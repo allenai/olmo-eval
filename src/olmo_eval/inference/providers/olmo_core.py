@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_STOP_SEQUENCE_CONTEXT_TOKENS = 4
+
 
 class OlmoCoreProvider(InferenceProvider):
     """Provider using OLMo-core's in-process generation module."""
@@ -122,6 +124,7 @@ class OlmoCoreProvider(InferenceProvider):
         self._inference_cache_retained = False
         self.batch_size = batch_size
         self.chat_template = chat_template
+        self._stop_sequence_window_cache: dict[tuple[str, ...], int] = {}
         self.max_length = core_utils._resolve_max_length(
             explicit_max_length=max_model_len,
             tokenizer=self.tokenizer,
@@ -281,6 +284,94 @@ class OlmoCoreProvider(InferenceProvider):
     def _decode(self, token_ids: list[int], *, skip_special_tokens: bool) -> str:
         return self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
 
+    def _stop_sequence_window_token_count(
+        self,
+        stop_sequences: tuple[str, ...] | None,
+    ) -> int:
+        stops = tuple(stop for stop in stop_sequences or () if stop)
+        if not stops:
+            return 0
+
+        cache = getattr(self, "_stop_sequence_window_cache", None)
+        if cache is None:
+            cache = {}
+            self._stop_sequence_window_cache = cache
+        if stops in cache:
+            return cache[stops]
+
+        # Byte length covers byte-fallback tokenizers; context covers stops that
+        # start inside a neighboring token.
+        window = 0
+        for stop in stops:
+            token_count = len(self.tokenizer.encode(stop, add_special_tokens=False))
+            byte_count = len(stop.encode("utf-8"))
+            window = max(window, token_count, byte_count)
+
+        window += _STOP_SEQUENCE_CONTEXT_TOKENS
+        cache[stops] = window
+        return window
+
+    def _text_before_stop(self, text: str, stop_sequences: tuple[str, ...]) -> str | None:
+        for stop in stop_sequences:
+            if stop in text:
+                return text.split(stop, 1)[0]
+        return None
+
+    def _find_stop_sequence_end(
+        self,
+        token_ids: list[int],
+        stop_sequences: tuple[str, ...],
+    ) -> tuple[int, str] | None:
+        if not stop_sequences:
+            return None
+
+        window = self._stop_sequence_window_token_count(stop_sequences)
+        if window <= 0:
+            return None
+
+        for idx in range(len(token_ids)):
+            window_start = max(0, idx + 1 - window)
+            decoded_window = self._decode(
+                token_ids[window_start : idx + 1],
+                skip_special_tokens=True,
+            )
+            if self._text_before_stop(decoded_window, stop_sequences) is None:
+                continue
+
+            decoded = self._decode(token_ids[: idx + 1], skip_special_tokens=True)
+            text = self._text_before_stop(decoded, stop_sequences)
+            if text is not None:
+                return idx + 1, text
+
+        return None
+
+    def _find_stop_sequence_end_by_prefix_decode(
+        self,
+        token_ids: list[int],
+        stop_sequences: tuple[str, ...],
+    ) -> tuple[int, str] | None:
+        stop_end: int | None = None
+        stop_text: str | None = None
+        low = 1
+        high = len(token_ids)
+
+        while low <= high:
+            mid = (low + high) // 2
+            decoded = self._decode(token_ids[:mid], skip_special_tokens=True)
+            text = self._text_before_stop(decoded, stop_sequences)
+            if text is None:
+                low = mid + 1
+                continue
+
+            stop_end = mid
+            stop_text = text
+            high = mid - 1
+
+        if stop_end is None:
+            return None
+        assert stop_text is not None
+        return stop_end, stop_text
+
     def _validate_generation_lengths(
         self,
         prompt_token_ids: list[list[int]],
@@ -315,17 +406,30 @@ class OlmoCoreProvider(InferenceProvider):
         if token_logprobs is not None:
             token_logprobs = token_logprobs[:end]
 
-        if stop_sequences:
-            for idx in range(len(token_ids)):
-                decoded = self._decode(token_ids[: idx + 1], skip_special_tokens=True)
-                for stop in stop_sequences:
-                    if stop and stop in decoded:
-                        token_ids = token_ids[: idx + 1]
-                        if token_logprobs is not None:
-                            token_logprobs = token_logprobs[: idx + 1]
-                        return token_ids, token_logprobs, decoded.split(stop, 1)[0]
+        stop_sequences = tuple(stop for stop in stop_sequences or () if stop)
+        stop_match = self._find_stop_sequence_end(token_ids, stop_sequences)
+        if stop_match is not None:
+            stop_end, text = stop_match
+            token_ids = token_ids[:stop_end]
+            if token_logprobs is not None:
+                token_logprobs = token_logprobs[:stop_end]
+            return token_ids, token_logprobs, text
 
-        return token_ids, token_logprobs, self._decode(token_ids, skip_special_tokens=True)
+        decoded = self._decode(token_ids, skip_special_tokens=True)
+        text = self._text_before_stop(decoded, stop_sequences)
+        if text is not None:
+            stop_match = self._find_stop_sequence_end_by_prefix_decode(
+                token_ids,
+                stop_sequences,
+            )
+            if stop_match is not None:
+                stop_end, text = stop_match
+                token_ids = token_ids[:stop_end]
+                if token_logprobs is not None:
+                    token_logprobs = token_logprobs[:stop_end]
+                return token_ids, token_logprobs, text
+
+        return token_ids, token_logprobs, decoded
 
     def _logprob_entries(
         self,

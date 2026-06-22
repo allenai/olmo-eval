@@ -223,12 +223,14 @@ class FakeTokenizer:
 
     def __init__(self) -> None:
         self.template_calls: list[dict[str, Any]] = []
+        self.decode_calls: list[list[int]] = []
         self.vocab = {
             "": [],
             "Prompt": [10, 11],
             "Other": [12],
             "!": [6],
             " STOP": [4],
+            "STOP": [8, 9],
             "a": [1],
             "ab": [1, 2],
             "abc": [1, 2, 3],
@@ -243,6 +245,8 @@ class FakeTokenizer:
             5: "hello",
             6: "!",
             7: "x",
+            8: "ST",
+            9: "OP",
             10: "P",
             11: "rompt",
             12: "Other",
@@ -257,6 +261,7 @@ class FakeTokenizer:
     def decode(self, token_ids: int | list[int], skip_special_tokens: bool = True) -> str:
         if isinstance(token_ids, int):
             token_ids = [token_ids]
+        self.decode_calls.append(list(token_ids))
         pieces = []
         for token_id in token_ids:
             if skip_special_tokens and token_id in {self.pad_token_id, self.eos_token_id}:
@@ -547,6 +552,29 @@ def test_generate_repeats_prompts_for_num_samples_and_trims_stops(
     assert outputs[1][1].metadata["num_tokens"] == 2
     assert module.cache_allocated is False
     assert module.free_calls == 1
+
+
+def test_normalize_generation_uses_bounded_decode_for_multi_token_stops() -> None:
+    provider, _ = _cache_lifecycle_provider()
+    tokenizer = provider.tokenizer
+    token_ids = [7] * 64 + [8, 9, 7]
+    token_logprobs = [-0.01] * len(token_ids)
+
+    tokenizer.decode_calls.clear()
+    normalized_ids, normalized_logprobs, text = provider._normalize_generation_output(
+        token_ids,
+        token_logprobs,
+        ("STOP",),
+    )
+
+    expected_ids = [7] * 64 + [8, 9]
+    assert normalized_ids == expected_ids
+    assert normalized_logprobs == token_logprobs[: len(expected_ids)]
+    assert text == "x" * 64
+
+    window = provider._stop_sequence_window_token_count(("STOP",))
+    long_decode_calls = [call for call in tokenizer.decode_calls if len(call) > window]
+    assert long_decode_calls == [expected_ids]
 
 
 def test_generate_rejects_requests_that_exceed_max_length() -> None:
