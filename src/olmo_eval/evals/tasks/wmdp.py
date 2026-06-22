@@ -178,6 +178,12 @@ _WMDP_SUBSET_METRICS = (
 )
 
 _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
+_BASE_SAMPLING = SamplingParams(
+    max_tokens=1024,
+    temperature=0.6,
+    top_p=0.6,
+    # stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
+)
 
 
 def _wmdp_base_safety_metrics(scorer):
@@ -207,6 +213,6 @@ register_variant(
     "wmdp",
     "base",
     metrics=_wmdp_base_safety_metrics(scorer=LogprobScorer),
-    sampling_params=_JUDGE_SAMPLING,
+    sampling_params=_BASE_SAMPLING,
     formatter=MultipleChoiceFormatter(),
 )

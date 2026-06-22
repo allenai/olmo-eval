@@ -151,8 +151,11 @@ def _bbq_logprob_metric_helper(
             if gold_idx is None or not r.outputs:
                 continue
 
+            print(r.outputs)
             logprob_sums = [scorer.score(r.instance, o) for o in r.outputs]
+            print(logprob_sums)
             pred = logprob_sums.index(max(logprob_sums))
+            print(pred)
             accuracy = pred == gold_idx
             subset_accuracy.append(accuracy)
 
@@ -313,6 +316,12 @@ _BBQ_SUBSET = (
 )
 
 _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
+_BASE_SAMPLING = SamplingParams(
+    max_tokens=1024,
+    temperature=0.6,
+    top_p=0.6,
+    # stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
+)
 
 
 def _safety_metrics_mcq(scorer):
@@ -355,6 +364,6 @@ register_variant(
     "base",
     metrics=_safety_metrics_base(LogprobScorer),
     primary_metric=BBQLogprobMetric(name="any::any::accuracy", scorer=LogprobScorer),
-    sampling_params=_JUDGE_SAMPLING,
+    sampling_params=_BASE_SAMPLING,
     formatter=MultipleChoiceFormatter(),
 )
