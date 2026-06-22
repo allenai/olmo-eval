@@ -404,9 +404,24 @@ class FakeAutoTokenizer:
         return tokenizer
 
 
-def _fake_olmo_core_imports(*, cuda_available: bool = False) -> SimpleNamespace:
+class MissingSpecialTokenAutoTokenizer:
+    @classmethod
+    def from_pretrained(cls, tokenizer_path: str, **kwargs: Any) -> FakeTokenizer:
+        del cls
+        tokenizer = FakeAutoTokenizer.from_pretrained(tokenizer_path, **kwargs)
+        tokenizer.pad_token_id = None
+        tokenizer.eos_token_id = None
+        tokenizer.bos_token_id = None
+        return tokenizer
+
+
+def _fake_olmo_core_imports(
+    *,
+    cuda_available: bool = False,
+    auto_tokenizer: type[Any] = FakeAutoTokenizer,
+) -> SimpleNamespace:
     return SimpleNamespace(
-        AutoTokenizer=FakeAutoTokenizer,
+        AutoTokenizer=auto_tokenizer,
         AttentionBackendName=str,
         GenerationConfig=lambda **kwargs: SimpleNamespace(**kwargs),
         TokenizerConfig=FakeTokenizerConfig,
@@ -441,6 +456,42 @@ def test_provider_uses_checkpoint_max_length_without_validation(tmp_path, monkey
 
     assert provider.max_length == 4096
     assert provider.generation_module.checkpoint_kwargs["attention_backend"] == "torch"
+
+
+def test_provider_populates_missing_tokenizer_special_token_ids_from_config(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    checkpoint_dir = tmp_path / "step1000"
+    _write_olmo_config(
+        checkpoint_dir,
+        model={"d_model": 8, "max_sequence_length": 4096},
+    )
+
+    monkeypatch.setattr(
+        olmo_core_utils,
+        "_import_olmo_core",
+        lambda: _fake_olmo_core_imports(auto_tokenizer=MissingSpecialTokenAutoTokenizer),
+    )
+
+    provider = OlmoCoreProvider(str(checkpoint_dir), validate_checkpoint=False)
+
+    assert provider.pad_token_id == 0
+    assert provider.eos_token_id == 2
+    assert provider.tokenizer.pad_token_id == 0
+    assert provider.tokenizer.eos_token_id == 2
+
+    rows = provider._logprob_inputs_for_request(
+        LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt="",
+            continuations=("!",),
+        )
+    )
+
+    assert rows[0].input_ids == [2]
+    assert rows[0].input_length == 1
+    assert rows[0].num_tokens_all == 2
 
 
 def test_provider_prefers_flash_attention_3_when_available(tmp_path, monkeypatch) -> None:

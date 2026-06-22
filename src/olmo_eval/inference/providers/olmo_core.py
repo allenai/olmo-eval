@@ -119,6 +119,10 @@ class OlmoCoreProvider(InferenceProvider):
         )
         self.pad_token_id = resolved_pad_token_id
         self.eos_token_id = resolved_eos_token_id
+        if getattr(self.tokenizer, "pad_token_id", None) is None:
+            self.tokenizer.pad_token_id = resolved_pad_token_id
+        if getattr(self.tokenizer, "eos_token_id", None) is None:
+            self.tokenizer.eos_token_id = resolved_eos_token_id
         self.use_cache = use_cache
         self.retain_inference_cache = retain_inference_cache
         self._inference_cache_retained = False
