@@ -147,6 +147,7 @@ SCIENCE_RESEARCH = make_suite(
         "sciriff_yesno",
         "expertqa",
         "litsearch",
+        "litsearch_rerank",
         get_suite("astabench"),
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
@@ -160,11 +161,18 @@ SCIENCE_RESEARCH = make_suite(
 #   reference; a high score means well-cited, on-topic prose, not verified truth.
 # - litsearch: an AGENTIC retrieval smoke test (does a gold paper surface in live
 #   Semantic Scholar results), not the published fixed-corpus Recall@k.
+# - litsearch_rerank: fixed-corpus reranking. The model reranks a frozen pool of
+#   BM25-retrieved candidates per query; scored Recall@5/@20 over the model's own
+#   selection. Reproducible, judge-free, tool-free (the opposite trade-offs to
+#   agentic litsearch). The BM25 retriever Recall@k baseline is reported by the
+#   offline build script, not this task.
 #
-# Note: litsearch is intentionally only in science:research, not science:judge /
-# science:nojudge / science:all. It needs an agentic tool-providing harness
-# (semantic_scholar_snippet_search) rather than a judge, so it does not fit the
-# judge/nojudge execution split and would score zero in a routine science:all run.
+# Note: litsearch (agentic) is intentionally only in science:research, not
+# science:judge / science:nojudge / science:all. It needs an agentic
+# tool-providing harness (semantic_scholar_snippet_search) rather than a judge,
+# so it does not fit the judge/nojudge execution split and would score zero in a
+# routine science:all run. litsearch_rerank has no such dependency and so does
+# sit in science:nojudge (and thus science:all).
 
 SCIENCE_MATH = make_suite(
     "science:math",
@@ -189,6 +197,7 @@ SCIENCE_NOJUDGE = make_suite(
         SCIENCE_PHYSICAL,
         "qasper_yesno",
         "sciriff_yesno",
+        "litsearch_rerank",
         SCIENCE_MATH,
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
