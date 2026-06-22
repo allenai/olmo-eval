@@ -22,14 +22,6 @@ from olmo_eval.inference.providers.olmo_core_utils import (
 from olmo_eval.runners.asynq.batching.config import BatchConfig, BatchStrategy
 
 
-class FakeTransformerConfig:
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> object:
-        if data.get("invalid"):
-            raise ValueError("bad model config")
-        return object()
-
-
 class FakeTokenizerConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SimpleNamespace:
@@ -81,7 +73,6 @@ def test_validates_raw_olmo_core_checkpoint(tmp_path) -> None:
 
     info = _validate_olmo_core_checkpoint(
         str(checkpoint_dir),
-        TransformerConfig=FakeTransformerConfig,
         TokenizerConfig=FakeTokenizerConfig,
         get_checkpoint_metadata=_metadata_reader,
     )
@@ -99,7 +90,6 @@ def test_rejects_hf_style_checkpoint_config(tmp_path) -> None:
     with pytest.raises(ValueError, match="HF-format checkpoints should use"):
         _validate_olmo_core_checkpoint(
             str(checkpoint_dir),
-            TransformerConfig=FakeTransformerConfig,
             TokenizerConfig=FakeTokenizerConfig,
             get_checkpoint_metadata=_metadata_reader,
         )
@@ -112,7 +102,6 @@ def test_rejects_checkpoint_without_distributed_metadata(tmp_path) -> None:
     with pytest.raises(ValueError, match="missing distributed checkpoint metadata"):
         _validate_olmo_core_checkpoint(
             str(checkpoint_dir),
-            TransformerConfig=FakeTransformerConfig,
             TokenizerConfig=FakeTokenizerConfig,
             get_checkpoint_metadata=_metadata_reader,
         )
@@ -134,7 +123,6 @@ def test_rejects_invalid_checkpoint_token_ids(tmp_path) -> None:
     with pytest.raises(ValueError, match="must be different"):
         _validate_olmo_core_checkpoint(
             str(checkpoint_dir),
-            TransformerConfig=FakeTransformerConfig,
             TokenizerConfig=FakeTokenizerConfig,
             get_checkpoint_metadata=_metadata_reader,
         )
@@ -425,7 +413,6 @@ def _fake_olmo_core_imports(
         AttentionBackendName=str,
         GenerationConfig=lambda **kwargs: SimpleNamespace(**kwargs),
         TokenizerConfig=FakeTokenizerConfig,
-        TransformerConfig=FakeTransformerConfig,
         TransformerGenerationModule=FakeGenerationModule,
         cached_path=None,
         get_checkpoint_metadata=_metadata_reader,

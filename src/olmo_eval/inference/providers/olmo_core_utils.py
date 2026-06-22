@@ -54,10 +54,6 @@ class TokenizerConfigFactory(Protocol):
     def dolma2(self) -> TokenizerConfigProtocol: ...
 
 
-class TransformerConfigFactory(Protocol):
-    def from_dict(self, data: object) -> object: ...
-
-
 class GenerationConfigFactory(Protocol):
     def __call__(
         self,
@@ -133,7 +129,6 @@ class OlmoCoreImports:
     AttentionBackendName: AttentionBackendFactory
     GenerationConfig: GenerationConfigFactory
     TokenizerConfig: TokenizerConfigFactory
-    TransformerConfig: TransformerConfigFactory
     TransformerGenerationModule: TransformerGenerationModuleFactory
     cached_path: CachedPath
     get_checkpoint_metadata: Callable[[str], CheckpointMetadataProtocol]
@@ -167,7 +162,6 @@ def _import_olmo_core() -> OlmoCoreImports:
             TransformerGenerationModule,
         )
         from olmo_core.nn.attention import AttentionBackendName
-        from olmo_core.nn.transformer import TransformerConfig
         from transformers import AutoTokenizer
     except ImportError as e:
         raise ImportError(
@@ -180,7 +174,6 @@ def _import_olmo_core() -> OlmoCoreImports:
         AttentionBackendName=cast(AttentionBackendFactory, AttentionBackendName),
         GenerationConfig=cast(GenerationConfigFactory, GenerationConfig),
         TokenizerConfig=cast(TokenizerConfigFactory, TokenizerConfig),
-        TransformerConfig=cast(TransformerConfigFactory, TransformerConfig),
         TransformerGenerationModule=cast(
             TransformerGenerationModuleFactory,
             TransformerGenerationModule,
@@ -285,7 +278,6 @@ def _tokenizer_config_from_checkpoint_config(
 def _validate_olmo_core_checkpoint(
     checkpoint_dir: str,
     *,
-    TransformerConfig: TransformerConfigFactory,
     TokenizerConfig: TokenizerConfigFactory,
     get_checkpoint_metadata: Callable[[str], CheckpointMetadataProtocol],
     cached_path: CachedPath | None = None,
@@ -299,13 +291,11 @@ def _validate_olmo_core_checkpoint(
             f"config.json missing required field {e}",
         ) from e
 
-    try:
-        TransformerConfig.from_dict(model_config)
-    except Exception as e:
+    if not isinstance(model_config, Mapping):
         raise _checkpoint_value_error(
             checkpoint_dir,
-            f"config.json field 'model' is not a valid OLMo-core TransformerConfig: {e}",
-        ) from e
+            "config.json field 'model' must be an object",
+        )
 
     tokenizer_config = _tokenizer_config_from_checkpoint_config(
         checkpoint_dir,
@@ -383,7 +373,6 @@ def _resolve_checkpoint(
     if validate_checkpoint:
         checkpoint_info = _validate_olmo_core_checkpoint(
             checkpoint_dir,
-            TransformerConfig=imports.TransformerConfig,
             TokenizerConfig=imports.TokenizerConfig,
             get_checkpoint_metadata=imports.get_checkpoint_metadata,
             cached_path=imports.cached_path,
