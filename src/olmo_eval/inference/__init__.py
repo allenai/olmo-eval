@@ -3,7 +3,6 @@
 from olmo_eval.common.types import ProviderKind
 
 from .base import InferenceProvider
-from .providers.mock import MockProvider
 from .tokenizer_utils import (
     encode_context_and_continuation,
     get_bos_token_ids,
@@ -96,6 +95,8 @@ def create_provider(
 
     match kind_str:
         case "mock":
+            from .providers.mock import MockProvider
+
             return MockProvider(model_name)
         case "hf":
             from .providers.huggingface import HuggingFaceProvider
@@ -141,6 +142,10 @@ def create_provider(
 
 # Lazy imports for optional dependencies
 def __getattr__(name: str):
+    if name == "MockProvider":
+        from .providers.mock import MockProvider
+
+        return MockProvider
     if name == "HuggingFaceProvider":
         from .providers.huggingface import HuggingFaceProvider
 
