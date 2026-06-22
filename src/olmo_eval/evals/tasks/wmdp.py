@@ -93,7 +93,7 @@ class WMDPLogprobMCAccuracyMetric(Metric):
                 gold_idx = r.instance.metadata.get("gold_idx")
                 if gold_idx is None or not r.outputs:
                     continue
-                print(r.instance.metadata)
+                print(r.instance)
                 print(r.outputs)
                 logprob_sums = [scorer.score(r.instance, o) for o in r.outputs]
                 print(logprob_sums)
