@@ -570,6 +570,12 @@ def _normalize_distribution_name(package_name: str) -> str:
     return re.sub(r"[-_.]+", "-", package_name).lower()
 
 
+def _normalize_install_target_name(package_name: str) -> str | None:
+    """Return the canonical distribution name used by uv package flags."""
+    base_name = _strip_package_extras(package_name)
+    return _normalize_distribution_name(base_name) if base_name else None
+
+
 def _infer_wheel_distribution_name(filename: str) -> str | None:
     """Infer the distribution name from a wheel filename."""
     if not filename.lower().endswith(".whl"):
@@ -584,14 +590,14 @@ def _infer_install_target_name_from_normalized(package: str) -> str | None:
 
     # PEP 508 direct references: "name @ URL"
     if " @ " in normalized:
-        return _strip_package_extras(normalized.split(" @ ", 1)[0].strip()) or None
+        return _normalize_install_target_name(normalized.split(" @ ", 1)[0].strip())
 
     # Direct URLs and local paths: prefer an explicit egg fragment, otherwise
     # fall back to the trailing path component (e.g., transformers.git -> transformers).
     if normalized.startswith("git+") or "://" in normalized or normalized.startswith("/"):
         match = re.search(r"(?:[#&]egg=)([A-Za-z0-9_.-]+)", normalized)
         if match:
-            return _strip_package_extras(match.group(1))
+            return _normalize_install_target_name(match.group(1))
 
         path_part = normalized.split("#", 1)[0].rsplit("/", 1)[-1]
         if "@" in path_part:
@@ -601,10 +607,10 @@ def _infer_install_target_name_from_normalized(package: str) -> str | None:
             return wheel_distribution
         if path_part.endswith(".git"):
             path_part = path_part[:-4]
-        return _strip_package_extras(path_part) or None
+        return _normalize_install_target_name(path_part)
 
     match = re.match(r"^\s*([A-Za-z0-9_.-]+)", normalized)
-    return match.group(1) if match else None
+    return _normalize_install_target_name(match.group(1)) if match else None
 
 
 def bind_direct_source_to_package(package: str) -> str:
