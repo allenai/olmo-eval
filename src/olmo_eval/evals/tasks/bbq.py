@@ -150,7 +150,7 @@ def _bbq_logprob_metric_helper(
 
             if gold_idx is None or not r.outputs:
                 continue
-
+            print(r.instance.metadata)
             print(r.outputs)
             logprob_sums = [scorer.score(r.instance, o) for o in r.outputs]
             print(logprob_sums)
