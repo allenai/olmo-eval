@@ -36,6 +36,10 @@ class TestVLLMServerStartupTimeout:
         mock_process.stdout.read.side_effect = track_read
 
         with (
+            patch(
+                "olmo_eval.inference.providers.vllm_server_utils._find_free_internal_port",
+                return_value=23456,
+            ),
             patch("subprocess.Popen", return_value=mock_process),
             patch(
                 "olmo_eval.inference.providers.vllm_server_utils._wait_for_server",
@@ -50,7 +54,6 @@ class TestVLLMServerStartupTimeout:
                 model_name="test-model",
                 port=8000,
                 startup_timeout=1,  # Short timeout
-                distributed_init_method="tcp://127.0.0.1:23456",
             )
 
             with pytest.raises(RuntimeError, match="failed to start"):
@@ -83,6 +86,10 @@ class TestVLLMServerStartupTimeout:
         mock_log_file = MagicMock()
 
         with (
+            patch(
+                "olmo_eval.inference.providers.vllm_server_utils._find_free_internal_port",
+                return_value=23456,
+            ),
             patch("subprocess.Popen", return_value=mock_process),
             patch(
                 "olmo_eval.inference.providers.vllm_server_utils._wait_for_server",
@@ -99,7 +106,6 @@ class TestVLLMServerStartupTimeout:
                 port=8000,
                 startup_timeout=1,
                 log_dir=str(log_dir),
-                distributed_init_method="tcp://127.0.0.1:23456",
             )
 
             with pytest.raises(RuntimeError, match="failed to start") as exc_info:
@@ -118,6 +124,10 @@ class TestVLLMServerStartupTimeout:
         mock_process.poll.return_value = None
 
         with (
+            patch(
+                "olmo_eval.inference.providers.vllm_server_utils._find_free_internal_port",
+                return_value=23456,
+            ),
             patch("subprocess.Popen", return_value=mock_process),
             patch(
                 "olmo_eval.inference.providers.vllm_server_utils._wait_for_server",
@@ -128,7 +138,6 @@ class TestVLLMServerStartupTimeout:
             server = VLLMServerProcess(
                 model_name="test-model",
                 port=8000,
-                distributed_init_method="tcp://127.0.0.1:23456",
             )
 
             url = server.start()
@@ -145,38 +154,8 @@ class TestVLLMServerStartupTimeout:
 
         with (
             patch.dict("os.environ", {"VLLM_PYTHON": "/opt/vllm-venv/bin/python"}),
-            patch("subprocess.Popen", return_value=mock_process) as mock_popen,
             patch(
-                "olmo_eval.inference.providers.vllm_server_utils._wait_for_server",
-                return_value=(True, None, None),
-            ),
-            patch("atexit.register"),
-        ):
-            server = VLLMServerProcess(
-                model_name="test-model",
-                port=8000,
-                distributed_init_method="tcp://127.0.0.1:23456",
-            )
-
-            server.start()
-
-        cmd = mock_popen.call_args.args[0]
-        env = mock_popen.call_args.kwargs["env"]
-        assert cmd[0] == "/opt/vllm-venv/bin/python"
-        assert "VLLM_PYTHON" not in env
-
-    @pytest.mark.anyio
-    async def test_sets_unique_distributed_init_method(self):
-        """Managed servers should pin vLLM's internal torch rendezvous port."""
-        from olmo_eval.inference.providers.vllm_server_utils import VLLMServerProcess
-
-        mock_process = MagicMock()
-        mock_process.pid = 12345
-        mock_process.poll.return_value = None
-
-        with (
-            patch(
-                "olmo_eval.inference.providers.vllm_server_utils._find_free_distributed_port",
+                "olmo_eval.inference.providers.vllm_server_utils._find_free_internal_port",
                 return_value=23456,
             ),
             patch("subprocess.Popen", return_value=mock_process) as mock_popen,
@@ -194,12 +173,14 @@ class TestVLLMServerStartupTimeout:
             server.start()
 
         cmd = mock_popen.call_args.args[0]
-        flag_index = cmd.index("--distributed-init-method")
-        assert cmd[flag_index + 1] == "tcp://127.0.0.1:23456"
+        env = mock_popen.call_args.kwargs["env"]
+        assert cmd[0] == "/opt/vllm-venv/bin/python"
+        assert "VLLM_PYTHON" not in env
+        assert env["VLLM_PORT"] == "23456"
 
     @pytest.mark.anyio
-    async def test_preserves_explicit_distributed_init_method(self):
-        """An explicit vLLM distributed init method should not be replaced."""
+    async def test_sets_unique_internal_port_env(self):
+        """Managed servers should pin vLLM's internal port selection base."""
         from olmo_eval.inference.providers.vllm_server_utils import VLLMServerProcess
 
         mock_process = MagicMock()
@@ -207,6 +188,10 @@ class TestVLLMServerStartupTimeout:
         mock_process.poll.return_value = None
 
         with (
+            patch(
+                "olmo_eval.inference.providers.vllm_server_utils._find_free_internal_port",
+                return_value=23456,
+            ),
             patch("subprocess.Popen", return_value=mock_process) as mock_popen,
             patch(
                 "olmo_eval.inference.providers.vllm_server_utils._wait_for_server",
@@ -217,14 +202,48 @@ class TestVLLMServerStartupTimeout:
             server = VLLMServerProcess(
                 model_name="test-model",
                 port=8000,
-                distributed_init_method="tcp://10.0.0.5:12345",
             )
 
             server.start()
 
         cmd = mock_popen.call_args.args[0]
-        flag_index = cmd.index("--distributed-init-method")
-        assert cmd[flag_index + 1] == "tcp://10.0.0.5:12345"
+        env = mock_popen.call_args.kwargs["env"]
+        assert "--distributed-init-method" not in cmd
+        assert env["VLLM_PORT"] == "23456"
+
+    @pytest.mark.anyio
+    async def test_overrides_inherited_vllm_port_for_child(self):
+        """Each managed server should get its own internal port base."""
+        from olmo_eval.inference.providers.vllm_server_utils import VLLMServerProcess
+
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.poll.return_value = None
+
+        with (
+            patch.dict("os.environ", {"VLLM_PORT": "11111"}),
+            patch(
+                "olmo_eval.inference.providers.vllm_server_utils._find_free_internal_port",
+                return_value=23456,
+            ),
+            patch("subprocess.Popen", return_value=mock_process) as mock_popen,
+            patch(
+                "olmo_eval.inference.providers.vllm_server_utils._wait_for_server",
+                return_value=(True, None, None),
+            ),
+            patch("atexit.register"),
+        ):
+            server = VLLMServerProcess(
+                model_name="test-model",
+                port=8000,
+            )
+
+            server.start()
+
+        cmd = mock_popen.call_args.args[0]
+        env = mock_popen.call_args.kwargs["env"]
+        assert "--distributed-init-method" not in cmd
+        assert env["VLLM_PORT"] == "23456"
 
 
 class TestVLLMServerProviderStartup:
