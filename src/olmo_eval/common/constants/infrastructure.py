@@ -19,10 +19,10 @@ BEAKER_DEFAULT_BUDGET = "ai2/oe-base"
 BEAKER_DEFAULT_PRIORITY = "normal"
 """Default job priority level."""
 
-BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc290-amd64"
+BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 
-BEAKER_SANDBOX_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc290-amd64-sandbox"
+BEAKER_SANDBOX_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64-sandbox"
 """Docker image for Beaker evaluation jobs with sandbox support (includes Podman)."""
 
 BEAKER_RESULT_DIR = "/results"

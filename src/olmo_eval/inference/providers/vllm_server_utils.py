@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Default timeout for server startup
 DEFAULT_STARTUP_TIMEOUT = 300  # 5 minutes for large models
 DEFAULT_HEALTH_CHECK_INTERVAL = 2  # seconds
+_VLLM_INTERNAL_PORT_RANGE = (20000, 32767)
 
 
 def _find_free_port() -> int:
@@ -37,6 +38,26 @@ def _find_free_port() -> int:
         s.bind(("", 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return s.getsockname()[1]
+
+
+def _find_free_internal_port(exclude: set[int] | None = None) -> int:
+    """Find a local base port for vLLM internals outside the ephemeral range."""
+    import random
+
+    excluded = exclude or set()
+    start, end = _VLLM_INTERNAL_PORT_RANGE
+    for port in random.sample(range(start, end + 1), end - start + 1):
+        if port in excluded:
+            continue
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+
+    return _find_free_port()
 
 
 ProgressCallback = Callable[[str], None]
@@ -359,6 +380,7 @@ class VLLMServerProcess:
         self.log_dir = log_dir
         self.owner = owner or get_current_worker_id()
         self.server_kwargs = kwargs
+        self._vllm_port = _find_free_internal_port(exclude={self.port})
         self._process: subprocess.Popen | None = None
         self._log_file: Any | None = None
         self._log_path: Any | None = None
@@ -438,6 +460,11 @@ class VLLMServerProcess:
         # itself does not need to see it, and forwarding it triggers a warning
         # because vLLM treats unknown VLLM_* variables as suspicious.
         env.pop("VLLM_PYTHON", None)
+        # vLLM uses VLLM_PORT as the starting point for internal port
+        # selection, including torch distributed rendezvous. Give each managed
+        # server a low base port so concurrent cold starts do not collide in
+        # the kernel ephemeral range.
+        env["VLLM_PORT"] = str(self._vllm_port)
         if self.gpu_ids:
             env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.gpu_ids)
 

@@ -9,10 +9,10 @@
 #   ./scripts/build_image.sh --platform linux/amd64
 #
 # Tags: cu{cuda}-trc{torch}-{arch}
-# Example: cu128-trc291-amd64
+# Example: cu1281-trc2100-amd64
 
 ARG CUDA_VERSION=12.8.1
-ARG TORCH_VERSION=2.9.0
+ARG TORCH_VERSION=2.10.0
 ARG PYTHON_VERSION=3.12
 ARG INSTALL_CHANNEL=whl
 ARG GIT_COMMIT=""
