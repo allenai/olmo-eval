@@ -169,9 +169,61 @@ class OlmoCoreProvider(InferenceProvider):
                 **{key: value for key, value in load_kwargs.items() if value is not None}
             )
         )
+        self._configure_inference_cache_for_sequence_mixers()
 
     def get_tokenizer(self) -> core_utils.TokenizerProtocol:
         return self.tokenizer
+
+    def _configure_inference_cache_for_sequence_mixers(self) -> None:
+        model = getattr(self.generation_module, "model", None)
+        blocks = getattr(model, "blocks", None)
+        if blocks is None or not hasattr(blocks, "values"):
+            return
+
+        attentions = [
+            getattr(block, "attention", None)
+            for block in blocks.values()
+            if getattr(block, "attention", None) is not None
+        ]
+        if not attentions:
+            return
+
+        def cacheable_attentions() -> list[object]:
+            return [
+                attention
+                for attention in attentions
+                if hasattr(attention, "kv_cache_manager")
+                and hasattr(attention, "init_kv_cache_manager")
+            ]
+
+        cacheable_count = len(cacheable_attentions())
+        if cacheable_count == len(attentions):
+            return
+
+        if self.use_cache:
+            logger.warning(
+                "Disabling OLMo-core generation cache because this model has "
+                "sequence mixers without KV-cache support."
+            )
+            self.use_cache = False
+            self.retain_inference_cache = False
+
+        def prepare_inference_cache(batch_size: int, max_seq_len: int) -> None:
+            for attention in cacheable_attentions():
+                if getattr(attention, "kv_cache_manager", None) is None:
+                    attention.init_kv_cache_manager(batch_size, max_seq_len)
+                else:
+                    attention.kv_cache_manager.reset(batch_size, max_seq_len)
+
+        def free_inference_cache() -> None:
+            for attention in cacheable_attentions():
+                attention.kv_cache_manager = None
+
+        # OLMo-core's current cache helpers assert every block uses Attention.
+        # Hybrid models include recurrent sequence mixers, so install tolerant
+        # instance methods that operate only on blocks that actually own a KV cache.
+        self.generation_module.prepare_inference_cache = prepare_inference_cache  # type: ignore[method-assign]
+        self.generation_module.free_inference_cache = free_inference_cache  # type: ignore[method-assign]
 
     def _free_inference_cache(self) -> None:
         self.generation_module.free_inference_cache()
