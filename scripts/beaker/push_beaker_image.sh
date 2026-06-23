@@ -8,7 +8,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./scripts/push_beaker_image.sh                              # Use defaults
-#   ./scripts/push_beaker_image.sh --source olmo-eval:cu1281-trc2110-amd64
+#   ./scripts/push_beaker_image.sh --source olmo-eval:cu1281-trc2100-amd64
 #   ./scripts/push_beaker_image.sh --workspace ai2/oe-data      # Custom workspace
 #   ./scripts/push_beaker_image.sh --dry-run                    # Preview only
 #   ./scripts/push_beaker_image.sh --force                      # Force re-upload (delete existing tmp)
@@ -84,7 +84,7 @@ fi
 
 # Auto-generate Beaker image name from source tag
 if [[ "$AUTO_NAME" == "true" ]]; then
-    # Extract tag from source image (e.g., olmo-eval:cu1281-trc2110-amd64 -> cu1281-trc2110-amd64)
+    # Extract tag from source image (e.g., olmo-eval:cu1281-trc2100-amd64 -> cu1281-trc2100-amd64)
     SOURCE_TAG=$(echo "$SOURCE_IMAGE" | cut -d':' -f2)
     BEAKER_IMAGE="olmo-eval-${SOURCE_TAG}"
     echo "Auto-generated Beaker image name: ${BEAKER_IMAGE}"
