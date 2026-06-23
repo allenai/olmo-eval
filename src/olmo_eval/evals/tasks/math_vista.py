@@ -6,10 +6,13 @@ the ``Question:``/``Hint:`` boilerplate is stripped from the query.
 Multiple-choice questions are templated with lettered options (no style tag);
 free-form questions are prompted with the ``vqa2`` style tag.
 
-Scoring: the default task scores **offline** (deterministic extraction — no
-API key needed).  The official protocol extracts answers with GPT-4
-(``gpt-4-0613``); use the ``math_vista:gpt`` variant for that (requires
+Scoring follows the official MathVista protocol: deterministic short-circuits
+(empty response, verbatim choice, int/float parse) and otherwise GPT-4
+(``gpt-4-0613``) answer extraction — exactly mm_olmo's ``extract_answer``
+(``quick_extract=False``).  This is the **default** task scorer (requires
 ``OPENAI_API_KEY``; responses cached per-run, see ``MathVistaGptScorer``).
+The ``math_vista:offline`` variant replaces the GPT step with deterministic
+letter/value extraction for API-free runs (an approximation, not the protocol).
 
 Reference (Molmo2-4B ck2000, GPT extraction): score=0.5670.
 """
@@ -31,8 +34,8 @@ _GPT_METRIC = MeanScorerMetric(name="score", scorer=MathVistaGptScorer())
 @register("math_vista")
 class MathVistaTask(ImageQATask):
     sampling_params = SamplingParams(temperature=0.0, max_tokens=32)
-    metrics = (_OFFLINE_METRIC,)
-    primary_metric = _OFFLINE_METRIC
+    metrics = (_GPT_METRIC,)
+    primary_metric = _GPT_METRIC
     split = Split.VALIDATION  # maps to the HF "testmini" split
 
     def _build_instances(self) -> Iterator[Instance]:
@@ -70,4 +73,9 @@ class MathVistaTask(ImageQATask):
             )
 
 
+# `:offline` = deterministic extraction (no API key, approximation of the
+# protocol); `:gpt` is an explicit alias for the GPT-4 default.
+register_variant(
+    "math_vista", "offline", metrics=(_OFFLINE_METRIC,), primary_metric=_OFFLINE_METRIC
+)
 register_variant("math_vista", "gpt", metrics=(_GPT_METRIC,), primary_metric=_GPT_METRIC)

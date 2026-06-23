@@ -45,6 +45,15 @@ Issues = "https://github.com/allenai/olmo-eval/issues"
 [project.optional-dependencies]
 hf = [
     "transformers>=5.4.0",
+    # Required by the released Molmo2 remote code (image_processing_molmo2.py imports both at
+    # module top); not pulled transitively, so declare them here for the HF multimodal path.
+    "einops",
+    "torchvision ; platform_system != 'Darwin'",  # GPU-coupled; skip on macOS like the vllm extra
+    # Image-pointing benchmarks (pixmo_points_eval, sa_co_gold_subset): pycocotools decodes the
+    # COCO-RLE instance masks and scipy provides the point↔mask bipartite matching. Both are
+    # imported lazily by the pointing scorer, so non-pointing HF runs don't need them at import.
+    "pycocotools",
+    "scipy~=1.17.1",
 ]
 vllm = [
     # vllm + its companions are Linux/CUDA-only; skip on macOS so the lockfile

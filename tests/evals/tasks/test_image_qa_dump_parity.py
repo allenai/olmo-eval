@@ -269,7 +269,7 @@ def test_dump_parity_real_world_qa() -> None:
 
 def test_dump_parity_math_vista_offline() -> None:
     rows, ref = _load_dump("math_vista_v2-validation")
-    task = get_task("math_vista")
+    task = get_task("math_vista:offline")
     instances = list(task.instances)
     assert len(instances) == len(rows)
 

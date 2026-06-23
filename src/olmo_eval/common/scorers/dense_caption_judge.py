@@ -125,6 +125,9 @@ async def _cached_gpt_call(
     completion = response.model_dump()
 
     # Atomic write: tmp → rename, identical to legacy Gpt4WithCache.
+    # Ensure the cache dir exists so a user-supplied (e.g. MATHVISTA_GPT_CACHE_DIR) path that
+    # hasn't been created yet doesn't fail every GPT call with "No such file or directory".
+    os.makedirs(cache_dir, exist_ok=True)
     fd, tmp = tempfile.mkstemp(".tmp", prefix=f"{key}-v1.json", text=True, dir=cache_dir)
     os.close(fd)
     with open(tmp, "w") as f:

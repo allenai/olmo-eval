@@ -230,6 +230,7 @@ class LMRequest:
     tools: tuple[ToolSchema, ...] | None = None
     system_prompt: str | None = None
     max_length: int | None = None
+    images: tuple[Any, ...] | None = None
 
 
 @hide_unset()

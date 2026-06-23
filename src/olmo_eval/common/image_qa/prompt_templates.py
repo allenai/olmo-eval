@@ -90,6 +90,34 @@ POINT_COUNT_TEMPLATES: list[str] = [
 ]
 
 
+LONG_CAPTION_TEMPLATES: list[str] = [
+    "Describe this image.",
+    "Describe this image",
+    "describe the image",
+    "Write a long description of this image.",
+    "caption the picture",
+    "Caption",
+    "caption",
+    "Construct a long caption for this image",
+    "Generate a caption",
+    "Create a detailed caption",
+    "Write a long caption",
+    "Describe this image in detail",
+    "Describe this",
+    "describe this",
+    "Caption this",
+    "What can be seen in this image?",
+    "What do you see in the image?",
+    "Look at this photo carefully and then tell me about it in detail",
+    "Write a long description of this image",
+    "Tell me about this picture.",
+    "Write a paragraph about this image.",
+    "Look at this image carefully and then describe it in detail",
+    "Generate a long caption about this image.",
+]
+"""``GENERAL_PROMPTS_V1["long_caption"]`` verbatim (order matters for the RNG pick)."""
+
+
 def _apply_label(template: str, label: str) -> str:
     """``apply_keywords`` from mm_olmo: replaces only the first occurrence."""
     res = template.split("{label}", 2)
@@ -106,6 +134,21 @@ def pixmo_count_question(label: str, arrow_idx: int, seed: int = EVAL_LOADER_SEE
     rng = np.random.RandomState((seed * 195172 + arrow_idx) % (2**32 - 1))
     template = POINT_COUNT_TEMPLATES[rng.randint(0, len(POINT_COUNT_TEMPLATES))]
     return _apply_label(template, label.lower())
+
+
+def dense_caption_question(idx: int, seed: int = EVAL_LOADER_SEED) -> str:
+    """Reproduce mm_olmo's per-example PixMo-Cap dense-caption prompt.
+
+    The released Molmo2-4B uses ``prompt_templates="uber_model_v2"`` +
+    ``system_prompt="demo_or_style_v2"``: ``long_caption`` is a demo style, so it gets **no**
+    style prefix (and ``default_inference_len`` is ignored), and its user prompt is a seeded
+    per-example pick from :data:`LONG_CAPTION_TEMPLATES` (``apply_keyword_prompt``'s
+    ``rng.randint``).  ``idx`` is the example's raw line position in
+    ``dense-caption-eval/test.jsonl``; the seed arithmetic matches
+    ``DeterministicDataset.get`` (epoch 0), same as :func:`pixmo_count_question`.
+    """
+    rng = np.random.RandomState((seed * 195172 + idx) % (2**32 - 1))
+    return LONG_CAPTION_TEMPLATES[rng.randint(0, len(LONG_CAPTION_TEMPLATES))]
 
 
 def format_mc_question(

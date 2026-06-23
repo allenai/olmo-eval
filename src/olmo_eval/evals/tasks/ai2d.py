@@ -84,3 +84,6 @@ class Ai2dTask(ImageQATask):
 
 
 register_variant("ai2d", "test", split=Split.TEST)
+# `:transparent` makes mc_ai2d_transparent the primary metric (shown in the summary table);
+# both metrics are still computed. Stack with `:test`, e.g. `ai2d:test:transparent`.
+register_variant("ai2d", "transparent", primary_metric=_TRANSPARENT)

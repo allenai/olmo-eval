@@ -7,8 +7,9 @@ into recall / recall_at_10 / consistency / num_statements / avg metrics.
 Environment variables (optional — defaults point to Weka paths):
     DENSE_CAPTION_EVAL_DIR   root of dense_caption_eval/ (contains final-data.json,
                              mturk-eval-statements/, gpt4-cache/)
-    MOLMO_DATA_DIR           parent of torch_datasets/ (contains pixmo_images/ and
-                             pixmo_datasets/dense-caption-eval/test.jsonl)
+    MOLMO_DATA_DIR           parent of torch_datasets/ (same convention as the 11 image-QA
+                             tasks); images live at torch_datasets/pixmo_images/ and the split
+                             manifest at torch_datasets/pixmo_datasets/dense-caption-eval/test.jsonl
 """
 
 from __future__ import annotations
@@ -21,16 +22,17 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from olmo_eval.common.image_qa import dense_caption_question
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.dense_caption_judge import DenseCaptionJudgeScorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, Response, SamplingParams
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common.image_qa_base import load_instance_image, torch_datasets_dir
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_EVAL_DIR = "/weka/oe-training-default/mm-olmo/dense_caption_eval"
-_DEFAULT_DATA_HOME = "/weka/oe-training-default/mm-olmo/torch_datasets"
 
 # Shared scorer instance — all 5 metrics hold a reference so _get_scorers()
 # deduplicates to a single GPT-judge call per example (via Scorer.__call__).
@@ -169,14 +171,18 @@ class DenseCaptionEval(Task):
     * ``torch_datasets/pixmo_datasets/dense-caption-eval/test.jsonl`` — image
       paths and URLs
 
-    The model inference request is a CHAT message "Describe this image."
-    The local image path is stored in ``instance.metadata["image_path"]`` for
-    an inference script to load.
+    The model inference request is a CHAT message whose text reproduces mm_olmo's
+    per-example seeded ``long_caption`` template (the released Molmo2-4B uses
+    ``demo_or_style_v2`` + ``uber_model_v2``: no style prefix, template sampled by line
+    index). The local image path is stored in ``instance.metadata["image_path"]``.
     """
 
     sampling_params = SamplingParams(temperature=0.0, max_tokens=448)
     metrics = _DEFAULT_METRICS
     primary_metric = _AVG_METRIC
+    # None => reproduce mm_olmo's per-example seeded `long_caption` template (the released
+    # Molmo2-4B behavior). Set to a fixed string on a subclass to force one prompt.
+    caption_prompt: str | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -186,7 +192,9 @@ class DenseCaptionEval(Task):
 
     def _build_instances(self) -> Iterator[Instance]:
         eval_dir = Path(os.environ.get("DENSE_CAPTION_EVAL_DIR", _DEFAULT_EVAL_DIR))
-        data_home = Path(os.environ.get("MOLMO_DATA_DIR", _DEFAULT_DATA_HOME))
+        # Same MOLMO_DATA_DIR convention as the 11 image-QA tasks (the mm-olmo parent;
+        # `torch_datasets_dir()` appends `torch_datasets`), so one env var covers all tasks.
+        data_home = torch_datasets_dir()
         test_jsonl = data_home / "pixmo_datasets" / "dense-caption-eval" / "test.jsonl"
 
         with open(eval_dir / "final-data.json") as f:
@@ -198,7 +206,10 @@ class DenseCaptionEval(Task):
         limit = self.config.limit
         count = 0
         with open(test_jsonl) as f:
-            for line in f:
+            # `idx` is the raw line position in test.jsonl (matches mm_olmo's
+            # DeterministicDataset index over the full readlines()); it drives the seeded
+            # prompt and must NOT be affected by the transcript/mturk skips below.
+            for idx, line in enumerate(f):
                 if limit is not None and count >= limit:
                     break
                 rec = json.loads(line)
@@ -220,8 +231,13 @@ class DenseCaptionEval(Task):
                     mturk_data = json.load(f2)
                 mturk_statements: str = mturk_data["canonical_statements"]
 
+                question = (
+                    self.caption_prompt
+                    if self.caption_prompt is not None
+                    else dense_caption_question(idx)
+                )
                 yield Instance(
-                    question="Describe this image.",
+                    question=question,
                     gold_answer=None,
                     metadata={
                         "id": image_id,
@@ -234,9 +250,11 @@ class DenseCaptionEval(Task):
                 count += 1
 
     def format_request(self, instance: Instance) -> LMRequest:
+        image = load_instance_image(instance)
         return LMRequest(
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
+            images=(image,) if image is not None else None,
         )
 
 

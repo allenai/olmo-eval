@@ -26,11 +26,13 @@ Conventions:
 
 from __future__ import annotations
 
+import functools
 import os
 from abc import abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
@@ -65,28 +67,32 @@ def rebase_data_path(path: str) -> str:
     return path
 
 
+def _decode_hf_image_cell(dataset: Any, index: int, column: str):
+    """Decode one image cell of a no-decode HF dataset (module-level so it is picklable)."""
+    import io
+
+    from PIL import Image
+
+    rec = dataset[index][column]
+    if isinstance(rec, dict):
+        if rec.get("bytes"):
+            return Image.open(io.BytesIO(rec["bytes"]))
+        if rec.get("path"):
+            return Image.open(rec["path"])
+    return rec
+
+
 def lazy_hf_image(dataset, index: int, column: str = "image"):
-    """A zero-arg callable that decodes one image cell of a no-decode HF dataset.
+    """A picklable zero-arg callable that decodes one image cell of a no-decode HF dataset.
 
-    ``dataset`` should have ``column`` cast to ``datasets.Image(decode=False)``
-    so building instances never decodes pixels; the callable decodes exactly
-    one image when the inference script needs it.
+    ``dataset`` should have ``column`` cast to ``datasets.Image(decode=False)`` so building
+    instances never decodes pixels; the callable decodes exactly one image when called.
+
+    Returns a ``functools.partial`` over a module-level function (not a local closure) so the
+    owning ``Instance`` stays picklable across the runner's worker processes — a closure would
+    raise ``AttributeError: Can't get local object 'lazy_hf_image.<locals>._load'`` on pickle.
     """
-
-    def _load():
-        import io
-
-        from PIL import Image
-
-        rec = dataset[index][column]
-        if isinstance(rec, dict):
-            if rec.get("bytes"):
-                return Image.open(io.BytesIO(rec["bytes"]))
-            if rec.get("path"):
-                return Image.open(rec["path"])
-        return rec
-
-    return _load
+    return functools.partial(_decode_hf_image_cell, dataset, index, column)
 
 
 def load_instance_image(instance: Instance):
@@ -121,9 +127,11 @@ class ImageQATask(Task):
         ...
 
     def format_request(self, instance: Instance) -> LMRequest:
+        image = load_instance_image(instance)
         return LMRequest(
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
+            images=(image,) if image is not None else None,
         )
 
 
