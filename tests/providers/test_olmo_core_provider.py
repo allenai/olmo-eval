@@ -682,6 +682,7 @@ def test_hybrid_sequence_mixers_disable_generation_cache() -> None:
     provider._configure_inference_cache_for_sequence_mixers()
 
     assert provider.use_cache is False
+    assert provider.batch_size == 1
     provider.generate(
         [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
         SamplingParams(max_tokens=3),

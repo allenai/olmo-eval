@@ -207,6 +207,12 @@ class OlmoCoreProvider(InferenceProvider):
             )
             self.use_cache = False
             self.retain_inference_cache = False
+        if self.batch_size is None:
+            logger.warning(
+                "Setting OLMo-core provider batch_size=1 because generation cache "
+                "is disabled for a model with non-cacheable sequence mixers."
+            )
+            self.batch_size = 1
 
         def prepare_inference_cache(batch_size: int, max_seq_len: int) -> None:
             for attention in cacheable_attentions():
