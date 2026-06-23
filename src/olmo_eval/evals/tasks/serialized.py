@@ -2,8 +2,16 @@
 
 These tasks bypass the standard Formatter pipeline because the serialized
 data already contains both raw Instance fields (for scoring) and fully
-formatted LMRequest fields (for inference).  The serialized JSONL is
-produced by oe-eval-internal's serialize_benchmark.py.
+formatted LMRequest fields (for inference).  The serialized JSONL can be
+produced by oe-eval-internal's serialize_benchmark.py or by any script
+that emits the schema documented in ``docs/serialized_tasks.md``.
+
+To add a new serialized task, call ``register_variant`` with a
+``DataSource`` pointing at your JSONL file and the desired metrics.
+You can add registrations directly in this file or in a new module
+that imports ``SerializedTask``.  See the existing registrations at
+the bottom of this file, ``examples/serialize_task_example.py``, and
+``docs/serialized_tasks.md`` for full walkthroughs.
 
 Top-level JSONL fields (used for Instance / LMRequest building):
     doc_id, question, gold_answers, choices, metadata,
@@ -16,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import BPBMetricInstanceAvg
+from olmo_eval.common.metrics import BPBMetricInstanceAvg, LogprobMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -140,3 +148,16 @@ for _lang in _MULTILINGUAL_MBPP_LANGUAGES:
         data_source=DataSource(path=f"{_S3_BASE}/mt_mbpp_v2fix_{_lang}.jsonl"),
         metrics=_BPB_METRICS,
     )
+
+# =============================================================================
+# Example: SciQ multiple-choice (from examples/serialize_task_example.py)
+# =============================================================================
+
+register_variant(
+    "serialized",
+    "sciq_mc",
+    data_source=DataSource(
+        path="s3://ai2-llm/ianm/oe-eval-serialized/examples/sciq_serialized.jsonl"
+    ),
+    metrics=(LogprobMCAccuracyMetric(),),
+)
