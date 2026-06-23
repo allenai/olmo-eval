@@ -197,10 +197,12 @@ class OlmoCoreProvider(InferenceProvider):
     @staticmethod
     def _build_transformer_config_for_display(
         *,
-        checkpoint_config: dict[str, object],
+        checkpoint_config: dict[str, object] | None,
         dtype: str,
         attention_backend: object | None,
     ) -> object | None:
+        if checkpoint_config is None:
+            return None
         model_config = checkpoint_config.get("model")
         if not isinstance(model_config, dict):
             return None
@@ -226,7 +228,7 @@ class OlmoCoreProvider(InferenceProvider):
                     if mixer is None and hasattr(config, "backend"):
                         mixer = config
                     if mixer is not None and hasattr(mixer, "backend"):
-                        mixer.backend = attention_backend  # type: ignore[attr-defined]
+                        setattr(mixer, "backend", attention_backend)  # noqa: B010
 
                 transformer_config.apply(set_attention_backend)
             return transformer_config
@@ -287,9 +289,9 @@ class OlmoCoreProvider(InferenceProvider):
         if not attentions:
             return
 
-        def cacheable_attentions() -> list[object]:
+        def cacheable_attentions() -> list[core_utils.CacheableAttentionProtocol]:
             return [
-                attention
+                cast(core_utils.CacheableAttentionProtocol, attention)
                 for attention in attentions
                 if hasattr(attention, "kv_cache_manager")
                 and hasattr(attention, "init_kv_cache_manager")
@@ -315,10 +317,11 @@ class OlmoCoreProvider(InferenceProvider):
 
         def prepare_inference_cache(batch_size: int, max_seq_len: int) -> None:
             for attention in cacheable_attentions():
-                if getattr(attention, "kv_cache_manager", None) is None:
+                kv_cache_manager = attention.kv_cache_manager
+                if kv_cache_manager is None:
                     attention.init_kv_cache_manager(batch_size, max_seq_len)
                 else:
-                    attention.kv_cache_manager.reset(batch_size, max_seq_len)
+                    kv_cache_manager.reset(batch_size, max_seq_len)
 
         def free_inference_cache() -> None:
             for attention in cacheable_attentions():
@@ -327,8 +330,8 @@ class OlmoCoreProvider(InferenceProvider):
         # OLMo-core's current cache helpers assert every block uses Attention.
         # Hybrid models include recurrent sequence mixers, so install tolerant
         # instance methods that operate only on blocks that actually own a KV cache.
-        self.generation_module.prepare_inference_cache = prepare_inference_cache  # type: ignore[method-assign]
-        self.generation_module.free_inference_cache = free_inference_cache  # type: ignore[method-assign]
+        setattr(self.generation_module, "prepare_inference_cache", prepare_inference_cache)  # noqa: B010
+        setattr(self.generation_module, "free_inference_cache", free_inference_cache)  # noqa: B010
 
     def _free_inference_cache(self) -> None:
         self.generation_module.free_inference_cache()

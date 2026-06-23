@@ -74,6 +74,16 @@ class TensorRows(Protocol):
     def tolist(self) -> list[list[int]] | list[list[float]]: ...
 
 
+class KVCacheManagerProtocol(Protocol):
+    def reset(self, batch_size: int, max_seq_len: int) -> None: ...
+
+
+class CacheableAttentionProtocol(Protocol):
+    kv_cache_manager: KVCacheManagerProtocol | None
+
+    def init_kv_cache_manager(self, batch_size: int, max_seq_len: int) -> None: ...
+
+
 class GenerationModuleProtocol(Protocol):
     def free_inference_cache(self) -> None: ...
 
