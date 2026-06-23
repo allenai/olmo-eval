@@ -23,6 +23,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _STOP_SEQUENCE_CONTEXT_TOKENS = 4
+_OLMO_CORE_GENERATION_LOGGER = "olmo_core.generate.generation_module.transformer.generation_module"
+_OLMO_CORE_CONFIG_LOG_PREFIXES = ("TransformerConfig(", "GenerationConfig(")
+
+
+class _OlmoCoreConfigLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.getMessage().startswith(_OLMO_CORE_CONFIG_LOG_PREFIXES)
 
 
 class OlmoCoreProvider(InferenceProvider):
@@ -144,12 +151,18 @@ class OlmoCoreProvider(InferenceProvider):
             AttentionBackendName=imports.AttentionBackendName,
             torch=imports.torch,
         )
+        transformer_config = self._build_transformer_config_for_display(
+            checkpoint_config=checkpoint_config,
+            dtype=dtype,
+            attention_backend=attention_backend_value,
+        )
 
         self.generation_config = imports.GenerationConfig(
             pad_token_id=self.pad_token_id,
             eos_token_id=self.eos_token_id,
             use_cache=use_cache,
         )
+        self._print_olmo_core_config(transformer_config, self.generation_config)
 
         load_kwargs = {
             "checkpoint_dir": model_name,
@@ -164,15 +177,101 @@ class OlmoCoreProvider(InferenceProvider):
         }
         if dtype != "auto":
             load_kwargs["dtype"] = dtype
-        self.generation_module: core_utils.GenerationModuleProtocol = (
-            imports.TransformerGenerationModule.from_checkpoint(
-                **{key: value for key, value in load_kwargs.items() if value is not None}
+
+        config_log_filter = _OlmoCoreConfigLogFilter()
+        olmo_core_logger = logging.getLogger(_OLMO_CORE_GENERATION_LOGGER)
+        olmo_core_logger.addFilter(config_log_filter)
+        try:
+            self.generation_module: core_utils.GenerationModuleProtocol = (
+                imports.TransformerGenerationModule.from_checkpoint(
+                    **{key: value for key, value in load_kwargs.items() if value is not None}
+                )
             )
-        )
+        finally:
+            olmo_core_logger.removeFilter(config_log_filter)
         self._configure_inference_cache_for_sequence_mixers()
 
     def get_tokenizer(self) -> core_utils.TokenizerProtocol:
         return self.tokenizer
+
+    @staticmethod
+    def _build_transformer_config_for_display(
+        *,
+        checkpoint_config: dict[str, object],
+        dtype: str,
+        attention_backend: object | None,
+    ) -> object | None:
+        model_config = checkpoint_config.get("model")
+        if not isinstance(model_config, dict):
+            return None
+
+        try:
+            from olmo_core.config import DType
+            from olmo_core.nn.transformer import TransformerConfig
+
+            transformer_config = TransformerConfig.from_dict(model_config)
+            if dtype != "auto":
+                dtype_value = DType(dtype)
+                transformer_config.apply(
+                    lambda config: setattr(config, "dtype", dtype_value)
+                    if hasattr(config, "dtype")
+                    else None
+                )
+            if attention_backend is not None:
+
+                def set_attention_backend(config: object) -> None:
+                    mixer = getattr(config, "sequence_mixer", None) or getattr(
+                        config, "attention", None
+                    )
+                    if mixer is None and hasattr(config, "backend"):
+                        mixer = config
+                    if mixer is not None and hasattr(mixer, "backend"):
+                        mixer.backend = attention_backend  # type: ignore[attr-defined]
+
+                transformer_config.apply(set_attention_backend)
+            return transformer_config
+        except Exception:
+            logger.debug("Could not build OLMo-core TransformerConfig for rich display.")
+            return model_config
+
+    @staticmethod
+    def _config_display_value(config: object) -> object:
+        as_dict = getattr(config, "as_dict", None)
+        if callable(as_dict):
+            with suppress(Exception):
+                return as_dict()
+        return config
+
+    @classmethod
+    def _print_olmo_core_config(
+        cls,
+        transformer_config: object | None,
+        generation_config: object,
+    ) -> None:
+        if not logger.isEnabledFor(logging.INFO):
+            return
+
+        from rich.panel import Panel
+        from rich.pretty import Pretty
+
+        from olmo_eval.common.console import console
+
+        payload = {
+            "generation": cls._config_display_value(generation_config),
+        }
+        if transformer_config is not None:
+            payload = {
+                "transformer": cls._config_display_value(transformer_config),
+                **payload,
+            }
+
+        console.print(
+            Panel(
+                Pretty(payload, expand_all=True),
+                title="[bold]OLMo-core Configuration[/bold]",
+                border_style="cyan",
+            )
+        )
 
     def _configure_inference_cache_for_sequence_mixers(self) -> None:
         model = getattr(self.generation_module, "model", None)
