@@ -213,9 +213,9 @@ class OlmoCoreProvider(InferenceProvider):
             if dtype != "auto":
                 dtype_value = DType(dtype)
                 transformer_config.apply(
-                    lambda config: setattr(config, "dtype", dtype_value)
-                    if hasattr(config, "dtype")
-                    else None
+                    lambda config: (
+                        setattr(config, "dtype", dtype_value) if hasattr(config, "dtype") else None
+                    )
                 )
             if attention_backend is not None:
 
