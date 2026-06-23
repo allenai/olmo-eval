@@ -53,6 +53,7 @@ RECALL_KS = (5, 20)
 DEFAULT_SELECT = 20  # how many ranked papers we ask the model to return
 
 _LIST_RE = re.compile(r"\[[^\[\]]*\]")
+_RANKED_KEY_RE = re.compile(r'"ranked_papers"\s*:\s*(\[[^\[\]]*\])')
 
 RERANK_PROMPT = (
     "You are helping a researcher find the most relevant scientific papers for a "
@@ -64,20 +65,34 @@ RERANK_PROMPT = (
 )
 
 
+def _coerce_int_list(raw: str) -> list[int]:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [int(x) for x in parsed if isinstance(x, (int, float))]
+
+
 def parse_ranked_numbers(text: str) -> list[int]:
-    """Extract an ordered list of 1-based candidate numbers from model output."""
+    """Extract an ordered list of 1-based candidate numbers from model output.
+
+    Reasoning models emit a long ``<think>`` block (which can contain stray
+    bracketed groups) before the answer, so prefer the explicit
+    ``"ranked_papers": [...]`` field, then fall back to the last bracketed list
+    in the text -- the final answer follows the reasoning.
+    """
     if not text:
         return []
-    # Prefer an explicit JSON list; fall back to the first bracketed group.
-    for match in _LIST_RE.finditer(text):
-        try:
-            parsed = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, list):
-            numbers = [int(x) for x in parsed if isinstance(x, (int, float))]
-            if numbers:
-                return numbers
+    for match in _RANKED_KEY_RE.finditer(text):
+        numbers = _coerce_int_list(match.group(1))
+        if numbers:
+            return numbers
+    for match in reversed(list(_LIST_RE.finditer(text))):
+        numbers = _coerce_int_list(match.group(0))
+        if numbers:
+            return numbers
     return []
 
 
@@ -126,7 +141,10 @@ class LitSearchRerank(Task):
     split = Split.TRAIN
     metrics = LITSEARCH_RERANK_METRICS
     primary_metric = RecallAtKMetric(name="recall@5")
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=512)
+    # Reasoning models spend most of their budget thinking before emitting the
+    # ranked list. Leave generation uncapped (bounded only by the model's context
+    # window) so the JSON answer is never truncated away.
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=None)
 
     #: How many candidates to present in the prompt (<= stored pool size).
     num_candidates: int = 50

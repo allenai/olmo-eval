@@ -74,6 +74,18 @@ class TestParseRankedNumbers:
     def test_empty(self):
         assert parse_ranked_numbers("") == []
 
+    def test_prefers_ranked_papers_over_stray_brackets(self):
+        text = (
+            "<think>\nPaper [3] looks relevant, and papers [1, 99] mention it.\n</think>\n\n"
+            '{"ranked_papers": [12, 4, 7]}'
+        )
+        assert parse_ranked_numbers(text) == [12, 4, 7]
+
+    def test_falls_back_to_last_list(self):
+        # No ranked_papers key: the answer list follows the reasoning.
+        text = "First I considered [1, 2]. Final answer: [8, 5, 3]"
+        assert parse_ranked_numbers(text) == [8, 5, 3]
+
 
 class TestRecallAtK:
     def test_partial(self):
