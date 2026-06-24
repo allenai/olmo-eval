@@ -161,12 +161,8 @@ def _bbq_logprob_metric_helper(
 
             if gold_idx is None or not r.outputs:
                 continue
-            print(r.instance)
-            print(r.outputs)
             logprob_sums = [scorer.score(r.instance, o) for o in r.outputs]
-            print(logprob_sums)
             pred = logprob_sums.index(max(logprob_sums))
-            print(pred)
             accuracy = pred == gold_idx
             subset_accuracy.append(accuracy)
 
@@ -273,8 +269,6 @@ class BBQ(Task):
         gold_idx = ord(gold_letter) - ord("A")
         bias_idx = ord(bias_letter) - ord("A")
         unknown_idx = ord(unknown_letter) - ord("A")
-
-        print(self.config.formatter)
 
         if self.config.formatter == MCQAChatFormatter():
             return Instance(
