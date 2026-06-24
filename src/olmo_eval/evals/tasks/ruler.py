@@ -158,15 +158,19 @@ class RulerTask(Task):
         if "context" not in context_fields:
             context_fields["context"] = ""
 
-        # Format the question using the user template
-        if self._templates is None:
-            raise RuntimeError("Templates not loaded. Call _load_data() first.")
-        question = self._templates["user"].format(**context_fields)
-
-        # Add system template as prepend text for non-chat format
+        # Prefer the preformatted RULER input when present. The released JSONL
+        # already includes the benchmark's exact prompt plus answer prefix.
+        question = doc.get("input")
         prepend_text = ""
-        if not self.ruler_config.get("use_chat_template", False):
-            prepend_text = self._templates["system"].format(**context_fields)
+        if not isinstance(question, str) or not question:
+            # Format the question using the user template
+            if self._templates is None:
+                raise RuntimeError("Templates not loaded. Call _load_data() first.")
+            question = self._templates["user"].format(**context_fields)
+
+            # Add system template as prepend text for non-chat format
+            if not self.ruler_config.get("use_chat_template", False):
+                prepend_text = self._templates["system"].format(**context_fields)
 
         # Get answer (handle both "answer" and "outputs" fields)
         answer = doc.get("answer") or doc.get("outputs")
