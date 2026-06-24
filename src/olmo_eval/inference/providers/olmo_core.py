@@ -31,6 +31,17 @@ class _OlmoCoreConfigLogFilter(logging.Filter):
         return not record.getMessage().startswith(_OLMO_CORE_CONFIG_LOG_PREFIXES)
 
 
+class _TokenizerBosOverride:
+    """Tokenizer proxy that gives logprob encoding the provider's BOS setting."""
+
+    def __init__(self, tokenizer: core_utils.TokenizerProtocol, add_bos_token: bool) -> None:
+        self._tokenizer = tokenizer
+        self.add_bos_token = add_bos_token
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._tokenizer, name)
+
+
 class OlmoCoreProvider(InferenceProvider):
     """Provider using OLMo-core's in-process generation module."""
 
@@ -280,7 +291,7 @@ class OlmoCoreProvider(InferenceProvider):
         ]
 
     def _encode_prompt(self, prompt: str) -> list[int]:
-        token_ids = self.tokenizer.encode(prompt, add_special_tokens=False or self.add_bos_token)
+        token_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
         if self.add_bos_token:
             return get_bos_token_ids(self.tokenizer, fallback_to_eos=True) + token_ids
         return token_ids
@@ -297,6 +308,28 @@ class OlmoCoreProvider(InferenceProvider):
                 kwargs["chat_template"] = self.chat_template
             return self.tokenizer.apply_chat_template(list(request.messages), **kwargs)
         return request.prompt
+
+    def _logprob_tokenizer(self) -> core_utils.TokenizerProtocol:
+        return cast(
+            core_utils.TokenizerProtocol,
+            _TokenizerBosOverride(self.tokenizer, self.add_bos_token),
+        )
+
+    def _encode_logprob_context_and_continuation(
+        self,
+        prompt: str,
+        continuation: str,
+    ) -> tuple[list[int], list[int]]:
+        context_ids, continuation_ids = encode_context_and_continuation(
+            self._logprob_tokenizer(),
+            prompt,
+            continuation,
+        )
+        if continuation_ids and not context_ids:
+            context_ids = get_bos_token_ids(self.tokenizer, fallback_to_eos=True) or [
+                self.eos_token_id
+            ]
+        return context_ids, continuation_ids
 
     def _pad_sequences(
         self,
@@ -599,8 +632,7 @@ class OlmoCoreProvider(InferenceProvider):
         cont_prompts = request.continuation_prompts
         for i, continuation in enumerate(request.continuations or ()):
             prompt = cont_prompts[i] if cont_prompts else request.prompt
-            context_ids, continuation_ids = encode_context_and_continuation(
-                self.tokenizer,
+            context_ids, continuation_ids = self._encode_logprob_context_and_continuation(
                 prompt,
                 continuation,
             )

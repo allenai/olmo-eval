@@ -33,12 +33,15 @@ class FakeTokenizer:
 
     def __init__(self) -> None:
         self.add_bos_token = False
+        self.encode_calls: list[dict[str, Any]] = []
         self.decode_calls: list[list[int]] = []
         self.vocab = {
             "": [],
             "Prompt": [10, 11],
+            "Prompt!": [10, 11, 6],
             "Other": [12],
             "!": [6],
+            " !": [13, 6],
             " STOP": [4],
             "STOP": [8, 9],
         }
@@ -55,13 +58,23 @@ class FakeTokenizer:
             10: "P",
             11: "rompt",
             12: "Other",
+            13: " ",
         }
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
-        del add_special_tokens
+        self.encode_calls.append(
+            {
+                "text": text,
+                "add_special_tokens": add_special_tokens,
+            }
+        )
         if text in self.vocab:
-            return self.vocab[text]
-        return [ord(char) % 13 + 3 for char in text]
+            token_ids = self.vocab[text]
+        else:
+            token_ids = [ord(char) % 13 + 3 for char in text]
+        if add_special_tokens:
+            return [self.bos_token_id, *token_ids]
+        return token_ids
 
     def decode(self, token_ids: int | list[int], skip_special_tokens: bool = True) -> str:
         if isinstance(token_ids, int):
@@ -356,9 +369,64 @@ def test_generation_encoding_uses_provider_bos_flag(
     tokenizer.add_bos_token = True
 
     assert provider._encode_prompt("Prompt") == [10, 11]
+    assert tokenizer.encode_calls[-1] == {
+        "text": "Prompt",
+        "add_special_tokens": False,
+    }
 
     provider.add_bos_token = True
     assert provider._encode_prompt("Prompt") == [1, 10, 11]
+    assert tokenizer.encode_calls[-1] == {
+        "text": "Prompt",
+        "add_special_tokens": False,
+    }
+
+
+def test_logprob_encoding_uses_provider_bos_flag(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, _, tokenizer = fake_provider
+    tokenizer.add_bos_token = True
+
+    rows = provider._logprob_inputs_for_request(
+        LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt="Prompt",
+            continuations=("!",),
+        )
+    )
+    assert rows[0].input_ids == [10, 11]
+    assert rows[0].continuation_token_ids == [6]
+
+    provider.add_bos_token = True
+    rows = provider._logprob_inputs_for_request(
+        LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt="Prompt",
+            continuations=("!",),
+        )
+    )
+    assert rows[0].input_ids == [1, 10, 11]
+    assert rows[0].continuation_token_ids == [6]
+
+
+def test_logprob_encoding_adds_prefix_when_context_tokenizes_empty(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, _, _ = fake_provider
+
+    rows = provider._logprob_inputs_for_request(
+        LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=" ",
+            continuations=("!",),
+        )
+    )
+
+    assert rows[0].input_ids == [1, 13]
+    assert rows[0].continuation_token_ids == [13, 6]
+    assert rows[0].input_length == 2
+    assert rows[0].num_tokens_all == 3
 
 
 def test_stop_text_postprocessing_matches_olmes(
