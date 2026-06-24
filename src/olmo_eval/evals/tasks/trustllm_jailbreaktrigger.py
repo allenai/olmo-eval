@@ -110,7 +110,7 @@ _BASE_SAMPLING = SamplingParams(
     max_tokens=1024,
     temperature=0.6,
     top_p=0.6,
-    # stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
+    stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
 )
 
 

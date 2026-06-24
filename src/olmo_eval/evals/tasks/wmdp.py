@@ -51,6 +51,16 @@ def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ")
     return f"{question}\n{choices_text}"
 
 
+def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") -> str:
+    choice_labels = "ABC"
+    label_format = label_prefix + "A."
+    choices_text = "\n".join(
+        f"{label_format.replace('A', label)} {text}"
+        for label, text in zip(choice_labels, choices, strict=False)
+    )
+    return f"Question: {question}\n{choices_text}\nAnswer:"
+
+
 # =============================================================================
 # Scorer
 # =============================================================================
@@ -123,6 +133,8 @@ class WMDP(Task):
     formatter = MCQAChatFormatter()
     sampling_params = SamplingParams(temperature=0.7, top_p=0.95)
     answer_extractor = extract_mcq_answer
+    fewshot_split: str = "validation"
+    fewshot_sample: bool = False
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -182,13 +194,25 @@ class WMDP(Task):
 
         Delegates to the configured formatter (ChatFormatter by default).
         """
-        if self.config.formatter is not None:
+        if self.config.formatter == MCQAChatFormatter():
             return self.config.formatter.format(instance)
+        elif self.config.formatter is not None:
+            return self.config.formatter.format(instance, self.get_fewshot())
         # Fallback: create a simple chat request
         return LMRequest(
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
         )
+
+    def _build_fewshot(self) -> list[Instance]:
+        """Few-shot from dev split in fixed order (first k), matching reference."""
+        all_fewshot = self._build_fewshot_from_source(
+            split=self.fewshot_split,
+            sample=self.fewshot_sample,
+            fallback_splits=[],
+        )
+        k = self.config.num_fewshot
+        return all_fewshot[:k] if k else all_fewshot
 
 
 _WMDP_SUBSET_METRICS = (
@@ -224,10 +248,18 @@ register_variant(
     formatter=MCQAChatFormatter(),
 )
 
+description = "The following are multiple choice questions (with answers).\n\n"
 register_variant(
     "wmdp",
     "base",
     metrics=_wmdp_base_safety_metrics(scorer=LogprobScorer),
     sampling_params=_BASE_SAMPLING,
-    formatter=MultipleChoiceLogprobFormatter(template="Question: {question}"),
+    num_fewshot=5,
+    formatter=MultipleChoiceLogprobFormatter(
+        template="{question}",
+        label_prefix=" ",
+        answer_suffix="",
+        fewshot_separator="\n\n",
+        description=description,
+    ),
 )
