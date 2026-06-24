@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_STOP_SEQUENCE_CONTEXT_TOKENS = 4
 _OLMO_CORE_GENERATION_LOGGER = "olmo_core.generate.generation_module.transformer.generation_module"
 _OLMO_CORE_CONFIG_LOG_PREFIXES = ("TransformerConfig(", "GenerationConfig(")
 
@@ -41,11 +40,10 @@ class OlmoCoreProvider(InferenceProvider):
         model_name: str,
         tokenizer: str | None = None,
         *,
-        dtype: str = "auto",
+        dtype: str = "bfloat16",
         max_model_len: int | None = None,
         attention_backend: str | None = None,
         use_cache: bool = True,
-        retain_inference_cache: bool = False,
         compile_model: bool = False,
         batch_size: int | None = None,
         validate_checkpoint: bool = True,
@@ -63,7 +61,7 @@ class OlmoCoreProvider(InferenceProvider):
         token: str | None = None,
         cache_dir: str | None = None,
         local_files_only: bool = False,
-        add_bos_token: bool | None = None,
+        add_bos_token: bool = False,
         **kwargs: object,
     ) -> None:
         max_model_len = core_utils._resolve_max_model_len_alias(max_model_len, kwargs)
@@ -107,8 +105,7 @@ class OlmoCoreProvider(InferenceProvider):
             tokenizer_path,
             **tokenizer_kwargs,
         )
-        if add_bos_token is not None:
-            self.tokenizer.add_bos_token = add_bos_token
+        self.add_bos_token = add_bos_token
 
         resolved_pad_token_id, resolved_eos_token_id = core_utils._validate_token_ids(
             checkpoint_dir=model_name,
@@ -132,11 +129,8 @@ class OlmoCoreProvider(InferenceProvider):
         if getattr(self.tokenizer, "eos_token_id", None) is None:
             self.tokenizer.eos_token_id = resolved_eos_token_id
         self.use_cache = use_cache
-        self.retain_inference_cache = retain_inference_cache
-        self._inference_cache_retained = False
         self.batch_size = batch_size
         self.chat_template = chat_template
-        self._stop_sequence_window_cache: dict[tuple[str, ...], int] = {}
         self.max_length = core_utils._resolve_max_length(
             explicit_max_length=max_model_len,
             tokenizer=self.tokenizer,
@@ -150,7 +144,6 @@ class OlmoCoreProvider(InferenceProvider):
         attention_backend_value = core_utils._resolve_attention_backend(
             attention_backend,
             AttentionBackendName=imports.AttentionBackendName,
-            torch=imports.torch,
         )
         transformer_config = self._build_transformer_config_for_display(
             checkpoint_config=checkpoint_config,
@@ -277,7 +270,6 @@ class OlmoCoreProvider(InferenceProvider):
 
     def _free_inference_cache(self) -> None:
         self.generation_module.free_inference_cache()
-        self._inference_cache_retained = False
 
     def _iter_chunks(self, requests: list[LMRequest]) -> list[list[LMRequest]]:
         if self.batch_size is None:
@@ -288,10 +280,8 @@ class OlmoCoreProvider(InferenceProvider):
         ]
 
     def _encode_prompt(self, prompt: str) -> list[int]:
-        if prompt == "":
-            return get_bos_token_ids(self.tokenizer, fallback_to_eos=True)
-        token_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
-        if getattr(self.tokenizer, "add_bos_token", False):
+        token_ids = self.tokenizer.encode(prompt, add_special_tokens=False or self.add_bos_token)
+        if self.add_bos_token:
             return get_bos_token_ids(self.tokenizer, fallback_to_eos=True) + token_ids
         return token_ids
 
@@ -356,17 +346,6 @@ class OlmoCoreProvider(InferenceProvider):
         input_ids, _ = self._pad_sequences(sequences, side="right")
         return input_ids
 
-    def _stop_token_ids(self, stop_sequences: tuple[str, ...] | None) -> list[int]:
-        if not stop_sequences:
-            return []
-
-        stop_token_ids: list[int] = []
-        for stop in stop_sequences:
-            token_ids = self.tokenizer.encode(stop, add_special_tokens=False)
-            if len(token_ids) == 1:
-                stop_token_ids.append(token_ids[0])
-        return sorted(set(stop_token_ids))
-
     def _build_generation_kwargs(self, params: SamplingParams) -> dict[str, object]:
         if params.max_tokens <= 0:
             raise ValueError("OlmoCoreProvider requires sampling max_tokens > 0")
@@ -374,109 +353,34 @@ class OlmoCoreProvider(InferenceProvider):
             raise ValueError("OlmoCoreProvider requires sampling num_samples > 0")
 
         do_sample = params.do_sample and params.temperature > 0
-        kwargs: dict[str, object] = {
-            "max_new_tokens": params.max_tokens,
+        return {
             "do_sample": do_sample,
             "temperature": params.temperature if do_sample else 0.0,
             "top_k": params.top_k if do_sample and params.top_k is not None else -1,
             "top_p": params.top_p if do_sample and params.top_p is not None else 1.0,
             "use_cache": self.use_cache,
         }
-        stop_token_ids = self._stop_token_ids(params.stop_sequences)
-        if stop_token_ids:
-            kwargs["stop_token_ids"] = stop_token_ids
-        return kwargs
 
     def _decode(self, token_ids: list[int], *, skip_special_tokens: bool) -> str:
         return self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
 
-    def _stop_sequence_window_token_count(
-        self,
-        stop_sequences: tuple[str, ...] | None,
-    ) -> int:
-        stops = tuple(stop for stop in stop_sequences or () if stop)
-        if not stops:
-            return 0
-
-        cache = getattr(self, "_stop_sequence_window_cache", None)
-        if cache is None:
-            cache = {}
-            self._stop_sequence_window_cache = cache
-        if stops in cache:
-            return cache[stops]
-
-        # Byte length covers byte-fallback tokenizers; context covers stops that
-        # start inside a neighboring token.
-        window = 0
-        for stop in stops:
-            token_count = len(self.tokenizer.encode(stop, add_special_tokens=False))
-            byte_count = len(stop.encode("utf-8"))
-            window = max(window, token_count, byte_count)
-
-        window += _STOP_SEQUENCE_CONTEXT_TOKENS
-        cache[stops] = window
-        return window
-
     def _text_before_stop(self, text: str, stop_sequences: tuple[str, ...]) -> str | None:
+        stop_idx: int | None = None
         for stop in stop_sequences:
             if stop in text:
-                return text.split(stop, 1)[0]
-        return None
-
-    def _find_stop_sequence_end(
-        self,
-        token_ids: list[int],
-        stop_sequences: tuple[str, ...],
-    ) -> tuple[int, str] | None:
-        if not stop_sequences:
+                idx = text.find(stop)
+                if stop_idx is None or idx < stop_idx:
+                    stop_idx = idx
+        if stop_idx is None:
             return None
+        return text[:stop_idx]
 
-        window = self._stop_sequence_window_token_count(stop_sequences)
-        if window <= 0:
-            return None
-
-        for idx in range(len(token_ids)):
-            window_start = max(0, idx + 1 - window)
-            decoded_window = self._decode(
-                token_ids[window_start : idx + 1],
-                skip_special_tokens=True,
-            )
-            if self._text_before_stop(decoded_window, stop_sequences) is None:
-                continue
-
-            decoded = self._decode(token_ids[: idx + 1], skip_special_tokens=True)
-            text = self._text_before_stop(decoded, stop_sequences)
-            if text is not None:
-                return idx + 1, text
-
-        return None
-
-    def _find_stop_sequence_end_by_prefix_decode(
-        self,
-        token_ids: list[int],
-        stop_sequences: tuple[str, ...],
-    ) -> tuple[int, str] | None:
-        stop_end: int | None = None
-        stop_text: str | None = None
-        low = 1
-        high = len(token_ids)
-
-        while low <= high:
-            mid = (low + high) // 2
-            decoded = self._decode(token_ids[:mid], skip_special_tokens=True)
-            text = self._text_before_stop(decoded, stop_sequences)
-            if text is None:
-                low = mid + 1
-                continue
-
-            stop_end = mid
-            stop_text = text
-            high = mid - 1
-
-        if stop_end is None:
-            return None
-        assert stop_text is not None
-        return stop_end, stop_text
+    def _stop_sequences_with_eos(self, stop_sequences: tuple[str, ...] | None) -> tuple[str, ...]:
+        stops = [stop for stop in stop_sequences or () if stop]
+        eos = self._decode([self.eos_token_id], skip_special_tokens=False)
+        if eos and eos not in stops:
+            stops.append(eos)
+        return tuple(stops)
 
     def _validate_generation_lengths(
         self,
@@ -493,18 +397,28 @@ class OlmoCoreProvider(InferenceProvider):
                     f"{self.max_length}."
                 )
 
+    def _left_truncate_prompts_for_generation(
+        self,
+        prompt_token_ids: list[list[int]],
+        params: SamplingParams,
+    ) -> list[list[int]]:
+        max_context_len = self.max_length - params.max_tokens
+        if max_context_len <= 0:
+            raise ValueError(
+                f"max_tokens ({params.max_tokens}) is greater than or equal to max_length "
+                f"({self.max_length}) for OlmoCoreProvider generation."
+            )
+        return [token_ids[-max_context_len:] for token_ids in prompt_token_ids]
+
     def _normalize_generation_output(
         self,
         token_ids: list[int],
         token_logprobs: list[float] | None,
         stop_sequences: tuple[str, ...] | None,
     ) -> tuple[list[int], list[float] | None, str]:
-        stop_token_ids = set(self._stop_token_ids(stop_sequences))
-        hard_stop_ids = {self.eos_token_id, self.pad_token_id, *stop_token_ids}
-
         end = len(token_ids)
         for idx, token_id in enumerate(token_ids):
-            if token_id in hard_stop_ids:
+            if token_id in {self.eos_token_id, self.pad_token_id}:
                 end = idx if token_id == self.pad_token_id else idx + 1
                 break
 
@@ -513,29 +427,9 @@ class OlmoCoreProvider(InferenceProvider):
             token_logprobs = token_logprobs[:end]
 
         stop_sequences = tuple(stop for stop in stop_sequences or () if stop)
-        stop_match = self._find_stop_sequence_end(token_ids, stop_sequences)
-        if stop_match is not None:
-            stop_end, text = stop_match
-            token_ids = token_ids[:stop_end]
-            if token_logprobs is not None:
-                token_logprobs = token_logprobs[:stop_end]
-            return token_ids, token_logprobs, text
-
         decoded = self._decode(token_ids, skip_special_tokens=True)
         text = self._text_before_stop(decoded, stop_sequences)
-        if text is not None:
-            stop_match = self._find_stop_sequence_end_by_prefix_decode(
-                token_ids,
-                stop_sequences,
-            )
-            if stop_match is not None:
-                stop_end, text = stop_match
-                token_ids = token_ids[:stop_end]
-                if token_logprobs is not None:
-                    token_logprobs = token_logprobs[:stop_end]
-                return token_ids, token_logprobs, text
-
-        return token_ids, token_logprobs, decoded
+        return token_ids, token_logprobs, text if text is not None else decoded
 
     def _logprob_entries(
         self,
@@ -594,10 +488,7 @@ class OlmoCoreProvider(InferenceProvider):
             self._free_inference_cache()
             raise
 
-        if self.retain_inference_cache and self.use_cache:
-            self._inference_cache_retained = True
-        else:
-            self._free_inference_cache()
+        self._free_inference_cache()
         return results
 
     def _generate_chunk(
@@ -611,23 +502,28 @@ class OlmoCoreProvider(InferenceProvider):
                 logger.info(f"Prompt {i}:\n{prompt}")
 
         generation_kwargs = self._build_generation_kwargs(params)
-        prompt_token_ids = [self._encode_prompt(prompt) for prompt in prompt_strs]
+        prompt_token_ids = self._left_truncate_prompts_for_generation(
+            [self._encode_prompt(prompt) for prompt in prompt_strs],
+            params,
+        )
         self._validate_generation_lengths(prompt_token_ids, params)
         expanded_token_ids = [
             token_ids for token_ids in prompt_token_ids for _ in range(params.num_samples)
         ]
         input_ids, attention_mask = self._left_pad(expanded_token_ids)
+        prompt_len = input_ids.shape[1]
+        generation_kwargs["max_length"] = prompt_len + params.max_tokens
 
         generated_ids, _, logprobs = self.generation_module.generate_batch(
             input_ids=input_ids,
             attention_mask=attention_mask,
             return_logprobs=True,
-            completions_only=True,
+            completions_only=False,
             log_timing=False,
             **generation_kwargs,
         )
 
-        generated_rows = cast(list[list[int]], generated_ids.tolist())
+        generated_rows = [row[prompt_len:] for row in cast(list[list[int]], generated_ids.tolist())]
         logprob_rows = (
             cast(list[list[float]], logprobs.tolist())
             if logprobs is not None
@@ -642,7 +538,7 @@ class OlmoCoreProvider(InferenceProvider):
             token_ids, token_logprobs, text = self._normalize_generation_output(
                 row_ids,
                 row_logprobs,
-                params.stop_sequences,
+                self._stop_sequences_with_eos(params.stop_sequences),
             )
             results[request_idx].append(self._generation_output(token_ids, token_logprobs, text))
         return results
@@ -673,7 +569,8 @@ class OlmoCoreProvider(InferenceProvider):
             **self._build_generation_kwargs(params),
             "num_samples": params.num_samples,
             "return_logprobs": True,
-            "completions_only": True,
+            "completions_only": False,
+            "max_length": "<padded_prompt_length + max_tokens>",
         }
         trace["stop_sequences"] = list(params.stop_sequences or ())
         return trace

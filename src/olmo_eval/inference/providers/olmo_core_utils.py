@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TextIO, cast
@@ -494,30 +492,14 @@ def _valid_tokenizer_model_max_length(tokenizer: TokenizerProtocol) -> int | Non
     return model_max_length
 
 
-def _flash_attention_3_available(torch: TorchModuleProtocol) -> bool:
-    if not torch.cuda.is_available():
-        return False
-    try:
-        importlib.import_module("flash_attn_interface")
-    except Exception:
-        return False
-    with suppress(Exception):
-        major, minor = torch.cuda.get_device_capability()
-        return (9, 0) <= (major, minor) < (10, 0)
-    return False
-
-
 def _resolve_attention_backend(
     attention_backend: str | None,
     *,
     AttentionBackendName: AttentionBackendFactory,
-    torch: TorchModuleProtocol,
-) -> object:
-    if attention_backend is not None:
-        return AttentionBackendName(attention_backend)
-    if _flash_attention_3_available(torch):
-        return AttentionBackendName("flash_3")
-    return AttentionBackendName("torch")
+) -> object | None:
+    if attention_backend is None:
+        return None
+    return AttentionBackendName(attention_backend)
 
 
 def _resolve_max_length(

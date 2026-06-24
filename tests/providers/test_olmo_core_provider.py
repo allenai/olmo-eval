@@ -279,23 +279,28 @@ class FakeGenerationModule:
         return module
 
     def generate_batch(self, **kwargs: Any):
-        torch = pytest.importorskip("torch")
-
         self.generate_calls.append(kwargs)
         batch_size = kwargs["input_ids"].shape[0]
         if kwargs["use_cache"]:
             self.prepare_inference_cache(
                 batch_size,
-                kwargs["input_ids"].shape[1] + kwargs["max_new_tokens"],
+                kwargs["max_length"],
             )
-        rows = [[5, 4, 0] if idx % 2 == 0 else [5, 6, 0] for idx in range(batch_size)]
-        generated = torch.tensor(rows, dtype=torch.long)
-        logprobs = torch.tensor(
+        completion_rows = [[5, 4, 0] if idx % 2 == 0 else [5, 6, 0] for idx in range(batch_size)]
+        rows = (
+            completion_rows
+            if kwargs["completions_only"]
+            else [
+                [*kwargs["input_ids"][idx].tolist(), *completion_rows[idx]]
+                for idx in range(batch_size)
+            ]
+        )
+        generated = FakeTensorRows(rows)
+        logprobs = FakeTensorRows(
             [
                 [-0.1, -0.2, -9.0] if idx % 2 == 0 else [-0.3, -0.4, -9.0]
                 for idx in range(batch_size)
-            ],
-            dtype=torch.float32,
+            ]
         )
         return generated, None, logprobs
 
@@ -326,6 +331,9 @@ class FakeTensorRows:
         self._rows = rows
         self.shape = (len(rows), len(rows[0]) if rows else 0)
 
+    def __getitem__(self, idx: int) -> Any:
+        return SimpleNamespace(tolist=lambda: self._rows[idx])
+
     def tolist(self):
         return self._rows
 
@@ -341,8 +349,16 @@ class CacheLifecycleGenerationModule:
         self.generate_calls.append(kwargs)
         batch_size, prompt_len = kwargs["input_ids"].shape
         if kwargs["use_cache"]:
-            self.prepare_inference_cache(batch_size, prompt_len + kwargs["max_new_tokens"])
-        generated = FakeTensorRows([[5, 0] for _ in range(batch_size)])
+            self.prepare_inference_cache(batch_size, kwargs["max_length"])
+        completion_rows = [[5, 0] for _ in range(batch_size)]
+        generated = FakeTensorRows(
+            completion_rows
+            if kwargs["completions_only"]
+            else [
+                [*kwargs["input_ids"].tolist()[idx], *completion_rows[idx]]
+                for idx in range(batch_size)
+            ]
+        )
         logprobs = FakeTensorRows([[-0.2, -9.0] for _ in range(batch_size)])
         return generated, None, logprobs
 
@@ -365,8 +381,7 @@ def _cache_lifecycle_provider() -> tuple[OlmoCoreProvider, CacheLifecycleGenerat
     provider.pad_token_id = tokenizer.pad_token_id
     provider.eos_token_id = tokenizer.eos_token_id
     provider.use_cache = True
-    provider.retain_inference_cache = False
-    provider._inference_cache_retained = False
+    provider.add_bos_token = False
     provider.batch_size = None
     provider.chat_template = None
     provider.max_length = 32
@@ -442,7 +457,8 @@ def test_provider_uses_checkpoint_max_length_without_validation(tmp_path, monkey
     provider = OlmoCoreProvider(str(checkpoint_dir), validate_checkpoint=False)
 
     assert provider.max_length == 4096
-    assert provider.generation_module.checkpoint_kwargs["attention_backend"] == "torch"
+    assert provider.generation_module.checkpoint_kwargs["dtype"] == "bfloat16"
+    assert "attention_backend" not in provider.generation_module.checkpoint_kwargs
 
 
 def test_provider_populates_missing_tokenizer_special_token_ids_from_config(
@@ -481,7 +497,7 @@ def test_provider_populates_missing_tokenizer_special_token_ids_from_config(
     assert rows[0].num_tokens_all == 2
 
 
-def test_provider_prefers_flash_attention_3_when_available(tmp_path, monkeypatch) -> None:
+def test_provider_preserves_checkpoint_attention_backend_by_default(tmp_path, monkeypatch) -> None:
     checkpoint_dir = tmp_path / "step1000"
     _write_olmo_config(
         checkpoint_dir,
@@ -493,11 +509,10 @@ def test_provider_prefers_flash_attention_3_when_available(tmp_path, monkeypatch
         "_import_olmo_core",
         lambda: _fake_olmo_core_imports(cuda_available=True),
     )
-    monkeypatch.setattr(olmo_core_utils, "_flash_attention_3_available", lambda _torch: True)
 
     provider = OlmoCoreProvider(str(checkpoint_dir), validate_checkpoint=False)
 
-    assert provider.generation_module.checkpoint_kwargs["attention_backend"] == "flash_3"
+    assert "attention_backend" not in provider.generation_module.checkpoint_kwargs
 
 
 def test_provider_attention_backend_override_wins(tmp_path, monkeypatch) -> None:
@@ -512,7 +527,6 @@ def test_provider_attention_backend_override_wins(tmp_path, monkeypatch) -> None
         "_import_olmo_core",
         lambda: _fake_olmo_core_imports(cuda_available=True),
     )
-    monkeypatch.setattr(olmo_core_utils, "_flash_attention_3_available", lambda _torch: True)
 
     provider = OlmoCoreProvider(
         str(checkpoint_dir),
@@ -525,8 +539,6 @@ def test_provider_attention_backend_override_wins(tmp_path, monkeypatch) -> None
 
 @pytest.fixture
 def fake_provider() -> tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer]:
-    torch = pytest.importorskip("torch")
-
     provider = OlmoCoreProvider.__new__(OlmoCoreProvider)
     tokenizer = FakeTokenizer()
     module = FakeGenerationModule()
@@ -536,12 +548,22 @@ def fake_provider() -> tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokeniz
     provider.pad_token_id = tokenizer.pad_token_id
     provider.eos_token_id = tokenizer.eos_token_id
     provider.use_cache = True
-    provider.retain_inference_cache = False
-    provider._inference_cache_retained = False
+    provider.add_bos_token = False
     provider.batch_size = None
     provider.chat_template = None
-    provider.device = torch.device("cpu")
     provider.max_length = 32
+
+    def left_pad(sequences: list[list[int]]):
+        max_len = max(max((len(seq) for seq in sequences), default=0), 1)
+        rows = []
+        masks = []
+        for seq in sequences:
+            pad_len = max_len - len(seq)
+            rows.append([tokenizer.pad_token_id] * pad_len + seq)
+            masks.append([0] * pad_len + [1] * len(seq))
+        return FakeTensorRows(rows), FakeTensorRows(masks)
+
+    provider._left_pad = left_pad
     return provider, module, tokenizer
 
 
@@ -579,11 +601,12 @@ def test_generate_repeats_prompts_for_num_samples_and_trims_stops(
         [0, 1],
         [0, 1],
     ]
-    assert call["max_new_tokens"] == 3
+    assert call["max_length"] == 5
+    assert call["completions_only"] is False
     assert call["top_k"] == -1
     assert call["top_p"] == 1.0
     assert call["use_cache"] is True
-    assert call["stop_token_ids"] == [4, 6]
+    assert "stop_token_ids" not in call
     assert module.prepare_calls == [(4, 5)]
     assert [output.text for output in outputs[0]] == ["hello", "hello"]
     assert outputs[0][0].metadata["sum_logits"] == pytest.approx(-0.3)
@@ -592,34 +615,80 @@ def test_generate_repeats_prompts_for_num_samples_and_trims_stops(
     assert module.free_calls == 1
 
 
-def test_normalize_generation_uses_bounded_decode_for_multi_token_stops() -> None:
+def test_encode_prompt_uses_provider_bos_flag_not_tokenizer_attribute(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, _, tokenizer = fake_provider
+    tokenizer.add_bos_token = True
+
+    assert provider._encode_prompt("Prompt") == [10, 11]
+
+    provider.add_bos_token = True
+    assert provider._encode_prompt("Prompt") == [1, 10, 11]
+
+
+def test_normalize_generation_trims_text_but_keeps_tokens_for_text_stops() -> None:
     provider, _ = _cache_lifecycle_provider()
-    tokenizer = provider.tokenizer
     token_ids = [7] * 64 + [8, 9, 7]
     token_logprobs = [-0.01] * len(token_ids)
 
-    tokenizer.decode_calls.clear()
     normalized_ids, normalized_logprobs, text = provider._normalize_generation_output(
         token_ids,
         token_logprobs,
         ("STOP",),
     )
 
-    expected_ids = [7] * 64 + [8, 9]
-    assert normalized_ids == expected_ids
-    assert normalized_logprobs == token_logprobs[: len(expected_ids)]
+    assert normalized_ids == token_ids
+    assert normalized_logprobs == token_logprobs
     assert text == "x" * 64
 
-    window = provider._stop_sequence_window_token_count(("STOP",))
-    long_decode_calls = [call for call in tokenizer.decode_calls if len(call) > window]
-    assert long_decode_calls == [expected_ids]
+
+def test_generate_postprocessing_appends_eos_to_text_stop_sequences() -> None:
+    provider, _ = _cache_lifecycle_provider()
+    tokenizer = provider.tokenizer
+    tokenizer.id_to_text[13] = tokenizer.decode(
+        [tokenizer.eos_token_id],
+        skip_special_tokens=False,
+    )
+    token_ids = [5, 13, 7]
+    token_logprobs = [-0.1, -0.2, -0.3]
+
+    normalized_ids, normalized_logprobs, text = provider._normalize_generation_output(
+        token_ids,
+        token_logprobs,
+        provider._stop_sequences_with_eos(None),
+    )
+
+    assert normalized_ids == token_ids
+    assert normalized_logprobs == token_logprobs
+    assert text == "hello"
 
 
-def test_generate_rejects_requests_that_exceed_max_length() -> None:
-    provider, module = _cache_lifecycle_provider()
+def test_generate_left_truncates_prompts_to_leave_generation_room(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, module, _ = fake_provider
     provider.max_length = 4
 
-    with pytest.raises(ValueError, match=r"prompt length \(2\) \+ max_tokens \(3\) = 5"):
+    provider.generate(
+        [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
+        SamplingParams(max_tokens=3),
+    )
+
+    call = module.generate_calls[0]
+    assert call["input_ids"].tolist() == [[11]]
+    assert call["attention_mask"].tolist() == [[1]]
+    assert call["max_length"] == 4
+
+
+def test_generate_rejects_when_generation_room_exhausts_context() -> None:
+    provider, module = _cache_lifecycle_provider()
+    provider.max_length = 3
+
+    with pytest.raises(
+        ValueError,
+        match=r"max_tokens \(3\) is greater than or equal to max_length",
+    ):
         provider.generate(
             [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
             SamplingParams(max_tokens=3),
@@ -628,9 +697,8 @@ def test_generate_rejects_requests_that_exceed_max_length() -> None:
     assert module.generate_calls == []
 
 
-def test_generate_can_retain_olmo_core_inference_cache() -> None:
+def test_generate_frees_olmo_core_inference_cache_after_generation() -> None:
     provider, module = _cache_lifecycle_provider()
-    provider.retain_inference_cache = True
 
     provider.generate(
         [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
@@ -638,20 +706,14 @@ def test_generate_can_retain_olmo_core_inference_cache() -> None:
     )
 
     assert module.prepare_calls == [(1, 5)]
-    assert module.cache_allocated is True
-    assert module.free_calls == 0
-    assert provider._inference_cache_retained is True
+    assert module.cache_allocated is False
+    assert module.free_calls == 1
 
 
-def test_logprobs_clears_retained_generation_cache_before_forward() -> None:
+def test_logprobs_clears_generation_cache_before_forward() -> None:
     provider, module = _cache_lifecycle_provider()
-    provider.retain_inference_cache = True
     cache_states: list[bool] = []
-
-    provider.generate(
-        [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
-        SamplingParams(max_tokens=1),
-    )
+    module.cache_allocated = True
 
     def logprobs_chunk(requests: list[LMRequest]) -> list[list[LMOutput]]:
         cache_states.append(module.cache_allocated)
@@ -670,7 +732,6 @@ def test_logprobs_clears_retained_generation_cache_before_forward() -> None:
 
     assert cache_states == [False]
     assert module.cache_allocated is False
-    assert provider._inference_cache_retained is False
 
 
 def test_generate_formats_chat_with_optional_template(
@@ -703,6 +764,7 @@ def test_generate_formats_chat_with_optional_template(
 def test_logprobs_uses_model_forward_and_computes_greedy_metadata(
     fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
 ) -> None:
+    pytest.importorskip("torch")
     provider, module, _ = fake_provider
     request = LMRequest(
         request_type=RequestType.LOGLIKELIHOOD,
