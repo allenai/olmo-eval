@@ -355,37 +355,6 @@ class CacheLifecycleGenerationModule:
         self.free_calls += 1
 
 
-class FakeCacheManager:
-    def __init__(self) -> None:
-        self.reset_calls: list[tuple[int, int]] = []
-
-    def reset(self, batch_size: int, max_seq_len: int) -> None:
-        self.reset_calls.append((batch_size, max_seq_len))
-
-
-class FakeCacheableAttention:
-    def __init__(self) -> None:
-        self.kv_cache_manager: FakeCacheManager | None = None
-        self.init_calls: list[tuple[int, int]] = []
-
-    def init_kv_cache_manager(self, batch_size: int, max_seq_len: int) -> None:
-        self.init_calls.append((batch_size, max_seq_len))
-        self.kv_cache_manager = FakeCacheManager()
-
-
-class HybridCacheGenerationModule(CacheLifecycleGenerationModule):
-    def __init__(self) -> None:
-        super().__init__()
-        self.cacheable_attention = FakeCacheableAttention()
-        self.recurrent_attention = object()
-        self.model = SimpleNamespace(
-            blocks={
-                "0": SimpleNamespace(attention=self.cacheable_attention),
-                "1": SimpleNamespace(attention=self.recurrent_attention),
-            }
-        )
-
-
 def _cache_lifecycle_provider() -> tuple[OlmoCoreProvider, CacheLifecycleGenerationModule]:
     provider = OlmoCoreProvider.__new__(OlmoCoreProvider)
     tokenizer = FakeTokenizer()
@@ -672,31 +641,6 @@ def test_generate_can_retain_olmo_core_inference_cache() -> None:
     assert module.cache_allocated is True
     assert module.free_calls == 0
     assert provider._inference_cache_retained is True
-
-
-def test_hybrid_sequence_mixers_disable_generation_cache() -> None:
-    provider, _ = _cache_lifecycle_provider()
-    module = HybridCacheGenerationModule()
-    provider.generation_module = module
-
-    provider._configure_inference_cache_for_sequence_mixers()
-
-    assert provider.use_cache is False
-    assert provider.batch_size == 1
-    provider.generate(
-        [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
-        SamplingParams(max_tokens=3),
-    )
-
-    assert module.generate_calls[0]["use_cache"] is False
-    assert module.cacheable_attention.init_calls == []
-    assert module.cacheable_attention.kv_cache_manager is None
-
-    module.prepare_inference_cache(2, 8)
-    assert module.cacheable_attention.init_calls == [(2, 8)]
-    assert module.cacheable_attention.kv_cache_manager is not None
-    module.free_inference_cache()
-    assert module.cacheable_attention.kv_cache_manager is None
 
 
 def test_logprobs_clears_retained_generation_cache_before_forward() -> None:
