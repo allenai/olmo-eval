@@ -348,6 +348,7 @@ _BBQ_SUBSET = (
 )
 
 _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
+_BASE_SAMPLING = SamplingParams(max_tokens=1, temperature=0.0)
 
 
 def _safety_metrics_mcq(scorer):
@@ -390,5 +391,6 @@ register_variant(
     "base",
     metrics=_safety_metrics_base(LogprobScorer),
     primary_metric=BBQLogprobMetric(name="any::any::accuracy", scorer=LogprobScorer),
+    sampling_params=_BASE_SAMPLING,
     formatter=MultipleChoiceLogprobFormatter(template="Question: {question}"),
 )
