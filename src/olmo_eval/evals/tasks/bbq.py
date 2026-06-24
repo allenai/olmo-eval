@@ -263,7 +263,9 @@ class BBQ(Task):
         bias_idx = ord(bias_letter) - ord("A")
         unknown_idx = ord(unknown_letter) - ord("A")
 
-        prefix = _BBQ_FORMAT if self.formatter == MCQAChatFormatter() else ""
+        print(self.config.formatter)
+
+        prefix = _BBQ_FORMAT if self.config.formatter == MCQAChatFormatter() else ""
 
         return Instance(
             question=prefix + doc["question"],
