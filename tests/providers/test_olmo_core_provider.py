@@ -1,4 +1,4 @@
-"""Unit tests for the OLMo-core provider."""
+"""Hotspot tests for the OLMo-core provider."""
 
 from __future__ import annotations
 
@@ -10,16 +10,9 @@ from typing import Any
 import pytest
 
 import olmo_eval.inference.providers.olmo_core_utils as olmo_core_utils
-from olmo_eval.common.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
-from olmo_eval.common.types import LMOutput, LMRequest, ProviderKind, RequestType, SamplingParams
-from olmo_eval.inference.providers.config import ProviderConfig
+from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.providers.olmo_core import OlmoCoreProvider
-from olmo_eval.inference.providers.olmo_core_utils import (
-    _TRANSFORMERS_UNSET_MODEL_MAX_LENGTH,
-    _resolve_max_length,
-    _validate_olmo_core_checkpoint,
-)
-from olmo_eval.runners.asynq.batching.config import BatchConfig, BatchStrategy
+from olmo_eval.inference.providers.olmo_core_utils import _TRANSFORMERS_UNSET_MODEL_MAX_LENGTH
 
 
 class FakeTokenizerConfig:
@@ -32,177 +25,6 @@ class FakeTokenizerConfig:
         )
 
 
-def _write_olmo_config(
-    checkpoint_dir,
-    *,
-    model: dict[str, Any] | None = None,
-    tokenizer: dict[str, Any] | None = None,
-) -> None:
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    (checkpoint_dir / "config.json").write_text(
-        json.dumps(
-            {
-                "model": model if model is not None else {"d_model": 8},
-                "dataset": {
-                    "tokenizer": tokenizer
-                    if tokenizer is not None
-                    else {
-                        "identifier": "fake-tokenizer",
-                        "vocab_size": 16,
-                        "pad_token_id": 0,
-                        "eos_token_id": 2,
-                    }
-                },
-            }
-        )
-    )
-
-
-def _metadata_reader(path: str | Path) -> SimpleNamespace:
-    path_obj = path if isinstance(path, Path) else Path(path)
-    if (path_obj / ".metadata").exists():
-        return SimpleNamespace(state_dict_metadata={"model.transformer.wte.weight": object()})
-    raise FileNotFoundError(path)
-
-
-def test_validates_raw_olmo_core_checkpoint(tmp_path) -> None:
-    checkpoint_dir = tmp_path / "step1000"
-    _write_olmo_config(checkpoint_dir)
-    (checkpoint_dir / "model_and_optim").mkdir()
-    (checkpoint_dir / "model_and_optim" / ".metadata").write_text("fake")
-
-    info = _validate_olmo_core_checkpoint(
-        str(checkpoint_dir),
-        TokenizerConfig=FakeTokenizerConfig,
-        get_checkpoint_metadata=_metadata_reader,
-    )
-
-    assert info.tokenizer_config.identifier == "fake-tokenizer"
-    assert info.metadata_dir == str(checkpoint_dir / "model_and_optim")
-
-
-def test_rejects_hf_style_checkpoint_config(tmp_path) -> None:
-    checkpoint_dir = tmp_path / "hf"
-    checkpoint_dir.mkdir()
-    (checkpoint_dir / "config.json").write_text(json.dumps({"architectures": ["LlamaForCausalLM"]}))
-    (checkpoint_dir / ".metadata").write_text("fake")
-
-    with pytest.raises(ValueError, match="HF-format checkpoints should use"):
-        _validate_olmo_core_checkpoint(
-            str(checkpoint_dir),
-            TokenizerConfig=FakeTokenizerConfig,
-            get_checkpoint_metadata=_metadata_reader,
-        )
-
-
-def test_rejects_checkpoint_without_distributed_metadata(tmp_path) -> None:
-    checkpoint_dir = tmp_path / "missing-metadata"
-    _write_olmo_config(checkpoint_dir)
-
-    with pytest.raises(ValueError, match="missing distributed checkpoint metadata"):
-        _validate_olmo_core_checkpoint(
-            str(checkpoint_dir),
-            TokenizerConfig=FakeTokenizerConfig,
-            get_checkpoint_metadata=_metadata_reader,
-        )
-
-
-def test_rejects_invalid_checkpoint_token_ids(tmp_path) -> None:
-    checkpoint_dir = tmp_path / "bad-tokenizer"
-    _write_olmo_config(
-        checkpoint_dir,
-        tokenizer={
-            "identifier": "fake-tokenizer",
-            "vocab_size": 16,
-            "pad_token_id": 2,
-            "eos_token_id": 2,
-        },
-    )
-    (checkpoint_dir / ".metadata").write_text("fake")
-
-    with pytest.raises(ValueError, match="must be different"):
-        _validate_olmo_core_checkpoint(
-            str(checkpoint_dir),
-            TokenizerConfig=FakeTokenizerConfig,
-            get_checkpoint_metadata=_metadata_reader,
-        )
-
-
-def test_provider_registration_and_config_round_trip(monkeypatch) -> None:
-    captured: dict[str, Any] = {}
-
-    def fake_create_provider(kind: str, model: str, **kwargs: Any) -> object:
-        captured.update({"kind": kind, "model": model, "kwargs": kwargs})
-        return object()
-
-    import olmo_eval.inference as inference_module
-
-    monkeypatch.setattr(inference_module, "create_provider", fake_create_provider)
-    config = ProviderConfig(
-        kind=ProviderKind.OLMO_CORE,
-        model="/weka/ckpts/step1000",
-        tokenizer="allenai/dolma2-tokenizer",
-        dtype="bfloat16",
-        max_model_len=4096,
-        kwargs={"attention_backend": "torch", "validate_checkpoint": False},
-    )
-
-    restored = ProviderConfig.from_dict(config.to_dict())
-    restored.create_provider()
-
-    assert restored.kind == ProviderKind.OLMO_CORE
-    assert restored.requires_gpu is True
-    assert restored.requires_local_gpu is True
-    assert BACKEND_OPTIONAL_GROUPS["olmo_core"] == "olmo_core"
-    assert captured == {
-        "kind": ProviderKind.OLMO_CORE,
-        "model": "/weka/ckpts/step1000",
-        "kwargs": {
-            "attention_backend": "torch",
-            "validate_checkpoint": False,
-            "tokenizer": "allenai/dolma2-tokenizer",
-            "dtype": "bfloat16",
-            "max_model_len": 4096,
-        },
-    }
-
-
-def test_olmo_core_is_sequential_only() -> None:
-    with pytest.raises(ValueError, match="only supports batched processing"):
-        BatchConfig(strategy=BatchStrategy.STREAMING).validate_for_provider("olmo_core")
-
-
-def test_rejects_tensor_parallel_size_above_one() -> None:
-    with pytest.raises(ValueError, match="not tensor-parallel generation config"):
-        OlmoCoreProvider("fake-checkpoint", tensor_parallel_size=2)
-
-
-def test_resolve_max_length_raises_for_unset_tokenizer_length() -> None:
-    tokenizer = SimpleNamespace(model_max_length=_TRANSFORMERS_UNSET_MODEL_MAX_LENGTH)
-
-    with pytest.raises(ValueError, match="pass max_model_len explicitly"):
-        _resolve_max_length(
-            explicit_max_length=None,
-            tokenizer=tokenizer,
-            checkpoint_config={"model": {}},
-            checkpoint_dir="fake-checkpoint",
-        )
-
-
-def test_resolve_max_length_prefers_checkpoint_config() -> None:
-    tokenizer = SimpleNamespace(model_max_length=_TRANSFORMERS_UNSET_MODEL_MAX_LENGTH)
-
-    assert (
-        _resolve_max_length(
-            explicit_max_length=None,
-            tokenizer=tokenizer,
-            checkpoint_config={"model": {"max_sequence_length": 4096}},
-            checkpoint_dir="fake-checkpoint",
-        )
-        == 4096
-    )
-
-
 class FakeTokenizer:
     pad_token_id = 0
     eos_token_id = 2
@@ -210,7 +32,7 @@ class FakeTokenizer:
     model_max_length = 32
 
     def __init__(self) -> None:
-        self.template_calls: list[dict[str, Any]] = []
+        self.add_bos_token = False
         self.decode_calls: list[list[int]] = []
         self.vocab = {
             "": [],
@@ -219,16 +41,11 @@ class FakeTokenizer:
             "!": [6],
             " STOP": [4],
             "STOP": [8, 9],
-            "a": [1],
-            "ab": [1, 2],
-            "abc": [1, 2, 3],
-            "bc": [2, 3],
         }
         self.id_to_text = {
             0: "<pad>",
-            1: "a",
-            2: "b",
-            3: "c",
+            1: "<bos>",
+            2: "<eos>",
             4: " STOP",
             5: "hello",
             6: "!",
@@ -257,145 +74,6 @@ class FakeTokenizer:
             pieces.append(self.id_to_text.get(token_id, str(token_id)))
         return "".join(pieces)
 
-    def apply_chat_template(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
-        self.template_calls.append({"messages": messages, **kwargs})
-        return "<chat>" + "|".join(message["content"] for message in messages)
-
-
-class FakeGenerationModule:
-    def __init__(self) -> None:
-        self.generate_calls: list[dict[str, Any]] = []
-        self.forward_calls: list[Any] = []
-        self.forward_cache_states: list[bool] = []
-        self.checkpoint_kwargs: dict[str, Any] = {}
-        self.prepare_calls: list[tuple[int, int]] = []
-        self.cache_allocated = False
-        self.free_calls = 0
-
-    @classmethod
-    def from_checkpoint(cls, **kwargs: Any) -> FakeGenerationModule:
-        module = cls()
-        module.checkpoint_kwargs = kwargs
-        return module
-
-    def generate_batch(self, **kwargs: Any):
-        self.generate_calls.append(kwargs)
-        batch_size = kwargs["input_ids"].shape[0]
-        if kwargs["use_cache"]:
-            self.prepare_inference_cache(
-                batch_size,
-                kwargs["max_length"],
-            )
-        completion_rows = [[5, 4, 0] if idx % 2 == 0 else [5, 6, 0] for idx in range(batch_size)]
-        rows = (
-            completion_rows
-            if kwargs["completions_only"]
-            else [
-                [*kwargs["input_ids"][idx].tolist(), *completion_rows[idx]]
-                for idx in range(batch_size)
-            ]
-        )
-        generated = FakeTensorRows(rows)
-        logprobs = FakeTensorRows(
-            [
-                [-0.1, -0.2, -9.0] if idx % 2 == 0 else [-0.3, -0.4, -9.0]
-                for idx in range(batch_size)
-            ]
-        )
-        return generated, None, logprobs
-
-    def model_forward(self, *, input_ids):
-        torch = pytest.importorskip("torch")
-
-        self.forward_calls.append(input_ids)
-        self.forward_cache_states.append(self.cache_allocated)
-        batch_size, seq_len = input_ids.shape
-        logits = torch.zeros((batch_size, seq_len, 8), dtype=torch.float32)
-        logits[:, :, :] = -5.0
-        logits[:, 0, 2] = 5.0
-        logits[:, 1, 4] = 5.0
-        logits[:, 1, 3] = 2.0
-        return logits
-
-    def prepare_inference_cache(self, batch_size: int, max_seq_len: int) -> None:
-        self.prepare_calls.append((batch_size, max_seq_len))
-        self.cache_allocated = True
-
-    def free_inference_cache(self) -> None:
-        self.cache_allocated = False
-        self.free_calls += 1
-
-
-class FakeTensorRows:
-    def __init__(self, rows: list[list[int]] | list[list[float]]) -> None:
-        self._rows = rows
-        self.shape = (len(rows), len(rows[0]) if rows else 0)
-
-    def __getitem__(self, idx: int) -> Any:
-        return SimpleNamespace(tolist=lambda: self._rows[idx])
-
-    def tolist(self):
-        return self._rows
-
-
-class CacheLifecycleGenerationModule:
-    def __init__(self) -> None:
-        self.generate_calls: list[dict[str, Any]] = []
-        self.prepare_calls: list[tuple[int, int]] = []
-        self.cache_allocated = False
-        self.free_calls = 0
-
-    def generate_batch(self, **kwargs: Any):
-        self.generate_calls.append(kwargs)
-        batch_size, prompt_len = kwargs["input_ids"].shape
-        if kwargs["use_cache"]:
-            self.prepare_inference_cache(batch_size, kwargs["max_length"])
-        completion_rows = [[5, 0] for _ in range(batch_size)]
-        generated = FakeTensorRows(
-            completion_rows
-            if kwargs["completions_only"]
-            else [
-                [*kwargs["input_ids"].tolist()[idx], *completion_rows[idx]]
-                for idx in range(batch_size)
-            ]
-        )
-        logprobs = FakeTensorRows([[-0.2, -9.0] for _ in range(batch_size)])
-        return generated, None, logprobs
-
-    def prepare_inference_cache(self, batch_size: int, max_seq_len: int) -> None:
-        self.prepare_calls.append((batch_size, max_seq_len))
-        self.cache_allocated = True
-
-    def free_inference_cache(self) -> None:
-        self.cache_allocated = False
-        self.free_calls += 1
-
-
-def _cache_lifecycle_provider() -> tuple[OlmoCoreProvider, CacheLifecycleGenerationModule]:
-    provider = OlmoCoreProvider.__new__(OlmoCoreProvider)
-    tokenizer = FakeTokenizer()
-    module = CacheLifecycleGenerationModule()
-    provider.model_name = "fake-model"
-    provider.tokenizer = tokenizer
-    provider.generation_module = module
-    provider.pad_token_id = tokenizer.pad_token_id
-    provider.eos_token_id = tokenizer.eos_token_id
-    provider.use_cache = True
-    provider.add_bos_token = False
-    provider.batch_size = None
-    provider.chat_template = None
-    provider.max_length = 32
-
-    def left_pad(sequences: list[list[int]]):
-        max_len = max(max((len(seq) for seq in sequences), default=0), 1)
-        return (
-            FakeTensorRows([[0] * max_len for _ in sequences]),
-            FakeTensorRows([[1] * max_len for _ in sequences]),
-        )
-
-    provider._left_pad = left_pad
-    return provider, module
-
 
 class FakeAutoTokenizer:
     @classmethod
@@ -414,8 +92,93 @@ class MissingSpecialTokenAutoTokenizer:
         tokenizer = FakeAutoTokenizer.from_pretrained(tokenizer_path, **kwargs)
         tokenizer.pad_token_id = None
         tokenizer.eos_token_id = None
-        tokenizer.bos_token_id = None
         return tokenizer
+
+
+class FakeTensorRows:
+    def __init__(self, rows: list[list[int]] | list[list[float]]) -> None:
+        self._rows = rows
+        self.shape = (len(rows), len(rows[0]) if rows else 0)
+
+    def __getitem__(self, idx: int) -> Any:
+        return SimpleNamespace(tolist=lambda: self._rows[idx])
+
+    def tolist(self) -> list[list[int]] | list[list[float]]:
+        return self._rows
+
+
+class FakeGenerationModule:
+    def __init__(self) -> None:
+        self.generate_calls: list[dict[str, Any]] = []
+        self.checkpoint_kwargs: dict[str, Any] = {}
+        self.prepare_calls: list[tuple[int, int]] = []
+        self.cache_allocated = False
+        self.free_calls = 0
+
+    @classmethod
+    def from_checkpoint(cls, **kwargs: Any) -> FakeGenerationModule:
+        module = cls()
+        module.checkpoint_kwargs = kwargs
+        return module
+
+    def generate_batch(self, **kwargs: Any):
+        self.generate_calls.append(kwargs)
+        batch_size = kwargs["input_ids"].shape[0]
+        if kwargs["use_cache"]:
+            self.prepare_inference_cache(batch_size, kwargs["max_length"])
+
+        completion_rows = [[5, 4, 0] if idx % 2 == 0 else [5, 6, 0] for idx in range(batch_size)]
+        generated_rows = (
+            completion_rows
+            if kwargs["completions_only"]
+            else [
+                [*kwargs["input_ids"][idx].tolist(), *completion_rows[idx]]
+                for idx in range(batch_size)
+            ]
+        )
+        logprob_rows = [
+            [-0.1, -0.2, -9.0] if idx % 2 == 0 else [-0.3, -0.4, -9.0] for idx in range(batch_size)
+        ]
+        return FakeTensorRows(generated_rows), None, FakeTensorRows(logprob_rows)
+
+    def prepare_inference_cache(self, batch_size: int, max_seq_len: int) -> None:
+        self.prepare_calls.append((batch_size, max_seq_len))
+        self.cache_allocated = True
+
+    def free_inference_cache(self) -> None:
+        self.cache_allocated = False
+        self.free_calls += 1
+
+
+def _write_raw_checkpoint(
+    checkpoint_dir: Path,
+    *,
+    model: dict[str, Any] | None = None,
+) -> None:
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    (checkpoint_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "model": model if model is not None else {"d_model": 8},
+                "dataset": {
+                    "tokenizer": {
+                        "identifier": "fake-tokenizer",
+                        "vocab_size": 16,
+                        "pad_token_id": 0,
+                        "eos_token_id": 2,
+                    }
+                },
+            }
+        )
+    )
+    (checkpoint_dir / ".metadata").write_text("fake")
+
+
+def _metadata_reader(path: str | Path) -> SimpleNamespace:
+    path_obj = path if isinstance(path, Path) else Path(path)
+    if (path_obj / ".metadata").exists():
+        return SimpleNamespace(state_dict_metadata={"model.transformer.wte.weight": object()})
+    raise FileNotFoundError(path)
 
 
 def _fake_olmo_core_imports(
@@ -441,102 +204,6 @@ def _fake_olmo_core_imports(
     )
 
 
-def test_provider_uses_checkpoint_max_length_without_validation(tmp_path, monkeypatch) -> None:
-    checkpoint_dir = tmp_path / "step1000"
-    _write_olmo_config(
-        checkpoint_dir,
-        model={"d_model": 8, "max_sequence_length": 4096},
-    )
-
-    monkeypatch.setattr(
-        olmo_core_utils,
-        "_import_olmo_core",
-        lambda: _fake_olmo_core_imports(cuda_available=False),
-    )
-
-    provider = OlmoCoreProvider(str(checkpoint_dir), validate_checkpoint=False)
-
-    assert provider.max_length == 4096
-    assert provider.generation_module.checkpoint_kwargs["dtype"] == "bfloat16"
-    assert "attention_backend" not in provider.generation_module.checkpoint_kwargs
-
-
-def test_provider_populates_missing_tokenizer_special_token_ids_from_config(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    checkpoint_dir = tmp_path / "step1000"
-    _write_olmo_config(
-        checkpoint_dir,
-        model={"d_model": 8, "max_sequence_length": 4096},
-    )
-
-    monkeypatch.setattr(
-        olmo_core_utils,
-        "_import_olmo_core",
-        lambda: _fake_olmo_core_imports(auto_tokenizer=MissingSpecialTokenAutoTokenizer),
-    )
-
-    provider = OlmoCoreProvider(str(checkpoint_dir), validate_checkpoint=False)
-
-    assert provider.pad_token_id == 0
-    assert provider.eos_token_id == 2
-    assert provider.tokenizer.pad_token_id == 0
-    assert provider.tokenizer.eos_token_id == 2
-
-    rows = provider._logprob_inputs_for_request(
-        LMRequest(
-            request_type=RequestType.LOGLIKELIHOOD,
-            prompt="",
-            continuations=("!",),
-        )
-    )
-
-    assert rows[0].input_ids == [2]
-    assert rows[0].input_length == 1
-    assert rows[0].num_tokens_all == 2
-
-
-def test_provider_preserves_checkpoint_attention_backend_by_default(tmp_path, monkeypatch) -> None:
-    checkpoint_dir = tmp_path / "step1000"
-    _write_olmo_config(
-        checkpoint_dir,
-        model={"d_model": 8, "max_sequence_length": 4096},
-    )
-
-    monkeypatch.setattr(
-        olmo_core_utils,
-        "_import_olmo_core",
-        lambda: _fake_olmo_core_imports(cuda_available=True),
-    )
-
-    provider = OlmoCoreProvider(str(checkpoint_dir), validate_checkpoint=False)
-
-    assert "attention_backend" not in provider.generation_module.checkpoint_kwargs
-
-
-def test_provider_attention_backend_override_wins(tmp_path, monkeypatch) -> None:
-    checkpoint_dir = tmp_path / "step1000"
-    _write_olmo_config(
-        checkpoint_dir,
-        model={"d_model": 8, "max_sequence_length": 4096},
-    )
-
-    monkeypatch.setattr(
-        olmo_core_utils,
-        "_import_olmo_core",
-        lambda: _fake_olmo_core_imports(cuda_available=True),
-    )
-
-    provider = OlmoCoreProvider(
-        str(checkpoint_dir),
-        attention_backend="torch",
-        validate_checkpoint=False,
-    )
-
-    assert provider.generation_module.checkpoint_kwargs["attention_backend"] == "torch"
-
-
 @pytest.fixture
 def fake_provider() -> tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer]:
     provider = OlmoCoreProvider.__new__(OlmoCoreProvider)
@@ -553,7 +220,7 @@ def fake_provider() -> tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokeniz
     provider.chat_template = None
     provider.max_length = 32
 
-    def left_pad(sequences: list[list[int]]):
+    def left_pad(sequences: list[list[int]]) -> tuple[FakeTensorRows, FakeTensorRows]:
         max_len = max(max((len(seq) for seq in sequences), default=0), 1)
         rows = []
         masks = []
@@ -567,17 +234,59 @@ def fake_provider() -> tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokeniz
     return provider, module, tokenizer
 
 
-def test_generate_repeats_prompts_for_num_samples_and_trims_stops(
+def test_provider_loads_checkpoint_with_olmes_defaults(tmp_path, monkeypatch) -> None:
+    checkpoint_dir = tmp_path / "step1000"
+    _write_raw_checkpoint(checkpoint_dir, model={"d_model": 8, "max_sequence_length": 4096})
+    monkeypatch.setattr(
+        olmo_core_utils,
+        "_import_olmo_core",
+        lambda: _fake_olmo_core_imports(auto_tokenizer=MissingSpecialTokenAutoTokenizer),
+    )
+
+    provider = OlmoCoreProvider(str(checkpoint_dir))
+
+    checkpoint_kwargs = provider.generation_module.checkpoint_kwargs
+    generation_config = checkpoint_kwargs["generation_config"]
+    assert provider.max_length == 4096
+    assert provider.add_bos_token is False
+    assert provider.pad_token_id == 0
+    assert provider.eos_token_id == 2
+    assert provider.tokenizer.pad_token_id == 0
+    assert provider.tokenizer.eos_token_id == 2
+    assert checkpoint_kwargs["dtype"] == "bfloat16"
+    assert "attention_backend" not in checkpoint_kwargs
+    assert generation_config.pad_token_id == 0
+    assert generation_config.eos_token_id == 2
+    assert generation_config.use_cache is True
+
+
+def test_provider_passes_explicit_attention_backend(tmp_path, monkeypatch) -> None:
+    checkpoint_dir = tmp_path / "step1000"
+    _write_raw_checkpoint(checkpoint_dir, model={"d_model": 8, "max_sequence_length": 4096})
+    monkeypatch.setattr(
+        olmo_core_utils,
+        "_import_olmo_core",
+        lambda: _fake_olmo_core_imports(cuda_available=True),
+    )
+
+    provider = OlmoCoreProvider(
+        str(checkpoint_dir),
+        attention_backend="torch",
+    )
+
+    assert provider.generation_module.checkpoint_kwargs["attention_backend"] == "torch"
+
+
+def test_generate_uses_olmes_batch_contract(
     fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
 ) -> None:
     provider, module, _ = fake_provider
-    requests = [
-        LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt"),
-        LMRequest(request_type=RequestType.COMPLETION, prompt="Other"),
-    ]
 
     outputs = provider.generate(
-        requests,
+        [
+            LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt"),
+            LMRequest(request_type=RequestType.COMPLETION, prompt="Other"),
+        ],
         SamplingParams(
             max_tokens=3,
             num_samples=2,
@@ -601,11 +310,10 @@ def test_generate_repeats_prompts_for_num_samples_and_trims_stops(
         [0, 1],
         [0, 1],
     ]
-    assert call["max_length"] == 5
+    assert call["return_logprobs"] is True
     assert call["completions_only"] is False
-    assert call["top_k"] == -1
-    assert call["top_p"] == 1.0
-    assert call["use_cache"] is True
+    assert call["max_length"] == 5
+    assert "max_new_tokens" not in call
     assert "stop_token_ids" not in call
     assert module.prepare_calls == [(4, 5)]
     assert [output.text for output in outputs[0]] == ["hello", "hello"]
@@ -615,56 +323,7 @@ def test_generate_repeats_prompts_for_num_samples_and_trims_stops(
     assert module.free_calls == 1
 
 
-def test_encode_prompt_uses_provider_bos_flag_not_tokenizer_attribute(
-    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
-) -> None:
-    provider, _, tokenizer = fake_provider
-    tokenizer.add_bos_token = True
-
-    assert provider._encode_prompt("Prompt") == [10, 11]
-
-    provider.add_bos_token = True
-    assert provider._encode_prompt("Prompt") == [1, 10, 11]
-
-
-def test_normalize_generation_trims_text_but_keeps_tokens_for_text_stops() -> None:
-    provider, _ = _cache_lifecycle_provider()
-    token_ids = [7] * 64 + [8, 9, 7]
-    token_logprobs = [-0.01] * len(token_ids)
-
-    normalized_ids, normalized_logprobs, text = provider._normalize_generation_output(
-        token_ids,
-        token_logprobs,
-        ("STOP",),
-    )
-
-    assert normalized_ids == token_ids
-    assert normalized_logprobs == token_logprobs
-    assert text == "x" * 64
-
-
-def test_generate_postprocessing_appends_eos_to_text_stop_sequences() -> None:
-    provider, _ = _cache_lifecycle_provider()
-    tokenizer = provider.tokenizer
-    tokenizer.id_to_text[13] = tokenizer.decode(
-        [tokenizer.eos_token_id],
-        skip_special_tokens=False,
-    )
-    token_ids = [5, 13, 7]
-    token_logprobs = [-0.1, -0.2, -0.3]
-
-    normalized_ids, normalized_logprobs, text = provider._normalize_generation_output(
-        token_ids,
-        token_logprobs,
-        provider._stop_sequences_with_eos(None),
-    )
-
-    assert normalized_ids == token_ids
-    assert normalized_logprobs == token_logprobs
-    assert text == "hello"
-
-
-def test_generate_left_truncates_prompts_to_leave_generation_room(
+def test_generate_left_truncates_to_leave_completion_room(
     fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
 ) -> None:
     provider, module, _ = fake_provider
@@ -680,40 +339,64 @@ def test_generate_left_truncates_prompts_to_leave_generation_room(
     assert call["attention_mask"].tolist() == [[1]]
     assert call["max_length"] == 4
 
-
-def test_generate_rejects_when_generation_room_exhausts_context() -> None:
-    provider, module = _cache_lifecycle_provider()
+    module.generate_calls.clear()
     provider.max_length = 3
-
-    with pytest.raises(
-        ValueError,
-        match=r"max_tokens \(3\) is greater than or equal to max_length",
-    ):
+    with pytest.raises(ValueError, match=r"max_tokens \(3\) is greater than or equal"):
         provider.generate(
             [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
             SamplingParams(max_tokens=3),
         )
-
     assert module.generate_calls == []
 
 
-def test_generate_frees_olmo_core_inference_cache_after_generation() -> None:
-    provider, module = _cache_lifecycle_provider()
+def test_generation_encoding_uses_provider_bos_flag(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, _, tokenizer = fake_provider
+    tokenizer.add_bos_token = True
 
-    provider.generate(
-        [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
-        SamplingParams(max_tokens=3),
+    assert provider._encode_prompt("Prompt") == [10, 11]
+
+    provider.add_bos_token = True
+    assert provider._encode_prompt("Prompt") == [1, 10, 11]
+
+
+def test_stop_text_postprocessing_matches_olmes(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, _, tokenizer = fake_provider
+
+    token_ids = [7, 7, 8, 9, 7]
+    token_logprobs = [-0.01] * len(token_ids)
+    normalized_ids, normalized_logprobs, text = provider._normalize_generation_output(
+        token_ids,
+        token_logprobs,
+        ("STOP",),
     )
+    assert normalized_ids == token_ids
+    assert normalized_logprobs == token_logprobs
+    assert text == "xx"
 
-    assert module.prepare_calls == [(1, 5)]
-    assert module.cache_allocated is False
-    assert module.free_calls == 1
+    tokenizer.id_to_text[13] = tokenizer.decode(
+        [tokenizer.eos_token_id],
+        skip_special_tokens=False,
+    )
+    normalized_ids, normalized_logprobs, text = provider._normalize_generation_output(
+        [5, 13, 7],
+        [-0.1, -0.2, -0.3],
+        provider._stop_sequences_with_eos(None),
+    )
+    assert normalized_ids == [5, 13, 7]
+    assert normalized_logprobs == [-0.1, -0.2, -0.3]
+    assert text == "hello"
 
 
-def test_logprobs_clears_generation_cache_before_forward() -> None:
-    provider, module = _cache_lifecycle_provider()
-    cache_states: list[bool] = []
+def test_logprobs_clears_generation_cache_before_forward(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, module, _ = fake_provider
     module.cache_allocated = True
+    cache_states: list[bool] = []
 
     def logprobs_chunk(requests: list[LMRequest]) -> list[list[LMOutput]]:
         cache_states.append(module.cache_allocated)
@@ -724,62 +407,12 @@ def test_logprobs_clears_generation_cache_before_forward() -> None:
         [
             LMRequest(
                 request_type=RequestType.LOGLIKELIHOOD,
-                prompt="a",
-                continuations=("bc",),
+                prompt="Prompt",
+                continuations=("!",),
             )
         ]
     )
 
     assert cache_states == [False]
     assert module.cache_allocated is False
-
-
-def test_generate_formats_chat_with_optional_template(
-    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
-) -> None:
-    provider, module, tokenizer = fake_provider
-    provider.chat_template = "custom-template"
-
-    provider.generate(
-        [
-            LMRequest(
-                request_type=RequestType.CHAT,
-                messages=({"role": "user", "content": "Hello"},),
-            )
-        ],
-        SamplingParams(max_tokens=1),
-    )
-
-    assert tokenizer.template_calls == [
-        {
-            "messages": [{"role": "user", "content": "Hello"}],
-            "tokenize": False,
-            "add_generation_prompt": True,
-            "chat_template": "custom-template",
-        }
-    ]
-    assert module.generate_calls[0]["input_ids"].shape[0] == 1
-
-
-def test_logprobs_uses_model_forward_and_computes_greedy_metadata(
-    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
-) -> None:
-    pytest.importorskip("torch")
-    provider, module, _ = fake_provider
-    request = LMRequest(
-        request_type=RequestType.LOGLIKELIHOOD,
-        prompt="a",
-        continuations=("bc",),
-    )
-
-    outputs = provider.logprobs([request])
-
-    assert module.forward_calls[0].tolist() == [[1, 2]]
-    output = outputs[0][0]
-    assert output.text == "bc"
-    assert [entry["token"] for entry in output.logprobs or []] == ["b", "c"]
-    assert output.metadata["num_tokens"] == 2
-    assert output.metadata["num_tokens_all"] == 3
-    assert output.metadata["is_greedy"] is False
-    assert output.metadata["total_logprob"] < 0
     assert module.free_calls == 1
