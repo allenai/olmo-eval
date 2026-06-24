@@ -45,7 +45,7 @@ def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ")
         f"{label_format.replace('A', label)} {text}"
         for label, text in zip(choice_labels, choices, strict=False)
     )
-    return f"Question: {question}\n{choices_text}"
+    return f"{question}\n{choices_text}"
 
 
 # =============================================================================
