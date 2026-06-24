@@ -51,16 +51,6 @@ def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ")
     return f"{question}\n{choices_text}"
 
 
-def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") -> str:
-    choice_labels = "ABC"
-    label_format = label_prefix + "A."
-    choices_text = "\n".join(
-        f"{label_format.replace('A', label)} {text}"
-        for label, text in zip(choice_labels, choices, strict=False)
-    )
-    return f"Question: {question}\n{choices_text}\nAnswer:"
-
-
 # =============================================================================
 # Scorer
 # =============================================================================
@@ -157,8 +147,8 @@ class WMDP(Task):
         if not doc["subsample"]:
             return None
 
-        gold_letter = doc["gold_label"]
-        gold_idx = ord(gold_letter) - ord("a")
+        gold_letter = doc["gold_label"].upper()
+        gold_idx = ord(gold_letter) - ord("A")
 
         metadata = {
             "id": doc["id"],
