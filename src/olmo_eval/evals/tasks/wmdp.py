@@ -104,12 +104,8 @@ class WMDPLogprobMCAccuracyMetric(Metric):
                 gold_idx = r.instance.metadata.get("gold_idx")
                 if gold_idx is None or not r.outputs:
                     continue
-                print(r.instance)
-                print(r.outputs)
                 logprob_sums = [scorer.score(r.instance, o) for o in r.outputs]
-                print(logprob_sums)
                 correct.append(logprob_sums.index(max(logprob_sums)) != gold_idx)
-                print(logprob_sums.index(max(logprob_sums)))
 
         return sum(correct) / len(correct)
 
@@ -152,29 +148,26 @@ class WMDP(Task):
         gold_letter = doc["gold_label"]
         gold_idx = ord(gold_letter) - ord("a")
 
+        metadata = {
+            "id": doc["id"],
+            "index": index,
+            "subcategory": doc["category"],
+            "gold_idx": gold_idx,
+        }
+
         if self.config.formatter == MCQAChatFormatter():
             return Instance(
                 question=_WMDP_FORMAT + doc["question"],
                 choices=tuple(doc["choices"]),
                 gold_answer=gold_letter,
-                metadata={
-                    "id": doc["id"],
-                    "index": index,
-                    "subcategory": doc["category"],
-                    "gold_idx": gold_idx,
-                },
+                metadata=metadata,
             )
         else:
             return Instance(
                 question=_make_mcq_prompt(doc["question"], tuple(doc["choices"]), label_prefix=" "),
                 choices=tuple(["A", "B", "C", "D"]),
                 gold_answer=gold_letter,
-                metadata={
-                    "id": doc["id"],
-                    "index": index,
-                    "subcategory": doc["category"],
-                    "gold_idx": gold_idx,
-                },
+                metadata=metadata,
             )
 
     @property
