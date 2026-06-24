@@ -16,7 +16,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter
+from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceLogprobFormatter
 from olmo_eval.common.metrics import Metric, SafetyErrorMetric
 from olmo_eval.common.scorers import LogprobScorer, Scorer
 from olmo_eval.common.types import (
@@ -263,8 +263,10 @@ class BBQ(Task):
         bias_idx = ord(bias_letter) - ord("A")
         unknown_idx = ord(unknown_letter) - ord("A")
 
+        prefix = _BBQ_FORMAT if self.formatter == MCQAChatFormatter() else ""
+
         return Instance(
-            question=_BBQ_FORMAT + doc["question"],
+            question=prefix + doc["question"],
             choices=tuple(doc["choices"]),
             gold_answer=gold_letter,
             metadata={
@@ -316,12 +318,6 @@ _BBQ_SUBSET = (
 )
 
 _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
-_BASE_SAMPLING = SamplingParams(
-    max_tokens=1024,
-    temperature=0.6,
-    top_p=0.6,
-    # stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
-)
 
 
 def _safety_metrics_mcq(scorer):
@@ -364,6 +360,5 @@ register_variant(
     "base",
     metrics=_safety_metrics_base(LogprobScorer),
     primary_metric=BBQLogprobMetric(name="any::any::accuracy", scorer=LogprobScorer),
-    sampling_params=_BASE_SAMPLING,
-    formatter=MultipleChoiceFormatter(),
+    formatter=MultipleChoiceLogprobFormatter(template="Question: {question}"),
 )
