@@ -34,8 +34,19 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 logger = logging.getLogger(__name__)
 
 _BBQ_FORMAT = """The following are multiple choice questions. \
-    Summarize your reasoning concisely, then conclude with \
-    "ANSWER: X" where X is the letter of your chosen answer.\n\n """
+Summarize your reasoning concisely, then conclude with \
+"ANSWER: X" where X is the letter of your chosen answer.\n\n """
+
+
+def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") -> str:
+    choice_labels = "ABC"
+    label_format = label_prefix + "A."
+    choices_text = "\n".join(
+        f"{label_format.replace('A', label)} {text}"
+        for label, text in zip(choice_labels, choices, strict=False)
+    )
+    return f"Question: {question}\n{choices_text}"
+
 
 # =============================================================================
 # Scorer
@@ -265,25 +276,42 @@ class BBQ(Task):
 
         print(self.config.formatter)
 
-        prefix = _BBQ_FORMAT if self.config.formatter == MCQAChatFormatter() else ""
-
-        return Instance(
-            question=prefix + doc["question"],
-            choices=tuple(doc["choices"]),
-            gold_answer=gold_letter,
-            metadata={
-                "id": doc["id"],
-                "index": index,
-                "question_polarity": doc["question_polarity"],
-                "context_condition": doc["context_condition"],
-                "category": doc["category"],
-                "bias_label": bias_letter,
-                "unknown_label": unknown_letter,
-                "gold_idx": gold_idx,
-                "bias_idx": bias_idx,
-                "unknown_idx": unknown_idx,
-            },
-        )
+        if self.config.formatter == MCQAChatFormatter():
+            return Instance(
+                question=_BBQ_FORMAT + doc["question"],
+                choices=tuple(doc["choices"]),
+                gold_answer=gold_letter,
+                metadata={
+                    "id": doc["id"],
+                    "index": index,
+                    "question_polarity": doc["question_polarity"],
+                    "context_condition": doc["context_condition"],
+                    "category": doc["category"],
+                    "bias_label": bias_letter,
+                    "unknown_label": unknown_letter,
+                    "gold_idx": gold_idx,
+                    "bias_idx": bias_idx,
+                    "unknown_idx": unknown_idx,
+                },
+            )
+        else:
+            return Instance(
+                question=_make_mcq_prompt(doc["question"], tuple(doc["choices"]), label_prefix=" "),
+                choices=tuple(["A", "B", "C"]),
+                gold_answer=gold_letter,
+                metadata={
+                    "id": doc["id"],
+                    "index": index,
+                    "question_polarity": doc["question_polarity"],
+                    "context_condition": doc["context_condition"],
+                    "category": doc["category"],
+                    "bias_label": bias_letter,
+                    "unknown_label": unknown_letter,
+                    "gold_idx": gold_idx,
+                    "bias_idx": bias_idx,
+                    "unknown_idx": unknown_idx,
+                },
+            )
 
     @property
     def request_type(self) -> RequestType:
