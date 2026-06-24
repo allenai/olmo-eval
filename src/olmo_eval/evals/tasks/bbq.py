@@ -312,8 +312,10 @@ class BBQ(Task):
 
         Delegates to the configured formatter (ChatFormatter by default).
         """
-        if self.config.formatter is not None:
+        if self.config.formatter == MCQAChatFormatter():
             return self.config.formatter.format(instance)
+        elif self.config.formatter is not None:
+            return self.config.formatter.format(instance, self.get_fewshot())
         # Fallback: create a simple chat request
         return LMRequest(
             request_type=RequestType.CHAT,
@@ -382,7 +384,7 @@ register_variant(
     sampling_params=_JUDGE_SAMPLING,
     formatter=MCQAChatFormatter(),
 )
-description = "The following are multiple choice questions (with answers). "
+description = "The following are multiple choice questions (with answers).\n\n"
 register_variant(
     "bbq",
     "base",
