@@ -2,7 +2,8 @@
 
 from olmo_eval.evals.suites.registry import AggregationStrategy, make_suite
 
-# The 11 single-image QA / counting benchmarks Molmo2 reports.
+# The image-QA benchmarks Molmo2 reports. ``mmmu_pro`` is a single task whose primary metric is the
+# MMMU-Pro Overall = (standard-10 + vision)/2, so it contributes one 0-1 entry like the others.
 MOLMO2_IMAGE_QA_TASKS = (
     "chart_qa",
     "vqa2",
@@ -11,6 +12,7 @@ MOLMO2_IMAGE_QA_TASKS = (
     "text_vqa",
     "real_world_qa",
     "mmmu",
+    "mmmu_pro",
     "math_vista",
     "countbench_qa",
     "pixmo_count",
@@ -21,7 +23,7 @@ make_suite(
     "molmo2_imageqa",
     MOLMO2_IMAGE_QA_TASKS,
     aggregation=AggregationStrategy.AVERAGE,
-    description="Molmo2's 11 image-QA benchmarks (primary metrics are all 0-1).",
+    description="Molmo2's image-QA benchmarks (primary metrics are all 0-1).",
 )
 
 make_suite(
@@ -29,7 +31,7 @@ make_suite(
     (*MOLMO2_IMAGE_QA_TASKS, "dense_caption"),
     # dense_caption's primary metric is 0-100, so no cross-task average is computed.
     aggregation=AggregationStrategy.DISPLAY_ONLY,
-    description="Molmo2's 11 image-QA benchmarks plus PixMo-Cap dense caption (GPT judge).",
+    description="Molmo2's image-QA benchmarks plus PixMo-Cap dense caption (GPT judge).",
 )
 
 # Image-pointing benchmarks — a separate family from the image-QA tasks above
