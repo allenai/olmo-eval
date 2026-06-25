@@ -752,9 +752,12 @@ class VLLMServerProvider(InferenceProvider):
             "model": self.model_name,
             "prompt": request.prompt,
             "n": params.num_samples,
-            "max_tokens": params.max_tokens,
             "logprobs": 1,  # Request logprobs for metrics
         }
+        # max_tokens=None means "generate to the context limit"; omit the field
+        # rather than sending null, which some OpenAI-compatible servers reject.
+        if params.max_tokens is not None:
+            kwargs["max_tokens"] = params.max_tokens
         extra_body: dict[str, Any] = {"add_special_tokens": False}
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
@@ -824,8 +827,11 @@ class VLLMServerProvider(InferenceProvider):
             "model": self.model_name,
             "messages": messages,
             "n": params.num_samples,
-            "max_tokens": params.max_tokens,
         }
+        # max_tokens=None means "generate to the context limit"; omit the field
+        # rather than sending null, which some OpenAI-compatible servers reject.
+        if params.max_tokens is not None:
+            kwargs["max_tokens"] = params.max_tokens
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
