@@ -596,17 +596,33 @@ class SafetyScorer(LLMJudgeScorer):
         prompt = self.format_judge_prompt(instance, output)
 
         if self.provider_name is not None:
-            if (
-                self.judge_format == "wildguard"
-                or self.judge_format == "strongreject"
-                or self.judge_format == "toxigen"
-            ):
+            if self.judge_format == "wildguard":
                 response = await self._score_with_provider(
                     prompt,
                     context,
                     temperature=0.0,
                     max_tokens=128,
                     truncate_prompt_tokens=32600,
+                    truncation_side="right",
+                    request_type=self.judge_request_type,
+                )
+            elif self.judge_format == "strongreject":
+                response = await self._score_with_provider(
+                    prompt,
+                    context,
+                    temperature=0.0,
+                    max_tokens=10,
+                    truncate_prompt_tokens=8000,
+                    truncation_side="right",
+                    request_type=self.judge_request_type,
+                )
+            elif self.judge_format == "toxigen":
+                response = await self._score_with_provider(
+                    prompt,
+                    context,
+                    temperature=0.0,
+                    max_tokens=10,
+                    truncate_prompt_tokens=2000,
                     truncation_side="right",
                     request_type=self.judge_request_type,
                 )
