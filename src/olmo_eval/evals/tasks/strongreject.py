@@ -166,10 +166,16 @@ register_variant(
 #     judge_request_type=RequestType.LOGLIKELIHOOD,
 # )
 
+# _SR_SCORER = SafetyScorer(
+#     provider_name="wg_judge",
+#     judge_format="wildguard",
+#     judge_request_type=RequestType.COMPLETION,
+# )
+
 _SR_SCORER = SafetyScorer(
-    provider_name="wg_judge",
-    judge_format="wildguard",
-    judge_request_type=RequestType.COMPLETION,
+    provider_name="sr_judge",
+    judge_format="strongreject",
+    judge_request_type=RequestType.LOGLIKELIHOOD,
 )
 
 register_variant(

@@ -53,16 +53,16 @@ class Toxigen(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
 
-        if not doc.get("subsample"):
+        if not doc["subsample"]:
             return None
 
         return Instance(
-            question=doc.get("instruction"),
+            question=doc["instruction"],
             gold_answer="response_harmfulness=no",  # used for openai varient not original judge
             metadata={
-                "id": doc.get("id"),
+                "id": doc["id"],
                 "index": index,
-                "target_groups": list(doc.get("target_groups"))[0],
+                "target_groups": doc["target_groups"],
             },
         )
 
@@ -87,7 +87,7 @@ class Toxigen(Task):
         )
 
 
-_SAFETY_SUBSET_METRICS = (  ##TODO
+_SAFETY_SUBSET_METRICS = (
     "target_groups::asian",
     "target_groups::black",
     "target_groups::chinese",

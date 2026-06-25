@@ -217,6 +217,8 @@ def _build_server_command(
     tool_call_parser: str | None = None,
     enable_prefix_caching: bool = True,
     chat_template_kwargs: dict[str, Any] | None = None,
+    enable_lora: bool = False,
+    lora_modules: list[str] | None = None,
     **kwargs: Any,
 ) -> list[str]:
     """Build the vLLM server command.
@@ -236,6 +238,9 @@ def _build_server_command(
         chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false}).
             These are applied at request time by the provider for broad vLLM compatibility,
             rather than being forwarded as server CLI flags.
+        enable_lora: Enable LoRA (Low-Rank Adaptation) support for model loading
+        lora_modules: List of LoRA module paths to load (format: "module_name=/path/to/lora").
+            Only used if enable_lora is True.
         **kwargs: Additional vLLM server arguments. May include patch_olmo3_tool_parser
             which controls whether to use the custom OLMo3 chat template.
 
@@ -296,6 +301,13 @@ def _build_server_command(
         cmd.append("--enable-prefix-caching")
     else:
         cmd.append("--no-enable-prefix-caching")
+
+    # LoRA (Low-Rank Adaptation) support
+    if enable_lora:
+        cmd.append("--enable-lora")
+        if lora_modules:
+            # lora_modules should be a list of strings in format "name=/path/to/lora"
+            cmd.extend(["--lora-modules"] + lora_modules)
 
     # Disable tqdm loading bar by default, enable with --debug-provider
     if is_debug_provider():

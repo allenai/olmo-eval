@@ -273,6 +273,8 @@ class VLLMServerProvider(InferenceProvider):
         completion_use_prompt_token_ids: bool | None = None,
         completion_client_side_stop_trim: bool | None = None,
         completion_sentencepiece_cleanup: bool | None = None,
+        enable_lora: bool = False,
+        lora_modules: list[str] | None = None,
         **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -306,6 +308,9 @@ class VLLMServerProvider(InferenceProvider):
                 stop sequence client-side after generation.
             completion_sentencepiece_cleanup: If True, replace SentencePiece space markers
                 with actual spaces in completion outputs.
+            enable_lora: Enable LoRA (Low-Rank Adaptation) support for model loading (server mode).
+            lora_modules: List of LoRA module paths to load (format: "module_name=/path/to/lora").
+                Only used if enable_lora is True (server mode).
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
@@ -330,6 +335,8 @@ class VLLMServerProvider(InferenceProvider):
         self._tokenizer: Any = None
         self._server: VLLMServerProcess | None = None  # type: ignore[possibly-unresolved-reference]
         self._max_length: int | None = None
+        self._enable_lora = enable_lora
+        self._lora_modules = lora_modules
 
         if base_url:
             # Connect to existing server
@@ -362,6 +369,10 @@ class VLLMServerProvider(InferenceProvider):
                     srv_kwargs["tool_call_parser"] = tool_call_parser
             if trust_remote_code:
                 srv_kwargs["trust_remote_code"] = True
+            if enable_lora:
+                srv_kwargs["enable_lora"] = True
+            if lora_modules:
+                srv_kwargs["lora_modules"] = lora_modules
             self._server = VLLMServerProcess(
                 model_name=model_name,
                 tensor_parallel_size=tensor_parallel_size,
@@ -837,6 +848,10 @@ class VLLMServerProvider(InferenceProvider):
         extra_body: dict[str, Any] = {}
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             extra_body["top_k"] = params.top_k
+        if params.truncate_prompt_tokens is not None:
+            extra_body["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+        if params.truncation_side is not None:
+            extra_body["truncation_side"] = params.truncation_side
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         if tools:
