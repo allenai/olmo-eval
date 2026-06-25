@@ -3,7 +3,7 @@
 Evaluates whether claims in a generated, inline-cited report are supported by
 the snippets attached to their citations, producing citation precision and
 recall via an LLM judge. Reusable across attributed-QA benchmarks (ScholarQA,
-ExpertQA, DeepScholar-Bench).
+ExpertQA).
 
 Ported from astabench citation_eval.py (https://github.com/allenai/asta-bench).
 """
