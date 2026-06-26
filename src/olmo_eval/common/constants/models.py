@@ -57,7 +57,11 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM_SERVER,
             model=os.environ.get("SFTLAB_EVAL_MODEL", ""),
             trust_remote_code=True,
-            max_model_len=4096,
+            # max_model_len is env-tunable (default 4096) so we can probe the YaRN
+            # vs generation-length tradeoff without editing this file: a low cap
+            # neutralizes YaRN on short prompts, but the long-CoT science tasks
+            # (aime/math500) request up to 32768 output tokens and need a higher cap.
+            max_model_len=int(os.environ.get("SFTLAB_EVAL_MAX_LEN", "4096")),
             kwargs={"gpu_memory_utilization": 0.7},
         ),
         "bk/olmo7b-sft-general-within-step17307": ProviderConfig(
