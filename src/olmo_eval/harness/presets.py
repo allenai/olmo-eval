@@ -35,7 +35,7 @@ def _get_logs_dir() -> str:
 # ─────────────────────────────────────────────────────────
 
 
-class _Lazy:
+class Lazy:
     """Descriptor for lazily-loaded presets with auto-injected name."""
 
     def __init__(self, factory: Callable[[str], HarnessConfig]):
@@ -52,9 +52,9 @@ class _Lazy:
         return self._cached
 
 
-def lazy(fn: Callable[[str], HarnessConfig]) -> _Lazy:
+def lazy(fn: Callable[[str], HarnessConfig]) -> Lazy:
     """Mark a preset factory for lazy loading. Factory receives preset name."""
-    return _Lazy(fn)
+    return Lazy(fn)
 
 
 # ─────────────────────────────────────────────────────────
@@ -236,11 +236,11 @@ class HarnessPresets:
 
 
 def _is_preset(name: str) -> bool:
-    """Check if a name is a valid preset (not private, is HarnessConfig or _Lazy)."""
+    """Check if a name is a valid preset (not private, is HarnessConfig or Lazy)."""
     if name.startswith("_"):
         return False
     attr = getattr(HarnessPresets, name, None)
-    return isinstance(attr, (HarnessConfig, _Lazy))
+    return isinstance(attr, (HarnessConfig, Lazy))
 
 
 def get_harness_preset(name: str) -> HarnessConfig:

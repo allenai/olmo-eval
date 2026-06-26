@@ -45,7 +45,7 @@ class ConcreteTask(Task):
 
 
 @dataclass(frozen=True, slots=True)
-class _EchoProcessScorer(ProcessScorer):
+class EchoProcessScorer(ProcessScorer):
     """Simple process scorer that checks extracted answer equality."""
 
     name: str = "echo_process"
@@ -57,7 +57,7 @@ class _EchoProcessScorer(ProcessScorer):
 
 
 @dataclass(frozen=True, slots=True)
-class _FailingProcessScorer(ProcessScorer):
+class FailingProcessScorer(ProcessScorer):
     """Process scorer that fails for selected outputs."""
 
     name: str = "failing_process"
@@ -70,7 +70,7 @@ class _FailingProcessScorer(ProcessScorer):
 
 
 @dataclass(frozen=True, slots=True)
-class _TimedProcessScorer(ProcessScorer):
+class TimedProcessScorer(ProcessScorer):
     """Process scorer used to verify mixed-workload overlap."""
 
     name: str = "timed_process"
@@ -291,7 +291,7 @@ class TestProcessScoring:
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
 
     async def test_process_scorer_requires_runtime(self):
-        metric = AccuracyMetric(scorer=_EchoProcessScorer)
+        metric = AccuracyMetric(scorer=EchoProcessScorer)
         task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
 
         response = Response(
@@ -304,7 +304,7 @@ class TestProcessScoring:
             await task.score_responses([response], context=ScoringContext(scoring_concurrency=8))
 
     async def test_process_scorer_scores_outputs_with_real_pool(self):
-        metric = AccuracyMetric(scorer=_EchoProcessScorer)
+        metric = AccuracyMetric(scorer=EchoProcessScorer)
         task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
         manager = ProcessPoolManager({"cpu": ProcessScoringPoolConfig(workers=1)})
 
@@ -330,7 +330,7 @@ class TestProcessScoring:
         assert scored[0].outputs[1].metadata["score:echo_process"] == 0.0
 
     async def test_process_scorer_failure_becomes_zero_with_diagnostics(self):
-        metric = PassAtKMetric(k=1, scorer=_FailingProcessScorer)
+        metric = PassAtKMetric(k=1, scorer=FailingProcessScorer)
         task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
         manager = ProcessPoolManager({"cpu": ProcessScoringPoolConfig(workers=1)})
 
@@ -367,7 +367,7 @@ class TestProcessScoring:
 
     async def test_process_scorer_rejects_local_non_reconstructible_class(self):
         @dataclass(frozen=True, slots=True)
-        class _LocalProcessScorer(ProcessScorer):
+        class LocalProcessScorer(ProcessScorer):
             name: str = "local_process"
 
             def process_score(self, instance: Instance, output: LMOutput) -> float:
@@ -378,7 +378,7 @@ class TestProcessScoring:
         try:
             with pytest.raises(ProcessScoringConfigError, match="module scope"):
                 await manager.score_outputs(
-                    _LocalProcessScorer(),
+                    LocalProcessScorer(),
                     Instance(question="Q", gold_answer="A"),
                     [LMOutput(text="A")],
                 )
@@ -493,7 +493,7 @@ class TestTaskMetrics:
 
 
 @dataclass(frozen=True)
-class _ConcurrencyTracker:
+class ConcurrencyTracker:
     """Track peak concurrent calls (mutable internals, frozen wrapper)."""
 
     _current: list[int]  # [current_count] — single-element list for mutability
@@ -501,8 +501,8 @@ class _ConcurrencyTracker:
     _lock: asyncio.Lock
 
     @staticmethod
-    def create() -> _ConcurrencyTracker:
-        return _ConcurrencyTracker(_current=[0], _peak=[0], _lock=asyncio.Lock())
+    def create() -> ConcurrencyTracker:
+        return ConcurrencyTracker(_current=[0], _peak=[0], _lock=asyncio.Lock())
 
     async def enter(self) -> None:
         async with self._lock:
@@ -520,11 +520,11 @@ class _ConcurrencyTracker:
 
 
 @dataclass(frozen=True, slots=True)
-class _TrackedContextScorer(ContextScorer):
+class TrackedContextScorer(ContextScorer):
     """Context scorer that tracks overlap with other async work."""
 
     name: str = "tracked_context"
-    tracker: _ConcurrencyTracker | None = None
+    tracker: ConcurrencyTracker | None = None
     delay: float = 0.05
 
     async def ascore_with_context(self, instance, output, context) -> float:
@@ -539,11 +539,11 @@ class _TrackedContextScorer(ContextScorer):
 
 
 @dataclass(frozen=True, slots=True)
-class _MockExecutionScorer(ExecutionScorer):
+class MockExecutionScorer(ExecutionScorer):
     """ExecutionScorer that tracks concurrency and returns a fixed score."""
 
     name: str = "mock_exec"
-    tracker: _ConcurrencyTracker | None = None
+    tracker: ConcurrencyTracker | None = None
     requires_async: ClassVar[bool] = True
 
     async def ascore(self, instance, output, execution_env) -> float:
@@ -558,11 +558,11 @@ class _MockExecutionScorer(ExecutionScorer):
 
 
 @dataclass(frozen=True, slots=True)
-class _TrackedExecutionScorer(ExecutionScorer):
+class TrackedExecutionScorer(ExecutionScorer):
     """Execution scorer that tracks overlap with other async work."""
 
     name: str = "tracked_exec"
-    tracker: _ConcurrencyTracker | None = None
+    tracker: ConcurrencyTracker | None = None
     delay: float = 0.05
     requires_async: ClassVar[bool] = True
 
@@ -578,7 +578,7 @@ class _TrackedExecutionScorer(ExecutionScorer):
 
 
 @dataclass(frozen=True, slots=True)
-class _FailingExecutionScorer(ExecutionScorer):
+class FailingExecutionScorer(ExecutionScorer):
     """ExecutionScorer that can fail for selected outputs."""
 
     name: str = "failing_exec"
@@ -591,7 +591,7 @@ class _FailingExecutionScorer(ExecutionScorer):
         return 1.0
 
 
-class _MockExecutionEnv:
+class MockExecutionEnv:
     """Minimal mock that satisfies the ExecutionEnvironment protocol + semaphore."""
 
     def __init__(self, semaphore: asyncio.Semaphore | None = None) -> None:
@@ -617,10 +617,10 @@ class _MockExecutionEnv:
         return self._semaphore
 
 
-class _TrackedProcessPoolManager:
+class TrackedProcessPoolManager:
     """Minimal async process manager for overlap tests."""
 
-    def __init__(self, tracker: _ConcurrencyTracker, delay: float = 0.05) -> None:
+    def __init__(self, tracker: ConcurrencyTracker, delay: float = 0.05) -> None:
         self._tracker = tracker
         self._delay = delay
 
@@ -672,11 +672,11 @@ class TestExecutionConcurrency:
 
     async def test_shared_semaphore_bounds_concurrency(self):
         """Peak concurrent sandbox calls must not exceed the semaphore limit."""
-        tracker = _ConcurrencyTracker.create()
+        tracker = ConcurrencyTracker.create()
         semaphore_limit = 2
-        env = _MockExecutionEnv(semaphore=asyncio.Semaphore(semaphore_limit))
+        env = MockExecutionEnv(semaphore=asyncio.Semaphore(semaphore_limit))
 
-        scorer = _MockExecutionScorer(tracker=tracker)
+        scorer = MockExecutionScorer(tracker=tracker)
         metric = PassAtKMetric(k=1, scorer=lambda: scorer)
         config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
         task = ConcreteTask(config)
@@ -696,10 +696,10 @@ class TestExecutionConcurrency:
 
     async def test_no_semaphore_still_works(self):
         """When execution env has no get_execution_semaphore, scoring completes."""
-        tracker = _ConcurrencyTracker.create()
-        env = _MockExecutionEnv(semaphore=None)
+        tracker = ConcurrencyTracker.create()
+        env = MockExecutionEnv(semaphore=None)
 
-        scorer = _MockExecutionScorer(tracker=tracker)
+        scorer = MockExecutionScorer(tracker=tracker)
         metric = PassAtKMetric(k=1, scorer=lambda: scorer)
         config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
         task = ConcreteTask(config)
@@ -719,7 +719,7 @@ class TestExecutionConcurrency:
     async def test_env_without_get_execution_semaphore(self):
         """Execution env that lacks get_execution_semaphore method still works."""
 
-        class _BareEnv:
+        class BareEnv:
             """Env without semaphore support."""
 
             is_running = True
@@ -733,8 +733,8 @@ class TestExecutionConcurrency:
             async def execute_code(self, code, language="python", timeout=None):
                 return ExecutionResult(success=True)
 
-        env = _BareEnv()
-        scorer = _MockExecutionScorer()
+        env = BareEnv()
+        scorer = MockExecutionScorer()
         metric = PassAtKMetric(k=1, scorer=lambda: scorer)
         config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
         task = ConcreteTask(config)
@@ -753,8 +753,8 @@ class TestAsyncScoringFailures:
     """Tests that async scoring failures are recorded instead of dropping metrics."""
 
     async def test_async_scorer_failure_becomes_zero_with_diagnostics(self):
-        env = _MockExecutionEnv(semaphore=asyncio.Semaphore(4))
-        scorer = _FailingExecutionScorer()
+        env = MockExecutionEnv(semaphore=asyncio.Semaphore(4))
+        scorer = FailingExecutionScorer()
         metric = PassAtKMetric(k=1, scorer=lambda: scorer)
         config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
         task = ConcreteTask(config)
@@ -782,8 +782,8 @@ class TestAsyncScoringFailures:
         }
 
     async def test_partial_async_failures_preserve_passing_outputs(self):
-        env = _MockExecutionEnv(semaphore=asyncio.Semaphore(4))
-        scorer = _FailingExecutionScorer()
+        env = MockExecutionEnv(semaphore=asyncio.Semaphore(4))
+        scorer = FailingExecutionScorer()
         metric = PassAtKMetric(k=1, scorer=lambda: scorer)
         config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
         task = ConcreteTask(config)
@@ -811,11 +811,11 @@ class TestMixedWorkloadScoring:
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
 
     async def test_mixed_workloads_overlap(self):
-        tracker = _ConcurrencyTracker.create()
+        tracker = ConcurrencyTracker.create()
         metric_sync = AccuracyMetric(scorer=ExactMatchScorer)
-        metric_process = PassAtKMetric(k=1, scorer=_TimedProcessScorer)
-        metric_context = PassAtKMetric(k=1, scorer=lambda: _TrackedContextScorer(tracker=tracker))
-        metric_exec = PassAtKMetric(k=1, scorer=lambda: _TrackedExecutionScorer(tracker=tracker))
+        metric_process = PassAtKMetric(k=1, scorer=TimedProcessScorer)
+        metric_context = PassAtKMetric(k=1, scorer=lambda: TrackedContextScorer(tracker=tracker))
+        metric_exec = PassAtKMetric(k=1, scorer=lambda: TrackedExecutionScorer(tracker=tracker))
         task = ConcreteTask(
             TaskConfig(
                 name="test",
@@ -830,9 +830,9 @@ class TestMixedWorkloadScoring:
             outputs=[LMOutput(text="4")],
         )
         context = ScoringContext(
-            execution_env=_MockExecutionEnv(semaphore=None),
+            execution_env=MockExecutionEnv(semaphore=None),
             scoring_concurrency=8,
-            process_pool_manager=_TrackedProcessPoolManager(tracker=tracker, delay=0.05),
+            process_pool_manager=TrackedProcessPoolManager(tracker=tracker, delay=0.05),
         )
 
         scored = await task.score_responses([response], context=context)

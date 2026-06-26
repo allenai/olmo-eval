@@ -65,7 +65,7 @@ def _store_output_score(
         existing[scorer_name] = scoring_error
 
 
-class _OutputScore(NamedTuple):
+class OutputScore(NamedTuple):
     """Scoring result for a single output (execution / context scorers)."""
 
     resp_idx: int
@@ -75,7 +75,7 @@ class _OutputScore(NamedTuple):
     scoring_error: dict[str, str] | None
 
 
-class _ResponseScore(NamedTuple):
+class ResponseScore(NamedTuple):
     """Scoring result for a whole response (process scorers)."""
 
     resp_idx: int
@@ -686,7 +686,7 @@ class Task(ABC):
 
             async def score_execution(
                 resp_idx: int, scorer: ExecutionScorer, out_idx: int
-            ) -> _OutputScore:
+            ) -> OutputScore:
                 response = responses[resp_idx]
                 output = response.outputs[out_idx]
                 try:
@@ -703,12 +703,12 @@ class Task(ABC):
                         scorer.name,
                         error.get("message", error["type"]),
                     )
-                    return _OutputScore(resp_idx, scorer.name, out_idx, 0.0, error)
-                return _OutputScore(resp_idx, scorer.name, out_idx, score, None)
+                    return OutputScore(resp_idx, scorer.name, out_idx, 0.0, error)
+                return OutputScore(resp_idx, scorer.name, out_idx, score, None)
 
             async def score_context(
                 resp_idx: int, scorer: ContextScorer, out_idx: int
-            ) -> _OutputScore:
+            ) -> OutputScore:
                 response = responses[resp_idx]
                 output = response.outputs[out_idx]
                 try:
@@ -724,13 +724,13 @@ class Task(ABC):
                         scorer.name,
                         error.get("message", error["type"]),
                     )
-                    return _OutputScore(resp_idx, scorer.name, out_idx, 0.0, error)
-                return _OutputScore(resp_idx, scorer.name, out_idx, score, None)
+                    return OutputScore(resp_idx, scorer.name, out_idx, 0.0, error)
+                return OutputScore(resp_idx, scorer.name, out_idx, score, None)
 
             async def score_process(
                 resp_idx: int,
                 scorer: ProcessScorer,
-            ) -> _ResponseScore:
+            ) -> ResponseScore:
                 response = responses[resp_idx]
                 assert process_pool_manager is not None
                 results = await process_pool_manager.score_outputs(
@@ -744,7 +744,7 @@ class Task(ABC):
                     for out_idx, result in enumerate(results)
                     if result.error is not None
                 }
-                return _ResponseScore(resp_idx, scorer.name, output_scores, output_errors)
+                return ResponseScore(resp_idx, scorer.name, output_scores, output_errors)
 
             tasks = []
             for resp_idx, response in enumerate(responses):
@@ -768,7 +768,7 @@ class Task(ABC):
             scores_by_response: dict[int, dict[str, dict[int, float]]] = {}
             scoring_errors_by_response: dict[int, dict[int, dict[str, dict[str, str]]]] = {}
             for result in results:
-                if isinstance(result, _OutputScore):
+                if isinstance(result, OutputScore):
                     resp_idx, scorer_name, out_idx, score, scoring_error = result
                     if resp_idx not in scores_by_response:
                         scores_by_response[resp_idx] = {}

@@ -469,7 +469,7 @@ class SQAJudgeScorer(Scorer):
         return (output.metadata or {}).get(self.score_key, 0.0)
 
 
-class _SQAMetricBase(Metric, ABC):
+class SQAMetricBase(Metric, ABC):
     """Base for SQA metrics that read from response.scores."""
 
     scorer: type[Scorer] = SQAJudgeScorer
@@ -482,31 +482,31 @@ class _SQAMetricBase(Metric, ABC):
 
 
 @dataclass(frozen=True)
-class IngredientRecallMetric(_SQAMetricBase):
+class IngredientRecallMetric(SQAMetricBase):
     name: str = "ingredient_recall"
     scorer: type[Scorer] = SQAJudgeScorer
 
 
 @dataclass(frozen=True)
-class AnswerPrecisionMetric(_SQAMetricBase):
+class AnswerPrecisionMetric(SQAMetricBase):
     name: str = "answer_precision"
     scorer: type[Scorer] = SQAJudgeScorer
 
 
 @dataclass(frozen=True)
-class CitationPrecisionMetric(_SQAMetricBase):
+class CitationPrecisionMetric(SQAMetricBase):
     name: str = "citation_precision"
     scorer: type[Scorer] = SQAJudgeScorer
 
 
 @dataclass(frozen=True)
-class CitationRecallMetric(_SQAMetricBase):
+class CitationRecallMetric(SQAMetricBase):
     name: str = "citation_recall"
     scorer: type[Scorer] = SQAJudgeScorer
 
 
 @dataclass(frozen=True)
-class GlobalAvgMetric(_SQAMetricBase):
+class GlobalAvgMetric(SQAMetricBase):
     name: str = "global_avg"
     scorer: type[Scorer] = SQAJudgeScorer
 

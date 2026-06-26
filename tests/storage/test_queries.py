@@ -6,13 +6,13 @@ from olmo_eval.common.types import EvalResult, StoredTaskResult
 from olmo_eval.storage.backends.postgres.queries import QueryHelper
 
 
-class _FakeExperimentRepository:
+class FakeExperimentRepository:
     def save(self, result: EvalResult) -> int:
         self.saved_result = result
         return 17
 
 
-class _FakeInstancePredictionRepository:
+class FakeInstancePredictionRepository:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
@@ -37,8 +37,8 @@ class _FakeInstancePredictionRepository:
 
 def test_save_with_instances_normalizes_old_style_mc_predictions_before_insert() -> None:
     helper = QueryHelper(session=None)  # type: ignore[arg-type]
-    helper.experiment_repo = _FakeExperimentRepository()
-    helper.instance_repo = _FakeInstancePredictionRepository()
+    helper.experiment_repo = FakeExperimentRepository()
+    helper.instance_repo = FakeInstancePredictionRepository()
 
     result = EvalResult(
         experiment_id="exp-123",
@@ -108,8 +108,8 @@ def test_save_with_instances_normalizes_flat_instance_metrics_when_task_metrics_
     None
 ):
     helper = QueryHelper(session=None)  # type: ignore[arg-type]
-    helper.experiment_repo = _FakeExperimentRepository()
-    helper.instance_repo = _FakeInstancePredictionRepository()
+    helper.experiment_repo = FakeExperimentRepository()
+    helper.instance_repo = FakeInstancePredictionRepository()
 
     result = EvalResult(
         experiment_id="exp-123",

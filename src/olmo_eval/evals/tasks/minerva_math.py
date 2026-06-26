@@ -13,31 +13,7 @@ from olmo_eval.evals.tasks.constants.minerva_math import MINERVA_MATH_FIXED_FEWS
 
 
 @dataclass(slots=True)
-class _MinervaCompletionFormatter(CompletionFormatter):
-    """CompletionFormatter that omits answer_prefix from the final (test) instance."""
-
-    def format(
-        self,
-        instance: Instance,
-        fewshot: list[Instance] | None = None,
-    ) -> LMRequest:
-        parts: list[str] = []
-        for ex in fewshot or []:
-            example = self.template.format(question=ex.question)
-            if self.fewshot_answer_key and self.fewshot_answer_key in ex.metadata:
-                answer = ex.metadata[self.fewshot_answer_key]
-            else:
-                answer = ex.gold_answer
-            if answer:
-                example += self.answer_prefix + str(answer)
-            parts.append(example)
-        parts.append(self.template.format(question=instance.question))
-        prompt = self.fewshot_separator.join(parts)
-        return LMRequest(request_type=self.request_type, prompt=prompt)
-
-
-@dataclass(slots=True)
-class _MinervaCompletionFormatter(CompletionFormatter):
+class MinervaCompletionFormatter(CompletionFormatter):
     """CompletionFormatter that omits answer_prefix from the final (test) instance."""
 
     def format(
@@ -257,7 +233,7 @@ for _subset in MATH_SUBSETS:
         _task_name,
         "olmo3base",
         fewshot_source="minerva_math_fixed",
-        formatter=_MinervaCompletionFormatter(
+        formatter=MinervaCompletionFormatter(
             template="Problem:\n{question}\n\nSolution:",
             answer_prefix=" ",
             fewshot_answer_key="solution_text",
@@ -282,7 +258,7 @@ for _subset in MATH_SUBSETS:
         _task_name,
         "olmo3base_gen",
         fewshot_source="minerva_math_fixed",
-        formatter=_MinervaCompletionFormatter(
+        formatter=MinervaCompletionFormatter(
             template="Problem:\n{question}\n\nSolution:",
             answer_prefix=" ",
             fewshot_answer_key="solution_text",

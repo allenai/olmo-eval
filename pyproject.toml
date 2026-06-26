@@ -27,7 +27,7 @@ dependencies = [
     "numpy>=1.20.0",
     "omegaconf>=2.4.0.dev10,<2.5.0",
     "prometheus_client>=0.21.0",
-    "rich~=14.3.4",
+    "rich>=13.7,<15",
     "sympy>=1.12",
     "textual-plot>=0.10.1",
     "tree-sitter>=0.24.0",
@@ -45,6 +45,9 @@ Issues = "https://github.com/allenai/olmo-eval/issues"
 [project.optional-dependencies]
 hf = [
     "transformers>=5.4.0",
+]
+olmo_core = [
+    "ai2-olmo-core[torchao,transformers]==2.4.0",
 ]
 vllm = [
     # vllm + its companions are Linux/CUDA-only; skip on macOS so the lockfile
@@ -113,6 +116,10 @@ conflicts = [
     ],
     [
         { extra = "vllm" },
+        { extra = "openhands" },
+    ],
+    [
+        { extra = "olmo_core" },
         { extra = "openhands" },
     ],
     [
@@ -226,6 +233,8 @@ allowed-unresolved-imports = [
     "google.cloud.**",
     "matplotlib.**",
     "scipy.**",
+    "olmo_core.**",
+    "cached_path.**",
     "instructions_registry.**",
     "instructions.**",
 ]
