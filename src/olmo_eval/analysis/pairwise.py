@@ -103,7 +103,7 @@ class FilteredModel:
 
 
 @dataclass(frozen=True)
-class _PairwiseTaskRow:
+class PairwiseTaskRow:
     experiment_pk: int
     task_name: str
     task_hash: str
@@ -113,14 +113,14 @@ class _PairwiseTaskRow:
 
 
 @dataclass(frozen=True)
-class _PairwiseInstanceKeyRow:
+class PairwiseInstanceKeyRow:
     experiment_pk: int
     native_id: str
     task_hash: str
 
 
 @dataclass(frozen=True)
-class _PairwiseInstanceScoreRow:
+class PairwiseInstanceScoreRow:
     experiment_pk: int
     native_id: str
     task_hash: str
@@ -128,7 +128,7 @@ class _PairwiseInstanceScoreRow:
 
 
 @dataclass(frozen=True)
-class _PairwiseTaskCountRow:
+class PairwiseTaskCountRow:
     experiment_pk: int
     task_hash: str
     num_instances: int
@@ -379,11 +379,11 @@ def _canonicalize_scope_task_rows(
     task_rows: Sequence[Any],
     *,
     alias_to_canonical: dict[str, str],
-) -> list[_PairwiseTaskRow]:
-    canonical_rows: list[_PairwiseTaskRow] = []
+) -> list[PairwiseTaskRow]:
+    canonical_rows: list[PairwiseTaskRow] = []
     for row in task_rows:
         canonical_rows.append(
-            _PairwiseTaskRow(
+            PairwiseTaskRow(
                 experiment_pk=int(row.experiment_pk),
                 task_name=alias_to_canonical.get(
                     str(row.task_name or ""),
@@ -610,7 +610,7 @@ def _merge_latest_task_rows(
     task_rows: list[Any],
     source_experiments: list[Any],
     display_experiments: list[Any],
-) -> list[_PairwiseTaskRow]:
+) -> list[PairwiseTaskRow]:
     normalized_rows: list[LatestTaskRowInput] = []
     for row in task_rows:
         try:
@@ -639,7 +639,7 @@ def _merge_latest_task_rows(
         display_experiments=display_experiments,
     )
     return [
-        _PairwiseTaskRow(
+        PairwiseTaskRow(
             experiment_pk=row.experiment_pk,
             task_name=row.task_name,
             task_hash=str(row.task_hash or ""),
@@ -656,7 +656,7 @@ def _merge_latest_instance_key_rows(
     instance_rows: list[Any],
     source_experiments: list[Any],
     display_experiments: list[Any],
-) -> list[_PairwiseInstanceKeyRow]:
+) -> list[PairwiseInstanceKeyRow]:
     (
         source_experiment_by_pk,
         display_experiment_by_hash,
@@ -695,7 +695,7 @@ def _merge_latest_instance_key_rows(
 
     enriched_rows.sort()
 
-    merged_keys: list[_PairwiseInstanceKeyRow] = []
+    merged_keys: list[PairwiseInstanceKeyRow] = []
     seen_keys: set[tuple[int, str, str]] = set()
     for display_pk, task_hash, native_id, _, _ in enriched_rows:
         key = (display_pk, task_hash, native_id)
@@ -703,7 +703,7 @@ def _merge_latest_instance_key_rows(
             continue
         seen_keys.add(key)
         merged_keys.append(
-            _PairwiseInstanceKeyRow(
+            PairwiseInstanceKeyRow(
                 experiment_pk=display_pk,
                 native_id=native_id,
                 task_hash=task_hash,
@@ -724,20 +724,20 @@ def _update_task_rows_num_instances(
     *,
     task_rows: list[Any],
     instance_rows: list[Any],
-) -> list[_PairwiseTaskRow]:
+) -> list[PairwiseTaskRow]:
     instance_count_by_task: dict[tuple[int, str], int] = {}
     for row in instance_rows:
         key = (int(row.experiment_pk), str(row.task_hash or ""))
         instance_count_by_task[key] = instance_count_by_task.get(key, 0) + 1
 
-    updated_rows: list[_PairwiseTaskRow] = []
+    updated_rows: list[PairwiseTaskRow] = []
     for row in task_rows:
         resolved_count = max(
             int(getattr(row, "num_instances", 0) or 0),
             instance_count_by_task.get((int(row.experiment_pk), str(row.task_hash or "")), 0),
         )
         updated_rows.append(
-            _PairwiseTaskRow(
+            PairwiseTaskRow(
                 experiment_pk=int(row.experiment_pk),
                 task_name=str(row.task_name or ""),
                 task_hash=str(row.task_hash or ""),
@@ -756,7 +756,7 @@ def _merge_latest_instance_score_rows(
     instance_rows: Sequence[Any],
     source_experiments: Sequence[Any],
     display_experiments: Sequence[Any],
-) -> list[_PairwiseInstanceScoreRow]:
+) -> list[PairwiseInstanceScoreRow]:
     (
         source_experiment_by_pk,
         display_experiment_by_hash,
@@ -797,12 +797,12 @@ def _merge_latest_instance_score_rows(
 
     enriched_rows.sort()
 
-    merged_rows_by_key: dict[tuple[int, str, str], _PairwiseInstanceScoreRow] = {}
+    merged_rows_by_key: dict[tuple[int, str, str], PairwiseInstanceScoreRow] = {}
     for display_pk, task_hash, native_id, _, _, raw_score in enriched_rows:
         key = (display_pk, task_hash, native_id)
         existing = merged_rows_by_key.get(key)
         if existing is None:
-            merged_rows_by_key[key] = _PairwiseInstanceScoreRow(
+            merged_rows_by_key[key] = PairwiseInstanceScoreRow(
                 experiment_pk=display_pk,
                 native_id=native_id,
                 task_hash=task_hash,
@@ -810,7 +810,7 @@ def _merge_latest_instance_score_rows(
             )
             continue
         if existing.raw_score is None and raw_score is not None:
-            merged_rows_by_key[key] = _PairwiseInstanceScoreRow(
+            merged_rows_by_key[key] = PairwiseInstanceScoreRow(
                 experiment_pk=display_pk,
                 native_id=native_id,
                 task_hash=task_hash,
@@ -846,7 +846,7 @@ def _merge_latest_task_count_rows(
     *,
     count_rows: Sequence[Any],
     display_experiments: Sequence[Any],
-) -> list[_PairwiseTaskCountRow]:
+) -> list[PairwiseTaskCountRow]:
     display_experiment_by_hash = {
         str(experiment.model_hash or ""): experiment
         for experiment in display_experiments
@@ -856,14 +856,14 @@ def _merge_latest_task_count_rows(
         int(experiment.id): index for index, experiment in enumerate(display_experiments)
     }
 
-    merged_rows: list[_PairwiseTaskCountRow] = []
+    merged_rows: list[PairwiseTaskCountRow] = []
     for row in count_rows:
         model_hash = str(getattr(row, "model_hash", "") or "")
         display_experiment = display_experiment_by_hash.get(model_hash)
         if display_experiment is None:
             continue
         merged_rows.append(
-            _PairwiseTaskCountRow(
+            PairwiseTaskCountRow(
                 experiment_pk=int(display_experiment.id),
                 task_hash=str(getattr(row, "task_hash", "") or ""),
                 num_instances=int(getattr(row, "num_instances", 0) or 0),
@@ -883,7 +883,7 @@ def _update_task_rows_num_instances_from_counts(
     *,
     task_rows: Sequence[Any],
     count_rows: Sequence[Any],
-) -> list[_PairwiseTaskRow]:
+) -> list[PairwiseTaskRow]:
     instance_count_by_task: dict[tuple[int, str], int] = {}
     for row in count_rows:
         key = (int(row.experiment_pk), str(row.task_hash or ""))
@@ -892,14 +892,14 @@ def _update_task_rows_num_instances_from_counts(
             int(getattr(row, "num_instances", 0) or 0),
         )
 
-    updated_rows: list[_PairwiseTaskRow] = []
+    updated_rows: list[PairwiseTaskRow] = []
     for row in task_rows:
         resolved_count = max(
             int(getattr(row, "num_instances", 0) or 0),
             instance_count_by_task.get((int(row.experiment_pk), str(row.task_hash or "")), 0),
         )
         updated_rows.append(
-            _PairwiseTaskRow(
+            PairwiseTaskRow(
                 experiment_pk=int(row.experiment_pk),
                 task_name=str(row.task_name or ""),
                 task_hash=str(row.task_hash or ""),

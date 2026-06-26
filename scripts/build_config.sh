@@ -2,8 +2,8 @@
 # Docker build configuration
 # This file contains shared configuration for building olmo-eval Docker images
 #
-# Note: PyTorch is NOT included in the base image. It's installed at runtime
-# as a transitive dependency of the backend (vllm, transformers, etc.)
+# Note: PyTorch is included in the base image. Backend dependencies
+# (vllm, transformers, etc.) are installed at runtime.
 
 # Supported CUDA versions (full patch versions required by NVIDIA images)
 # Format: "MAJOR.MINOR.PATCH"
@@ -18,7 +18,7 @@ SUPPORTED_CUDA_VERSIONS=(
 DEFAULT_CUDA_VERSION="12.8.1"
 
 # Default PyTorch version
-DEFAULT_TORCH_VERSION="2.9.0"
+DEFAULT_TORCH_VERSION="2.10.0"
 
 # Supported platforms
 SUPPORTED_PLATFORMS=(

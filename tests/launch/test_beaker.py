@@ -669,6 +669,20 @@ class TestBuildCommandWithTaskPackages:
         ) in install_cmd
         assert "[isolated-vllm-check]" not in install_cmd
 
+    def test_olmo_core_extra_does_not_try_to_build_flash_attention(self):
+        """Default OLMo-core jobs must not compile flash-attn at startup."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=["olmo_core"],
+            env_exports=None,
+        )
+
+        assert "uv pip install -e '.[olmo_core,beaker]' -c /tmp/cuda-constraints.txt" in install_cmd
+        assert "flash-attn" not in install_cmd
+        assert "--no-build-isolation-package" not in install_cmd
+
 
 class TestNormalizeProviderPackage:
     """Tests for normalize_provider_package function."""
@@ -829,6 +843,111 @@ class TestBuildInstallCommand:
             cmd == "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package transformers --reinstall-package transformers "
             "'transformers @ git+https://github.com/user/transformers.git@custom-branch' "
+            "-c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_strips_extras_from_named_direct_ref_target(self):
+        """Reinstall flags should use the base distribution name, not extras."""
+        cmd = build_install_command(
+            "ai2-olmo-core[torchao,transformers] @ "
+            "git+https://github.com/allenai/OLMo-core.git@feature-branch",
+            "/tmp/constraints.txt",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv --no-config --no-cache pip install --refresh "
+            "--refresh-package ai2-olmo-core --reinstall-package ai2-olmo-core "
+            "'ai2-olmo-core[torchao,transformers] @ "
+            "git+https://github.com/allenai/OLMo-core.git@feature-branch' "
+            "-c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_normalizes_named_direct_ref_target(self):
+        """Named direct-ref reinstall targets should be PEP 503-normalized."""
+        cmd = build_install_command(
+            "flash_attn.interface[dev] @ "
+            "git+https://github.com/user/flash_attn.interface.git@feature-branch",
+            "/tmp/constraints.txt",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv --no-config --no-cache pip install --refresh "
+            "--refresh-package flash-attn-interface --reinstall-package flash-attn-interface "
+            "'flash_attn.interface[dev] @ "
+            "git+https://github.com/user/flash_attn.interface.git@feature-branch' "
+            "-c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_normalizes_git_repo_target(self):
+        """Forced git installs should normalize inferred repo names."""
+        cmd = build_install_command(
+            "git+https://github.com/user/flash_attn.interface.git@feature-branch",
+            "/tmp/constraints.txt",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv --no-config --no-cache pip install --refresh "
+            "--refresh-package flash-attn-interface --reinstall-package flash-attn-interface "
+            "'flash-attn-interface @ "
+            "git+https://github.com/user/flash_attn.interface.git@feature-branch' "
+            "-c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_normalizes_egg_fragment_target(self):
+        """Explicit egg fragments should normalize to uv's package target form."""
+        cmd = build_install_command(
+            "git+https://github.com/user/repo.git@feature-branch#egg=flash_attn.interface",
+            "/tmp/constraints.txt",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv --no-config --no-cache pip install --refresh "
+            "--refresh-package flash-attn-interface --reinstall-package flash-attn-interface "
+            "'flash-attn-interface @ "
+            "git+https://github.com/user/repo.git@feature-branch#egg=flash_attn.interface' "
+            "-c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_normalizes_local_path_target(self):
+        """Forced local path installs should normalize inferred path names."""
+        cmd = build_install_command(
+            "/mnt/packages/flash_attn.interface",
+            "/tmp/constraints.txt",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv --no-config --no-cache pip install --refresh "
+            "--refresh-package flash-attn-interface --reinstall-package flash-attn-interface "
+            "'flash-attn-interface @ /mnt/packages/flash_attn.interface' "
+            "-c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_normalizes_plain_package_target(self):
+        """Plain package specs should also target canonical distribution names."""
+        cmd = build_install_command(
+            "flash_attn.interface==1.0.0",
+            "/tmp/constraints.txt",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv pip install --refresh-package flash-attn-interface "
+            "--reinstall-package flash-attn-interface "
+            "'flash_attn.interface==1.0.0' -c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_targets_wheel_distribution_name(self):
+        """Forced wheel installs should target the distribution, not the wheel filename."""
+        cmd = build_install_command(
+            "https://example.org/wheels/flash_attn_interface-3.0.0-cp312-cp312-linux_x86_64.whl",
+            "/tmp/constraints.txt",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv --no-config --no-cache pip install --refresh "
+            "--refresh-package flash-attn-interface "
+            "--reinstall-package flash-attn-interface "
+            "'flash-attn-interface @ https://example.org/wheels/"
+            "flash_attn_interface-3.0.0-cp312-cp312-linux_x86_64.whl' "
             "-c /tmp/constraints.txt"
         )
 

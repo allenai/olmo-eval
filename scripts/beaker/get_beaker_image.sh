@@ -4,10 +4,10 @@ set -euo pipefail
 # Get the full Beaker image name for olmo-eval
 #
 # Usage:
-#   ./scripts/get_beaker_image.sh                    # Returns ai2/oe-data/olmo-eval-latest
-#   ./scripts/get_beaker_image.sh ai2/other          # Custom workspace
+#   ./scripts/beaker/get_beaker_image.sh
+#   ./scripts/beaker/get_beaker_image.sh ai2-other olmo-eval-custom
 
-WORKSPACE="${1:-ai2/oe-data}"
-IMAGE_NAME="olmo-eval-latest"
+IMAGE_OWNER="${1:-ai2-tylerm}"
+IMAGE_NAME="${2:-olmo-eval-cu1281-trc2100-amd64}"
 
-echo "${WORKSPACE}/${IMAGE_NAME}"
+echo "${IMAGE_OWNER}/${IMAGE_NAME}"

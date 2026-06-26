@@ -46,7 +46,7 @@ _DEFAULT_PROCESS_POOL = "cpu"
 
 
 @dataclass(frozen=True)
-class _SandboxDemand:
+class SandboxDemand:
     """Execution-aware sandbox demand summary for allocation and logging."""
 
     sandbox_envs: list[SandboxEnv]
@@ -57,7 +57,7 @@ class _SandboxDemand:
 
 
 @dataclass(frozen=True)
-class _SandboxPlan:
+class SandboxPlan:
     """Resolved sandbox configs and allocation data for relevant sandbox envs."""
 
     sandboxes: list[SandboxConfig]
@@ -71,7 +71,7 @@ class _SandboxPlan:
 
 
 @dataclass(frozen=True)
-class _ProcessPoolDemand:
+class ProcessPoolDemand:
     """Observed process-scoring workload for a named process pool."""
 
     task_count: int
@@ -80,11 +80,11 @@ class _ProcessPoolDemand:
 
 
 @dataclass(frozen=True)
-class _ProcessPoolPlan:
+class ProcessPoolPlan:
     """Resolved process pools and demand data for process-backed scorers."""
 
     pools: dict[str, ProcessScoringPoolConfig]
-    demand: dict[str, _ProcessPoolDemand]
+    demand: dict[str, ProcessPoolDemand]
     auto_created: frozenset[str]
 
 
@@ -120,7 +120,7 @@ def _count_process_scorers_by_pool(task: Task) -> dict[str, int]:
 def _collect_process_pool_demand(
     trackers: Mapping[str, TaskTracker],
     expanded_tasks: Sequence[str] | None = None,
-) -> dict[str, _ProcessPoolDemand]:
+) -> dict[str, ProcessPoolDemand]:
     """Collect per-pool demand for process-backed scorers."""
     from olmo_eval.common.execution import ProcessScoringConfigError
 
@@ -152,7 +152,7 @@ def _collect_process_pool_demand(
             )
 
     return {
-        pool_name: _ProcessPoolDemand(
+        pool_name: ProcessPoolDemand(
             task_count=task_counts[pool_name],
             scorer_count=scorer_counts[pool_name],
             response_jobs=response_jobs[pool_name],
@@ -166,7 +166,7 @@ def _plan_process_scoring_pools(
     expanded_tasks: Sequence[str],
     trackers: Mapping[str, TaskTracker],
     scoring_concurrency: int | None,
-) -> _ProcessPoolPlan | None:
+) -> ProcessPoolPlan | None:
     """Resolve the process pools needed by the selected tasks."""
     from olmo_eval.common.execution import ProcessScoringPoolConfig, default_process_pool_workers
 
@@ -201,7 +201,7 @@ def _plan_process_scoring_pools(
         )
 
     pools = {name: explicit[name] for name in sorted(referenced)}
-    return _ProcessPoolPlan(
+    return ProcessPoolPlan(
         pools=pools,
         demand=demand,
         auto_created=frozenset(auto_created),
@@ -222,7 +222,7 @@ def _shutdown_process_scoring_pools(process_pool_manager: Any) -> None:
 def _collect_sandbox_demand(
     trackers: Mapping[str, TaskTracker],
     expanded_tasks: Sequence[str] | None = None,
-) -> _SandboxDemand:
+) -> SandboxDemand:
     """Collect execution-aware sandbox demand and task counts per environment."""
     env_sandbox_items: dict[str, int] = {}
     env_work_units: dict[str, float] = {}
@@ -263,7 +263,7 @@ def _collect_sandbox_demand(
         )
         env_task_count[env_key] = env_task_count.get(env_key, 0) + 1
 
-    return _SandboxDemand(
+    return SandboxDemand(
         sandbox_envs=list(named_envs.values()),
         env_sandbox_items=env_sandbox_items,
         env_work_units=env_work_units,
@@ -328,7 +328,7 @@ def _plan_sandbox_configs(
     trackers: Mapping[str, TaskTracker],
     sandbox_pool_instances: int | None,
     sandbox_pool_min_instances: int | None = None,
-) -> _SandboxPlan | None:
+) -> SandboxPlan | None:
     """Resolve relevant sandbox configs and concrete executor counts."""
     from olmo_eval.harness.sandbox.image import dependencies_to_dockerfile_extra
 
@@ -428,7 +428,7 @@ def _plan_sandbox_configs(
             min_instances=resolved_min,
         )
 
-    return _SandboxPlan(
+    return SandboxPlan(
         sandboxes=materialized_sandboxes,
         env_sandbox_items=sandbox_demand.env_sandbox_items,
         env_work_units=sandbox_demand.env_work_units,
@@ -443,7 +443,7 @@ def _plan_sandbox_configs(
 def _determine_scoring_limits(
     harness_config: HarnessConfig,
     sandbox_configs_list: Sequence[dict[str, Any]] | None,
-    process_pool_plan: _ProcessPoolPlan | None,
+    process_pool_plan: ProcessPoolPlan | None,
 ) -> tuple[int, int]:
     """Return (response_concurrency, context_concurrency) for scoring."""
     import os

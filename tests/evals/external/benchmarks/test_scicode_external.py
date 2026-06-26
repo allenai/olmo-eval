@@ -115,7 +115,7 @@ class TestVerifierScript(unittest.TestCase):
         self.assertIn("def foo(x)", script)
 
 
-class _FakeProvider:
+class FakeProvider:
     """Minimal async provider that returns fixed code blocks per call."""
 
     def __init__(self, responses: list[str]) -> None:
@@ -139,7 +139,7 @@ class TestRunProblemCascade(unittest.IsolatedAsyncioTestCase):
             "```python\ndef b():\n    return 2\n```",
             "```python\ndef c():\n    return 3\n```",
         ]
-        provider = _FakeProvider(responses)
+        provider = FakeProvider(responses)
         sc_args = scicode_eval.SciCodeConfig(max_concurrency=1, with_background=True)
         evaluator = scicode_eval.SciCodeExternalEval()
 
@@ -168,7 +168,7 @@ class TestRunProblemCascade(unittest.IsolatedAsyncioTestCase):
             "```python\ndef a():\n    return 1\n```",
             "```python\ndef b():\n    return 2\n```",
         ]
-        provider = _FakeProvider(responses)
+        provider = FakeProvider(responses)
         sc_args = scicode_eval.SciCodeConfig(max_concurrency=1, with_background=True)
         evaluator = scicode_eval.SciCodeExternalEval()
 
@@ -198,7 +198,7 @@ class TestRunProblemCascade(unittest.IsolatedAsyncioTestCase):
             "```python\ndef step_two():\n    return 'BETA_MARKER'\n```",
             "```python\ndef step_three():\n    return 'GAMMA_MARKER'\n```",
         ]
-        provider = _FakeProvider(responses)
+        provider = FakeProvider(responses)
         sc_args = scicode_eval.SciCodeConfig(max_concurrency=1, with_background=True)
         evaluator = scicode_eval.SciCodeExternalEval()
 

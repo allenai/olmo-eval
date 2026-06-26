@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.constants.infrastructure import (
@@ -16,6 +17,10 @@ if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
     from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
     from olmo_eval.launch import BeakerJobConfig
+
+
+OLMO_CORE_PACKAGE_WITH_EXTRAS = "ai2-olmo-core[torchao,transformers]"
+_VERSION_SELECTOR_RE = re.compile(r"^(?:\d|==|!=|~=|>=|<=|>|<)")
 
 
 def get_provider_kind(model_spec: str, default_kind: str | None = None) -> str | None:
@@ -43,14 +48,15 @@ def get_provider_extras(model_spec: str, default_kind: str | None = None) -> lis
 
     Args:
         model_spec: Model name or path.
-        default_kind: Default provider kind if model is not a preset.
+        default_kind: Effective provider kind to use when the caller has already resolved
+            harness/provider overrides. When omitted, the model spec is inspected.
 
     Returns:
         List of pip extras needed for the provider.
     """
     from olmo_eval.common.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
-    provider_kind = get_provider_kind(model_spec, default_kind)
+    provider_kind = default_kind or get_provider_kind(model_spec)
 
     extras: list[str] = []
     if provider_kind:
@@ -79,6 +85,54 @@ def get_provider_dependencies(model_spec: str) -> list[str]:
         return list(provider_config.dependencies)
     except Exception:
         return []
+
+
+def _is_olmo_core_version_selector(package: str) -> bool:
+    """Whether a provider.package value is shorthand for an ai2-olmo-core version."""
+    return bool(_VERSION_SELECTOR_RE.match(package))
+
+
+def _format_install_spec(package: str, flags: list[str]) -> str:
+    return " ".join([package, *flags]) if flags else package
+
+
+def _normalize_olmo_core_package(package: str) -> str:
+    """Normalize OLMo-core provider package overrides.
+
+    The GitHub repository is named ``OLMo-core``, but the Python distribution is
+    ``ai2-olmo-core``. A bare source URL therefore needs a PEP 508 name binding
+    so uv replaces the already-installed distribution instead of targeting the
+    repository basename.
+    """
+    from olmo_eval.launch.beaker.launcher import (
+        is_direct_source_package,
+        normalize_provider_package,
+        parse_install_spec,
+    )
+
+    pkg_spec, flags = parse_install_spec(package.strip())
+    if not pkg_spec:
+        return package
+
+    if _is_olmo_core_version_selector(pkg_spec):
+        version_spec = pkg_spec if not pkg_spec[0].isdigit() else f"=={pkg_spec}"
+        return _format_install_spec(f"{OLMO_CORE_PACKAGE_WITH_EXTRAS}{version_spec}", flags)
+
+    if " @ " not in pkg_spec and is_direct_source_package(pkg_spec):
+        normalized_source = normalize_provider_package(pkg_spec)
+        return _format_install_spec(
+            f"{OLMO_CORE_PACKAGE_WITH_EXTRAS} @ {normalized_source}",
+            flags,
+        )
+
+    return package
+
+
+def normalize_provider_package_for_kind(provider_kind: str | None, package: str) -> str:
+    """Normalize a provider package override for the effective provider kind."""
+    if provider_kind == "olmo_core":
+        return _normalize_olmo_core_package(package)
+    return package
 
 
 def collect_install_extras(
@@ -417,10 +471,21 @@ class JobConfigAssembler:
         vllm_isolated_venv = provider_kind == "vllm_server"
         model_provider_extras = get_provider_extras(exp.model_spec, default_kind=provider_kind)
 
-        # If provider.package is set, it replaces the default vllm extra but
-        # keeps companion extras like clients for vllm_server.
-        if harness_provider_package:
-            provider_extras = [extra for extra in model_provider_extras if extra != "vllm"]
+        # If provider.package is set, it replaces the provider's bundled extra.
+        # Keep companion extras like clients for vllm_server.
+        provider_extra_override = (
+            {
+                "olmo_core": "olmo_core",
+                "vllm": "vllm",
+                "vllm_server": "vllm",
+            }.get(provider_kind)
+            if provider_kind is not None
+            else None
+        )
+        if harness_provider_package and provider_extra_override:
+            provider_extras = [
+                extra for extra in model_provider_extras if extra != provider_extra_override
+            ]
         else:
             provider_extras = model_provider_extras
 
@@ -526,7 +591,9 @@ class JobConfigAssembler:
         # 3. provider.dependencies (additional deps)
         provider_packages: list[str] = []
         if harness_provider_package:
-            provider_packages.append(harness_provider_package)
+            provider_packages.append(
+                normalize_provider_package_for_kind(provider_kind, harness_provider_package)
+            )
         provider_packages.extend(get_provider_dependencies(exp.model_spec))
         provider_packages.extend(harness_provider_deps)
         provider_packages = provider_packages or None  # type: ignore[ty:invalid-assignment]
