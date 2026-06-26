@@ -129,10 +129,9 @@ class LitSearch(Task):
     data_source = DataSource(path=LITSEARCH_REPO, subset="query", split="full")
     metrics = LITSEARCH_METRICS
     primary_metric = FoundRateMetric()
-    # Advisory only: the openai_agents scaffold this task runs under does not yet
-    # thread sampling_params into the Agents SDK model settings, so the agent uses
-    # server defaults. Scoring depends only on which corpus IDs surface, not on
-    # the generated text, so this does not affect the metric.
+    # Scoring keys off which corpus IDs surface in tool results, not the
+    # generated text, so these are advisory: an agentic harness that runs the
+    # model at its own defaults does not change the metric.
     sampling_params = SamplingParams(temperature=0.0, max_tokens=1024)
 
     @property

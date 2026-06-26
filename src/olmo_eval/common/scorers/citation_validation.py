@@ -3,7 +3,7 @@
 Motivation: the citation scorer must not become an unvalidated oracle that
 rewards citation-shaped prose. This module constructs adversarial cited-report
 cases with KNOWN-correct expected behavior and checks that the scorer penalizes
-them. It has two honest layers:
+them. It has two layers:
 
 1. Pipeline layer (deterministic, CI-safe): run each case through an oracle judge
    that returns the case's ground-truth verdicts, and assert the scoring pipeline

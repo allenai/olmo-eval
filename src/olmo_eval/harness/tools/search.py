@@ -33,10 +33,10 @@ _MAX_RETRIES = 5
 _BASE_BACKOFF_S = 1.0
 _MAX_BACKOFF_S = 16.0
 
-# Semantic Scholar's introductory plan is 1 request/second cumulative across all
-# endpoints. With several concurrent agents this is blown instantly, so we gate
-# all S2 requests through a process-global minimum interval (proactive throttle),
-# leaving backoff to mop up the occasional 429 that still slips through.
+# Semantic Scholar's introductory plan allows ~1 request/second cumulative across
+# all endpoints, which several concurrent agents exhaust immediately. All S2
+# requests pass through a process-global minimum interval (proactive throttle);
+# backoff handles the occasional 429 that still gets through.
 _S2_MIN_INTERVAL_S = 1.1  # slightly over 1s for margin
 _s2_rate_lock = asyncio.Lock()
 _s2_last_request_ts = 0.0  # time.monotonic() of the last dispatched S2 request

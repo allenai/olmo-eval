@@ -154,18 +154,17 @@ SCIENCE_RESEARCH = make_suite(
     description="Scientific literature understanding, evidence use, and scholarly synthesis.",
 )
 
-# What the members of science:research actually measure (read the metric tiers,
-# not a single aggregate):
-# - expertqa: attribution + on-topic precision of cited long-form answers
-#   (citation precision/recall + answer precision). NOT factual correctness vs a
-#   reference; a high score means well-cited, on-topic prose, not verified truth.
-# - litsearch: an AGENTIC retrieval smoke test (does a gold paper surface in live
-#   Semantic Scholar results), not the published fixed-corpus Recall@k.
+# The members of science:research measure different things; read the per-metric
+# tiers rather than the aggregate:
+# - expertqa: attribution and on-topic precision of cited long-form answers
+#   (citation precision/recall + answer precision), not factual correctness
+#   against a reference. A high score means well-cited, on-topic prose.
+# - litsearch: an agentic retrieval smoke test (does a gold paper surface in live
+#   Semantic Scholar results), distinct from the published fixed-corpus Recall@k.
 # - litsearch_rerank: fixed-corpus reranking. The model reranks a frozen pool of
-#   BM25-retrieved candidates per query; scored Recall@5/@20 over the model's own
-#   selection. Reproducible, judge-free, tool-free (the opposite trade-offs to
-#   agentic litsearch). The BM25 retriever Recall@k baseline is reported by the
-#   offline build script, not this task.
+#   BM25-retrieved candidates per query, scored Recall@5/@20 over its own
+#   selection: reproducible, judge-free, and tool-free. The BM25 retriever
+#   Recall@k baseline comes from the offline build script, not this task.
 #
 # Note: litsearch (agentic) is intentionally only in science:research, not
 # science:judge / science:nojudge / science:all. It needs an agentic

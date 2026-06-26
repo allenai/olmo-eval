@@ -32,7 +32,7 @@ class TestRegistration:
         }
 
     def test_primary_metric(self, task):
-        # Primary is a citation tier, not the global_avg aggregate (report tiers).
+        # Primary metric is a citation tier, not the global_avg aggregate.
         assert task.config.get_primary_metric().name == "citation_recall"
 
     def test_declares_judge_secret(self, task):

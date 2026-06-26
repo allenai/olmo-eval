@@ -115,10 +115,10 @@ class HarnessPresets:
     def paper_search_agent(name: str) -> HarnessConfig:
         """Agentic harness exposing only Semantic Scholar paper search.
 
-        For literature-search tasks (e.g. litsearch). Unlike dr_tulu it omits the
-        web-search tools and declares no required secrets, so it runs against the
-        public Semantic Scholar API keyless (rate-limited). For higher rate
-        limits, mount a key with `--secret-env <user>_S2_API_KEY:S2_API_KEY`.
+        For literature-search tasks (e.g. litsearch). Exposes a single paper-search
+        tool and declares no required secrets, so it runs against the public
+        Semantic Scholar API keyless (rate-limited). For higher rate limits, mount
+        a key with `--secret-env <user>_S2_API_KEY:S2_API_KEY`.
         """
         from .tools.search import semantic_scholar_search
 
