@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -43,6 +44,21 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             max_model_len=4096,
             revision="stage2-step47684",
             kwargs={"gpu_memory_utilization": 0.7, "add_bos_token": False},
+        ),
+        # sftlab data-ablation checkpoints (OLMo-3-7B SFT-from-base, converted to HF).
+        # Same ProviderConfig shape as the bk/olmo7b-sft-* presets — crucially
+        # max_model_len=4096, which neutralizes the checkpoint's YaRN rope_scaling
+        # (rope_type=yarn, factor 8, attention_factor ~1.21) on the short few-shot
+        # science:nojudge prompts; without the cap vLLM applies YaRN/mscale to all
+        # lengths and the model scores near-random. The model path is per-run, so it
+        # comes from $SFTLAB_EVAL_MODEL (sftlab sets it on the eval job) rather than a
+        # hardcoded path — one preset serves every sftlab arm.
+        "sftlab-olmo3-7b-sft": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model=os.environ.get("SFTLAB_EVAL_MODEL", ""),
+            trust_remote_code=True,
+            max_model_len=4096,
+            kwargs={"gpu_memory_utilization": 0.7},
         ),
         "bk/olmo7b-sft-general-within-step17307": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
