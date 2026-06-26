@@ -941,6 +941,19 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         from rich.table import Table
 
+        # Force-create tqdm's class-level lock in THIS (main) thread before fanning out.
+        # tqdm >=4.67 makes `tqdm._lock` lazy (created on the first get_lock() call); when
+        # several prepare_one threads load HF datasets concurrently, they race on that lazy
+        # init and one dies with "type object 'tqdm' has no attribute '_lock'" (seen on the
+        # geneturing tasks). Calling get_lock() once up front makes the attribute exist so
+        # the worker threads only ever read it.
+        try:
+            from tqdm import tqdm as _tqdm
+
+            _tqdm.get_lock()
+        except Exception:
+            pass
+
         # Collect prepared tasks in parallel, but accumulate results for deterministic ordering
         prepared_results: dict[str, tuple[TaskTracker, list[QueueItem]]] = {}
         with ThreadPoolExecutor(max_workers=min(32, len(expanded_tasks))) as executor:
