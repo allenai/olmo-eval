@@ -129,9 +129,8 @@ class LitSearch(Task):
     data_source = DataSource(path=LITSEARCH_REPO, subset="query", split="full")
     metrics = LITSEARCH_METRICS
     primary_metric = FoundRateMetric()
-    # Scoring keys off which corpus IDs surface in tool results, not the
-    # generated text, so these are advisory: an agentic harness that runs the
-    # model at its own defaults does not change the metric.
+    # Intended sampling for this task; whether it takes effect depends on the
+    # agentic harness threading sampling_params into the model.
     sampling_params = SamplingParams(temperature=0.0, max_tokens=1024)
 
     @property

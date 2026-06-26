@@ -79,7 +79,7 @@ class ExpertQA(Task):
     primary_metric = CitationRecallMetric()
     sampling_params = SamplingParams(temperature=0.0, max_tokens=4096)
     # The LLM-judge scorer needs an OpenAI key at scoring time; the launcher
-    # mounts it as the user-scoped beaker secret roryd_OPENAI_API_KEY.
+    # mounts it as the user-scoped beaker secret {user}_OPENAI_API_KEY.
     required_secrets = ("OPENAI_API_KEY",)
 
     @property

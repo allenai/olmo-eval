@@ -315,20 +315,11 @@ def format_report(results: Sequence[CaseResult]) -> str:
 # include rungs you may not have. Suggested workflow: sweep models at default
 # effort to find the cheapest that passes, then effort-tune that winner.
 #
-# Judge selection, from this kill test at --repeat 5 (cases passing all 5 runs).
-# The score-INFLATING failure modes are topical_non_supporting and
-# shuffled_citations (judge accepts wrong/irrelevant evidence). title_only and
-# citation_stuffed are conservative: flakiness there under-credits, not inflates.
-#   gpt-4o-mini    2/6  both dangerous cases FAIL -> do NOT use for citation judging.
-#   gpt-5-nano     4/6  dangerous cases 5/5; flaky on half-credit + stuffed.
-#                       Cheapest "won't inflate", but noisy recall magnitudes.
-#   gpt-5-mini     5/6  dangerous cases 5/5, half-credit ok; only stuffed-recall
-#                       flaky. Best cheap default for frequent iteration.
-#   gpt-5.5:medium 6/6  only fully-clean config across 5 runs. Trustworthy
-#                       report-card ceiling.
-# Pareto frontier (cost -> reliability): gpt-5-nano -> gpt-5-mini -> gpt-5.5:medium.
-# (gpt-5.4, gpt-5.5:low are dominated by gpt-5-mini; gpt-5.4-mini fails a
-# dangerous case despite passing stuffed, so it is off the frontier.)
+# Judge selection from a representative sweep (--repeat 5, cases passing all runs):
+# gpt-4o-mini accepts wrong/irrelevant evidence and must not be used for citation
+# judging; gpt-5-mini is the cheapest reliable choice for iteration; gpt-5.5:medium
+# was the only fully-clean config. Re-run the sweep below to refresh these for new
+# models rather than trusting these figures as current.
 DEFAULT_JUDGE_LADDER = [
     "gpt-5-nano",
     "gpt-5.4-nano",
