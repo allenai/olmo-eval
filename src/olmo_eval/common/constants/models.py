@@ -56,12 +56,14 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         "sftlab-olmo3-7b-sft": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             model=os.environ.get("SFTLAB_EVAL_MODEL", ""),
+            # trust_remote_code is the load-bearing fix: without it the bare-path
+            # default eval scored MMLU ~2% (near-random); with it, ~57%. max_model_len
+            # is env-tunable but defaults to the model's full 32768 — a diagnostic
+            # (mmlu/gsm8k at 4096 vs 32768) gave identical scores, so the cap is NOT
+            # needed for correctness, and 32768 is required for the long-CoT science
+            # tasks (aime/math500) that request up to 32768 output tokens.
             trust_remote_code=True,
-            # max_model_len is env-tunable (default 4096) so we can probe the YaRN
-            # vs generation-length tradeoff without editing this file: a low cap
-            # neutralizes YaRN on short prompts, but the long-CoT science tasks
-            # (aime/math500) request up to 32768 output tokens and need a higher cap.
-            max_model_len=int(os.environ.get("SFTLAB_EVAL_MAX_LEN", "4096")),
+            max_model_len=int(os.environ.get("SFTLAB_EVAL_MAX_LEN", "32768")),
             kwargs={"gpu_memory_utilization": 0.7},
         ),
         "bk/olmo7b-sft-general-within-step17307": ProviderConfig(
