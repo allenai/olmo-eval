@@ -166,7 +166,7 @@ class WMDP(Task):
             )
         else:
             return Instance(
-                question=_make_mcq_prompt(doc["question"], tuple(doc["choices"]), label_prefix=" "),
+                question=_make_mcq_prompt(doc["question"], doc["choices"], label_prefix=" "),
                 choices=tuple(["A", "B", "C", "D"]),
                 gold_answer=gold_letter,
                 metadata=metadata,
