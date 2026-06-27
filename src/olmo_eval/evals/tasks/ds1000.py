@@ -210,21 +210,21 @@ import subprocess, sys, tempfile, os
 _inner = '''
 import contextlib, io, os, sys, tempfile
 
-class _WriteOnlyStringIO(io.StringIO):
+class WriteOnlyStringIO(io.StringIO):
     def read(self, *a, **k): raise IOError
     def readline(self, *a, **k): raise IOError
     def readlines(self, *a, **k): raise IOError
     def readable(self, *a, **k): return False
 
-class _RedirectStdin(contextlib._RedirectStream):
+class RedirectStdin(contextlib._RedirectStream):
     _stream = "stdin"
 
 _td = tempfile.mkdtemp()
 os.chdir(_td)
-_stream = _WriteOnlyStringIO()
+_stream = WriteOnlyStringIO()
 with contextlib.redirect_stdout(_stream):
     with contextlib.redirect_stderr(_stream):
-        with _RedirectStdin(_stream):
+        with RedirectStdin(_stream):
             exec(compile(_TEST_CODE, "<test>", "exec"), {})
 '''
 _py310 = "/root/python310/python/bin/python3"

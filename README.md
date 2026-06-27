@@ -1469,7 +1469,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/build_image.sh
 
 # Specific CUDA + PyTorch version
-./scripts/build_image.sh --cuda-version 12.8.1 --torch-version 2.9.0
+./scripts/build_image.sh --cuda-version 12.8.1 --torch-version 2.10.0
 
 # Production build
 ./scripts/build_image.sh --platform linux/amd64
@@ -1492,7 +1492,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/beaker/push_beaker_image.sh --dry-run
 ```
 
-The script auto-detects the image name from the tag (e.g., `olmo-eval-cu128-trc291-amd64`)
+The script auto-detects the image name from the tag (e.g., `olmo-eval-cu1281-trc2100-amd64`)
 
 ### What's in the Image
 
@@ -1532,6 +1532,38 @@ uv run olmo-eval beaker launch -n "eval" \
 # Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]
 ```
+
+For raw OLMo-core checkpoints, force the provider kind through the harness and
+use `provider.package` when you need a specific `ai2-olmo-core` install:
+
+```bash
+# Pin the PyPI package version
+uv run olmo-eval beaker launch -n "eval" \
+    --harness default \
+    -o provider.kind=olmo_core \
+    -o provider.package=2.3.0 \
+    -m /weka/path/to/raw-olmo-core-checkpoint \
+    -t mmlu \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
+
+# Override ai2-olmo-core from a GitHub branch
+uv run olmo-eval beaker launch -n "eval" \
+    --harness default \
+    -o provider.kind=olmo_core \
+    -o provider.package=https://github.com/allenai/OLMo-core.git@my-branch \
+    -m /weka/path/to/raw-olmo-core-checkpoint \
+    -t mmlu \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
+```
+
+The OLMo-core source URL is normalized to install the
+`ai2-olmo-core[torchao,transformers]` distribution, so branch overrides replace
+the bundled OLMo-core dependency instead of installing a separate repo-named
+package.
 
 ### Task-Specific Dependencies
 

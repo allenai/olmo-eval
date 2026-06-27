@@ -110,7 +110,7 @@ class RemoteTokenizer:
             self._client = None
 
 
-class _TokenizerBosOverride:
+class TokenizerBosOverride:
     """Tokenizer proxy that overrides add_bos_token without mutating the underlying tokenizer."""
 
     def __init__(self, tokenizer: Any, add_bos_token: bool) -> None:
@@ -220,7 +220,7 @@ async def _log_response(response: httpx.Response) -> None:
         logger.error(f"vLLM response error: {response.status_code} {response.url}\n  body: {body}")
 
 
-class _DebugTransport(httpx.AsyncHTTPTransport):
+class DebugTransport(httpx.AsyncHTTPTransport):
     """Transport wrapper that logs all HTTP errors with full tracebacks."""
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -439,7 +439,7 @@ class VLLMServerProvider(InferenceProvider):
                 }
 
             # Use debug transport when enabled to catch connection errors
-            transport = _DebugTransport() if _DEBUG_REQUESTS else None
+            transport = DebugTransport() if _DEBUG_REQUESTS else None
 
             self._http_client = httpx.AsyncClient(
                 transport=transport,
@@ -982,7 +982,7 @@ class VLLMServerProvider(InferenceProvider):
         except (ImportError, Exception):
             tokenizer = self._get_tokenizer(require_local=False)
         if self._add_bos_token is not None:
-            tokenizer = _TokenizerBosOverride(tokenizer, self._add_bos_token)
+            tokenizer = TokenizerBosOverride(tokenizer, self._add_bos_token)
         params = self._default_sampling_params(params)
 
         # Get the context/prompt text

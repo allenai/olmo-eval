@@ -11,7 +11,7 @@ import numpy as np
 from olmo_eval.analysis.pairwise import ModelMeta, PairwiseResult, get_task_metric_profile
 
 
-class _PairCell(NamedTuple):
+class PairCell(NamedTuple):
     win_rate: float
     se: float
     prob_a_gt_b: float
@@ -37,7 +37,7 @@ class TaskMetrics(NamedTuple):
     worst_model_score: float | None
 
 
-type PairCellLookup = dict[tuple[int, int], _PairCell]
+type PairCellLookup = dict[tuple[int, int], PairCell]
 
 _SIGNIFICANCE_Z = 2.0
 
@@ -56,12 +56,12 @@ def _build_pair_cell_lookup(result: PairwiseResult) -> PairCellLookup:
     for pair in result.pairs:
         se = pair.se
         prob_a_gt_b = pair.prob_a_gt_b
-        pair_lookup[(pair.index_a, pair.index_b)] = _PairCell(
+        pair_lookup[(pair.index_a, pair.index_b)] = PairCell(
             win_rate=pair.win_rate_a,
             se=se,
             prob_a_gt_b=prob_a_gt_b,
         )
-        pair_lookup[(pair.index_b, pair.index_a)] = _PairCell(
+        pair_lookup[(pair.index_b, pair.index_a)] = PairCell(
             win_rate=pair.win_rate_b,
             se=se,
             prob_a_gt_b=1.0 - prob_a_gt_b,
