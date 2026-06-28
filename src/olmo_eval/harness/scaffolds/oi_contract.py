@@ -117,20 +117,22 @@ class OIContractScaffold(Scaffold):
             serper_web_search,
         )
         try:
+            # The search.py helpers are @tool-wrapped Tool objects: call with KEYWORD args
+            # (Tool.__call__(**kwargs)); positional args raise "takes 1 positional argument".
             if name == "search":
                 queries = args.get("query") or []
                 if isinstance(queries, str):
                     queries = [queries]
-                parts = [f"### Results for {q!r}\n{await serper_web_search(q)}" for q in queries]
+                parts = [f"### Results for {q!r}\n{await serper_web_search(query=q)}" for q in queries]
                 return "\n\n".join(parts) if parts else "No queries provided."
             if name == "browse":
                 urls = args.get("url") or []
                 if isinstance(urls, str):
                     urls = [urls]
-                parts = [await serper_fetch_page(u) for u in urls]
+                parts = [await serper_fetch_page(url=u) for u in urls]
                 return "\n\n".join(parts) if parts else "No urls provided."
             if name == "s2_search":
-                return await semantic_scholar_search(args.get("query", ""))
+                return await semantic_scholar_search(query=args.get("query", ""))
             return f"Error: unknown tool {name!r}. Available: search, browse, s2_search."
         except Exception as e:  # tool failures must not kill the loop
             logger.warning("tool %s failed: %s", name, e)
