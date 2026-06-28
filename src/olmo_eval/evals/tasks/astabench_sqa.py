@@ -765,3 +765,80 @@ register_variant(
         split="train",
     ),
 )
+
+
+# =============================================================================
+# Variant: oe-sci-litreview / open-instruct `olmo` contract output format
+# =============================================================================
+# sftlab's OLMo-3 SFT checkpoints (run via the `oi_contract` harness) produce a
+# grounded MARKDOWN report with inline <cite id="S_..">evidence</cite> tags — NOT the
+# {sections,citations} JSON this task's judge parses. This variant (a) feeds the model the
+# bare question (the oi_contract scaffold drives its own contract prompt, so the JSON
+# SQA_GENERATION_PROMPT would only mis-instruct it) and (b) converts the model's markdown +
+# <cite> output into the {sections,citations} schema so the existing 4-metric rubric judge
+# can score it. Content is unchanged; only the structure is bridged.
+
+_CONTRACT_CITE_RE = re.compile(r'<cite\s+id="?(S_[0-9a-fA-F]+)"?>(.*?)</cite>', re.DOTALL)
+_CONTRACT_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_CONTRACT_ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.DOTALL)
+_CONTRACT_HEADER_RE = re.compile(r"^#{1,6}\s+(.*)$")
+
+
+def contract_report_to_sqa(text: str) -> dict[str, Any] | None:
+    """Convert a contract markdown report (with <cite id="S_..">evidence</cite>) into the SQA
+    {sections:[{title,text,citations:[{id,snippets}]}]} schema. Inline <cite> tags become bracketed
+    [S_..] markers in the section text and a matching citation entry, as the judge expects."""
+    m = _CONTRACT_ANSWER_RE.search(text)
+    body = (m.group(1) if m else text)
+    body = _CONTRACT_THINK_RE.sub("", body).strip()
+    if not body:
+        return None
+
+    sections: list[dict[str, Any]] = []
+    title = ""
+    buf: list[str] = []
+
+    def flush() -> None:
+        sec_text = "\n".join(buf).strip()
+        if not sec_text and not title:
+            return
+        cites: list[dict[str, Any]] = []
+
+        def repl(mm: "re.Match[str]") -> str:
+            cid, ev = mm.group(1), mm.group(2).strip()
+            marker = f"[{cid}]"
+            cites.append({"id": marker, "snippets": [ev]})
+            return marker
+
+        sec_text = _CONTRACT_CITE_RE.sub(repl, sec_text)
+        if sec_text or cites:
+            sections.append({"title": title, "text": sec_text, "citations": cites})
+
+    for line in body.split("\n"):
+        h = _CONTRACT_HEADER_RE.match(line)
+        if h:
+            flush()
+            title = h.group(1).strip()
+            buf = []
+        else:
+            buf.append(line)
+    flush()
+
+    return {"sections": sections} if sections else None
+
+
+@register("astabench_scholarqa_oi")
+class AstaBenchSQAContract(AstaBenchSQA):
+    """ScholArQA scored against the oe-sci-litreview <answer>+<cite id> markdown output format."""
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        # Bare question — the oi_contract scaffold supplies the contract system prompt + tools.
+        return LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": instance.question},),
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        parsed = contract_report_to_sqa(output.text)
+        output.metadata["parsed_response"] = parsed
+        return parsed
