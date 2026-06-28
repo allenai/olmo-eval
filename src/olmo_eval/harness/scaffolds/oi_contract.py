@@ -23,10 +23,14 @@ The 3 canonical tool schemas are exactly those baked into the training data's <f
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import re
 from typing import Any
+
+import httpx
 
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
@@ -72,6 +76,62 @@ DEFAULT_SYSTEM = (
     "your final grounded answer inside <answer>...</answer> with <cite id=...> tags."
 )
 
+# Observation rendering (CONTRACT §4): tool results become <snippet>/<webpage> blocks with a stable
+# evidence id, so the model recognizes them and can cite via <cite id="S_..">. Length caps per §4.
+_TITLE_CAP = 150
+_WEB_TEXT_CAP = 300  # web `search` Text; s2_search Text is uncapped
+_PAGE_CAP = 4000     # keep browsed pages bounded
+
+
+def _eid(prefix: str, key: str) -> str:
+    return f"{prefix}_{hashlib.sha1((key or '').encode('utf-8')).hexdigest()[:8]}"
+
+
+def _snippet(title: str, url: str, text: str, text_cap: int | None) -> str:
+    title = (title or "")[:_TITLE_CAP]
+    text = (text or "")
+    if text_cap is not None:
+        text = text[:text_cap]
+    sid = _eid("S", url or title or text)
+    return f'<snippet id="{sid}">\nTitle: {title}\nURL: {url}\nText: {text}\n</snippet>'
+
+
+async def _serper_search(client: httpx.AsyncClient, query: str, key: str) -> str:
+    resp = await client.post(
+        "https://google.serper.dev/search", json={"q": query, "num": 5},
+        headers={"X-API-KEY": key, "Content-Type": "application/json"}, timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    blocks = [_snippet(it.get("title", ""), it.get("link", ""), it.get("snippet", ""), _WEB_TEXT_CAP)
+              for it in data.get("organic", [])[:5]]
+    return "\n".join(blocks) if blocks else "No search results found."
+
+
+async def _s2_search(client: httpx.AsyncClient, query: str, key: str | None) -> str:
+    headers = {"x-api-key": key} if key else {}
+    resp = await client.get(
+        "https://api.semanticscholar.org/graph/v1/paper/search",
+        params={"query": query, "limit": 5, "fields": "title,abstract,url,year"},
+        headers=headers, timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    blocks = [_snippet(p.get("title", ""), p.get("url", ""), p.get("abstract") or "", None)
+              for p in data.get("data", [])]
+    return "\n".join(blocks) if blocks else "No papers found for query."
+
+
+async def _serper_browse(client: httpx.AsyncClient, url: str, key: str) -> str:
+    resp = await client.post(
+        "https://scrape.serper.dev", json={"url": url},
+        headers={"X-API-KEY": key, "Content-Type": "application/json"}, timeout=45,
+    )
+    resp.raise_for_status()
+    text = (resp.json().get("text", "") or "")[:_PAGE_CAP]
+    return f'<webpage id="{_eid("W", url)}">\n# {url}\n{text}\n</webpage>'
+
+
 _FUNCTION_CALLS_RE = re.compile(r"<function_calls>\s*(.*?)\s*</function_calls>", re.DOTALL)
 _ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.DOTALL)
 # An <answer> that appears only inside <think> is scratch reasoning, not terminal (CONTRACT §6).
@@ -109,30 +169,25 @@ class OIContractScaffold(Scaffold):
 
     name = "oi_contract"
 
-    async def _dispatch(self, name: str, args: dict[str, Any]) -> str:
-        """Run a contract tool call and return the observation text."""
-        from olmo_eval.harness.tools.search import (
-            semantic_scholar_search,
-            serper_fetch_page,
-            serper_web_search,
-        )
+    async def _dispatch(self, client: httpx.AsyncClient, name: str, args: dict[str, Any]) -> str:
+        """Run a contract tool call and return the observation text as <snippet>/<webpage> blocks."""
+        serper_key = os.getenv("SERPER_API_KEY", "")
+        s2_key = os.getenv("S2_API_KEY")
         try:
-            # The search.py helpers are @tool-wrapped Tool objects: call with KEYWORD args
-            # (Tool.__call__(**kwargs)); positional args raise "takes 1 positional argument".
             if name == "search":
                 queries = args.get("query") or []
                 if isinstance(queries, str):
                     queries = [queries]
-                parts = [f"### Results for {q!r}\n{await serper_web_search(query=q)}" for q in queries]
-                return "\n\n".join(parts) if parts else "No queries provided."
+                parts = [await _serper_search(client, q, serper_key) for q in queries]
+                return "\n".join(parts) if parts else "No queries provided."
+            if name == "s2_search":
+                return await _s2_search(client, args.get("query", ""), s2_key)
             if name == "browse":
                 urls = args.get("url") or []
                 if isinstance(urls, str):
                     urls = [urls]
-                parts = [await serper_fetch_page(url=u) for u in urls]
-                return "\n\n".join(parts) if parts else "No urls provided."
-            if name == "s2_search":
-                return await semantic_scholar_search(query=args.get("query", ""))
+                parts = [await _serper_browse(client, u, serper_key) for u in urls]
+                return "\n".join(parts) if parts else "No urls provided."
             return f"Error: unknown tool {name!r}. Available: search, browse, s2_search."
         except Exception as e:  # tool failures must not kill the loop
             logger.warning("tool %s failed: %s", name, e)
@@ -171,6 +226,17 @@ class OIContractScaffold(Scaffold):
         final_text = ""
         max_turns_reached = False
 
+        client = httpx.AsyncClient()
+        try:
+            return await self._loop(
+                provider, client, prompt, turn_sp, max_turns, turns,
+            )
+        finally:
+            await client.aclose()
+
+    async def _loop(self, provider, client, prompt, turn_sp, max_turns, turns):
+        final_text = ""
+        max_turns_reached = False
         for _turn in range(max_turns):
             prompt += "<|im_start|>assistant\n"
             req = LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
@@ -202,7 +268,7 @@ class OIContractScaffold(Scaffold):
             # Execute each call, gather observations into one environment turn.
             obs_parts = []
             for c in calls:
-                obs_parts.append(await self._dispatch(c.get("name", ""), c.get("arguments", {}) or {}))
+                obs_parts.append(await self._dispatch(client, c.get("name", ""), c.get("arguments", {}) or {}))
             observation = "\n\n".join(obs_parts)
 
             prompt += gen + "<|im_end|>\n"
