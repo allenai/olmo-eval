@@ -209,6 +209,7 @@ def validate_scaffold(name: str) -> None:
 
 
 # Import scaffolds to trigger registration
+from .oi_contract import OIContractScaffold  # noqa: E402  (no optional extras)
 from .openai_agents import OpenAIAgentsScaffold  # noqa: E402
 from .openhands import OpenHandsScaffold  # noqa: E402
 

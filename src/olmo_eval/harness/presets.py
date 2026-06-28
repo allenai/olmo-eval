@@ -112,6 +112,29 @@ class HarnessPresets:
         )
 
     @lazy
+    def oi_contract(name: str) -> HarnessConfig:
+        """open-instruct / oe-sci-litreview tool-calling contract preset.
+
+        For sftlab OLMo-3 SFT checkpoints trained on the open-instruct `olmo` template, whose tool
+        format (JSON <function_calls>, search/browse/s2_search tools) differs from the official
+        Olmo-3 format the openai_agents scaffold + olmo3 parser expect. The oi_contract scaffold
+        drives the loop in the model's native text format (no vLLM tool parser needed) and owns the
+        tool dispatch internally (search->Serper, browse->Serper fetch, s2_search->S2)."""
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            system_prompt=None,  # scaffold supplies the contract system prompt
+            max_turns=10,
+            max_concurrency=4,
+            scaffold="oi_contract",
+            required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
     def codex_universal(name: str) -> HarnessConfig:
         """Universal code execution preset with multiple capabilities."""
         from .sandbox import SandboxConfig, SandboxMode
