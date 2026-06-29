@@ -223,6 +223,8 @@ class VLLMProvider(InferenceProvider):
         top_p = None if not params.do_sample else params.top_p
         top_k = None if not params.do_sample else params.top_k
 
+        # vLLM natively accepts max_tokens=None as "generate to the context limit",
+        # matching our uncapped contract, so pass it through unchanged.
         kwargs: dict[str, Any] = {
             "max_tokens": params.max_tokens,
             "n": params.num_samples,

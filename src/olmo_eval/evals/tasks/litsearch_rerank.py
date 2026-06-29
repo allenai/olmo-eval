@@ -65,6 +65,17 @@ RERANK_PROMPT = (
 )
 
 
+def _coerce_int(x: Any) -> int | None:
+    """Coerce a JSON list element to an int, accepting digit strings like "3"."""
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, (int, float)):
+        return int(x)
+    if isinstance(x, str) and x.strip().lstrip("-").isdigit():
+        return int(x.strip())
+    return None
+
+
 def _coerce_int_list(raw: str) -> list[int]:
     try:
         parsed = json.loads(raw)
@@ -72,23 +83,24 @@ def _coerce_int_list(raw: str) -> list[int]:
         return []
     if not isinstance(parsed, list):
         return []
-    return [int(x) for x in parsed if isinstance(x, (int, float))]
+    return [n for n in (_coerce_int(x) for x in parsed) if n is not None]
 
 
 def parse_ranked_numbers(text: str) -> list[int]:
     """Extract an ordered list of 1-based candidate numbers from model output.
 
     Reasoning models emit a long ``<think>`` block (which can contain stray
-    bracketed groups) before the answer, so prefer the explicit
-    ``"ranked_papers": [...]`` field, then fall back to the last bracketed list
-    in the text -- the final answer follows the reasoning.
+    bracketed groups) before the answer. The explicit ``"ranked_papers": [...]``
+    field is the final answer, so take the last such field and return it as-is --
+    including an empty list, which means the model selected nothing. Only when no
+    ``ranked_papers`` field is present at all do we fall back to the last
+    bracketed list in the text.
     """
     if not text:
         return []
-    for match in _RANKED_KEY_RE.finditer(text):
-        numbers = _coerce_int_list(match.group(1))
-        if numbers:
-            return numbers
+    ranked_matches = list(_RANKED_KEY_RE.finditer(text))
+    if ranked_matches:
+        return _coerce_int_list(ranked_matches[-1].group(1))
     for match in reversed(list(_LIST_RE.finditer(text))):
         numbers = _coerce_int_list(match.group(0))
         if numbers:

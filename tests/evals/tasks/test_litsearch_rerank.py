@@ -86,6 +86,15 @@ class TestParseRankedNumbers:
         text = "First I considered [1, 2]. Final answer: [8, 5, 3]"
         assert parse_ranked_numbers(text) == [8, 5, 3]
 
+    def test_empty_ranked_papers_is_final_answer(self):
+        # An explicit empty ranked_papers is the answer ("selected nothing"); a
+        # stray bracket in the reasoning must not be scored as a selection.
+        text = '<think>Consider [3]</think>{"ranked_papers": []}'
+        assert parse_ranked_numbers(text) == []
+
+    def test_digit_strings_coerced(self):
+        assert parse_ranked_numbers('{"ranked_papers": ["3", "1", "12"]}') == [3, 1, 12]
+
 
 class TestRecallAtK:
     def test_partial(self):

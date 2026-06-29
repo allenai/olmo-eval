@@ -10,14 +10,34 @@ Ported from astabench citation_eval.py (https://github.com/allenai/asta-bench).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, TypedDict
 
 from olmo_eval.common.scorers.llm_judge import JudgeFn
 
 logger = logging.getLogger(__name__)
+
+
+class Citation(TypedDict):
+    """A citation normalized for judging: an id and its snippet text."""
+
+    id: str
+    snippets: str
+
+
+class GroupResult(TypedDict):
+    """Per-section citation counts aggregated by compute_citation_scores_from_groups."""
+
+    n_attributable: int
+    n_extrapolatory: int
+    n_half_credit_claims: int
+    supporting_counts: list[int]
+    non_supporting_counts: list[int]
+    n_half_credit_citations: list[int]
+
 
 # from astabench citation_eval.py: marker for citations where only the title
 # (no quoted snippet) is available, which earns half credit.
@@ -101,7 +121,7 @@ def _filter_citation(citation: dict[str, Any], sec_text: str) -> bool:
 
 # from astabench citation_eval.py:CitationEval
 def compute_citation_scores_from_groups(
-    group_results: list[dict[str, Any]],
+    group_results: list[GroupResult],
 ) -> dict[str, float]:
     """Aggregate citation precision and recall from per-group scoring results."""
     n_attributable = 0
@@ -132,7 +152,7 @@ def compute_citation_scores_from_groups(
     }
 
 
-def _empty_group_result(citation_group: str) -> dict[str, Any]:
+def _empty_group_result(citation_group: str) -> GroupResult:
     """Fallback group result counting sentences as unsupported claims."""
     n_sentences = len([s for s in re.split(r"(?<=[.!?])\s+", citation_group) if s.strip()])
     return {
@@ -149,8 +169,8 @@ def _empty_group_result(citation_group: str) -> dict[str, Any]:
 async def score_citation_group(
     judge_fn: JudgeFn,
     citation_group: str,
-    citations: list[dict[str, str]],
-) -> dict[str, Any]:
+    citations: list[Citation],
+) -> GroupResult:
     """Score citations for a single section using the judge.
 
     Returns counts for aggregation by compute_citation_scores_from_groups.
@@ -200,16 +220,14 @@ async def score_citation_group(
     }
 
 
-def _build_section_citations(
-    raw_citations: list[dict[str, Any]], sec_text: str
-) -> list[dict[str, str]]:
+def _build_section_citations(raw_citations: list[dict[str, Any]], sec_text: str) -> list[Citation]:
     """Normalize a section's raw citations into id/snippets pairs for judging.
 
     Citations whose snippets are unusable (absent, echoing the section text, or
     the Semantic Scholar placeholder) fall back to a title-only half-credit
     marker, or empty snippets when no title is available.
     """
-    citations: list[dict[str, str]] = []
+    citations: list[Citation] = []
     for c in raw_citations:
         cit_id = c.get("id")
         if not cit_id:
@@ -246,8 +264,7 @@ async def score_citations_for_sections(
     Returns:
         Mapping with ``citation_precision`` and ``citation_recall`` in [0, 1].
     """
-    group_results: list[dict[str, Any]] = []
-
+    sections_to_judge: list[tuple[str, list[Citation]]] = []
     for section in parsed_response.get("sections", []):
         sec_iter = [section]
         if section.get("table") and isinstance(section["table"], dict):
@@ -256,11 +273,12 @@ async def score_citations_for_sections(
         for curr_sec in sec_iter:
             sec_text = curr_sec.get("text", "")
             citations = _build_section_citations(curr_sec.get("citations", []), sec_text)
-            clean_text = clean_sentence(sec_text)
-            result = await score_citation_group(judge_fn, clean_text, citations)
-            group_results.append(result)
+            sections_to_judge.append((clean_sentence(sec_text), citations))
 
-    if not group_results:
+    if not sections_to_judge:
         return {"citation_precision": 0.0, "citation_recall": 0.0}
 
-    return compute_citation_scores_from_groups(group_results)
+    group_results = await asyncio.gather(
+        *(score_citation_group(judge_fn, text, citations) for text, citations in sections_to_judge)
+    )
+    return compute_citation_scores_from_groups(list(group_results))
