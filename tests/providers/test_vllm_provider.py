@@ -1,11 +1,29 @@
 """Unit tests for the inline VLLMProvider."""
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.providers.vllm import VLLMProvider
+
+
+class FakeVllmModule(ModuleType):
+    SamplingParams: object
+
+
+def test_build_sampling_params_passes_none_max_tokens_through(monkeypatch) -> None:
+    # vLLM treats max_tokens=None as "generate to the context limit", so the
+    # provider must forward None unchanged rather than crashing or coercing it.
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.SamplingParams = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+
+    provider = VLLMProvider.__new__(VLLMProvider)
+    built = provider._build_sampling_params(SamplingParams(max_tokens=None, do_sample=False))
+
+    assert built["max_tokens"] is None
 
 
 class FakeTokenizer:

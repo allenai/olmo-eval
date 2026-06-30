@@ -95,6 +95,7 @@ def build_openai_judge_fn(
     scorer_name: str = "LLMJudgeScorer",
     max_tokens: int = 10,
     temperature: float = 0.0,
+    reasoning_effort: str | None = None,
 ) -> JudgeFn:
     """Build a lazy async judge function using OpenAI API.
 
@@ -106,13 +107,22 @@ def build_openai_judge_fn(
         scorer_name: Name of the scorer class (for error messages).
         max_tokens: Maximum tokens in the judge response.
         temperature: Sampling temperature for the judge.
+        reasoning_effort: Optional reasoning effort ("minimal"/"low"/"medium"/"high")
+            for reasoning models; dropped automatically if the model rejects it.
 
     Returns:
         An async judge function that validates and calls OpenAI.
     """
     _client: list = []  # Mutable container for lazy initialization
+    # Adaptive request shape, resolved on first use and cached. Newer models
+    # (e.g. the gpt-5 series) require max_completion_tokens instead of max_tokens
+    # and reject a non-default temperature; older models reject reasoning_effort.
+    _token_param = "max_tokens"
+    _send_temperature = True
+    _send_reasoning_effort = reasoning_effort is not None
 
     async def judge(prompt: str, *, system_prompt: str | None = None) -> str:
+        nonlocal _token_param, _send_temperature, _send_reasoning_effort
         import os
 
         if not _client:
@@ -137,15 +147,74 @@ def build_openai_judge_fn(
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = await _client[0].chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content or ""
+        # Retry while adapting to per-model parameter constraints. Each iteration
+        # fixes at most one rejected parameter; unrelated errors re-raise.
+        last_error: Exception | None = None
+        for _ in range(3):
+            kwargs: dict[str, Any] = {"model": model, "messages": messages}
+            kwargs[_token_param] = max_tokens
+            if _send_temperature:
+                kwargs["temperature"] = temperature
+            if _send_reasoning_effort:
+                kwargs["reasoning_effort"] = reasoning_effort
+            try:
+                response = await _client[0].chat.completions.create(**kwargs)
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                message = str(e).lower()
+                adapted = False
+                if _token_param == "max_tokens" and "max_completion_tokens" in message:
+                    _token_param = "max_completion_tokens"
+                    adapted = True
+                if (
+                    _send_temperature
+                    and "temperature" in message
+                    and ("unsupported" in message or "does not support" in message)
+                ):
+                    _send_temperature = False
+                    adapted = True
+                if _send_reasoning_effort and "reasoning_effort" in message:
+                    _send_reasoning_effort = False
+                    adapted = True
+                if not adapted:
+                    raise
+                last_error = e
+
+        assert last_error is not None
+        raise last_error
 
     return judge
+
+
+# Default judge for attributed-QA scoring (citation / precision / rubric).
+# gpt-5.5:medium is the cheapest config that passed the adversarial citation kill
+# test 6/6 across 5 runs (see common/scorers/citation_validation.py). gpt-5-mini
+# is a decent cheaper alternative for frequent iteration (reliable on the
+# score-inflating cases; loses only the conservative stuffed-recall edge).
+DEFAULT_JUDGE_SPEC = "gpt-5.5:medium"
+
+
+def build_default_judge_fn(scorer_name: str, max_tokens: int = 4096) -> JudgeFn:
+    """Build the default attributed-QA judge, overridable via ``$OLMO_EVAL_JUDGE``.
+
+    The spec is ``"model"`` or ``"model:effort"`` (reasoning effort for the gpt-5
+    series). Defaults to ``gpt-5.5:medium``; for cheap iteration set
+    ``OLMO_EVAL_JUDGE=gpt-5-mini`` (or e.g. ``gpt-5.5:high`` for a stricter run).
+
+    Args:
+        scorer_name: Name of the calling scorer/task (for error messages).
+        max_tokens: Maximum tokens in the judge response.
+    """
+    import os
+
+    spec = os.getenv("OLMO_EVAL_JUDGE", DEFAULT_JUDGE_SPEC)
+    model, sep, effort = spec.partition(":")
+    return build_openai_judge_fn(
+        model=model,
+        scorer_name=scorer_name,
+        max_tokens=max_tokens,
+        reasoning_effort=(effort if sep else None),
+    )
 
 
 @dataclass(frozen=True)

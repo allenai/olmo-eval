@@ -11,8 +11,12 @@ Import the tool objects and use .name for HarnessConfig.tool_names.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import random
+import time
+from collections.abc import Awaitable, Callable
 
 import httpx
 
@@ -22,6 +26,34 @@ logger = logging.getLogger(__name__)
 
 # Module-level shared HTTP client for connection reuse
 _http_client: httpx.AsyncClient | None = None
+
+# Statuses worth retrying with backoff: rate limiting + transient server errors.
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+_MAX_RETRIES = 5
+_BASE_BACKOFF_S = 1.0
+_MAX_BACKOFF_S = 16.0
+
+# Semantic Scholar's introductory plan allows ~1 request/second cumulative across
+# all endpoints, which several concurrent agents exhaust immediately. All S2
+# requests pass through a process-global minimum interval (proactive throttle);
+# backoff handles the occasional 429 that still gets through.
+_S2_MIN_INTERVAL_S = 1.1  # slightly over 1s for margin
+_s2_rate_lock = asyncio.Lock()
+_s2_last_request_ts = 0.0  # time.monotonic() of the last dispatched S2 request
+
+
+async def _s2_rate_gate() -> None:
+    """Block until at least _S2_MIN_INTERVAL_S has elapsed since the last S2 call.
+
+    Serializes S2 requests across all concurrent agents in this process so the
+    cumulative rate stays under the 1 req/s limit.
+    """
+    global _s2_last_request_ts
+    async with _s2_rate_lock:
+        wait = _s2_last_request_ts + _S2_MIN_INTERVAL_S - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _s2_last_request_ts = time.monotonic()
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -34,6 +66,66 @@ def _get_http_client() -> httpx.AsyncClient:
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(timeout=30.0)
     return _http_client
+
+
+def _s2_search_limit() -> int:
+    """Results per S2 search, overridable via S2_SEARCH_LIMIT (default 5).
+
+    Raising this widens coverage per query (closer to Recall@20-style behavior)
+    at the cost of longer tool output; set e.g. S2_SEARCH_LIMIT=20 in the run env.
+    """
+    try:
+        return max(1, int(os.getenv("S2_SEARCH_LIMIT", "5")))
+    except ValueError:
+        return 5
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a Retry-After header value in seconds, ignoring HTTP-date form."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None  # HTTP-date form is rare here; fall back to exponential backoff
+
+
+async def _get_with_backoff(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    params: dict,
+    headers: dict,
+    max_retries: int = _MAX_RETRIES,
+    rate_gate: Callable[[], Awaitable[None]] | None = None,
+) -> httpx.Response:
+    """GET with exponential backoff + jitter on 429/5xx, honoring Retry-After.
+
+    Retries transient failures (rate limits, 5xx, network errors). The Retry-After
+    header takes precedence over the computed backoff. Returns the final response
+    even if still failing after the last attempt; the caller handles its status.
+    If ``rate_gate`` is given it is awaited before every attempt (including
+    retries) to enforce a proactive request rate.
+    """
+    delay = _BASE_BACKOFF_S
+    for attempt in range(max_retries + 1):
+        retry_after: float | None = None
+        try:
+            if rate_gate is not None:
+                await rate_gate()
+            resp = await client.get(url, params=params, headers=headers)
+            if resp.status_code not in _RETRYABLE_STATUS or attempt == max_retries:
+                return resp
+            retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+        except httpx.RequestError:
+            if attempt == max_retries:
+                raise
+
+        wait = retry_after if retry_after is not None else delay + random.uniform(0, delay)
+        await asyncio.sleep(min(wait, _MAX_BACKOFF_S))
+        delay = min(delay * 2, _MAX_BACKOFF_S)
+
+    raise RuntimeError("unreachable: backoff loop exited without returning")
 
 
 @registered_tool(
@@ -60,18 +152,20 @@ async def semantic_scholar_search(query: str) -> str:
 
     client = _get_http_client()
     try:
-        resp = await client.get(
+        resp = await _get_with_backoff(
+            client,
             "https://api.semanticscholar.org/graph/v1/paper/search",
             params={
                 "query": sanitized_query,
-                "limit": 5,
-                "fields": "title,abstract,url,year,authors",
+                "limit": _s2_search_limit(),
+                "fields": "title,abstract,url,year,authors,corpusId",
             },
             headers=headers,
+            rate_gate=_s2_rate_gate,
         )
         if resp.status_code != 200:
             logger.error(
-                f"Semantic Scholar API error: status={resp.status_code}, "
+                f"Semantic Scholar API error (after retries): status={resp.status_code}, "
                 f"query={sanitized_query!r}, response={resp.text[:500]}"
             )
         resp.raise_for_status()
@@ -96,6 +190,7 @@ async def semantic_scholar_search(query: str) -> str:
         abstract = paper.get("abstract", "No abstract available")
         url = paper.get("url", "")
         year = paper.get("year", "")
+        corpus_id = paper.get("corpusId")
         authors = paper.get("authors", [])
         author_names = ", ".join(a.get("name", "") for a in authors[:3])
         if len(authors) > 3:
@@ -104,6 +199,8 @@ async def semantic_scholar_search(query: str) -> str:
         result = f"**{title}**"
         if year:
             result += f" ({year})"
+        if corpus_id is not None:
+            result += f"\nCorpus ID: {corpus_id}"
         if author_names:
             result += f"\nAuthors: {author_names}"
         if abstract:

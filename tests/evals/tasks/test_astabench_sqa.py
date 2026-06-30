@@ -4,22 +4,25 @@ import json
 
 import pytest
 
+from olmo_eval.common.scorers.citation import (
+    JUST_HAS_A_TITLE,
+    _build_section_citations,
+    _filter_citation,
+    compute_citation_scores_from_groups,
+    extract_json_from_response,
+    score_citation_group,
+)
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.astabench_sqa import (
-    JUST_HAS_A_TITLE,
     AnswerPrecisionMetric,
     CitationPrecisionMetric,
     CitationRecallMetric,
     GlobalAvgMetric,
     IngredientRecallMetric,
-    _filter_citation,
-    compute_citation_scores_from_groups,
     compute_ingredient_score,
     compute_precision_score,
-    extract_json_from_response,
     format_report,
     normalize_agent_response_dict,
-    score_citation_group,
 )
 from olmo_eval.evals.tasks.common import get_task, list_tasks
 
@@ -610,35 +613,11 @@ class TestFilterCitation:
 
 
 class TestScoreCitationsHalfCredit:
-    def _build_citations(self, sec_text, raw_citations):
-        """Replicate the citation-building logic from _score_citations."""
-        bad_snippet = "Please click on the paper title to read the abstract on Semantic Scholar."
-        citations = []
-        for c in raw_citations:
-            cit_id = c.get("id")
-            if not cit_id:
-                continue
-            snippets = c.get("snippets", [])
-            if isinstance(snippets, list):
-                snippet_text = "... ".join(str(s) for s in snippets)
-            else:
-                snippet_text = str(snippets)
-
-            if _filter_citation(c, sec_text) and bad_snippet not in snippet_text:
-                citations.append({"id": cit_id, "snippets": snippet_text})
-            else:
-                title = c.get("title", "")
-                if title:
-                    citations.append({"id": cit_id, "snippets": f"{JUST_HAS_A_TITLE}{title}"})
-                else:
-                    citations.append({"id": cit_id, "snippets": ""})
-        return citations
-
     def test_no_title_no_snippets_gets_zero_credit(self):
         """Citation with no valid snippets AND no title should not get half-credit."""
-        citations = self._build_citations(
-            "Claim A [1].",
+        citations = _build_section_citations(
             [{"id": "[1]", "snippets": [], "title": ""}],
+            "Claim A [1].",
         )
         half_credit_ids = [c["id"] for c in citations if c["snippets"].startswith(JUST_HAS_A_TITLE)]
         assert "[1]" not in half_credit_ids
@@ -646,9 +625,9 @@ class TestScoreCitationsHalfCredit:
 
     def test_with_title_gets_half_credit_marker(self):
         """Citation with a title but no valid snippets should get the half-credit marker."""
-        citations = self._build_citations(
-            "Claim A [1].",
+        citations = _build_section_citations(
             [{"id": "[1]", "snippets": [], "title": "Real Paper Title"}],
+            "Claim A [1].",
         )
         half_credit_ids = [c["id"] for c in citations if c["snippets"].startswith(JUST_HAS_A_TITLE)]
         assert "[1]" in half_credit_ids
