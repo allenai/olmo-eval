@@ -28,7 +28,7 @@ class Citation(TypedDict):
     snippets: str
 
 
-class GroupResult(TypedDict):
+class GroupedCitationResult(TypedDict):
     """Per-section citation counts aggregated by compute_citation_scores_from_groups."""
 
     n_attributable: int
@@ -121,7 +121,7 @@ def _filter_citation(citation: dict[str, Any], sec_text: str) -> bool:
 
 # from astabench citation_eval.py:CitationEval
 def compute_citation_scores_from_groups(
-    group_results: list[GroupResult],
+    group_results: list[GroupedCitationResult],
 ) -> dict[str, float]:
     """Aggregate citation precision and recall from per-group scoring results."""
     n_attributable = 0
@@ -152,7 +152,7 @@ def compute_citation_scores_from_groups(
     }
 
 
-def _empty_group_result(citation_group: str) -> GroupResult:
+def _empty_group_result(citation_group: str) -> GroupedCitationResult:
     """Fallback group result counting sentences as unsupported claims."""
     n_sentences = len([s for s in re.split(r"(?<=[.!?])\s+", citation_group) if s.strip()])
     return {
@@ -170,7 +170,7 @@ async def score_citation_group(
     judge_fn: JudgeFn,
     citation_group: str,
     citations: list[Citation],
-) -> GroupResult:
+) -> GroupedCitationResult:
     """Score citations for a single section using the judge.
 
     Returns counts for aggregation by compute_citation_scores_from_groups.
