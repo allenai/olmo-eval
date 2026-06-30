@@ -110,6 +110,13 @@ _s2_lock = asyncio.Lock()
 _s2_last = 0.0
 
 
+class SerperCreditsExhausted(RuntimeError):
+    """Serper returned its 'Not enough credits' 400. This is NOT a per-call tool failure: if the
+    web-search backend is dead, every instance silently degrades to a closed-book guess and the
+    eval reports a plausible-but-meaningless score. Fail the whole job loudly instead so the result
+    is never mistaken for real tool-use performance."""
+
+
 async def _s2_throttle() -> None:
     global _s2_last
     async with _s2_lock:
@@ -129,6 +136,13 @@ async def _send_with_retry(send) -> httpx.Response:
             return resp
         except httpx.HTTPStatusError as e:
             last_exc = e
+            # Serper signals an empty account with a 400 body of "Not enough credits". Don't retry
+            # it and don't let it degrade to a per-call error string — abort the run.
+            if e.response.status_code == 400 and "not enough credits" in (e.response.text or "").lower():
+                raise SerperCreditsExhausted(
+                    "Serper returned 'Not enough credits' (HTTP 400) — web search/browse is "
+                    "unavailable. Top up the Serper account and re-run."
+                ) from e
             if e.response.status_code not in _RETRY_STATUS or attempt == _MAX_RETRIES:
                 raise
             ra = e.response.headers.get("Retry-After", "")
@@ -245,7 +259,9 @@ class OIContractScaffold(Scaffold):
                 parts = [await _serper_browse(client, u, serper_key) for u in urls]
                 return "\n".join(parts) if parts else "No urls provided."
             return f"Error: unknown tool {name!r}. Available: search, browse, s2_search."
-        except Exception as e:  # tool failures must not kill the loop
+        except SerperCreditsExhausted:
+            raise  # never degrade credit exhaustion to a per-call error — fail the run
+        except Exception as e:  # other tool failures must not kill the loop
             logger.warning("tool %s failed: %s", name, e)
             reason = str(e) or type(e).__name__  # ReadTimeout etc. stringify to ''
             return (
