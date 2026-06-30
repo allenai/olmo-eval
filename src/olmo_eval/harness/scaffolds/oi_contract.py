@@ -196,16 +196,27 @@ def _terminal_answer(text: str) -> str | None:
 
 
 def _parse_calls(text: str) -> list[dict[str, Any]] | None:
-    """Parse the first <function_calls>[...]</function_calls> JSON array (outside <think>)."""
+    """Parse the <function_calls>[...]</function_calls> JSON array (outside <think>).
+
+    Some checkpoints mangle or drop the opening <function_calls> tag (e.g. emit
+    `</function_calls>[{...}]</function_calls>`); fall back to the bare JSON array so a
+    well-formed tool call isn't mistaken for a final answer.
+    """
     stripped = _THINK_RE.sub("", text)
     m = _FUNCTION_CALLS_RE.search(stripped)
-    if not m:
+    raw = m.group(1) if m else None
+    if raw is None:
+        bare = re.sub(r"</?function_calls>", " ", stripped)
+        am = re.search(r"\[\s*\{.*\}\s*\]", bare, re.DOTALL)
+        raw = am.group(0) if am else None
+    if raw is None:
         return None
     try:
-        calls = json.loads(m.group(1))
-        return calls if isinstance(calls, list) else [calls]
+        calls = json.loads(raw)
     except json.JSONDecodeError:
         return None
+    calls = calls if isinstance(calls, list) else [calls]
+    return calls if calls and all(isinstance(c, dict) and "name" in c for c in calls) else None
 
 
 @register_scaffold("oi_contract")
