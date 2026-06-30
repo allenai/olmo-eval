@@ -1,14 +1,14 @@
 """
-HarmBench Safety Evaluation Task
+XSTest Safety Evaluation Task
 
-This module implements the HarmBench Safety evaluation task
+This module implements the XSTest evaluation task
 as previously implemented in allenai/safety-eval
 
-Paper: https://arxiv.org/abs/2402.04249
+Paper: https://arxiv.org/abs/2308.01263
 
 Usage:
 
-    olmo-eval run -m llama3.1-8b -t harmbench:wg_judge
+    olmo-eval run -m llama3.1-8b -t xstest:wg_judge
 """
 
 import logging
@@ -27,11 +27,11 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 logger = logging.getLogger(__name__)
 
 
-@register("harmbench")
-class Harmbench(Task):
-    """Harmbench safety evaluation task."""
+@register("xstest")
+class XSTest(Task):
+    """xstest safety evaluation task."""
 
-    data_source = DataSource("allenai/tulu-3-harmbench-eval")
+    data_source = DataSource(path="walledai/XSTest", split="test")
     formatter = ChatFormatter()
     sampling_params = SamplingParams(temperature=0.7, top_p=0.95)
     answer_extractor = extract_think_answer
@@ -53,23 +53,20 @@ class Harmbench(Task):
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
+        prompt_type = doc["label"]
 
-        functional_cat = doc["FunctionalCategory"]
-        semantic_cat = doc["SemanticCategory"]
-
-        if functional_cat == "contextual":
-            question = doc["ContextString"] + "\n\n---\n\n" + doc["Behavior"]
-        else:
-            question = doc["Behavior"]
+        if prompt_type == "safe":
+            gold_answer = "response_refusal=no"
+        elif prompt_type == "unsafe":
+            gold_answer = "response_refusal=yes"
 
         return Instance(
-            question=question,
-            gold_answer="response_harmfulness=no",
+            question=doc["prompt"],
+            gold_answer=gold_answer,
             metadata={
-                "id": doc["BehaviorID"],
-                "index": index,
-                "functional_category": functional_cat,
-                "semantic_category": semantic_cat,
+                "id": index,
+                "prompt_type": prompt_type,
+                "subcategory": doc["type"],
             },
         )
 
@@ -94,17 +91,27 @@ class Harmbench(Task):
         )
 
 
-_HARMBENCH_SUBSET_METRICS = (
-    "functional_category::standard",
-    "functional_category::contextual",
-    "functional_category::copyright",
-    "semantic_category::copyright",
-    "semantic_category::misinformation_disinformation",
-    "semantic_category::chemical_biological",
-    "semantic_category::illegal",
-    "semantic_category::harmful",
-    "semantic_category::cybercrime_intrusion",
-    "semantic_category::harassment_bullying",
+_XSTEST_SUBSET_METRICS = (
+    "prompt_type::safe",
+    "prompt_type::unsafe",
+    "subcategory::homonyms",
+    "subcategory::contrast_homonyms",
+    "subcategory::figurative_language",
+    "subcategory::contrast_figurative_language",
+    "subcategory::safe_targets",
+    "subcategory::contrast_safe_targets",
+    "subcategory::safe_contexts",
+    "subcategory::contrast_safe_contexts",
+    "subcategory::definitions",
+    "subcategory::contrast_definitions",
+    "subcategory::nons_group_real_discr",
+    "subcategory::real_group_nons_discr",
+    "subcategory::contrast_discr",
+    "subcategory::historical_events",
+    "subcategory::contrast_historical_events",
+    "subcategory::privacy_public",
+    "subcategory::privacy_fictional",
+    "subcategory::contrast_privacy",
 )
 
 _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
@@ -122,9 +129,9 @@ _BASE_SAMPLING = SamplingParams(
 
 # OpenAI judge variant - uses OpenAI API as the judge
 register_variant(
-    "harmbench",
+    "xstest",
     "openai_judge",
-    metrics=safety_metrics(SafetyScorer, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(SafetyScorer, _XSTEST_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=SafetyScorer),
     sampling_params=_JUDGE_SAMPLING,
 )
@@ -137,26 +144,26 @@ _WG_SCORER = SafetyScorer(
 )
 
 register_variant(
-    "harmbench",
+    "xstest",
     "wg_judge",
-    metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(_WG_SCORER, _XSTEST_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
 )
 
 register_variant(
-    "harmbench",
+    "xstest",
     "wg_judge_thinking",
-    metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(_WG_SCORER, _XSTEST_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     answer_extractor=extract_think_answer_only,
 )
 
 register_variant(
-    "harmbench",
+    "xstest",
     "base",
-    metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(_WG_SCORER, _XSTEST_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_BASE_SAMPLING,
     formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),

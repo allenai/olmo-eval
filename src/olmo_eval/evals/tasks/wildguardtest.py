@@ -1,14 +1,14 @@
 """
-HarmBench Safety Evaluation Task
+WildGuardTest Safety Evaluation Task
 
-This module implements the HarmBench Safety evaluation task
+This module implements the WildGuardTest evaluation task
 as previously implemented in allenai/safety-eval
 
-Paper: https://arxiv.org/abs/2402.04249
+Paper: https://arxiv.org/abs/2406.18495
 
 Usage:
 
-    olmo-eval run -m llama3.1-8b -t harmbench:wg_judge
+    olmo-eval run -m llama3.1-8b -t wildguard:wg_judge
 """
 
 import logging
@@ -27,11 +27,11 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 logger = logging.getLogger(__name__)
 
 
-@register("harmbench")
-class Harmbench(Task):
-    """Harmbench safety evaluation task."""
+@register("wildguardtest")
+class WildGuardTest(Task):
+    """wildguardtest safety evaluation task."""
 
-    data_source = DataSource("allenai/tulu-3-harmbench-eval")
+    data_source = DataSource(path="allenai/wildguardmix", subset="wildguardtest", split="test")
     formatter = ChatFormatter()
     sampling_params = SamplingParams(temperature=0.7, top_p=0.95)
     answer_extractor = extract_think_answer
@@ -54,22 +54,25 @@ class Harmbench(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
 
-        functional_cat = doc["FunctionalCategory"]
-        semantic_cat = doc["SemanticCategory"]
+        # Drop the instance if prompt_harm_label or response_harm_label is NA
+        if doc["prompt_harm_label"] is None or doc["response_harm_label"] is None:
+            return None
 
-        if functional_cat == "contextual":
-            question = doc["ContextString"] + "\n\n---\n\n" + doc["Behavior"]
-        else:
-            question = doc["Behavior"]
+        # Drop examples where the prompt label is not harmful
+        if doc["prompt_harm_label"] != "harmful":
+            return None
+
+        prompt_type = "adversarial" if doc["adversarial"] else "vanilla"
+
+        question = doc["prompt"]
 
         return Instance(
             question=question,
             gold_answer="response_harmfulness=no",
             metadata={
-                "id": doc["BehaviorID"],
-                "index": index,
-                "functional_category": functional_cat,
-                "semantic_category": semantic_cat,
+                "id": index,
+                "subcategory": doc["subcategory"],
+                "prompt_type": prompt_type,
             },
         )
 
@@ -94,17 +97,23 @@ class Harmbench(Task):
         )
 
 
-_HARMBENCH_SUBSET_METRICS = (
-    "functional_category::standard",
-    "functional_category::contextual",
-    "functional_category::copyright",
-    "semantic_category::copyright",
-    "semantic_category::misinformation_disinformation",
-    "semantic_category::chemical_biological",
-    "semantic_category::illegal",
-    "semantic_category::harmful",
-    "semantic_category::cybercrime_intrusion",
-    "semantic_category::harassment_bullying",
+_WILDGGUARD_SUBSET_METRICS = (
+    "prompt_type::vanilla",
+    "prompt_type::adversarial",
+    "subcategory::private_information_individual",
+    "subcategory::others",
+    "subcategory::cyberattack",
+    "subcategory::sexual_content",
+    "subcategory::social_stereotypes_and_unfair_discrimination",
+    "subcategory::toxic_language_hate_speech",
+    "subcategory::violence_and_physical_harm",
+    "subcategory::defamation_encouraging_unethical_or_unsafe_actions",
+    "subcategory::fraud_assisting_illegal_activities",
+    "subcategory::mental_health_over-reliance_crisis",
+    "subcategory::causing_material_harm_by_disseminating_misinformation",
+    "subcategory::disseminating_false_or_misleading_information_encouraging_disinformation_campaigns",
+    "subcategory::copyright_violations",
+    "subcategory::sensitive_information_organization_government",
 )
 
 _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
@@ -122,9 +131,9 @@ _BASE_SAMPLING = SamplingParams(
 
 # OpenAI judge variant - uses OpenAI API as the judge
 register_variant(
-    "harmbench",
+    "wildguardtest",
     "openai_judge",
-    metrics=safety_metrics(SafetyScorer, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(SafetyScorer, _WILDGGUARD_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=SafetyScorer),
     sampling_params=_JUDGE_SAMPLING,
 )
@@ -137,26 +146,26 @@ _WG_SCORER = SafetyScorer(
 )
 
 register_variant(
-    "harmbench",
+    "wildguardtest",
     "wg_judge",
-    metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(_WG_SCORER, _WILDGGUARD_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
 )
 
 register_variant(
-    "harmbench",
+    "wildguardtest",
     "wg_judge_thinking",
-    metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(_WG_SCORER, _WILDGGUARD_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     answer_extractor=extract_think_answer_only,
 )
 
 register_variant(
-    "harmbench",
+    "wildguardtest",
     "base",
-    metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(_WG_SCORER, _WILDGGUARD_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_BASE_SAMPLING,
     formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),

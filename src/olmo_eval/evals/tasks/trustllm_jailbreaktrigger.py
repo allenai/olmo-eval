@@ -1,14 +1,14 @@
 """
-HarmBench Safety Evaluation Task
+TrustLLM_JailbreakTrigger Safety Evaluation Task
 
-This module implements the HarmBench Safety evaluation task
+This module implements the TrustLLM_JailbreakTrigger evaluation task
 as previously implemented in allenai/safety-eval
 
-Paper: https://arxiv.org/abs/2402.04249
+Paper: https://arxiv.org/abs/2401.05561
 
 Usage:
 
-    olmo-eval run -m llama3.1-8b -t harmbench:wg_judge
+    olmo-eval run -m llama3.1-8b -t trustllm_jailbreaktrigger:wg_judge
 """
 
 import logging
@@ -27,11 +27,11 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 logger = logging.getLogger(__name__)
 
 
-@register("harmbench")
-class Harmbench(Task):
-    """Harmbench safety evaluation task."""
+@register("trustllm_jailbreaktrigger")
+class TrustLLM_JailbreakTrigger(Task):
+    """trustllm_jailbreaktrigger safety evaluation task."""
 
-    data_source = DataSource("allenai/tulu-3-harmbench-eval")
+    data_source = DataSource(path="allenai/tulu-3-trustllm-jailbreaktrigger-eval", split="test")
     formatter = ChatFormatter()
     sampling_params = SamplingParams(temperature=0.7, top_p=0.95)
     answer_extractor = extract_think_answer
@@ -54,22 +54,14 @@ class Harmbench(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
 
-        functional_cat = doc["FunctionalCategory"]
-        semantic_cat = doc["SemanticCategory"]
-
-        if functional_cat == "contextual":
-            question = doc["ContextString"] + "\n\n---\n\n" + doc["Behavior"]
-        else:
-            question = doc["Behavior"]
-
         return Instance(
-            question=question,
-            gold_answer="response_harmfulness=no",
+            question=doc["prompt"],
+            gold_answer="response_refusal=yes",
             metadata={
-                "id": doc["BehaviorID"],
+                "id": doc["id"],
                 "index": index,
-                "functional_category": functional_cat,
-                "semantic_category": semantic_cat,
+                "source": doc["source"],
+                "jailbreak_type": doc["label"][0],
             },
         )
 
@@ -94,17 +86,23 @@ class Harmbench(Task):
         )
 
 
-_HARMBENCH_SUBSET_METRICS = (
-    "functional_category::standard",
-    "functional_category::contextual",
-    "functional_category::copyright",
-    "semantic_category::copyright",
-    "semantic_category::misinformation_disinformation",
-    "semantic_category::chemical_biological",
-    "semantic_category::illegal",
-    "semantic_category::harmful",
-    "semantic_category::cybercrime_intrusion",
-    "semantic_category::harassment_bullying",
+_JAILBREAKTRIGGER_SUBSET_METRICS = (
+    "source::QBB",
+    "source::ITC",
+    "jailbreak_type::Refusal sentence prohibition",
+    "jailbreak_type::leetspeak",
+    "jailbreak_type::bad words",
+    "jailbreak_type::programming",
+    "jailbreak_type::fixed sentence",
+    "jailbreak_type::cot",
+    "jailbreak_type::json_format",
+    "jailbreak_type::no_punctuation",
+    "jailbreak_type::no_long_word",
+    "jailbreak_type::without_the",
+    "jailbreak_type::url_encode",
+    "jailbreak_type::cou",
+    "jailbreak_type::scenario",
+    "jailbreak_type::multitask",
 )
 
 _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
@@ -122,9 +120,9 @@ _BASE_SAMPLING = SamplingParams(
 
 # OpenAI judge variant - uses OpenAI API as the judge
 register_variant(
-    "harmbench",
+    "trustllm_jailbreaktrigger",
     "openai_judge",
-    metrics=safety_metrics(SafetyScorer, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(SafetyScorer, _JAILBREAKTRIGGER_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=SafetyScorer),
     sampling_params=_JUDGE_SAMPLING,
 )
@@ -137,26 +135,26 @@ _WG_SCORER = SafetyScorer(
 )
 
 register_variant(
-    "harmbench",
+    "trustllm_jailbreaktrigger",
     "wg_judge",
-    metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(_WG_SCORER, _JAILBREAKTRIGGER_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
 )
 
 register_variant(
-    "harmbench",
+    "trustllm_jailbreaktrigger",
     "wg_judge_thinking",
-    metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(_WG_SCORER, _JAILBREAKTRIGGER_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     answer_extractor=extract_think_answer_only,
 )
 
 register_variant(
-    "harmbench",
+    "trustllm_jailbreaktrigger",
     "base",
-    metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
+    metrics=safety_metrics(_WG_SCORER, _JAILBREAKTRIGGER_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_BASE_SAMPLING,
     formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
