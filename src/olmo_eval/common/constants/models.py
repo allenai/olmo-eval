@@ -66,6 +66,18 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             max_model_len=int(os.environ.get("SFTLAB_EVAL_MAX_LEN", "32768")),
             kwargs={"gpu_memory_utilization": 0.7},
         ),
+        # The released, post-trained OLMo-3-7B SFT checkpoint (general instruction tuning,
+        # NOT our deep-research data). Native olmo3 (Olmo3ForCausalLM, YaRN rope). Used as an
+        # ALTERNATE baseline anchor, evaluated on the STOCK pythonic harness (-H dr_tulu) — its
+        # native tool dialect — NOT oi_contract. Pairs with the official olmo3 vLLM tool parser
+        # (auto-inferred from the model name) for the openai_agents scaffold.
+        "olmo-3-7b-instruct-sft": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="allenai/Olmo-3-7B-Instruct-SFT",
+            trust_remote_code=True,
+            max_model_len=32768,
+            kwargs={"gpu_memory_utilization": 0.7},
+        ),
         "bk/olmo7b-sft-general-within-step17307": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             model="/weka/oe-training-default/ai2-llm/checkpoints/baileyk/olmo-sft/olmo-7b-base-general-within-mix/step17307-hf",
