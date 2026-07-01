@@ -93,6 +93,31 @@ def parse_metrics_csv(text: str) -> dict[str, float]:
     return metrics
 
 
+def parse_aggregate_csv(text: str, metric: str | None = None) -> float | None:
+    """Read a metric's ``aggregated_results.csv`` (``baseline_name,<metric>`` header).
+
+    Returns the value on the ``deepscholar_base`` row (or the first row), taken from
+    the ``metric``-named column when present, else the first other numeric column.
+    """
+    rows = list(csv.DictReader(io.StringIO(text)))
+    if not rows:
+        return None
+    row = next(
+        (r for r in rows if (r.get("baseline_name") or "").strip() == "deepscholar_base"),
+        rows[0],
+    )
+    candidates: list[str] = []
+    if metric and metric in row:
+        candidates.append(metric)
+    candidates += [k for k in row if k != "baseline_name" and k not in candidates]
+    for key in candidates:
+        try:
+            return float(row[key])
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def compute_geomean(
     metrics: dict[str, float], keys: tuple[str, ...] = PRIMARY_METRICS
 ) -> float | None:

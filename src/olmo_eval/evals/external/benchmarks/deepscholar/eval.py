@@ -25,11 +25,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.evals.external.base import SandboxedExternalEval
-from olmo_eval.evals.external.benchmarks.deepscholar.args import PRIMARY_METRICS, DeepScholarArgs
+from olmo_eval.evals.external.benchmarks.deepscholar.args import DeepScholarArgs
 from olmo_eval.evals.external.benchmarks.deepscholar.result_parser import (
     compute_geomean,
     flatten_numeric,
-    parse_metrics_csv,
+    parse_aggregate_csv,
 )
 from olmo_eval.evals.external.result import ExternalEvalResult
 
@@ -413,31 +413,28 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         n_success: int = 0,
         n_total: int = 0,
     ) -> ExternalEvalResult:
-        json_files = await self._read_dir(executor, self._eval_dir, "*.json")
-        csv_files = await self._read_dir(executor, self._eval_dir, "*.csv")
-
+        # Canonical layout: evaluation/<metric>/aggregated_results.csv holds the
+        # aggregate for each metric on a single `deepscholar_base` row. The metric
+        # name is the parent directory.
+        agg_files = await self._read_dir(executor, self._eval_dir, "aggregated_results.csv")
         all_metrics: dict[str, float] = {}
-        for rel, text in json_files.items():
-            stem = Path(rel).stem
-            try:
-                parsed = flatten_numeric(json.loads(text))
-            except json.JSONDecodeError:
-                continue
-            for key, value in parsed.items():
-                all_metrics[f"{stem}.{key}"] = value
-        for rel, text in csv_files.items():
-            stem = Path(rel).stem
-            for key, value in parse_metrics_csv(text).items():
-                all_metrics[f"{stem}.{key}"] = value
+        for rel, text in sorted(agg_files.items()):
+            metric = rel.split("/")[0]
+            value = parse_aggregate_csv(text, metric)
+            if value is not None:
+                all_metrics[metric] = value
 
-        # Surface the primary metrics unprefixed, and the headline geomean.
-        for metric in PRIMARY_METRICS:
-            match = next(
-                (v for k, v in all_metrics.items() if k == metric or k.endswith(f".{metric}")),
-                None,
-            )
-            if match is not None:
-                all_metrics[metric] = match
+        # Fallback if the upstream layout changes: scan any JSON for numeric leaves.
+        if not all_metrics:
+            for rel, text in (await self._read_dir(executor, self._eval_dir, "*.json")).items():
+                try:
+                    parsed = flatten_numeric(json.loads(text))
+                except json.JSONDecodeError:
+                    continue
+                for key, value in parsed.items():
+                    all_metrics[f"{Path(rel).stem}.{key}"] = value
+
+        # Headline geomean over the primary metrics (None if any is missing).
         geomean = compute_geomean(all_metrics)
         if geomean is not None:
             all_metrics["geomean"] = geomean
