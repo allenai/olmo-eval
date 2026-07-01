@@ -46,7 +46,11 @@ def map_s2_paper(paper: dict[str, Any], query: str) -> dict[str, Any]:
     """
     title = paper.get("title") or ""
     snippet = paper.get("abstract") or ""
-    date = paper.get("publicationDate") or (str(paper["year"]) if paper.get("year") else "")
+    # Emit a %Y-%m-%d date: downstream parses dates strictly and a bare year
+    # ("2006") raises, failing the search/filter step. Pad year-only to Jan 1.
+    date = paper.get("publicationDate") or ""
+    if not date and paper.get("year"):
+        date = f"{int(paper['year'])}-01-01"
     ext = paper.get("externalIds") or {}
     arxiv_id = ext.get("ArXiv")
     if arxiv_id:
