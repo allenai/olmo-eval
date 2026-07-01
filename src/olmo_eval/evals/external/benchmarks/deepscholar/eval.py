@@ -123,6 +123,9 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             # Target our .venv explicitly: the swe-rex derived image ships an active
             # /root/venv (3.12), which uv would otherwise install into by default.
             f"cd {self._repo} && uv pip install --python {self._venv_python} -r requirements.txt",
+            # The eval phase's cite_p scorer calls nltk.sent_tokenize, which needs the
+            # punkt_tab tokenizer data (not bundled with the pip install).
+            f"{self._venv_python} -m nltk.downloader punkt_tab",
             f"mkdir -p {self._gen_dir} {self._eval_dir}",
         )
 
@@ -450,9 +453,12 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 raw_output=raw_output,
             )
 
+        success = exit_code == 0 and bool(all_metrics)
+        error = None if success else f"Eval phase exited {exit_code} (metrics may be partial)"
         return ExternalEvalResult(
             name=self.name,
-            success=exit_code == 0 and bool(all_metrics),
+            success=success,
+            error=error,
             metrics=all_metrics,
             metadata={
                 "eval_dir": self._eval_dir,
