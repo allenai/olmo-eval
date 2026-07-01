@@ -44,6 +44,11 @@ class DeepScholarArgs:
     # Web search corpus for retrieval. ARXIV is keyless (the dataset is arXiv CS
     # papers); TAVILY/GOOGLE/GOOGLE_SCHOLAR/BING need their own API keys.
     web_corpuses: list[str] = field(default_factory=lambda: ["ARXIV"])
+    # Recursive-search intensity. Total search requests scale with
+    # steps * queries_per_step * papers; lowering these reduces arXiv 429s. None
+    # keeps the upstream config value.
+    search_steps: int | None = None  # -> num_search_steps
+    search_queries_per_step: int | None = None  # -> num_search_queries_per_step_per_corpus
     temperature: float | None = None
     max_tokens: int = 10000
     # litellm provider prefix for a local OpenAI-compatible (vLLM) server.
@@ -84,6 +89,8 @@ class DeepScholarArgs:
             start_idx=int(data.get("start_idx", 0)),
             search_mode=data.get("search_mode"),
             web_corpuses=_as_list(data.get("web_corpuses")) or ["ARXIV"],
+            search_steps=_parse_optional(data, "search_steps", int),
+            search_queries_per_step=_parse_optional(data, "search_queries_per_step", int),
             temperature=_parse_optional(data, "temperature", float),
             max_tokens=int(data.get("max_tokens", 10000)),
             local_model_prefix=data.get("local_model_prefix", "openai"),

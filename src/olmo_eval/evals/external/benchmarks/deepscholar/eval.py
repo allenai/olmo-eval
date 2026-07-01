@@ -165,6 +165,8 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 "Search corpus: ARXIV (keyless), TAVILY, GOOGLE, GOOGLE_SCHOLAR, BING",
                 "ARXIV",
             ),
+            "search_steps": ("Recursive search rounds (lower cuts arXiv 429s)", None),
+            "search_queries_per_step": ("Search queries per round (lower cuts arXiv 429s)", None),
             "temperature": ("Generation temperature for the model under test", None),
             "max_tokens": ("Max tokens for the model under test", 10000),
             "local_model_prefix": (
@@ -324,6 +326,10 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         config["web_corpuses"] = ds_args.web_corpuses
         if ds_args.search_mode:
             config["search_mode"] = ds_args.search_mode
+        if ds_args.search_steps is not None:
+            config["num_search_steps"] = ds_args.search_steps
+        if ds_args.search_queries_per_step is not None:
+            config["num_search_queries_per_step_per_corpus"] = ds_args.search_queries_per_step
         content = json.dumps(config, indent=2)
         encoded = base64.b64encode(content.encode()).decode()
         await executor.execute_command(
