@@ -70,6 +70,85 @@ def _get_modal_app_name() -> str:
     return f"swerex-{uuid.uuid4().hex[:12]}"
 
 
+def _modal_kwargs_with_encrypted_runtime_port(
+    modal_kwargs: dict[str, Any] | None,
+    runtime_port: int,
+) -> dict[str, Any]:
+    """Return Modal sandbox kwargs that expose the SWE-ReX runtime over HTTPS."""
+    resolved_kwargs = dict(modal_kwargs or {})
+    resolved_kwargs.pop("unencrypted_ports", None)
+
+    configured_ports = resolved_kwargs.pop("encrypted_ports", ()) or ()
+    if isinstance(configured_ports, int):
+        encrypted_ports = [configured_ports]
+    else:
+        encrypted_ports = list(configured_ports)
+
+    if runtime_port not in encrypted_ports:
+        encrypted_ports.append(runtime_port)
+
+    resolved_kwargs["encrypted_ports"] = encrypted_ports
+    return resolved_kwargs
+
+
+def _encrypted_modal_deployment_class(modal_deployment_cls: type[Any]) -> type[Any]:
+    class EncryptedModalDeployment(modal_deployment_cls):
+        async def start(self) -> None:
+            """Start the Modal runtime using encrypted sandbox tunnels."""
+            from importlib import import_module
+
+            modal = import_module("modal")
+            RemoteRuntime = import_module("swerex.runtime.remote").RemoteRuntime
+
+            if self._runtime is not None and self._sandbox is not None:
+                self.logger.warning(
+                    "Deployment is already started. Ignoring duplicate start() call."
+                )
+                return
+
+            self.logger.info("Starting modal sandbox")
+            self._hooks.on_custom_step("Starting modal sandbox")
+            t0 = time.time()
+            token = self._get_token()
+            modal_kwargs = _modal_kwargs_with_encrypted_runtime_port(
+                self._modal_kwargs,
+                self._port,
+            )
+            self._sandbox = await modal.Sandbox.create.aio(
+                "/usr/bin/env",
+                "bash",
+                "-c",
+                self._start_swerex_cmd(token),
+                image=self._image,
+                timeout=int(self._deployment_timeout),
+                app=self._app,
+                **modal_kwargs,
+            )
+            tunnels = await self._sandbox.tunnels.aio()
+            tunnel = tunnels[self._port]
+            elapsed_sandbox_creation = time.time() - t0
+            self.logger.info(
+                f"Sandbox ({self._sandbox.object_id}) created in {elapsed_sandbox_creation:.2f}s"
+            )
+            self.logger.info(f"Check sandbox logs at {await self.get_modal_log_url()}")
+            self.logger.info(f"Sandbox created with id {self._sandbox.object_id}")
+            await asyncio.sleep(1)
+            self.logger.info(f"Starting runtime at {tunnel.url}")
+            self._hooks.on_custom_step("Starting runtime")
+            self._runtime = RemoteRuntime(
+                host=tunnel.url,
+                timeout=self._runtime_timeout,
+                auth_token=token,
+                logger=self.logger,
+            )
+            remaining_startup_timeout = max(0, self._startup_timeout - elapsed_sandbox_creation)
+            t1 = time.time()
+            await self._wait_until_alive(timeout=remaining_startup_timeout)
+            self.logger.info(f"Runtime started in {time.time() - t1:.2f}s")
+
+    return EncryptedModalDeployment
+
+
 class SandboxExecutor:
     """Executor for sandboxed command execution via SWE-ReX.
 
@@ -340,7 +419,8 @@ class SandboxExecutor:
                 else:
                     modal_image = modal.Image.from_registry(image)
 
-                return ModalDeployment(
+                EncryptedModalDeployment = _encrypted_modal_deployment_class(ModalDeployment)
+                return EncryptedModalDeployment(
                     image=modal_image,
                     startup_timeout=self.config.startup_timeout,
                     runtime_timeout=self.config.runtime_timeout,
