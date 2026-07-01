@@ -43,6 +43,13 @@ logger = logging.getLogger(__name__)
 # (recursive_search._process_single_lotus_search_task), so track a fixed commit.
 DEEPSCHOLAR_REF = "c95413b3b2f3255b461b90d0ce650f685ae2d1ff"
 
+# Default token budget for upstream's stage LMs (raising the upstream 512 cap that
+# truncates structured outputs). Kept well below max_model_len: LOTUS sends this as
+# max_completion_tokens, and vLLM rejects prompt_tokens + max_completion_tokens >
+# context, so a large budget would starve prompt room on stage prompts that
+# aggregate many reference abstracts. Override with -a stage_max_tokens.
+DEFAULT_STAGE_MAX_TOKENS = 4096
+
 # Mirrors configs/deepscholar_base.yaml; the `lm` block is filled in per run.
 _BASE_CONFIG: dict[str, Any] = {
     "queries_file": "dataset/queries.csv",
@@ -179,6 +186,11 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             "search_queries_per_step": ("Search queries per round (lower cuts arXiv 429s)", None),
             "temperature": ("Generation temperature for the model under test", None),
             "max_tokens": ("Max tokens for the model under test", 10000),
+            "stage_max_tokens": (
+                "Token budget for upstream stage LMs (default 4096; raises the "
+                "upstream 512 cap that truncates taxonomy JSON, kept below context)",
+                None,
+            ),
             "local_model_prefix": (
                 "litellm prefix for local vLLM ('openai' or 'hosted_vllm')",
                 "openai",
@@ -252,8 +264,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                     )
 
                 await self._write_config(executor, model_name, sandbox_url, is_local, ds_args)
-                if ds_args.search_backend in ("s2", "tavily"):
-                    await self._write_search_shim(executor)
+                await self._write_search_shim(executor)
 
                 gen_cmd = self._build_generation_command(ds_args)
                 logger.info(f"[{self.name}] Generation: {gen_cmd}")
@@ -380,16 +391,16 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         logger.info(f"[{self.name}] Wrote search shim to {self._shim_path}")
 
     def _build_generation_command(self, ds_args: DeepScholarArgs) -> str:
-        # Non-arxiv backends run through the shim, which monkeypatches the search
-        # function and then hands off to deepscholar_base.main.
-        if ds_args.search_backend in ("s2", "tavily"):
-            entry = [
-                f"DEEPSCHOLAR_SEARCH_BACKEND={shlex.quote(ds_args.search_backend)}",
-                self._venv_python,
-                self._shim_path,
-            ]
-        else:
-            entry = [self._venv_python, "-m", "deepscholar_base.main"]
+        # Always run through the shim: it applies the stage-LM token-budget fix for
+        # every backend, and (for s2/tavily) also reroutes retrieval. It then hands
+        # off to deepscholar_base.main unchanged.
+        stage_budget = ds_args.stage_max_tokens or DEFAULT_STAGE_MAX_TOKENS
+        entry = [
+            f"DEEPSCHOLAR_SEARCH_BACKEND={shlex.quote(ds_args.search_backend)}",
+            f"DEEPSCHOLAR_STAGE_MAX_TOKENS={stage_budget}",
+            self._venv_python,
+            self._shim_path,
+        ]
         parts = [
             f"cd {self._repo} &&",
             *entry,

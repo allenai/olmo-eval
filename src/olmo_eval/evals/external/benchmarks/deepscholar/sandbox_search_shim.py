@@ -156,11 +156,41 @@ def _make_patched(backend: str, original: Any) -> Any:
     return patched
 
 
-def main() -> None:
-    backend = os.environ.get("DEEPSCHOLAR_SEARCH_BACKEND", "s2")
-    if backend in ("s2", "tavily"):
-        import importlib
+def _patch_stage_max_tokens(max_tokens: int) -> None:
+    """Raise the default stage-LM token budget.
 
+    Upstream ``Configs.initialize_lms`` drops the configured token budget when it
+    builds the filter/search/taxonomize/generation LMs, so they fall back to LOTUS's
+    default (512) and truncate structured outputs (notably the taxonomize
+    ``Categories`` JSON, which then fails to parse). Default a missing ``max_tokens``
+    to the configured budget instead. ``max_tokens`` is a cap, not a target, so this
+    does not lengthen short stage calls; the model-under-test LM and the judge pass
+    ``max_tokens`` explicitly and are unaffected.
+    """
+    import importlib
+
+    lm_attr = "LM"
+    lm_cls = getattr(importlib.import_module("lotus.models"), lm_attr)
+    init_name = "__init__"
+    original_init = getattr(lm_cls, init_name)
+
+    def init(self: Any, *args: Any, **kwargs: Any) -> None:
+        if kwargs.get("max_tokens") is None:
+            kwargs["max_tokens"] = max_tokens
+        original_init(self, *args, **kwargs)
+
+    setattr(lm_cls, init_name, init)
+
+
+def main() -> None:
+    import importlib
+
+    stage_max_tokens = os.environ.get("DEEPSCHOLAR_STAGE_MAX_TOKENS")
+    if stage_max_tokens and int(stage_max_tokens) > 0:
+        _patch_stage_max_tokens(int(stage_max_tokens))
+
+    backend = os.environ.get("DEEPSCHOLAR_SEARCH_BACKEND", "arxiv")
+    if backend in ("s2", "tavily"):
         rs = importlib.import_module("deepscholar_base.search.recursive_search")
         target = "_process_single_lotus_search_task"
         setattr(rs, target, _make_patched(backend, getattr(rs, target)))

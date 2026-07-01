@@ -57,6 +57,11 @@ class DeepScholarArgs:
     search_queries_per_step: int | None = None  # -> num_search_queries_per_step_per_corpus
     temperature: float | None = None
     max_tokens: int = 10000
+    # Token budget for upstream's stage LMs (filter/search/taxonomize/generation),
+    # which otherwise default to 512 and truncate structured outputs. None uses the
+    # eval's DEFAULT_STAGE_MAX_TOKENS (kept below max_model_len, since LOTUS sends it
+    # as max_completion_tokens and the server rejects prompt + budget > context).
+    stage_max_tokens: int | None = None
     # litellm provider prefix for a local OpenAI-compatible (vLLM) server.
     # "openai" routes via litellm's OpenAI handler against api_base; an alternative
     # is "hosted_vllm". Ignored for external API models.
@@ -100,6 +105,7 @@ class DeepScholarArgs:
             search_queries_per_step=_parse_optional(data, "search_queries_per_step", int),
             temperature=_parse_optional(data, "temperature", float),
             max_tokens=int(data.get("max_tokens", 10000)),
+            stage_max_tokens=_parse_optional(data, "stage_max_tokens", int),
             local_model_prefix=data.get("local_model_prefix", "openai"),
             judge_model=data.get("judge_model", "gpt-4o"),
             evals=evals or list(PRIMARY_METRICS),
