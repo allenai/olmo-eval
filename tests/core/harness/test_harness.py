@@ -163,6 +163,42 @@ class TestHarness:
         assert injected == messages
 
 
+class TestHarnessConfig:
+    """Tests for HarnessConfig helpers."""
+
+    def test_merge_provider_preserves_explicit_default_provider_kind(self):
+        """Explicit harness provider kind should win even when it matches the default."""
+        harness_config = HarnessConfig(
+            name="default",
+            provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
+        )
+        model_provider = ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="allenai/Olmo-3-1025-7B",
+        )
+
+        merged = harness_config.merge_provider(
+            model_provider,
+            preserve_provider_kind=True,
+        )
+
+        assert merged.provider.kind == ProviderKind.VLLM_SERVER
+        assert merged.provider.model == "allenai/Olmo-3-1025-7B"
+
+    def test_merge_provider_uses_model_kind_without_explicit_harness_kind(self):
+        """The default empty harness should not override model preset provider kind."""
+        harness_config = HarnessConfig(name="default")
+        model_provider = ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="allenai/Olmo-3-1025-7B",
+        )
+
+        merged = harness_config.merge_provider(model_provider)
+
+        assert merged.provider.kind == ProviderKind.VLLM
+        assert merged.provider.model == "allenai/Olmo-3-1025-7B"
+
+
 class TestCreateHarness:
     """Tests for create_harness factory function."""
 

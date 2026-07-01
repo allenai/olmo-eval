@@ -236,11 +236,18 @@ class HarnessConfig:
         """Create a new config with a different provider configuration."""
         return replace(self, provider=provider)
 
-    def merge_provider(self, provider: ProviderConfig) -> HarnessConfig:
+    def merge_provider(
+        self,
+        provider: ProviderConfig,
+        *,
+        preserve_provider_kind: bool = False,
+    ) -> HarnessConfig:
         """Merge model info from provider while preserving harness provider settings.
 
-        The harness's provider kind takes precedence if explicitly set (non-default),
-        while model-specific fields come from the new provider.
+        Harness provider settings take precedence when they differ from the base
+        provider defaults, while model-specific fields come from the new provider.
+        Set preserve_provider_kind when the caller knows the harness provider kind
+        was explicitly configured, even if it equals the base default.
         """
         defaults = ProviderConfig()
         overrides = {
@@ -248,6 +255,8 @@ class HarnessConfig:
             for f in fields(self.provider)
             if getattr(self.provider, f.name) != getattr(defaults, f.name)
         }
+        if preserve_provider_kind:
+            overrides["kind"] = self.provider.kind
         # kwargs should merge, not replace
         if self.provider.kwargs:
             overrides["kwargs"] = {**provider.kwargs, **self.provider.kwargs}
