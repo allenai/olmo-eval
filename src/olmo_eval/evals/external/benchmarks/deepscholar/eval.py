@@ -136,6 +136,15 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 env[optional] = value
         return env
 
+    def _create_sandbox_config(self, container_runtime: str, output_dir: str | None = None) -> Any:
+        # The bare uv base image has no swe-rex; inject_swerex builds a derived
+        # image with swe-rex (plus git/curl) preinstalled, avoiding the failing
+        # runtime bootstrap. Same approach as the scicode external eval.
+        from dataclasses import replace
+
+        config = super()._create_sandbox_config(container_runtime, output_dir)
+        return replace(config, inject_swerex=True)
+
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
         return {
