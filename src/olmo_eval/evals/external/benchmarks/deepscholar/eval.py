@@ -111,11 +111,18 @@ class DeepScholarExternalEval(SandboxedExternalEval):
     @property
     def setup_command(self) -> tuple[str, ...]:
         repo_url = "https://github.com/guestrin-lab/deepscholar-bench.git"
+        # The repo is ~1.3GB (dataset CSVs + baseline outputs), so a full clone is
+        # slow. Shallow-fetch just the target ref (works for a branch name or a
+        # commit SHA); no submodules exist. checkout FETCH_HEAD lands the snapshot.
         return (
-            f"git clone --recursive {repo_url} {self._repo}",
-            f"cd {self._repo} && git checkout {DEEPSCHOLAR_REF}",
+            f"git init {self._repo}",
+            f"cd {self._repo} && git remote add origin {repo_url}",
+            f"cd {self._repo} && git fetch --depth 1 origin {DEEPSCHOLAR_REF}",
+            f"cd {self._repo} && git checkout FETCH_HEAD",
             f"cd {self._repo} && uv venv --python 3.10",
-            f"cd {self._repo} && uv pip install -r requirements.txt",
+            # Target our .venv explicitly: the swe-rex derived image ships an active
+            # /root/venv (3.12), which uv would otherwise install into by default.
+            f"cd {self._repo} && uv pip install --python {self._venv_python} -r requirements.txt",
             f"mkdir -p {self._gen_dir} {self._eval_dir}",
         )
 
