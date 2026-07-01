@@ -1,6 +1,6 @@
 """Scaffold for the oe-sci-litreview / open-instruct `olmo` tool-calling contract.
 
-sftlab's OLMo-3 SFT checkpoints are trained on the open-instruct `olmo` chat template, whose
+OLMo-3 SFT checkpoints are trained on the open-instruct `olmo` chat template, whose
 tool convention differs from the official Olmo-3 (`[func(arg='x')]` pythonic) format that
 olmo-eval's `openai_agents` scaffold + `olmo3_tool_parser` target. The contract format is:
 

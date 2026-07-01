@@ -115,7 +115,7 @@ class HarnessPresets:
     def oi_contract(name: str) -> HarnessConfig:
         """open-instruct / oe-sci-litreview tool-calling contract preset.
 
-        For sftlab OLMo-3 SFT checkpoints trained on the open-instruct `olmo` template, whose tool
+        For OLMo-3 SFT checkpoints trained on the open-instruct `olmo` template, whose tool
         format (JSON <function_calls>, search/browse/s2_search tools) differs from the official
         Olmo-3 format the openai_agents scaffold + olmo3 parser expect. The oi_contract scaffold
         drives the loop in the model's native text format (no vLLM tool parser needed) and owns the

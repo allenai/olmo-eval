@@ -45,25 +45,20 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             revision="stage2-step47684",
             kwargs={"gpu_memory_utilization": 0.7, "add_bos_token": False},
         ),
-        # sftlab data-ablation checkpoints (OLMo-3-7B SFT-from-base, converted to HF).
-        # Same ProviderConfig shape as the bk/olmo7b-sft-* presets — crucially
-        # max_model_len=4096, which neutralizes the checkpoint's YaRN rope_scaling
-        # (rope_type=yarn, factor 8, attention_factor ~1.21) on the short few-shot
-        # science:nojudge prompts; without the cap vLLM applies YaRN/mscale to all
-        # lengths and the model scores near-random. The model path is per-run, so it
-        # comes from $SFTLAB_EVAL_MODEL (sftlab sets it on the eval job) rather than a
-        # hardcoded path — one preset serves every sftlab arm.
-        "sftlab-olmo3-7b-sft": ProviderConfig(
+        # OLMo-3-7B SFT checkpoints converted to HF (e.g. the olmo_core_native
+        # SFT-from-base pipeline). The model path is per-run, provided via
+        # $OLMO3_EVAL_MODEL, so one preset serves any such checkpoint.
+        # trust_remote_code is the load-bearing fix: without it these YaRN-rope
+        # checkpoints (rope_type=yarn, factor 8, attention_factor ~1.21) score MMLU
+        # ~2% (near-random); with it ~57%. max_model_len defaults to the full 32768
+        # (required for the long-CoT science tasks aime/math500 that request up to
+        # 32768 output tokens); a 4096-vs-32768 diagnostic gave identical mmlu/gsm8k,
+        # so the cap isn't needed for correctness. Tunable via $OLMO3_EVAL_MAX_LEN.
+        "olmo3-7b-sft": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
-            model=os.environ.get("SFTLAB_EVAL_MODEL", ""),
-            # trust_remote_code is the load-bearing fix: without it the bare-path
-            # default eval scored MMLU ~2% (near-random); with it, ~57%. max_model_len
-            # is env-tunable but defaults to the model's full 32768 — a diagnostic
-            # (mmlu/gsm8k at 4096 vs 32768) gave identical scores, so the cap is NOT
-            # needed for correctness, and 32768 is required for the long-CoT science
-            # tasks (aime/math500) that request up to 32768 output tokens.
+            model=os.environ.get("OLMO3_EVAL_MODEL", ""),
             trust_remote_code=True,
-            max_model_len=int(os.environ.get("SFTLAB_EVAL_MAX_LEN", "32768")),
+            max_model_len=int(os.environ.get("OLMO3_EVAL_MAX_LEN", "32768")),
             kwargs={"gpu_memory_utilization": 0.7},
         ),
         # The released, post-trained OLMo-3-7B SFT checkpoint (general instruction tuning,

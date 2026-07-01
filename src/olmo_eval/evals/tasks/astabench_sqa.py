@@ -770,7 +770,7 @@ register_variant(
 # =============================================================================
 # Variant: oe-sci-litreview / open-instruct `olmo` contract output format
 # =============================================================================
-# sftlab's OLMo-3 SFT checkpoints (run via the `oi_contract` harness) produce a
+# OLMo-3 SFT checkpoints (run via the `oi_contract` harness) produce a
 # grounded MARKDOWN report with inline <cite id="S_..">evidence</cite> tags — NOT the
 # {sections,citations} JSON this task's judge parses. This variant (a) feeds the model the
 # bare question (the oi_contract scaffold drives its own contract prompt, so the JSON
