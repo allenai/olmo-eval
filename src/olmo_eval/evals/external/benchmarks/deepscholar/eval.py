@@ -94,7 +94,10 @@ class DeepScholarExternalEval(SandboxedExternalEval):
 
     @property
     def timeout_seconds(self) -> float:
-        return 14400.0  # 4 hours; generation + judge over many queries
+        # 8h per phase. Generation is sequential over queries (~4-5 min each), so a
+        # full 63-query run is ~5h; 4h would kill it mid-run. Well under the 24h
+        # beaker job cap even with generation + eval phases.
+        return 28800.0
 
     @property
     def _repo(self) -> str:
