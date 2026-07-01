@@ -69,6 +69,21 @@ def _merge_dict_into_list_items(items: list[Any], override: dict[str, Any], key_
         _deep_merge(item, copy.deepcopy(override))
 
 
+def _overrides_provider_kind(overrides: list[str]) -> bool:
+    """Whether dotlist overrides explicitly set the harness provider kind."""
+    for override in overrides:
+        if "=" not in override:
+            continue
+        key_path, value = override.split("=", 1)
+        if key_path == "provider.kind":
+            return True
+        if key_path == "provider":
+            parsed_value = _parse_override_value(value)
+            if isinstance(parsed_value, dict) and "kind" in parsed_value:
+                return True
+    return False
+
+
 def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) -> dict[str, Any]:
     """Apply dotlist overrides to a dictionary, handling list indices.
 
@@ -391,11 +406,14 @@ class RunConfigBuilder:
 
         harness_config: HarnessConfig
 
+        preserve_provider_kind = False
+
         if self.harness_preset:
             try:
                 from olmo_eval.harness import get_harness_preset
 
                 harness_config = get_harness_preset(self.harness_preset)
+                preserve_provider_kind = True
             except ValueError as e:
                 console.print(f"[red]Error:[/red] {e}")
                 raise SystemExit(1) from None
@@ -412,6 +430,8 @@ class RunConfigBuilder:
                     else:
                         config_dict = yaml.safe_load(f)
 
+                provider_dict = config_dict.get("provider", {})
+                preserve_provider_kind = isinstance(provider_dict, dict) and "kind" in provider_dict
                 harness_config = HarnessConfig.from_dict(config_dict)
                 console.print(f"[dim]Using harness config: {self.harness_config_path}[/dim]")
             except FileNotFoundError:
@@ -431,6 +451,9 @@ class RunConfigBuilder:
 
         # Apply CLI overrides to harness config
         if self.cli_harness_overrides:
+            preserve_provider_kind = preserve_provider_kind or _overrides_provider_kind(
+                self.cli_harness_overrides
+            )
             harness_dict = harness_config.to_dict()
             harness_dict = _apply_dotlist_overrides(harness_dict, self.cli_harness_overrides)
             harness_config = HarnessConfig.from_dict(harness_dict)
@@ -438,7 +461,10 @@ class RunConfigBuilder:
         from olmo_eval.common.configs import get_provider_config
 
         provider_config = get_provider_config(model_name)
-        harness_config = harness_config.merge_provider(provider_config)
+        harness_config = harness_config.merge_provider(
+            provider_config,
+            preserve_provider_kind=preserve_provider_kind,
+        )
         if self.force_download_model:
             harness_config = harness_config.with_provider_overrides(force_download=True)
 
