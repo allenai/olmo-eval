@@ -39,8 +39,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Pin once a validation run succeeds (see plans/006_deepscholar_bench.md).
-DEEPSCHOLAR_REF = "main"
+# Pinned: the search shim monkeypatches upstream internals
+# (recursive_search._process_single_lotus_search_task), so track a fixed commit.
+DEEPSCHOLAR_REF = "c95413b3b2f3255b461b90d0ce650f685ae2d1ff"
 
 # Mirrors configs/deepscholar_base.yaml; the `lm` block is filled in per run.
 _BASE_CONFIG: dict[str, Any] = {
@@ -109,6 +110,10 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         return f"{self._repo}/olmo_eval_config.yaml"
 
     @property
+    def _shim_path(self) -> str:
+        return f"{self._repo}/olmo_eval_search_shim.py"
+
+    @property
     def setup_command(self) -> tuple[str, ...]:
         repo_url = "https://github.com/guestrin-lab/deepscholar-bench.git"
         # The repo is ~1.3GB (dataset CSVs + baseline outputs), so a full clone is
@@ -161,6 +166,11 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             "limit": ("Number of queries to run (maps to generation --end-idx)", None),
             "start_idx": ("Starting query index", 0),
             "search_mode": ("Search mode: 'agentic' or 'recursive' (default: config value)", None),
+            "search_backend": (
+                "Retrieval backend: 'arxiv' (default, keyless), 's2' (Semantic Scholar, "
+                "needs S2_API_KEY), or 'tavily' (needs TAVILY_API_KEY)",
+                "arxiv",
+            ),
             "web_corpuses": (
                 "Search corpus: ARXIV (keyless), TAVILY, GOOGLE, GOOGLE_SCHOLAR, BING",
                 "ARXIV",
@@ -201,12 +211,24 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         model_name = provider.model_name
         is_local = self._is_local_provider(provider, provider_url)
 
-        # Upstream's agentic search builds a raw OpenAI Agents SDK client and sends
-        # `lm.model` verbatim, so the litellm-style "openai/<model>" prefix the LOTUS
-        # sem-ops require would be rejected by a vLLM server. Recursive search keeps
-        # every model call on the LOTUS/litellm path, where the prefix is consistent.
-        # External API models keep the upstream default (agentic).
-        if is_local and ds_args.search_mode is None:
+        # Fail early on a missing search key rather than deep inside generation.
+        key_for_backend = {"s2": "S2_API_KEY", "tavily": "TAVILY_API_KEY"}.get(
+            ds_args.search_backend
+        )
+        if key_for_backend and not os.environ.get(key_for_backend):
+            return self._error_result(
+                f"search_backend={ds_args.search_backend} requires {key_for_backend} "
+                f"(map it with --secret-env <beaker_secret>:{key_for_backend})",
+                start_time,
+            )
+
+        # The search shim only intercepts the recursive path, so a non-arxiv backend
+        # forces recursive. (Agentic search uses separate LOTUS tools the shim can't
+        # reach, and would still hit arXiv.) Otherwise: local providers default to
+        # recursive because upstream's agentic path sends `lm.model` verbatim to a raw
+        # OpenAI client, which rejects the litellm "openai/<model>" prefix a vLLM
+        # server needs; external API models keep the upstream default (agentic).
+        if ds_args.search_backend in ("s2", "tavily") or (is_local and ds_args.search_mode is None):
             ds_args.search_mode = "recursive"
 
         try:
@@ -230,6 +252,8 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                     )
 
                 await self._write_config(executor, model_name, sandbox_url, is_local, ds_args)
+                if ds_args.search_backend in ("s2", "tavily"):
+                    await self._write_search_shim(executor)
 
                 gen_cmd = self._build_generation_command(ds_args)
                 logger.info(f"[{self.name}] Generation: {gen_cmd}")
@@ -324,6 +348,15 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         config = dict(_BASE_CONFIG)
         config["lm"] = self._build_lm_config(model_name, sandbox_url, is_local, ds_args)
         config["web_corpuses"] = ds_args.web_corpuses
+        # Backend selection (see sandbox_search_shim). For "s2" the shim routes the
+        # hardwired arXiv search to Semantic Scholar, so disable the extra web pass
+        # to avoid duplicate S2 calls. For "tavily" the shim skips arXiv and uses the
+        # TAVILY web corpus, so that pass must stay on.
+        if ds_args.search_backend == "s2":
+            config["enable_web_search"] = False
+        elif ds_args.search_backend == "tavily":
+            config["enable_web_search"] = True
+            config["web_corpuses"] = ["TAVILY"]
         if ds_args.search_mode:
             config["search_mode"] = ds_args.search_mode
         if ds_args.search_steps is not None:
@@ -337,12 +370,29 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         )
         logger.info(f"[{self.name}] Wrote LOTUS config (model={config['lm']['model']})")
 
+    async def _write_search_shim(self, executor: SandboxExecutor) -> None:
+        """Copy the search-backend shim into the sandbox (see sandbox_search_shim)."""
+        source = (Path(__file__).parent / "sandbox_search_shim.py").read_text()
+        encoded = base64.b64encode(source.encode()).decode()
+        await executor.execute_command(
+            f"echo '{encoded}' | base64 -d > {shlex.quote(self._shim_path)}", timeout=30.0
+        )
+        logger.info(f"[{self.name}] Wrote search shim to {self._shim_path}")
+
     def _build_generation_command(self, ds_args: DeepScholarArgs) -> str:
+        # Non-arxiv backends run through the shim, which monkeypatches the search
+        # function and then hands off to deepscholar_base.main.
+        if ds_args.search_backend in ("s2", "tavily"):
+            entry = [
+                f"DEEPSCHOLAR_SEARCH_BACKEND={shlex.quote(ds_args.search_backend)}",
+                self._venv_python,
+                self._shim_path,
+            ]
+        else:
+            entry = [self._venv_python, "-m", "deepscholar_base.main"]
         parts = [
             f"cd {self._repo} &&",
-            self._venv_python,
-            "-m",
-            "deepscholar_base.main",
+            *entry,
             "--output-folder",
             shlex.quote(self._gen_dir),
             "--config-yaml",

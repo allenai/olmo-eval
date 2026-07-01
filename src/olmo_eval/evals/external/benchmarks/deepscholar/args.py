@@ -41,8 +41,14 @@ class DeepScholarArgs:
     limit: int | None = None  # -> generation --end-idx (smoke runs)
     start_idx: int = 0  # -> generation --start-idx
     search_mode: str | None = None  # "agentic" | "recursive"; None keeps the YAML default
-    # Web search corpus for retrieval. ARXIV is keyless (the dataset is arXiv CS
-    # papers); TAVILY/GOOGLE/GOOGLE_SCHOLAR/BING need their own API keys.
+    # Retrieval backend. "arxiv" is upstream's recursive default (keyless, but the
+    # export.arxiv.org API rate-limits/hangs at volume). "s2" routes recursive search
+    # to the Semantic Scholar API via a runtime shim (keyed, request timeouts, no
+    # arXiv hangs; needs S2_API_KEY). "tavily" skips the hardwired arXiv corpus and
+    # uses only the TAVILY web corpus (needs TAVILY_API_KEY).
+    search_backend: str = "arxiv"
+    # Web search corpus for retrieval (arxiv backend only). ARXIV is keyless;
+    # TAVILY/GOOGLE/GOOGLE_SCHOLAR/BING need their own API keys.
     web_corpuses: list[str] = field(default_factory=lambda: ["ARXIV"])
     # Recursive-search intensity. Total search requests scale with
     # steps * queries_per_step * papers; lowering these reduces arXiv 429s. None
@@ -88,6 +94,7 @@ class DeepScholarArgs:
             limit=_parse_optional(data, "limit", int),
             start_idx=int(data.get("start_idx", 0)),
             search_mode=data.get("search_mode"),
+            search_backend=data.get("search_backend", "arxiv"),
             web_corpuses=_as_list(data.get("web_corpuses")) or ["ARXIV"],
             search_steps=_parse_optional(data, "search_steps", int),
             search_queries_per_step=_parse_optional(data, "search_queries_per_step", int),
