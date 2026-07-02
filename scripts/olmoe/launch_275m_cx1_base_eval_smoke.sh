@@ -26,7 +26,7 @@ Environment overrides:
   GPUS=${GPUS:-1}
   TIMEOUT=${TIMEOUT:-2h}
   OLMO_CORE_PACKAGE=${OLMO_CORE_PACKAGE:-https://github.com/allenai/OLMo-core.git@jacobm/olmoe-dev-v2}
-  EXTRA_PROVIDER_DEPS=${EXTRA_PROVIDER_DEPS:-matplotlib}
+  EXTRA_PROVIDER_DEPS=${EXTRA_PROVIDER_DEPS:-matplotlib,nvtx}
   STORE=${STORE:-0}  # Set to 1, or pass --store, once DB secrets exist in the workspace.
   S3_BUCKET=${S3_BUCKET:-ai2-llm}
   S3_PREFIX=${S3_PREFIX:-olmo-eval/olmoe3}
@@ -78,7 +78,7 @@ PRIORITY="${PRIORITY:-urgent}"
 GPUS="${GPUS:-1}"
 TIMEOUT="${TIMEOUT:-2h}"
 OLMO_CORE_PACKAGE="${OLMO_CORE_PACKAGE:-https://github.com/allenai/OLMo-core.git@jacobm/olmoe-dev-v2}"
-EXTRA_PROVIDER_DEPS="${EXTRA_PROVIDER_DEPS:-matplotlib}"
+EXTRA_PROVIDER_DEPS="${EXTRA_PROVIDER_DEPS:-matplotlib,nvtx}"
 S3_BUCKET="${S3_BUCKET:-ai2-llm}"
 S3_PREFIX="${S3_PREFIX:-olmo-eval/olmoe3}"
 
