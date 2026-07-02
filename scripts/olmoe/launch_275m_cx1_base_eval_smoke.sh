@@ -10,13 +10,13 @@ usage() {
   cat <<EOF
 Usage: ${SCRIPT_NAME} [--launch] [--follow] [--store]
 
-Smoke-tests olmo-eval against the optimal 275m Cx1 baseline OLMo-core checkpoint.
+Smoke-tests olmo-eval against the optimal 275m Cx1 baseline HF-converted checkpoint.
 By default this prints the Beaker spec with --dry-run. Pass --launch to submit.
 
 Environment overrides:
   NAME=${NAME:-olmoe3-275m-cx1-baseline-arc-easy-smoke}
   GROUP=${GROUP:-olmoe3-base-eval-smoke}
-  CHECKPOINT=${CHECKPOINT:-/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmoe3-tiny-275m-cx1-b256k-gpu2-ep1mb16-lr2e-3-r2/step15365}
+  CHECKPOINT=${CHECKPOINT:-/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/hf-checkpoints/olmoe3-tiny-275m-cx1-b256k-gpu2-ep1mb16-lr2e-3-r2/step15365}
   TASK=${TASK:-arc_easy:mc:olmo3base}
   LIMIT=${LIMIT:-10}
   CLUSTER=${CLUSTER:-ai2/titan}
@@ -25,8 +25,7 @@ Environment overrides:
   PRIORITY=${PRIORITY:-urgent}
   GPUS=${GPUS:-1}
   TIMEOUT=${TIMEOUT:-2h}
-  OLMO_CORE_PACKAGE=${OLMO_CORE_PACKAGE:-https://github.com/allenai/OLMo-core.git@jacobm/olmoe-dev-v2}
-  EXTRA_PROVIDER_DEPS=${EXTRA_PROVIDER_DEPS:-matplotlib,nvtx}
+  TRUST_REMOTE_CODE=${TRUST_REMOTE_CODE:-true}
   STORE=${STORE:-0}  # Set to 1, or pass --store, once DB secrets exist in the workspace.
   S3_BUCKET=${S3_BUCKET:-ai2-llm}
   S3_PREFIX=${S3_PREFIX:-olmo-eval/olmoe3}
@@ -68,7 +67,7 @@ done
 
 NAME="${NAME:-olmoe3-275m-cx1-baseline-arc-easy-smoke}"
 GROUP="${GROUP:-olmoe3-base-eval-smoke}"
-CHECKPOINT="${CHECKPOINT:-/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmoe3-tiny-275m-cx1-b256k-gpu2-ep1mb16-lr2e-3-r2/step15365}"
+CHECKPOINT="${CHECKPOINT:-/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/hf-checkpoints/olmoe3-tiny-275m-cx1-b256k-gpu2-ep1mb16-lr2e-3-r2/step15365}"
 TASK="${TASK:-arc_easy:mc:olmo3base}"
 LIMIT="${LIMIT:-10}"
 CLUSTER="${CLUSTER:-ai2/titan}"
@@ -77,13 +76,12 @@ BUDGET="${BUDGET:-ai2/oe-other}"
 PRIORITY="${PRIORITY:-urgent}"
 GPUS="${GPUS:-1}"
 TIMEOUT="${TIMEOUT:-2h}"
-OLMO_CORE_PACKAGE="${OLMO_CORE_PACKAGE:-https://github.com/allenai/OLMo-core.git@jacobm/olmoe-dev-v2}"
-EXTRA_PROVIDER_DEPS="${EXTRA_PROVIDER_DEPS:-matplotlib,nvtx}"
+TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-true}"
 S3_BUCKET="${S3_BUCKET:-ai2-llm}"
 S3_PREFIX="${S3_PREFIX:-olmo-eval/olmoe3}"
 
 if [[ ! -f "${CHECKPOINT}/config.json" ]]; then
-  echo "Missing reconstructed OLMo-core config: ${CHECKPOINT}/config.json" >&2
+  echo "Missing HF checkpoint config: ${CHECKPOINT}/config.json" >&2
   exit 1
 fi
 
@@ -95,10 +93,8 @@ cmd=(
   --task "${TASK}"
   --override "limit=${LIMIT}"
   --harness default
-  --override provider.kind=olmo_core
-  --override provider.package="${OLMO_CORE_PACKAGE}"
-  --override provider.dependencies="[${EXTRA_PROVIDER_DEPS}]"
-  --override provider.max_model_len=8192
+  --override provider.kind=hf
+  --override provider.trust_remote_code="${TRUST_REMOTE_CODE}"
   --override provider.dtype=bfloat16
   --cluster "${CLUSTER}"
   --workspace "${WORKSPACE}"
