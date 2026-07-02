@@ -198,6 +198,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 "litellm prefix for local vLLM ('openai' or 'hosted_vllm')",
                 "openai",
             ),
+            "lm_timeout": ("Per-request LM timeout in seconds (guards against hangs)", 240),
             "judge_model": ("Judge model for the eval phase", "gpt-4o"),
             "evals": (
                 "Comma-separated eval metrics, or 'all' for the full upstream set",
@@ -340,6 +341,9 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         lm: dict[str, Any] = {
             "temperature": ds_args.temperature if ds_args.temperature is not None else 1.0,
             "max_tokens": ds_args.max_tokens,
+            # Propagated to litellm; caps stalled requests so one hung call can't wedge
+            # the whole run. Inherited by upstream's stage LMs via configured_lm.kwargs.
+            "timeout": ds_args.lm_timeout,
         }
         if is_local:
             # litellm routes "<prefix>/<model>" to the OpenAI-compatible vLLM server at api_base.

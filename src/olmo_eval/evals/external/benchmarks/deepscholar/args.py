@@ -66,6 +66,10 @@ class DeepScholarArgs:
     # "openai" routes via litellm's OpenAI handler against api_base; an alternative
     # is "hosted_vllm". Ignored for external API models.
     local_model_prefix: str = "openai"
+    # Per-request timeout (s) for LOTUS LM calls, propagated to litellm. Without it a
+    # stalled vLLM request hangs generation until the sandbox watchdog kills the whole
+    # run (losing all completed queries). Kept under the 300s health-poll interval.
+    lm_timeout: int = 240
 
     # Eval phase (judge). Default to the four headline metrics (the geomean
     # inputs); `-a evals=all` opts into the full upstream set (adds
@@ -107,6 +111,7 @@ class DeepScholarArgs:
             max_tokens=int(data.get("max_tokens", 10000)),
             stage_max_tokens=_parse_optional(data, "stage_max_tokens", int),
             local_model_prefix=data.get("local_model_prefix", "openai"),
+            lm_timeout=int(data.get("lm_timeout", 240)),
             judge_model=data.get("judge_model", "gpt-4o"),
             evals=evals or list(PRIMARY_METRICS),
             allow_partial_generation=_parse_bool(data.get("allow_partial_generation")),
