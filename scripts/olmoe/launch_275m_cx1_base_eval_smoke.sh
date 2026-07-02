@@ -4,10 +4,11 @@ set -euo pipefail
 SCRIPT_NAME="$(basename "$0")"
 DO_LAUNCH=false
 FOLLOW=false
+STORE="${STORE:-0}"
 
 usage() {
   cat <<EOF
-Usage: ${SCRIPT_NAME} [--launch] [--follow]
+Usage: ${SCRIPT_NAME} [--launch] [--follow] [--store]
 
 Smoke-tests olmo-eval against the optimal 275m Cx1 baseline OLMo-core checkpoint.
 By default this prints the Beaker spec with --dry-run. Pass --launch to submit.
@@ -25,12 +26,13 @@ Environment overrides:
   GPUS=${GPUS:-1}
   TIMEOUT=${TIMEOUT:-2h}
   OLMO_CORE_PACKAGE=${OLMO_CORE_PACKAGE:-https://github.com/allenai/OLMo-core.git@jacobm/olmoe-dev-v2}
+  STORE=${STORE:-0}  # Set to 1, or pass --store, once DB secrets exist in the workspace.
   S3_BUCKET=${S3_BUCKET:-ai2-llm}
   S3_PREFIX=${S3_PREFIX:-olmo-eval/olmoe3}
 
 Results:
   Local Beaker artifacts are written under /results in the job.
-  With --store, metrics/predictions/requests are uploaded to:
+  With STORE=1, metrics/predictions/requests are also uploaded to:
     s3://$S3_BUCKET/$S3_PREFIX/$GROUP/<model>_<hash>/<experiment_id>/
   And summary rows are saved to the olmo-eval Postgres DB.
 EOF
@@ -43,6 +45,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --follow)
       FOLLOW=true
+      ;;
+    --store)
+      STORE=1
       ;;
     --dry-run)
       DO_LAUNCH=false
@@ -99,11 +104,18 @@ cmd=(
   --preemptible
   --gpus "${GPUS}"
   --timeout "${TIMEOUT}"
-  --store
-  --s3-bucket "${S3_BUCKET}"
-  --s3-prefix "${S3_PREFIX}"
   --yes
 )
+
+if [[ "${STORE}" == "1" ]]; then
+  cmd+=(
+    --store
+    --s3-bucket "${S3_BUCKET}"
+    --s3-prefix "${S3_PREFIX}"
+  )
+else
+  cmd+=(--no-store)
+fi
 
 if [[ "${FOLLOW}" == "false" ]]; then
   cmd+=(--no-follow)
