@@ -164,7 +164,8 @@ def _import_olmo_core() -> OlmoCoreImports:
     except ImportError as e:
         raise ImportError(
             "ai2-olmo-core and transformers are required for OlmoCoreProvider. "
-            "Install with: pip install 'olmo-eval[olmo_core]'"
+            "Install with: pip install 'olmo-eval[olmo_core]'. "
+            f"Underlying import error: {type(e).__name__}: {e}"
         ) from e
 
     return OlmoCoreImports(
