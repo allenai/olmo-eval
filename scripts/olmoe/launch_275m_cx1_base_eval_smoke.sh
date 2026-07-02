@@ -26,6 +26,7 @@ Environment overrides:
   GPUS=${GPUS:-1}
   TIMEOUT=${TIMEOUT:-2h}
   OLMO_CORE_PACKAGE=${OLMO_CORE_PACKAGE:-https://github.com/allenai/OLMo-core.git@jacobm/olmoe-dev-v2}
+  EXTRA_PROVIDER_DEPS=${EXTRA_PROVIDER_DEPS:-matplotlib}
   STORE=${STORE:-0}  # Set to 1, or pass --store, once DB secrets exist in the workspace.
   S3_BUCKET=${S3_BUCKET:-ai2-llm}
   S3_PREFIX=${S3_PREFIX:-olmo-eval/olmoe3}
@@ -77,6 +78,7 @@ PRIORITY="${PRIORITY:-urgent}"
 GPUS="${GPUS:-1}"
 TIMEOUT="${TIMEOUT:-2h}"
 OLMO_CORE_PACKAGE="${OLMO_CORE_PACKAGE:-https://github.com/allenai/OLMo-core.git@jacobm/olmoe-dev-v2}"
+EXTRA_PROVIDER_DEPS="${EXTRA_PROVIDER_DEPS:-matplotlib}"
 S3_BUCKET="${S3_BUCKET:-ai2-llm}"
 S3_PREFIX="${S3_PREFIX:-olmo-eval/olmoe3}"
 
@@ -95,6 +97,7 @@ cmd=(
   --harness default
   --override provider.kind=olmo_core
   --override provider.package="${OLMO_CORE_PACKAGE}"
+  --override provider.dependencies="[${EXTRA_PROVIDER_DEPS}]"
   --override provider.max_model_len=8192
   --override provider.dtype=bfloat16
   --cluster "${CLUSTER}"
