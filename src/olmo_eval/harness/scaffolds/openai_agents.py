@@ -341,6 +341,12 @@ class OpenAIAgentsScaffold(Scaffold):
                         max_turns_reached=True,
                         error=f"Max turns ({max_turns}) exceeded",
                     )
+                if type(e).__name__ == "ModelBehaviorError":
+                    return HarnessResult(
+                        trajectory=AgentTrajectory(turns=()),
+                        final_output=LMOutput(text=f"[Tool error: {e}]"),
+                        error=str(e),
+                    )
 
                 # Log full traceback for debugging connection issues
                 import traceback

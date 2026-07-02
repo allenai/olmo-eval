@@ -17,6 +17,7 @@ import sys
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
+from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider
@@ -61,6 +62,29 @@ def _find_free_internal_port(exclude: set[int] | None = None) -> int:
 
 
 ProgressCallback = Callable[[str], None]
+
+
+@cache
+def _chat_template_has_function_tag(
+    model_name: str, trust_remote_code: bool = False, revision: str | None = None
+) -> bool | None:
+    """Return whether the model chat template contains '<function=', or None if unavailable."""
+    try:
+        from transformers import AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name, trust_remote_code=trust_remote_code, revision=revision
+        )
+        get_chat_template = getattr(tokenizer, "get_chat_template", None)
+        if callable(get_chat_template):
+            chat_template = get_chat_template()
+        else:
+            chat_template = getattr(tokenizer, "chat_template", None)
+        if chat_template is None:
+            return None
+        return "<function=" in str(chat_template)
+    except Exception:
+        return None
 
 
 def _wait_for_server(
@@ -154,7 +178,9 @@ def _wait_for_server(
     return False, last_error, None
 
 
-def _infer_tool_call_parser(model_name: str) -> str:
+def _infer_tool_call_parser(
+    model_name: str, *, trust_remote_code: bool = False, revision: str | None = None
+) -> str:
     """Infer the appropriate tool call parser based on model name.
 
     Args:
@@ -166,13 +192,18 @@ def _infer_tool_call_parser(model_name: str) -> str:
     model_lower = model_name.lower()
     if "llama" in model_lower:
         return "llama3_json"
-    elif "mistral" in model_lower:
+    if "mistral" in model_lower:
         return "mistral"
-    elif "olmo" in model_lower:
+    if "olmo" in model_lower:
         return "olmo3"
-    else:
-        # Default for Qwen and other models
-        return "hermes"
+
+    tag = _chat_template_has_function_tag(model_name, trust_remote_code, revision)
+    if tag:
+        return "qwen3_coder"
+    if tag is None and any(k in model_lower for k in ("qwen3-coder", "qwen3.5", "qwen3.6")):
+        return "qwen3_coder"
+    # Default for Qwen (e.g. Qwen3-8B) and other models
+    return "hermes"
 
 
 def _get_vllm_python() -> str:
@@ -304,7 +335,11 @@ def _build_server_command(
     if enable_auto_tool_choice:
         cmd.append("--enable-auto-tool-choice")
         # Auto-detect parser if not specified
-        parser = tool_call_parser or _infer_tool_call_parser(model_name)
+        parser = tool_call_parser or _infer_tool_call_parser(
+            tokenizer or model_name,
+            trust_remote_code=bool(kwargs.get("trust_remote_code", False)),
+            revision=kwargs.get("revision"),
+        )
         cmd.extend(["--tool-call-parser", parser])
 
         # OLMo3 requires custom chat template for tool calling (only when patch is applied)
