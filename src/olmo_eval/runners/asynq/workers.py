@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import multiprocessing as mp
 import os
+import sys
 import time
 from typing import Any
 
@@ -15,6 +16,76 @@ from olmo_eval.runners.asynq.types import (
 )
 
 logger = get_logger(__name__)
+
+
+def _configure_hf_modules_cache_for_worker(
+    worker_id: str,
+    output_dir: str | None,
+    trust_remote_code: bool,
+    worker_logger: Any,
+) -> None:
+    """Avoid concurrent writes to Transformers' dynamic remote-code cache.
+
+    Local checkpoints with ``trust_remote_code=True`` are copied into
+    Hugging Face's modules cache before import. When many eval workers cold-start
+    the same checkpoint at once, they can observe a partially populated package.
+    Give each worker its own tiny modules cache while keeping the large model
+    and dataset caches shared.
+    """
+    if not trust_remote_code:
+        return
+    if os.environ.get("HF_MODULES_CACHE"):
+        return
+
+    base_dir = output_dir or os.path.join("/tmp", "olmo_eval")
+    safe_worker_id = "".join(c if c.isalnum() or c in "._-" else "_" for c in worker_id)
+    modules_cache = os.path.join(base_dir, ".hf_modules_cache", safe_worker_id)
+    os.makedirs(modules_cache, exist_ok=True)
+    os.environ["HF_MODULES_CACHE"] = modules_cache
+
+    # These constants are computed at import time. If Transformers was imported
+    # before this worker initialized, update the already-imported modules too.
+    for module_name in ("transformers.utils.hub", "transformers.dynamic_module_utils"):
+        module = sys.modules.get(module_name)
+        if module is not None and hasattr(module, "HF_MODULES_CACHE"):
+            module.HF_MODULES_CACHE = modules_cache
+
+    worker_logger.info(f"  HF modules cache: {modules_cache}")
+
+
+def _configure_torch_threads_for_worker(worker_logger: Any) -> None:
+    """Optionally cap PyTorch CPU thread pools inside inference workers."""
+    torch_threads = os.environ.get("OLMO_EVAL_TORCH_NUM_THREADS")
+    if not torch_threads:
+        return
+
+    try:
+        intra_op_threads = int(torch_threads)
+        inter_op_threads = int(os.environ.get("OLMO_EVAL_TORCH_INTEROP_THREADS", "1"))
+    except ValueError:
+        worker_logger.warning(
+            "Ignoring invalid OLMO_EVAL_TORCH_NUM_THREADS/OLMO_EVAL_TORCH_INTEROP_THREADS"
+        )
+        return
+
+    if intra_op_threads < 1 or inter_op_threads < 1:
+        worker_logger.warning(
+            "Ignoring non-positive OLMO_EVAL_TORCH_NUM_THREADS/OLMO_EVAL_TORCH_INTEROP_THREADS"
+        )
+        return
+
+    try:
+        import torch
+
+        torch.set_num_threads(intra_op_threads)
+        torch.set_num_interop_threads(inter_op_threads)
+    except Exception as exc:
+        worker_logger.warning(f"Failed to configure PyTorch CPU threads: {exc}")
+        return
+
+    worker_logger.info(
+        f"  Torch CPU threads: intra_op={intra_op_threads}, inter_op={inter_op_threads}"
+    )
 
 
 def inference_worker(
@@ -47,8 +118,6 @@ def inference_worker(
         num_workers: Number of parallel workers sharing the work.
         start_event: Optional event used to hold all ready workers at a start gate.
     """
-    import sys
-
     from olmo_eval.common.logging import configure_logging, configure_worker_logging
 
     configure_logging()
@@ -83,6 +152,13 @@ def inference_worker(
             worker_logger.info(f"  Tokenizer: {tokenizer}")
         if gpu_ids:
             worker_logger.info(f"  GPUs: {gpu_ids}")
+        _configure_torch_threads_for_worker(worker_logger)
+        _configure_hf_modules_cache_for_worker(
+            worker_id,
+            output_dir,
+            provider_config.trust_remote_code,
+            worker_logger,
+        )
 
         init_start = time.time()
 
@@ -123,19 +199,30 @@ def inference_worker(
             )
             harness_config = harness_config.with_metrics(updated_metrics)
 
+        worker_logger.info("Building harness")
         harness = Harness(harness_config)
+        worker_logger.info("Harness built")
 
         # Force provider creation to catch import errors early
+        worker_logger.info(
+            "Creating provider via harness.provider "
+            "(vLLM may load weights, profile KV cache, and compile kernels)"
+        )
         _ = harness.provider
+        worker_logger.info("Provider object created")
 
         # Validate scaffold requirements early to fail fast
         if harness_config.scaffold:
             from olmo_eval.harness.scaffolds import validate_scaffold
 
+            worker_logger.info("Validating scaffold")
             validate_scaffold(harness_config.scaffold)
+            worker_logger.info("Scaffold validated")
 
         # Initialize metrics reporters early to establish database connections
+        worker_logger.info("Initializing metrics reporters")
         harness.initialize_reporters()
+        worker_logger.info("Metrics reporters initialized")
 
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")
@@ -149,7 +236,9 @@ def inference_worker(
 
             # Initialize scaffold resources (e.g., sandbox manager) before processing
             if harness_config.scaffold:
+                worker_logger.info("Initializing scaffold resources")
                 asyncio.run(harness.scaffold.initialize(harness_config))
+                worker_logger.info("Scaffold resources initialized")
 
             # Get batching strategy from config
             from olmo_eval.runners.asynq.batching import BatchConfig, get_strategy
@@ -174,8 +263,11 @@ def inference_worker(
                 init_queue.put((worker_id, init_time))
 
             if start_event is not None:
+                worker_logger.info("Waiting for worker start gate")
                 start_event.wait()
+                worker_logger.info("Worker start gate released")
 
+            worker_logger.info("Starting inference processing loop")
             asyncio.run(
                 strategy.run(
                     item_queue,
@@ -187,15 +279,19 @@ def inference_worker(
                     num_workers,
                 )
             )
+            worker_logger.info("Inference processing loop returned")
 
             worker_logger.info("Processing complete")
         finally:
             # Clean up harness resources (including sandbox manager)
+            worker_logger.info("Cleaning up harness resources")
             asyncio.run(harness.cleanup())
             # Clean up provider
+            worker_logger.info("Closing provider if supported")
             close_fn = getattr(harness.provider, "close", None)
             if callable(close_fn):
                 close_fn()
+            worker_logger.info("Worker cleanup complete")
 
     except Exception as e:
         import traceback

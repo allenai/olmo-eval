@@ -18,7 +18,7 @@ from olmo_eval.evals.tasks.constants.piqa import PIQA_FIXED_FEWSHOT
 
 @register("piqa")
 class PiQA(Task):
-    data_source = DataSource(path="piqa", split="validation", revision="refs/convert/parquet")
+    data_source = DataSource(path="ybisk/piqa", split="validation", revision="refs/convert/parquet")
     split = Split.VALIDATION
     metrics = (LogprobPerTokenMCAccuracyMetric(),)
     num_fewshot = 0

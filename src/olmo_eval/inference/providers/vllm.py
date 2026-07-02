@@ -131,6 +131,7 @@ class VLLMProvider(InferenceProvider):
         if worker_id:
             _configure_vllm_logger(worker_id)
 
+        logger.info("Importing vLLM LLM class")
         try:
             from vllm import LLM
         except ImportError as e:
@@ -139,6 +140,7 @@ class VLLMProvider(InferenceProvider):
             logger.error(f"Failed to import vllm: {e}")
             logger.error(traceback.format_exc())
             raise ImportError("vllm is required for VLLMProvider") from e
+        logger.info("Imported vLLM LLM class")
 
         super().__init__(model_name)
         self._worker_id = worker_id
@@ -181,7 +183,12 @@ class VLLMProvider(InferenceProvider):
         # matching the old framework's behavior (tokenizer(text, add_special_tokens=False)).
         self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
 
+        logger.info(
+            "Calling vllm.LLM(...) "
+            "(loads weights, initializes engine, profiles KV cache, and may compile kernels)"
+        )
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
+        logger.info("vllm.LLM(...) returned")
 
     @property
     def max_length(self) -> int:
