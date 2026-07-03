@@ -13,6 +13,7 @@ Usage:
 
 import logging
 from collections.abc import Iterator
+from typing import Literal
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
 from olmo_eval.common.metrics import AccuracyMetric, SafetyErrorMetric, SubsetAccuracyMetric
@@ -98,7 +99,7 @@ def make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") 
     return f"Question: {question}\n{choices_text}\nAnswer:"
 
 
-def register_safety_variants(eval_name: str, subsets: list[str]):
+def register_safety_variants(eval_name: str, subsets: tuple[Literal]):
     """
     Build the four variants that the base wildguard safety tasks use.
     """
