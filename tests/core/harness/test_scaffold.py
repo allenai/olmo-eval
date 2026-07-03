@@ -104,6 +104,30 @@ class TestGetScaffold:
 
 
 class TestOpenAIAgentsToolCorrection:
+    def test_get_response_forwarded_parameters_exist_on_sdk_parent(self):
+        """Forwarded keyword names must exist upstream or super() raises TypeError at runtime."""
+        import inspect
+
+        from agents import OpenAIChatCompletionsModel
+
+        sdk_parameters = inspect.signature(OpenAIChatCompletionsModel.get_response).parameters
+        override_parameters = inspect.signature(
+            _get_tool_call_correcting_model_class().get_response
+        ).parameters
+        sdk_has_var_keyword = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in sdk_parameters.values()
+        )
+        missing_parameters = [
+            name
+            for name, parameter in override_parameters.items()
+            if name != "self"
+            and parameter.kind is not inspect.Parameter.VAR_KEYWORD
+            and name not in sdk_parameters
+            and not sdk_has_var_keyword
+        ]
+
+        assert missing_parameters == []
+
     @pytest.mark.anyio
     async def test_fallback_tool_execute_mentions_requested_and_available_tools(self):
         from agents import function_tool
