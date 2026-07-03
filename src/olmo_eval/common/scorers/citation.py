@@ -11,6 +11,7 @@ Ported from astabench citation_eval.py (https://github.com/allenai/asta-bench).
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -47,6 +48,80 @@ JUST_HAS_A_TITLE = "Paper content unavailable. The paper's title is: "
 SEMANTIC_SCHOLAR_BAD_SNIPPET = (
     "Please click on the paper title to read the abstract on Semantic Scholar."
 )
+
+
+def _normalize_grounding_text(text: str) -> str:
+    """Normalize text for source-grounding substring checks."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def ground_citations_in_sources(
+    parsed_response: dict[str, Any], source_text: str
+) -> tuple[dict[str, Any], dict[str, float]]:
+    """Filter fabricated citation evidence against retrieved source text.
+
+    This is the anti-fabrication layer for agentic attributed-QA tasks such as
+    ExpertQA, and is reusable by ScholarQA later. ``source_text`` is the
+    concatenated tool output the agent saw during its trajectory.
+
+    Citations with an ``id`` keep only snippets found verbatim in the source
+    text. If no snippet remains, the citation is kept only when its title is
+    also source-grounded, preserving the title-only half-credit path. Citations
+    without an ``id`` are left untouched and excluded from snippet counts, since
+    they are ignored by citation judging.
+    """
+    grounded_response = copy.deepcopy(parsed_response)
+    normalized_source = _normalize_grounding_text(source_text)
+    n_snippets = 0
+    n_grounded = 0
+
+    for section in grounded_response.get("sections", []):
+        sec_iter = [section]
+        if section.get("table") and isinstance(section["table"], dict):
+            sec_iter.append(section["table"])
+
+        for curr_sec in sec_iter:
+            if "citations" not in curr_sec:
+                continue
+
+            grounded_citations = []
+            for citation in curr_sec.get("citations", []):
+                if not citation.get("id"):
+                    grounded_citations.append(citation)
+                    continue
+
+                raw_snippets = citation.get("snippets", [])
+                if isinstance(raw_snippets, str):
+                    raw_snippets = [raw_snippets]
+                elif not isinstance(raw_snippets, list):
+                    raw_snippets = []
+
+                grounded_snippets = []
+                for snippet in raw_snippets:
+                    snippet_text = str(snippet)
+                    if not snippet_text.strip():
+                        continue
+                    n_snippets += 1
+                    normalized_snippet = _normalize_grounding_text(snippet_text)
+                    if len(normalized_snippet) >= 20 and normalized_snippet in normalized_source:
+                        grounded_snippets.append(snippet)
+                        n_grounded += 1
+
+                citation["snippets"] = grounded_snippets
+                title = citation.get("title", "")
+                normalized_title = _normalize_grounding_text(str(title))
+                title_grounded = bool(normalized_title) and normalized_title in normalized_source
+                if grounded_snippets or title_grounded:
+                    grounded_citations.append(citation)
+            curr_sec["citations"] = grounded_citations
+
+    rate = n_grounded / n_snippets if n_snippets else 0.0
+    return grounded_response, {
+        "n_snippets": float(n_snippets),
+        "n_grounded": float(n_grounded),
+        "snippet_grounding_rate": rate,
+    }
+
 
 # from astabench citation_eval.py:CitationEval.score_citation_group
 CITATION_GROUP_PROMPT = """You are a claim validator. For each claim made in the following text you will determine if it is supported by the quote from it's corresponding inline citations. As is typically done in academic writing, assume that consecutive sentences can share citations. Make sure to also include claims presented in table format. For references with only the title available (ie no quotes from the reference are included), judge them as `supporting` if the title indicates that the paper is likely relevant to the claim being considered. Return a JSON object with a single key `claims` which is a list of `claim` objects, one for each sentence in the text. Each `claim` object contains the claim itself (`text`), a list of `supporting` inline citations and `non_supporting` inline citations and finally a boolean `is_fully_supported` which indicates if the claim is entirely supported by the quotations in the associated citations. Each inline citation corresponding to that claim should appear in either `supporting` or `non_supporting`, but not both. Each claim made in the text should appear in your output, but you should skip sentences covering high level introductory information.

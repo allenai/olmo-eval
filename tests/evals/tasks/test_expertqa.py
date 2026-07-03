@@ -1,11 +1,24 @@
 """Tests for the ExpertQA attributed long-form QA task."""
 
 import json
+import logging
 
 import pytest
 
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
+from olmo_eval.common.types import (
+    AgentTrajectory,
+    AgentTurn,
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+    ToolResult,
+)
+from olmo_eval.evals.suites import get_suite
+from olmo_eval.evals.tasks import expertqa as expertqa_module
 from olmo_eval.evals.tasks.common import get_task, list_tasks
+from olmo_eval.evals.tasks.expertqa import EXPERTQA_OUTPUT_LABELS
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +42,7 @@ class TestRegistration:
             "citation_precision",
             "citation_recall",
             "answer_precision",
+            "snippet_grounding_rate",
         }
 
     def test_primary_metric(self, task):
@@ -102,51 +116,242 @@ class TestFormatRequest:
         assert len(request.messages) == 1
         content = request.messages[0]["content"]
         assert "What is attention?" in content
-        assert "Generate a report" in content
+        assert "well-cited report" in content
+        assert "serper_google_webpage_search" in content
+        assert "serper_fetch_webpage_content" in content
+        assert "`url` is the source page" in content
+        assert "Do not create a References section" in content
 
 
-class TestScoreSingle:
-    def _response(self, parsed):
+class TestScoreResponses:
+    def _response(self, parsed, trajectory):
         instance = Instance(question="What causes X?", metadata={})
-        output = LMOutput(text="", metadata={"parsed_response": parsed})
+        text = json.dumps(parsed) if parsed is not None else "not json at all"
+        output = LMOutput(text=text)
         return Response(
             instance=instance,
             request=LMRequest(request_type=RequestType.CHAT, messages=()),
             outputs=[output],
             scores={},
+            trajectory=trajectory,
         )
 
     @pytest.mark.anyio
-    async def test_no_parsed_response_scores_zero(self, task):
-        response = self._response(None)
-        scores = await task._score_single(response, _unused_judge)
-        assert scores == {
+    async def test_no_parsed_response_scores_zero(self, task, monkeypatch):
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: _unused_judge)
+        response = self._response(None, _trajectory_with_source(""))
+
+        await task.score_responses([response])
+
+        assert response.scores == {
             "citation_precision": 0.0,
             "citation_recall": 0.0,
             "answer_precision": 0.0,
+            "snippet_grounding_rate": 0.0,
             "global_avg": 0.0,
         }
+        assert response.outputs[0].metadata["grounding_stats"]["snippet_grounding_rate"] == 0.0
 
     @pytest.mark.anyio
-    async def test_global_avg_is_mean_of_three_axes(self, task):
+    async def test_global_avg_is_mean_of_three_axes(self, task, monkeypatch):
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: _citation_split_judge)
+        snippet = "Evidence from a fetched source supports the first claim."
         parsed = {
             "sections": [
                 {
                     "text": "Claim A [1]. Claim B [1].",
-                    "citations": [
-                        {"id": "[1]", "snippets": ["evidence from paper"], "title": "Paper"}
-                    ],
+                    "citations": [{"id": "[1]", "snippets": [snippet], "title": "Paper"}],
                 }
             ]
         }
-        response = self._response(parsed)
-        scores = await task._score_single(response, _citation_split_judge)
+        response = self._response(parsed, _trajectory_with_source(snippet))
+
+        await task.score_responses([response])
+
+        scores = response.scores
         # One of two claims attributable -> recall 0.5; precision averages 0.5;
         # no irrelevant paragraphs -> answer_precision 1.0.
         assert scores["citation_recall"] == pytest.approx(0.5)
         assert scores["citation_precision"] == pytest.approx(0.5)
         assert scores["answer_precision"] == pytest.approx(1.0)
+        assert scores["snippet_grounding_rate"] == pytest.approx(1.0)
         assert scores["global_avg"] == pytest.approx((0.5 + 0.5 + 1.0) / 3)
+
+    @pytest.mark.anyio
+    async def test_grounded_snippet_reaches_judge(self, task, monkeypatch):
+        snippet = "This fetched passage exactly supports the grounded ExpertQA answer."
+        judge = _RecordingJudge()
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: judge)
+        parsed = {
+            "sections": [
+                {
+                    "text": "Grounded claim [1].",
+                    "citations": [
+                        {
+                            "id": "[1]",
+                            "url": "https://example.com/source",
+                            "title": "Fetched Source",
+                            "snippets": [snippet],
+                        }
+                    ],
+                }
+            ]
+        }
+        response = self._response(parsed, _trajectory_with_source(f"Fetched text: {snippet}"))
+
+        await task.score_responses([response])
+
+        citation_prompts = [p for p in judge.prompts if "References:" in p]
+        assert citation_prompts
+        assert snippet in citation_prompts[0]
+        assert response.outputs[0].metadata["grounding_stats"] == {
+            "n_snippets": 1.0,
+            "n_grounded": 1.0,
+            "snippet_grounding_rate": 1.0,
+        }
+        assert response.outputs[0].metadata["score:snippet_grounding_rate"] == pytest.approx(1.0)
+        assert response.scores["snippet_grounding_rate"] == pytest.approx(1.0)
+
+    @pytest.mark.anyio
+    async def test_fabricated_snippet_removed_before_judging(self, task, monkeypatch):
+        grounded_snippet = "Fetched evidence appears verbatim in the trajectory source text."
+        fabricated_snippet = "Fabricated evidence never appeared in any fetched page."
+        judge = _RecordingJudge()
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: judge)
+        parsed = {
+            "sections": [
+                {
+                    "text": "One grounded claim [1]. One fabricated citation [2].",
+                    "citations": [
+                        {"id": "[1]", "snippets": [grounded_snippet], "title": "Fetched"},
+                        {"id": "[2]", "snippets": [fabricated_snippet], "title": "Missing"},
+                    ],
+                }
+            ]
+        }
+        response = self._response(parsed, _trajectory_with_source(grounded_snippet))
+
+        await task.score_responses([response])
+
+        citation_prompts = [p for p in judge.prompts if "References:" in p]
+        assert citation_prompts
+        assert grounded_snippet in citation_prompts[0]
+        assert fabricated_snippet not in citation_prompts[0]
+        assert response.outputs[0].metadata["grounding_stats"]["n_snippets"] == 2.0
+        assert response.outputs[0].metadata["grounding_stats"]["n_grounded"] == 1.0
+        assert response.scores["snippet_grounding_rate"] == pytest.approx(0.5)
+
+    @pytest.mark.anyio
+    async def test_fully_fabricated_citation_scores_zero_with_supporting_judge(
+        self, task, monkeypatch
+    ):
+        fabricated_snippet = "Fabricated ExpertQA evidence never appeared in retrieved sources."
+        judge = _EverythingSupportingJudge()
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: judge)
+        parsed = {
+            "sections": [
+                {
+                    "text": "A fully fabricated citation should not receive credit [1].",
+                    "citations": [
+                        {
+                            "id": "[1]",
+                            "snippets": [fabricated_snippet],
+                            "title": "Invented Source Title",
+                        }
+                    ],
+                }
+            ]
+        }
+        response = self._response(
+            parsed, _trajectory_with_source("Retrieved unrelated source text.")
+        )
+
+        await task.score_responses([response])
+
+        assert response.scores["citation_precision"] == pytest.approx(0.0)
+        assert response.scores["citation_recall"] == pytest.approx(0.0)
+        assert response.scores["snippet_grounding_rate"] == pytest.approx(0.0)
+        assert response.outputs[0].metadata["grounding_stats"] == {
+            "n_snippets": 1.0,
+            "n_grounded": 0.0,
+            "snippet_grounding_rate": 0.0,
+        }
+        assert [p for p in judge.prompts if "References:" in p] == []
+
+    @pytest.mark.anyio
+    async def test_missing_trajectory_warns_and_ungrounds_snippets(self, task, monkeypatch, caplog):
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: _citation_split_judge)
+        caplog.set_level(logging.WARNING, logger=expertqa_module.__name__)
+        parsed = {
+            "sections": [
+                {
+                    "text": "Claim with missing trajectory [1].",
+                    "citations": [
+                        {
+                            "id": "[1]",
+                            "snippets": ["This snippet is long enough but has no source text."],
+                            "title": "Missing",
+                        }
+                    ],
+                }
+            ]
+        }
+        response = self._response(parsed, trajectory=None)
+
+        await task.score_responses([response])
+
+        assert response.scores["snippet_grounding_rate"] == pytest.approx(0.0)
+        assert "web_search_agent" in caplog.text
+        assert "no trajectory" in caplog.text
+
+    @pytest.mark.anyio
+    async def test_multi_output_scores_metadata_and_uses_configured_aggregation(self, monkeypatch):
+        task = get_task("expertqa", config_overrides={"output_score_aggregation": "first"})
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: _citation_split_judge)
+        grounded_snippet = "Grounded multi-output evidence appears in fetched content."
+        fabricated = {
+            "sections": [
+                {
+                    "text": "Ungrounded first output [1].",
+                    "citations": [
+                        {
+                            "id": "[1]",
+                            "snippets": ["This first output quote is not in trajectory text."],
+                        }
+                    ],
+                }
+            ]
+        }
+        grounded = {
+            "sections": [
+                {
+                    "text": "Grounded second output [1].",
+                    "citations": [{"id": "[1]", "snippets": [grounded_snippet]}],
+                }
+            ]
+        }
+        response = Response(
+            instance=Instance(question="What causes X?", metadata={}),
+            request=LMRequest(request_type=RequestType.CHAT, messages=()),
+            outputs=[LMOutput(text=json.dumps(fabricated)), LMOutput(text=json.dumps(grounded))],
+            scores={},
+            trajectory=_trajectory_with_source(grounded_snippet),
+        )
+
+        await task.score_responses([response])
+
+        for output in response.outputs:
+            for label in EXPERTQA_OUTPUT_LABELS:
+                assert f"score:{label}" in output.metadata
+        assert response.outputs[0].metadata["score:snippet_grounding_rate"] == pytest.approx(0.0)
+        assert response.outputs[1].metadata["score:snippet_grounding_rate"] == pytest.approx(1.0)
+        assert response.scores["snippet_grounding_rate"] == pytest.approx(0.0)
+
+
+class TestSuiteMembership:
+    def test_expertqa_research_only_for_science_execution_split(self):
+        assert "expertqa" in get_suite("science:research").expand()
+        assert "expertqa" not in get_suite("science:judge").expand()
 
 
 async def _unused_judge(prompt, **kwargs):
@@ -174,4 +379,63 @@ async def _citation_split_judge(prompt, **kwargs):
                 },
             ]
         }
+    )
+
+
+class _RecordingJudge:
+    def __init__(self):
+        self.prompts = []
+
+    async def __call__(self, prompt, **kwargs):
+        self.prompts.append(prompt)
+        if "irrelevant paragraphs" in prompt:
+            return json.dumps({"irrelevant_paragraphs": []})
+        return json.dumps(
+            {
+                "claims": [
+                    {
+                        "text": "Claim",
+                        "supporting": ["[1]"],
+                        "non_supporting": [],
+                        "is_fully_supported": True,
+                    }
+                ]
+            }
+        )
+
+
+class _EverythingSupportingJudge:
+    def __init__(self):
+        self.prompts = []
+
+    async def __call__(self, prompt, **kwargs):
+        self.prompts.append(prompt)
+        if "irrelevant paragraphs" in prompt:
+            return json.dumps({"irrelevant_paragraphs": []})
+        return json.dumps(
+            {
+                "claims": [
+                    {
+                        "text": "Claim",
+                        "supporting": ["[1]"],
+                        "non_supporting": [],
+                        "is_fully_supported": True,
+                    }
+                ]
+            }
+        )
+
+
+def _trajectory_with_source(source_text):
+    return AgentTrajectory(
+        turns=(
+            AgentTurn.tool(
+                [
+                    ToolResult(
+                        tool_call_id="call_1",
+                        content=source_text,
+                    )
+                ]
+            ),
+        )
     )
