@@ -99,7 +99,7 @@ def make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") 
     return f"Question: {question}\n{choices_text}\nAnswer:"
 
 
-def register_safety_variants(eval_name: str, subsets: tuple[Literal]):
+def register_safety_variants(eval_name: str, subsets: tuple[Literal, ...]):
     """
     Build the four variants that the base wildguard safety tasks use.
     """
