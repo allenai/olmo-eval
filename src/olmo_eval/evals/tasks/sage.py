@@ -2,10 +2,16 @@
 
 SAGE asks a model to identify a target paper from a reasoning-intensive query.
 This task scores the model's final output, not the agent trajectory.
+
+Requirements: this task only measures retrieval when run through a
+tool-providing agentic harness (scaffold that executes tool calls, e.g. the
+`paper_search_agent` preset). Run without tools, the model answers from
+parametric memory and scores can look plausible but do not measure retrieval.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -23,8 +29,11 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.evals.tasks.common.base import _store_output_score
 
-SAGE_REPO = "yilunzhao/sage-retrieval"  # HF repo set (OT-1)
+logger = logging.getLogger(__name__)
+
+SAGE_REPO = "allenai/sage-retrieval"  # HF dataset repo in the allenai org
 
 SAGE_SHORT_FORM_PROMPT = (
     "You are helping a researcher identify a scientific paper from a detailed query. "
@@ -294,17 +303,32 @@ class SageShortForm(_SageRetrieval):
         context: Any = None,
     ) -> Sequence[Response]:
         """Score each response by matching the final output against the gold paper."""
+        missing_trajectory = 0
         for response in responses:
-            output = response.outputs[0] if response.outputs else None
-            output_text = output.text if output is not None else ""
-            em = await exact_match(self.matcher, response.instance.metadata["gold"], output_text)
-            response.scores["exact_match"] = em
+            if response.trajectory is None:
+                missing_trajectory += 1
 
-            if output is not None:
+            scores: list[float] = []
+            for output in response.outputs:
+                em = await exact_match(
+                    self.matcher, response.instance.metadata["gold"], output.text
+                )
+                scores.append(em)
                 output.metadata = output.metadata or {}
                 output.metadata["sage_matched"] = bool(em)
                 output.metadata["exact_match"] = em
+                _store_output_score(output, scorer_name="exact_match", score=em)
 
+            response.scores["exact_match"] = self._aggregate_output_scores(dict(enumerate(scores)))
+
+        if missing_trajectory:
+            logger.warning(
+                "SAGE short-form scored %d/%d responses with no trajectory; scores likely "
+                "reflect parametric memory, not agentic retrieval. Run through a "
+                "tool-providing agentic harness such as paper_search_agent.",
+                missing_trajectory,
+                len(responses),
+            )
         return responses
 
 
@@ -369,16 +393,31 @@ class SageOpenEnded(_SageRetrieval):
         context: Any = None,
     ) -> Sequence[Response]:
         """Score each response by relevance-weighted recall over gold papers."""
+        missing_trajectory = 0
         for response in responses:
-            output = response.outputs[0] if response.outputs else None
-            output_text = output.text if output is not None else ""
-            wr = await weighted_recall(
-                self.matcher, response.instance.metadata["golds"], output_text
-            )
-            response.scores["weighted_recall"] = wr
+            if response.trajectory is None:
+                missing_trajectory += 1
 
-            if output is not None:
+            scores: list[float] = []
+            for output in response.outputs:
+                wr = await weighted_recall(
+                    self.matcher, response.instance.metadata["golds"], output.text
+                )
+                scores.append(wr)
                 output.metadata = output.metadata or {}
                 output.metadata["weighted_recall"] = wr
+                _store_output_score(output, scorer_name="weighted_recall", score=wr)
 
+            response.scores["weighted_recall"] = self._aggregate_output_scores(
+                dict(enumerate(scores))
+            )
+
+        if missing_trajectory:
+            logger.warning(
+                "SAGE open-ended scored %d/%d responses with no trajectory; scores likely "
+                "reflect parametric memory, not agentic retrieval. Run through a "
+                "tool-providing agentic harness such as paper_search_agent.",
+                missing_trajectory,
+                len(responses),
+            )
         return responses

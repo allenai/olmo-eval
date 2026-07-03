@@ -3,7 +3,7 @@
 import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
-from olmo_eval.evals.tasks.common import get_task, list_tasks
+from olmo_eval.evals.tasks.common import OutputScoreAggregation, get_task, list_tasks
 from olmo_eval.evals.tasks.sage import (
     SageExactMatchMetric,
     SageExactMatchScorer,
@@ -178,6 +178,47 @@ async def test_score_responses_with_default_normalized_matcher(task, short_form_
 
 
 @pytest.mark.anyio
+async def test_short_form_score_responses_empty_outputs_scores_zero(task, short_form_doc):
+    instance = task.process_doc(short_form_doc)
+    assert instance is not None
+    request = task.format_request(instance)
+    response = Response(instance=instance, request=request, outputs=[])
+
+    scored = await task.score_responses([response])
+
+    assert scored[0].scores["exact_match"] == 0.0
+
+
+@pytest.mark.anyio
+async def test_short_form_score_responses_scores_all_outputs_with_max(short_form_doc):
+    task = get_task(
+        "sage_short_form",
+        config_overrides={"output_score_aggregation": OutputScoreAggregation.MAX},
+    )
+    instance = task.process_doc(short_form_doc)
+    assert instance is not None
+    request = task.format_request(instance)
+    response = Response(
+        instance=instance,
+        request=request,
+        outputs=[
+            LMOutput(text="The paper I found is a different retrieval benchmark."),
+            LMOutput(
+                text=("The paper I found is Compact Retrieval Benchmarks for Deep Research Agents.")
+            ),
+        ],
+    )
+
+    scored = await task.score_responses([response])
+
+    assert scored[0].scores["exact_match"] == 1.0
+    assert scored[0].outputs[0].metadata["score:exact_match"] == 0.0
+    assert scored[0].outputs[1].metadata["score:exact_match"] == 1.0
+    assert scored[0].outputs[0].metadata["sage_matched"] is False
+    assert scored[0].outputs[1].metadata["sage_matched"] is True
+
+
+@pytest.mark.anyio
 async def test_sage_exact_match_scorer_reads_scored_output_metadata(task, short_form_doc):
     instance = task.process_doc(short_form_doc)
     assert instance is not None
@@ -285,3 +326,35 @@ async def test_open_ended_score_responses_weighted_recall(open_task, open_ended_
     assert scored[0].outputs[0].metadata["weighted_recall"] == pytest.approx(0.5)
     assert SageWeightedRecallMetric().compute(scored) == pytest.approx(0.5)
     assert SageWeightedRecallScorer().score(instance, scored[0].outputs[0]) == pytest.approx(0.5)
+
+
+@pytest.mark.anyio
+async def test_open_ended_score_responses_scores_all_outputs_with_first(open_ended_doc):
+    open_task = get_task(
+        "sage_open_ended",
+        config_overrides={"output_score_aggregation": OutputScoreAggregation.FIRST},
+    )
+    instance = open_task.process_doc(open_ended_doc)
+    assert instance is not None
+    request = open_task.format_request(instance)
+    response = Response(
+        instance=instance,
+        request=request,
+        outputs=[
+            LMOutput(text="The relevant papers include unrelated retrieval benchmarks."),
+            LMOutput(
+                text=(
+                    "The relevant papers include Compact Retrieval Benchmarks for "
+                    "Deep Research Agents and Open Evidence Maps for Biology."
+                )
+            ),
+        ],
+    )
+
+    scored = await open_task.score_responses([response])
+
+    assert scored[0].scores["weighted_recall"] == 0.0
+    assert scored[0].outputs[0].metadata["score:weighted_recall"] == 0.0
+    assert scored[0].outputs[1].metadata["score:weighted_recall"] == pytest.approx(0.5)
+    assert scored[0].outputs[0].metadata["weighted_recall"] == 0.0
+    assert scored[0].outputs[1].metadata["weighted_recall"] == pytest.approx(0.5)
