@@ -16,7 +16,7 @@ from collections.abc import Iterator
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
 from olmo_eval.common.metrics import AccuracyMetric, SafetyErrorMetric, SubsetAccuracyMetric
-from olmo_eval.common.scorers.base import SafetyScorer, Scorer
+from olmo_eval.common.scorers import SafetyScorer, Scorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_think_answer, extract_think_answer_only
