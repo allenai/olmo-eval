@@ -13,14 +13,14 @@ Usage:
 
 import logging
 from collections.abc import Iterator
-from typing import Any
 
-from olmo_eval.common.formatters import ChatFormatter
+from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
 from olmo_eval.common.metrics import AccuracyMetric, SafetyErrorMetric, SubsetAccuracyMetric
+from olmo_eval.common.scorers.base import SafetyScorer, Scorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
-from olmo_eval.data import DataLoader
-from olmo_eval.evals.extract import extract_think_answer
-from olmo_eval.evals.tasks.common import Task
+from olmo_eval.data import DataLoader, DataSource
+from olmo_eval.evals.extract import extract_think_answer, extract_think_answer_only
+from olmo_eval.evals.tasks.common import Task, register_variant
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +36,11 @@ base_sampling = SamplingParams(
 class SafetyBase(Task):
     """Base class for safety evaluation tasks."""
 
-    data_source = None
+    data_source: DataSource | None = None
+    fewshot_split: str | None = None
+    fewshot_sample: bool = False
+    sampling_params: SamplingParams = judge_sampling
     formatter = ChatFormatter()
-    sampling_params = judge_sampling
     answer_extractor = extract_think_answer
 
     @property
@@ -55,13 +57,6 @@ class SafetyBase(Task):
                     self._instances_cache.append(instance)
 
         yield from self._instances_cache
-
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
-        """
-        Convert a dataset document to an Instance. This method must be implemented
-        by each task individually.
-        """
-        return None
 
     @property
     def request_type(self) -> RequestType:
@@ -84,10 +79,68 @@ class SafetyBase(Task):
         )
 
 
-def safety_metrics(scorer, subsets):
+def safety_metrics(scorer: Scorer, subsets: list[str]):
     """Build the full metric tuple for a safety judge scorer."""
     return (
         AccuracyMetric(scorer=scorer),
         SafetyErrorMetric(scorer=scorer),
         *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in subsets),
+    )
+
+
+def make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") -> str:
+    choice_labels = "ABCD"
+    label_format = label_prefix + "A."
+    choices_text = "\n".join(
+        f"{label_format.replace('A', label)} {text}"
+        for label, text in zip(choice_labels, choices, strict=False)
+    )
+    return f"Question: {question}\n{choices_text}\nAnswer:"
+
+
+def register_safety_variants(eval_name: str, subsets: list[str]):
+    """
+    Build the four variants that the base wildguard safety tasks use.
+    """
+
+    # Initialize the safety scorer
+    _WG_SCORER = SafetyScorer(
+        provider_name="wg_judge",
+        judge_format="wildguard",
+        judge_request_type=RequestType.COMPLETION,
+    )
+
+    # OpenAI judge variant - uses OpenAI API as the judge
+    register_variant(
+        eval_name,
+        "openai_judge",
+        metrics=safety_metrics(SafetyScorer, subsets),
+        primary_metric=AccuracyMetric(scorer=SafetyScorer),
+        sampling_params=judge_sampling,
+    )
+
+    register_variant(
+        eval_name,
+        "wg_judge",
+        metrics=safety_metrics(_WG_SCORER, subsets),
+        primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+        sampling_params=judge_sampling,
+    )
+
+    register_variant(
+        eval_name,
+        "wg_judge_thinking",
+        metrics=safety_metrics(_WG_SCORER, subsets),
+        primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+        sampling_params=judge_sampling,
+        answer_extractor=extract_think_answer_only,
+    )
+
+    register_variant(
+        eval_name,
+        "base",
+        metrics=safety_metrics(_WG_SCORER, subsets),
+        primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+        sampling_params=base_sampling,
+        formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
     )

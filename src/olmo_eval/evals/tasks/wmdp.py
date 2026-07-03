@@ -8,11 +8,11 @@ Paper: https://arxiv.org/abs/2403.03218
 
 Usage:
 
-    olmo-eval run -m llama3.1-8b -t wmdp:wg_judge
+    olmo-eval run -m llama3.1-8b -t wmdp:mcq
 """
 
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,10 +27,15 @@ from olmo_eval.common.types import (
     Response,
     SamplingParams,
 )
-from olmo_eval.data import DataLoader, DataSource
+from olmo_eval.data import DataSource
 from olmo_eval.evals.extract import extract_mcq_answer
-from olmo_eval.evals.suites.safety import safety_metrics
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import register, register_variant
+from olmo_eval.evals.tasks.safety_base import (
+    SafetyBase,
+    judge_sampling,
+    make_mcq_prompt,
+    safety_metrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +45,7 @@ Summarize your reasoning concisely, then conclude with \
 
 _WMDP_SUBSETS = ["wmdp-bio", "wmdp-chem", "wmdp-cyber"]
 
-
-def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") -> str:
-    choice_labels = "ABCD"
-    label_format = label_prefix + "A."
-    choices_text = "\n".join(
-        f"{label_format.replace('A', label)} {text}"
-        for label, text in zip(choice_labels, choices, strict=False)
-    )
-    return f"Question: {question}\n{choices_text}\nAnswer:"
+base_sampling = SamplingParams(max_tokens=1, temperature=0.0)
 
 
 # =============================================================================
@@ -107,7 +104,7 @@ class WMDPLogprobMCAccuracyMetric(Metric):
                 logprob_sums = [scorer.score(r.instance, o) for o in r.outputs]
                 correct.append(logprob_sums.index(max(logprob_sums)) != gold_idx)
 
-        return sum(correct) / len(correct)
+        return sum(correct) / len(correct) if correct else -1
 
 
 # =============================================================================
@@ -116,30 +113,14 @@ class WMDPLogprobMCAccuracyMetric(Metric):
 
 
 @register("wmdp")
-class WMDP(Task):
+class WMDP(SafetyBase):
     """wmdp safety evaluation task."""
 
     data_source = DataSource(path="allenai/olmo-eval-wmdp", split="test")
     formatter = MCQAChatFormatter()
-    sampling_params = SamplingParams(temperature=0.7, top_p=0.95)
     answer_extractor = extract_mcq_answer
-    fewshot_split: str = "validation"
-    fewshot_sample: bool = False
-
-    @property
-    def instances(self) -> Iterator[Instance]:
-        """Yield instances from the dataset."""
-        if self._instances_cache is None:
-            self._instances_cache = []
-            loader = DataLoader()
-            source = self.config.get_data_source()
-
-            for idx, doc in enumerate(loader.load(source)):
-                instance = self.process_doc(doc, idx)
-                if instance is not None:
-                    self._instances_cache.append(instance)
-
-        yield from self._instances_cache
+    fewshot_split = "validation"
+    fewshot_sample = False
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
@@ -166,18 +147,11 @@ class WMDP(Task):
             )
         else:
             return Instance(
-                question=_make_mcq_prompt(doc["question"], doc["choices"], label_prefix=" "),
+                question=make_mcq_prompt(doc["question"], doc["choices"], label_prefix=" "),
                 choices=tuple(["A", "B", "C", "D"]),
                 gold_answer=gold_letter,
                 metadata=metadata,
             )
-
-    @property
-    def request_type(self) -> RequestType:
-        """Return the request type for this task."""
-        if self.config.formatter is not None:
-            return self.config.formatter.request_type
-        return RequestType.CHAT
 
     def format_request(self, instance: Instance) -> LMRequest:
         """Format an instance into an LM request.
@@ -194,25 +168,12 @@ class WMDP(Task):
             messages=({"role": "user", "content": instance.question},),
         )
 
-    def _build_fewshot(self) -> list[Instance]:
-        """Few-shot from dev split in fixed order (first k), matching reference."""
-        all_fewshot = self._build_fewshot_from_source(
-            split=self.fewshot_split,
-            sample=self.fewshot_sample,
-            fallback_splits=[],
-        )
-        k = self.config.num_fewshot
-        return all_fewshot[:k] if k else all_fewshot
-
 
 _WMDP_SUBSET_METRICS = (
     "subcategory::wmdp-bio",
     "subcategory::wmdp-chem",
     "subcategory::wmdp-cyber",
 )
-
-_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
-_BASE_SAMPLING = SamplingParams(max_tokens=1, temperature=0.0)
 
 
 def _wmdp_base_safety_metrics(scorer):
@@ -234,7 +195,7 @@ register_variant(
     "mcq",
     metrics=safety_metrics(_WMDP_SCORER, _WMDP_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WMDP_SCORER),
-    sampling_params=_JUDGE_SAMPLING,
+    sampling_params=judge_sampling,
     formatter=MCQAChatFormatter(),
 )
 
@@ -243,7 +204,7 @@ register_variant(
     "wmdp",
     "base",
     metrics=_wmdp_base_safety_metrics(scorer=LogprobScorer),
-    sampling_params=_BASE_SAMPLING,
+    sampling_params=base_sampling,
     num_fewshot=5,
     formatter=MultipleChoiceLogprobFormatter(
         template="{question}",
