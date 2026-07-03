@@ -197,11 +197,18 @@ def _infer_tool_call_parser(
     if "olmo" in model_lower:
         return "olmo3"
 
+    name_suggests_xml = any(k in model_lower for k in ("qwen3-coder", "qwen3.5", "qwen3.6"))
     tag = _chat_template_has_function_tag(model_name, trust_remote_code, revision)
     if tag:
         return "qwen3_coder"
-    if tag is None and any(k in model_lower for k in ("qwen3-coder", "qwen3.5", "qwen3.6")):
+    if tag is None and name_suggests_xml:
         return "qwen3_coder"
+    if tag is False and name_suggests_xml:
+        logger.warning(
+            "Model name %s suggests XML-style tool calls but its chat template does not contain "
+            "'<function='; using 'hermes'; pass tool_call_parser explicitly to override.",
+            model_name,
+        )
     # Default for Qwen (e.g. Qwen3-8B) and other models
     return "hermes"
 
