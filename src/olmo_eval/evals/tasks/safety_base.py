@@ -79,7 +79,7 @@ class SafetyBase(Task):
         )
 
 
-def safety_metrics(scorer: Scorer, subsets: list[str]):
+def safety_metrics(scorer: Scorer, subsets: tuple[str, ...]):
     """Build the full metric tuple for a safety judge scorer."""
     return (
         AccuracyMetric(scorer=scorer),
