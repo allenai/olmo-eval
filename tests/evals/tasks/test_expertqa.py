@@ -143,7 +143,6 @@ class TestFormatRequest:
         assert request.request_type == RequestType.CHAT
         assert len(request.messages) == 1
         content = request.messages[0]["content"]
-        assert "What is attention?" in content
         assert "well-cited report" in content
         assert "serper_google_webpage_search" in content
         assert "serper_fetch_webpage_content" in content
@@ -152,19 +151,26 @@ class TestFormatRequest:
         assert "The first character of your final answer must be '{'" in content
         assert "Do not use Markdown, code fences, headings" in content
         assert "Do not create a References section" in content
+        assert "Do not answer from memory. You must search before answering" in content
+        workflow_start = content.index("Workflow (follow in order):")
+        assert workflow_start > content.index("Your final answer must consist")
+        assert content.endswith("Question: What is attention?")
 
     def test_cite_request_uses_cite_prompt(self, cite_task):
         instance = Instance(question="What is attention?", metadata={})
         request = cite_task.format_request(instance)
         assert request.request_type == RequestType.CHAT
         content = request.messages[0]["content"]
-        assert "What is attention?" in content
         assert "Markdown is allowed" in content
         assert "Do not return JSON." in content
         assert '<cite url="https://example.com/page">claim text</cite>' in content
         assert "serper_google_webpage_search" in content
         assert "serper_fetch_webpage_content" in content
+        assert "Do not answer from memory. You must search before answering" in content
+        workflow_start = content.index("Workflow (follow in order):")
+        assert workflow_start > content.index("Do not return JSON.")
         assert "Return valid JSON" not in content
+        assert content.endswith("Question: What is attention?")
 
 
 class TestScoreResponses:

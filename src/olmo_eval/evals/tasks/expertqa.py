@@ -97,6 +97,13 @@ Do not use Markdown, code fences, headings, or any text outside the JSON.
 If no supporting source was found for a claim, do not attach a fabricated citation.
 Do not create a References section.
 
+Workflow (follow in order):
+1. Call serper_google_webpage_search to find relevant pages.
+2. Call serper_fetch_webpage_content to read the most promising pages.
+3. Only after you have gathered evidence from fetched pages, write your final answer.
+Do not answer from memory. You must search before answering and read pages before answering.
+When you answer, output only the single JSON object described above.
+
 Question: """
 
 EXPERTQA_CITE_PROMPT = """Answer the following expert question in plain prose. Markdown is allowed.
@@ -114,6 +121,13 @@ For every source-based claim, wrap the exact claim text in a cite tag:
 Use the exact URL of a page you fetched or a search result you relied on. Do not
 invent URLs. Every factual claim needs a citation.
 Do not create a References section.
+
+Workflow (follow in order):
+1. Call serper_google_webpage_search to find relevant pages.
+2. Call serper_fetch_webpage_content to read the most promising pages.
+3. Only after you have gathered evidence from fetched pages, write your final answer.
+Do not answer from memory. You must search before answering and read pages before answering.
+When you answer, write prose with <cite url="..."> tags as described above.
 
 Question: """
 
