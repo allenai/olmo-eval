@@ -201,8 +201,9 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             "lm_timeout": ("Per-request LM timeout in seconds (guards against hangs)", 240),
             "judge_model": ("Judge model for the eval phase", "gpt-4o"),
             "evals": (
-                "Comma-separated eval metrics, or 'all' for the full upstream set",
-                "organization,nugget_coverage,reference_coverage,cite_p",
+                "Comma-separated eval metrics (default: all seven), or 'all'",
+                "organization,nugget_coverage,coverage_relevance_rate,document_importance,"
+                "reference_coverage,cite_p,claim_coverage",
             ),
             "allow_partial_generation": (
                 "Score even if some generation queries failed (default: require all)",
@@ -281,26 +282,41 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 all_output.append(f"$ {gen_cmd}\n{gen_result.output}")
                 logger.info(f"[{self.name}] Generation exit code: {gen_result.exit_code}")
 
-                if not gen_result.success:
-                    return self._error_result(
-                        "Generation phase failed", start_time, "\n".join(all_output)
-                    )
-
-                # Generation catches per-query exceptions and still exits 0. The eval
-                # then scores only the folders that succeeded, so partial generation
-                # would silently report metrics over a smaller subset than requested.
-                # Require every query to succeed unless partial runs are opted into.
+                # How much generation actually completed. summary.json is written only
+                # when generation finishes, so a killed run (timeout / "sandbox
+                # unresponsive" abort) leaves none — fall back to counting the per-query
+                # folders that hold a final_report.md. Those folders persist on disk even
+                # when the command is killed, so we salvage them rather than discard the
+                # whole run.
                 n_success, n_total = await self._generation_counts(executor)
-                logger.info(f"[{self.name}] Generation: {n_success}/{n_total} queries succeeded")
-                incomplete = n_success != n_total and not ds_args.allow_partial_generation
-                if n_success == 0 or incomplete:
+                if n_total == 0:
+                    n_success = await self._completed_query_count(executor)
+                    n_total = ds_args.limit if ds_args.limit is not None else n_success
+                logger.info(
+                    f"[{self.name}] Generation {'ok' if gen_result.success else 'FAILED'}: "
+                    f"{n_success}/{n_total} queries completed"
+                )
+
+                # Strict by default: only score a whole run, or a partial one when
+                # explicitly opted in. Generation catches per-query exceptions and still
+                # exits 0, and a killed run leaves partial folders, so both cases would
+                # otherwise score a smaller subset than requested. A killed generation is
+                # treated as partial. Either way, copy completed folders back so a crashed
+                # run's work can be inspected or combined offline.
+                whole = gen_result.success and n_success == n_total
+                may_score = n_success > 0 and (whole or ds_args.allow_partial_generation)
+                if not may_score:
                     if output_dir:
                         await self._copy_back(executor, output_dir)
+                    reason = (
+                        "Generation phase failed"
+                        if not gen_result.success
+                        else f"Generation incomplete: {n_success}/{n_total} queries succeeded"
+                    )
                     return self._error_result(
-                        f"Generation incomplete: {n_success}/{n_total} queries succeeded; "
-                        "skipping eval to avoid scoring a partial subset "
-                        "(pass -a allow_partial_generation=true to score anyway; "
-                        "see copied summary.json)",
+                        f"{reason}; skipping eval "
+                        "(pass -a allow_partial_generation=true to score what completed; "
+                        "completed folders copied back for inspection)",
                         start_time,
                         "\n".join(all_output),
                     )
@@ -323,6 +339,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                     output_dir,
                     n_success=n_success,
                     n_total=n_total,
+                    generation_ok=gen_result.success,
                 )
 
         except Exception as e:
@@ -460,6 +477,25 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         n_success = sum(1 for r in summary if isinstance(r, dict) and r.get("status") == "success")
         return (n_success, len(summary))
 
+    async def _completed_query_count(self, executor: SandboxExecutor) -> int:
+        """Count generation query folders that finished, by their final_report.md.
+
+        Used when summary.json is absent because generation was killed mid-run:
+        final_report.md is the last artifact written per query, so its presence is a
+        proxy for a completed, scorable folder (the eval scores per-folder anyway).
+        """
+        find = await executor.execute_command(
+            f"find {shlex.quote(self._gen_dir)} -mindepth 2 -maxdepth 2 "
+            "-type f -name final_report.md 2>/dev/null | wc -l",
+            timeout=60.0,
+        )
+        if not find.success:
+            return 0
+        try:
+            return int(find.output.strip())
+        except (ValueError, AttributeError):
+            return 0
+
     async def _read_dir(
         self, executor: SandboxExecutor, remote_dir: str, pattern: str
     ) -> dict[str, str]:
@@ -486,6 +522,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         output_dir: str | None = None,
         n_success: int = 0,
         n_total: int = 0,
+        generation_ok: bool = True,
     ) -> ExternalEvalResult:
         # Canonical layout: evaluation/<metric>/aggregated_results.csv holds the
         # aggregate for each metric on a single `deepscholar_base` row. The metric
@@ -536,6 +573,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 "ref": DEEPSCHOLAR_REF,
                 "queries_succeeded": n_success,
                 "queries_total": n_total,
+                "generation_complete": generation_ok and n_success == n_total,
             },
             raw_output=raw_output,
         )

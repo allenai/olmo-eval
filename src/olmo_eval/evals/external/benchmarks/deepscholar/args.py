@@ -8,9 +8,20 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Metric names emitted by the upstream eval (`--evals all`). The geometric mean
-# of these is DeepScholar-Bench's headline score.
-PRIMARY_METRICS = ("organization", "nugget_coverage", "reference_coverage", "cite_p")
+# The seven metrics DeepScholar-Bench defines (paper Table 1), grouped by
+# dimension: knowledge synthesis, retrieval quality, verifiability. The paper's
+# headline score is the geometric mean over all seven (Table 2 "Geo. Mean"; no
+# system exceeds ~31%). These strings are the upstream EvaluationFunction values,
+# which are also the per-metric output subdir and aggregated_results.csv column.
+PRIMARY_METRICS = (
+    "organization",
+    "nugget_coverage",
+    "coverage_relevance_rate",
+    "document_importance",
+    "reference_coverage",
+    "cite_p",
+    "claim_coverage",
+)
 
 
 def _parse_optional(data: dict[str, Any], key: str, type_fn: type) -> Any:
@@ -71,9 +82,10 @@ class DeepScholarArgs:
     # run (losing all completed queries). Kept under the 300s health-poll interval.
     lm_timeout: int = 240
 
-    # Eval phase (judge). Default to the four headline metrics (the geomean
-    # inputs); `-a evals=all` opts into the full upstream set (adds
-    # document_importance, claim_coverage, coverage_relevance_rate).
+    # Eval phase (judge). Default to all seven metrics (the geomean inputs and how
+    # both the paper's Table 2 and the leaderboard report results). Pass a
+    # comma-separated subset to run fewer; the geomean is reported only when every
+    # metric in PRIMARY_METRICS is present.
     judge_model: str = "gpt-4o"
     evals: list[str] = field(default_factory=lambda: list(PRIMARY_METRICS))
 
