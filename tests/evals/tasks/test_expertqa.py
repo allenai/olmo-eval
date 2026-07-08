@@ -13,6 +13,7 @@ from olmo_eval.common.types import (
     LMRequest,
     RequestType,
     Response,
+    ToolCall,
     ToolResult,
 )
 from olmo_eval.evals.suites import get_suite
@@ -31,9 +32,17 @@ def task():
     return get_task("expertqa")
 
 
+@pytest.fixture
+def cite_task():
+    return get_task("expertqa:cite")
+
+
 class TestRegistration:
     def test_task_registered(self):
         assert "expertqa" in list_tasks()
+
+    def test_cite_task_registered(self):
+        assert "expertqa:cite" in list_tasks()
 
     def test_metrics_exclude_ingredient_recall(self, task):
         metric_names = {m.name for m in task.config.metrics}
@@ -107,6 +116,25 @@ class TestExtractAnswer:
         assert result is not None
         assert "sections" in result
 
+    def test_cite_extract_answer_parses_tags(self, cite_task):
+        text = (
+            "<think>\nplan\n</think>\n"
+            'Intro <cite url="https://example.com/source">Grounded claim.</cite>'
+        )
+        output = LMOutput(text=text)
+        result = cite_task.extract_answer(output)
+        assert result is not None
+        assert result["sections"][0]["text"] == "Intro Grounded claim. [1]"
+        assert result["sections"][0]["citations"] == [
+            {
+                "id": "[1]",
+                "url": "https://example.com/source",
+                "title": "",
+                "snippets": [],
+            }
+        ]
+        assert output.metadata["parsed_response"] == result
+
 
 class TestFormatRequest:
     def test_chat_request_embeds_question(self, task):
@@ -120,7 +148,23 @@ class TestFormatRequest:
         assert "serper_google_webpage_search" in content
         assert "serper_fetch_webpage_content" in content
         assert "`url` is the source page" in content
+        assert "Your final answer must consist of ONLY a single JSON object" in content
+        assert "The first character of your final answer must be '{'" in content
+        assert "Do not use Markdown, code fences, headings" in content
         assert "Do not create a References section" in content
+
+    def test_cite_request_uses_cite_prompt(self, cite_task):
+        instance = Instance(question="What is attention?", metadata={})
+        request = cite_task.format_request(instance)
+        assert request.request_type == RequestType.CHAT
+        content = request.messages[0]["content"]
+        assert "What is attention?" in content
+        assert "Markdown is allowed" in content
+        assert "Do not return JSON." in content
+        assert '<cite url="https://example.com/page">claim text</cite>' in content
+        assert "serper_google_webpage_search" in content
+        assert "serper_fetch_webpage_content" in content
+        assert "Return valid JSON" not in content
 
 
 class TestScoreResponses:
@@ -347,11 +391,203 @@ class TestScoreResponses:
         assert response.outputs[1].metadata["score:snippet_grounding_rate"] == pytest.approx(1.0)
         assert response.scores["snippet_grounding_rate"] == pytest.approx(0.0)
 
+    @pytest.mark.anyio
+    async def test_cite_grounded_fetched_url_reaches_judge(self, cite_task, monkeypatch):
+        page_excerpt = "Fetched page evidence supports the cite-tag ExpertQA claim."
+        judge = _RecordingJudge()
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: judge)
+        response = _cite_response(
+            '<cite url="https://example.com/source">Grounded cite claim.</cite>',
+            _trajectory_with_search_and_fetch(
+                fetch_url="https://example.com/source",
+                fetch_content=page_excerpt,
+                search_content="URL: https://example.com/source\nURL: https://example.com/other",
+            ),
+        )
+
+        await cite_task.score_responses([response])
+
+        citation_prompts = [p for p in judge.prompts if "References:" in p]
+        assert citation_prompts
+        assert page_excerpt in citation_prompts[0]
+        assert response.outputs[0].metadata["grounding_stats"] == {
+            "n_citations": 1.0,
+            "n_grounded": 1.0,
+            "n_half": 0.0,
+            "snippet_grounding_rate": 1.0,
+        }
+        assert response.scores["snippet_grounding_rate"] == pytest.approx(1.0)
+
+    @pytest.mark.anyio
+    async def test_cite_invented_url_scores_zero_with_supporting_judge(
+        self, cite_task, monkeypatch
+    ):
+        judge = _EverythingSupportingJudge()
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: judge)
+        response = _cite_response(
+            '<cite url="https://invented.example/missing">Invented cite claim.</cite>',
+            _trajectory_with_search_and_fetch(
+                fetch_url="https://example.com/source",
+                fetch_content="Fetched content for a different source.",
+                search_content="URL: https://example.com/source",
+            ),
+        )
+
+        await cite_task.score_responses([response])
+
+        assert response.scores["citation_precision"] == pytest.approx(0.0)
+        assert response.scores["citation_recall"] == pytest.approx(0.0)
+        assert response.scores["snippet_grounding_rate"] == pytest.approx(0.0)
+        assert response.outputs[0].metadata["grounding_stats"] == {
+            "n_citations": 1.0,
+            "n_grounded": 0.0,
+            "n_half": 0.0,
+            "snippet_grounding_rate": 0.0,
+        }
+        assert [p for p in judge.prompts if "References:" in p] == []
+
+    @pytest.mark.anyio
+    async def test_cite_empty_url_scores_zero_with_supporting_judge(self, cite_task, monkeypatch):
+        judge = _EverythingSupportingJudge()
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: judge)
+        response = _cite_response(
+            '<cite url="">Empty-url cite claim.</cite>',
+            _trajectory_with_search_and_fetch(
+                fetch_url="https://example.com/source",
+                fetch_content="Fetched content for a source.",
+                search_content="URL: https://example.com/source",
+            ),
+        )
+
+        await cite_task.score_responses([response])
+
+        assert response.outputs[0].metadata["parsed_response"] is None
+        assert response.scores["citation_precision"] == pytest.approx(0.0)
+        assert response.scores["citation_recall"] == pytest.approx(0.0)
+        assert response.scores["snippet_grounding_rate"] == pytest.approx(0.0)
+        assert response.outputs[0].metadata["grounding_stats"] == {
+            "n_snippets": 0.0,
+            "n_grounded": 0.0,
+            "snippet_grounding_rate": 0.0,
+        }
+        assert [p for p in judge.prompts if "References:" in p] == []
+
+    @pytest.mark.anyio
+    async def test_cite_fetch_error_routes_to_half_credit(self, cite_task, monkeypatch):
+        judge = _RecordingJudge()
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: judge)
+        response = _cite_response(
+            '<cite url="https://example.com/source">Error-fetch cite claim.</cite>',
+            _trajectory_with_search_and_fetch(
+                fetch_url="https://example.com/source",
+                fetch_content="Error fetching webpage: timed out",
+                search_content="URL: https://example.com/source",
+                fetch_is_error=True,
+            ),
+        )
+
+        await cite_task.score_responses([response])
+
+        citation_prompts = [p for p in judge.prompts if "References:" in p]
+        assert citation_prompts
+        assert "Paper content unavailable" in citation_prompts[0]
+        assert "The paper's title is: https://example.com/source" in citation_prompts[0]
+        assert "Error fetching webpage" not in citation_prompts[0]
+        assert response.outputs[0].metadata["grounding_stats"] == {
+            "n_citations": 1.0,
+            "n_grounded": 0.0,
+            "n_half": 1.0,
+            "snippet_grounding_rate": 0.0,
+        }
+
 
 class TestSuiteMembership:
     def test_expertqa_research_only_for_science_execution_split(self):
         assert "expertqa" in get_suite("science:research").expand()
         assert "expertqa" not in get_suite("science:judge").expand()
+
+
+class TestTrajectoryUrlContent:
+    def test_good_fetch_content_survives_later_error_refetch(self):
+        url = "https://example.com/source"
+        good_content = "Fetched page evidence that should remain mapped."
+        trajectory = AgentTrajectory(
+            turns=(
+                AgentTurn.assistant(
+                    tool_calls=[
+                        ToolCall.create(
+                            "fetch_1",
+                            "serper_fetch_webpage_content",
+                            {"url": url},
+                        )
+                    ]
+                ),
+                AgentTurn.tool(
+                    [
+                        ToolResult(
+                            tool_call_id="fetch_1",
+                            content=good_content,
+                        )
+                    ]
+                ),
+                AgentTurn.assistant(
+                    tool_calls=[
+                        ToolCall.create(
+                            "fetch_2",
+                            "serper_fetch_webpage_content",
+                            {"url": url},
+                        )
+                    ]
+                ),
+                AgentTurn.tool(
+                    [
+                        ToolResult(
+                            tool_call_id="fetch_2",
+                            content="Error fetching webpage: timed out",
+                            is_error=True,
+                        )
+                    ]
+                ),
+            )
+        )
+
+        url_to_content = expertqa_module._trajectory_url_content(_cite_response("", trajectory))
+
+        assert url_to_content[url] == good_content
+
+    def test_two_tool_calls_pair_results_by_order_when_ids_empty(self):
+        fetch_url = "https://example.com/source"
+        search_content = f"URL: {fetch_url}\nSearch result text should not be fetch evidence."
+        fetch_content = "Fetched page evidence belongs to the fetch call."
+        trajectory = AgentTrajectory(
+            turns=(
+                AgentTurn.assistant(
+                    tool_calls=[
+                        ToolCall.create(
+                            "",
+                            "serper_google_webpage_search",
+                            {"query": "expertqa source"},
+                        ),
+                        ToolCall.create(
+                            "",
+                            "serper_fetch_webpage_content",
+                            {"url": fetch_url},
+                        ),
+                    ]
+                ),
+                AgentTurn.tool(
+                    [
+                        ToolResult(tool_call_id="", content=search_content),
+                        ToolResult(tool_call_id="", content=fetch_content),
+                    ]
+                ),
+            )
+        )
+
+        url_to_content = expertqa_module._trajectory_url_content(_cite_response("", trajectory))
+
+        assert url_to_content[fetch_url] == fetch_content
+        assert url_to_content[fetch_url] != search_content
 
 
 async def _unused_judge(prompt, **kwargs):
@@ -434,6 +670,63 @@ def _trajectory_with_source(source_text):
                     ToolResult(
                         tool_call_id="call_1",
                         content=source_text,
+                    )
+                ]
+            ),
+        )
+    )
+
+
+def _cite_response(text, trajectory):
+    return Response(
+        instance=Instance(question="What causes X?", metadata={}),
+        request=LMRequest(request_type=RequestType.CHAT, messages=()),
+        outputs=[LMOutput(text=text)],
+        scores={},
+        trajectory=trajectory,
+    )
+
+
+def _trajectory_with_search_and_fetch(
+    fetch_url,
+    fetch_content,
+    search_content,
+    fetch_is_error=False,
+):
+    return AgentTrajectory(
+        turns=(
+            AgentTurn.assistant(
+                tool_calls=[
+                    ToolCall.create(
+                        "",
+                        "serper_google_webpage_search",
+                        {"query": "expertqa source"},
+                    )
+                ]
+            ),
+            AgentTurn.tool(
+                [
+                    ToolResult(
+                        tool_call_id="",
+                        content=search_content,
+                    )
+                ]
+            ),
+            AgentTurn.assistant(
+                tool_calls=[
+                    ToolCall.create(
+                        "",
+                        "serper_fetch_webpage_content",
+                        {"url": fetch_url},
+                    )
+                ]
+            ),
+            AgentTurn.tool(
+                [
+                    ToolResult(
+                        tool_call_id="",
+                        content=fetch_content,
+                        is_error=fetch_is_error,
                     )
                 ]
             ),

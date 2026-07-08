@@ -20,18 +20,26 @@ they cannot grade a fresh model answer directly. We therefore score a model
 under test on citation_precision, citation_recall, answer_precision, and a
 separate snippet_grounding_rate that reports how much quoted evidence was found
 in retrieved tool text.
+
+Answer formats: `expertqa` is the primary/official JSON-schema task.
+`expertqa:cite` is prose with cite tags. Both feed the same metrics, but numbers
+are not comparable across modes; pick one mode for any comparison table.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.scorers.citation import (
     extract_json_from_response,
+    ground_citations_by_url,
     ground_citations_in_sources,
+    parse_cite_tag_response,
     score_citations_for_sections,
 )
 from olmo_eval.common.scorers.llm_judge import JudgeFn, build_default_judge_fn
@@ -60,6 +68,11 @@ from olmo_eval.evals.tasks.common import Task, register
 logger = logging.getLogger(__name__)
 
 EXPERTQA_REPO = "cmalaviya/expertqa"
+EXPERTQA_WEB_SEARCH_TOOL = "serper_google_webpage_search"
+EXPERTQA_WEB_FETCH_TOOL = "serper_fetch_webpage_content"
+EXPERTQA_FETCH_EMPTY_CONTENT = "No content extracted from webpage."
+_URL_RE = re.compile(r"https?://[^\s<>()\]\"']+")
+
 EXPERTQA_GENERATION_PROMPT = """Answer the following expert question as a well-cited report.
 
 You have exactly two tools available, and only these tool names exist:
@@ -78,7 +91,28 @@ has keys `id`, `url`, `title`, and `snippets`:
 - `snippets` is a list of VERBATIM excerpts copied exactly from fetched content.
 Do not paraphrase snippets and do not invent quotes.
 
+Your final answer must consist of ONLY a single JSON object.
+The first character of your final answer must be '{' and the last must be '}'.
+Do not use Markdown, code fences, headings, or any text outside the JSON.
 If no supporting source was found for a claim, do not attach a fabricated citation.
+Do not create a References section.
+
+Question: """
+
+EXPERTQA_CITE_PROMPT = """Answer the following expert question in plain prose. Markdown is allowed.
+
+You have exactly two tools available, and only these tool names exist:
+- serper_google_webpage_search
+- serper_fetch_webpage_content
+
+Use those names verbatim. Search first with serper_google_webpage_search, then fetch
+promising pages with serper_fetch_webpage_content before answering.
+
+Do not return JSON.
+For every source-based claim, wrap the exact claim text in a cite tag:
+<cite url="https://example.com/page">claim text</cite>.
+Use the exact URL of a page you fetched or a search result you relied on. Do not
+invent URLs. Every factual claim needs a citation.
 Do not create a References section.
 
 Question: """
@@ -120,6 +154,95 @@ def _trajectory_source_text(response: Response) -> str:
     if response.trajectory is None:
         return ""
     return "\n\n".join(result.content or "" for result in response.trajectory.tool_result_sequence)
+
+
+def _strip_think_block(text: str) -> str:
+    """Strip leading chain-of-thought block emitted by some reasoning models."""
+    think_end = text.find("</think>")
+    if think_end >= 0:
+        return text[think_end + len("</think>") :]
+    return text
+
+
+def _extract_urls(text: str) -> list[str]:
+    """Extract URL-like strings from search result text."""
+    return [url.strip().rstrip("/.,;:)]}'\"") for url in _URL_RE.findall(text or "")]
+
+
+def _tool_call_arguments(tool_call: Any) -> dict[str, Any]:
+    """Decode a trajectory tool call's JSON arguments."""
+    try:
+        parsed = json.loads(tool_call.function.arguments)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _fetch_result_is_error(result: Any, content: str) -> bool:
+    """Return whether a fetch result should be treated as unfetched."""
+    return bool(
+        getattr(result, "is_error", False)
+        or content.startswith("Error")
+        or content.strip() == EXPERTQA_FETCH_EMPTY_CONTENT
+    )
+
+
+def _trajectory_url_content(response: Response) -> dict[str, str]:
+    """Map trajectory-observed URLs to fetched content, or empty text if only seen."""
+    if response.trajectory is None:
+        return {}
+
+    url_to_content: dict[str, str] = {}
+    pending_tool_calls: list[Any] = []
+    pending_tool_calls_by_id: dict[str, Any] = {}
+
+    def pop_tool_call(result: Any) -> Any | None:
+        result_tool_call_id = str(getattr(result, "tool_call_id", "") or "")
+        if result_tool_call_id:
+            tool_call = pending_tool_calls_by_id.pop(result_tool_call_id, None)
+            if tool_call is not None:
+                for idx, pending_tool_call in enumerate(pending_tool_calls):
+                    if pending_tool_call is tool_call:
+                        del pending_tool_calls[idx]
+                        break
+                return tool_call
+
+        # Saved trajectories carry empty tool_call_id on results; fall back to order.
+        tool_call = pending_tool_calls.pop(0) if pending_tool_calls else None
+        if tool_call is not None:
+            pending_tool_calls_by_id.pop(getattr(tool_call, "id", ""), None)
+        return tool_call
+
+    for turn in response.trajectory.turns:
+        if turn.role == "assistant":
+            for tool_call in turn.tool_calls:
+                pending_tool_calls.append(tool_call)
+                if tool_call.id:
+                    pending_tool_calls_by_id[tool_call.id] = tool_call
+            continue
+        if turn.role != "tool":
+            continue
+
+        for result in turn.tool_results:
+            tool_call = pop_tool_call(result)
+            content = result.content or ""
+            if tool_call is None:
+                continue
+
+            tool_name = tool_call.function.name
+            if tool_name == EXPERTQA_WEB_SEARCH_TOOL:
+                for url in _extract_urls(content):
+                    url_to_content.setdefault(url, "")
+            elif tool_name == EXPERTQA_WEB_FETCH_TOOL:
+                url = str(_tool_call_arguments(tool_call).get("url", "")).strip()
+                if url:
+                    if _fetch_result_is_error(result, content):
+                        url_to_content.setdefault(url, "")
+                    elif content:
+                        url_to_content[url] = content
+                    else:
+                        url_to_content.setdefault(url, "")
+    return url_to_content
 
 
 @register("expertqa")
@@ -167,11 +290,8 @@ class ExpertQA(Task):
 
     def extract_answer(self, output: LMOutput) -> Any:
         """Parse JSON from model output and store the structured response."""
-        text = output.text
         # Strip <think>...</think> blocks so JSON extraction ignores reasoning braces.
-        think_end = text.find("</think>")
-        if think_end >= 0:
-            text = text[think_end + len("</think>") :]
+        text = _strip_think_block(output.text)
         parsed = extract_json_from_response(text)
         if parsed is not None:
             parsed = normalize_agent_response_dict(parsed)
@@ -192,7 +312,6 @@ class ExpertQA(Task):
         for response in responses:
             if response.trajectory is None:
                 missing_trajectory += 1
-            source_text = _trajectory_source_text(response)
             per_label: dict[str, dict[int, float]] = {label: {} for label in EXPERTQA_OUTPUT_LABELS}
 
             for out_idx, output in enumerate(response.outputs):
@@ -200,7 +319,6 @@ class ExpertQA(Task):
                     response=response,
                     output=output,
                     judge_fn=judge_fn,
-                    source_text=source_text,
                 )
                 for label in EXPERTQA_OUTPUT_LABELS:
                     score = scores.get(label, 0.0)
@@ -230,7 +348,6 @@ class ExpertQA(Task):
         response: Response,
         output: LMOutput,
         judge_fn: JudgeFn,
-        source_text: str,
     ) -> dict[str, float]:
         zeros = {k: 0.0 for k in EXPERTQA_OUTPUT_LABELS}
         parsed = output.metadata.get("parsed_response")
@@ -238,7 +355,7 @@ class ExpertQA(Task):
             output.metadata["grounding_stats"] = dict(ZERO_GROUNDING_STATS)
             return zeros
 
-        grounded, grounding_stats = ground_citations_in_sources(parsed, source_text)
+        grounded, grounding_stats = self._ground(parsed, response)
         output.metadata["grounding_stats"] = grounding_stats
 
         answer_text = format_report(grounded)
@@ -254,6 +371,12 @@ class ExpertQA(Task):
             "snippet_grounding_rate": grounding_stats["snippet_grounding_rate"],
         }
 
+    def _ground(
+        self, parsed: dict[str, Any], response: Response
+    ) -> tuple[dict[str, Any], dict[str, float]]:
+        """Ground parsed JSON citation snippets against trajectory tool text."""
+        return ground_citations_in_sources(parsed, _trajectory_source_text(response))
+
     async def _score_precision(self, judge_fn: JudgeFn, question: str, answer: str) -> float:
         """Answer precision via the irrelevant-paragraph judge (astabench precision_eval)."""
         prompt = PRECISION_EVAL_PROMPT.format(query=question, answer=answer)
@@ -264,3 +387,28 @@ class ExpertQA(Task):
 
         score, _ = compute_precision_score(parsed, answer)
         return score
+
+
+@register("expertqa:cite")
+class ExpertQACite(ExpertQA):
+    """ExpertQA prose cite-tag variant, sharing ExpertQA scoring."""
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        prompt_text = EXPERTQA_CITE_PROMPT + instance.question
+        return LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": prompt_text},),
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        """Parse cite-tag prose into the structured response shape."""
+        text = _strip_think_block(output.text)
+        parsed = parse_cite_tag_response(text)
+        output.metadata["parsed_response"] = parsed
+        return parsed
+
+    def _ground(
+        self, parsed: dict[str, Any], response: Response
+    ) -> tuple[dict[str, Any], dict[str, float]]:
+        """Ground parsed cite-tag citations by trajectory-observed URL."""
+        return ground_citations_by_url(parsed, _trajectory_url_content(response))

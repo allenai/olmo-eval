@@ -49,10 +49,61 @@ SEMANTIC_SCHOLAR_BAD_SNIPPET = (
     "Please click on the paper title to read the abstract on Semantic Scholar."
 )
 
+_CITE_TAG_RE = re.compile(
+    r"<\s*cite\b(?=[^>]*(?<![\w-])url\s*=)[^>]*(?<![\w-])url\s*=\s*"
+    r"(?:\"(?P<url_d>[^\"<>]*\S[^\"<>]*)\"|'(?P<url_s>[^'<>]*\S[^'<>]*)')"
+    r"[^>]*>(?P<claim>.*?)<\s*/\s*cite\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+
 
 def _normalize_grounding_text(text: str) -> str:
     """Normalize text for source-grounding substring checks."""
     return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _normalize_grounding_url(url: str) -> str:
+    """Normalize URL strings for cite-mode trajectory lookup."""
+    return str(url).strip().rstrip("/.,;:)]}'\"")
+
+
+def parse_cite_tag_response(text: str) -> dict[str, Any] | None:
+    """Parse prose with ``<cite url="...">claim</cite>`` tags into report JSON."""
+    citations: list[dict[str, Any]] = []
+    citation_ids_by_url: dict[str, str] = {}
+
+    def replace_cite_tag(match: re.Match[str]) -> str:
+        url = (match.group("url_d") or match.group("url_s") or "").strip()
+        if not url:
+            return match.group(0)
+        claim_text = match.group("claim").strip()
+        citation_id = citation_ids_by_url.get(url)
+        if citation_id is None:
+            citation_id = f"[{len(citations) + 1}]"
+            citation_ids_by_url[url] = citation_id
+            citations.append(
+                {
+                    "id": citation_id,
+                    "url": url,
+                    "title": "",
+                    "snippets": [],
+                }
+            )
+        return f"{claim_text} {citation_id}"
+
+    prose, count = _CITE_TAG_RE.subn(replace_cite_tag, text)
+    if count == 0:
+        return None
+
+    return {
+        "sections": [
+            {
+                "title": "",
+                "text": prose.strip(),
+                "citations": citations,
+            }
+        ]
+    }
 
 
 def ground_citations_in_sources(
@@ -119,6 +170,78 @@ def ground_citations_in_sources(
     return grounded_response, {
         "n_snippets": float(n_snippets),
         "n_grounded": float(n_grounded),
+        "snippet_grounding_rate": rate,
+    }
+
+
+def ground_citations_by_url(
+    parsed_response: dict[str, Any],
+    url_to_content: dict[str, str],
+    max_evidence_chars: int = 1500,
+) -> tuple[dict[str, Any], dict[str, float]]:
+    """Ground cite-tag citations by URL against trajectory-observed content.
+
+    This is the cite-mode counterpart of ``ground_citations_in_sources``.
+    ``url_to_content`` should contain every URL observed in the trajectory:
+    fetched pages map to their fetched content, while search-result-only URLs map
+    to an empty string and receive title-only half-credit handling downstream.
+    Rates are not comparable across modes because cite mode counts URL citations
+    while JSON mode counts quoted snippets.
+    """
+    grounded_response = copy.deepcopy(parsed_response)
+    normalized_content: dict[str, str] = {}
+    for url, content in url_to_content.items():
+        normalized_url = _normalize_grounding_url(url)
+        if not normalized_url:
+            continue
+        content_text = str(content or "")
+        if normalized_url not in normalized_content or content_text:
+            normalized_content[normalized_url] = content_text
+
+    n_citations = 0
+    n_grounded = 0
+    n_half = 0
+
+    for section in grounded_response.get("sections", []):
+        sec_iter = [section]
+        if section.get("table") and isinstance(section["table"], dict):
+            sec_iter.append(section["table"])
+
+        for curr_sec in sec_iter:
+            if "citations" not in curr_sec:
+                continue
+
+            grounded_citations = []
+            for citation in curr_sec.get("citations", []):
+                raw_url = citation.get("url")
+                if not raw_url:
+                    continue
+
+                citation_url = str(raw_url).strip()
+                normalized_url = _normalize_grounding_url(citation_url)
+                if not normalized_url:
+                    continue
+
+                n_citations += 1
+                if normalized_url not in normalized_content:
+                    continue
+
+                content = normalized_content[normalized_url]
+                if content:
+                    citation["snippets"] = [content[:max_evidence_chars]]
+                    n_grounded += 1
+                else:
+                    citation["snippets"] = []
+                    citation["title"] = citation_url
+                    n_half += 1
+                grounded_citations.append(citation)
+            curr_sec["citations"] = grounded_citations
+
+    rate = n_grounded / n_citations if n_citations else 0.0
+    return grounded_response, {
+        "n_citations": float(n_citations),
+        "n_grounded": float(n_grounded),
+        "n_half": float(n_half),
         "snippet_grounding_rate": rate,
     }
 
