@@ -100,9 +100,16 @@ class Matcher(Protocol):
 def normalize_title(s: str) -> str:
     """Normalize a paper title for substring matching.
 
-    Article-stripping (a/an/the) is intentionally not done here. This matches the
-    task packet and remains pending confirmation of SAGE's original EM
-    normalization (open thread OT-2).
+    SAGE scores short-form EM as whether the gold paper is "included in the output
+    text or citations" (SAGE paper, arXiv:2602.05975); we implement that as a
+    normalized-substring inclusion check over the model's single output string (any
+    citations the model emits are part of that string, not a separate parsed
+    field). The normalization follows the SAGE authors' reference EM
+    implementation, confirmed with them directly (the public release ships data
+    only, no scoring code): the title is lowercased, every run of characters
+    outside [a-z0-9] is collapsed to a single space, and the result is trimmed, so
+    punctuation and any non-ASCII letters or digits (accented or non-Latin) are
+    dropped rather than transliterated. Article words (a/an/the) are kept.
     """
     return " ".join(re.sub(r"[^a-z0-9]+", " ", s.lower()).split())
 
