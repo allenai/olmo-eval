@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import (
     LMOutput,
     LMRequest,
@@ -14,6 +15,8 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     import torch
@@ -139,6 +142,11 @@ class HuggingFaceProvider(InferenceProvider):
         import torch
 
         params = self._default_sampling_params(sampling_params)
+        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
+            logger.warning(
+                "truncate_prompt_tokens or truncation_side has been set in the params, \
+                but is not supported for the HuggingFaceProvider and will not be used."
+            )
         gen_kwargs = self._build_generate_kwargs(params)
 
         results = []
@@ -220,6 +228,12 @@ class HuggingFaceProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         import torch
 
+        params = self._default_sampling_params(sampling_params)
+        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
+            logger.warning(
+                "truncate_prompt_tokens or truncation_side has been set in the params, \
+                but is not supported for the HuggingFaceProvider and will not be used."
+            )
         results = []
         for request in requests:
             request_outputs = []

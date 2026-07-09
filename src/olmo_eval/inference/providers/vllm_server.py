@@ -594,6 +594,10 @@ class VLLMServerProvider(InferenceProvider):
                 trace["generation_kwargs"]["top_p"] = params.top_p
             if params.do_sample and params.temperature > 0 and params.top_k is not None:
                 trace["generation_kwargs"]["top_k"] = params.top_k
+            if params.truncate_prompt_tokens is not None:
+                trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+            if params.truncation_side is not None:
+                trace["generation_kwargs"]["truncation_side"] = params.truncation_side
             trace["stop_sequences"] = self._get_completion_stop_sequences(params) or []
             trace["input_mode"] = (
                 "prompt_token_ids" if self._completion_use_prompt_token_ids else "text"
@@ -616,6 +620,10 @@ class VLLMServerProvider(InferenceProvider):
             generation_kwargs["top_p"] = params.top_p
         if self.chat_template_kwargs:
             generation_kwargs["chat_template_kwargs"] = dict(self.chat_template_kwargs)
+        if params.truncate_prompt_tokens is not None:
+            generation_kwargs["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+        if params.truncation_side is not None:
+            generation_kwargs["truncation_side"] = params.truncation_side
         trace["generation_kwargs"] = generation_kwargs
         trace["stop_sequences"] = list(params.stop_sequences or ())
         trace["input_mode"] = "messages"
@@ -1144,6 +1152,11 @@ class VLLMServerProvider(InferenceProvider):
         from olmo_eval.inference.dispatch import dispatch_concurrent
 
         params = self._default_sampling_params(sampling_params)
+        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
+            logger.warning(
+                "truncate_prompt_tokens or truncation_side has been set in the params, \
+                but is not supported for logliklihood requests and will not be used."
+            )
         results = await dispatch_concurrent(
             requests,
             lambda request: self._logprobs_single_async(request, params),
