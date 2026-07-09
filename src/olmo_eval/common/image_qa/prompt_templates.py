@@ -24,7 +24,12 @@ import string
 import numpy as np
 
 EVAL_LOADER_SEED = 691203
-"""DataLoaderConfig seed used by mm_olmo's eval pipeline."""
+"""DataLoaderConfig seed used by mm_olmo's image-QA eval pipeline (``olmo/eval/eval_utils.py``)."""
+
+DENSE_CAPTION_LOADER_SEED = 6198
+"""DataLoaderConfig seed used by mm_olmo's dense-caption generation pipeline
+(``launch_scripts/eval.py``, the ``eval_captioner.sh`` path). Verified against a real
+mm_olmo prediction dump: ``_getter_seed == (6198 * 195172 + idx) % (2**32 - 1)``."""
 
 POINT_COUNT_TEMPLATES: list[str] = [
     "How many {label} are there?",
@@ -136,7 +141,7 @@ def pixmo_count_question(label: str, arrow_idx: int, seed: int = EVAL_LOADER_SEE
     return _apply_label(template, label.lower())
 
 
-def dense_caption_question(idx: int, seed: int = EVAL_LOADER_SEED) -> str:
+def dense_caption_question(idx: int, seed: int = DENSE_CAPTION_LOADER_SEED) -> str:
     """Reproduce mm_olmo's per-example PixMo-Cap dense-caption prompt.
 
     The released Molmo2-4B uses ``prompt_templates="uber_model_v2"`` +
@@ -145,7 +150,14 @@ def dense_caption_question(idx: int, seed: int = EVAL_LOADER_SEED) -> str:
     per-example pick from :data:`LONG_CAPTION_TEMPLATES` (``apply_keyword_prompt``'s
     ``rng.randint``).  ``idx`` is the example's raw line position in
     ``dense-caption-eval/test.jsonl``; the seed arithmetic matches
-    ``DeterministicDataset.get`` (epoch 0), same as :func:`pixmo_count_question`.
+    ``DeterministicDataset.get`` (epoch 0), same as :func:`pixmo_count_question` — but with
+    :data:`DENSE_CAPTION_LOADER_SEED` (6198), the ``launch_scripts/eval.py`` loader seed,
+    not the image-QA loader seed used for :func:`pixmo_count_question`.
+
+    Checkpoints trained with ``prompt_templates="none"`` + ``system_prompt=
+    "style_and_length_v2"`` (mm_olmo's captioner family) do not sample a template at all —
+    their eval prompt is the constant ``"long_caption {default_inference_len}:"``; see the
+    ``dense_caption_captioner`` task.
     """
     rng = np.random.RandomState((seed * 195172 + idx) % (2**32 - 1))
     return LONG_CAPTION_TEMPLATES[rng.randint(0, len(LONG_CAPTION_TEMPLATES))]

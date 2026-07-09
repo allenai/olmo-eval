@@ -18,6 +18,7 @@ __all__ = [
     "VLLMProvider",
     "VLLMServerProvider",
     "OlmoCoreProvider",
+    "OlmoCoreVLMProvider",
     "LiteLLMProvider",
     "create_provider",
     # Tokenizer utilities
@@ -129,9 +130,20 @@ def create_provider(
             )
             return VLLMServerProvider(model_name, **kwargs)
         case "olmo_core":
+            from .providers.olmo_core_vlm_utils import is_multimodal_checkpoint
+
+            if is_multimodal_checkpoint(model_name):
+                from .providers.olmo_core_vlm import OlmoCoreVLMProvider
+
+                return OlmoCoreVLMProvider(model_name, **kwargs)
+
             from .providers.olmo_core import OlmoCoreProvider
 
             return OlmoCoreProvider(model_name, **kwargs)
+        case "olmo_core_vlm":
+            from .providers.olmo_core_vlm import OlmoCoreVLMProvider
+
+            return OlmoCoreVLMProvider(model_name, **kwargs)
         case "litellm":
             from .providers.litellm import LiteLLMProvider
 
@@ -162,6 +174,10 @@ def __getattr__(name: str):
         from .providers.olmo_core import OlmoCoreProvider
 
         return OlmoCoreProvider
+    if name == "OlmoCoreVLMProvider":
+        from .providers.olmo_core_vlm import OlmoCoreVLMProvider
+
+        return OlmoCoreVLMProvider
     if name == "LiteLLMProvider":
         from .providers.litellm import LiteLLMProvider
 

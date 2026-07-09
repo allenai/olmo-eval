@@ -269,6 +269,11 @@ class HuggingFaceProvider(InferenceProvider):
             model_kwargs.pop(key, None)
 
         super().__init__(model_name)
+        if not multimodal:
+            from .olmo_core_vlm_utils import is_olmo_core_hf_export
+
+            if is_olmo_core_hf_export(model_name):
+                multimodal = True
         self.is_multimodal = bool(multimodal)
         self.max_crops = int(max_crops)
         self.autocast_dtype = autocast_dtype
@@ -318,11 +323,75 @@ class HuggingFaceProvider(InferenceProvider):
 
         _ensure_default_rope_registered()
         _patch_processor_optional_attribute_kwargs()
+
+        from .olmo_core_vlm_utils import is_olmo_core_hf_export
+
+        if is_olmo_core_hf_export(model_name):
+            self._init_multimodal_from_olmo_core_export(model_name, model_kwargs)
+            return
+
         processor_kwargs = {
             key: value for key, value in model_kwargs.items() if key in self._TOKENIZER_KWARGS
         }
         self.processor = AutoProcessor.from_pretrained(model_name, **processor_kwargs)
         self.model = AutoModelForImageTextToText.from_pretrained(model_name, **model_kwargs)
+        _reinit_rope_buffers(self.model)
+        _patch_molmo2_generation_cache_position(self.model)
+        self.tokenizer = self.processor.tokenizer
+
+    def _init_multimodal_from_olmo_core_export(
+        self, model_name: str, model_kwargs: dict[str, Any]
+    ) -> None:
+        """Load a consolidated OLMo-core multimodal export through the HF stack.
+
+        Such a directory (``olmo_core_config.json`` + ``model.safetensors`` with
+        OLMo-core key names) has no HF config/processor/modeling files, so this
+        borrows them from a *reference* released repo — the ``reference_model``
+        kwarg, or the export's recorded ``model_id`` (e.g.
+        ``allenai/Molmo2-4B``) — builds the remote-code model from that config,
+        and loads the weights converted back to released-Molmo2 naming (the
+        bit-exact inverse of OLMo-core's HF loader mapping). Everything
+        downstream (processor, ``model.generate``, transformers-5 shims) is the
+        verified released-Molmo2 path.
+        """
+        from pathlib import Path
+
+        from transformers import AutoConfig, AutoModelForImageTextToText, AutoProcessor
+
+        from .olmo_core_vlm_utils import (
+            convert_olmo_core_to_molmo2_hf_state_dict,
+            olmo_core_export_reference_model,
+        )
+
+        reference = model_kwargs.pop("reference_model", None) or olmo_core_export_reference_model(
+            model_name
+        )
+        processor_kwargs = {
+            key: value for key, value in model_kwargs.items() if key in self._TOKENIZER_KWARGS
+        }
+        self.processor = AutoProcessor.from_pretrained(reference, **processor_kwargs)
+        config = AutoConfig.from_pretrained(reference, **processor_kwargs)
+
+        from safetensors.torch import load_file
+
+        state_dict = load_file(str(Path(model_name) / "model.safetensors"))
+        converted = convert_olmo_core_to_molmo2_hf_state_dict(
+            state_dict,
+            base_vocab_size=config.text_config.vocab_size,
+            patch_size=config.vit_config.image_patch_size,
+        )
+        del state_dict
+
+        self.model = AutoModelForImageTextToText.from_config(
+            config, trust_remote_code=bool(model_kwargs.get("trust_remote_code"))
+        )
+        self.model.load_state_dict(converted)
+        del converted
+
+        dtype = model_kwargs.get("dtype") or model_kwargs.get("torch_dtype")
+        if dtype and dtype != "auto":
+            self.model.to(_to_torch_dtype(str(dtype)))
+
         _reinit_rope_buffers(self.model)
         _patch_molmo2_generation_cache_position(self.model)
         self.tokenizer = self.processor.tokenizer
