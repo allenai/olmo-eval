@@ -837,6 +837,10 @@ class VLLMServerProvider(InferenceProvider):
         extra_body: dict[str, Any] = {}
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             extra_body["top_k"] = params.top_k
+        if params.truncate_prompt_tokens is not None:
+            extra_body["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+        if params.truncation_side is not None:
+            extra_body["truncation_side"] = params.truncation_side
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         if tools:
