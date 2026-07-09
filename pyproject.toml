@@ -44,6 +44,9 @@ Repository = "https://github.com/allenai/olmo-eval"
 Issues = "https://github.com/allenai/olmo-eval/issues"
 
 [project.optional-dependencies]
+crawl4ai = [
+    "crawl4ai>=0.8",
+]
 hf = [
     "transformers>=5.4.0",
 ]
@@ -239,6 +242,7 @@ allowed-unresolved-imports = [
     "cached_path.**",
     "instructions_registry.**",
     "instructions.**",
+    "crawl4ai.**",
 ]
 
 [tool.gantry]

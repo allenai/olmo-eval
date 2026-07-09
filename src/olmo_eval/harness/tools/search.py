@@ -4,6 +4,7 @@ This module provides search tools that can be used with the Harness:
 - semantic_scholar_search: Search academic papers via Semantic Scholar API
 - serper_web_search: Search the web via Serper/Google API
 - serper_fetch_page: Fetch and extract webpage content
+- crawl4ai_browse: Fetch and extract webpage content via crawl4ai
 
 These tools are pre-registered in the global registry.
 Import the tool objects and use .name for HarnessConfig.tool_names.
@@ -21,6 +22,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import date
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -38,6 +40,8 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 _MAX_RETRIES = 5
 _BASE_BACKOFF_S = 1.0
 _MAX_BACKOFF_S = 16.0
+_WEBPAGE_CONTENT_LIMIT = 4000
+_WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
 
 # Semantic Scholar's introductory plan allows ~1 request/second cumulative across
 # all endpoints, which several concurrent agents exhaust immediately. All S2
@@ -82,6 +86,23 @@ def _parse_cutoff(raw: str | None) -> tuple[int, str, str] | None:
         f"{month_text}/{day_text}/{year_text}",
         f"{year_text}-{month_text}-{day_text}",
     )
+
+
+def _truncate_webpage_content(text: str) -> str:
+    limit_value = os.environ.get("OLMO_WEBPAGE_CONTENT_LIMIT")
+    if limit_value is None:
+        limit = _WEBPAGE_CONTENT_LIMIT
+    else:
+        try:
+            limit = int(limit_value)
+        except ValueError:
+            limit = _WEBPAGE_CONTENT_LIMIT
+
+    if limit <= 0:
+        return text
+    if len(text) > limit:
+        return text[:limit] + _WEBPAGE_TRUNCATION_NOTICE
+    return text
 
 
 async def _s2_rate_gate() -> None:
@@ -416,8 +437,57 @@ async def serper_fetch_page(url: str) -> str:
     if not text:
         return "No content extracted from webpage."
 
-    # Truncate if too long
-    if len(text) > 4000:
-        text = text[:4000] + "\n\n[Content truncated...]"
+    text = _truncate_webpage_content(text)
+
+    return text
+
+
+@registered_tool(
+    name="browse_webpage",
+    description="Fetch and extract a webpage's content as clean markdown (via crawl4ai).",
+)
+async def crawl4ai_browse(url: str) -> str:
+    """Fetch and extract a webpage's content as clean markdown via crawl4ai.
+
+    Args:
+        url: The URL of the webpage to fetch.
+
+    Returns:
+        Extracted markdown content from the webpage.
+    """
+    if not url or not url.strip():
+        return "Error: Empty URL."
+
+    sanitized_url = url.strip()
+    if urlsplit(sanitized_url).scheme.lower() not in {"http", "https"}:
+        return "Error: Only http(s) URLs are supported."
+
+    try:
+        from crawl4ai import AsyncWebCrawler
+    except ImportError:
+        return "Error: crawl4ai is not installed."
+
+    try:
+        async with AsyncWebCrawler() as crawler:
+            result = await crawler.arun(sanitized_url)
+    except Exception as e:
+        logger.exception(f"crawl4ai browse error: url={sanitized_url!r}")
+        return f"Error fetching webpage: {e}"
+
+    if not getattr(result, "success", False):
+        error_message = getattr(result, "error_message", None)
+        if error_message:
+            return f"Error fetching webpage: {error_message}"
+        status_code = getattr(result, "status_code", None)
+        if status_code is not None:
+            return f"Error fetching webpage: HTTP {status_code}"
+        return "Error fetching webpage: unknown error"
+
+    markdown = getattr(result, "markdown", None)
+    text = getattr(markdown, "raw_markdown", None) or str(markdown or "")
+    if not text.strip():
+        return "No content extracted from webpage."
+
+    text = _truncate_webpage_content(text)
 
     return text

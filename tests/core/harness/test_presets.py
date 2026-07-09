@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from olmo_eval.common.types import ProviderKind
 from olmo_eval.harness import clear_registry
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.presets import (
@@ -91,6 +92,39 @@ class TestHarnessPresets:
         assert "S2_API_KEY" in config.required_secrets
         assert "SERPER_API_KEY" in config.required_secrets
 
+    def test_get_dr_tulu_crawl4ai_preset(self):
+        """Test the Dr. Tulu S2 + Serper search + crawl4ai browse preset."""
+        config = get_harness_preset("dr_tulu_crawl4ai")
+
+        assert isinstance(config, HarnessConfig)
+        assert config.name == "dr_tulu_crawl4ai"
+        assert config.tool_names == (
+            "semantic_scholar_snippet_search",
+            "serper_google_webpage_search",
+            "browse_webpage",
+        )
+        assert config.max_turns == 20
+        assert config.required_secrets == ("SERPER_API_KEY",)
+
+    def test_get_web_search_agent_crawl4ai_preset(self):
+        """Test the Serper search + crawl4ai browse preset."""
+        config = get_harness_preset("web_search_agent_crawl4ai")
+
+        assert isinstance(config, HarnessConfig)
+        assert config.name == "web_search_agent_crawl4ai"
+        assert config.tool_names == ("serper_google_webpage_search", "browse_webpage")
+        assert config.required_secrets == ("SERPER_API_KEY",)
+        assert config.provider.kind == ProviderKind.VLLM_SERVER
+        assert config.provider.kwargs["timeout"] == 120
+        assert config.max_turns == 30
+        assert config.max_concurrency == 4
+        assert config.scaffold == "openai_agents"
+        assert config.batching is not None
+        assert config.batching.strategy == "streaming"
+        assert config.system_prompt is not None
+        assert "serper_google_webpage_search" in config.system_prompt
+        assert "browse_webpage" in config.system_prompt
+
     def test_direct_preset_access(self):
         """Test accessing presets directly via HarnessPresets class."""
         config = HarnessPresets.default
@@ -130,6 +164,7 @@ class TestSearchTools:
         register_tool(search.semantic_scholar_search)
         register_tool(search.serper_web_search)
         register_tool(search.serper_fetch_page)
+        register_tool(search.crawl4ai_browse)
 
     def test_search_tools_registered(self):
         """Test that search tools are registered when preset is loaded."""
@@ -139,6 +174,7 @@ class TestSearchTools:
         assert "semantic_scholar_snippet_search" in tools
         assert "serper_google_webpage_search" in tools
         assert "serper_fetch_webpage_content" in tools
+        assert "browse_webpage" in tools
 
     def test_search_tools_have_schemas(self):
         """Test that search tools have valid schemas."""
