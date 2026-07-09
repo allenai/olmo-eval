@@ -82,6 +82,25 @@ class DeepScholarArgs:
     # run (losing all completed queries). Kept under the 300s health-poll interval.
     lm_timeout: int = 240
 
+    # In-sandbox chunking. A single generation process over all 63 queries wedges the
+    # sandbox container ~40 min in (a nested-podman resource stall, not a vLLM crash),
+    # losing every completed query. Instead we run generation as a sequence of short
+    # commands over disjoint index ranges of `chunk_size` queries, each well inside the
+    # proven-reliable ~20-min window; completed query folders accumulate on disk and
+    # eval runs once over the union. A stalled chunk is skipped (its head query dropped)
+    # and the loop advances rather than killing the whole run. Set chunk_size=0 (or None)
+    # to disable chunking and run one command (the old behavior). Runs that fit in a
+    # single chunk (limit <= chunk_size) take the single-command path unchanged.
+    chunk_size: int | None = 10
+    # Per-chunk timeout (s). Kept under the ~40-min wedge threshold so a slow chunk is
+    # cut and its remaining queries retried in a later chunk, rather than drifting into
+    # the wedge. The sandbox's own 3x300s poll-abort catches true stalls sooner.
+    chunk_timeout: int = 1800
+    # Extra chunk attempts beyond the nominal chunk count, absorbing retries of cut or
+    # stalled chunks. The loop also stops early if the container goes unresponsive
+    # between chunks or the overall generation budget is exhausted.
+    chunk_retries: int = 3
+
     # Eval phase (judge). Default to all seven metrics (the geomean inputs and how
     # both the paper's Table 2 and the leaderboard report results). Pass a
     # comma-separated subset to run fewer; the geomean is reported only when every
@@ -111,6 +130,15 @@ class DeepScholarArgs:
                 return [a.strip() for a in value.split(",") if a.strip()]
             return list(value)
 
+        # Absent -> default 10 (chunking on); explicit None/""/"none"/<=0 -> disabled.
+        raw_chunk = data.get("chunk_size", 10)
+        if isinstance(raw_chunk, str):
+            raw_chunk = raw_chunk.strip().lower()
+            raw_chunk = None if raw_chunk in ("", "none", "null", "off") else int(raw_chunk)
+        chunk_size = int(raw_chunk) if raw_chunk is not None else None
+        if chunk_size is not None and chunk_size <= 0:
+            chunk_size = None
+
         return cls(
             limit=_parse_optional(data, "limit", int),
             start_idx=int(data.get("start_idx", 0)),
@@ -124,6 +152,9 @@ class DeepScholarArgs:
             stage_max_tokens=_parse_optional(data, "stage_max_tokens", int),
             local_model_prefix=data.get("local_model_prefix", "openai"),
             lm_timeout=int(data.get("lm_timeout", 240)),
+            chunk_size=chunk_size,
+            chunk_timeout=int(data.get("chunk_timeout", 1800)),
+            chunk_retries=int(data.get("chunk_retries", 3)),
             judge_model=data.get("judge_model", "gpt-4o"),
             evals=evals or list(PRIMARY_METRICS),
             allow_partial_generation=_parse_bool(data.get("allow_partial_generation")),
