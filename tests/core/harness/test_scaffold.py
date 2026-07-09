@@ -1,7 +1,5 @@
 """Tests for Scaffold implementations."""
 
-from __future__ import annotations
-
 import pytest
 
 from olmo_eval.harness.scaffolds import (
