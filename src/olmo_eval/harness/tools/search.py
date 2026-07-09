@@ -45,6 +45,23 @@ _s2_rate_lock = asyncio.Lock()
 _s2_last_request_ts = 0.0  # time.monotonic() of the last dispatched S2 request
 
 
+def _truncate_webpage_content(text: str) -> str:
+    limit_value = os.environ.get("OLMO_WEBPAGE_CONTENT_LIMIT")
+    if limit_value is None:
+        limit = _WEBPAGE_CONTENT_LIMIT
+    else:
+        try:
+            limit = int(limit_value)
+        except ValueError:
+            limit = _WEBPAGE_CONTENT_LIMIT
+
+    if limit <= 0:
+        return text
+    if len(text) > limit:
+        return text[:limit] + _WEBPAGE_TRUNCATION_NOTICE
+    return text
+
+
 async def _s2_rate_gate() -> None:
     """Block until at least _S2_MIN_INTERVAL_S has elapsed since the last S2 call.
 
@@ -351,11 +368,7 @@ async def serper_fetch_page(url: str) -> str:
     if not text:
         return "No content extracted from webpage."
 
-    # Truncate if too long
-    if len(text) > _WEBPAGE_CONTENT_LIMIT:
-        text = text[:_WEBPAGE_CONTENT_LIMIT] + _WEBPAGE_TRUNCATION_NOTICE
-
-    return text
+    return _truncate_webpage_content(text)
 
 
 @registered_tool(
@@ -398,7 +411,4 @@ async def crawl4ai_browse(url: str) -> str:
     if not text.strip():
         return "No content extracted from webpage."
 
-    if len(text) > _WEBPAGE_CONTENT_LIMIT:
-        text = text[:_WEBPAGE_CONTENT_LIMIT] + _WEBPAGE_TRUNCATION_NOTICE
-
-    return text
+    return _truncate_webpage_content(text)

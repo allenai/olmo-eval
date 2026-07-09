@@ -58,6 +58,36 @@ def prepare_task_items(
         rng = random.Random(task.config.seed)
         instances = rng.sample(instances, task.config.limit)
 
+    if task.config.restrict_native_ids is not None:
+        requested_ids = task.config.restrict_native_ids
+        candidate_count = len(instances)
+        instances_with_native_ids = [
+            (inst, inst.metadata.get("id", f"doc_{idx}")) for idx, inst in enumerate(instances)
+        ]
+        matched_requested_ids = {
+            native_id for _, native_id in instances_with_native_ids if native_id in requested_ids
+        }
+        instances = [
+            inst for inst, native_id in instances_with_native_ids if native_id in requested_ids
+        ]
+        if not instances:
+            logger.warning(
+                "restrict_native_ids matched 0 of %d instances; check the ids / limit / seed",
+                candidate_count,
+            )
+
+        unmatched_ids = sorted(requested_ids - matched_requested_ids)
+        if unmatched_ids:
+            preview = unmatched_ids[:10]
+            suffix = " ..." if len(unmatched_ids) > len(preview) else ""
+            logger.warning(
+                "restrict_native_ids: matched %d/%d requested ids; unmatched: %s%s",
+                len(matched_requested_ids),
+                len(requested_ids),
+                preview,
+                suffix,
+            )
+
     items = [
         QueueItem(
             model_name=model_name,

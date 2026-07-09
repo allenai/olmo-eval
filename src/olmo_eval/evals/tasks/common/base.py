@@ -141,6 +141,7 @@ class TaskConfig:
     num_fewshot: int = 0
     fewshot_seed: int = 42
     limit: int | None = None
+    restrict_native_ids: frozenset[str] | None = None
     seed: int = 42
     split: Split = Split.TEST
     primary_metric: MetricName | Metric | None = None
@@ -178,6 +179,11 @@ class TaskConfig:
                     f"output_score_aggregation must be one of: {valid}; "
                     f"got {self.output_score_aggregation!r}"
                 ) from exc
+
+        if isinstance(self.restrict_native_ids, str):
+            self.restrict_native_ids = frozenset({self.restrict_native_ids})
+        elif isinstance(self.restrict_native_ids, (list, tuple, set, frozenset)):
+            self.restrict_native_ids = frozenset(str(value) for value in self.restrict_native_ids)
 
         try:
             weight = float(self.sandbox_allocation_weight)
@@ -268,6 +274,9 @@ class TaskConfig:
             "num_fewshot": self.num_fewshot,
             "fewshot_seed": self.fewshot_seed,
             "limit": self.limit,
+            "restrict_native_ids": (
+                sorted(self.restrict_native_ids) if self.restrict_native_ids is not None else None
+            ),
             "seed": self.seed,
             "split": self.split.value,
             "primary_metric": serialize_primary_metric(self.get_primary_metric()),

@@ -35,6 +35,48 @@ def _install_fake_crawl4ai(monkeypatch: pytest.MonkeyPatch, result: object):
     return FakeCrawler
 
 
+def test_truncate_webpage_content_uses_default_when_env_unset(monkeypatch):
+    from olmo_eval.harness.tools import search
+
+    monkeypatch.delenv("OLMO_WEBPAGE_CONTENT_LIMIT", raising=False)
+
+    result = search._truncate_webpage_content("x" * 4001)
+
+    assert result == ("x" * 4000) + "\n\n[Content truncated...]"
+
+
+def test_truncate_webpage_content_uses_env_limit(monkeypatch):
+    from olmo_eval.harness.tools import search
+
+    monkeypatch.setenv("OLMO_WEBPAGE_CONTENT_LIMIT", "8000")
+
+    result = search._truncate_webpage_content("x" * 8001)
+
+    assert result == ("x" * 8000) + "\n\n[Content truncated...]"
+
+
+def test_truncate_webpage_content_zero_disables_truncation(monkeypatch):
+    from olmo_eval.harness.tools import search
+
+    text = "x" * 8001
+    monkeypatch.setenv("OLMO_WEBPAGE_CONTENT_LIMIT", "0")
+
+    result = search._truncate_webpage_content(text)
+
+    assert result == text
+    assert "\n\n[Content truncated...]" not in result
+
+
+def test_truncate_webpage_content_invalid_env_uses_default(monkeypatch):
+    from olmo_eval.harness.tools import search
+
+    monkeypatch.setenv("OLMO_WEBPAGE_CONTENT_LIMIT", "abc")
+
+    result = search._truncate_webpage_content("x" * 4001)
+
+    assert result == ("x" * 4000) + "\n\n[Content truncated...]"
+
+
 @pytest.mark.anyio
 async def test_crawl4ai_browse_returns_markdown(monkeypatch):
     from olmo_eval.harness.tools import search
@@ -146,6 +188,7 @@ async def test_crawl4ai_browse_empty_markdown(monkeypatch):
 async def test_crawl4ai_browse_truncates_markdown(monkeypatch):
     from olmo_eval.harness.tools import search
 
+    monkeypatch.delenv("OLMO_WEBPAGE_CONTENT_LIMIT", raising=False)
     _install_fake_crawl4ai(
         monkeypatch,
         SimpleNamespace(success=True, status_code=200, markdown="x" * 4001, cleaned_html=""),

@@ -146,6 +146,8 @@ class TestFormatRequest:
         assert "well-cited report" in content
         assert "serper_google_webpage_search" in content
         assert "serper_fetch_webpage_content" in content
+        assert "browse_webpage" in content
+        assert "serper_fetch_webpage_content or browse_webpage" in content
         assert "`url` is the source page" in content
         assert "Your final answer must consist of ONLY a single JSON object" in content
         assert "The first character of your final answer must be '{'" in content
@@ -166,6 +168,8 @@ class TestFormatRequest:
         assert '<cite url="https://example.com/page">claim text</cite>' in content
         assert "serper_google_webpage_search" in content
         assert "serper_fetch_webpage_content" in content
+        assert "browse_webpage" in content
+        assert "serper_fetch_webpage_content or browse_webpage" in content
         assert "Do not answer from memory. You must search before answering" in content
         workflow_start = content.index("Workflow (follow in order):")
         assert workflow_start > content.index("Do not return JSON.")
@@ -260,6 +264,52 @@ class TestScoreResponses:
             "snippet_grounding_rate": 1.0,
         }
         assert response.outputs[0].metadata["score:snippet_grounding_rate"] == pytest.approx(1.0)
+        assert response.scores["snippet_grounding_rate"] == pytest.approx(1.0)
+
+    @pytest.mark.anyio
+    async def test_browse_webpage_grounded_snippet_reaches_judge(self, task, monkeypatch):
+        url = "https://example.com/crawl4ai-source"
+        snippet = "Crawl4ai fetched passage exactly supports the grounded ExpertQA answer."
+        page_content = f"Fetched text: {snippet}"
+        judge = _RecordingJudge()
+        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda: judge)
+        parsed = {
+            "sections": [
+                {
+                    "text": "Grounded crawl4ai claim [1].",
+                    "citations": [
+                        {
+                            "id": "[1]",
+                            "url": url,
+                            "title": "Fetched Source",
+                            "snippets": [snippet],
+                        }
+                    ],
+                }
+            ]
+        }
+        response = self._response(
+            parsed,
+            _trajectory_with_search_and_fetch(
+                fetch_url=url,
+                fetch_content=page_content,
+                search_content=f"URL: {url}",
+                fetch_tool_name="browse_webpage",
+            ),
+        )
+
+        assert expertqa_module._trajectory_source_text(response) == page_content
+
+        await task.score_responses([response])
+
+        citation_prompts = [p for p in judge.prompts if "References:" in p]
+        assert citation_prompts
+        assert snippet in citation_prompts[0]
+        assert response.outputs[0].metadata["grounding_stats"] == {
+            "n_snippets": 1.0,
+            "n_grounded": 1.0,
+            "snippet_grounding_rate": 1.0,
+        }
         assert response.scores["snippet_grounding_rate"] == pytest.approx(1.0)
 
     @pytest.mark.anyio
@@ -514,6 +564,20 @@ class TestSuiteMembership:
 
 
 class TestTrajectoryUrlContent:
+    def test_browse_webpage_fetch_content_maps_url(self):
+        url = "https://example.com/crawl4ai-source"
+        fetch_content = "Crawl4ai fetched page evidence belongs to the cited URL."
+        trajectory = _trajectory_with_search_and_fetch(
+            fetch_url=url,
+            fetch_content=fetch_content,
+            search_content=f"URL: {url}",
+            fetch_tool_name="browse_webpage",
+        )
+
+        url_to_content = expertqa_module._trajectory_url_content(_cite_response("", trajectory))
+
+        assert url_to_content[url] == fetch_content
+
     def test_good_fetch_content_survives_later_error_refetch(self):
         url = "https://example.com/source"
         good_content = "Fetched page evidence that should remain mapped."
@@ -698,6 +762,7 @@ def _trajectory_with_search_and_fetch(
     fetch_content,
     search_content,
     fetch_is_error=False,
+    fetch_tool_name="serper_fetch_webpage_content",
 ):
     return AgentTrajectory(
         turns=(
@@ -722,7 +787,7 @@ def _trajectory_with_search_and_fetch(
                 tool_calls=[
                     ToolCall.create(
                         "",
-                        "serper_fetch_webpage_content",
+                        fetch_tool_name,
                         {"url": fetch_url},
                     )
                 ]

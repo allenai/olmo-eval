@@ -111,6 +111,28 @@ class TestTaskConfig:
         )
         assert len(config.metrics) == 1
 
+    def test_restrict_native_ids_coerces_and_serializes_sorted(self):
+        """Test native-id restriction is stable for overrides and hashing."""
+        config = TaskConfig(
+            name="restricted",
+            data_source="test/dataset",
+            restrict_native_ids=["doc_3", "doc_1"],
+        )
+
+        assert config.restrict_native_ids == frozenset({"doc_1", "doc_3"})
+        assert config.to_dict()["restrict_native_ids"] == ["doc_1", "doc_3"]
+
+    def test_restrict_native_ids_bare_string_is_single_id(self):
+        """Test a single native-id string is not treated as an iterable of characters."""
+        config = TaskConfig(
+            name="restricted",
+            data_source="test/dataset",
+            restrict_native_ids="doc_1",
+        )
+
+        assert config.restrict_native_ids == frozenset({"doc_1"})
+        assert config.to_dict()["restrict_native_ids"] == ["doc_1"]
+
 
 class TestTask:
     """Tests for Task base class."""
