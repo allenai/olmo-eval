@@ -414,18 +414,19 @@ class TestPromptTemplates:
     def test_long_caption_template_count(self) -> None:
         assert len(LONG_CAPTION_TEMPLATES) == 23
 
-    # Pinned (line_idx -> dense-caption prompt) pairs, verified byte-for-byte against
-    # mm_olmo's DataFormatter.get_user_prompt for style="long_caption" under the released
-    # Molmo2-4B config (prompt_templates="uber_model_v2", system_prompt="demo_or_style_v2"):
-    # a seeded per-example pick from the long_caption templates, with no style prefix.
+    # Pinned (line_idx -> dense-caption prompt) pairs for mm_olmo's dense-caption
+    # generation pipeline (`launch_scripts/eval.py`, loader seed 6198 — verified against a
+    # real DenseCaptionEval-test dump's `_getter_seed`), under the released Molmo2-4B config
+    # (prompt_templates="uber_model_v2", system_prompt="demo_or_style_v2"): a seeded
+    # per-example pick from the long_caption templates, with no style prefix.
     @pytest.mark.parametrize(
         ("idx", "expected"),
         [
-            (0, "What do you see in the image?"),
-            (1, "Look at this photo carefully and then tell me about it in detail"),
-            (2, "Describe this image in detail"),
-            (3, "Caption this"),
-            (6, "describe the image"),
+            (0, "What can be seen in this image?"),
+            (1, "Construct a long caption for this image"),
+            (2, "caption the picture"),
+            (3, "Generate a long caption about this image."),
+            (6, "What do you see in the image?"),
         ],
     )
     def test_dense_caption_question_pinned(self, idx: int, expected: str) -> None:

@@ -339,6 +339,10 @@ class DenseCaptionJudgeScorer(ContextScorer):
                 consistency_valid = num_valid > 0
                 result["consistency"] = num_consistent / num_valid if consistency_valid else 0.0
                 result["num_consistent"] = num_consistent
+                # mm_olmo's reported `num_statements` is this consistency-side count:
+                # the canonical statements GPT derived from the *model caption*
+                # (ConsistencyEval.num_statements), not the recall-side mturk count.
+                result["consistency_num_statements"] = num_valid
                 result["consistency_valid"] = consistency_valid
             except Exception as exc:
                 logger.warning(
@@ -346,7 +350,12 @@ class DenseCaptionJudgeScorer(ContextScorer):
                     instance.metadata.get("url", "?"),
                     exc,
                 )
-                result.update(consistency=0.0, num_consistent=0, consistency_valid=False)
+                result.update(
+                    consistency=0.0,
+                    num_consistent=0,
+                    consistency_num_statements=0,
+                    consistency_valid=False,
+                )
 
         if output.metadata is None:
             output.metadata = {}

@@ -138,6 +138,7 @@ class TestDenseCaptionMetrics:
         num_covered: int = 5,
         num_statements: int = 10,
         num_consistent: int = 8,
+        consistency_num_statements: int = 10,
         consistency_valid: bool = True,
     ) -> dict:
         return dict(
@@ -148,6 +149,7 @@ class TestDenseCaptionMetrics:
             recall_valid=True,
             consistency=consistency,
             num_consistent=num_consistent,
+            consistency_num_statements=consistency_num_statements,
             consistency_valid=consistency_valid,
         )
 
@@ -190,9 +192,11 @@ class TestDenseCaptionMetrics:
         assert abs(score - 80.0) < 1e-6
 
     def test_num_statements_not_scaled(self):
+        # num_statements reports the consistency-side canonical-statement count
+        # (mm_olmo's ConsistencyEval.num_statements), not the recall-side count.
         responses = [
-            _make_response(self._valid_result(num_statements=20)),
-            _make_response(self._valid_result(num_statements=10)),
+            _make_response(self._valid_result(consistency_num_statements=20)),
+            _make_response(self._valid_result(consistency_num_statements=10)),
         ]
         score = DenseCaptionNumStatementsMetric().compute(responses)
         assert abs(score - 15.0) < 1e-6

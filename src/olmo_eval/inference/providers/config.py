@@ -61,7 +61,9 @@ class ProviderConfig:
     kwargs: Mapping[str, Any] = field(default_factory=dict)
 
     # Providers that require GPU resources for local inference
-    _GPU_PROVIDERS: ClassVar[frozenset[str]] = frozenset({"vllm", "vllm_server", "hf", "olmo_core"})
+    _GPU_PROVIDERS: ClassVar[frozenset[str]] = frozenset(
+        {"vllm", "vllm_server", "hf", "olmo_core", "olmo_core_vlm"}
+    )
 
     @property
     def requires_gpu(self) -> bool:
@@ -108,6 +110,14 @@ class ProviderConfig:
         "litellm": ("base_url", "api_base", "max_concurrency"),
         "hf": ("tokenizer", "revision", "force_download", "trust_remote_code", "dtype"),
         "olmo_core": (
+            "tokenizer",
+            "revision",
+            "force_download",
+            "trust_remote_code",
+            "dtype",
+            "max_model_len",
+        ),
+        "olmo_core_vlm": (
             "tokenizer",
             "revision",
             "force_download",

@@ -103,19 +103,26 @@ class DenseCaptionRecallAt10Metric(Metric):
 
 @dataclass(frozen=True, slots=True)
 class DenseCaptionNumStatementsMetric(Metric):
-    """Mean number of mturk statements per valid example (raw, not ×100)."""
+    """Mean number of canonical statements per valid example (raw, not ×100).
+
+    Matches mm_olmo's reported ``num_statements``: the count of canonical
+    statements GPT derives from the *model caption* during the consistency
+    judge (``ConsistencyEval.num_statements``), averaged over
+    consistency-valid examples — a caption-informativeness proxy, not the
+    recall-side mturk statement count.
+    """
 
     name: str = "num_statements"
     scorer: type[Scorer] | Scorer = _JUDGE
 
     def compute(self, responses: Sequence[Response]) -> float:
         vals = [
-            o.metadata["dense_caption_result"]["num_statements"]
+            o.metadata["dense_caption_result"]["consistency_num_statements"]
             for r in responses
             for o in r.outputs
             if o.metadata
             and "dense_caption_result" in o.metadata
-            and o.metadata["dense_caption_result"].get("recall_valid")
+            and o.metadata["dense_caption_result"].get("consistency_valid")
         ]
         return (sum(vals) / len(vals)) if vals else 0.0
 
@@ -260,3 +267,20 @@ class DenseCaptionEval(Task):
 
 # "pixmo_cap" is an alias for "dense_caption" with no overrides.
 register_variant("dense_caption", "pixmo_cap")
+
+
+@register("dense_caption_captioner")
+class DenseCaptionCaptionerEval(DenseCaptionEval):
+    """Dense-caption eval prompt for mm_olmo's captioner-family checkpoints.
+
+    Checkpoints trained with ``prompt_templates="none"`` + ``system_prompt=
+    "style_and_length_v2"`` (mm_olmo ``train_captioner.py``; e.g. the
+    siglip2-cap-stage1 runs) see a constant eval prompt: an empty user question
+    with the style/length prefix ``"long_caption {default_inference_len}:"``
+    (``default_inference_len`` defaults to 65). Verified verbatim against an
+    mm_olmo ``DenseCaptionEval-test`` prediction dump. Use ``dense_caption``
+    for released-Molmo2-family (``uber_model_v2``) checkpoints, which sample a
+    seeded natural-language instruction instead.
+    """
+
+    caption_prompt: str | None = "long_caption 65:"
