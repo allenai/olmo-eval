@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Sequence
 from contextvars import ContextVar
@@ -22,6 +23,96 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _current_binding: ContextVar[ExecutorBinding | None] = ContextVar("_current_binding", default=None)
+TOOL_NOT_FOUND_TOOL_NAME = "tool_not_found"
+_TOOL_CALL_CORRECTING_MODEL_CLASS: type[Any] | None = None
+
+
+def _get_tool_call_correcting_model_class() -> type[Any]:
+    """Create the correcting model subclass without importing agents at module import time."""
+    global _TOOL_CALL_CORRECTING_MODEL_CLASS
+    if _TOOL_CALL_CORRECTING_MODEL_CLASS is not None:
+        return _TOOL_CALL_CORRECTING_MODEL_CLASS
+
+    from agents import OpenAIChatCompletionsModel  # type: ignore[ty:unresolved-import]
+    from openai.types.responses import ResponseFunctionToolCall
+
+    class _ToolCallCorrectingModel(OpenAIChatCompletionsModel):
+        """Rewrite unknown function calls to a hidden fallback tool.
+
+        This scaffold uses non-streaming Runner.run, so stream_response is intentionally inherited.
+        """
+
+        async def get_response(
+            self,
+            system_instructions: str | None,
+            input: Any,
+            model_settings: Any,
+            tools: list[Any],
+            output_schema: Any,
+            handoffs: list[Any],
+            tracing: Any,
+            previous_response_id: Any | None = None,
+            conversation_id: Any | None = None,
+            prompt: Any | None = None,
+            **kwargs: Any,
+        ) -> Any:
+            visible_tools = [tool for tool in tools if tool.name != TOOL_NOT_FOUND_TOOL_NAME]
+            response = await super().get_response(
+                system_instructions=system_instructions,
+                input=input,
+                model_settings=model_settings,
+                tools=visible_tools,
+                output_schema=output_schema,
+                handoffs=handoffs,
+                tracing=tracing,
+                previous_response_id=previous_response_id,
+                conversation_id=conversation_id,
+                prompt=prompt,
+                **kwargs,
+            )
+
+            known = {tool.name for tool in visible_tools} | {
+                handoff.tool_name for handoff in handoffs
+            }
+            for item in response.output:
+                if isinstance(item, ResponseFunctionToolCall) and item.name not in known:
+                    original_name = item.name
+                    logger.warning(
+                        "Model called unknown tool %r; routing to internal fallback %r",
+                        original_name,
+                        TOOL_NOT_FOUND_TOOL_NAME,
+                    )
+                    item.arguments = json.dumps(
+                        {
+                            "requested_tool": original_name,
+                            "arguments": item.arguments or "",
+                        }
+                    )
+                    item.name = TOOL_NOT_FOUND_TOOL_NAME
+
+            return response
+
+    _TOOL_CALL_CORRECTING_MODEL_CLASS = _ToolCallCorrectingModel
+    return _TOOL_CALL_CORRECTING_MODEL_CLASS
+
+
+def _create_tool_not_found_tool(function_tool: Any, real_tool_names: Sequence[str]) -> Any:
+    """Create the fallback tool that tells the model which tool names are valid."""
+    if real_tool_names:
+        tool_guidance = (
+            f"Available tools: {', '.join(real_tool_names)}. Call one of these exact names."
+        )
+    else:
+        tool_guidance = "No tools are available."
+
+    async def tool_not_found(requested_tool: str = "", arguments: str = "") -> str:
+        return f"Error: tool '{requested_tool}' does not exist. {tool_guidance}"
+
+    wrapped = function_tool(strict_mode=False)(tool_not_found)
+    wrapped.name = TOOL_NOT_FOUND_TOOL_NAME
+    if hasattr(wrapped, "description"):
+        wrapped.description = "Internal fallback for unknown tool calls."
+    return wrapped
 
 
 @register_scaffold("openai_agents")
@@ -159,7 +250,6 @@ class OpenAIAgentsScaffold(Scaffold):
         """
         from agents import (  # type: ignore[ty:unresolved-import]
             Agent,
-            OpenAIChatCompletionsModel,
             function_tool,
             set_tracing_disabled,
         )
@@ -179,12 +269,20 @@ class OpenAIAgentsScaffold(Scaffold):
             f"model={provider.model_name}"
         )
 
-        model = OpenAIChatCompletionsModel(
+        correcting_model_class = _get_tool_call_correcting_model_class()
+        model = correcting_model_class(
             openai_client=client,
             model=provider.model_name,
         )
 
-        agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
+        resolved_tools = config.resolved_tools
+        if any(tool.name == TOOL_NOT_FOUND_TOOL_NAME for tool in resolved_tools):
+            raise ValueError(f"Tool name {TOOL_NOT_FOUND_TOOL_NAME!r} is reserved by the scaffold")
+
+        agent_tools = self._convert_tools(resolved_tools, function_tool, sandbox_manager)
+        agent_tools.append(
+            _create_tool_not_found_tool(function_tool, [tool.name for tool in resolved_tools])
+        )
 
         agent = Agent(
             name=self.name,
@@ -340,6 +438,14 @@ class OpenAIAgentsScaffold(Scaffold):
                         final_output=LMOutput(text="[Max turns exceeded]"),
                         max_turns_reached=True,
                         error=f"Max turns ({max_turns}) exceeded",
+                    )
+                if type(e).__name__ == "ModelBehaviorError":
+                    # Unknown tool names are rewritten before the SDK validates them, so this is
+                    # now a last-resort backstop for other model behavior errors.
+                    return HarnessResult(
+                        trajectory=AgentTrajectory(turns=()),
+                        final_output=LMOutput(text=f"[Tool error: {e}]"),
+                        error=str(e),
                     )
 
                 # Log full traceback for debugging connection issues
