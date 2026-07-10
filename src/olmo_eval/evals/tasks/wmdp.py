@@ -168,6 +168,16 @@ class WMDP(SafetyBase):
             messages=({"role": "user", "content": instance.question},),
         )
 
+    def _build_fewshot(self) -> list[Instance]:
+        """Few-shot from dev split in fixed order (first k), matching reference."""
+        all_fewshot = self._build_fewshot_from_source(
+            split=self.fewshot_split,
+            sample=self.fewshot_sample,
+            fallback_splits=[],
+        )
+        k = self.config.num_fewshot
+        return all_fewshot[:k] if k else all_fewshot
+
 
 _WMDP_SUBSET_METRICS = (
     "subcategory::wmdp-bio",
