@@ -83,7 +83,7 @@ def _format_rc(question: str, choices: tuple[str, ...], answer: str | None = Non
     return prompt
 
 
-class _NaturalQsMCBase(Task):
+class NaturalQsMCBase(Task):
     metrics = (LogprobMCAccuracyMetric(),)
     num_fewshot = 5
     sampling_params = SamplingParams(temperature=0.0)
@@ -132,7 +132,7 @@ class _NaturalQsMCBase(Task):
 
 
 @register("naturalqs:mc")
-class NaturalQsMC(_NaturalQsMCBase):
+class NaturalQsMC(NaturalQsMCBase):
     data_source = DataSource(path="allenai/nq_open_mc", split="validation")
     split = Split.VALIDATION
     from olmo_eval.common.formatters import MultipleChoiceFormatter
@@ -142,7 +142,7 @@ class NaturalQsMC(_NaturalQsMCBase):
 
 
 @register("naturalqs:rc")
-class NaturalQsRC(_NaturalQsMCBase):
+class NaturalQsRC(NaturalQsMCBase):
     data_source = DataSource(path="allenai/nq_open_mc", split="validation")
     split = Split.VALIDATION
     metrics = (LogprobPerCharMCAccuracyMetric(),)
@@ -167,7 +167,7 @@ register_variant(
 
 
 @register("naturalqs:bpb")
-class NaturalQsBPB(_NaturalQsMCBase):
+class NaturalQsBPB(NaturalQsMCBase):
     data_source = DataSource(path="allenai/nq_open_mc", split="validation")
     split = Split.VALIDATION
     formatter = PPLFormatter()

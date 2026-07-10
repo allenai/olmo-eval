@@ -16,7 +16,7 @@ def _format_query(title: str, context: str, question: str) -> str:
     return f"Title: {title}\nBackground: {context}\nQuestion: {question}\nAnswer:"
 
 
-class _SQuADBase(Task):
+class SQuADBase(Task):
     fewshot_split = "train"
     metrics = (SQuADF1Metric(),)
     sampling_params = SamplingParams(
@@ -84,7 +84,7 @@ class _SQuADBase(Task):
 
 
 @register("squad")
-class SQuAD(_SQuADBase):
+class SQuAD(SQuADBase):
     data_source = DataSource(path="allenai/squad", split="validation")
     split = Split.VALIDATION
     num_fewshot = 5

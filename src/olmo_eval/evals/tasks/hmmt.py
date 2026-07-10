@@ -44,7 +44,7 @@ _RLZERO_SAMPLING = SamplingParams(
 
 
 @dataclass(frozen=True, slots=True)
-class _HMMTCompetition:
+class HMMTCompetition:
     dataset_path: str
     year: int
     season: str
@@ -56,19 +56,19 @@ class _HMMTCompetition:
 
 
 _HMMT_COMPETITIONS = (
-    _HMMTCompetition(
+    HMMTCompetition(
         dataset_path="MathArena/hmmt_feb_2025",
         year=2025,
         season="feb",
         date="2025-02-15",
     ),
-    _HMMTCompetition(
+    HMMTCompetition(
         dataset_path="MathArena/hmmt_nov_2025",
         year=2025,
         season="nov",
         date="2025-11-08",
     ),
-    _HMMTCompetition(
+    HMMTCompetition(
         dataset_path="MathArena/hmmt_feb_2026",
         year=2026,
         season="feb",
@@ -107,7 +107,7 @@ class HMMTTask(MinervaMathTask):
     def instances(self) -> Iterator[Instance]:
         yield from self._load_instances_cached()
 
-    def _selected_competitions(self) -> tuple[_HMMTCompetition, ...]:
+    def _selected_competitions(self) -> tuple[HMMTCompetition, ...]:
         competitions = []
         for competition in _HMMT_COMPETITIONS:
             if self.years is not None and competition.year not in self.years:
@@ -117,7 +117,7 @@ class HMMTTask(MinervaMathTask):
             competitions.append(competition)
         return tuple(competitions)
 
-    def _resolve_competition(self, doc: dict[str, Any]) -> _HMMTCompetition:
+    def _resolve_competition(self, doc: dict[str, Any]) -> HMMTCompetition:
         competition = doc.get("_hmmt_competition")
         if competition is not None:
             return competition
@@ -150,7 +150,7 @@ class HMMTTask(MinervaMathTask):
         *,
         problem_idx: Any,
         fallback_index: int,
-        competition: _HMMTCompetition,
+        competition: HMMTCompetition,
     ) -> Any:
         base_identifier = problem_idx if problem_idx is not None else fallback_index
         if len(self._selected_competitions()) == 1:

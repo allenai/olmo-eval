@@ -8,7 +8,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./scripts/push_beaker_image.sh                              # Use defaults
-#   ./scripts/push_beaker_image.sh --source olmo-eval:latest    # Custom source
+#   ./scripts/push_beaker_image.sh --source olmo-eval:cu1281-trc2100-amd64
 #   ./scripts/push_beaker_image.sh --workspace ai2/oe-data      # Custom workspace
 #   ./scripts/push_beaker_image.sh --dry-run                    # Preview only
 #   ./scripts/push_beaker_image.sh --force                      # Force re-upload (delete existing tmp)
@@ -57,7 +57,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --source IMAGE        Local Docker image (default: olmo-eval:latest)"
-            echo "  --beaker-image NAME   Beaker image name (default: olmo-eval-latest)"
+            echo "  --beaker-image NAME   Beaker image name (default: auto-generated from source tag)"
             echo "  --workspace WS        Beaker workspace (default: ai2/oe-data)"
             echo "  --dry-run             Preview without pushing"
             echo "  --force               Force upload even if tmp image exists (deletes existing tmp)"
@@ -84,7 +84,7 @@ fi
 
 # Auto-generate Beaker image name from source tag
 if [[ "$AUTO_NAME" == "true" ]]; then
-    # Extract tag from source image (e.g., olmo-eval:cu128-trc291-amd64 -> cu128-trc291-amd64)
+    # Extract tag from source image (e.g., olmo-eval:cu1281-trc2100-amd64 -> cu1281-trc2100-amd64)
     SOURCE_TAG=$(echo "$SOURCE_IMAGE" | cut -d':' -f2)
     BEAKER_IMAGE="olmo-eval-${SOURCE_TAG}"
     echo "Auto-generated Beaker image name: ${BEAKER_IMAGE}"

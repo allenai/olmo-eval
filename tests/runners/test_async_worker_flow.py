@@ -9,7 +9,7 @@ from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.inference.provider_manager import ProviderManager
 
 
-class _FakeProcess:
+class FakeProcess:
     def __init__(self, target: Any, args: tuple[Any, ...]) -> None:
         self.target = target
         self.args = args
@@ -19,18 +19,18 @@ class _FakeProcess:
         self.started = True
 
 
-class _FakeContext:
+class FakeContext:
     def __init__(self) -> None:
-        self.processes: list[_FakeProcess] = []
+        self.processes: list[FakeProcess] = []
 
-    def Process(self, target: Any, args: tuple[Any, ...]) -> _FakeProcess:
-        process = _FakeProcess(target, args)
+    def Process(self, target: Any, args: tuple[Any, ...]) -> FakeProcess:
+        process = FakeProcess(target, args)
         self.processes.append(process)
         return process
 
 
 def test_provider_manager_passes_start_event_to_each_worker() -> None:
-    ctx = _FakeContext()
+    ctx = FakeContext()
     init_queue = object()
     start_event = object()
     manager = ProviderManager(

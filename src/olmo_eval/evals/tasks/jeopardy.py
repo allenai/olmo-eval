@@ -20,7 +20,7 @@ def _format_query(category: str, question: str) -> str:
     return f"Category: {category}\nQuestion: {question}\nAnswer:"
 
 
-class _JeopardyBase(Task):
+class JeopardyBase(Task):
     fewshot_split: str = "train"
     metrics = (SQuADF1Metric(),)
     sampling_params = SamplingParams(
@@ -81,7 +81,7 @@ class _JeopardyBase(Task):
 
 
 @register("jeopardy")
-class Jeopardy(_JeopardyBase):
+class Jeopardy(JeopardyBase):
     data_source = DataSource(path="soldni/jeopardy", subset="mosaicml_gauntlet", split="train")
     split = Split.TRAIN
     num_fewshot = 5

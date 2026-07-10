@@ -32,7 +32,7 @@ BASIC_SKILLS_SUBTASKS = [
 ]
 
 
-class _BasicSkillsBase(Task):
+class BasicSkillsBase(Task):
     metrics = (LogprobPerTokenMCAccuracyMetric(),)
     num_fewshot = 0
     split = Split.VALIDATION
@@ -129,7 +129,7 @@ for _subtask in BASIC_SKILLS_SUBTASKS:
     _class_name = f"BasicSkills_{_subtask.title().replace('_', '')}"
     _cls = type(
         _class_name,
-        (_BasicSkillsBase,),
+        (BasicSkillsBase,),
         {
             "_subset": _subtask,
             "data_source": DataSource(

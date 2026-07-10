@@ -83,7 +83,7 @@ def _build_arc_fixed_fewshot(
     return instances
 
 
-class _ARCBase(Task):
+class ARCBase(Task):
     metrics = (LogprobMCAccuracyMetric(),)
     num_fewshot = 0
     fewshot_split = "train"
@@ -194,7 +194,7 @@ class _ARCBase(Task):
 
 
 @register("arc_easy")
-class ARCEasy(_ARCBase):
+class ARCEasy(ARCBase):
     data_source = DataSource(path="allenai/ai2_arc", subset="ARC-Easy", split="test")
     split = Split.TEST
     _fewshot_data = ARC_EASY_FIXED_FEWSHOT
@@ -203,7 +203,7 @@ class ARCEasy(_ARCBase):
 
 
 @register("arc_challenge")
-class ARCChallenge(_ARCBase):
+class ARCChallenge(ARCBase):
     data_source = DataSource(path="allenai/ai2_arc", subset="ARC-Challenge", split="test")
     split = Split.TEST
     _fewshot_data = ARC_CHALLENGE_FIXED_FEWSHOT

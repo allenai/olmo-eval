@@ -12,43 +12,21 @@ Usage:
 """
 
 import logging
-from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
-from olmo_eval.common.metrics import AccuracyMetric
-from olmo_eval.common.scorers import SafetyScorer
-from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
-from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.extract import extract_think_answer, extract_think_answer_only
-from olmo_eval.evals.suites.safety import safety_metrics
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.common.types import Instance
+from olmo_eval.data import DataSource
+from olmo_eval.evals.tasks.common import register
+from olmo_eval.evals.tasks.safety_base import SafetyBase, register_safety_variants
 
 logger = logging.getLogger(__name__)
 
 
 @register("wildjailbreak")
-class WildJailbreak(Task):
+class WildJailbreak(SafetyBase):
     """wildjailbreak safety evaluation task."""
 
     data_source = DataSource(path="allenai/olmo-eval-wildjailbreak", split="test")
-    formatter = ChatFormatter()
-    sampling_params = SamplingParams(temperature=0.7, top_p=0.95)
-    answer_extractor = extract_think_answer
-
-    @property
-    def instances(self) -> Iterator[Instance]:
-        """Yield instances from the dataset."""
-        if self._instances_cache is None:
-            self._instances_cache = []
-            loader = DataLoader()
-            source = self.config.get_data_source()
-            for idx, doc in enumerate(loader.load(source)):
-                instance = self.process_doc(doc, idx)
-                if instance is not None:
-                    self._instances_cache.append(instance)
-
-        yield from self._instances_cache
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
@@ -59,6 +37,9 @@ class WildJailbreak(Task):
         elif doc["data_type"] == "adversarial_harmful":
             prompt_type = "harmful"
             gold_answer = "response_refusal=yes"
+        else:
+            logger.warning("Failed to parse prompt data type: %s", doc)
+            return None
 
         return Instance(
             question=doc["adversarial"],
@@ -69,83 +50,14 @@ class WildJailbreak(Task):
             },
         )
 
-    @property
-    def request_type(self) -> RequestType:
-        """Return the request type for this task."""
-        if self.config.formatter is not None:
-            return self.config.formatter.request_type
-        return RequestType.CHAT
-
-    def format_request(self, instance: Instance) -> LMRequest:
-        """Format an instance into an LM request.
-
-        Delegates to the configured formatter (ChatFormatter by default).
-        """
-        if self.config.formatter is not None:
-            return self.config.formatter.format(instance)
-        # Fallback: create a simple chat request
-        return LMRequest(
-            request_type=RequestType.CHAT,
-            messages=({"role": "user", "content": instance.question},),
-        )
-
 
 _WILDJAILBREAK_SUBSET_METRICS = (
     "prompt_type::benign",
     "prompt_type::harmful",
 )
 
-_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
-_BASE_SAMPLING = SamplingParams(
-    max_tokens=1024,
-    temperature=0.6,
-    top_p=0.6,
-    stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
-)
-
-
 # =============================================================================
 # Variant Registrations
 # =============================================================================
 
-# OpenAI judge variant - uses OpenAI API as the judge
-register_variant(
-    "wildjailbreak",
-    "openai_judge",
-    metrics=safety_metrics(SafetyScorer, _WILDJAILBREAK_SUBSET_METRICS),
-    primary_metric=AccuracyMetric(scorer=SafetyScorer),
-    sampling_params=_JUDGE_SAMPLING,
-)
-
-# Wildguard judge variant - uses a local auxiliary provider (auxiliary_providers.wg_judge)
-_WG_SCORER = SafetyScorer(
-    provider_name="wg_judge",
-    judge_format="wildguard",
-    judge_request_type=RequestType.COMPLETION,
-)
-
-register_variant(
-    "wildjailbreak",
-    "wg_judge",
-    metrics=safety_metrics(_WG_SCORER, _WILDJAILBREAK_SUBSET_METRICS),
-    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
-    sampling_params=_JUDGE_SAMPLING,
-)
-
-register_variant(
-    "wildjailbreak",
-    "wg_judge_thinking",
-    metrics=safety_metrics(_WG_SCORER, _WILDJAILBREAK_SUBSET_METRICS),
-    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
-    sampling_params=_JUDGE_SAMPLING,
-    answer_extractor=extract_think_answer_only,
-)
-
-register_variant(
-    "wildjailbreak",
-    "base",
-    metrics=safety_metrics(_WG_SCORER, _WILDJAILBREAK_SUBSET_METRICS),
-    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
-    sampling_params=_BASE_SAMPLING,
-    formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
-)
+register_safety_variants("wildjailbreak", _WILDJAILBREAK_SUBSET_METRICS)

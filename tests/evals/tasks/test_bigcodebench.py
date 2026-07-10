@@ -14,7 +14,7 @@ from olmo_eval.evals.tasks.bigcodebench import (
 )
 
 
-class _StubExecutionEnv:
+class StubExecutionEnv:
     """Minimal execution environment stub for scorer tests."""
 
     def __init__(self, result: ExecutionResult | None = None) -> None:
@@ -50,7 +50,7 @@ def _extract_tmp_dir(command: str) -> str:
 class TestCodeExecutionScorerPythonScriptHelper:
     async def test_execute_python_script_uses_file_based_command(self) -> None:
         scorer = CodeExecutionScorer()
-        env = _StubExecutionEnv()
+        env = StubExecutionEnv()
 
         result = await scorer.execute_python_script(
             env,
@@ -82,7 +82,7 @@ class TestCodeExecutionScorerPythonScriptHelper:
 
     async def test_code_execution_scorer_records_execution_result(self) -> None:
         scorer = CodeExecutionScorer()
-        env = _StubExecutionEnv(
+        env = StubExecutionEnv(
             result=ExecutionResult(success=False, output="traceback", exit_code=1)
         )
         instance = Instance(question="Q", metadata={"test": "assert answer() == 42"})
@@ -104,7 +104,7 @@ class TestCodeExecutionScorerPythonScriptHelper:
 class TestBigCodeBenchScorer:
     async def test_ascore_uses_execute_command_with_rlimits(self) -> None:
         scorer = BigCodeBenchScorer()
-        env = _StubExecutionEnv()
+        env = StubExecutionEnv()
         instance = Instance(
             question="Q",
             metadata={
@@ -146,7 +146,7 @@ class TestBigCodeBenchScorer:
 
     async def test_ascore_returns_zero_on_nonzero_command_exit(self) -> None:
         scorer = BigCodeBenchScorer()
-        env = _StubExecutionEnv(result=ExecutionResult(success=False, output="", exit_code=1))
+        env = StubExecutionEnv(result=ExecutionResult(success=False, output="", exit_code=1))
         instance = Instance(
             question="Q",
             metadata={"test": "class TestCases: pass", "code_prompt": ""},
@@ -179,7 +179,7 @@ class TestBigCodeBenchScorer:
         extracted_answer: str | None,
     ) -> None:
         scorer = BigCodeBenchScorer()
-        env = _StubExecutionEnv()
+        env = StubExecutionEnv()
         instance = Instance(question="Q", metadata=metadata)
         output = LMOutput(text="unused")
         output.extracted_answer = extracted_answer

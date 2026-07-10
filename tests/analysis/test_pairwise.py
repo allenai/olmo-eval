@@ -823,7 +823,7 @@ class TestLatestRunMergeHelpers:
         assert row_by_hash["task-hash-b"].num_instances == 5
 
 
-class _SequenceExecuteResult:
+class SequenceExecuteResult:
     def __init__(self, rows):
         self._rows = list(rows)
 
@@ -841,7 +841,7 @@ class _SequenceExecuteResult:
         return self._rows[0]
 
 
-class _SequenceSession:
+class SequenceSession:
     def __init__(self, responses, *, compile_queries: bool = False):
         self._responses = list(responses)
         self._compile_queries = compile_queries
@@ -851,7 +851,7 @@ class _SequenceSession:
             raise AssertionError("Unexpected session.execute() call")
         if self._compile_queries:
             _query.compile(dialect=postgresql.dialect())
-        return _SequenceExecuteResult(self._responses.pop(0))
+        return SequenceExecuteResult(self._responses.pop(0))
 
 
 class TestComputePairwiseLatestRunMerge:
@@ -1026,7 +1026,7 @@ class TestComputePairwiseLatestRunMerge:
                 raw_score=0.0,
             ),
         ]
-        session = _SequenceSession(
+        session = SequenceSession(
             [task_rows, instance_count_rows, preflight_rows, score_rows],
             compile_queries=True,
         )
@@ -1097,7 +1097,7 @@ class TestComputePairwiseLatestRunMerge:
             SimpleNamespace(model_hash="hash-a", task_hash="task-a-hash", num_instances=2),
             SimpleNamespace(model_hash="hash-b", task_hash="task-a-hash", num_instances=2),
         ]
-        session = _SequenceSession(
+        session = SequenceSession(
             [
                 task_rows,
                 instance_count_rows,

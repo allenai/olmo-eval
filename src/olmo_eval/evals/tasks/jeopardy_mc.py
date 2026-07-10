@@ -71,7 +71,7 @@ def _build_jeopardy_mc_fixed_fewshot(
     return instances
 
 
-class _JeopardyMCBase(Task):
+class JeopardyMCBase(Task):
     data_source = DataSource(path="allenai/jeopardy_mc", split="test")
     split = Split.TEST
     metrics = (LogprobMCAccuracyMetric(),)
@@ -157,7 +157,7 @@ class _JeopardyMCBase(Task):
 
 
 @register("jeopardy:mc")
-class JeopardyMC(_JeopardyMCBase):
+class JeopardyMC(JeopardyMCBase):
     data_source = DataSource(path="allenai/jeopardy_mc", split="test")
     split = Split.TEST
     formatter = MultipleChoiceFormatter()
@@ -165,7 +165,7 @@ class JeopardyMC(_JeopardyMCBase):
 
 
 @register("jeopardy:rc")
-class JeopardyRC(_JeopardyMCBase):
+class JeopardyRC(JeopardyMCBase):
     data_source = DataSource(path="allenai/jeopardy_mc", split="test")
     split = Split.TEST
     metrics = (LogprobPerCharMCAccuracyMetric(),)

@@ -24,6 +24,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from rich.console import Console
 from rich.panel import Panel
@@ -60,6 +61,8 @@ __all__ = [
 
 # Rich console for pretty printing
 _console = Console()
+
+_DIRECT_URL_ARTIFACT_SUFFIXES = (".whl", ".zip", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz")
 
 
 def print_experiment_config(
@@ -504,6 +507,13 @@ def parse_install_spec(package: str) -> tuple[str, list[str]]:
     return " ".join(pkg_parts), flags
 
 
+def _is_direct_url_artifact(package: str) -> bool:
+    if "://" not in package:
+        return False
+    path = urlsplit(package).path.lower()
+    return path.endswith(_DIRECT_URL_ARTIFACT_SUFFIXES)
+
+
 def normalize_provider_package(package: str) -> str:
     """Normalize a provider package specifier for pip installation.
 
@@ -537,6 +547,11 @@ def normalize_provider_package(package: str) -> str:
     if pkg_spec.startswith("git+"):
         return pkg_spec
 
+    # GitHub release assets and other direct wheel/archive URLs are installable
+    # artifacts, not Git repositories.
+    if _is_direct_url_artifact(pkg_spec):
+        return pkg_spec
+
     # GitHub or GitLab URLs need git+ prefix
     if "github.com" in pkg_spec or "gitlab.com" in pkg_spec:
         return f"git+{pkg_spec}"
@@ -545,30 +560,57 @@ def normalize_provider_package(package: str) -> str:
     return pkg_spec
 
 
+def _strip_package_extras(package_name: str) -> str:
+    """Return the base distribution name from a package name with optional extras."""
+    return package_name.split("[", 1)[0].strip()
+
+
+def _normalize_distribution_name(package_name: str) -> str:
+    """Return a PEP 503-normalized distribution name."""
+    return re.sub(r"[-_.]+", "-", package_name).lower()
+
+
+def _normalize_install_target_name(package_name: str) -> str | None:
+    """Return the canonical distribution name used by uv package flags."""
+    base_name = _strip_package_extras(package_name)
+    return _normalize_distribution_name(base_name) if base_name else None
+
+
+def _infer_wheel_distribution_name(filename: str) -> str | None:
+    """Infer the distribution name from a wheel filename."""
+    if not filename.lower().endswith(".whl"):
+        return None
+    distribution = filename[:-4].split("-", 1)[0]
+    return _normalize_distribution_name(distribution) if distribution else None
+
+
 def _infer_install_target_name_from_normalized(package: str) -> str | None:
     """Infer a distribution name from an already-normalized package spec."""
     normalized = package
 
     # PEP 508 direct references: "name @ URL"
     if " @ " in normalized:
-        return normalized.split(" @ ", 1)[0].strip() or None
+        return _normalize_install_target_name(normalized.split(" @ ", 1)[0].strip())
 
     # Direct URLs and local paths: prefer an explicit egg fragment, otherwise
     # fall back to the trailing path component (e.g., transformers.git -> transformers).
     if normalized.startswith("git+") or "://" in normalized or normalized.startswith("/"):
         match = re.search(r"(?:[#&]egg=)([A-Za-z0-9_.-]+)", normalized)
         if match:
-            return match.group(1)
+            return _normalize_install_target_name(match.group(1))
 
         path_part = normalized.split("#", 1)[0].rsplit("/", 1)[-1]
         if "@" in path_part:
             path_part = path_part.split("@", 1)[0]
+        wheel_distribution = _infer_wheel_distribution_name(path_part)
+        if wheel_distribution:
+            return wheel_distribution
         if path_part.endswith(".git"):
             path_part = path_part[:-4]
-        return path_part or None
+        return _normalize_install_target_name(path_part)
 
     match = re.match(r"^\s*([A-Za-z0-9_.-]+)", normalized)
-    return match.group(1) if match else None
+    return _normalize_install_target_name(match.group(1)) if match else None
 
 
 def bind_direct_source_to_package(package: str) -> str:

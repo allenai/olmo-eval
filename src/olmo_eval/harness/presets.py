@@ -35,7 +35,7 @@ def _get_logs_dir() -> str:
 # ─────────────────────────────────────────────────────────
 
 
-class _Lazy:
+class Lazy:
     """Descriptor for lazily-loaded presets with auto-injected name."""
 
     def __init__(self, factory: Callable[[str], HarnessConfig]):
@@ -52,9 +52,9 @@ class _Lazy:
         return self._cached
 
 
-def lazy(fn: Callable[[str], HarnessConfig]) -> _Lazy:
+def lazy(fn: Callable[[str], HarnessConfig]) -> Lazy:
     """Mark a preset factory for lazy loading. Factory receives preset name."""
-    return _Lazy(fn)
+    return Lazy(fn)
 
 
 # ─────────────────────────────────────────────────────────
@@ -108,6 +108,30 @@ class HarnessPresets:
             max_concurrency=4,
             scaffold="openai_agents",
             required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def paper_search_agent(name: str) -> HarnessConfig:
+        """Agentic harness exposing only Semantic Scholar paper search.
+
+        For literature-search tasks (e.g. litsearch). Exposes a single paper-search
+        tool and declares no required secrets, so it runs against the public
+        Semantic Scholar API keyless (rate-limited). For higher rate limits, mount
+        a key with `--secret-env <user>_S2_API_KEY:S2_API_KEY`.
+        """
+        from .tools.search import semantic_scholar_search
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            tools=(semantic_scholar_search,),
+            max_turns=10,
+            max_concurrency=4,
+            scaffold="openai_agents",
             batching=BatchConfig.streaming(),
         )
 
@@ -236,11 +260,11 @@ class HarnessPresets:
 
 
 def _is_preset(name: str) -> bool:
-    """Check if a name is a valid preset (not private, is HarnessConfig or _Lazy)."""
+    """Check if a name is a valid preset (not private, is HarnessConfig or Lazy)."""
     if name.startswith("_"):
         return False
     attr = getattr(HarnessPresets, name, None)
-    return isinstance(attr, (HarnessConfig, _Lazy))
+    return isinstance(attr, (HarnessConfig, Lazy))
 
 
 def get_harness_preset(name: str) -> HarnessConfig:

@@ -7,7 +7,7 @@ from typing import Any
 
 
 @dataclass
-class _ChildAverageResult:
+class ChildAverageResult:
     """Result from computing a child average."""
 
     metrics: dict[str, dict[str, float]]  # Nested: {metric: {scorer: value}}
@@ -66,11 +66,11 @@ def _compute_child_average(
     child: str | Any,  # str or Suite
     priority_suffix: str,
     task_results: dict[str, dict[str, Any]],
-) -> _ChildAverageResult | None:
+) -> ChildAverageResult | None:
     """Compute average metrics for a single child (task string or nested Suite).
 
     Returns:
-        _ChildAverageResult with metrics and task info, or None if no results found.
+        ChildAverageResult with metrics and task info, or None if no results found.
     """
     from olmo_eval.evals.suites.registry import Suite
 
@@ -113,7 +113,7 @@ def _compute_child_average(
         avg_primary = sum(primary_scores) / len(primary_scores) if primary_scores else None
         # Build the key for this nested suite (with suffix)
         nested_key = f"{child.name}{priority_suffix}"
-        return _ChildAverageResult(
+        return ChildAverageResult(
             metrics=averaged,
             tasks=tasks_included,
             primary_score=avg_primary,
@@ -131,7 +131,7 @@ def _compute_child_average(
         if not metrics:
             return None
 
-        return _ChildAverageResult(
+        return ChildAverageResult(
             metrics=dict(metrics),
             tasks=[full_task_spec],
             primary_score=_extract_primary_score(task_data),

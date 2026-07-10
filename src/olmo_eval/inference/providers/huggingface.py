@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import (
     LMOutput,
     LMRequest,
@@ -14,6 +15,8 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     import torch
@@ -94,13 +97,28 @@ class HuggingFaceProvider(InferenceProvider):
         """Get the tokenizer for this provider."""
         return self.tokenizer
 
-    def _build_generate_kwargs(self, params: SamplingParams) -> dict[str, Any]:
+    def _context_length(self) -> int:
+        """Model context length, used to cap uncapped (max_tokens=None) generation."""
+        for attr in ("max_position_embeddings", "n_positions", "max_sequence_length"):
+            value = getattr(self.model.config, attr, None)
+            if isinstance(value, int) and value > 0:
+                return value
+        return 2048
+
+    def _build_generate_kwargs(self, params: SamplingParams, prompt_len: int = 0) -> dict[str, Any]:
         """Convert SamplingParams to HuggingFace generate kwargs."""
         # Use explicit do_sample flag, overriding temperature-based inference
         do_sample = params.do_sample and params.temperature > 0
 
+        # max_tokens=None means "uncapped"; transformers would otherwise fall back
+        # to its tiny default max_length. max_new_tokens counts generated tokens on
+        # top of the prompt, so reserve the room left in the context after it.
+        if params.max_tokens is not None:
+            max_new_tokens = params.max_tokens
+        else:
+            max_new_tokens = max(self._context_length() - prompt_len, 1)
         kwargs: dict[str, Any] = {
-            "max_new_tokens": params.max_tokens,
+            "max_new_tokens": max_new_tokens,
             "do_sample": do_sample,
         }
 
@@ -139,6 +157,11 @@ class HuggingFaceProvider(InferenceProvider):
         import torch
 
         params = self._default_sampling_params(sampling_params)
+        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
+            logger.warning(
+                "truncate_prompt_tokens or truncation_side has been set in the params, "
+                "but is not supported for the HuggingFaceProvider and will not be used."
+            )
         gen_kwargs = self._build_generate_kwargs(params)
 
         results = []
@@ -146,6 +169,7 @@ class HuggingFaceProvider(InferenceProvider):
             prompt = request.prompt
             encoded = self.tokenizer(prompt, return_tensors="pt").to(self.device)
             prompt_len = encoded["input_ids"].shape[1]
+            gen_kwargs = self._build_generate_kwargs(params, prompt_len)
 
             request_outputs = []
             for _ in range(params.num_samples):
@@ -204,11 +228,14 @@ class HuggingFaceProvider(InferenceProvider):
             return None
 
         if request.request_type != RequestType.LOGLIKELIHOOD:
+            # Pass the prompt length so an uncapped (max_tokens=None) trace shows the
+            # same per-prompt max_new_tokens budget that generate() will use.
+            prompt_len = len(self.tokenizer.encode(request.prompt)) if request.prompt else 0
             trace["provider"] = "HuggingFaceProvider"
             trace["endpoint"] = "transformers.generate"
             trace["generation_kwargs"] = {
                 "max_gen_toks": params.max_tokens,
-                **self._build_generate_kwargs(params),
+                **self._build_generate_kwargs(params, prompt_len),
             }
             trace["stop_sequences"] = list(params.stop_sequences or ())
         return trace
@@ -220,6 +247,12 @@ class HuggingFaceProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         import torch
 
+        params = self._default_sampling_params(sampling_params)
+        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
+            logger.warning(
+                "truncate_prompt_tokens or truncation_side has been set in the params, "
+                "but is not supported for the HuggingFaceProvider and will not be used."
+            )
         results = []
         for request in requests:
             request_outputs = []

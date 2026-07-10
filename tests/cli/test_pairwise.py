@@ -16,7 +16,7 @@ from click.testing import CliRunner
 from olmo_eval.analysis.pairwise import ModelMeta, PairStats, PairwiseResult
 
 
-class _DummySession:
+class DummySession:
     def __enter__(self) -> object:
         return object()
 
@@ -24,15 +24,15 @@ class _DummySession:
         return False
 
 
-class _DummyDB:
-    def session(self) -> _DummySession:
-        return _DummySession()
+class DummyDB:
+    def session(self) -> DummySession:
+        return DummySession()
 
     def dispose(self) -> None:
         pass
 
 
-class _StaticExecuteResult:
+class StaticExecuteResult:
     def __init__(self, rows):
         self._rows = list(rows)
 
@@ -40,7 +40,7 @@ class _StaticExecuteResult:
         return list(self._rows)
 
 
-class _StaticLookupResult:
+class StaticLookupResult:
     def __init__(self, row):
         self._row = row
 
@@ -51,15 +51,15 @@ class _StaticLookupResult:
         return self._row
 
 
-class _StaticTaskSession:
+class StaticTaskSession:
     def __init__(self, rows):
         self._rows = list(rows)
 
     def execute(self, _query):
-        return _StaticExecuteResult(self._rows)
+        return StaticExecuteResult(self._rows)
 
 
-class _SequentialExecuteSession:
+class SequentialExecuteSession:
     def __init__(self, results):
         self._results = list(results)
 
@@ -149,7 +149,7 @@ def test_results_viewer_json_blob_forwards_exclude_filters(monkeypatch) -> None:
         return _build_pairwise_result()
 
     monkeypatch.setattr(analysis_pairwise, "compute_pairwise", fake_compute_pairwise)
-    monkeypatch.setattr(viewer_cli, "get_database_session", lambda *args: _DummyDB())
+    monkeypatch.setattr(viewer_cli, "get_database_session", lambda *args: DummyDB())
 
     runner = CliRunner()
     result = runner.invoke(
@@ -203,7 +203,7 @@ def test_results_viewer_dump_repeated_runs_status_uses_plain_language(
         "compute_pairwise",
         lambda **kwargs: _build_pairwise_result(),
     )
-    monkeypatch.setattr(viewer_cli, "get_database_session", lambda *args: _DummyDB())
+    monkeypatch.setattr(viewer_cli, "get_database_session", lambda *args: DummyDB())
 
     output_path = tmp_path / "pairwise.json"
     runner = CliRunner()
@@ -296,7 +296,7 @@ def test_results_viewer_csv_dump_streams_to_stdout(monkeypatch) -> None:
         "compute_pairwise",
         lambda **kwargs: _build_pairwise_result(),
     )
-    monkeypatch.setattr(viewer_cli, "get_database_session", lambda *args: _DummyDB())
+    monkeypatch.setattr(viewer_cli, "get_database_session", lambda *args: DummyDB())
 
     runner = CliRunner()
     result = runner.invoke(
@@ -342,7 +342,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
     )
 
     latest_table = viewer_server._build_results_table(
-        _StaticTaskSession(
+        StaticTaskSession(
             [
                 (
                     11,
@@ -357,7 +357,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
         keep_all=False,
     )
     all_runs_table = viewer_server._build_results_table(
-        _StaticTaskSession(
+        StaticTaskSession(
             [
                 (
                     10,
@@ -423,7 +423,7 @@ def test_load_results_model_config_bundle_prefers_displayed_run_config(monkeypat
     )
 
     bundle = viewer_server._load_results_model_config_bundle(
-        _SequentialExecuteSession([_StaticLookupResult(detail_row)]),
+        SequentialExecuteSession([StaticLookupResult(detail_row)]),
         group_name="my-group",
         model_ref="abc12345deadbeef",
         keep_all=False,
@@ -469,10 +469,10 @@ def test_load_results_model_config_bundle_falls_back_to_same_hash(monkeypatch) -
     )
 
     bundle = viewer_server._load_results_model_config_bundle(
-        _SequentialExecuteSession(
+        SequentialExecuteSession(
             [
-                _StaticLookupResult(display_row),
-                _StaticLookupResult(fallback_row),
+                StaticLookupResult(display_row),
+                StaticLookupResult(fallback_row),
             ]
         ),
         group_name="my-group",
@@ -519,7 +519,7 @@ def test_load_results_model_config_bundle_repeated_runs_still_require_exact_ref(
     )
 
     bundle = viewer_server._load_results_model_config_bundle(
-        _SequentialExecuteSession([_StaticLookupResult(detail_row)]),
+        SequentialExecuteSession([StaticLookupResult(detail_row)]),
         group_name="my-group",
         model_ref="abc12345deadbeef|2026-04-21T08:00:00+00:00",
         keep_all=True,
@@ -550,7 +550,7 @@ def test_build_results_table_metric_options_do_not_double_count_primary_metric(
     )
 
     results_table = viewer_server._build_results_table(
-        _StaticTaskSession(
+        StaticTaskSession(
             [
                 (
                     11,
@@ -603,7 +603,7 @@ def test_build_results_table_latest_mode_merges_partial_runs_by_model_and_task_h
     )
 
     results_table = viewer_server._build_results_table(
-        _StaticTaskSession(
+        StaticTaskSession(
             [
                 (
                     10,
@@ -663,7 +663,7 @@ def test_build_results_table_latest_mode_keeps_unique_older_metrics_and_latest_d
     )
 
     results_table = viewer_server._build_results_table(
-        _StaticTaskSession(
+        StaticTaskSession(
             [
                 (
                     10,
@@ -714,7 +714,7 @@ def test_build_results_table_splits_same_name_tasks_by_hash(monkeypatch) -> None
     )
 
     results_table = viewer_server._build_results_table(
-        _StaticTaskSession(
+        StaticTaskSession(
             [
                 (
                     11,
@@ -958,7 +958,7 @@ def test_timed_value_cache_reuses_fresh_entries_and_expires_stale_ones() -> None
     viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
     now = [100.0]
-    cache = viewer_server._TimedValueCache(ttl_seconds=5.0, clock=lambda: now[0])
+    cache = viewer_server.TimedValueCache(ttl_seconds=5.0, clock=lambda: now[0])
     calls = {"count": 0}
 
     def loader() -> dict[str, int]:
@@ -1056,7 +1056,7 @@ def test_load_group_browser_data_for_request_falls_back_when_scope_is_stale(monk
             requested_scope="task::old-task",
             keep_all=False,
             require_full_coverage=True,
-            group_browser_cache=viewer_server._TimedValueCache(ttl_seconds=60.0),
+            group_browser_cache=viewer_server.TimedValueCache(ttl_seconds=60.0),
         )
     )
 
@@ -1217,9 +1217,9 @@ def test_latest_only_exports_merge_source_rows_back_to_display_models() -> None:
         score_unit="proportion",
         higher_is_better=True,
     )
-    session = _SequentialExecuteSession(
+    session = SequentialExecuteSession(
         [
-            _StaticExecuteResult(
+            StaticExecuteResult(
                 [
                     SimpleNamespace(
                         experiment_pk=11,
@@ -1245,7 +1245,7 @@ def test_latest_only_exports_merge_source_rows_back_to_display_models() -> None:
                     ),
                 ]
             ),
-            _StaticExecuteResult(
+            StaticExecuteResult(
                 [
                     SimpleNamespace(
                         experiment_pk=11,

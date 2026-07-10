@@ -2,7 +2,6 @@
 Safety suites for thinking and instruct models, and wildguard vs openai models
 """
 
-from olmo_eval.common.metrics import AccuracyMetric, SafetyErrorMetric, SubsetAccuracyMetric
 from olmo_eval.evals.suites.registry import AggregationStrategy, make_suite
 
 SAFETY_TASKS = [
@@ -41,12 +40,3 @@ make_suite(
     aggregation=AggregationStrategy.AVERAGE,
     description="Safety evals for pretrained models",
 )
-
-
-def safety_metrics(scorer, subsets):
-    """Build the full metric tuple for a safety judge scorer."""
-    return (
-        AccuracyMetric(scorer=scorer),
-        SafetyErrorMetric(scorer=scorer),
-        *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in subsets),
-    )

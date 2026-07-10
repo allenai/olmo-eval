@@ -3,7 +3,6 @@
 from olmo_eval.common.types import ProviderKind
 
 from .base import InferenceProvider
-from .providers.mock import MockProvider
 from .tokenizer_utils import (
     encode_context_and_continuation,
     get_bos_token_ids,
@@ -18,6 +17,7 @@ __all__ = [
     "HuggingFaceProvider",
     "VLLMProvider",
     "VLLMServerProvider",
+    "OlmoCoreProvider",
     "LiteLLMProvider",
     "create_provider",
     # Tokenizer utilities
@@ -95,6 +95,8 @@ def create_provider(
 
     match kind_str:
         case "mock":
+            from .providers.mock import MockProvider
+
             return MockProvider(model_name)
         case "hf":
             from .providers.huggingface import HuggingFaceProvider
@@ -126,6 +128,10 @@ def create_provider(
                 force_download=force_download,
             )
             return VLLMServerProvider(model_name, **kwargs)
+        case "olmo_core":
+            from .providers.olmo_core import OlmoCoreProvider
+
+            return OlmoCoreProvider(model_name, **kwargs)
         case "litellm":
             from .providers.litellm import LiteLLMProvider
 
@@ -136,6 +142,10 @@ def create_provider(
 
 # Lazy imports for optional dependencies
 def __getattr__(name: str):
+    if name == "MockProvider":
+        from .providers.mock import MockProvider
+
+        return MockProvider
     if name == "HuggingFaceProvider":
         from .providers.huggingface import HuggingFaceProvider
 
@@ -148,6 +158,10 @@ def __getattr__(name: str):
         from .providers.vllm_server import VLLMServerProvider
 
         return VLLMServerProvider
+    if name == "OlmoCoreProvider":
+        from .providers.olmo_core import OlmoCoreProvider
+
+        return OlmoCoreProvider
     if name == "LiteLLMProvider":
         from .providers.litellm import LiteLLMProvider
 

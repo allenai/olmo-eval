@@ -11,6 +11,8 @@ from olmo_eval.runners.asynq.types import WORKER_FATAL
 
 logger = get_logger(__name__)
 
+DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
+
 
 def terminate_workers(
     workers: list[mp.process.BaseProcess],
@@ -144,7 +146,7 @@ def wait_for_init_times(
     num_workers: int,
     workers: list[mp.process.BaseProcess] | None = None,
     result_queue: mp.Queue | None = None,
-    timeout: float = 300.0,
+    timeout: float = DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS,
     check_interval: float = 1.0,
 ) -> dict[str, float]:
     """Wait for all workers to report their initialization times.
@@ -188,11 +190,15 @@ def wait_for_init_times(
         time.sleep(check_interval)
 
     # Return what we have even if incomplete
-    logger.warning(f"Timed out waiting for init times: got {len(collected)}/{num_workers} workers")
+    logger.warning(
+        f"Timed out after {timeout:.0f}s waiting for init times: "
+        f"got {len(collected)}/{num_workers} workers"
+    )
     return collected
 
 
 __all__ = [
+    "DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS",
     "terminate_workers",
     "check_workers_alive",
     "wait_for_workers_ready",
