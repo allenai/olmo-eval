@@ -265,8 +265,8 @@ class VLLMProvider(InferenceProvider):
         params = self._default_sampling_params(sampling_params)
         if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
             logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, \
-                but is not supported for the VLLMProvider and will not be used."
+                "truncate_prompt_tokens or truncation_side has been set in the params, "
+                "but is not supported for the VLLMProvider and will not be used."
             )
         vllm_params = self._build_sampling_params(params)
 

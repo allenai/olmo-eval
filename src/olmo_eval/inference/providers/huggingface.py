@@ -159,8 +159,8 @@ class HuggingFaceProvider(InferenceProvider):
         params = self._default_sampling_params(sampling_params)
         if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
             logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, \
-                but is not supported for the HuggingFaceProvider and will not be used."
+                "truncate_prompt_tokens or truncation_side has been set in the params, "
+                "but is not supported for the HuggingFaceProvider and will not be used."
             )
         gen_kwargs = self._build_generate_kwargs(params)
 
@@ -250,8 +250,8 @@ class HuggingFaceProvider(InferenceProvider):
         params = self._default_sampling_params(sampling_params)
         if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
             logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, \
-                but is not supported for the HuggingFaceProvider and will not be used."
+                "truncate_prompt_tokens or truncation_side has been set in the params, "
+                "but is not supported for the HuggingFaceProvider and will not be used."
             )
         results = []
         for request in requests:
