@@ -77,9 +77,14 @@ class DeepScholarArgs:
     # "openai" routes via litellm's OpenAI handler against api_base; an alternative
     # is "hosted_vllm". Ignored for external API models.
     local_model_prefix: str = "openai"
-    # Per-request timeout (s) for LOTUS LM calls, propagated to litellm. Without it a
-    # stalled vLLM request hangs generation until the sandbox watchdog kills the whole
-    # run (losing all completed queries). Kept under the 300s health-poll interval.
+    # Per-call timeout (s) for LOTUS LM calls. Set both as the litellm config `timeout`
+    # (best-effort; litellm does not reliably enforce it on the vLLM path) and as the
+    # shim's hard wall-clock guard, which runs each LM call in a worker thread and
+    # abandons it after this many seconds. A stalled/runaway vLLM request then fails the
+    # one query (upstream catches it and moves on) instead of hanging the run until the
+    # sandbox watchdog aborts. Kept under the 300s health-poll interval so it fires
+    # first. Worst-case legitimate call is a stage LM at stage_max_tokens (~4096) tokens,
+    # well under 240s, so this does not cut genuine work.
     lm_timeout: int = 240
 
     # In-sandbox chunking. A single generation process over all 63 queries wedges the

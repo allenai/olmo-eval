@@ -199,7 +199,12 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 "litellm prefix for local vLLM ('openai' or 'hosted_vllm')",
                 "openai",
             ),
-            "lm_timeout": ("Per-request LM timeout in seconds (guards against hangs)", 240),
+            "lm_timeout": (
+                "Per-call LM timeout in seconds; hard wall-clock guard against vLLM "
+                "stalls/runaway generation (fails the query, doesn't hang the run). "
+                "Kept under the 300s poll interval",
+                240,
+            ),
             "chunk_size": (
                 "Queries per generation command (default 10; 0/none disables chunking). "
                 "Chunking runs generation as short commands over disjoint index ranges "
@@ -415,6 +420,11 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         entry = [
             f"DEEPSCHOLAR_SEARCH_BACKEND={shlex.quote(ds_args.search_backend)}",
             f"DEEPSCHOLAR_STAGE_MAX_TOKENS={stage_budget}",
+            # Hard per-call wall-clock timeout in the shim: litellm doesn't enforce the
+            # config `timeout` on the vLLM path, so a stalled request would hang the run
+            # until the sandbox watchdog kills it. This makes a stall fail the one query
+            # and continue. Kept under the 300s poll interval.
+            f"DEEPSCHOLAR_LM_HARD_TIMEOUT={ds_args.lm_timeout}",
             self._venv_python,
             self._shim_path,
         ]

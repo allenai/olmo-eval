@@ -186,12 +186,60 @@ def _patch_stage_max_tokens(max_tokens: int) -> None:
     setattr(lm_cls, init_name, init)
 
 
+def _patch_lm_hard_timeout(timeout_s: float) -> None:
+    """Wrap ``lotus.models.LM.__call__`` with a hard wall-clock timeout.
+
+    A generation LM call can stall indefinitely: the vLLM server goes silent
+    mid-request (or a weak model provokes a runaway generation), the request never
+    returns, and because LOTUS calls ``litellm.batch_completion`` non-streaming with
+    a ``timeout`` that litellm does not actually enforce on the vLLM path, nothing
+    aborts it — the whole run hangs until the sandbox watchdog kills it (losing the
+    chunk). This runs the call in a worker thread and abandons it after ``timeout_s``,
+    raising ``TimeoutError``. Upstream catches that per query, marks the query failed,
+    and moves on, so a stall costs one query instead of the run. That is the intended
+    behavior: a model that provokes these stalls should be penalized (failed queries
+    score 0 under a fixed denominator), not hang the harness.
+
+    The abandoned worker is not killed (Python can't), but the ``timeout`` we set in
+    the LM kwargs still tells litellm to close that request's connection, so vLLM
+    frees the slot and the thread ends on its own; the pool is oversized so any
+    lingering workers never block new calls. Kept below the 300s sandbox poll
+    interval so it fires before the watchdog escalates.
+    """
+    import concurrent.futures
+    import importlib
+
+    lm_attr = "LM"
+    lm_cls = getattr(importlib.import_module("lotus.models"), lm_attr)
+    call_name = "__call__"
+    original_call = getattr(lm_cls, call_name)
+    pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=256, thread_name_prefix="lm-hard-timeout"
+    )
+
+    def timed_call(self: Any, *args: Any, **kwargs: Any) -> Any:
+        future = pool.submit(original_call, self, *args, **kwargs)
+        try:
+            return future.result(timeout=timeout_s)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(
+                f"LM call exceeded hard timeout of {timeout_s:.0f}s "
+                "(vLLM stall / runaway generation); failing this query"
+            ) from None
+
+    setattr(lm_cls, call_name, timed_call)
+
+
 def main() -> None:
     import importlib
 
     stage_max_tokens = os.environ.get("DEEPSCHOLAR_STAGE_MAX_TOKENS")
     if stage_max_tokens and int(stage_max_tokens) > 0:
         _patch_stage_max_tokens(int(stage_max_tokens))
+
+    hard_timeout = os.environ.get("DEEPSCHOLAR_LM_HARD_TIMEOUT")
+    if hard_timeout and float(hard_timeout) > 0:
+        _patch_lm_hard_timeout(float(hard_timeout))
 
     backend = os.environ.get("DEEPSCHOLAR_SEARCH_BACKEND", "arxiv")
     if backend in ("s2", "tavily"):
