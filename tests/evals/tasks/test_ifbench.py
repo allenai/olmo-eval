@@ -43,6 +43,30 @@ def _make_response(instance: Instance, response_text: str) -> Response:
     )
 
 
+class TestIFEvalTask(unittest.TestCase):
+    def test_registered(self) -> None:
+        task = get_task("ifeval")
+        self.assertIsNotNone(task)
+        self.assertEqual(task.request_type, RequestType.CHAT)
+        self.assertEqual(task.config.data_source.path, "wis-k/instruction-following-eval")
+        self.assertEqual(task.config.data_source.split, "train")
+
+    def test_process_doc_strips_none_kwargs(self) -> None:
+        task = get_task("ifeval")
+        doc = {
+            "key": 1000,
+            "prompt": "hi",
+            "instruction_id_list": ["count:numbers"],
+            "kwargs": [{"N": 2, "keyword": None, "frequency": None}],
+        }
+        instance = task.process_doc(doc, index=0)
+        self.assertIsNotNone(instance)
+        assert instance is not None
+        self.assertEqual(instance.metadata["instruction_id_list"], ["count:numbers"])
+        self.assertEqual(instance.metadata["kwargs"], [{"N": 2}])
+        self.assertEqual(instance.metadata["key"], 1000)
+
+
 class TestIFEvalOODTask(unittest.TestCase):
     def test_registered(self) -> None:
         task = get_task("ifeval_ood")
