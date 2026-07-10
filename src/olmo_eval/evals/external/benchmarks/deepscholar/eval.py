@@ -169,7 +169,23 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         from dataclasses import replace
 
         config = super()._create_sandbox_config(container_runtime, output_dir)
-        return replace(config, inject_swerex=True)
+        volumes = config.volumes
+        if output_dir:
+            # Persist every completed query immediately. Post-failure copy-back
+            # cannot work when the swe-rex control server is the failed component,
+            # and generation only writes summary.json after the whole range exits.
+            # Binding the two output trees also makes partial work available in the
+            # Beaker result dataset even if the sandbox never answers another RPC.
+            dest = Path(output_dir).resolve() / "deepscholar_results"
+            generation = dest / "generation"
+            evaluation = dest / "evaluation"
+            generation.mkdir(parents=True, exist_ok=True)
+            evaluation.mkdir(parents=True, exist_ok=True)
+            volumes += (
+                (str(generation), self._gen_dir),
+                (str(evaluation), self._eval_dir),
+            )
+        return replace(config, inject_swerex=True, volumes=volumes)
 
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
@@ -198,6 +214,11 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             "local_model_prefix": (
                 "litellm prefix for local vLLM ('openai' or 'hosted_vllm')",
                 "openai",
+            ),
+            "max_batch_size": (
+                "Concurrent vLLM requests per LOTUS sem-op (upstream default 64). "
+                "Lower (e.g. 4-8) to cut sandbox resource pressure / runtime wedges",
+                None,
             ),
             "lm_timeout": (
                 "Per-call LM timeout in seconds; hard wall-clock guard against vLLM "
@@ -358,6 +379,14 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             # the whole run. Inherited by upstream's stage LMs via configured_lm.kwargs.
             "timeout": ds_args.lm_timeout,
         }
+        if ds_args.max_batch_size is not None:
+            # LOTUS uses this as batch_completion's max_workers: the number of vLLM
+            # requests fired concurrently per sem-op. Upstream defaults to 64, i.e. up
+            # to 64 concurrent HTTP connections from inside the nested-podman sandbox,
+            # which is a plausible contributor to the swe-rex runtime wedging under
+            # resource pressure. Lowering it trades generation speed for container
+            # stability. Propagates to the stage LMs via initialize_lms.
+            lm["max_batch_size"] = ds_args.max_batch_size
         if is_local:
             # litellm routes "<prefix>/<model>" to the OpenAI-compatible vLLM server at api_base.
             lm["model"] = f"{ds_args.local_model_prefix}/{model_name}"
@@ -808,7 +837,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         )
 
     async def _copy_back(self, executor: SandboxExecutor, output_dir: str) -> None:
-        """Copy eval outputs and generation summary back for inspection."""
+        """Copy outputs back when they are not already bind-mounted locally."""
         dest = Path(output_dir) / "deepscholar_results"
         for remote_dir, pattern, subdir in (
             (self._eval_dir, "*", "evaluation"),

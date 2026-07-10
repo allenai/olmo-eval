@@ -73,6 +73,12 @@ class DeepScholarArgs:
     # eval's DEFAULT_STAGE_MAX_TOKENS (kept below max_model_len, since LOTUS sends it
     # as max_completion_tokens and the server rejects prompt + budget > context).
     stage_max_tokens: int | None = None
+    # Concurrent vLLM requests per LOTUS sem-op (batch_completion max_workers).
+    # Upstream defaults to 64; that many concurrent connections from inside the
+    # nested-podman sandbox is a likely contributor to the swe-rex runtime wedging
+    # under resource pressure. Lower it (e.g. 4-8) to trade generation speed for
+    # container stability. None keeps the upstream default. Propagates to stage LMs.
+    max_batch_size: int | None = None
     # litellm provider prefix for a local OpenAI-compatible (vLLM) server.
     # "openai" routes via litellm's OpenAI handler against api_base; an alternative
     # is "hosted_vllm". Ignored for external API models.
@@ -157,6 +163,7 @@ class DeepScholarArgs:
             stage_max_tokens=_parse_optional(data, "stage_max_tokens", int),
             local_model_prefix=data.get("local_model_prefix", "openai"),
             lm_timeout=int(data.get("lm_timeout", 240)),
+            max_batch_size=_parse_optional(data, "max_batch_size", int),
             chunk_size=chunk_size,
             chunk_timeout=int(data.get("chunk_timeout", 1800)),
             chunk_retries=int(data.get("chunk_retries", 3)),
