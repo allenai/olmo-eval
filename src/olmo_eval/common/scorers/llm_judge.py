@@ -548,29 +548,34 @@ class SafetyScorer(LLMJudgeScorer):
         context: ScoringContext,
     ) -> float:
         """Score using configured provider or judge_fn."""
-        self._validate_provider(context)
-        prompt = self.format_judge_prompt(instance, output)
+        instance.metadata["is_parsing_error"] = False
+        try:
+            self._validate_provider(context)
+            prompt = self.format_judge_prompt(instance, output)
 
-        if self.provider_name is not None:
-            if self.judge_format == "wildguard":
-                response = await self._score_with_provider(
-                    prompt,
-                    context,
-                    temperature=0.0,
-                    max_tokens=128,
-                    truncate_prompt_tokens=32600,
-                    truncation_side="right",
-                    request_type=self.judge_request_type,
-                )
+            if self.provider_name is not None:
+                if self.judge_format == "wildguard":
+                    response = await self._score_with_provider(
+                        prompt,
+                        context,
+                        temperature=0.0,
+                        max_tokens=128,
+                        truncate_prompt_tokens=32600,
+                        truncation_side="right",
+                        request_type=self.judge_request_type,
+                    )
+                else:
+                    response = await self._score_with_provider(
+                        prompt,
+                        context,
+                        temperature=0.0,
+                        max_tokens=128,
+                        request_type=self.judge_request_type,
+                    )
             else:
-                response = await self._score_with_provider(
-                    prompt,
-                    context,
-                    temperature=0.0,
-                    max_tokens=128,
-                    request_type=self.judge_request_type,
-                )
-        else:
-            response = await self._score_with_judge_fn(prompt)
+                response = await self._score_with_judge_fn(prompt)
 
-        return self.parse_judge_response(response, instance=instance)
+            return self.parse_judge_response(response, instance=instance)
+        except Exception:
+            instance.metadata["is_parsing_error"] = True
+            raise

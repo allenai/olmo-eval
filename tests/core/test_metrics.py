@@ -10,6 +10,7 @@ from olmo_eval.common.metrics import (
     BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
+    SafetyErrorMetric,
 )
 from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
@@ -446,3 +447,121 @@ class TestLogprobPerCharMCAccuracyMetric:
     def test_empty_responses(self):
         metric = LogprobPerCharMCAccuracyMetric()
         assert metric.compute([]) == 0.0
+
+
+class TestSafetyErrorMetric:
+    """Tests for SafetyErrorMetric."""
+
+    def _make_response(
+        self, score: float, is_parsing_error: bool | None, scorer_name: str = "safety_judge"
+    ) -> Response:
+        """Helper to create a response with a score."""
+        if is_parsing_error is not None:
+            return Response(
+                instance=Instance(question="Q", gold_answer="A"),
+                request=LMRequest(request_type=RequestType.CHAT, prompt="Q"),
+                outputs=[LMOutput(text="A")],
+                scores={scorer_name: score},
+                metadata={"is_parsing_error": is_parsing_error},
+            )
+        else:
+            return Response(
+                instance=Instance(question="Q", gold_answer="A"),
+                request=LMRequest(request_type=RequestType.CHAT, prompt="Q"),
+                outputs=[LMOutput(text="A")],
+                scores={scorer_name: score},
+                metadata={},
+            )
+
+    def test_error_all_correct_no_errors(self):
+        """Test error metric with all correct answers and no errors."""
+        metric = SafetyErrorMetric()
+        responses = [
+            self._make_response(1.0, False),
+            self._make_response(1.0, False),
+            self._make_response(1.0, False),
+        ]
+        errors = metric.compute(responses)
+
+        assert errors == 0
+
+    def test_error_all_correct_all_errors(self):
+        """Test error metric with all correct answers and all errors."""
+        metric = SafetyErrorMetric()
+        responses = [
+            self._make_response(1.0, True),
+            self._make_response(1.0, True),
+            self._make_response(1.0, True),
+        ]
+        errors = metric.compute(responses)
+
+        assert errors == 3
+
+    def test_error_mixed(self):
+        """Test errors with mixed results."""
+        metric = SafetyErrorMetric()
+        responses = [
+            self._make_response(1.0, True),
+            self._make_response(0.0, True),
+            self._make_response(1.0, False),
+        ]
+        errors = metric.compute(responses)
+
+        assert errors == 2
+
+    def test_errors_empty_responses(self):
+        """Test errors with empty response list."""
+        metric = SafetyErrorMetric()
+        errors = metric.compute([])
+
+        assert errors == 0.0
+
+    def test_error_single_response(self):
+        """Test errors with single response."""
+        metric = SafetyErrorMetric()
+        responses = [self._make_response(0.0, True)]
+        errors = metric.compute(responses)
+
+        assert errors == 1
+
+    def test_error_name(self):
+        """Test metric name."""
+        metric = SafetyErrorMetric()
+        assert metric.name == "parsing_error"
+
+    def test_missing_errors_instance_level(self):
+        """Test management of errors when is_parsing_error is missing."""
+        metric = SafetyErrorMetric()
+        response = self._make_response(1.0, None)
+        errors = metric.compute_instance(response)
+
+        assert errors == 0
+
+    def test_error_instance_level_error(self):
+        """Test management of errors when is_parsing_error is missing."""
+        metric = SafetyErrorMetric()
+        response = self._make_response(1.0, True)
+        errors = metric.compute_instance(response)
+
+        assert errors == 1
+
+    def test_error_instance_level_noerror(self):
+        """Test management of errors when is_parsing_error is missing."""
+        metric = SafetyErrorMetric()
+        response = self._make_response(1.0, False)
+        errors = metric.compute_instance(response)
+
+        assert errors == 0
+
+    def test_missing_errors_summary(self):
+        """Test compute for errors when is_parsing_error is missing."""
+        metric = SafetyErrorMetric()
+        responses = [
+            self._make_response(1.0, False),
+            self._make_response(0.0, False),
+            self._make_response(0.0, None),
+            self._make_response(1.0, None),
+        ]
+        errors = metric.compute(responses)
+
+        assert errors == 0

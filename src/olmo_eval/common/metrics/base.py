@@ -890,4 +890,4 @@ class SafetyErrorMetric(Metric):
     def compute_instance(self, response: Response) -> float | None:
         """Compute the per-instance value"""
 
-        return float(response.instance.metadata.get("is_parsing_error", False))
+        return float(response.instance.metadata["is_parsing_error"])
