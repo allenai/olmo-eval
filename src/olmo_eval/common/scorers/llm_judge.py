@@ -336,6 +336,7 @@ class LLMJudgeScorer(ContextScorer):
         """Score using configured provider or judge_fn."""
         self._validate_provider(context)
         prompt = self.format_judge_prompt(instance, output)
+        print(prompt)
 
         if self.provider_name is not None:
             response = await self._score_with_provider(prompt, context)
@@ -621,6 +622,7 @@ class SafetyScorer(LLMJudgeScorer):
         try:
             self._validate_provider(context)
             prompt = self.format_judge_prompt(instance, output)
+            print(prompt)
 
             if self.provider_name is not None:
                 if self.judge_format == "wildguard":
