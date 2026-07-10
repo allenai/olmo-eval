@@ -458,19 +458,19 @@ class TestSafetyErrorMetric:
         """Helper to create a response with a score."""
         if is_parsing_error is not None:
             return Response(
-                instance=Instance(question="Q", gold_answer="A"),
+                instance=Instance(
+                    question="Q", gold_answer="A", metadata={"is_parsing_error": is_parsing_error}
+                ),
                 request=LMRequest(request_type=RequestType.CHAT, prompt="Q"),
                 outputs=[LMOutput(text="A")],
                 scores={scorer_name: score},
-                metadata={"is_parsing_error": is_parsing_error},
             )
         else:
             return Response(
-                instance=Instance(question="Q", gold_answer="A"),
+                instance=Instance(question="Q", gold_answer="A", metadata={}),
                 request=LMRequest(request_type=RequestType.CHAT, prompt="Q"),
                 outputs=[LMOutput(text="A")],
                 scores={scorer_name: score},
-                metadata={},
             )
 
     def test_error_all_correct_no_errors(self):
