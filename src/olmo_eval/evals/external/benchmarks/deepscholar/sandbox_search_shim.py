@@ -28,6 +28,14 @@ S2_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 S2_FIELDS = "title,abstract,url,authors,year,publicationDate,externalIds"
 REQUIRED_COLUMNS = ["title", "url", "snippet", "query", "context", "date"]
 
+# Hard wall-clock budget (s) for a single S2 search across all its retries. A weak
+# model can provoke a retry storm (malformed search-query JSON -> upstream re-searches
+# repeatedly), and S2 answers the burst with 429s. Left unbounded and silent, those
+# backoff sleeps produce no output long enough to trip the sandbox's 3x300s poll-abort,
+# which wedges the container. Bounding the total time and logging every retry keeps
+# output flowing so the poll counter never escalates; the query just gets fewer results.
+S2_SEARCH_BUDGET_S = 45.0
+
 
 def _authors_str(paper: dict[str, Any]) -> str:
     names = [a.get("name", "") for a in (paper.get("authors") or []) if a.get("name")]
@@ -95,8 +103,14 @@ def s2_search_rows(
     end_date: Any = None,
     api_key: str | None = None,
     logger: Any = None,
+    budget_s: float = S2_SEARCH_BUDGET_S,
 ) -> list[dict[str, Any]]:
-    """Query Semantic Scholar and return standardized row dicts (performs I/O)."""
+    """Query Semantic Scholar and return standardized row dicts (performs I/O).
+
+    Bounded by ``budget_s`` total across retries, and every retry (including 429s)
+    logs, so this never goes silent long enough to trip the sandbox poll-abort. On
+    exhausting the budget it returns no results rather than hanging.
+    """
     import requests
 
     params: dict[str, Any] = {
@@ -108,11 +122,22 @@ def s2_search_rows(
         params["year"] = f"-{end_date.year}"
     headers = {"x-api-key": api_key} if api_key else {}
 
-    for attempt in range(5):
+    start = time.time()
+    attempt = 0
+    while time.time() - start < budget_s:
+        attempt += 1
         try:
-            resp = requests.get(S2_SEARCH_URL, params=params, headers=headers, timeout=(5, 30))
+            resp = requests.get(S2_SEARCH_URL, params=params, headers=headers, timeout=(5, 15))
             if resp.status_code == 429:
-                time.sleep(2 * (attempt + 1))
+                remaining = budget_s - (time.time() - start)
+                if logger:
+                    logger.warning(
+                        f"S2 rate-limited (429) for {query!r} (attempt {attempt}); "
+                        f"backing off, {remaining:.0f}s budget left"
+                    )
+                if remaining <= 0:
+                    break
+                time.sleep(min(2.0 * attempt, remaining))
                 continue
             resp.raise_for_status()
             data = resp.json().get("data") or []
@@ -120,8 +145,12 @@ def s2_search_rows(
             return [r for r in rows if _within_cutoff(r["date"], end_date)]
         except (requests.RequestException, ValueError) as e:
             if logger:
-                logger.error(f"S2 search failed for {query!r} (attempt {attempt + 1}/5): {e}")
-            time.sleep(1 + attempt)
+                logger.error(f"S2 search failed for {query!r} (attempt {attempt}): {e}")
+            time.sleep(1.0)
+    if logger:
+        logger.warning(
+            f"S2 search for {query!r} exhausted {budget_s:.0f}s budget; returning no results"
+        )
     return []
 
 
