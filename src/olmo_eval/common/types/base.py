@@ -237,7 +237,7 @@ class LMRequest:
 class SamplingParams:
     """Parameters for language model sampling."""
 
-    max_tokens: int = 512
+    max_tokens: int | None = 512  # None means generate to the model's context limit
     temperature: float = 0.0
     top_p: float | None = None
     top_k: int | None = None

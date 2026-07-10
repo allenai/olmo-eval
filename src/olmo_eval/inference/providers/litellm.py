@@ -125,9 +125,12 @@ class LiteLLMProvider(InferenceProvider):
             "model": self.model_name,
             "messages": messages,
             "n": params.num_samples,
-            "max_completion_tokens": params.max_tokens,
             **self.api_kwargs,
         }
+        # max_tokens=None means "uncapped"; omit the field so the API uses its
+        # own context-bounded default rather than receiving a literal null.
+        if params.max_tokens is not None:
+            kwargs["max_completion_tokens"] = params.max_tokens
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
