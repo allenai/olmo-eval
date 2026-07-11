@@ -48,6 +48,10 @@ class TestParseOverrideValue:
     def test_empty_list(self):
         assert _parse_override_value("[]") == []
 
+    @pytest.mark.parametrize("value", ["null", "None", "NULL"])
+    def test_null(self, value):
+        assert _parse_override_value(value) is None
+
     def test_bool_true(self):
         assert _parse_override_value("true") is True
 
@@ -98,6 +102,11 @@ class TestDotlistScalarOverrides:
     def test_set_bool_field(self, sandbox_preset):
         result = _apply_dotlist_overrides(sandbox_preset, ["sandboxes.0.inject_swerex=false"])
         assert result["sandboxes"][0]["inject_swerex"] is False
+
+    def test_set_null_field(self):
+        base = {"sampling_params": {"max_tokens": 512}}
+        result = _apply_dotlist_overrides(base, ["sampling_params.max_tokens=null"])
+        assert result["sampling_params"]["max_tokens"] is None
 
     def test_creates_intermediate_dicts(self):
         base: dict = {}

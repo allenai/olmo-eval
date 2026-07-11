@@ -14,7 +14,7 @@ console = Console()
 
 
 def _parse_override_value(value: str) -> Any:
-    """Parse an override value, supporting JSON, OmegaConf lists, bool, int, float, and string."""
+    """Parse an override value, supporting null, JSON, bool, numbers, and strings."""
     import json
 
     # Try JSON first (for dicts and arrays with quoted strings)
@@ -33,8 +33,10 @@ def _parse_override_value(value: str) -> Any:
                 return items
             return []
 
-    # Parse bool, int, float, or string
-    if value.lower() == "true":
+    # Parse null, bool, int, float, or string
+    if value.lower() in {"null", "none"}:
+        return None
+    elif value.lower() == "true":
         return True
     elif value.lower() == "false":
         return False
