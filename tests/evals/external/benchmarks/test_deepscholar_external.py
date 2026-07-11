@@ -1,3 +1,4 @@
+import stat
 from pathlib import Path
 from unittest import mock
 
@@ -24,6 +25,8 @@ def test_output_directories_are_bind_mounted(tmp_path: Path) -> None:
     )
     assert (destination / "generation").is_dir()
     assert (destination / "evaluation").is_dir()
+    assert stat.S_IMODE((destination / "generation").stat().st_mode) == 0o777
+    assert stat.S_IMODE((destination / "evaluation").stat().st_mode) == 0o777
 
 
 def test_max_batch_size_reaches_lotus_lm_config() -> None:

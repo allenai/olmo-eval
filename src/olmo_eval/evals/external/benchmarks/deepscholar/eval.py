@@ -181,6 +181,11 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             evaluation = dest / "evaluation"
             generation.mkdir(parents=True, exist_ok=True)
             evaluation.mkdir(parents=True, exist_ok=True)
+            # Rootless Podman maps the container user to a subordinate host UID,
+            # so host-owned 0755 directories are readable but not writable inside
+            # the sandbox. These paths contain benchmark artifacts only.
+            generation.chmod(0o777)
+            evaluation.chmod(0o777)
             volumes += (
                 (str(generation), self._gen_dir),
                 (str(evaluation), self._eval_dir),
