@@ -426,6 +426,16 @@ class TestGetTaskDependencies:
         ]
 
 
+class TestParseOverridesTypes:
+    @pytest.mark.parametrize("value", ["null", "None", "NULL"])
+    def test_parse_null(self, value):
+        result = parse_overrides(f"max_tokens={value}")
+        assert result == {"max_tokens": None}
+
+    def test_parse_integer(self):
+        assert parse_overrides("max_tokens=32768") == {"max_tokens": 32768}
+
+
 class TestParseOverridesDependencies:
     """Tests for parse_overrides handling of dependencies field."""
 

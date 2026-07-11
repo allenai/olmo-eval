@@ -156,7 +156,9 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
             i = comma_pos if comma_pos != -1 else len(override_str)
 
             # Type coercion
-            if key in {
+            if value_str.lower() in {"null", "none"}:
+                value = None
+            elif key in {
                 "num_fewshot",
                 "limit",
                 "fewshot_seed",
