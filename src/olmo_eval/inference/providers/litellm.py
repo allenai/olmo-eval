@@ -44,6 +44,7 @@ class LiteLLMProvider(InferenceProvider):
         max_concurrency: int = 32,
         max_retries: int = 3,
         retry_delay: float = 1.0,
+        generation_logprobs: bool = True,
         **api_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -55,6 +56,7 @@ class LiteLLMProvider(InferenceProvider):
             max_concurrency: Maximum number of concurrent API requests.
             max_retries: Maximum number of retries for transient errors.
             retry_delay: Base delay in seconds between retries (exponential backoff).
+            generation_logprobs: Whether generation responses should include token logprobs.
             **api_kwargs: Additional arguments passed to litellm.completion.
         """
         try:
@@ -64,7 +66,7 @@ class LiteLLMProvider(InferenceProvider):
                 "litellm is required for LiteLLMProvider. Install with: uv pip install litellm"
             ) from e
 
-        super().__init__(model_name)
+        super().__init__(model_name, generation_logprobs=generation_logprobs)
         self._litellm = litellm
         self.base_url = base_url
         self.api_base = api_base
@@ -136,11 +138,10 @@ class LiteLLMProvider(InferenceProvider):
         kwargs["temperature"] = params.temperature
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)[:_MAX_STOP_SEQUENCES]
-        # Always request logprobs for metrics computation
-        kwargs["logprobs"] = True
-        kwargs["top_logprobs"] = (
-            1  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
-        )
+        if (logprobs := self._generation_logprobs(params)) is not None:
+            kwargs["logprobs"] = True
+            # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
+            kwargs["top_logprobs"] = logprobs
 
         response = await self._litellm.acompletion(**kwargs)
 
@@ -199,14 +200,16 @@ class LiteLLMProvider(InferenceProvider):
 
         trace["provider"] = "LiteLLMProvider"
         trace["endpoint"] = "litellm.acompletion"
-        trace["generation_kwargs"] = {
+        generation_kwargs = {
             "max_gen_toks": params.max_tokens,
             "do_sample": params.do_sample and params.temperature > 0,
             "temperature": params.temperature,
-            "logprobs": True,
-            "top_logprobs": 1,
             "num_samples": params.num_samples,
         }
+        if (logprobs := self._generation_logprobs(params)) is not None:
+            generation_kwargs["logprobs"] = True
+            generation_kwargs["top_logprobs"] = logprobs
+        trace["generation_kwargs"] = generation_kwargs
         if params.top_p is not None:
             trace["generation_kwargs"]["top_p"] = params.top_p
         trace["stop_sequences"] = list(params.stop_sequences or ())[:_MAX_STOP_SEQUENCES]

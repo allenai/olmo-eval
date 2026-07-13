@@ -51,6 +51,7 @@ class TestVLLMServerProviderLogprobs:
             p = VLLMServerProvider.__new__(VLLMServerProvider)
             p.model_name = "test-model"
             p.base_url = "http://localhost:8000/v1"
+            p.generation_logprobs = True
             p._tokenizer = mock_tokenizer
             p._add_bos_token = None
             p._client = None
@@ -137,6 +138,37 @@ class TestVLLMServerProviderLogprobs:
         assert client.completions.create.call_args.kwargs["max_tokens"] == 64
 
     @pytest.mark.anyio
+    async def test_generate_completion_omits_logprobs_when_disabled(self, provider):
+        """generation_logprobs=False should avoid completion logprob payload cost."""
+        provider.generation_logprobs = False
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        await provider._generate_completion(client, request, SamplingParams(max_tokens=64))
+
+        assert "logprobs" not in client.completions.create.call_args.kwargs
+
+    @pytest.mark.anyio
+    async def test_generate_completion_explicit_logprobs_overrides_disabled_provider(
+        self,
+        provider,
+    ):
+        """SamplingParams.logprobs should still opt a single request into logprobs."""
+        provider.generation_logprobs = False
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        await provider._generate_completion(
+            client,
+            request,
+            SamplingParams(max_tokens=64, logprobs=3),
+        )
+
+        assert client.completions.create.call_args.kwargs["logprobs"] == 3
+
+    @pytest.mark.anyio
     async def test_generate_chat_omits_max_tokens_when_none(self, provider):
         """max_tokens=None means uncapped: omit the field rather than sending null."""
         provider.chat_template_kwargs = None
@@ -163,6 +195,23 @@ class TestVLLMServerProviderLogprobs:
         await provider._generate_chat(client, request, SamplingParams(max_tokens=128))
 
         assert client.chat.completions.create.call_args.kwargs["max_tokens"] == 128
+
+    @pytest.mark.anyio
+    async def test_generate_chat_omits_logprobs_when_disabled(self, provider):
+        """generation_logprobs=False should avoid chat logprob payload cost."""
+        provider.generation_logprobs = False
+        provider.chat_template_kwargs = None
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
+
+        request = LMRequest(
+            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+        )
+        await provider._generate_chat(client, request, SamplingParams(max_tokens=128))
+
+        call_kwargs = client.chat.completions.create.call_args.kwargs
+        assert "logprobs" not in call_kwargs
+        assert "top_logprobs" not in call_kwargs
 
     def test_describe_request_includes_chat_template_kwargs(self):
         """Chat traces should preserve template kwargs in generation metadata."""

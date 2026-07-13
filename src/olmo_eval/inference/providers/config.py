@@ -35,6 +35,8 @@ class ProviderConfig:
         dtype: Data type for model weights (auto, float16, bfloat16, float32).
         max_model_len: Maximum sequence length (overrides model default).
         max_concurrency: Maximum concurrent requests.
+        generation_logprobs: Whether generation responses should include token logprobs.
+            Disable for faster generation when no generation metric needs token logprobs.
         num_instances: Number of server instances for horizontal scaling.
         required_secrets: Environment variable names that must be set.
         package: Package specifier that overrides the default provider extra (e.g., vllm fork).
@@ -54,6 +56,7 @@ class ProviderConfig:
     dtype: str = "auto"
     max_model_len: int | None = None
     max_concurrency: int | None = None
+    generation_logprobs: bool = True
     num_instances: int = 1
     required_secrets: tuple[str, ...] = ()
     package: str | None = None
@@ -94,6 +97,7 @@ class ProviderConfig:
             "trust_remote_code",
             "dtype",
             "max_model_len",
+            "generation_logprobs",
         ),
         "vllm_server": (
             "base_url",
@@ -104,9 +108,17 @@ class ProviderConfig:
             "dtype",
             "max_concurrency",
             "max_model_len",
+            "generation_logprobs",
         ),
-        "litellm": ("base_url", "api_base", "max_concurrency"),
-        "hf": ("tokenizer", "revision", "force_download", "trust_remote_code", "dtype"),
+        "litellm": ("base_url", "api_base", "max_concurrency", "generation_logprobs"),
+        "hf": (
+            "tokenizer",
+            "revision",
+            "force_download",
+            "trust_remote_code",
+            "dtype",
+            "generation_logprobs",
+        ),
         "olmo_core": (
             "tokenizer",
             "revision",
@@ -114,8 +126,9 @@ class ProviderConfig:
             "trust_remote_code",
             "dtype",
             "max_model_len",
+            "generation_logprobs",
         ),
-        "mock": (),
+        "mock": ("generation_logprobs",),
     }
 
     def create_provider(self) -> InferenceProvider:
@@ -132,7 +145,9 @@ class ProviderConfig:
         # Add config fields this provider accepts (skip None/default values)
         for field_name in self._PROVIDER_FIELDS.get(kind_str, ()):
             value = getattr(self, field_name)
-            if value is not None and value is not False and value != "auto":
+            if field_name == "generation_logprobs" or (
+                value is not None and value is not False and value != "auto"
+            ):
                 provider_kwargs[field_name] = value
 
         return create_provider(self.kind, self.model, **provider_kwargs)
@@ -191,6 +206,8 @@ class ProviderConfig:
             d["max_model_len"] = self.max_model_len
         if self.max_concurrency is not None:
             d["max_concurrency"] = self.max_concurrency
+        if not self.generation_logprobs:
+            d["generation_logprobs"] = self.generation_logprobs
         if self.num_instances != 1:
             d["num_instances"] = self.num_instances
         if self.required_secrets:
@@ -234,6 +251,7 @@ class ProviderConfig:
             dtype=data.get("dtype", "auto"),
             max_model_len=data.get("max_model_len"),
             max_concurrency=data.get("max_concurrency"),
+            generation_logprobs=data.get("generation_logprobs", True),
             num_instances=data.get("num_instances", 1),
             required_secrets=tuple(data.get("required_secrets", [])),
             package=data.get("package"),

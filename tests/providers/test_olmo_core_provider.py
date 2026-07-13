@@ -223,6 +223,7 @@ def fake_provider() -> tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokeniz
     tokenizer = FakeTokenizer()
     module = FakeGenerationModule()
     provider.model_name = "fake-model"
+    provider.generation_logprobs = True
     provider.tokenizer = tokenizer
     provider.generation_module = module
     provider.pad_token_id = tokenizer.pad_token_id
@@ -334,6 +335,23 @@ def test_generate_uses_olmes_batch_contract(
     assert outputs[1][1].metadata["num_tokens"] == 2
     assert module.cache_allocated is False
     assert module.free_calls == 1
+
+
+def test_generate_can_disable_generation_logprobs(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, module, _ = fake_provider
+    provider.generation_logprobs = False
+
+    outputs = provider.generate(
+        [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
+        SamplingParams(max_tokens=3),
+    )
+
+    call = module.generate_calls[0]
+    assert call["return_logprobs"] is False
+    assert outputs[0][0].logprobs is None
+    assert outputs[0][0].metadata == {}
 
 
 def test_generate_uncapped_fills_context(

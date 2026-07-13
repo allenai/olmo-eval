@@ -21,13 +21,17 @@ class InferenceProvider(ABC):
 
     model_name: str
 
-    def __init__(self, model_name: str) -> None:
+    def __init__(self, model_name: str, *, generation_logprobs: bool = True) -> None:
         """Initialize the provider.
 
         Args:
             model_name: Model identifier or path.
+            generation_logprobs: Whether generated completions should include
+                generated-token logprobs by default. This does not affect the
+                separate logprobs/loglikelihood scoring path.
         """
         self.model_name = model_name
+        self.generation_logprobs = generation_logprobs
 
     @abstractmethod
     def generate(
@@ -139,8 +143,8 @@ class InferenceProvider(ABC):
             generation_kwargs["top_k"] = params.top_k
         if params.num_samples != 1:
             generation_kwargs["num_samples"] = params.num_samples
-        if params.logprobs is not None:
-            generation_kwargs["logprobs"] = params.logprobs
+        if (logprobs := self._generation_logprobs(params)) is not None:
+            generation_kwargs["logprobs"] = logprobs
 
         trace["generation_kwargs"] = generation_kwargs
         trace["stop_sequences"] = list(params.stop_sequences or ())
@@ -149,6 +153,18 @@ class InferenceProvider(ABC):
     def _default_sampling_params(self, sampling_params: SamplingParams | None) -> SamplingParams:
         """Return sampling params with defaults applied."""
         return sampling_params or SamplingParams()
+
+    def _generation_logprobs(self, params: SamplingParams, *, default: int = 1) -> int | None:
+        """Resolve generated-token logprob count for a generation request.
+
+        ``SamplingParams.logprobs`` is an explicit per-request override: positive
+        values enable logprobs with that count, and zero/negative values disable
+        them. When it is unset, ``generation_logprobs`` controls the provider
+        default.
+        """
+        if params.logprobs is not None:
+            return params.logprobs if params.logprobs > 0 else None
+        return default if self.generation_logprobs else None
 
     def get_tokenizer(self) -> Any:
         """Get the tokenizer for this provider.

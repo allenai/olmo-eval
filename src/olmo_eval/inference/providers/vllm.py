@@ -106,6 +106,7 @@ class VLLMProvider(InferenceProvider):
         attention_backend: str | None = None,
         worker_id: str | None = None,
         force_download: bool = False,
+        generation_logprobs: bool = True,
         **engine_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -119,6 +120,7 @@ class VLLMProvider(InferenceProvider):
                 will include this identifier.
             force_download: Force-refresh Hugging Face model/tokenizer cache entries
                 before initializing vLLM.
+            generation_logprobs: Whether generation responses should include token logprobs.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
         # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_PROVIDER=1, otherwise WARNING
@@ -140,7 +142,7 @@ class VLLMProvider(InferenceProvider):
             logger.error(traceback.format_exc())
             raise ImportError("vllm is required for VLLMProvider") from e
 
-        super().__init__(model_name)
+        super().__init__(model_name, generation_logprobs=generation_logprobs)
         self._worker_id = worker_id
         if force_download:
             model_revision = engine_kwargs.get("revision")
@@ -238,8 +240,8 @@ class VLLMProvider(InferenceProvider):
             kwargs["top_k"] = top_k
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
-        # Always request logprobs (default to 1) for metrics computation
-        kwargs["logprobs"] = params.logprobs if params.logprobs is not None else 1
+        if (logprobs := self._generation_logprobs(params)) is not None:
+            kwargs["logprobs"] = logprobs
 
         return VLLMSamplingParams(**kwargs)
 
@@ -344,9 +346,10 @@ class VLLMProvider(InferenceProvider):
             "max_gen_toks": vllm_params.max_tokens,
             "do_sample": params.do_sample and params.temperature > 0,
             "temperature": getattr(vllm_params, "temperature", params.temperature),
-            "logprobs": getattr(vllm_params, "logprobs", None),
             "num_samples": vllm_params.n,
         }
+        if getattr(vllm_params, "logprobs", None) is not None:
+            trace["generation_kwargs"]["logprobs"] = vllm_params.logprobs
         if getattr(vllm_params, "top_p", None) is not None:
             trace["generation_kwargs"]["top_p"] = vllm_params.top_p
         if getattr(vllm_params, "top_k", None) is not None:

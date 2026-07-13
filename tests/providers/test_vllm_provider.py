@@ -21,9 +21,38 @@ def test_build_sampling_params_passes_none_max_tokens_through(monkeypatch) -> No
     monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
 
     provider = VLLMProvider.__new__(VLLMProvider)
+    provider.generation_logprobs = True
     built = provider._build_sampling_params(SamplingParams(max_tokens=None, do_sample=False))
 
     assert built["max_tokens"] is None
+
+
+def test_build_sampling_params_omits_logprobs_when_disabled(monkeypatch) -> None:
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.SamplingParams = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+
+    provider = VLLMProvider.__new__(VLLMProvider)
+    provider.generation_logprobs = False
+
+    built = provider._build_sampling_params(SamplingParams(max_tokens=1))
+
+    assert "logprobs" not in built
+
+
+def test_build_sampling_params_explicit_logprobs_override_disabled_provider(
+    monkeypatch,
+) -> None:
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.SamplingParams = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+
+    provider = VLLMProvider.__new__(VLLMProvider)
+    provider.generation_logprobs = False
+
+    built = provider._build_sampling_params(SamplingParams(max_tokens=1, logprobs=3))
+
+    assert built["logprobs"] == 3
 
 
 class FakeTokenizer:
@@ -88,6 +117,7 @@ def fake_provider() -> tuple[VLLMProvider, FakeLLM, FakeTokenizer]:
     llm = FakeLLM(tokenizer)
     provider = VLLMProvider.__new__(VLLMProvider)
     provider.model_name = "test-model"
+    provider.generation_logprobs = True
     provider.llm = llm
     provider._add_bos_token = None
     provider._build_sampling_params = lambda params: "fake-sampling-params"

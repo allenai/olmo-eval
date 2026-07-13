@@ -74,6 +74,7 @@ class OlmoCoreProvider(InferenceProvider):
         cache_dir: str | None = None,
         local_files_only: bool = False,
         add_bos_token: bool = False,
+        generation_logprobs: bool = True,
         **kwargs: object,
     ) -> None:
         max_model_len = core_utils._resolve_max_model_len_alias(max_model_len, kwargs)
@@ -85,7 +86,7 @@ class OlmoCoreProvider(InferenceProvider):
         core_utils._raise_for_unsupported_kwargs(kwargs)
 
         imports = core_utils._import_olmo_core()
-        super().__init__(model_name)
+        super().__init__(model_name, generation_logprobs=generation_logprobs)
 
         checkpoint_config, tokenizer_config = core_utils._resolve_checkpoint(
             model_name,
@@ -562,6 +563,7 @@ class OlmoCoreProvider(InferenceProvider):
         generation_kwargs = self._build_generation_kwargs(params)
         prompt_token_ids = self._left_truncate_prompts_for_generation(encoded_prompts, params)
         self._validate_generation_lengths(prompt_token_ids, params)
+        include_logprobs = self._generation_logprobs(params) is not None
         expanded_token_ids = [
             token_ids for token_ids in prompt_token_ids for _ in range(params.num_samples)
         ]
@@ -572,7 +574,7 @@ class OlmoCoreProvider(InferenceProvider):
         generated_ids, _, logprobs = self.generation_module.generate_batch(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            return_logprobs=True,
+            return_logprobs=include_logprobs,
             completions_only=False,
             log_timing=False,
             **generation_kwargs,
@@ -581,7 +583,7 @@ class OlmoCoreProvider(InferenceProvider):
         generated_rows = [row[prompt_len:] for row in cast(list[list[int]], generated_ids.tolist())]
         logprob_rows = (
             cast(list[list[float]], logprobs.tolist())
-            if logprobs is not None
+            if include_logprobs and logprobs is not None
             else [None] * len(generated_rows)
         )
 
@@ -623,7 +625,7 @@ class OlmoCoreProvider(InferenceProvider):
         trace["generation_kwargs"] = {
             **self._build_generation_kwargs(params),
             "num_samples": params.num_samples,
-            "return_logprobs": True,
+            "return_logprobs": self._generation_logprobs(params) is not None,
             "completions_only": False,
             "max_length": "<padded_prompt_length + max_tokens>",
         }

@@ -22,6 +22,7 @@ _MODEL_HASH_IGNORED_PROVIDER_KEYS = frozenset(
         "api_base",
         "base_url",
         "force_download",
+        "generation_logprobs",
         "max_concurrency",
         "num_instances",
         "required_secrets",

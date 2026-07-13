@@ -97,7 +97,10 @@ def create_provider(
         case "mock":
             from .providers.mock import MockProvider
 
-            return MockProvider(model_name)
+            return MockProvider(
+                model_name,
+                generation_logprobs=bool(kwargs.get("generation_logprobs", True)),
+            )
         case "hf":
             from .providers.huggingface import HuggingFaceProvider
 

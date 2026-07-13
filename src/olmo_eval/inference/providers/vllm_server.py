@@ -269,6 +269,7 @@ class VLLMServerProvider(InferenceProvider):
         revision: str | None = None,
         force_download: bool = False,
         add_bos_token: bool | None = None,
+        generation_logprobs: bool = True,
         prompt_logprobs: int | None = None,
         completion_use_prompt_token_ids: bool | None = None,
         completion_client_side_stop_trim: bool | None = None,
@@ -298,6 +299,7 @@ class VLLMServerProvider(InferenceProvider):
             add_bos_token: Optional provider-level BOS override for local tokenization paths.
                 This matches the old oe-eval-internal runtime behavior and is not forwarded
                 as a vLLM server CLI argument.
+            generation_logprobs: Whether generation responses should include token logprobs.
             prompt_logprobs: Number of prompt logprobs to request for loglikelihood scoring.
                 Defaults to 5 in the current runtime.
             completion_use_prompt_token_ids: If True, locally tokenize completion prompts
@@ -308,7 +310,7 @@ class VLLMServerProvider(InferenceProvider):
                 with actual spaces in completion outputs.
             **server_kwargs: Additional vLLM server arguments.
         """
-        super().__init__(model_name)
+        super().__init__(model_name, generation_logprobs=generation_logprobs)
         self._beaker_reporter = BeakerStatusReporter()
         self.timeout = timeout
         self.max_concurrency = max_concurrency
@@ -580,16 +582,18 @@ class VLLMServerProvider(InferenceProvider):
             and request.prompt
         )
         if use_completions:
+            logprobs = self._generation_logprobs(params)
             trace["provider"] = "VLLMServerProvider"
             trace["endpoint"] = "/completions"
             trace["generation_kwargs"] = {
                 "max_gen_toks": params.max_tokens,
                 "do_sample": params.do_sample and params.temperature > 0,
                 "temperature": params.temperature,
-                "logprobs": 1,
                 "num_samples": params.num_samples,
                 "add_special_tokens": False,
             }
+            if logprobs is not None:
+                trace["generation_kwargs"]["logprobs"] = logprobs
             if params.top_p is not None:
                 trace["generation_kwargs"]["top_p"] = params.top_p
             if params.do_sample and params.temperature > 0 and params.top_k is not None:
@@ -606,10 +610,11 @@ class VLLMServerProvider(InferenceProvider):
             "max_gen_toks": params.max_tokens,
             "do_sample": params.do_sample and params.temperature > 0,
             "temperature": params.temperature,
-            "logprobs": True,
-            "top_logprobs": 1,
             "num_samples": params.num_samples,
         }
+        if (logprobs := self._generation_logprobs(params)) is not None:
+            generation_kwargs["logprobs"] = True
+            generation_kwargs["top_logprobs"] = logprobs
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             generation_kwargs["top_k"] = params.top_k
         if params.top_p is not None:
@@ -752,8 +757,9 @@ class VLLMServerProvider(InferenceProvider):
             "model": self.model_name,
             "prompt": request.prompt,
             "n": params.num_samples,
-            "logprobs": 1,  # Request logprobs for metrics
         }
+        if (logprobs := self._generation_logprobs(params)) is not None:
+            kwargs["logprobs"] = logprobs
         # max_tokens=None means "generate to the context limit"; omit the field
         # rather than sending null, which some OpenAI-compatible servers reject.
         if params.max_tokens is not None:
@@ -844,10 +850,10 @@ class VLLMServerProvider(InferenceProvider):
             kwargs["stop"] = list(params.stop_sequences)
         if tools:
             kwargs["tools"] = tools
-        # Always request logprobs for metrics computation
-        # Both logprobs=True and top_logprobs are required for chat completions API
-        kwargs["logprobs"] = True
-        kwargs["top_logprobs"] = 1
+        # Both logprobs=True and top_logprobs are required for chat completions API.
+        if (logprobs := self._generation_logprobs(params)) is not None:
+            kwargs["logprobs"] = True
+            kwargs["top_logprobs"] = logprobs
 
         # Pass chat_template_kwargs via extra_body for vLLM
         if self.chat_template_kwargs:

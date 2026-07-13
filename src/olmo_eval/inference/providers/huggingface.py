@@ -59,12 +59,20 @@ class HuggingFaceProvider(InferenceProvider):
         }
     )
 
-    def __init__(self, model_name: str, tokenizer: str | None = None, **model_kwargs) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        tokenizer: str | None = None,
+        *,
+        generation_logprobs: bool = True,
+        **model_kwargs,
+    ) -> None:
         """Initialize the provider.
 
         Args:
             model_name: HuggingFace model identifier or local path.
             tokenizer: Tokenizer path/identifier. If not specified, uses the model path.
+            generation_logprobs: Whether generation responses should include token logprobs.
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
         try:
@@ -79,7 +87,7 @@ class HuggingFaceProvider(InferenceProvider):
         for key in self._IGNORED_KWARGS:
             model_kwargs.pop(key, None)
 
-        super().__init__(model_name)
+        super().__init__(model_name, generation_logprobs=generation_logprobs)
         tokenizer_path = tokenizer or model_name
         tokenizer_kwargs = {
             key: value for key, value in model_kwargs.items() if key in self._TOKENIZER_KWARGS
@@ -161,6 +169,7 @@ class HuggingFaceProvider(InferenceProvider):
             encoded = self.tokenizer(prompt, return_tensors="pt").to(self.device)
             prompt_len = encoded["input_ids"].shape[1]
             gen_kwargs = self._build_generate_kwargs(params, prompt_len)
+            include_logprobs = self._generation_logprobs(params) is not None
 
             request_outputs = []
             for _ in range(params.num_samples):
@@ -170,10 +179,9 @@ class HuggingFaceProvider(InferenceProvider):
                 gen_ids = output_ids[prompt_len:]
                 gen_ids, text = self._truncate_at_stop(gen_ids, params.stop_sequences)
 
-                # Always compute logprobs for metrics
                 logprob_entries = None
                 metadata: dict[str, Any] = {}
-                if len(gen_ids) > 0:
+                if include_logprobs and len(gen_ids) > 0:
                     seq = torch.cat([encoded["input_ids"][0], gen_ids]).unsqueeze(0)
                     with torch.no_grad():
                         logits = self.model(seq).logits
@@ -228,6 +236,8 @@ class HuggingFaceProvider(InferenceProvider):
                 "max_gen_toks": params.max_tokens,
                 **self._build_generate_kwargs(params, prompt_len),
             }
+            if (logprobs := self._generation_logprobs(params)) is not None:
+                trace["generation_kwargs"]["logprobs"] = logprobs
             trace["stop_sequences"] = list(params.stop_sequences or ())
         return trace
 

@@ -183,6 +183,9 @@ def get_provider_config(name: str, **overrides: Any) -> ProviderConfig:
                 dtype=filtered_overrides.get("dtype", base.dtype),
                 max_model_len=filtered_overrides.get("max_model_len", base.max_model_len),
                 max_concurrency=filtered_overrides.get("max_concurrency", base.max_concurrency),
+                generation_logprobs=filtered_overrides.get(
+                    "generation_logprobs", base.generation_logprobs
+                ),
                 required_secrets=tuple(
                     filtered_overrides.get("required_secrets", base.required_secrets)
                 ),

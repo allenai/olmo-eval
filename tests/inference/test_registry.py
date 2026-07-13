@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from olmo_eval.common.types import ProviderKind
+from olmo_eval.common.types import LMRequest, ProviderKind, RequestType, compute_model_hash
 from olmo_eval.inference.gpu_planner import GPUAllocation, GPUPlan, GPUPlanner, validate_gpu_plan
 from olmo_eval.inference.providers.config import ProviderConfig
 from olmo_eval.inference.registry import ProviderRegistry, ReplicaSet
@@ -106,6 +106,47 @@ class TestProviderConfigRoundtrip:
 
         assert serialized["force_download"] is True
         assert restored.force_download is True
+
+    def test_generation_logprobs_false_survives_roundtrip(self):
+        """generation_logprobs=False is serialized and restored."""
+        config = ProviderConfig(
+            kind=ProviderKind.MOCK,
+            model="test-model",
+            generation_logprobs=False,
+        )
+
+        serialized = config.to_dict()
+        restored = ProviderConfig.from_dict(serialized)
+
+        assert serialized["generation_logprobs"] is False
+        assert restored.generation_logprobs is False
+
+    def test_generation_logprobs_false_reaches_provider(self):
+        """The config factory must not drop explicit False for generation_logprobs."""
+        provider = ProviderConfig(
+            kind=ProviderKind.MOCK,
+            model="test-model",
+            generation_logprobs=False,
+        ).create_provider()
+
+        assert provider.generation_logprobs is False
+        outputs = provider.generate([LMRequest(request_type=RequestType.COMPLETION, prompt="Hi")])
+        assert outputs[0][0].logprobs is None
+
+    def test_generation_logprobs_does_not_change_model_hash(self):
+        """Generation logprob collection is request metadata, not model identity."""
+        with_logprobs = ProviderConfig(
+            kind=ProviderKind.MOCK,
+            model="test-model",
+            generation_logprobs=True,
+        ).to_dict()
+        without_logprobs = ProviderConfig(
+            kind=ProviderKind.MOCK,
+            model="test-model",
+            generation_logprobs=False,
+        ).to_dict()
+
+        assert compute_model_hash(with_logprobs) == compute_model_hash(without_logprobs)
 
 
 class TestReplicaSetRoundRobin:
