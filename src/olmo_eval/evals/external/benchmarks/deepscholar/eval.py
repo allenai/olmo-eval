@@ -18,7 +18,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import math
 import os
 import shlex
 import time
@@ -30,6 +29,7 @@ from olmo_eval.evals.external.benchmarks.deepscholar.args import DeepScholarArgs
 from olmo_eval.evals.external.benchmarks.deepscholar.result_parser import (
     compute_geomean,
     parse_aggregate_csv,
+    parse_per_query_csv,
 )
 from olmo_eval.evals.external.result import ExternalEvalResult
 
@@ -97,9 +97,9 @@ class DeepScholarExternalEval(SandboxedExternalEval):
 
     @property
     def timeout_seconds(self) -> float:
-        # 8h per phase. Generation is sequential over queries (~4-5 min each), so a
-        # full 63-query run is ~5h; 4h would kill it mid-run. Well under the 24h
-        # beaker job cap even with generation + eval phases.
+        # Full validation takes roughly two hours, but retrieval and model latency
+        # vary substantially. Keep each phase below the 24h Beaker job cap with
+        # enough headroom for transient backend slowdowns.
         return 28800.0
 
     @property
@@ -213,8 +213,11 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 "Search corpus: ARXIV (keyless), TAVILY, GOOGLE, GOOGLE_SCHOLAR, BING",
                 "ARXIV",
             ),
-            "search_steps": ("Recursive search rounds (lower cuts arXiv 429s)", None),
-            "search_queries_per_step": ("Search queries per round (lower cuts arXiv 429s)", None),
+            "search_steps": ("Recursive search rounds (lower values reduce backend load)", None),
+            "search_queries_per_step": (
+                "Search queries per round (lower values reduce backend load)",
+                None,
+            ),
             "temperature": ("Generation temperature for the model under test", None),
             "max_tokens": ("Max tokens for the model under test", 10000),
             "stage_max_tokens": (
@@ -230,14 +233,6 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 "Per-request timeout in seconds passed to LOTUS/litellm",
                 240,
             ),
-            "chunk_size": (
-                "Queries per generation command (default 10; 0/none disables chunking). "
-                "Chunking runs generation as short commands over disjoint index ranges "
-                "so a single stall can't lose the whole run",
-                10,
-            ),
-            "chunk_timeout": ("Per-chunk generation timeout in seconds", 1800),
-            "chunk_retries": ("Extra chunk attempts beyond the nominal chunk count", 3),
             "judge_model": ("Judge model for the eval phase", "gpt-4o"),
             "evals": (
                 "Comma-separated eval metrics (default: all seven), or 'all'",
@@ -311,21 +306,23 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 await self._write_search_shim(executor)
 
                 n_success, n_total, generation_ok = await self._run_generation(
-                    executor, ds_args, all_output
+                    executor, ds_args, all_output, output_dir
                 )
+                generation_complete = generation_ok and n_success == n_total
                 logger.info(
-                    f"[{self.name}] Generation {'ok' if generation_ok else 'incomplete'}: "
+                    f"[{self.name}] Generation "
+                    f"{'complete' if generation_complete else 'incomplete'}: "
                     f"{n_success}/{n_total} queries completed"
                 )
 
                 # Strict by default: only score a whole run, or a partial one when
                 # explicitly opted in. Generation catches per-query exceptions and still
                 # exits 0, and a killed/stalled run leaves partial folders, so both cases
-                # would otherwise score a smaller subset than requested. Either way, copy
-                # completed folders back so a crashed run's work can be inspected or
-                # combined offline.
-                whole = generation_ok and n_success == n_total
-                may_score = n_success > 0 and (whole or ds_args.allow_partial_generation)
+                # would otherwise score a smaller subset than requested. Output folders
+                # are bind-mounted, so partial artifacts remain available for inspection.
+                may_score = n_success > 0 and (
+                    generation_complete or ds_args.allow_partial_generation
+                )
                 if not may_score:
                     reason = (
                         "Generation phase failed"
@@ -358,6 +355,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                     n_success=n_success,
                     n_total=n_total,
                     generation_ok=generation_ok,
+                    requested_metrics=tuple(ds_args.evals),
                 )
 
         except Exception as e:
@@ -430,9 +428,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         )
         logger.info(f"[{self.name}] Wrote search shim to {self._shim_path}")
 
-    def _build_generation_command(
-        self, ds_args: DeepScholarArgs, start_idx: int, end_idx: int | None
-    ) -> str:
+    def _build_generation_command(self, ds_args: DeepScholarArgs) -> str:
         # Always run through the shim: it applies the stage-LM token-budget fix for
         # every backend, and (for s2/tavily) also reroutes retrieval. It then hands
         # off to deepscholar_base.main unchanged.
@@ -451,46 +447,24 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             "--config-yaml",
             shlex.quote(self._config_path),
             "--start-idx",
-            str(start_idx),
+            str(ds_args.start_idx),
         ]
-        if end_idx is not None:
-            parts.extend(["--end-idx", str(end_idx)])
+        if ds_args.limit is not None:
+            parts.extend(["--end-idx", str(ds_args.start_idx + ds_args.limit)])
         # search_mode is carried in the generated config (see _write_config).
         parts.extend(ds_args.extra_gen_args)
         return " ".join(parts)
 
     async def _run_generation(
-        self, executor: SandboxExecutor, ds_args: DeepScholarArgs, all_output: list[str]
-    ) -> tuple[int, int, bool]:
-        """Run the generation phase and return (n_success, n_total, generation_ok).
-
-        Chunks the run into short commands over disjoint index ranges so a single
-        stall can't wedge the whole run (see DeepScholarArgs.chunk_size). Falls back
-        to a single command when chunking is disabled, the query count is unknown, or
-        the whole run fits in one chunk.
-        """
-        start = ds_args.start_idx
-        end = await self._resolve_end_bound(executor, ds_args)
-
-        needs_chunking = (
-            ds_args.chunk_size is not None
-            and end is not None
-            and (end - start) > ds_args.chunk_size
-        )
-        if not needs_chunking:
-            return await self._run_generation_single(executor, ds_args, all_output, start, end)
-        return await self._run_generation_chunked(executor, ds_args, all_output, start, end)
-
-    async def _run_generation_single(
         self,
         executor: SandboxExecutor,
         ds_args: DeepScholarArgs,
         all_output: list[str],
-        start: int,
-        end: int | None,
+        output_dir: str | None,
     ) -> tuple[int, int, bool]:
-        """Single-command generation (old behavior); counts via summary.json."""
-        gen_cmd = self._build_generation_command(ds_args, start, end)
+        """Run generation once and return (generated, requested, command_succeeded)."""
+        n_total = await self._requested_query_count(executor, ds_args)
+        gen_cmd = self._build_generation_command(ds_args)
         logger.info(f"[{self.name}] Generation: {gen_cmd}")
         gen_result = await executor.execute_command(
             gen_cmd,
@@ -501,133 +475,27 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         all_output.append(f"$ {gen_cmd}\n{gen_result.output}")
         logger.info(f"[{self.name}] Generation exit code: {gen_result.exit_code}")
 
-        # summary.json is written only when generation finishes, so a killed run
-        # leaves none — fall back to counting the per-query folders that hold a
-        # final_report.md (these persist even when the command is killed).
-        n_success, n_total = await self._generation_counts(executor)
-        if n_total == 0:
-            n_success = await self._completed_query_count(executor)
-            n_total = (end - start) if end is not None else n_success
+        summary_success, summary_total = await self._generation_counts(executor, output_dir)
+        completed = await self._completed_query_ids(
+            executor,
+            output_dir,
+            ds_args.start_idx,
+            ds_args.start_idx + n_total if n_total else None,
+        )
+        n_success = len(completed) if completed is not None else summary_success
+        if not n_total:
+            n_total = summary_total or n_success
         return n_success, n_total, gen_result.success
 
-    async def _run_generation_chunked(
-        self,
-        executor: SandboxExecutor,
-        ds_args: DeepScholarArgs,
-        all_output: list[str],
-        start: int,
-        end: int,
-    ) -> tuple[int, int, bool]:
-        """Generation as a sequence of short commands over disjoint index ranges.
-
-        Drives off which indices are still missing: each chunk starts at the lowest
-        uncompleted index. A chunk that completes some queries advances the frontier;
-        a chunk that completes none has its head query marked stalled and dropped so
-        the loop moves past it. The loop stops early when the container goes
-        unresponsive between chunks or the generation budget is exhausted.
-        """
-        chunk_size = ds_args.chunk_size
-        assert chunk_size is not None
-        n_total = end - start
-        n_chunks = math.ceil(n_total / chunk_size)
-        deadline = time.time() + self.timeout_seconds
-        # Every iteration removes at least one index from the frontier (a completed
-        # query, or a skipped head), so the loop can run at most n_total times; the
-        # cap is a defensive backstop.
-        attempt_cap = n_total + ds_args.chunk_retries + 2
-
-        completed = await self._completed_indices(executor, start, end)
-        skipped: set[int] = set()
-        no_progress_chunks = 0
-        attempts = 0
-        last_chunk_failed = False
-        logger.info(
-            f"[{self.name}] Chunked generation: {n_total} queries, {n_chunks} chunks "
-            f"of {chunk_size}, chunk_timeout={ds_args.chunk_timeout}s"
-        )
-
-        while attempts < attempt_cap:
-            missing = [i for i in range(start, end) if i not in completed and i not in skipped]
-            if not missing:
-                break
-            if time.time() >= deadline:
-                logger.warning(f"[{self.name}] Generation budget exhausted; stopping chunk loop")
-                break
-            # Consecutive no-progress chunks mean the container is likely wedging (not a
-            # single query erroring, which still lets the chunk finish its neighbors).
-            # Bail so we salvage rather than grind through every remaining index.
-            if no_progress_chunks > ds_args.chunk_retries:
-                logger.error(
-                    f"[{self.name}] {no_progress_chunks} no-progress chunks "
-                    f"(> chunk_retries={ds_args.chunk_retries}); salvaging completed queries"
-                )
-                break
-            # After a no-progress chunk, verify the container still answers before
-            # committing another long command to it.
-            if last_chunk_failed and not await self._sandbox_alive(executor):
-                logger.error(
-                    f"[{self.name}] Sandbox unresponsive between chunks; "
-                    "salvaging completed queries"
-                )
-                break
-
-            chunk_start = missing[0]
-            chunk_end = min(chunk_start + chunk_size, end)
-            attempts += 1
-            gen_cmd = self._build_generation_command(ds_args, chunk_start, chunk_end)
-            logger.info(
-                f"[{self.name}] Chunk attempt {attempts} [{chunk_start}:{chunk_end}): {gen_cmd}"
-            )
-            gen_result = await executor.execute_command(
-                gen_cmd,
-                timeout=ds_args.chunk_timeout,
-                stream=True,
-                log_prefix=f"{self.name}-gen",
-            )
-            all_output.append(f"$ {gen_cmd}\n{gen_result.output}")
-
-            before = completed
-            # Union rather than replace: folders are only ever added, so a transient
-            # failed scan (empty set) must not erase already-counted progress.
-            completed = before | await self._completed_indices(executor, start, end)
-            newly = completed - before
-            # No new folder at all means a stall (container/vLLM wedge), distinct from a
-            # query erroring (upstream skips it but the chunk still completes neighbors).
-            last_chunk_failed = not newly
-            no_progress_chunks = no_progress_chunks + 1 if last_chunk_failed else 0
-            if chunk_start not in completed:
-                # The chunk's head index still has no report: it errored, or the chunk
-                # was cut/stalled before finishing its first query. Skip it so the loop
-                # advances rather than re-running the same range.
-                skipped.add(chunk_start)
-                logger.warning(
-                    f"[{self.name}] Chunk [{chunk_start}:{chunk_end}): index "
-                    f"{chunk_start} did not complete (exit {gen_result.exit_code}); "
-                    f"skipping it (+{len(newly)} other queries this chunk)"
-                )
-            else:
-                logger.info(
-                    f"[{self.name}] Chunk done: +{len(newly)} queries "
-                    f"({len(completed)}/{n_total} total)"
-                )
-
-        n_success = len(completed)
-        generation_ok = n_success == n_total
-        return n_success, n_total, generation_ok
-
-    async def _resolve_end_bound(
+    async def _requested_query_count(
         self, executor: SandboxExecutor, ds_args: DeepScholarArgs
-    ) -> int | None:
-        """Exclusive upper index bound for generation, or None if unbounded/unknown."""
+    ) -> int:
+        """Number of dataset rows requested by the generation bounds."""
+        dataset_total = await self._total_query_count(executor)
+        available = max(dataset_total - ds_args.start_idx, 0) if dataset_total is not None else None
         if ds_args.limit is not None:
-            return ds_args.start_idx + ds_args.limit
-        # Chunking needs a finite bound; when limit is absent, count the dataset rows
-        # (upstream derives one query per row of the queries/papers CSV).
-        if ds_args.chunk_size is not None:
-            total = await self._total_query_count(executor)
-            if total is not None:
-                return total
-        return None
+            return min(ds_args.limit, available) if available is not None else ds_args.limit
+        return available or 0
 
     async def _total_query_count(self, executor: SandboxExecutor) -> int | None:
         """Count dataset queries (queries.csv if present, else papers CSV).
@@ -652,38 +520,48 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 return int(token)
         return None
 
-    async def _completed_indices(self, executor: SandboxExecutor, start: int, end: int) -> set[int]:
-        """Query indices in [start, end) whose folder holds a final_report.md.
+    async def _completed_query_ids(
+        self,
+        executor: SandboxExecutor,
+        output_dir: str | None,
+        start: int,
+        end: int | None,
+    ) -> set[int] | None:
+        """Query indices with all artifacts required by the upstream parser."""
+        required = ("final_report.md", "intro.md", "paper.csv")
+        names: list[str]
+        if output_dir:
+            root = Path(output_dir) / "deepscholar_results" / "generation"
+            if root.is_dir():
+                names = [
+                    child.name
+                    for child in root.iterdir()
+                    if child.is_dir() and all((child / filename).is_file() for filename in required)
+                ]
+                indices = {int(name) for name in names if name.isdigit()}
+                return {
+                    index for index in indices if index >= start and (end is None or index < end)
+                }
 
-        Never raises: a wedged container yields an empty set (treated as no progress)
-        so the caller can still fall through to salvage rather than aborting.
-        """
+        script = (
+            "from pathlib import Path; "
+            f"root=Path({self._gen_dir!r}); "
+            f"required={required!r}; "
+            "print('\\n'.join(p.name for p in root.iterdir() "
+            "if p.is_dir() and all((p / f).is_file() for f in required)))"
+        )
         try:
-            find = await executor.execute_command(
-                f"find {shlex.quote(self._gen_dir)} -mindepth 2 -maxdepth 2 "
-                "-type f -name final_report.md 2>/dev/null",
-                timeout=60.0,
+            result = await executor.execute_command(
+                f"{self._venv_python} -c {shlex.quote(script)}", timeout=60.0
             )
         except Exception:
-            return set()
-        indices: set[int] = set()
-        if not (find.success and find.output.strip()):
-            return indices
-        for path in (p.strip() for p in find.output.strip().splitlines() if p.strip()):
-            name = Path(path).parent.name
-            if name.isdigit():
-                idx = int(name)
-                if start <= idx < end:
-                    indices.add(idx)
-        return indices
+            return None
+        if not result.success:
+            return None
+        names = result.output.splitlines()
 
-    async def _sandbox_alive(self, executor: SandboxExecutor) -> bool:
-        """Quick liveness probe: does the container still answer a trivial command?"""
-        try:
-            result = await executor.execute_command("echo alive", timeout=30.0)
-        except Exception:
-            return False
-        return result.success and "alive" in result.output
+        indices = {int(name) for name in names if name.isdigit()}
+        return {index for index in indices if index >= start and (end is None or index < end)}
 
     def _build_eval_command(self, ds_args: DeepScholarArgs) -> str:
         parts = [
@@ -705,40 +583,34 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         parts.extend(ds_args.extra_eval_args)
         return " ".join(parts)
 
-    async def _generation_counts(self, executor: SandboxExecutor) -> tuple[int, int]:
+    async def _generation_counts(
+        self, executor: SandboxExecutor, output_dir: str | None
+    ) -> tuple[int, int]:
         """Return (successful_queries, total_queries) from generation summary.json."""
-        cat = await executor.execute_command(
-            f"cat {shlex.quote(self._gen_dir)}/summary.json", timeout=60.0
-        )
-        if not (cat.success and cat.output.strip()):
+        text = ""
+        if output_dir:
+            summary_path = Path(output_dir) / "deepscholar_results" / "generation" / "summary.json"
+            if summary_path.is_file():
+                text = summary_path.read_text()
+        if not text:
+            try:
+                cat = await executor.execute_command(
+                    f"cat {shlex.quote(self._gen_dir)}/summary.json", timeout=60.0
+                )
+            except Exception:
+                cat = None
+            if cat is not None and cat.success:
+                text = cat.output
+        if not text.strip():
             return (0, 0)
         try:
-            summary = json.loads(cat.output)
+            summary = json.loads(text)
         except json.JSONDecodeError:
             return (0, 0)
         if not isinstance(summary, list):
             return (0, 0)
         n_success = sum(1 for r in summary if isinstance(r, dict) and r.get("status") == "success")
         return (n_success, len(summary))
-
-    async def _completed_query_count(self, executor: SandboxExecutor) -> int:
-        """Count generation query folders that finished, by their final_report.md.
-
-        Used when summary.json is absent because generation was killed mid-run:
-        final_report.md is the last artifact written per query, so its presence is a
-        proxy for a completed, scorable folder (the eval scores per-folder anyway).
-        """
-        find = await executor.execute_command(
-            f"find {shlex.quote(self._gen_dir)} -mindepth 2 -maxdepth 2 "
-            "-type f -name final_report.md 2>/dev/null | wc -l",
-            timeout=60.0,
-        )
-        if not find.success:
-            return 0
-        try:
-            return int(find.output.strip())
-        except (ValueError, AttributeError):
-            return 0
 
     async def _read_dir(
         self, executor: SandboxExecutor, remote_dir: str, pattern: str
@@ -766,6 +638,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         n_success: int = 0,
         n_total: int = 0,
         generation_ok: bool = True,
+        requested_metrics: tuple[str, ...] = (),
     ) -> ExternalEvalResult:
         # Canonical layout: evaluation/<metric>/aggregated_results.csv holds the
         # aggregate for each metric on a single `deepscholar_base` row. The metric
@@ -777,11 +650,40 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             value = parse_aggregate_csv(text, metric)
             if value is not None:
                 all_metrics[metric] = value
+        parsed_metric_names = tuple(all_metrics)
 
         # Headline geomean over the primary metrics (None if any is missing).
         geomean = compute_geomean(all_metrics)
         if geomean is not None:
             all_metrics["geomean"] = geomean
+
+        # Upstream aggregates only rows its parser successfully scored. Preserve
+        # those canonical values above, and also expose a fixed-request denominator
+        # where missing generation/parser rows contribute zero.
+        query_files = await self._read_dir(executor, self._eval_dir, "deepscholar_base.csv")
+        per_metric: dict[str, dict[str, float]] = {}
+        for rel, text in sorted(query_files.items()):
+            metric = rel.split("/")[0]
+            per_metric[metric] = parse_per_query_csv(text, metric)
+
+        fixed_metrics: dict[str, float] = {}
+        if n_total > 0:
+            for metric in parsed_metric_names:
+                scores = per_metric.setdefault(metric, {})
+                fixed_metrics[metric] = sum(scores.values()) / n_total
+                all_metrics[f"{metric}_fixed"] = fixed_metrics[metric]
+            fixed_geomean = compute_geomean(fixed_metrics)
+            if fixed_geomean is not None:
+                all_metrics["geomean_fixed"] = fixed_geomean
+
+        score_sets = [
+            set(per_metric[metric]) for metric in requested_metrics if metric in per_metric
+        ]
+        n_scored = (
+            len(set.intersection(*score_sets))
+            if score_sets and len(score_sets) == len(requested_metrics)
+            else 0
+        )
 
         if not all_metrics:
             return ExternalEvalResult(
@@ -801,6 +703,15 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             metadata={
                 "eval_dir": self._eval_dir,
                 "ref": DEEPSCHOLAR_REF,
+                "queries_requested": n_total,
+                "queries_generated": n_success,
+                "queries_scored": n_scored,
+                "fixed_metric_denominator": n_total,
+                "metric_query_counts": {
+                    metric: len(scores) for metric, scores in sorted(per_metric.items())
+                },
+                # Backward-compatible alias; now counts scorable artifacts rather
+                # than any folder containing final_report.md.
                 "queries_succeeded": n_success,
                 "queries_total": n_total,
                 "generation_complete": generation_ok and n_success == n_total,

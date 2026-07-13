@@ -1,7 +1,7 @@
 """Parsing for DeepScholar-Bench eval outputs.
 
-The upstream eval phase writes one aggregate CSV per metric. This parser targets
-that schema, which is pinned by ``DEEPSCHOLAR_REF``.
+The upstream eval phase writes one aggregate CSV and one per-query CSV per metric.
+These parsers target that schema, which is pinned by ``DEEPSCHOLAR_REF``.
 """
 
 from __future__ import annotations
@@ -32,10 +32,28 @@ def parse_aggregate_csv(text: str, metric: str | None = None) -> float | None:
     candidates += [k for k in row if k != "baseline_name" and k not in candidates]
     for key in candidates:
         try:
-            return float(row[key])
+            value = float(row[key])
         except (TypeError, ValueError):
             continue
+        if math.isfinite(value):
+            return value
     return None
+
+
+def parse_per_query_csv(text: str, metric: str) -> dict[str, float]:
+    """Return finite per-query scores keyed by the generation folder name."""
+    scores: dict[str, float] = {}
+    for row in csv.DictReader(io.StringIO(text)):
+        query_id = (row.get("folder_path") or "").rstrip("/").rsplit("/", 1)[-1]
+        if not query_id:
+            continue
+        try:
+            value = float(row[metric])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            scores[query_id] = value
+    return scores
 
 
 def compute_geomean(
@@ -53,7 +71,7 @@ def compute_geomean(
             (v for k, v in metrics.items() if k == key or k.endswith(f".{key}")),
             None,
         )
-        if match is None or match < 0:
+        if match is None or not math.isfinite(match) or match < 0:
             return None
         values.append(match)
     if any(v == 0 for v in values):
