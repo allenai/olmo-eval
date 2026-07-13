@@ -29,7 +29,6 @@ from olmo_eval.evals.external.base import SandboxedExternalEval
 from olmo_eval.evals.external.benchmarks.deepscholar.args import DeepScholarArgs
 from olmo_eval.evals.external.benchmarks.deepscholar.result_parser import (
     compute_geomean,
-    flatten_numeric,
     parse_aggregate_csv,
 )
 from olmo_eval.evals.external.result import ExternalEvalResult
@@ -43,6 +42,9 @@ logger = logging.getLogger(__name__)
 # Pinned: the search shim monkeypatches upstream internals
 # (recursive_search._process_single_lotus_search_task), so track a fixed commit.
 DEEPSCHOLAR_REF = "c95413b3b2f3255b461b90d0ce650f685ae2d1ff"
+# DeepScholar's requirements file follows LOTUS HEAD, but the runtime shim patches
+# LOTUS internals. Pin the exact revision used by the successful full validation.
+LOTUS_REF = "136ae4f4a344a2f75d89f811e516dfcb0de30e46"
 
 # Default token budget for upstream's stage LMs (raising the upstream 512 cap that
 # truncates structured outputs). Kept well below max_model_len: LOTUS sends this as
@@ -135,6 +137,10 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             f"cd {self._repo} && git remote add origin {repo_url}",
             f"cd {self._repo} && git fetch --depth 1 origin {DEEPSCHOLAR_REF}",
             f"cd {self._repo} && git checkout FETCH_HEAD",
+            f"cd {self._repo} && sed -i "
+            f"'s|git+https://github.com/lotus-data/lotus.git#egg=|"
+            f"git+https://github.com/lotus-data/lotus.git@{LOTUS_REF}#egg=|' requirements.txt "
+            f"&& grep -F '@{LOTUS_REF}#egg=' requirements.txt",
             f"cd {self._repo} && uv venv --python 3.10",
             # Target our .venv explicitly: the swe-rex derived image ships an active
             # /root/venv (3.12), which uv would otherwise install into by default.
@@ -220,15 +226,8 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 "litellm prefix for local vLLM ('openai' or 'hosted_vllm')",
                 "openai",
             ),
-            "max_batch_size": (
-                "Concurrent vLLM requests per LOTUS sem-op (upstream default 64). "
-                "Lower (e.g. 4-8) to cut sandbox resource pressure / runtime wedges",
-                None,
-            ),
             "lm_timeout": (
-                "Per-call LM timeout in seconds; hard wall-clock guard against vLLM "
-                "stalls/runaway generation (fails the query, doesn't hang the run). "
-                "Kept under the 300s poll interval",
+                "Per-request timeout in seconds passed to LOTUS/litellm",
                 240,
             ),
             "chunk_size": (
@@ -328,8 +327,6 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 whole = generation_ok and n_success == n_total
                 may_score = n_success > 0 and (whole or ds_args.allow_partial_generation)
                 if not may_score:
-                    if output_dir:
-                        await self._copy_back(executor, output_dir)
                     reason = (
                         "Generation phase failed"
                         if not generation_ok
@@ -338,7 +335,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                     return self._error_result(
                         f"{reason}; skipping eval "
                         "(pass -a allow_partial_generation=true to score what completed; "
-                        "completed folders copied back for inspection)",
+                        "completed folders are available in deepscholar_results/generation)",
                         start_time,
                         "\n".join(all_output),
                     )
@@ -358,7 +355,6 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                     executor,
                     "\n".join(all_output),
                     eval_result.exit_code,
-                    output_dir,
                     n_success=n_success,
                     n_total=n_total,
                     generation_ok=generation_ok,
@@ -380,18 +376,8 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         lm: dict[str, Any] = {
             "temperature": ds_args.temperature if ds_args.temperature is not None else 1.0,
             "max_tokens": ds_args.max_tokens,
-            # Propagated to litellm; caps stalled requests so one hung call can't wedge
-            # the whole run. Inherited by upstream's stage LMs via configured_lm.kwargs.
             "timeout": ds_args.lm_timeout,
         }
-        if ds_args.max_batch_size is not None:
-            # LOTUS uses this as batch_completion's max_workers: the number of vLLM
-            # requests fired concurrently per sem-op. Upstream defaults to 64, i.e. up
-            # to 64 concurrent HTTP connections from inside the nested-podman sandbox,
-            # which is a plausible contributor to the swe-rex runtime wedging under
-            # resource pressure. Lowering it trades generation speed for container
-            # stability. Propagates to the stage LMs via initialize_lms.
-            lm["max_batch_size"] = ds_args.max_batch_size
         if is_local:
             # litellm routes "<prefix>/<model>" to the OpenAI-compatible vLLM server at api_base.
             lm["model"] = f"{ds_args.local_model_prefix}/{model_name}"
@@ -454,11 +440,6 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         entry = [
             f"DEEPSCHOLAR_SEARCH_BACKEND={shlex.quote(ds_args.search_backend)}",
             f"DEEPSCHOLAR_STAGE_MAX_TOKENS={stage_budget}",
-            # Hard per-call wall-clock timeout in the shim: litellm doesn't enforce the
-            # config `timeout` on the vLLM path, so a stalled request would hang the run
-            # until the sandbox watchdog kills it. This makes a stall fail the one query
-            # and continue. Kept under the 300s poll interval.
-            f"DEEPSCHOLAR_LM_HARD_TIMEOUT={ds_args.lm_timeout}",
             self._venv_python,
             self._shim_path,
         ]
@@ -782,7 +763,6 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         executor: SandboxExecutor,
         raw_output: str,
         exit_code: int,
-        output_dir: str | None = None,
         n_success: int = 0,
         n_total: int = 0,
         generation_ok: bool = True,
@@ -798,23 +778,10 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             if value is not None:
                 all_metrics[metric] = value
 
-        # Fallback if the upstream layout changes: scan any JSON for numeric leaves.
-        if not all_metrics:
-            for rel, text in (await self._read_dir(executor, self._eval_dir, "*.json")).items():
-                try:
-                    parsed = flatten_numeric(json.loads(text))
-                except json.JSONDecodeError:
-                    continue
-                for key, value in parsed.items():
-                    all_metrics[f"{Path(rel).stem}.{key}"] = value
-
         # Headline geomean over the primary metrics (None if any is missing).
         geomean = compute_geomean(all_metrics)
         if geomean is not None:
             all_metrics["geomean"] = geomean
-
-        if output_dir:
-            await self._copy_back(executor, output_dir)
 
         if not all_metrics:
             return ExternalEvalResult(
@@ -840,30 +807,3 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             },
             raw_output=raw_output,
         )
-
-    async def _copy_back(self, executor: SandboxExecutor, output_dir: str) -> None:
-        """Copy outputs back when they are not already bind-mounted locally."""
-        dest = Path(output_dir) / "deepscholar_results"
-        for remote_dir, pattern, subdir in (
-            (self._eval_dir, "*", "evaluation"),
-            (self._gen_dir, "summary.json", "generation"),
-        ):
-            find = await executor.execute_command(
-                f"find {shlex.quote(remote_dir)} -type f -name {shlex.quote(pattern)} 2>/dev/null",
-                timeout=60.0,
-            )
-            if not find.success or not find.output.strip():
-                continue
-            for remote_path in (p.strip() for p in find.output.strip().split("\n") if p.strip()):
-                read = await executor.execute_command(
-                    f"base64 {shlex.quote(remote_path)}", timeout=120.0
-                )
-                if not (read.success and read.output.strip()):
-                    continue
-                rel = remote_path.replace(remote_dir.rstrip("/") + "/", "")
-                local_path = dest / subdir / rel
-                local_path.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    local_path.write_bytes(base64.b64decode(read.output.strip()))
-                except Exception as e:
-                    logger.warning(f"[{self.name}] Failed to copy {rel}: {e}")
