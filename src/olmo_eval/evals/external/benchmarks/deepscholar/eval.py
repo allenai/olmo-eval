@@ -655,7 +655,8 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         # Headline geomean over the primary metrics (None if any is missing).
         geomean = compute_geomean(all_metrics)
         if geomean is not None:
-            all_metrics["geomean"] = geomean
+            # Keep the canonical geomean first when no fixed denominator is available.
+            all_metrics = {"geomean": geomean, **all_metrics}
 
         # Upstream aggregates only rows its parser successfully scored. Preserve
         # those canonical values above, and also expose a fixed-request denominator
@@ -674,7 +675,9 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 all_metrics[f"{metric}_fixed"] = fixed_metrics[metric]
             fixed_geomean = compute_geomean(fixed_metrics)
             if fixed_geomean is not None:
-                all_metrics["geomean_fixed"] = fixed_geomean
+                # Missing generation/parser rows score zero in this value, so use
+                # it as the primary metric for comparisons across complete runs.
+                all_metrics = {"geomean_fixed": fixed_geomean, **all_metrics}
 
         score_sets = [
             set(per_metric[metric]) for metric in requested_metrics if metric in per_metric
@@ -706,6 +709,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 "queries_requested": n_total,
                 "queries_generated": n_success,
                 "queries_scored": n_scored,
+                "num_tasks": n_total,
                 "fixed_metric_denominator": n_total,
                 "metric_query_counts": {
                     metric: len(scores) for metric, scores in sorted(per_metric.items())

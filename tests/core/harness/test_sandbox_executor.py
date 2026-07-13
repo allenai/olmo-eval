@@ -1,4 +1,6 @@
 import asyncio
+import sys
+import types
 import unittest
 from unittest import mock
 
@@ -67,6 +69,38 @@ class TestStreamingControlCommand(unittest.IsolatedAsyncioTestCase):
             await executor._execute_stream_control("blocked", timeout=0.01)
 
         self.assertTrue(process.killed)
+
+    async def test_modal_control_uses_swerex(self) -> None:
+        executor = SandboxExecutor(SandboxConfig(image="test", mode=SandboxMode.MODAL))
+        executor._deployment = mock.Mock()
+        executor._runtime = mock.Mock()
+        executor._runtime.execute = mock.AsyncMock(
+            return_value=mock.Mock(stdout="remote output\n", stderr="", exit_code=0)
+        )
+        abstract = types.ModuleType("swerex.runtime.abstract")
+        abstract.Command = mock.Mock()  # type: ignore[ty:unresolved-attribute]
+        runtime = types.ModuleType("swerex.runtime")
+        runtime.abstract = abstract  # type: ignore[ty:unresolved-attribute]
+        swerex = types.ModuleType("swerex")
+        swerex.runtime = runtime  # type: ignore[ty:unresolved-attribute]
+
+        with (
+            mock.patch.dict(
+                sys.modules,
+                {
+                    "swerex": swerex,
+                    "swerex.runtime": runtime,
+                    "swerex.runtime.abstract": abstract,
+                },
+            ),
+            mock.patch("asyncio.create_subprocess_exec") as create,
+        ):
+            result = await executor._execute_stream_control("echo ok", timeout=2.0)
+
+        create.assert_not_called()
+        executor._runtime.execute.assert_awaited_once()
+        self.assertEqual(result.stdout, "remote output\n")
+        self.assertEqual(result.exit_code, 0)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,10 @@ from olmo_eval.evals.external.benchmarks.deepscholar.result_parser import (
     parse_aggregate_csv,
     parse_per_query_csv,
 )
+from olmo_eval.evals.external.benchmarks.deepscholar.sandbox_search_shim import (
+    map_s2_paper,
+    s2_search_rows,
+)
 from olmo_eval.harness.sandbox.config import SandboxConfig, SandboxMode
 
 
@@ -52,6 +56,52 @@ def test_setup_pins_lotus_revision() -> None:
 
 def test_all_metrics_argument_expands_to_primary_metrics() -> None:
     assert DeepScholarArgs.from_dict({"evals": "all"}).evals == list(PRIMARY_METRICS)
+
+
+def test_s2_mapping_prefers_scorable_arxiv_metadata() -> None:
+    row = map_s2_paper(
+        {
+            "title": "A paper",
+            "abstract": "An abstract",
+            "authors": [{"name": "Ada"}, {"name": "Grace"}],
+            "year": 2024,
+            "externalIds": {"ArXiv": "2401.01234", "DOI": "10.1/example"},
+        },
+        "test query",
+    )
+
+    assert row["url"] == "https://arxiv.org/abs/2401.01234"
+    assert row["id"] == "2401.01234"
+    assert row["date"] == "2024-01-01"
+    assert row["authors"] == "Ada, Grace"
+    assert row["query"] == "test query"
+
+
+def test_s2_search_sends_key_and_recovers_from_rate_limit() -> None:
+    rate_limited = mock.Mock(status_code=429)
+    success = mock.Mock(status_code=200)
+    success.json.return_value = {
+        "data": [
+            {
+                "title": "A paper",
+                "abstract": "An abstract",
+                "publicationDate": "2024-01-02",
+                "externalIds": {"ArXiv": "2401.01234"},
+            }
+        ]
+    }
+
+    with (
+        mock.patch("requests.get", side_effect=[rate_limited, success]) as get,
+        mock.patch("time.sleep"),
+    ):
+        rows = s2_search_rows("test query", 10, api_key="secret", budget_s=5)
+
+    assert len(rows) == 1
+    assert get.call_count == 2
+    assert get.call_args.kwargs["headers"] == {"x-api-key": "secret"}
+    assert get.call_args.kwargs["timeout"] == (5, 15)
+    success.raise_for_status.assert_called_once_with()
 
 
 def test_generation_runs_once_and_counts_only_scorable_artifacts(tmp_path: Path) -> None:
@@ -141,9 +191,11 @@ def test_fixed_metrics_use_requested_query_denominator(metric: str) -> None:
 
     assert result.metrics[metric] == pytest.approx(0.5)
     assert result.metrics[f"{metric}_fixed"] == pytest.approx(1 / 3)
+    assert next(iter(result.metrics)) == "geomean_fixed"
     assert result.metrics["geomean"] == pytest.approx(0.5)
     assert result.metrics["geomean_fixed"] == pytest.approx(1 / 3)
     assert result.metadata["queries_requested"] == 3
     assert result.metadata["queries_generated"] == 2
     assert result.metadata["queries_scored"] == 2
+    assert result.metadata["num_tasks"] == 3
     assert result.metadata["generation_complete"] is False
