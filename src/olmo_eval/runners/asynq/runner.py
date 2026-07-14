@@ -940,9 +940,13 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 return (spec, tracker, [])
 
         from rich.table import Table
+        from tqdm.auto import tqdm
 
         # Collect prepared tasks in parallel, but accumulate results for deterministic ordering
         prepared_results: dict[str, tuple[TaskTracker, list[QueueItem]]] = {}
+        # Nested tqdm.concurrent contexts may delete a lazily-created class lock
+        # while another dataset-loading thread is still using it.
+        tqdm.get_lock()
         with ThreadPoolExecutor(max_workers=min(32, len(expanded_tasks))) as executor:
             futures = {executor.submit(prepare_one, spec): spec for spec in expanded_tasks}
             for future in as_completed(futures):
