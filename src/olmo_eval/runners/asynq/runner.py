@@ -1025,6 +1025,13 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Apply per-task overrides
         per_task = self.task_overrides.get(spec, {})
         for key, value in per_task.items():
+            if key == "sampling_params" and isinstance(value, Mapping):
+                sampling_overrides.update(
+                    (sampling_key, sampling_value)
+                    for sampling_key, sampling_value in value.items()
+                    if sampling_key in sampling_fields
+                )
+                continue
             if key in task_fields:
                 task_overrides[key] = value
             elif key in sampling_fields:

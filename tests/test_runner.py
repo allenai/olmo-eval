@@ -37,6 +37,27 @@ def make_harness_config(model_name: str = "llama3.1-8b") -> HarnessConfig:
     )
 
 
+def test_nested_task_sampling_overrides_remain_typed() -> None:
+    spec = "math500:chat"
+    runner = AsyncEvalRunner(
+        harness_config=make_harness_config(),
+        task_specs=[spec],
+        task_overrides={
+            spec: {
+                "sampling_params": {
+                    "max_tokens": 32768,
+                    "temperature": 0.6,
+                }
+            }
+        },
+    )
+
+    task_overrides, sampling_overrides = runner._build_task_overrides(spec)
+
+    assert task_overrides == {}
+    assert sampling_overrides == {"max_tokens": 32768, "temperature": 0.6}
+
+
 @dataclass(frozen=True, slots=True)
 class DefaultProcessScorer(ProcessScorer):
     name: str = "default_process"
