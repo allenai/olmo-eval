@@ -15,14 +15,20 @@ import asyncio
 import logging
 import os
 import random
+import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import date
 
 import httpx
 
 from .registry import registered_tool
 
 logger = logging.getLogger(__name__)
+
+_search_date_cutoff: ContextVar[str | None] = ContextVar("_search_date_cutoff", default=None)
 
 # Module-level shared HTTP client for connection reuse
 _http_client: httpx.AsyncClient | None = None
@@ -40,6 +46,42 @@ _MAX_BACKOFF_S = 16.0
 _S2_MIN_INTERVAL_S = 1.1  # slightly over 1s for margin
 _s2_rate_lock = asyncio.Lock()
 _s2_last_request_ts = 0.0  # time.monotonic() of the last dispatched S2 request
+
+
+@contextmanager
+def search_date_cutoff(cutoff_raw: str | None) -> Iterator[None]:
+    """Set the date cutoff used by search tools within this context."""
+    token = _search_date_cutoff.set(cutoff_raw)
+    try:
+        yield
+    finally:
+        _search_date_cutoff.reset(token)
+
+
+def _parse_cutoff(raw: str | None) -> tuple[int, str, str] | None:
+    """Parse a leading ISO date into year, Google, and ISO date forms."""
+    if not isinstance(raw, str):
+        return None
+    if not raw:
+        return None
+
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})", raw)
+    if match is None:
+        logger.warning("Ignoring unparseable search date cutoff: %r", raw)
+        return None
+
+    year_text, month_text, day_text = match.groups()
+    try:
+        date(int(year_text), int(month_text), int(day_text))
+    except ValueError:
+        logger.warning("Ignoring unparseable search date cutoff: %r", raw)
+        return None
+
+    return (
+        int(year_text),
+        f"{month_text}/{day_text}/{year_text}",
+        f"{year_text}-{month_text}-{day_text}",
+    )
 
 
 async def _s2_rate_gate() -> None:
@@ -150,16 +192,21 @@ async def semantic_scholar_search(query: str) -> str:
     if not sanitized_query:
         return "Error: Empty search query."
 
+    cutoff = _parse_cutoff(_search_date_cutoff.get())
+    params = {
+        "query": sanitized_query,
+        "limit": _s2_search_limit(),
+        "fields": "title,abstract,url,year,publicationDate,authors,corpusId",
+    }
+    if cutoff is not None:
+        params["publicationDateOrYear"] = f":{cutoff[2]}"
+
     client = _get_http_client()
     try:
         resp = await _get_with_backoff(
             client,
             "https://api.semanticscholar.org/graph/v1/paper/search",
-            params={
-                "query": sanitized_query,
-                "limit": _s2_search_limit(),
-                "fields": "title,abstract,url,year,authors,corpusId",
-            },
+            params=params,
             headers=headers,
             rate_gate=_s2_rate_gate,
         )
@@ -181,6 +228,21 @@ async def semantic_scholar_search(query: str) -> str:
         return f"Error searching Semantic Scholar: {e}"
 
     papers = data.get("data", [])
+    if cutoff is not None:
+        cutoff_year, _, cutoff_iso = cutoff
+        papers = [
+            paper
+            for paper in papers
+            if (
+                isinstance(paper.get("publicationDate"), str)
+                and paper["publicationDate"] <= cutoff_iso
+            )
+            or (
+                not isinstance(paper.get("publicationDate"), str)
+                and isinstance(paper.get("year"), int)
+                and paper["year"] <= cutoff_year
+            )
+        ]
     if not papers:
         return "No papers found for query."
 
@@ -237,11 +299,17 @@ async def serper_web_search(query: str) -> str:
     if not sanitized_query:
         return "Error: Empty search query."
 
+    cutoff = _parse_cutoff(_search_date_cutoff.get())
+    request_body = {"q": sanitized_query, "num": 5}
+    if cutoff is not None:
+        _, cutoff_google, _ = cutoff
+        request_body["tbs"] = f"cdr:1,cd_min:01/01/1000,cd_max:{cutoff_google}"
+
     client = _get_http_client()
     try:
         resp = await client.post(
             "https://google.serper.dev/search",
-            json={"q": sanitized_query, "num": 5},
+            json=request_body,
             headers={
                 "X-API-KEY": api_key,
                 "Content-Type": "application/json",
