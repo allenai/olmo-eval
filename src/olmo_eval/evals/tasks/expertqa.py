@@ -70,17 +70,21 @@ logger = logging.getLogger(__name__)
 EXPERTQA_REPO = "cmalaviya/expertqa"
 EXPERTQA_WEB_SEARCH_TOOL = "serper_google_webpage_search"
 EXPERTQA_WEB_FETCH_TOOL = "serper_fetch_webpage_content"
+EXPERTQA_CRAWL4AI_FETCH_TOOL = "browse_webpage"
+EXPERTQA_WEB_FETCH_TOOLS = frozenset({EXPERTQA_WEB_FETCH_TOOL, EXPERTQA_CRAWL4AI_FETCH_TOOL})
 EXPERTQA_FETCH_EMPTY_CONTENT = "No content extracted from webpage."
 _URL_RE = re.compile(r"https?://[^\s<>()\]\"']+")
 
 EXPERTQA_GENERATION_PROMPT = """Answer the following expert question as a well-cited report.
 
-You have exactly two tools available, and only these tool names exist:
+You have a web search tool and one page-fetch tool available. The possible tool names are:
 - serper_google_webpage_search
 - serper_fetch_webpage_content
+- browse_webpage
 
-Use those names verbatim. Search first with serper_google_webpage_search, then fetch
-promising pages with serper_fetch_webpage_content before answering.
+Use the available tool names verbatim. Search first with serper_google_webpage_search,
+then fetch promising pages with serper_fetch_webpage_content or browse_webpage before
+answering.
 
 Return valid JSON with a single key `sections`, whose value is a list of section
 objects. Each section has keys `title`, `text`, and `citations`. Each citation
@@ -99,7 +103,7 @@ Do not create a References section.
 
 Workflow (follow in order):
 1. Call serper_google_webpage_search to find relevant pages.
-2. Call serper_fetch_webpage_content to read the most promising pages.
+2. Call serper_fetch_webpage_content or browse_webpage to read the most promising pages.
 3. Only after you have gathered evidence from fetched pages, write your final answer.
 Do not answer from memory. You must search before answering and read pages before answering.
 When you answer, output only the single JSON object described above.
@@ -108,12 +112,14 @@ Question: """
 
 EXPERTQA_CITE_PROMPT = """Answer the following expert question in plain prose. Markdown is allowed.
 
-You have exactly two tools available, and only these tool names exist:
+You have a web search tool and one page-fetch tool available. The possible tool names are:
 - serper_google_webpage_search
 - serper_fetch_webpage_content
+- browse_webpage
 
-Use those names verbatim. Search first with serper_google_webpage_search, then fetch
-promising pages with serper_fetch_webpage_content before answering.
+Use the available tool names verbatim. Search first with serper_google_webpage_search,
+then fetch promising pages with serper_fetch_webpage_content or browse_webpage before
+answering.
 
 Do not return JSON.
 For every source-based claim, wrap the exact claim text in a cite tag:
@@ -124,7 +130,7 @@ Do not create a References section.
 
 Workflow (follow in order):
 1. Call serper_google_webpage_search to find relevant pages.
-2. Call serper_fetch_webpage_content to read the most promising pages.
+2. Call serper_fetch_webpage_content or browse_webpage to read the most promising pages.
 3. Only after you have gathered evidence from fetched pages, write your final answer.
 Do not answer from memory. You must search before answering and read pages before answering.
 When you answer, write prose with <cite url="..."> tags as described above.
@@ -164,10 +170,31 @@ def _build_judge_fn() -> JudgeFn:
 
 
 def _trajectory_source_text(response: Response) -> str:
-    """Concatenate all tool result content visible to the agent."""
+    """Concatenate fetched-page content visible to the agent."""
     if response.trajectory is None:
         return ""
-    return "\n\n".join(result.content or "" for result in response.trajectory.tool_result_sequence)
+
+    source_chunks: list[str] = []
+    for tool_call, result in _iter_trajectory_tool_results(response):
+        content = result.content or ""
+        tool_name = tool_call.function.name
+        if (
+            tool_name in EXPERTQA_WEB_FETCH_TOOLS
+            and content
+            and not _fetch_result_is_error(result, content)
+        ):
+            source_chunks.append(content)
+
+    if source_chunks:
+        return "\n\n".join(source_chunks)
+
+    # Older tests and saved traces may contain tool results without tool-call
+    # metadata; keep those usable when there is no call sequence to pair.
+    if not response.trajectory.tool_call_sequence:
+        return "\n\n".join(
+            result.content or "" for result in response.trajectory.tool_result_sequence
+        )
+    return ""
 
 
 def _strip_think_block(text: str) -> str:
@@ -201,12 +228,11 @@ def _fetch_result_is_error(result: Any, content: str) -> bool:
     )
 
 
-def _trajectory_url_content(response: Response) -> dict[str, str]:
-    """Map trajectory-observed URLs to fetched content, or empty text if only seen."""
+def _iter_trajectory_tool_results(response: Response) -> Iterator[tuple[Any, Any]]:
+    """Yield trajectory tool results paired with their originating tool call."""
     if response.trajectory is None:
-        return {}
+        return
 
-    url_to_content: dict[str, str] = {}
     pending_tool_calls: list[Any] = []
     pending_tool_calls_by_id: dict[str, Any] = {}
 
@@ -239,23 +265,31 @@ def _trajectory_url_content(response: Response) -> dict[str, str]:
 
         for result in turn.tool_results:
             tool_call = pop_tool_call(result)
-            content = result.content or ""
-            if tool_call is None:
-                continue
+            if tool_call is not None:
+                yield tool_call, result
 
-            tool_name = tool_call.function.name
-            if tool_name == EXPERTQA_WEB_SEARCH_TOOL:
-                for url in _extract_urls(content):
+
+def _trajectory_url_content(response: Response) -> dict[str, str]:
+    """Map trajectory-observed URLs to fetched content, or empty text if only seen."""
+    if response.trajectory is None:
+        return {}
+
+    url_to_content: dict[str, str] = {}
+    for tool_call, result in _iter_trajectory_tool_results(response):
+        content = result.content or ""
+        tool_name = tool_call.function.name
+        if tool_name == EXPERTQA_WEB_SEARCH_TOOL:
+            for url in _extract_urls(content):
+                url_to_content.setdefault(url, "")
+        elif tool_name in EXPERTQA_WEB_FETCH_TOOLS:
+            url = str(_tool_call_arguments(tool_call).get("url", "")).strip()
+            if url:
+                if _fetch_result_is_error(result, content):
                     url_to_content.setdefault(url, "")
-            elif tool_name == EXPERTQA_WEB_FETCH_TOOL:
-                url = str(_tool_call_arguments(tool_call).get("url", "")).strip()
-                if url:
-                    if _fetch_result_is_error(result, content):
-                        url_to_content.setdefault(url, "")
-                    elif content:
-                        url_to_content[url] = content
-                    else:
-                        url_to_content.setdefault(url, "")
+                elif content:
+                    url_to_content[url] = content
+                else:
+                    url_to_content.setdefault(url, "")
     return url_to_content
 
 
