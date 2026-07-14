@@ -20,6 +20,7 @@ from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider
+from olmo_eval.inference.gpu_planner import resolve_visible_devices
 
 if TYPE_CHECKING:
     pass
@@ -466,7 +467,10 @@ class VLLMServerProcess:
         # the kernel ephemeral range.
         env["VLLM_PORT"] = str(self._vllm_port)
         if self.gpu_ids:
-            env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.gpu_ids)
+            # Invariant: gpu_ids are relative to the external CUDA_VISIBLE_DEVICES mask.
+            # Only runner-side InferenceManager/aux servers reach this; workers pass
+            # gpu_ids=None, avoiding a second composition that would mis-map GPUs.
+            env["CUDA_VISIBLE_DEVICES"] = resolve_visible_devices(self.gpu_ids)
 
         # Allow extended max_model_len when user specifies it (e.g., with rope_scaling)
         # This is needed when max_model_len > model's max_position_embeddings
