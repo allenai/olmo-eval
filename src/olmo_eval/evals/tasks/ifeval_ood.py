@@ -28,7 +28,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 _PRIMARY_METRIC = IFEvalPromptLooseAccuracy()
 
@@ -83,3 +83,15 @@ class IFEvalOOD(Task):
 
     def extract_answer(self, output: LMOutput) -> str:
         return output.text
+
+
+register_variant(
+    "ifeval_ood",
+    "qwen3_thinking",
+    sampling_params=SamplingParams(
+        max_tokens=32768,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+    ),
+)
