@@ -156,9 +156,11 @@ SCIENCE_RESEARCH = make_suite(
 
 # The members of science:research measure different things; read the per-metric
 # tiers rather than the aggregate:
-# - expertqa: attribution and on-topic precision of cited long-form answers
-#   (citation precision/recall + answer precision), not factual correctness
-#   against a reference. A high score means well-cited, on-topic prose.
+# - expertqa: agentic web-grounded attribution and on-topic precision of cited
+#   long-form answers, not factual correctness against a reference. Like
+#   litsearch, it needs a tool-providing harness (web_search_agent), so it sits
+#   only in science:research, not science:judge / science:nojudge / science:all.
+#   Its citation metrics additionally require the OpenAI judge at scoring time.
 # - litsearch: an agentic retrieval smoke test (does a gold paper surface in live
 #   Semantic Scholar results), distinct from the published fixed-corpus Recall@k.
 # - litsearch_rerank: fixed-corpus reranking. The model reranks a frozen pool of
@@ -205,10 +207,7 @@ SCIENCE_NOJUDGE = make_suite(
 
 SCIENCE_JUDGE = make_suite(
     "science:judge",
-    (
-        "expertqa",
-        get_suite("astabench"),
-    ),
+    (get_suite("astabench"),),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
     description="Current science tasks that require external LLM-as-judge scoring.",
 )

@@ -22,6 +22,17 @@ from .constants import (
     DR_TULU_SYSTEM_PROMPT,
 )
 
+WEB_SEARCH_SYSTEM_PROMPT = """\
+You are a web-search assistant for open-domain attributed question answering.
+
+Only these tool names exist; use them verbatim:
+- serper_google_webpage_search
+- serper_fetch_webpage_content
+
+Search first with serper_google_webpage_search, then fetch promising pages with
+serper_fetch_webpage_content before answering. Quote only text copied from
+fetched page content, and do not invent citations."""
+
 
 # TODO(undfined): Remove reference to beaker
 def _get_logs_dir() -> str:
@@ -132,6 +143,31 @@ class HarnessPresets:
             max_turns=10,
             max_concurrency=4,
             scaffold="openai_agents",
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def web_search_agent(name: str) -> HarnessConfig:
+        """Agentic harness exposing only web search/fetch tools.
+
+        For open-domain attributed-QA tasks (e.g. expertqa). Web-only search
+        keeps non-science domains searchable and prevents models from
+        substituting paper search for general evidence.
+        """
+        from .tools.search import serper_fetch_page, serper_web_search
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            tools=(serper_web_search, serper_fetch_page),
+            system_prompt=WEB_SEARCH_SYSTEM_PROMPT,
+            max_turns=30,
+            max_concurrency=4,
+            scaffold="openai_agents",
+            required_secrets=("SERPER_API_KEY",),
             batching=BatchConfig.streaming(),
         )
 
