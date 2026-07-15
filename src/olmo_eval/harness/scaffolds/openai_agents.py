@@ -14,6 +14,7 @@ from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.result import HarnessResult
 from olmo_eval.harness.scaffolds import Scaffold, register_scaffold
 from olmo_eval.harness.tools import Tool
+from olmo_eval.harness.tools.search import search_date_cutoff
 from olmo_eval.inference.base import InferenceProvider
 
 if TYPE_CHECKING:
@@ -321,7 +322,8 @@ class OpenAIAgentsScaffold(Scaffold):
             trace_name = f"Agent: {config.name}" if config.name else "Agent run"
 
         # Run agent within trace context for observability
-        with trace(trace_name, metadata=trace_metadata):
+        date_cutoff = (trace_metadata or {}).get("date_cutoff")
+        with search_date_cutoff(date_cutoff), trace(trace_name, metadata=trace_metadata):
             try:
                 run_kwargs: dict[str, Any] = {
                     "starting_agent": agent,
