@@ -136,6 +136,13 @@ def create_provider(
             from .providers.litellm import LiteLLMProvider
 
             return LiteLLMProvider(model_name, **kwargs)
+        case "python":
+            import importlib
+
+            class_path = kwargs.pop("class")
+            module_path, class_name = class_path.rsplit(".", 1)
+            cls = getattr(importlib.import_module(module_path), class_name)
+            return cls(model_name, **kwargs)
         case _:
             raise ValueError(f"Unknown provider kind: {provider_kind}")
 

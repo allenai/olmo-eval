@@ -116,6 +116,7 @@ class ProviderConfig:
             "max_model_len",
         ),
         "mock": (),
+        "python": (),
     }
 
     def create_provider(self) -> InferenceProvider:
