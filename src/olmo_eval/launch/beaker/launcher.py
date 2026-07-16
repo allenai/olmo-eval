@@ -954,26 +954,39 @@ class BeakerLauncher:
 
         # Install provider-specific dependencies
         if provider_packages:
-            # Rewrite github.com HTTPS URLs to embed the token so uv's git subprocess
-            # inherits credentials without relying on gh's credential helper.
-            steps.append(
-                'if [ -n "$GITHUB_TOKEN" ]; then '
-                "export GIT_CONFIG_COUNT=1; "
-                "export GIT_CONFIG_KEY_0=credential.helper; "
-                "export GIT_CONFIG_VALUE_0="
-                "'!f() { echo username=x-access-token; "
-                "echo password=$GITHUB_TOKEN; }; f'; "
-                "fi"
-            )
-            for pkg in provider_packages:
-                steps.append(
-                    build_install_command(
-                        provider_package_spec(pkg),
-                        constraints,
-                        venv_path=vllm_venv if use_isolated_vllm_venv else None,
-                        force_reinstall=True,
-                    )
+            for i, pkg in enumerate(provider_packages):
+                github_match = re.search(
+                    r"github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?(?:@[^\s]+)?$",
+                    pkg,
                 )
+                if github_match:
+                    # Clone directly so we control the git invocation and can
+                    # inject GITHUB_TOKEN into the URL without relying on
+                    # git config or credential helpers reaching uv's subprocess.
+                    gh_path = github_match.group(1)
+                    clone_dir = f"/tmp/provider-src-{i}"
+                    steps.append(
+                        f"git clone --quiet --depth=1 "
+                        f'"https://${{GITHUB_TOKEN:-}}@github.com/{gh_path}" '
+                        f"{clone_dir}"
+                    )
+                    steps.append(
+                        build_install_command(
+                            provider_package_spec(clone_dir),
+                            constraints,
+                            venv_path=vllm_venv if use_isolated_vllm_venv else None,
+                            force_reinstall=True,
+                        )
+                    )
+                else:
+                    steps.append(
+                        build_install_command(
+                            provider_package_spec(pkg),
+                            constraints,
+                            venv_path=vllm_venv if use_isolated_vllm_venv else None,
+                            force_reinstall=True,
+                        )
+                    )
 
         # Install task-specific dependencies
         if task_packages:
