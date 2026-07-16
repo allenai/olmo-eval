@@ -949,8 +949,10 @@ class BeakerLauncher:
             steps.append(
                 'if [ -n "$GITHUB_TOKEN" ]; then '
                 "export GIT_CONFIG_COUNT=1; "
-                'export GIT_CONFIG_KEY_0="url.https://${GITHUB_TOKEN}@github.com/.insteadOf"; '
-                'export GIT_CONFIG_VALUE_0="https://github.com/"; '
+                "export GIT_CONFIG_KEY_0=credential.helper; "
+                "export GIT_CONFIG_VALUE_0="
+                "'!f() { echo username=x-access-token; "
+                "echo password=$GITHUB_TOKEN; }; f'; "
                 "fi"
             )
             for pkg in provider_packages:
