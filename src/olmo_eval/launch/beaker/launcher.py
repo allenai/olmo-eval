@@ -944,6 +944,14 @@ class BeakerLauncher:
 
         # Install provider-specific dependencies
         if provider_packages:
+            # Rewrite github.com HTTPS URLs to embed the token so uv's git subprocess
+            # inherits credentials without relying on gh's credential helper.
+            steps.append(
+                'if [ -n "$GITHUB_TOKEN" ]; then '
+                "git config --global "
+                'url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; '
+                "fi"
+            )
             for pkg in provider_packages:
                 steps.append(
                     build_install_command(
