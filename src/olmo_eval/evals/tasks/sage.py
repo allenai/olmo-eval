@@ -295,6 +295,7 @@ class SageShortForm(_SageRetrieval):
                 "gold": gold,
                 "case_id": (
                     doc.get("case_id")
+                    or doc.get("query_id")
                     or doc.get("paper_id")
                     or ground_truth.get("paperId")
                     or f"sage_short_form_{index}"
@@ -388,7 +389,7 @@ class SageOpenEnded(_SageRetrieval):
             question=question,
             metadata={
                 "golds": golds,
-                "case_id": doc.get("case_id") or f"sage_open_ended_{index}",
+                "case_id": doc.get("case_id") or doc.get("query_id") or f"sage_open_ended_{index}",
                 "domain": doc.get("domain", ""),
                 "index": index,
             },

@@ -24,8 +24,7 @@ from urllib.request import Request, urlopen
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("build_sage_dataset")
 
-POOLS_REPO = "yilunzhao/sage-retrieval"  # HF repo set (OT-1)
-SAGE_REPO = "yilunzhao/sage-retrieval"  # HF repo set (OT-1)
+SAGE_REPO = "allenai/sage-retrieval"  # canonical HF dataset repo in the allenai org
 
 SAGE_RAW_ROOT = "https://raw.githubusercontent.com/HughieHu/Sage/main"
 DOMAINS = ("computer_science", "natural_science", "healthcare", "humanities")

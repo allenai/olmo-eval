@@ -113,6 +113,14 @@ def test_process_doc_builds_instance(task, short_form_doc):
     }
 
 
+def test_process_doc_uses_query_id_before_paper_id(task, short_form_doc):
+    doc = {**short_form_doc, "query_id": "short_form:cs:0", "paper_id": "X"}
+    instance = task.process_doc(doc)
+
+    assert instance is not None
+    assert instance.metadata["case_id"] == "short_form:cs:0"
+
+
 @pytest.mark.parametrize(
     "patch",
     (
@@ -268,6 +276,15 @@ def test_open_ended_process_doc_builds_weighted_golds(open_task, open_ended_doc)
     assert golds[1][0]["arxiv_id"] == "2603.12345"
     assert golds[1][0]["doi"] == "10.0000/most2"
     assert golds[1][0]["corpus_id"] == "23456"
+
+
+def test_open_ended_process_doc_uses_query_id(open_task, open_ended_doc):
+    doc = {**open_ended_doc, "query_id": "open_ended:cs:0"}
+    del doc["case_id"]
+    instance = open_task.process_doc(doc)
+
+    assert instance is not None
+    assert instance.metadata["case_id"] == "open_ended:cs:0"
 
 
 @pytest.mark.parametrize(
