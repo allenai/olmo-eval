@@ -148,6 +148,10 @@ SCIENCE_RESEARCH = make_suite(
         "expertqa",
         "litsearch",
         "litsearch_rerank",
+        # SAGE is agentic paper retrieval scored on the final answer (title matching),
+        # so it lives here rather than the judge/nojudge execution split.
+        "sage_short_form",
+        "sage_open_ended",
         get_suite("astabench"),
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
