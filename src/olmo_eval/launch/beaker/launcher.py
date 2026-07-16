@@ -963,12 +963,19 @@ class BeakerLauncher:
                     # Clone directly so we control the git invocation and can
                     # inject GITHUB_TOKEN into the URL without relying on
                     # git config or credential helpers reaching uv's subprocess.
+                    # GitHub token auth requires user:token format (token as password).
                     gh_path = github_match.group(1)
                     clone_dir = f"/tmp/provider-src-{i}"
                     steps.append(
+                        f'if [ -n "$GITHUB_TOKEN" ]; then '
                         f"git clone --quiet --depth=1 "
-                        f'"https://${{GITHUB_TOKEN:-}}@github.com/{gh_path}" '
-                        f"{clone_dir}"
+                        f'"https://x-access-token:${{GITHUB_TOKEN}}@github.com/{gh_path}" '
+                        f"{clone_dir}; "
+                        f"else "
+                        f"git clone --quiet --depth=1 "
+                        f'"https://github.com/{gh_path}" '
+                        f"{clone_dir}; "
+                        f"fi"
                     )
                     steps.append(
                         build_install_command(
