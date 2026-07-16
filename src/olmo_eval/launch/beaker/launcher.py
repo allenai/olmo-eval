@@ -965,6 +965,7 @@ class BeakerLauncher:
                     # git config or credential helpers reaching uv's subprocess.
                     # GitHub token auth requires user:token format (token as password).
                     gh_path = github_match.group(1)
+                    repo_name = gh_path.split("/")[-1]
                     clone_dir = f"/tmp/provider-src-{i}"
                     steps.append(
                         f'if [ -n "$GITHUB_TOKEN" ]; then '
@@ -979,7 +980,7 @@ class BeakerLauncher:
                     )
                     steps.append(
                         build_install_command(
-                            provider_package_spec(clone_dir),
+                            provider_package_spec(f"{repo_name} @ {clone_dir}"),
                             constraints,
                             venv_path=vllm_venv if use_isolated_vllm_venv else None,
                             force_reinstall=True,
