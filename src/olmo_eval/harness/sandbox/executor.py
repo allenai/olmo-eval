@@ -592,12 +592,22 @@ class SandboxExecutor:
                 )
                 resp = await self._execute_stream_control(poll_cmd, timeout=10.0)
                 poll_duration = time.time() - poll_start
+                stdout = resp.stdout or ""
+                if "---EXIT_CODE---" not in stdout:
+                    # A live container always reaches the echo above, even while the
+                    # background command is still running (the final cat then exits 1).
+                    # Container-runtime failures return normally with a nonzero exit
+                    # code, so use the marker to distinguish those from an incomplete
+                    # poll and feed them into the existing consecutive-failure guard.
+                    detail = (resp.stderr or "").strip()
+                    msg = f"poll control command exited {resp.exit_code} before producing marker"
+                    if detail:
+                        msg += f": {detail}"
+                    raise RuntimeError(msg)
                 consecutive_failures = 0  # Reset on success
 
                 if poll_duration > 5.0:
                     self._log(logging.WARNING, f"Poll slow ({poll_duration:.1f}s)")
-
-                stdout = resp.stdout or ""
 
                 # Check if output was truncated
                 if "---TRUNCATED---" in stdout:

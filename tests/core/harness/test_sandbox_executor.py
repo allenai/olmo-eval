@@ -70,6 +70,50 @@ class TestStreamingControlCommand(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(process.killed)
 
+    async def test_streaming_aborts_when_control_command_cannot_enter_container(self) -> None:
+        executor = self._executor()
+        executor._runtime.execute = mock.AsyncMock(
+            return_value=mock.Mock(stdout="", stderr="", exit_code=0)
+        )
+        in_progress = mock.Mock(
+            stdout="---EXIT_CODE---\n",
+            stderr="",
+            exit_code=1,
+        )
+        container_failure = mock.Mock(
+            stdout="",
+            stderr="container is not running",
+            exit_code=125,
+        )
+        control = mock.AsyncMock(side_effect=[in_progress, *([container_failure] * 5)])
+        abstract = types.ModuleType("swerex.runtime.abstract")
+        abstract.Command = mock.Mock()  # type: ignore[ty:unresolved-attribute]
+        runtime = types.ModuleType("swerex.runtime")
+        runtime.abstract = abstract  # type: ignore[ty:unresolved-attribute]
+        swerex = types.ModuleType("swerex")
+        swerex.runtime = runtime  # type: ignore[ty:unresolved-attribute]
+
+        with (
+            mock.patch.dict(
+                sys.modules,
+                {
+                    "swerex": swerex,
+                    "swerex.runtime": runtime,
+                    "swerex.runtime.abstract": abstract,
+                },
+            ),
+            mock.patch("asyncio.sleep", new=mock.AsyncMock()),
+            mock.patch.object(executor, "_execute_stream_control", new=control),
+        ):
+            result = await executor._execute_streaming("long-running", 60.0, "test")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.exit_code, -1)
+        self.assertIn("Sandbox unresponsive after 3 polls", result.output)
+        # The initial live poll exits 1 while the command is still running. It is
+        # followed by three failed polls, then best-effort kill and cleanup commands.
+        self.assertEqual(control.await_count, 6)
+
     async def test_modal_control_uses_swerex(self) -> None:
         executor = SandboxExecutor(SandboxConfig(image="test", mode=SandboxMode.MODAL))
         executor._deployment = mock.Mock()
