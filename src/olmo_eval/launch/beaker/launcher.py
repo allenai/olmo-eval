@@ -958,8 +958,9 @@ class BeakerLauncher:
             # inherits credentials without relying on gh's credential helper.
             steps.append(
                 'if [ -n "$GITHUB_TOKEN" ]; then '
-                "git config --global "
-                'url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; '
+                "export GIT_CONFIG_COUNT=1; "
+                'export GIT_CONFIG_KEY_0="url.https://${GITHUB_TOKEN}@github.com/.insteadOf"; '
+                'export GIT_CONFIG_VALUE_0="https://github.com/"; '
                 "fi"
             )
             for pkg in provider_packages:
