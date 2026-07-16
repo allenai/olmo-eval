@@ -1056,6 +1056,12 @@ class BeakerLauncher:
         if not any(name == "BEAKER_TOKEN" for name, _ in env_secrets):
             env_secrets.append(("BEAKER_TOKEN", f"{self.beaker.user_name}_BEAKER_TOKEN"))
 
+        # Inject GITHUB_TOKEN so provider package installs can clone private repos.
+        # Gantry only mounts this automatically for private olmo-eval repos; since
+        # olmo-eval is public, we must add it explicitly.
+        if not any(name == "GITHUB_TOKEN" for name, _ in env_secrets):
+            env_secrets.append(("GITHUB_TOKEN", self._default_github_token_secret()))
+
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:
             from olmo_eval.launch.beaker.aws import ensure_aws_secrets
