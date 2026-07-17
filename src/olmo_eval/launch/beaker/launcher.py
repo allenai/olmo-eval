@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC
@@ -789,6 +790,11 @@ class BeakerLauncher:
         """Return the user-scoped GitHub token secret name for Gantry clones."""
         return f"{self.beaker.user_name}_GITHUB_TOKEN"
 
+    def _github_token_secret(self) -> str | None:
+        if os.environ.get("OLMO_EVAL_PUBLIC_GITHUB") == "1":
+            return None
+        return self._default_github_token_secret()
+
     def _build_install_cmd(
         self,
         extras: list[str],
@@ -1057,11 +1063,10 @@ class BeakerLauncher:
         if not any(name == "BEAKER_TOKEN" for name, _ in env_secrets):
             env_secrets.append(("BEAKER_TOKEN", f"{self.beaker.user_name}_BEAKER_TOKEN"))
 
-        # Inject GITHUB_TOKEN so provider package installs can clone private repos.
-        # Gantry only mounts this automatically for private olmo-eval repos; since
-        # olmo-eval is public, we must add it explicitly.
-        if not any(name == "GITHUB_TOKEN" for name, _ in env_secrets):
-            env_secrets.append(("GITHUB_TOKEN", self._default_github_token_secret()))
+        github_token_secret = self._github_token_secret()
+        if github_token_secret:
+            if not any(name == "GITHUB_TOKEN" for name, _ in env_secrets):
+                env_secrets.append(("GITHUB_TOKEN", github_token_secret))
 
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:
@@ -1114,7 +1119,7 @@ class BeakerLauncher:
             budget=config.budget,
             beaker_image=config.beaker_image,
             weka=weka_mounts if weka_mounts else None,
-            gh_token_secret=self._default_github_token_secret(),
+            gh_token_secret=github_token_secret,
             env_vars=env_vars if env_vars else None,
             env_secrets=env_secrets if env_secrets else None,
             google_credentials_secret=google_credentials_secret,

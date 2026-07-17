@@ -234,6 +234,13 @@ class TestBeakerLauncherImport:
         launcher = BeakerLauncher()
         assert launcher._beaker is None
 
+    def test_public_github_skips_token(self, monkeypatch):
+        from olmo_eval.launch import BeakerLauncher
+
+        monkeypatch.setenv("OLMO_EVAL_PUBLIC_GITHUB", "1")
+
+        assert BeakerLauncher()._github_token_secret() is None
+
     def test_config_imports_work(self):
         """Test that config classes can be imported."""
         from olmo_eval.launch import (
