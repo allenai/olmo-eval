@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shlex
 from dataclasses import dataclass, field
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
@@ -946,7 +947,7 @@ class BeakerLauncher:
         if provider_packages:
             for i, pkg in enumerate(provider_packages):
                 github_match = re.search(
-                    r"github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?(?:@[^\s]+)?$",
+                    r"github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?(?:@([^\s]+))?$",
                     pkg,
                 )
                 if github_match:
@@ -955,6 +956,7 @@ class BeakerLauncher:
                     # git config or credential helpers reaching uv's subprocess.
                     # GitHub token auth requires user:token format (token as password).
                     gh_path = github_match.group(1)
+                    revision = github_match.group(2)
                     repo_name = gh_path.split("/")[-1]
                     clone_dir = f"/tmp/provider-src-{i}"
                     steps.append(
@@ -968,6 +970,12 @@ class BeakerLauncher:
                         f"{clone_dir}; "
                         f"fi"
                     )
+                    if revision:
+                        steps.append(
+                            f"git -C {clone_dir} fetch --quiet --depth=1 origin "
+                            f"{shlex.quote(revision)} && "
+                            f"git -C {clone_dir} checkout --quiet --detach FETCH_HEAD"
+                        )
                     steps.append(
                         build_install_command(
                             provider_package_spec(f"{repo_name} @ {clone_dir}"),
