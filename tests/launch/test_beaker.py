@@ -583,6 +583,22 @@ class TestBuildCommandWithTaskPackages:
         ) in install_cmd
         assert "grep -E '^(torch|nvidia-)' > /tmp/cuda-constraints.txt" not in install_cmd
 
+    def test_provider_package_checks_out_git_revision(self):
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        revision = "8b86284be6d18bcb71c7e64032d91fe73a714229"
+        install_cmd = launcher._build_install_cmd(
+            extras=[],
+            env_exports=None,
+            provider_packages=[f"git+https://github.com/allenai/lit-agents.git@{revision}"],
+        )
+
+        assert (
+            f"git -C /tmp/provider-src-0 fetch --quiet --depth=1 origin {revision}" in install_cmd
+        )
+        assert "git -C /tmp/provider-src-0 checkout --quiet --detach FETCH_HEAD" in install_cmd
+
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""
         from olmo_eval.launch import BeakerLauncher
