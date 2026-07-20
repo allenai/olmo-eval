@@ -31,7 +31,7 @@ REQUIRED_COLUMNS = ["title", "url", "snippet", "query", "context", "date"]
 # Hard wall-clock budget for a single S2 search across retries. The full validation
 # encountered frequent 429 responses, so each search needs bounded backoff rather
 # than retrying indefinitely.
-S2_SEARCH_BUDGET_S = 45.0
+S2_SEARCH_BUDGET_SEC = 45.0
 
 
 def _authors_str(paper: dict[str, Any]) -> str:
@@ -100,11 +100,11 @@ def s2_search_rows(
     end_date: Any = None,
     api_key: str | None = None,
     logger: Any = None,
-    budget_s: float = S2_SEARCH_BUDGET_S,
+    budget_sec: float = S2_SEARCH_BUDGET_SEC,
 ) -> list[dict[str, Any]]:
     """Query Semantic Scholar and return standardized row dicts (performs I/O).
 
-    Bounded by ``budget_s`` total across retries. On exhaustion it returns no
+    Bounded by ``budget_sec`` total across retries. On exhaustion it returns no
     results rather than delaying the query indefinitely.
     """
     import requests
@@ -120,12 +120,12 @@ def s2_search_rows(
 
     start = time.time()
     attempt = 0
-    while time.time() - start < budget_s:
+    while time.time() - start < budget_sec:
         attempt += 1
         try:
             resp = requests.get(S2_SEARCH_URL, params=params, headers=headers, timeout=(5, 15))
             if resp.status_code == 429:
-                remaining = budget_s - (time.time() - start)
+                remaining = budget_sec - (time.time() - start)
                 if logger:
                     logger.warning(
                         f"S2 rate-limited (429) for {query!r} (attempt {attempt}); "
@@ -145,7 +145,7 @@ def s2_search_rows(
             time.sleep(1.0)
     if logger:
         logger.warning(
-            f"S2 search for {query!r} exhausted {budget_s:.0f}s budget; returning no results"
+            f"S2 search for {query!r} exhausted {budget_sec:.0f}s budget; returning no results"
         )
     return []
 

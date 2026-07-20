@@ -2,6 +2,7 @@ import asyncio
 import json
 import stat
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -58,6 +59,24 @@ def test_all_metrics_argument_expands_to_primary_metrics() -> None:
     assert DeepScholarArgs.from_dict({"evals": "all"}).evals == list(PRIMARY_METRICS)
 
 
+def test_locality_is_decided_from_actual_base_url() -> None:
+    # execute() passes `base_url or ""` so a provider without a base_url is treated
+    # as an external API model (no forced-local health check), not mislabeled local
+    # by the localhost fallback used for the provider URL.
+    evaluator = DeepScholarExternalEval()
+
+    external = SimpleNamespace(base_url=None)
+    assert evaluator._is_local_provider(external, external.base_url or "") is False
+
+    local = SimpleNamespace(base_url="http://localhost:8000/v1")
+    assert evaluator._is_local_provider(local, local.base_url or "") is True
+
+    # A provider managing its own server is still local via the _server check even
+    # when it has not yet assigned a base_url.
+    managed = SimpleNamespace(base_url=None, _server=object())
+    assert evaluator._is_local_provider(managed, managed.base_url or "") is True
+
+
 def test_s2_mapping_prefers_scorable_arxiv_metadata() -> None:
     row = map_s2_paper(
         {
@@ -95,7 +114,7 @@ def test_s2_search_sends_key_and_recovers_from_rate_limit() -> None:
         mock.patch("requests.get", side_effect=[rate_limited, success]) as get,
         mock.patch("time.sleep"),
     ):
-        rows = s2_search_rows("test query", 10, api_key="secret", budget_s=5)
+        rows = s2_search_rows("test query", 10, api_key="secret", budget_sec=5)
 
     assert len(rows) == 1
     assert get.call_count == 2

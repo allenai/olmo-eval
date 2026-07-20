@@ -258,9 +258,16 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         ds_args = DeepScholarArgs.from_dict(args)
         all_output: list[str] = []
 
-        provider_url = getattr(provider, "base_url", None) or "http://localhost:8000/v1"
+        base_url = getattr(provider, "base_url", None)
         model_name = provider.model_name
-        is_local = self._is_local_provider(provider, provider_url)
+        # Decide locality from the provider's actual base_url, not the localhost
+        # fallback below: a provider without base_url is an external API model that
+        # must keep upstream behavior, and the fallback would otherwise mislabel it
+        # as local and fail the sandbox health check before generation. Pass "" (not
+        # the fallback) so a provider managing its own server is still detected via
+        # _is_local_provider's _server check even without a base_url.
+        is_local = self._is_local_provider(provider, base_url or "")
+        provider_url = base_url or "http://localhost:8000/v1"
 
         # Fail early on a missing search key rather than deep inside generation.
         key_for_backend = {"s2": "S2_API_KEY", "tavily": "TAVILY_API_KEY"}.get(
