@@ -44,6 +44,9 @@ Repository = "https://github.com/allenai/olmo-eval"
 Issues = "https://github.com/allenai/olmo-eval/issues"
 
 [project.optional-dependencies]
+crawl4ai = [
+    "crawl4ai>=0.8",
+]
 hf = [
     "transformers>=5.4.0",
 ]
@@ -131,6 +134,7 @@ conflicts = [
 
 [tool.setuptools.package-data]
 "olmo_eval.analysis.pairwise_viewer" = ["static/*.css", "static/*.js", "templates/*.html"]
+"olmo_eval.evals.tasks" = ["*.jsonl"]
 
 [dependency-groups]
 dev = [
@@ -239,6 +243,7 @@ allowed-unresolved-imports = [
     "cached_path.**",
     "instructions_registry.**",
     "instructions.**",
+    "crawl4ai.**",
 ]
 
 [tool.gantry]

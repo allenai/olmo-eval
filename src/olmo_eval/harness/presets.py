@@ -22,6 +22,17 @@ from .constants import (
     DR_TULU_SYSTEM_PROMPT,
 )
 
+WEB_SEARCH_SYSTEM_PROMPT = """\
+You are a web-search assistant for open-domain attributed question answering.
+
+Only these tool names exist; use them verbatim:
+- serper_google_webpage_search
+- serper_fetch_webpage_content
+
+Search first with serper_google_webpage_search, then fetch promising pages with
+serper_fetch_webpage_content before answering. Quote only text copied from
+fetched page content, and do not invent citations."""
+
 
 # TODO(undfined): Remove reference to beaker
 def _get_logs_dir() -> str:
@@ -112,6 +123,34 @@ class HarnessPresets:
         )
 
     @lazy
+    def dr_tulu_crawl4ai(name: str) -> HarnessConfig:
+        """Dr. Tulu-style S2 plus web-search harness that browses with in-process
+        crawl4ai.
+
+        Install with ``pip install 'olmo-eval[crawl4ai]'``, then run
+        ``crawl4ai-setup`` once to provision the headless browser. ``S2_API_KEY``
+        is not required but is strongly recommended for throughput because
+        keyless S2 is rate-limited to about 1 request/second process-wide.
+        """
+        from .tools.search import crawl4ai_browse, semantic_scholar_search, serper_web_search
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            tools=(semantic_scholar_search, serper_web_search, crawl4ai_browse),
+            system_prompt=DR_TULU_SYSTEM_PROMPT,
+            # Agentic paper search needs more turns than the dr_tulu default of 10.
+            max_turns=20,
+            max_concurrency=4,
+            scaffold="openai_agents",
+            required_secrets=("SERPER_API_KEY",),
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
     def paper_search_agent(name: str) -> HarnessConfig:
         """Agentic harness exposing only Semantic Scholar paper search.
 
@@ -132,6 +171,68 @@ class HarnessPresets:
             max_turns=10,
             max_concurrency=4,
             scaffold="openai_agents",
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def web_search_agent(name: str) -> HarnessConfig:
+        """Agentic harness exposing only web search/fetch tools.
+
+        For open-domain attributed-QA tasks (e.g. expertqa). Web-only search
+        keeps non-science domains searchable and prevents models from
+        substituting paper search for general evidence.
+        """
+        from .tools.search import serper_fetch_page, serper_web_search
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            tools=(serper_web_search, serper_fetch_page),
+            system_prompt=WEB_SEARCH_SYSTEM_PROMPT,
+            max_turns=30,
+            max_concurrency=4,
+            scaffold="openai_agents",
+            required_secrets=("SERPER_API_KEY",),
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def web_search_agent_crawl4ai(name: str) -> HarnessConfig:
+        """Web search via Serper + in-process crawl4ai browsing (no hosted scrape service).
+
+        Install with ``pip install 'olmo-eval[crawl4ai]'``, then run
+        ``crawl4ai-setup`` once to provision the headless browser.
+        """
+        from .tools.search import crawl4ai_browse, serper_web_search
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            tools=(serper_web_search, crawl4ai_browse),
+            system_prompt="""\
+You are a helpful assistant that can search and browse webpages to answer questions accurately.
+
+You have access to these tools:
+- serper_google_webpage_search: Search the web for relevant webpages.
+- browse_webpage: Fetch and extract a webpage's content as clean markdown.
+
+When answering questions:
+1. Use serper_google_webpage_search to find relevant sources when needed.
+2. Use browse_webpage to inspect promising URLs.
+3. Provide concise, accurate answers based on the information you find.
+4. If you cannot find reliable information, say so rather than guessing.
+
+Always strive to give factually correct answers.""",
+            max_turns=30,
+            max_concurrency=4,
+            scaffold="openai_agents",
+            required_secrets=("SERPER_API_KEY",),
             batching=BatchConfig.streaming(),
         )
 
