@@ -84,6 +84,21 @@ class BeakerStatusReporterTest(unittest.TestCase):
             workload, description="hello git_commit: unknown git_branch: unknown"
         )
 
+    def test_git_suffix_prefers_gantry_checkout_ref(self) -> None:
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "GIT_REF": "current-checkout",
+                "GIT_COMMIT": "stale-image-commit",
+                "GIT_BRANCH": "main",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                beaker_status._git_suffix(),
+                "git_commit: current-checkout git_branch: main",
+            )
+
     def test_force_bypasses_throttle(self) -> None:
         fake_client = mock.MagicMock()
         with (

@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 def _git_suffix() -> str:
-    commit = os.environ.get("GIT_COMMIT") or os.environ.get("GIT_REF") or "unknown"
+    # Gantry sets GIT_REF to the requested checkout. GIT_COMMIT can be inherited
+    # from the base image and therefore describe unrelated, stale source.
+    commit = os.environ.get("GIT_REF") or os.environ.get("GIT_COMMIT") or "unknown"
     branch = os.environ.get("GIT_BRANCH") or "unknown"
     return f"git_commit: {commit} git_branch: {branch}"
 
