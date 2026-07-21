@@ -8,16 +8,16 @@ the upstream evaluator.
 
 from __future__ import annotations
 
-import lotus  # noqa: F401  # registers the pandas pairwise_judge accessor
+import lotus  # type: ignore[ty:unresolved-import]  # noqa: F401
 import pandas as pd
 
 try:
-    from evaluator import EvaluationFunction, Evaluator
-    from parsers import Parser
+    from evaluator import EvaluationFunction, Evaluator  # type: ignore[ty:unresolved-import]
+    from parsers import Parser  # type: ignore[ty:unresolved-import]
 except ImportError:
-    from ..parsers import Parser
-    from .enum import EvaluationFunction
-    from .evaluator import Evaluator
+    from ..parsers import Parser  # type: ignore[ty:unresolved-import]
+    from .enum import EvaluationFunction  # type: ignore[ty:unresolved-import]
+    from .evaluator import Evaluator  # type: ignore[ty:unresolved-import]
 
 
 ORGANIZATION_JUDGE_INSTRUCTION = """
