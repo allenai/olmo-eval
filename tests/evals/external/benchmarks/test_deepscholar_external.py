@@ -14,6 +14,7 @@ import pytest
 
 from olmo_eval.common.execution.environment import ExecutionResult
 from olmo_eval.evals.external.base import SandboxedExternalEval
+from olmo_eval.evals.external.benchmarks.deepscholar import citation_lookup_patch
 from olmo_eval.evals.external.benchmarks.deepscholar.args import (
     PRIMARY_METRICS,
     DeepScholarArgs,
@@ -59,6 +60,7 @@ def test_setup_pins_lotus_revision() -> None:
     evaluator = DeepScholarExternalEval()
 
     assert any(LOTUS_REF in command for command in evaluator.setup_command)
+    assert evaluator.required_secrets == ("OPENAI_API_KEY", "OPENALEX_API_KEY")
 
 
 def test_organization_patch_is_written_to_upstream_evaluator() -> None:
@@ -73,6 +75,20 @@ def test_organization_patch_is_written_to_upstream_evaluator() -> None:
     command = awaited_call.args[0]
     assert "base64 -d" in command
     assert command.endswith("> /workspace/deepscholar-bench/eval/evaluator/organization.py")
+
+
+def test_citation_patch_is_applied_to_upstream_utils() -> None:
+    evaluator = DeepScholarExternalEval()
+    executor = mock.Mock()
+    executor.execute_command = mock.AsyncMock(return_value=ExecutionResult(success=True))
+
+    asyncio.run(evaluator._patch_citation_lookup(executor))
+
+    awaited_call = executor.execute_command.await_args
+    assert awaited_call is not None
+    command = awaited_call.args[0]
+    assert "base64 -d | python3 -" in command
+    assert command.endswith("/workspace/deepscholar-bench/eval/utils.py")
 
 
 def test_organization_patch_scores_normalized_lotus_decisions(
@@ -94,13 +110,15 @@ def test_organization_patch_scores_normalized_lotus_decisions(
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
 
-    captured_kwargs: dict[str, object] = {}
+    captured_kwargs: list[dict[str, object]] = []
 
     def pairwise_judge(frame: pd.DataFrame, **kwargs: object) -> pd.DataFrame:
-        captured_kwargs.update(kwargs)
+        captured_kwargs.append(kwargs)
         result = frame.copy()
-        result["_judge_0"] = ["A", "B", " A ", "invalid"]
-        result["_judge_1"] = ["A", "B", "B", None]
+        if kwargs["col1"] == "related_work_a":
+            result["raw_output_judge_forward_0"] = ["A", "B", " A ", "B"]
+        else:
+            result["raw_output_judge_reverse_0"] = ["B", "A", "A", "B"]
         return result
 
     class FakeParser:
@@ -110,6 +128,7 @@ def test_organization_patch_scores_normalized_lotus_decisions(
         def get_folder_info(self, include_related_works_section: bool) -> dict[str, str]:
             assert include_related_works_section
             return {
+                "folder_path": f"/generation/{self.index}",
                 "paper_title": f"paper {self.index}",
                 "paper_abstract": "abstract",
                 "generated_related_works_section": "generated",
@@ -130,15 +149,141 @@ def test_organization_patch_scores_normalized_lotus_decisions(
     result = module.OrganizationEvaluator().calculate([FakeParser(i) for i in range(4)])
 
     assert result["organization_v1"].tolist() == [1, 0, 1, 0]
-    assert result["organization_v2"].tolist() == [1, 0, 0, 0]
-    assert result["organization"].tolist() == [1.0, 0.0, 0.5, 0.0]
-    assert "_judge_0" not in result and "_judge_1" not in result
-    assert captured_kwargs["n_trials"] == 2
-    assert captured_kwargs["permute_cols"] is True
-    assert "response_format" not in captured_kwargs
-    instruction = str(captured_kwargs["judge_instruction"])
-    assert "Return exactly one token" in instruction
-    assert "Do not return JSON" in instruction
+    assert result["organization_v2"].tolist() == [1, 0, 0, 1]
+    assert result["organization"].tolist() == [1.0, 0.0, 0.5, 0.5]
+    assert result["organization_raw_v1"].tolist() == ["A", "B", " A ", "B"]
+    assert result["organization_raw_v2"].tolist() == ["B", "A", "A", "B"]
+    assert len(captured_kwargs) == 2
+    assert [kwargs["col1"] for kwargs in captured_kwargs] == [
+        "related_work_a",
+        "related_work_b",
+    ]
+    assert all(kwargs["n_trials"] == 1 for kwargs in captured_kwargs)
+    assert all(kwargs["permute_cols"] is False for kwargs in captured_kwargs)
+    assert all(kwargs["return_raw_outputs"] is True for kwargs in captured_kwargs)
+    assert all("response_format" not in kwargs for kwargs in captured_kwargs)
+    instruction = str(captured_kwargs[0]["judge_instruction"])
+    assert "Return exactly the choice token" in instruction
+    assert "not return json" in instruction.lower()
+
+
+def test_organization_patch_rejects_non_exact_judge_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_path = (
+        Path(inspect.getfile(DeepScholarExternalEval)).parent / "organization_eval_patch.py"
+    )
+    fake_lotus = types.ModuleType("lotus")
+    fake_evaluator = types.ModuleType("evaluator")
+    fake_evaluator.__dict__.update(
+        Evaluator=object,
+        EvaluationFunction=SimpleNamespace(ORGANIZATION=SimpleNamespace(value="organization")),
+    )
+    fake_parsers = types.ModuleType("parsers")
+    fake_parsers.__dict__["Parser"] = object
+    module_name = "test_deepscholar_organization_eval_patch_invalid"
+    spec = importlib.util.spec_from_file_location(module_name, patch_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    def pairwise_judge(frame: pd.DataFrame, **kwargs: object) -> pd.DataFrame:
+        result = frame.copy()
+        suffix = str(kwargs["suffix"])
+        result[f"raw_output{suffix}_0"] = ["A because it flows better"]
+        return result
+
+    parser = mock.Mock()
+    parser.get_folder_info.return_value = {
+        "folder_path": "/generation/0",
+        "paper_title": "paper",
+        "paper_abstract": "abstract",
+        "generated_related_works_section": "generated",
+        "related_works_section": "reference",
+    }
+
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "lotus": fake_lotus,
+            "evaluator": fake_evaluator,
+            "parsers": fake_parsers,
+        },
+    ):
+        monkeypatch.setattr(pd.DataFrame, "pairwise_judge", pairwise_judge, raising=False)
+        spec.loader.exec_module(module)
+
+    with pytest.raises(ValueError, match="non-A/B output for 1/1 rows"):
+        module.OrganizationEvaluator().calculate([parser])
+
+
+def test_citation_patch_authenticates_retries_and_caches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "utils.py"
+    source_path.write_text(
+        "import os\nimport requests\nimport time\n\n"
+        "def jaccard_similarity(left, right):\n"
+        "    left_tokens = set(left.lower().split())\n"
+        "    right_tokens = set(right.lower().split())\n"
+        "    union = left_tokens | right_tokens\n"
+        "    return len(left_tokens & right_tokens) / len(union) if union else 0\n\n\n"
+        + citation_lookup_patch._FUNCTION_OLD
+    )
+    monkeypatch.setattr(sys, "argv", ["citation_lookup_patch.py", str(source_path)])
+    citation_lookup_patch.main()
+
+    namespace: dict[str, object] = {}
+    exec(compile(source_path.read_text(), str(source_path), "exec"), namespace)
+
+    rate_limited = mock.Mock(status_code=429, headers={"Retry-After": "0"})
+    success = mock.Mock(status_code=200, headers={})
+    success.json.return_value = {
+        "results": [{"display_name": "A useful paper", "cited_by_count": 42}]
+    }
+    fake_get = mock.Mock(side_effect=[rate_limited, success])
+    fake_time = SimpleNamespace(
+        monotonic=mock.Mock(side_effect=[1.0, 1.1, 1.2, 1.3]), sleep=mock.Mock()
+    )
+    namespace["requests"] = SimpleNamespace(
+        get=fake_get,
+        RequestException=Exception,
+    )
+    namespace["time"] = fake_time
+    monkeypatch.setenv("OPENALEX_API_KEY", "secret")
+    monkeypatch.setenv("OPENALEX_EMAIL", "researcher@example.org")
+
+    lookup = namespace["get_citation_count_from_title"]
+    assert callable(lookup)
+    assert lookup("A useful paper") == 42
+    assert lookup("A useful paper") == 42
+    assert fake_get.call_count == 2
+    assert fake_get.call_args.args == ("https://api.openalex.org/works",)
+    assert fake_get.call_args.kwargs["params"] == {
+        "search": "A useful paper",
+        "api_key": "secret",
+        "per_page": 1,
+        "select": "display_name,cited_by_count",
+        "mailto": "researcher@example.org",
+    }
+
+
+def test_citation_patch_requires_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_path = tmp_path / "utils.py"
+    source_path.write_text(
+        "import os\nimport requests\nimport time\n\n"
+        "def jaccard_similarity(left, right):\n"
+        "    return 1.0\n\n\n" + citation_lookup_patch._FUNCTION_OLD
+    )
+    monkeypatch.setattr(sys, "argv", ["citation_lookup_patch.py", str(source_path)])
+    citation_lookup_patch.main()
+    namespace: dict[str, object] = {}
+    exec(compile(source_path.read_text(), str(source_path), "exec"), namespace)
+    monkeypatch.delenv("OPENALEX_API_KEY", raising=False)
+
+    lookup = namespace["get_citation_count_from_title"]
+    assert callable(lookup)
+    with pytest.raises(RuntimeError, match="OPENALEX_API_KEY is required"):
+        lookup("A useful paper")
 
 
 def test_all_metrics_argument_expands_to_primary_metrics() -> None:
@@ -261,6 +406,35 @@ def test_metric_parsers_skip_invalid_values() -> None:
 
     assert parse_per_query_csv(text, "cite_p") == {"1": 0.25}
     assert parse_aggregate_csv("baseline_name,cite_p\ndeepscholar_base,nan\n", "cite_p") is None
+
+
+def test_missing_requested_metric_fails_the_eval() -> None:
+    evaluator = DeepScholarExternalEval()
+    aggregate_files = {
+        "cite_p/aggregated_results.csv": "baseline_name,cite_p\ndeepscholar_base,0.5\n"
+    }
+    query_files = {
+        "cite_p/deepscholar_base.csv": ("folder_path,cite_p\n/workspace/generation/0,0.5\n")
+    }
+
+    with mock.patch.object(
+        evaluator,
+        "_read_dir",
+        new=mock.AsyncMock(side_effect=[aggregate_files, query_files]),
+    ):
+        result = asyncio.run(
+            evaluator._extract_results(
+                mock.Mock(),
+                "raw output",
+                0,
+                n_success=1,
+                n_total=1,
+                requested_metrics=("cite_p", "organization"),
+            )
+        )
+
+    assert result.success is False
+    assert result.error == "Missing requested eval metrics: organization (eval phase exited 0)"
 
 
 @pytest.mark.parametrize("metric", PRIMARY_METRICS)

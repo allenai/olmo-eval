@@ -169,10 +169,10 @@ class DeepScholarExternalEval(SandboxedExternalEval):
 
     @property
     def required_secrets(self) -> tuple[str, ...]:
-        # Only OPENAI_API_KEY (the gpt-4o judge) is always required. Web search
-        # defaults to the keyless ARXIV corpus; TAVILY_API_KEY is forwarded only
-        # if set (see _build_env_vars), for users who opt into the TAVILY corpus.
-        return ("OPENAI_API_KEY",)
+        # OPENAI_API_KEY drives the gpt-4o judge. OPENALEX_API_KEY is required so
+        # document_importance cannot silently collapse toward zero on anonymous
+        # rate limits. Web-search keys remain optional for non-default corpora.
+        return ("OPENAI_API_KEY", "OPENALEX_API_KEY")
 
     def _build_env_vars(self, secrets: tuple[str, ...] | None = None) -> dict[str, str]:
         env = super()._build_env_vars(secrets)
@@ -762,8 +762,17 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 raw_output=raw_output,
             )
 
-        success = exit_code == 0 and bool(all_metrics)
-        error = None if success else f"Eval phase exited {exit_code} (metrics may be partial)"
+        missing_metrics = sorted(set(requested_metrics) - set(parsed_metric_names))
+        success = exit_code == 0 and bool(all_metrics) and not missing_metrics
+        if success:
+            error = None
+        elif missing_metrics:
+            error = (
+                "Missing requested eval metrics: "
+                f"{', '.join(missing_metrics)} (eval phase exited {exit_code})"
+            )
+        else:
+            error = f"Eval phase exited {exit_code} (metrics may be partial)"
         return ExternalEvalResult(
             name=self.name,
             success=success,

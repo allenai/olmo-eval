@@ -22,7 +22,7 @@ except ImportError:
 
 ORGANIZATION_JUDGE_INSTRUCTION = """
 You will receive the title and abstract of a research paper together with two
-candidate related-work sections, A and B, written for that paper.
+candidate related-work sections written for that paper.
 
 Decide which section exhibits better organization and coherence. Ignore the
 text's Markdown or LaTeX formatting and assess organization only:
@@ -36,24 +36,32 @@ text's Markdown or LaTeX formatting and assess organization only:
 - Signposting: helpful headings, topic sentences, or discourse markers.
 
 Do not judge breadth, citation accuracy, or analytic depth. There are no ties.
-Return exactly one token: A if section A is better organized, or B if section B
-is better organized. Do not return JSON or an explanation.
+Return exactly the choice token requested by the surrounding instruction. Do
+not return JSON or an explanation.
 
 ### Paper under assessment
 {paper_title}
 {paper_abstract}
-
-### Candidate related-work section A
-{related_work_a}
-
-### Candidate related-work section B
-{related_work_b}
 """
 
 
-def _generated_section_wins(decision: object) -> int:
-    """Convert a normalized LOTUS decision to a generated-section win."""
-    return int(isinstance(decision, str) and decision.strip().upper() == "A")
+def _strict_decision(raw_output: object) -> str | None:
+    """Parse only a bare A/B judge response, never LOTUS's fallback decision."""
+    if not isinstance(raw_output, str):
+        return None
+    decision = raw_output.strip().upper()
+    return decision if decision in {"A", "B"} else None
+
+
+def _raw_output_column(results: pd.DataFrame, suffix: str) -> pd.Series:
+    """Return the raw-output column emitted by a one-trial LOTUS judge call."""
+    column = f"raw_output{suffix}_0"
+    if column not in results:
+        raise RuntimeError(
+            f"organization judge did not return expected raw output column {column!r}; "
+            f"got {list(results.columns)!r}"
+        )
+    return results[column]
 
 
 class OrganizationEvaluator(Evaluator):
@@ -62,7 +70,8 @@ class OrganizationEvaluator(Evaluator):
     def calculate(self, parsers: list[Parser]) -> pd.DataFrame:
         system_prompt = (
             "You are an intelligent, rigorous, and fair evaluator of scholarly "
-            "writing quality and relevance."
+            "writing. Follow the requested output format exactly and return only "
+            "the single choice token."
         )
         infos = [parser.get_folder_info(include_related_works_section=True) for parser in parsers]
         df = pd.DataFrame(infos)
@@ -74,21 +83,57 @@ class OrganizationEvaluator(Evaluator):
             inplace=True,
         )
 
-        # At the pinned LOTUS revision, pairwise_judge returns plain A/B strings
-        # and normalizes the reversed trial back to the original column order.
-        # Therefore A means the generated section won in both output columns.
-        results: pd.DataFrame = df.pairwise_judge(
+        # Run the two orders separately. Pinned LOTUS converts malformed outputs
+        # to a boolean default before exposing its A/B decision column, which can
+        # silently turn parse failures into generated-section wins. Its raw-output
+        # columns preserve the judge text, so parse those strictly instead.
+        forward: pd.DataFrame = df.pairwise_judge(
             col1="related_work_a",
             col2="related_work_b",
             judge_instruction=ORGANIZATION_JUDGE_INSTRUCTION,
             system_prompt=system_prompt,
-            n_trials=2,
-            permute_cols=True,
+            n_trials=1,
+            permute_cols=False,
+            return_raw_outputs=True,
+            suffix="_judge_forward",
         )
-        results["organization_v1"] = results["_judge_0"].map(_generated_section_wins)
-        results["organization_v2"] = results["_judge_1"].map(_generated_section_wins)
+        reverse: pd.DataFrame = df.pairwise_judge(
+            col1="related_work_b",
+            col2="related_work_a",
+            judge_instruction=ORGANIZATION_JUDGE_INSTRUCTION,
+            system_prompt=system_prompt,
+            n_trials=1,
+            permute_cols=False,
+            return_raw_outputs=True,
+            suffix="_judge_reverse",
+        )
+
+        raw_forward = _raw_output_column(forward, "_judge_forward")
+        raw_reverse = _raw_output_column(reverse, "_judge_reverse")
+        decision_forward = raw_forward.map(_strict_decision)
+        decision_reverse = raw_reverse.map(_strict_decision)
+        invalid = decision_forward.isna() | decision_reverse.isna()
+        if invalid.any():
+            examples = [
+                {
+                    "folder_path": df.loc[index, "folder_path"],
+                    "forward": raw_forward.loc[index],
+                    "reverse": raw_reverse.loc[index],
+                }
+                for index in df.index[invalid][:5]
+            ]
+            raise ValueError(
+                "organization judge returned non-A/B output for "
+                f"{int(invalid.sum())}/{len(df)} rows; examples={examples!r}"
+            )
+
+        results = df.copy()
+        results["organization_raw_v1"] = raw_forward
+        results["organization_raw_v2"] = raw_reverse
+        # Forward A selects generated. Reverse B selects generated.
+        results["organization_v1"] = (decision_forward == "A").astype(int)
+        results["organization_v2"] = (decision_reverse == "B").astype(int)
         results[self.evaluation_function.value] = (
             results["organization_v1"] + results["organization_v2"]
         ) / 2
-        results.drop(columns=["_judge_0", "_judge_1"], inplace=True)
         return results
