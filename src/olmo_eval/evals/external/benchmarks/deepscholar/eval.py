@@ -53,6 +53,14 @@ LOTUS_REF = "136ae4f4a344a2f75d89f811e516dfcb0de30e46"
 # aggregate many reference abstracts. Override with -a stage_max_tokens.
 DEFAULT_STAGE_MAX_TOKENS = 4096
 
+# Upstream eval/evaluator/coverage_relevance_rate.py reports the mean graded
+# relevance (score in {0, 1, 2}) over deduplicated retrieved sources, omitting the
+# 1/(2|S|) normalization the paper defines (arXiv:2508.20033: RR = 1/(2|S|) * sum
+# Rel), so its values live on a 0-2 scale and can exceed 1.0. Halve them so the
+# reported metric and the geomeans match the paper's 0-1 scale. (The upstream
+# leaderboard instead clips to 1.0; we follow the paper for geomean fidelity.)
+_HALF_SCALE_METRICS = ("coverage_relevance_rate",)
+
 # Mirrors configs/deepscholar_base.yaml; the `lm` block is filled in per run.
 _BASE_CONFIG: dict[str, Any] = {
     "queries_file": "dataset/queries.csv",
@@ -131,6 +139,10 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         return f"{self._repo}/eval/evaluator/organization.py"
 
     @property
+    def _citation_utils_path(self) -> str:
+        return f"{self._repo}/eval/utils.py"
+
+    @property
     def setup_command(self) -> tuple[str, ...]:
         repo_url = "https://github.com/guestrin-lab/deepscholar-bench.git"
         # The repo is ~1.3GB (dataset CSVs + baseline outputs), so a full clone is
@@ -166,7 +178,15 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         env = super()._build_env_vars(secrets)
         # Optional: forward web-search keys when present so a non-default corpus
         # (e.g. -a web_corpuses=TAVILY) works without making the key mandatory.
-        for optional in ("TAVILY_API_KEY", "S2_API_KEY", "SERPAPI_API_KEY"):
+        # OPENALEX_API_KEY / OPENALEX_EMAIL lift the document_importance citation
+        # lookup out of OpenAlex's throttled anonymous tier (see the citation patch).
+        for optional in (
+            "TAVILY_API_KEY",
+            "S2_API_KEY",
+            "SERPAPI_API_KEY",
+            "OPENALEX_API_KEY",
+            "OPENALEX_EMAIL",
+        ):
             value = os.environ.get(optional)
             if value:
                 env[optional] = value
@@ -316,6 +336,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 await self._write_config(executor, model_name, sandbox_url, is_local, ds_args)
                 await self._write_search_shim(executor)
                 await self._write_organization_eval_patch(executor)
+                await self._patch_citation_lookup(executor)
 
                 n_success, n_total, generation_ok = await self._run_generation(
                     executor, ds_args, all_output, output_dir
@@ -451,6 +472,16 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         logger.info(
             f"[{self.name}] Patched organization evaluator at {self._organization_evaluator_path}"
         )
+
+    async def _patch_citation_lookup(self, executor: SandboxExecutor) -> None:
+        """Route the upstream OpenAlex citation lookup through env-provided creds."""
+        source = (Path(__file__).parent / "citation_lookup_patch.py").read_text()
+        encoded = base64.b64encode(source.encode()).decode()
+        await executor.execute_command(
+            f"echo '{encoded}' | base64 -d | python3 - {shlex.quote(self._citation_utils_path)}",
+            timeout=30.0,
+        )
+        logger.info(f"[{self.name}] Patched citation lookup at {self._citation_utils_path}")
 
     def _build_generation_command(self, ds_args: DeepScholarArgs) -> str:
         # Always run through the shim: it applies the stage-LM token-budget fix for
@@ -676,6 +707,11 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 all_metrics[metric] = value
         parsed_metric_names = tuple(all_metrics)
 
+        # Normalize upstream 0-2 metrics to the paper's 0-1 scale before aggregating.
+        for metric in _HALF_SCALE_METRICS:
+            if metric in all_metrics:
+                all_metrics[metric] /= 2
+
         # Headline geomean over the primary metrics (None if any is missing).
         geomean = compute_geomean(all_metrics)
         if geomean is not None:
@@ -690,6 +726,12 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         for rel, text in sorted(query_files.items()):
             metric = rel.split("/")[0]
             per_metric[metric] = parse_per_query_csv(text, metric)
+
+        # Same 0-2 -> 0-1 normalization for the per-query values feeding the fixed
+        # denominator, so coverage_relevance_rate_fixed and geomean_fixed also match.
+        for metric in _HALF_SCALE_METRICS:
+            if metric in per_metric:
+                per_metric[metric] = {k: v / 2 for k, v in per_metric[metric].items()}
 
         fixed_metrics: dict[str, float] = {}
         if n_total > 0:

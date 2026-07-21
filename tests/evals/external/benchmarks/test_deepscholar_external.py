@@ -19,6 +19,7 @@ from olmo_eval.evals.external.benchmarks.deepscholar.args import (
     DeepScholarArgs,
 )
 from olmo_eval.evals.external.benchmarks.deepscholar.eval import (
+    _HALF_SCALE_METRICS,
     LOTUS_REF,
     DeepScholarExternalEval,
 )
@@ -265,16 +266,21 @@ def test_metric_parsers_skip_invalid_values() -> None:
 @pytest.mark.parametrize("metric", PRIMARY_METRICS)
 def test_fixed_metrics_use_requested_query_denominator(metric: str) -> None:
     evaluator = DeepScholarExternalEval()
-    aggregate_files = {
-        f"{name}/aggregated_results.csv": f"baseline_name,{name}\ndeepscholar_base,0.5\n"
-        for name in PRIMARY_METRICS
-    }
-    query_files = {
-        f"{name}/deepscholar_base.csv": (
-            f"folder_path,{name}\n/workspace/generation/0,0.25\n/workspace/generation/1,0.75\n"
-        )
-        for name in PRIMARY_METRICS
-    }
+
+    # _HALF_SCALE_METRICS arrive on upstream's 0-2 scale and are halved by
+    # _extract_results. Feed those doubled so every metric lands at the same 0-1
+    # value post-normalization (0.5 aggregate, 0.25/0.75 per query) - keeping the
+    # uniform expectations below and failing if the halving regresses.
+    def _agg(name: str) -> str:
+        value = 1.0 if name in _HALF_SCALE_METRICS else 0.5
+        return f"baseline_name,{name}\ndeepscholar_base,{value}\n"
+
+    def _query(name: str) -> str:
+        lo, hi = ("0.5", "1.5") if name in _HALF_SCALE_METRICS else ("0.25", "0.75")
+        return f"folder_path,{name}\n/workspace/generation/0,{lo}\n/workspace/generation/1,{hi}\n"
+
+    aggregate_files = {f"{name}/aggregated_results.csv": _agg(name) for name in PRIMARY_METRICS}
+    query_files = {f"{name}/deepscholar_base.csv": _query(name) for name in PRIMARY_METRICS}
 
     with mock.patch.object(
         evaluator,
