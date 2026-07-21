@@ -64,8 +64,22 @@ def get_citation_count_from_title(title, mailto=None, similarity_threshold=0.8):
     if cache_key in _OPENALEX_CACHE:
         return _OPENALEX_CACHE[cache_key]
 
+    # OpenAlex interprets ``?`` and ``*`` in ``search`` as wildcards, which
+    # require a different API mode and turn ordinary paper titles into HTTP 400s.
+    # Strip search syntax and quote the remaining words as an exact phrase. This
+    # also gives substantially better title matching than an unquoted word query.
+    search_title = " ".join(
+        "".join(
+            character if character.isalnum() or character.isspace() else " "
+            for character in normalized_title
+        ).split()
+    )
+    if not search_title:
+        _OPENALEX_CACHE[cache_key] = None
+        return None
+
     params = {
-        "search": normalized_title,
+        "search": f'"{search_title}"',
         "api_key": api_key,
         "per_page": 1,
         "select": "display_name,cited_by_count",
@@ -85,36 +99,48 @@ def get_citation_count_from_title(title, mailto=None, similarity_threshold=0.8):
             response = requests.get(
                 "https://api.openalex.org/works", params=params, timeout=10
             )
-            _OPENALEX_LAST_REQUEST_AT = time.monotonic()
-            if response.status_code == 429 or response.status_code >= 500:
-                last_error = RuntimeError(
-                    f"OpenAlex transient HTTP {response.status_code}"
-                )
-                retry_after = response.headers.get("Retry-After")
-                try:
-                    delay = float(retry_after) if retry_after else 2 ** attempt
-                except (TypeError, ValueError):
-                    delay = 2 ** attempt
-                # Per-process hash randomization gives concurrent jobs different jitter.
-                jitter = 0.75 + (abs(hash(normalized_title)) % 500) / 1000
-                time.sleep(min(max(delay, 0.25) * jitter, 30.0))
-                continue
-
-            response.raise_for_status()
-            results = response.json().get("results", [])
-            citation_count = None
-            if results:
-                top_result = results[0]
-                paper_title = top_result.get("display_name", "")
-                similarity = jaccard_similarity(normalized_title, paper_title)
-                if similarity >= similarity_threshold:
-                    citation_count = top_result.get("cited_by_count", 0)
-            _OPENALEX_CACHE[cache_key] = citation_count
-            return citation_count
         except requests.RequestException as error:
-            last_error = error
+            # RequestException text can contain a prepared URL with credentials.
+            last_error = f"{type(error).__name__}: request failed"
             if attempt + 1 < _OPENALEX_MAX_ATTEMPTS:
                 time.sleep(min(2 ** attempt, 30.0))
+            continue
+
+        _OPENALEX_LAST_REQUEST_AT = time.monotonic()
+        if response.status_code == 429 or response.status_code >= 500:
+            last_error = RuntimeError(
+                f"OpenAlex transient HTTP {response.status_code}"
+            )
+            retry_after = response.headers.get("Retry-After")
+            try:
+                delay = float(retry_after) if retry_after else 2 ** attempt
+            except (TypeError, ValueError):
+                delay = 2 ** attempt
+            # Per-process hash randomization gives concurrent jobs different jitter.
+            jitter = 0.75 + (abs(hash(normalized_title)) % 500) / 1000
+            time.sleep(min(max(delay, 0.25) * jitter, 30.0))
+            continue
+
+        if response.status_code >= 400:
+            # Do not use raise_for_status(): requests includes the prepared
+            # URL (and therefore our api_key query parameter) in HTTPError.
+            detail = str(response.text or "").strip()[:500]
+            detail = detail.replace(api_key, "<redacted>")
+            raise RuntimeError(
+                f"OpenAlex HTTP {response.status_code} for title "
+                f"{normalized_title!r}: {detail}"
+            )
+
+        results = response.json().get("results", [])
+        citation_count = None
+        if results:
+            top_result = results[0]
+            paper_title = top_result.get("display_name", "")
+            similarity = jaccard_similarity(search_title, paper_title)
+            if similarity >= similarity_threshold:
+                citation_count = top_result.get("cited_by_count", 0)
+        _OPENALEX_CACHE[cache_key] = citation_count
+        return citation_count
 
     raise RuntimeError(
         f"OpenAlex lookup failed after {_OPENALEX_MAX_ATTEMPTS} attempts "

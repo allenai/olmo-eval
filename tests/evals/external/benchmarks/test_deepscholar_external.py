@@ -254,17 +254,59 @@ def test_citation_patch_authenticates_retries_and_caches(
 
     lookup = namespace["get_citation_count_from_title"]
     assert callable(lookup)
-    assert lookup("A useful paper") == 42
-    assert lookup("A useful paper") == 42
+    assert lookup("A useful paper?") == 42
+    assert lookup("A useful paper?") == 42
     assert fake_get.call_count == 2
     assert fake_get.call_args.args == ("https://api.openalex.org/works",)
     assert fake_get.call_args.kwargs["params"] == {
-        "search": "A useful paper",
+        "search": '"A useful paper"',
         "api_key": "secret",
         "per_page": 1,
         "select": "display_name,cited_by_count",
         "mailto": "researcher@example.org",
     }
+
+
+def test_citation_patch_does_not_retry_or_leak_key_on_http_400(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "utils.py"
+    source_path.write_text(
+        "import os\nimport requests\nimport time\n\n"
+        "def jaccard_similarity(left, right):\n"
+        "    return 1.0\n\n\n" + citation_lookup_patch._FUNCTION_OLD
+    )
+    monkeypatch.setattr(sys, "argv", ["citation_lookup_patch.py", str(source_path)])
+    citation_lookup_patch.main()
+
+    namespace: dict[str, object] = {}
+    exec(compile(source_path.read_text(), str(source_path), "exec"), namespace)
+
+    api_key = "do-not-leak"
+    bad_request = SimpleNamespace(
+        status_code=400,
+        headers={},
+        text=f"invalid wildcard request using {api_key}",
+    )
+    fake_get = mock.Mock(return_value=bad_request)
+    namespace["requests"] = SimpleNamespace(
+        get=fake_get,
+        RequestException=Exception,
+    )
+    namespace["time"] = SimpleNamespace(monotonic=mock.Mock(return_value=1.0), sleep=mock.Mock())
+    monkeypatch.setenv("OPENALEX_API_KEY", api_key)
+
+    lookup = namespace["get_citation_count_from_title"]
+    assert callable(lookup)
+    with pytest.raises(RuntimeError, match="OpenAlex HTTP 400") as error:
+        lookup("Can Language Models Learn to Listen?")
+
+    assert fake_get.call_count == 1
+    assert fake_get.call_args.kwargs["params"]["search"] == (
+        '"Can Language Models Learn to Listen"'
+    )
+    assert api_key not in str(error.value)
+    assert "<redacted>" in str(error.value)
 
 
 def test_citation_patch_requires_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
