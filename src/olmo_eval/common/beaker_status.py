@@ -14,8 +14,9 @@ import logging
 import os
 import time
 from collections.abc import Callable
+from threading import Lock, Thread
 
-from beaker import Beaker, BeakerWorkload
+from beaker import Beaker, BeakerExperiment, BeakerWorkload
 from beaker.exceptions import BeakerConfigurationError
 
 DEFAULT_MIN_INTERVAL = 10.0
@@ -35,14 +36,23 @@ class BeakerStatusReporter:
     def __init__(self, min_interval: float = DEFAULT_MIN_INTERVAL) -> None:
         self.min_interval = min_interval
         self._git_suffix = _git_suffix()
-        self._workload: BeakerWorkload | None = None
+        workload_id = os.environ.get("BEAKER_WORKLOAD_ID")
+        self._workload = (
+            BeakerWorkload(experiment=BeakerExperiment(id=workload_id)) if workload_id else None
+        )
+        self._lock = Lock()
+        self._update_in_flight = False
         self._last_update: float = float("-inf")
-        try:
-            self._client: Beaker | None = Beaker.from_env()
-        except BeakerConfigurationError:
-            self._client = None
+        self._client: Beaker | None = None
+        if self._workload is None:
             return
-        self._workload = self._client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+
+        try:
+            self._client = Beaker.from_env()
+        except BeakerConfigurationError:
+            return
+        except Exception as error:
+            logger.warning("Beaker status reporting disabled during setup: %s", error)
 
     def update(self, message: str, force: bool = False) -> None:
         """Push a status message to the Beaker workload description.
@@ -54,12 +64,41 @@ class BeakerStatusReporter:
             return
 
         now = time.monotonic()
-        if not force and now - self._last_update < self.min_interval:
-            return
+        with self._lock:
+            if not force and now - self._last_update < self.min_interval:
+                return
+            # Status is cosmetic. Never queue more work behind a slow Beaker API
+            # request, and never let that request block model startup or evaluation.
+            if self._update_in_flight:
+                return
+            self._update_in_flight = True
+            self._last_update = now
 
+        client = self._client
+        workload = self._workload
         full_message = f"{message} {self._git_suffix}"
-        self._client.workload.update(self._workload, description=full_message)
-        self._last_update = now
+
+        def send_update() -> None:
+            try:
+                client.workload.update(workload, description=full_message)
+            except Exception as error:
+                logger.warning("Beaker status reporting disabled after update failure: %s", error)
+                self._client = None
+            finally:
+                with self._lock:
+                    self._update_in_flight = False
+
+        try:
+            Thread(
+                target=send_update,
+                name="beaker-status-update",
+                daemon=True,
+            ).start()
+        except Exception as error:
+            with self._lock:
+                self._update_in_flight = False
+            self._client = None
+            logger.warning("Beaker status reporting disabled after thread failure: %s", error)
 
     def progress_callback(self, label: str, units: str = "items/sec") -> Callable[..., None]:
         """Return a ``(count, total, *, force=False)`` callback bound to a fresh start time.
