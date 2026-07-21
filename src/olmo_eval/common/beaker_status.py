@@ -48,7 +48,9 @@ class BeakerStatusReporter:
             return
 
         try:
-            self._client = Beaker.from_env()
+            # Status reporting is cosmetic and must not block model startup on
+            # Beaker's synchronous package-upgrade network check.
+            self._client = Beaker.from_env(check_for_upgrades=False)
         except BeakerConfigurationError:
             return
         except Exception as error:

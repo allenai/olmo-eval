@@ -41,7 +41,9 @@ class BeakerStatusReporterTest(unittest.TestCase):
         fake_client = mock.MagicMock()
         with (
             mock.patch.dict("os.environ", env, clear=True),
-            mock.patch.object(beaker_status.Beaker, "from_env", return_value=fake_client),
+            mock.patch.object(
+                beaker_status.Beaker, "from_env", return_value=fake_client
+            ) as from_env,
             mock.patch.object(beaker_status, "Thread", InlineThread),
         ):
             reporter = beaker_status.BeakerStatusReporter(min_interval=60.0)
@@ -53,6 +55,8 @@ class BeakerStatusReporterTest(unittest.TestCase):
                 reporter.update("first")
                 reporter.update("second")
                 reporter.update("third")
+
+            from_env.assert_called_once_with(check_for_upgrades=False)
 
         self.assertEqual(fake_client.workload.update.call_count, 2)
         suffix = "git_commit: abc123 git_branch: main"
