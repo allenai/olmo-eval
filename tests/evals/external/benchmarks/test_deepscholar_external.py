@@ -1,10 +1,15 @@
 import asyncio
+import importlib.util
+import inspect
 import json
 import stat
+import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import pandas as pd
 import pytest
 
 from olmo_eval.common.execution.environment import ExecutionResult
@@ -53,6 +58,86 @@ def test_setup_pins_lotus_revision() -> None:
     evaluator = DeepScholarExternalEval()
 
     assert any(LOTUS_REF in command for command in evaluator.setup_command)
+
+
+def test_organization_patch_is_written_to_upstream_evaluator() -> None:
+    evaluator = DeepScholarExternalEval()
+    executor = mock.Mock()
+    executor.execute_command = mock.AsyncMock(return_value=ExecutionResult(success=True))
+
+    asyncio.run(evaluator._write_organization_eval_patch(executor))
+
+    awaited_call = executor.execute_command.await_args
+    assert awaited_call is not None
+    command = awaited_call.args[0]
+    assert "base64 -d" in command
+    assert command.endswith("> /workspace/deepscholar-bench/eval/evaluator/organization.py")
+
+
+def test_organization_patch_scores_normalized_lotus_decisions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_path = (
+        Path(inspect.getfile(DeepScholarExternalEval)).parent / "organization_eval_patch.py"
+    )
+    fake_lotus = types.ModuleType("lotus")
+    fake_evaluator = types.ModuleType("evaluator")
+    fake_evaluator.__dict__.update(
+        Evaluator=object,
+        EvaluationFunction=SimpleNamespace(ORGANIZATION=SimpleNamespace(value="organization")),
+    )
+    fake_parsers = types.ModuleType("parsers")
+    fake_parsers.__dict__["Parser"] = object
+    module_name = "test_deepscholar_organization_eval_patch"
+    spec = importlib.util.spec_from_file_location(module_name, patch_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    captured_kwargs: dict[str, object] = {}
+
+    def pairwise_judge(frame: pd.DataFrame, **kwargs: object) -> pd.DataFrame:
+        captured_kwargs.update(kwargs)
+        result = frame.copy()
+        result["_judge_0"] = ["A", "B", " A ", "invalid"]
+        result["_judge_1"] = ["A", "B", "B", None]
+        return result
+
+    class FakeParser:
+        def __init__(self, index: int):
+            self.index = index
+
+        def get_folder_info(self, include_related_works_section: bool) -> dict[str, str]:
+            assert include_related_works_section
+            return {
+                "paper_title": f"paper {self.index}",
+                "paper_abstract": "abstract",
+                "generated_related_works_section": "generated",
+                "related_works_section": "reference",
+            }
+
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "lotus": fake_lotus,
+            "evaluator": fake_evaluator,
+            "parsers": fake_parsers,
+        },
+    ):
+        monkeypatch.setattr(pd.DataFrame, "pairwise_judge", pairwise_judge, raising=False)
+        spec.loader.exec_module(module)
+
+    result = module.OrganizationEvaluator().calculate([FakeParser(i) for i in range(4)])
+
+    assert result["organization_v1"].tolist() == [1, 0, 1, 0]
+    assert result["organization_v2"].tolist() == [1, 0, 0, 0]
+    assert result["organization"].tolist() == [1.0, 0.0, 0.5, 0.0]
+    assert "_judge_0" not in result and "_judge_1" not in result
+    assert captured_kwargs["n_trials"] == 2
+    assert captured_kwargs["permute_cols"] is True
+    assert "response_format" not in captured_kwargs
+    instruction = str(captured_kwargs["judge_instruction"])
+    assert "Return exactly one token" in instruction
+    assert "Do not return JSON" in instruction
 
 
 def test_all_metrics_argument_expands_to_primary_metrics() -> None:

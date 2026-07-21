@@ -127,6 +127,10 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         return f"{self._repo}/olmo_eval_search_shim.py"
 
     @property
+    def _organization_evaluator_path(self) -> str:
+        return f"{self._repo}/eval/evaluator/organization.py"
+
+    @property
     def setup_command(self) -> tuple[str, ...]:
         repo_url = "https://github.com/guestrin-lab/deepscholar-bench.git"
         # The repo is ~1.3GB (dataset CSVs + baseline outputs), so a full clone is
@@ -311,6 +315,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
 
                 await self._write_config(executor, model_name, sandbox_url, is_local, ds_args)
                 await self._write_search_shim(executor)
+                await self._write_organization_eval_patch(executor)
 
                 n_success, n_total, generation_ok = await self._run_generation(
                     executor, ds_args, all_output, output_dir
@@ -434,6 +439,18 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             f"echo '{encoded}' | base64 -d > {shlex.quote(self._shim_path)}", timeout=30.0
         )
         logger.info(f"[{self.name}] Wrote search shim to {self._shim_path}")
+
+    async def _write_organization_eval_patch(self, executor: SandboxExecutor) -> None:
+        """Install the organization scorer compatible with the pinned LOTUS API."""
+        source = (Path(__file__).parent / "organization_eval_patch.py").read_text()
+        encoded = base64.b64encode(source.encode()).decode()
+        await executor.execute_command(
+            f"echo '{encoded}' | base64 -d > {shlex.quote(self._organization_evaluator_path)}",
+            timeout=30.0,
+        )
+        logger.info(
+            f"[{self.name}] Patched organization evaluator at {self._organization_evaluator_path}"
+        )
 
     def _build_generation_command(self, ds_args: DeepScholarArgs) -> str:
         # Always run through the shim: it applies the stage-LM token-budget fix for
