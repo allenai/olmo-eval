@@ -7,18 +7,17 @@ ported verbatim/faithfully from the benchmark repository.
 
 This integration deliberately deviates from the official implementation in
 six ways: (1) FACT scrapes with olmo-eval's crawl4ai-backed browsing logic
-instead of Jina Reader; (2) generated articles receive only deterministic
-``<think>`` stripping instead of the optional LLM ArticleCleaner, equivalent
-to evaluating with official cleaning skipped; (3) both judge models can be
-overridden with ``OLMO_EVAL_JUDGE``; and (4) the appended report-generation
-instruction is ours because the official benchmark leaves each deep-research
-system's generation prompting unspecified; (5) ``clean_urls`` is applied to
-every article rather than conditionally by source model, and text-fragment
-URLs are also normalized while grouping, merging citations to fragments of
-the same page; and (6) judge failures use three attempts with ``2**n``
-backoff, while the official RACE runner uses ten attempts with ``1.5**n``
-backoff. After final RACE judge/parse failure, an instance receives zero RACE
-scores and remains in every mean.
+instead of Jina Reader; (2) generated articles receive deterministic ``<think>``
+stripping and tool/channel-scaffold marker removal instead of the optional LLM
+ArticleCleaner; (3) both judge models can be overridden with
+``OLMO_EVAL_JUDGE``; and (4) the appended report-generation instruction is ours
+because the official benchmark leaves each deep-research system's generation
+prompting unspecified; (5) ``clean_urls`` is applied to every article rather
+than conditionally by source model, and text-fragment URLs are also normalized
+while grouping, merging citations to fragments of the same page; and (6) judge
+failures use three attempts with ``2**n`` backoff, while the official RACE
+runner uses ten attempts with ``1.5**n`` backoff. After final RACE judge/parse
+failure, an instance receives zero RACE scores and remains in every mean.
 """
 
 from __future__ import annotations
@@ -69,13 +68,17 @@ DEEPRESEARCH_GENERATION_INSTRUCTIONS = {
     "en": (
         "Write a comprehensive research report in English. Research the task using the "
         "available web-search and webpage-browsing tools before writing. Place an inline "
-        "Markdown citation in the exact form `[source title](url)` immediately after every "
-        "factual claim it supports. Synthesize the sources into a clear, detailed report."
+        "Markdown citation in the exact form `[<the source's actual "
+        "title>](<the source's actual URL>)` immediately after every factual claim it "
+        "supports. Replace both placeholders with the real page title and URL; never output "
+        "either placeholder itself. Synthesize the sources "
+        "into a clear, detailed report."
     ),
     "zh": (
         "请用中文撰写一份全面的研究报告。写作前请使用可用的网页搜索和网页浏览工具调研任务。"
-        "每项事实性主张后都应紧跟一个格式严格为 `[来源标题](url)` 的行内 Markdown 引用。"
-        "请综合各项来源，形成清晰、详尽的报告。"
+        "每项事实性主张后都应紧跟一个格式严格为 `[<来源的真实标题>]"
+        "(<来源的真实链接>)` 的行内 Markdown 引用。请将两个占位符替换为真实网页标题和链接，"
+        "绝不要原样输出任何一个占位符。请综合各项来源，形成清晰、详尽的报告。"
     ),
 }
 
@@ -700,7 +703,7 @@ def clean_urls(input_text: str) -> str:
 
 def clean_citation_url(url: str) -> str:
     """Apply the official ``#:~:text=`` URL cleanup to a raw URL."""
-    return url.split("#:~:text=", maxsplit=1)[0]
+    return url.strip().strip("<>").split("#:~:text=", maxsplit=1)[0]
 
 
 def remove_urls(input_text: str) -> str:
@@ -941,11 +944,128 @@ DEEPRESEARCH_METRICS = (
 
 
 def strip_think_block(text: str) -> str:
-    """Strip a leading reasoning block using the ResearchQA helper pattern."""
+    """Strip a reasoning prefix using the intentionally lossy ResearchQA pattern.
+
+    Only text after the first ``</think>`` is retained, so a mid-report closing tag
+    discards the report prefix as well. This pre-existing behavior matches ResearchQA.
+    """
     think_end = text.find("</think>")
     if think_end >= 0:
         text = text[think_end + len("</think>") :]
     return text.strip()
+
+
+_SCAFFOLD_IDENTIFIER = r"[A-Za-z_][\w.:-]*"
+_SCAFFOLD_QUOTED_VALUE = r"""(?:"[^"<>\r\n]*"|'[^'<>\r\n]*')"""
+_SCAFFOLD_VALUE = rf"(?:{_SCAFFOLD_IDENTIFIER}|{_SCAFFOLD_QUOTED_VALUE})"
+_SCAFFOLD_OPEN_WITH_ATTRIBUTES_RE = re.compile(
+    rf"<(?:tool_call|tool_response|function|parameter)(?:"
+    rf"[ \t]*=[ \t]*{_SCAFFOLD_VALUE}|"
+    rf"(?:[ \t]+{_SCAFFOLD_IDENTIFIER}[ \t]*=[ \t]*{_SCAFFOLD_VALUE})+"
+    rf")[ \t]*>",
+    flags=re.IGNORECASE,
+)
+_SCAFFOLD_TAG_RE = re.compile(
+    r"</?(?:tool_call|tool_response)[ \t]*>|</(?:function|parameter)[ \t]*>",
+    flags=re.IGNORECASE,
+)
+_SPECIAL_TOKEN_PATTERN = r"<(?:\|[A-Za-z_][\w.:-]*\|?|[A-Za-z_][\w.:-]*\|)>"
+_SPECIAL_TOKEN_RE = re.compile(_SPECIAL_TOKEN_PATTERN, flags=re.IGNORECASE)
+_CHANNEL_HEADER_RE = re.compile(
+    rf"<\|channel\|?>[ \t]*(?P<channel>analysis|commentary|final|thought|tool)"
+    rf"[ \t\r\n]*(?={_SPECIAL_TOKEN_PATTERN})",
+    flags=re.IGNORECASE,
+)
+_ASSISTANT_TURN_PREFIX_RE = re.compile(
+    r"(?:<\|start\|>|<start\|>)[ \t]*assistant\b", flags=re.IGNORECASE
+)
+_MARKDOWN_CODE_SPAN_RE = re.compile(r"```[\s\S]*?```|`[^`\n]*`")
+_PAIRED_BARE_SCAFFOLD_TAGS = ("function", "parameter")
+_BARE_SCAFFOLD_OPEN_RES = {
+    tag: re.compile(rf"<{tag}[ \t]*>", flags=re.IGNORECASE) for tag in _PAIRED_BARE_SCAFFOLD_TAGS
+}
+_BARE_SCAFFOLD_CLOSE_RES = {
+    tag: re.compile(rf"</{tag}[ \t]*>", flags=re.IGNORECASE) for tag in _PAIRED_BARE_SCAFFOLD_TAGS
+}
+_REASONING_CHANNELS = frozenset({"analysis", "commentary", "thought"})
+
+
+def _partition_markdown_code(text: str) -> list[tuple[bool, str]]:
+    """Return ``(is_code, text)`` parts without modifying protected Markdown code."""
+    parts: list[tuple[bool, str]] = []
+    cursor = 0
+    for match in _MARKDOWN_CODE_SPAN_RE.finditer(text):
+        if cursor < match.start():
+            parts.append((False, text[cursor : match.start()]))
+        parts.append((True, match.group()))
+        cursor = match.end()
+    if cursor < len(text):
+        parts.append((False, text[cursor:]))
+    return parts
+
+
+def _retain_final_channel(parts: Sequence[tuple[bool, str]]) -> list[tuple[bool, str]]:
+    """Keep pre-header and final prose when reasoning and final channels coexist."""
+    channel_names = {
+        match.group("channel").lower()
+        for is_code, part in parts
+        if not is_code
+        for match in _CHANNEL_HEADER_RE.finditer(part)
+    }
+    if "final" not in channel_names or channel_names.isdisjoint(_REASONING_CHANNELS):
+        return list(parts)
+
+    retained: list[tuple[bool, str]] = []
+    active_channel: str | None = None
+    for is_code, part in parts:
+        if is_code:
+            retained.append((True, part))
+            continue
+
+        cursor = 0
+        retained_chunks: list[str] = []
+        for match in _CHANNEL_HEADER_RE.finditer(part):
+            if active_channel in (None, "final"):
+                retained_chunks.append(part[cursor : match.start()])
+            active_channel = match.group("channel").lower()
+            cursor = match.end()
+        if active_channel in (None, "final"):
+            retained_chunks.append(part[cursor:])
+        retained.append((False, "".join(retained_chunks)))
+    return retained
+
+
+def _clean_report_segment(text: str, paired_bare_tags: frozenset[str]) -> str:
+    """Remove scaffold tokens from a non-code Markdown segment in linear passes."""
+    text = _ASSISTANT_TURN_PREFIX_RE.sub(" ", text)
+    text = _CHANNEL_HEADER_RE.sub(" ", text)
+    text = _SPECIAL_TOKEN_RE.sub(" ", text)
+    for tag in paired_bare_tags:
+        text = _BARE_SCAFFOLD_OPEN_RES[tag].sub("", text)
+    text = _SCAFFOLD_OPEN_WITH_ATTRIBUTES_RE.sub("", text)
+    return _SCAFFOLD_TAG_RE.sub("", text)
+
+
+def _clean_generated_report(text: str) -> str:
+    """Strip reasoning and tool-call scaffold while preserving report prose and code.
+
+    Explicit analysis/commentary/thought content is dropped only when an explicit final
+    channel is also present; ordinary report content before the first channel header and
+    final-channel content are retained. This intentionally limited parser infers
+    boundaries from channel headers rather than assigning semantics to every possible
+    special token; protected Markdown code spans are always retained verbatim.
+    """
+    text = strip_think_block(text)
+    parts = _retain_final_channel(_partition_markdown_code(text))
+    paired_bare_tags = frozenset(
+        tag
+        for tag, close_re in _BARE_SCAFFOLD_CLOSE_RES.items()
+        if any(not is_code and close_re.search(part) for is_code, part in parts)
+    )
+    return "".join(
+        part if is_code else _clean_report_segment(part, paired_bare_tags)
+        for is_code, part in parts
+    ).strip()
 
 
 def _validated_criteria(doc: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -1025,7 +1145,7 @@ class DeepResearchBench(Task):
         )
 
     def extract_answer(self, output: LMOutput) -> str:
-        return strip_think_block(output.text)
+        return _clean_generated_report(output.text)
 
     async def score_responses(
         self,

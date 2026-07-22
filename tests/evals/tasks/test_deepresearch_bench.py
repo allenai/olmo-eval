@@ -3,6 +3,7 @@
 import builtins
 import hashlib
 import json
+import re
 
 import pytest
 
@@ -11,6 +12,7 @@ from olmo_eval.evals.tasks import deepresearch_bench
 from olmo_eval.evals.tasks.common import get_task, task_exists
 from olmo_eval.evals.tasks.deepresearch_bench import (
     DEEPRESEARCH_DIMENSIONS,
+    DEEPRESEARCH_GENERATION_INSTRUCTIONS,
     FACT_DEDUPLICATION_PROMPT_EN,
     FACT_DEDUPLICATION_PROMPT_ZH,
     FACT_EXTRACTION_PROMPT_EN,
@@ -136,7 +138,7 @@ class TestRegistrationAndDocs:
 
         assert instance is not None
         assert instance.question.startswith(doc["prompt"] + "\n\n")
-        assert "[source title](url)" in instance.question or "[来源标题](url)" in instance.question
+        assert instance.question.endswith(DEEPRESEARCH_GENERATION_INSTRUCTIONS[doc["language"]])
         assert instance.metadata["id"] == doc["id"]
         assert instance.metadata["language"] == doc["language"]
         assert instance.metadata["topic"] == doc["topic"]
@@ -159,6 +161,230 @@ class TestRegistrationAndDocs:
     def test_think_strip_matches_researchqa_pattern(self, task):
         output = LMOutput(text="<think>private reasoning</think>\n\nFinal report.")
         assert task.extract_answer(output) == "Final report."
+
+    @pytest.mark.parametrize(
+        (
+            "language",
+            "bare_placeholder",
+            "citation_format",
+            "inline_citation",
+            "replacement_clause",
+        ),
+        [
+            (
+                "en",
+                "[source title]",
+                "[<the source's actual title>](<the source's actual URL>)",
+                "inline Markdown citation",
+                "Replace both placeholders with the real page title and URL",
+            ),
+            (
+                "zh",
+                "[来源标题]",
+                "[<来源的真实标题>](<来源的真实链接>)",
+                "行内 Markdown 引用",
+                "请将两个占位符替换为真实网页标题和链接",
+            ),
+        ],
+    )
+    def test_generation_instruction_uses_noncopyable_citation_placeholders(
+        self,
+        language,
+        bare_placeholder,
+        citation_format,
+        inline_citation,
+        replacement_clause,
+    ):
+        instruction = DEEPRESEARCH_GENERATION_INSTRUCTIONS[language]
+
+        assert instruction
+        assert bare_placeholder not in instruction
+        assert citation_format in instruction
+        assert inline_citation in instruction
+        assert replacement_clause in instruction
+        assert "](<" in instruction
+        assert re.search(r"https?://", instruction, flags=re.IGNORECASE) is None
+
+
+class TestGeneratedReportCleaning:
+    def test_dangling_nid_76_closing_tags_are_removed_and_report_survives(self, task):
+        report = (
+            "# Findings\n\nThe evidence supports the conclusion.\n"
+            "The final sources were MDPI and Healthline."
+        )
+        generated = f"{report}\n</parameter>\n</function>\n</tool_call>"
+
+        cleaned = task.extract_answer(LMOutput(text=generated))
+
+        assert cleaned == report
+        assert cleaned.endswith("The final sources were MDPI and Healthline.")
+        assert "<" not in cleaned
+
+    def test_channel_and_harmony_markers_are_removed_on_production_path(self, task):
+        report = "# Findings\n\nA legitimate report sentence."
+        generated = f"<|channel>thought\n<channel|>{report}<|im_end|>"
+
+        assert task.extract_answer(LMOutput(text=generated)) == report
+
+    def test_pure_gemma_channel_and_tool_call_scaffold_becomes_empty(self, task):
+        generated = "<|channel>thought<tool_call|>"
+
+        assert task.extract_answer(LMOutput(text=generated)) == ""
+
+    def test_complete_tool_call_wrapper_loses_markup_but_keeps_prose(self, task):
+        generated = '<tool_call name="write_report">\nA legitimate report sentence.\n</tool_call>'
+
+        assert task.extract_answer(LMOutput(text=generated)) == "A legitimate report sentence."
+
+    def test_complete_tool_response_wrapper_loses_markup_but_keeps_prose(self, task):
+        generated = "<tool_response>\nA sourced report sentence.\n</tool_response>"
+
+        assert task.extract_answer(LMOutput(text=generated)) == "A sourced report sentence."
+
+    @pytest.mark.parametrize("family", ["tool_call", "tool_response", "function", "parameter"])
+    @pytest.mark.parametrize("quote", ['"', "'"])
+    @pytest.mark.parametrize("value", ["write=report", "write report"])
+    def test_quoted_scaffold_attributes_accept_spaces_and_equals_on_production_path(
+        self, task, family, quote, value
+    ):
+        generated = f"<{family} name={quote}{value}{quote}>Final report.</{family}>"
+
+        assert task.extract_answer(LMOutput(text=generated)) == "Final report."
+
+    @pytest.mark.parametrize("value", ["write=report", "write report"])
+    def test_unquoted_scaffold_attributes_remain_identifier_shaped(self, task, value):
+        generated = f"<tool_call name={value}>Final report."
+
+        assert task.extract_answer(LMOutput(text=generated)) == generated
+
+    @pytest.mark.parametrize(
+        "generated",
+        [
+            '<tool_call name="write report>Visible prose > remains visible.',
+            "<tool_call name='write report>Visible prose > remains visible.",
+            '<tool_call name="write report\nVisible prose > remains visible.',
+            "<tool_call name='write report\nVisible prose > remains visible.",
+        ],
+    )
+    def test_unterminated_quoted_opener_cannot_cross_angle_or_newline(self, task, generated):
+        assert task.extract_answer(LMOutput(text=generated)) == generated
+
+    def test_double_quoted_scaffold_attribute_cannot_consume_quoted_prose(self, task):
+        generated = '<function name="a" and "b" > tail.'
+
+        assert task.extract_answer(LMOutput(text=generated)) == generated
+
+    def test_single_quoted_scaffold_attribute_cannot_consume_apostrophe_prose(self, task):
+        generated = "<function name='x' the model's output '> tail."
+
+        assert task.extract_answer(LMOutput(text=generated)) == generated
+
+    def test_function_opener_with_double_quoted_spaced_value_is_stripped(self, task):
+        generated = '<function name="write report">Final report.'
+
+        assert task.extract_answer(LMOutput(text=generated)) == "Final report."
+
+    def test_tool_call_opener_with_multiple_quoted_attributes_is_stripped(self, task):
+        generated = '<tool_call name="a b" id="c d">Final report.'
+
+        assert task.extract_answer(LMOutput(text=generated)) == "Final report."
+
+    @pytest.mark.parametrize(
+        "generated",
+        [
+            (
+                "<|start|>assistant<|channel|>analysis<|message|>Private reasoning."
+                "<|end|><|start|>assistant<|channel|>final<|message|>Final report."
+                "<|return|>"
+            ),
+            (
+                "<start|>assistant<|channel>thought<message|>Private reasoning."
+                "<end|><start|>assistant<|channel>final<message|>Final report.<return|>"
+            ),
+        ],
+    )
+    def test_reasoning_channel_content_is_dropped_when_final_channel_exists(self, task, generated):
+        assert task.extract_answer(LMOutput(text=generated)) == "Final report."
+
+    def test_report_content_before_first_channel_is_retained_with_final_content(self, task):
+        generated = (
+            "Report body comes first."
+            "<|channel|>analysis<|message|>Private reasoning."
+            "<|channel|>final<|message|>Final report."
+        )
+
+        assert task.extract_answer(LMOutput(text=generated)) == (
+            "Report body comes first. Final report."
+        )
+
+    def test_special_token_removal_separates_adjacent_words(self, task):
+        generated = "First<|im_end|>second"
+
+        assert task.extract_answer(LMOutput(text=generated)) == "First second"
+
+    def test_think_block_is_removed_before_scaffold_tags(self):
+        generated = (
+            "<think>private reasoning with <tool_call></think>\n"
+            "<tool_call><function=write_report><parameter=report>"
+            "Final report sentence.</parameter></function></tool_call>"
+        )
+
+        assert deepresearch_bench._clean_generated_report(generated) == ("Final report sentence.")
+
+    def test_text_without_tags_is_unchanged_modulo_strip(self):
+        report = "A plain report with no scaffold markup."
+
+        assert deepresearch_bench._clean_generated_report(f" \n{report}\n ") == report
+
+    def test_unpaired_bare_function_keyword_in_prose_is_preserved(self):
+        report = "C++ does not use the `<function>` keyword for function declarations."
+
+        assert deepresearch_bench._clean_generated_report(report) == report
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "`<function>example</function>`",
+            '```xml\n<tool_call name="example">\n</tool_call>\n```',
+        ],
+    )
+    def test_scaffold_examples_in_markdown_code_are_preserved(self, code):
+        report = f"The documentation shows {code} as an example."
+
+        assert deepresearch_bench._clean_generated_report(report) == report
+
+    def test_paired_bare_function_tags_in_prose_lose_markup_but_keep_content(self):
+        report = "The prose uses <function>call</function> to discuss the wrapper."
+
+        assert deepresearch_bench._clean_generated_report(report) == (
+            "The prose uses call to discuss the wrapper."
+        )
+
+    def test_bare_parameter_pairing_crosses_preserved_inline_code_on_production_path(self, task):
+        generated = "<parameter>A report cites `x = <parameter>` verbatim.</parameter>"
+
+        assert task.extract_answer(LMOutput(text=generated)) == (
+            "A report cites `x = <parameter>` verbatim."
+        )
+
+    def test_malformed_opener_is_preserved_on_production_path(self, task):
+        generated = '<function name="write_report"\n# Findings\n\nThe report starts here.'
+
+        assert task.extract_answer(LMOutput(text=generated)) == generated
+
+    def test_malformed_opener_cannot_consume_prose_at_bare_greater_than(self, task):
+        generated = (
+            '<parameter name="report"\n'
+            "# Findings\n\nGlobal spending > 100 trillion dollars.\n"
+            "The result was not significant (p > 0.05)."
+        )
+
+        assert task.extract_answer(LMOutput(text=generated)) == generated
+
+    def test_large_bare_tag_sequence_is_cleaned_without_pairwise_lookahead(self):
+        generated = "<function>" * 10_000 + "report" + "</function>" * 10_000
+
+        assert deepresearch_bench._clean_generated_report(generated) == "report"
 
 
 class TestRaceScoring:
@@ -259,6 +485,13 @@ class TestFactHelpersAndMetrics:
         assert clean_citation_url(url) == "https://example.test/page"
         assert clean_urls(report) == "A claim [Example](https://example.test/page) follows."
         assert remove_urls(report) == "A claim [Example] follows."
+
+    def test_url_cleaning_removes_commonmark_autolink_brackets(self):
+        url = " <https://example.test/page#:~:text=quoted%20passage> "
+        report = f"A claim [Example]({url}) follows."
+
+        assert clean_citation_url(url) == "https://example.test/page"
+        assert clean_urls(report) == "A claim [Example](https://example.test/page) follows."
 
     def test_grouping_uses_cleaned_url(self):
         citations = [
