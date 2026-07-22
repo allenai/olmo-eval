@@ -180,6 +180,8 @@ select = [
 # Verbatim prompt templates from asta-bench reference implementation
 "src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
 "src/olmo_eval/common/scorers/citation.py" = ["E501"]
+# Verbatim bilingual prompt templates from DeepResearch Bench
+"src/olmo_eval/evals/tasks/deepresearch_bench.py" = ["E501"]
 # Verbatim prompt templates and gold snippets from scicode-bench reference implementation
 "src/olmo_eval/evals/external/benchmarks/scicode/prompts.py" = ["E501"]
 # Embedded fewshot data with long string literals
