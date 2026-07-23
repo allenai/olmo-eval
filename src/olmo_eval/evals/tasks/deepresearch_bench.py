@@ -832,7 +832,7 @@ async def fetch_crawl4ai_page(url: str) -> str:
     return text
 
 
-def _build_judge_fn(default_spec: str, scorer_name: str) -> JudgeFn:
+def _build_judge_fn(default_spec: str, scorer_name: str, default_effort: str) -> JudgeFn:
     spec = os.getenv("OLMO_EVAL_JUDGE", default_spec)
     model, separator, effort = spec.partition(":")
     return build_openai_judge_fn(
@@ -840,18 +840,18 @@ def _build_judge_fn(default_spec: str, scorer_name: str) -> JudgeFn:
         temperature=0.0,
         max_tokens=DEEPRESEARCH_JUDGE_MAX_TOKENS,
         scorer_name=scorer_name,
-        reasoning_effort=(effort if separator else None),
+        reasoning_effort=(effort if separator else default_effort),
     )
 
 
 def build_deepresearch_race_judge_fn() -> JudgeFn:
-    """Build the RACE judge from its default or ``$OLMO_EVAL_JUDGE``."""
-    return _build_judge_fn(DEEPRESEARCH_RACE_DEFAULT_JUDGE_SPEC, "DeepResearchBenchRACE")
+    """Build the RACE judge with medium effort unless a spec suffix overrides it."""
+    return _build_judge_fn(DEEPRESEARCH_RACE_DEFAULT_JUDGE_SPEC, "DeepResearchBenchRACE", "medium")
 
 
 def build_deepresearch_fact_judge_fn() -> JudgeFn:
-    """Build the shared FACT-stage judge from its default or ``$OLMO_EVAL_JUDGE``."""
-    return _build_judge_fn(DEEPRESEARCH_FACT_DEFAULT_JUDGE_SPEC, "DeepResearchBenchFACT")
+    """Build the FACT judge with low effort unless a spec suffix overrides it."""
+    return _build_judge_fn(DEEPRESEARCH_FACT_DEFAULT_JUDGE_SPEC, "DeepResearchBenchFACT", "low")
 
 
 @dataclass(frozen=True)

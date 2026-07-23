@@ -828,8 +828,8 @@ class TestPromptsAndJudges:
     @pytest.mark.parametrize(
         ("env_spec", "expected_models", "expected_efforts"),
         [
-            (None, ["gpt-5.5", "gpt-5.4-mini"], [None, None]),
-            ("judge-override", ["judge-override", "judge-override"], [None, None]),
+            (None, ["gpt-5.5", "gpt-5.4-mini"], ["medium", "low"]),
+            ("judge-override", ["judge-override", "judge-override"], ["medium", "low"]),
             ("gpt-5.5:high", ["gpt-5.5", "gpt-5.5"], ["high", "high"]),
         ],
     )
