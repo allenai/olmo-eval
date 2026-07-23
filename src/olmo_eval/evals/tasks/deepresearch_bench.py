@@ -1159,6 +1159,7 @@ class DeepResearchBench(Task):
         fact_judge = build_deepresearch_fact_judge_fn()
 
         race_failures = 0
+        fact_failures = 0
         for response in responses:
             output = response.outputs[0] if response.outputs else None
             answer = ""
@@ -1173,17 +1174,30 @@ class DeepResearchBench(Task):
                 race_scores, race_details, race_failed = await self._score_race(
                     response.instance, answer, race_judge
                 )
-                fact_scores, fact_details = await self._score_fact(
-                    response.instance, answer, fact_judge
-                )
+                try:
+                    fact_scores, fact_details = await self._score_fact(
+                        response.instance, answer, fact_judge
+                    )
+                    fact_failed = False
+                except Exception as exc:
+                    logger.warning(
+                        "DeepResearch Bench FACT scoring failed for id %r: %s",
+                        response.instance.metadata.get("id"),
+                        exc,
+                    )
+                    fact_scores = self._zero_fact_scores()
+                    fact_details = []
+                    fact_failed = True
             else:
                 race_scores = self._zero_race_scores()
                 race_details = None
                 race_failed = False
                 fact_scores = self._zero_fact_scores()
                 fact_details = []
+                fact_failed = False
 
             race_failures += int(race_failed)
+            fact_failures += int(fact_failed)
             response.scores.update(race_scores)
             response.scores.update(fact_scores)
             if output is not None:
@@ -1200,6 +1214,12 @@ class DeepResearchBench(Task):
                 "attempts; assigned zero and retained them in the denominator.",
                 race_failures,
                 DEEPRESEARCH_JUDGE_ATTEMPTS,
+            )
+        if fact_failures:
+            logger.warning(
+                "DeepResearch Bench FACT scoring failed for %d instance(s); assigned zero "
+                "and retained them in the denominator.",
+                fact_failures,
             )
         return responses
 
@@ -1399,10 +1419,14 @@ class DeepResearchBench(Task):
                 raw = await judge_fn(prompt)
                 parsed = cast(list[dict[str, Any]], _json_without_fences(raw))
                 for item in parsed:
+                    if not isinstance(item, Mapping) or "idx" not in item or "result" not in item:
+                        raise ValueError(
+                            "FACT validation item must be an object containing idx and result"
+                        )
                     item["idx"] -= 1
                 assert len(parsed) == len(facts), "FACT validation result length mismatch"
                 return parsed
-            except (AssertionError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            except (AssertionError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                 logger.warning(
                     "FACT validation attempt %d/%d failed: %s",
                     attempt + 1,
