@@ -689,6 +689,37 @@ class TestFactHelpersAndMetrics:
             {"idx": 1, "result": "unknown"},
         ]
 
+    @pytest.mark.parametrize("missing_key", ["result", "idx"])
+    @pytest.mark.anyio
+    async def test_validation_missing_required_key_retries_then_returns_all_unknown(
+        self, task, monkeypatch, missing_key
+    ):
+        calls = 0
+        delays = []
+
+        async def judge(_prompt):
+            nonlocal calls
+            calls += 1
+            items = [
+                {"idx": 1, "result": "supported"},
+                {"idx": 2, "result": "unsupported"},
+            ]
+            del items[1][missing_key]
+            return json.dumps(items)
+
+        async def sleep(delay):
+            delays.append(delay)
+
+        monkeypatch.setattr(deepresearch_bench.asyncio, "sleep", sleep)
+        results = await task._validate_facts(["first", "second"], "valid page", "en", judge)
+
+        assert calls == 3
+        assert delays == [1, 2]
+        assert results == [
+            {"idx": 0, "result": "unknown"},
+            {"idx": 1, "result": "unknown"},
+        ]
+
     @pytest.mark.anyio
     async def test_validation_blindly_decrements_idx_and_accepts_arbitrary_label(self, task):
         async def judge(_prompt):
@@ -900,6 +931,57 @@ async def test_score_responses_runs_race_and_fact_without_network(task, monkeypa
             "result": "supported",
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_unexpected_fact_failure_preserves_race_scores(task, monkeypatch, caplog):
+    instance = task.process_doc(_en_doc())
+    assert instance is not None
+    response = _response(instance, "A complete research report.")
+    race_payload = {
+        dimension: [
+            {
+                "criterion": _criteria()["criterions"][dimension][0]["criterion"],
+                "article_1_score": 8,
+                "article_2_score": 2,
+            }
+        ]
+        for dimension in DEEPRESEARCH_DIMENSIONS
+    }
+
+    async def race_judge(_prompt):
+        return json.dumps(race_payload)
+
+    async def unused_fact_judge(_prompt):
+        return "[]"
+
+    async def fail_fact(*_args):
+        raise RuntimeError("unexpected FACT failure")
+
+    monkeypatch.setattr(deepresearch_bench, "build_deepresearch_race_judge_fn", lambda: race_judge)
+    monkeypatch.setattr(
+        deepresearch_bench, "build_deepresearch_fact_judge_fn", lambda: unused_fact_judge
+    )
+    monkeypatch.setattr(task, "_score_fact", fail_fact)
+
+    scored = await task.score_responses([response])
+
+    assert scored == [response]
+    assert response.scores["race_overall"] == pytest.approx(0.8)
+    for dimension in DEEPRESEARCH_DIMENSIONS:
+        assert response.scores[f"race_{dimension}"] == pytest.approx(0.8)
+    assert {
+        metric: response.scores[metric]
+        for metric in (
+            "fact_citation_accuracy",
+            "fact_avg_effective_citations",
+            "fact_avg_citations",
+            "fact_has_citations",
+        )
+    } == task._zero_fact_scores()
+    assert response.outputs[0].metadata["deepresearch_fact"] == []
+    assert "FACT scoring failed for id 51" in caplog.text
+    assert "FACT scoring failed for 1 instance(s)" in caplog.text
 
 
 @pytest.mark.anyio
