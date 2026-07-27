@@ -4,6 +4,7 @@ This module provides search tools that can be used with the Harness:
 - semantic_scholar_search: Search academic papers via Semantic Scholar API
 - serper_web_search: Search the web via Serper/Google API
 - serper_fetch_page: Fetch and extract webpage content
+- crawl4ai_browse: Fetch and extract webpage content via crawl4ai
 
 These tools are pre-registered in the global registry.
 Import the tool objects and use .name for HarnessConfig.tool_names.
@@ -15,14 +16,21 @@ import asyncio
 import logging
 import os
 import random
+import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import date
+from urllib.parse import urlsplit
 
 import httpx
 
 from .registry import registered_tool
 
 logger = logging.getLogger(__name__)
+
+_search_date_cutoff: ContextVar[str | None] = ContextVar("_search_date_cutoff", default=None)
 
 # Module-level shared HTTP client for connection reuse
 _http_client: httpx.AsyncClient | None = None
@@ -32,6 +40,8 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 _MAX_RETRIES = 5
 _BASE_BACKOFF_S = 1.0
 _MAX_BACKOFF_S = 16.0
+_WEBPAGE_CONTENT_LIMIT = 4000
+_WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
 
 # Semantic Scholar's introductory plan allows ~1 request/second cumulative across
 # all endpoints, which several concurrent agents exhaust immediately. All S2
@@ -40,6 +50,59 @@ _MAX_BACKOFF_S = 16.0
 _S2_MIN_INTERVAL_S = 1.1  # slightly over 1s for margin
 _s2_rate_lock = asyncio.Lock()
 _s2_last_request_ts = 0.0  # time.monotonic() of the last dispatched S2 request
+
+
+@contextmanager
+def search_date_cutoff(cutoff_raw: str | None) -> Iterator[None]:
+    """Set the date cutoff used by search tools within this context."""
+    token = _search_date_cutoff.set(cutoff_raw)
+    try:
+        yield
+    finally:
+        _search_date_cutoff.reset(token)
+
+
+def _parse_cutoff(raw: str | None) -> tuple[int, str, str] | None:
+    """Parse a leading ISO date into year, Google, and ISO date forms."""
+    if not isinstance(raw, str):
+        return None
+    if not raw:
+        return None
+
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})", raw)
+    if match is None:
+        logger.warning("Ignoring unparseable search date cutoff: %r", raw)
+        return None
+
+    year_text, month_text, day_text = match.groups()
+    try:
+        date(int(year_text), int(month_text), int(day_text))
+    except ValueError:
+        logger.warning("Ignoring unparseable search date cutoff: %r", raw)
+        return None
+
+    return (
+        int(year_text),
+        f"{month_text}/{day_text}/{year_text}",
+        f"{year_text}-{month_text}-{day_text}",
+    )
+
+
+def _truncate_webpage_content(text: str) -> str:
+    limit_value = os.environ.get("OLMO_WEBPAGE_CONTENT_LIMIT")
+    if limit_value is None:
+        limit = _WEBPAGE_CONTENT_LIMIT
+    else:
+        try:
+            limit = int(limit_value)
+        except ValueError:
+            limit = _WEBPAGE_CONTENT_LIMIT
+
+    if limit <= 0:
+        return text
+    if len(text) > limit:
+        return text[:limit] + _WEBPAGE_TRUNCATION_NOTICE
+    return text
 
 
 async def _s2_rate_gate() -> None:
@@ -150,16 +213,21 @@ async def semantic_scholar_search(query: str) -> str:
     if not sanitized_query:
         return "Error: Empty search query."
 
+    cutoff = _parse_cutoff(_search_date_cutoff.get())
+    params = {
+        "query": sanitized_query,
+        "limit": _s2_search_limit(),
+        "fields": "title,abstract,url,year,publicationDate,authors,corpusId",
+    }
+    if cutoff is not None:
+        params["publicationDateOrYear"] = f":{cutoff[2]}"
+
     client = _get_http_client()
     try:
         resp = await _get_with_backoff(
             client,
             "https://api.semanticscholar.org/graph/v1/paper/search",
-            params={
-                "query": sanitized_query,
-                "limit": _s2_search_limit(),
-                "fields": "title,abstract,url,year,authors,corpusId",
-            },
+            params=params,
             headers=headers,
             rate_gate=_s2_rate_gate,
         )
@@ -181,6 +249,21 @@ async def semantic_scholar_search(query: str) -> str:
         return f"Error searching Semantic Scholar: {e}"
 
     papers = data.get("data", [])
+    if cutoff is not None:
+        cutoff_year, _, cutoff_iso = cutoff
+        papers = [
+            paper
+            for paper in papers
+            if (
+                isinstance(paper.get("publicationDate"), str)
+                and paper["publicationDate"] <= cutoff_iso
+            )
+            or (
+                not isinstance(paper.get("publicationDate"), str)
+                and isinstance(paper.get("year"), int)
+                and paper["year"] <= cutoff_year
+            )
+        ]
     if not papers:
         return "No papers found for query."
 
@@ -237,11 +320,17 @@ async def serper_web_search(query: str) -> str:
     if not sanitized_query:
         return "Error: Empty search query."
 
+    cutoff = _parse_cutoff(_search_date_cutoff.get())
+    request_body = {"q": sanitized_query, "num": 5}
+    if cutoff is not None:
+        _, cutoff_google, _ = cutoff
+        request_body["tbs"] = f"cdr:1,cd_min:01/01/1000,cd_max:{cutoff_google}"
+
     client = _get_http_client()
     try:
         resp = await client.post(
             "https://google.serper.dev/search",
-            json={"q": sanitized_query, "num": 5},
+            json=request_body,
             headers={
                 "X-API-KEY": api_key,
                 "Content-Type": "application/json",
@@ -348,8 +437,57 @@ async def serper_fetch_page(url: str) -> str:
     if not text:
         return "No content extracted from webpage."
 
-    # Truncate if too long
-    if len(text) > 4000:
-        text = text[:4000] + "\n\n[Content truncated...]"
+    text = _truncate_webpage_content(text)
+
+    return text
+
+
+@registered_tool(
+    name="browse_webpage",
+    description="Fetch and extract a webpage's content as clean markdown (via crawl4ai).",
+)
+async def crawl4ai_browse(url: str) -> str:
+    """Fetch and extract a webpage's content as clean markdown via crawl4ai.
+
+    Args:
+        url: The URL of the webpage to fetch.
+
+    Returns:
+        Extracted markdown content from the webpage.
+    """
+    if not url or not url.strip():
+        return "Error: Empty URL."
+
+    sanitized_url = url.strip()
+    if urlsplit(sanitized_url).scheme.lower() not in {"http", "https"}:
+        return "Error: Only http(s) URLs are supported."
+
+    try:
+        from crawl4ai import AsyncWebCrawler
+    except ImportError:
+        return "Error: crawl4ai is not installed."
+
+    try:
+        async with AsyncWebCrawler() as crawler:
+            result = await crawler.arun(sanitized_url)
+    except Exception as e:
+        logger.exception(f"crawl4ai browse error: url={sanitized_url!r}")
+        return f"Error fetching webpage: {e}"
+
+    if not getattr(result, "success", False):
+        error_message = getattr(result, "error_message", None)
+        if error_message:
+            return f"Error fetching webpage: {error_message}"
+        status_code = getattr(result, "status_code", None)
+        if status_code is not None:
+            return f"Error fetching webpage: HTTP {status_code}"
+        return "Error fetching webpage: unknown error"
+
+    markdown = getattr(result, "markdown", None)
+    text = getattr(markdown, "raw_markdown", None) or str(markdown or "")
+    if not text.strip():
+        return "No content extracted from webpage."
+
+    text = _truncate_webpage_content(text)
 
     return text
