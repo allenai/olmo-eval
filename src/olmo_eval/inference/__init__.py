@@ -19,6 +19,7 @@ __all__ = [
     "VLLMServerProvider",
     "OlmoCoreProvider",
     "LiteLLMProvider",
+    "StoredPredictionsProvider",
     "create_provider",
     # Tokenizer utilities
     "encode_context_and_continuation",
@@ -173,6 +174,10 @@ def __getattr__(name: str):
         from .providers.litellm import LiteLLMProvider
 
         return LiteLLMProvider
+    if name == "StoredPredictionsProvider":
+        from .providers.replay import StoredPredictionsProvider
+
+        return StoredPredictionsProvider
     if name == "metrics":
         from . import metrics
 
