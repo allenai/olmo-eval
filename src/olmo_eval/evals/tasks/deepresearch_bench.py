@@ -844,6 +844,17 @@ def _build_judge_fn(default_spec: str, scorer_name: str, default_effort: str) ->
     )
 
 
+def _fact_scoring_disabled() -> bool:
+    """Whether FACT scoring is switched off for this run.
+
+    FACT crawls every cited URL and judges each extracted statement, so it dominates the cost of
+    scoring this benchmark. RACE alone is often what is wanted, and there was previously no way
+    to ask for it.
+    """
+    value = os.environ.get("DEEPRESEARCH_SKIP_FACT", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_deepresearch_race_judge_fn() -> JudgeFn:
     """Build the RACE judge with medium effort unless a spec suffix overrides it."""
     return _build_judge_fn(DEEPRESEARCH_RACE_DEFAULT_JUDGE_SPEC, "DeepResearchBenchRACE", "medium")
@@ -1159,6 +1170,7 @@ class DeepResearchBench(Task):
         fact_judge = build_deepresearch_fact_judge_fn()
 
         race_failures = 0
+        fact_skipped = 0
         fact_failures = 0
         for response in responses:
             output = response.outputs[0] if response.outputs else None
@@ -1174,20 +1186,29 @@ class DeepResearchBench(Task):
                 race_scores, race_details, race_failed = await self._score_race(
                     response.instance, answer, race_judge
                 )
-                try:
-                    fact_scores, fact_details = await self._score_fact(
-                        response.instance, answer, fact_judge
-                    )
-                    fact_failed = False
-                except Exception as exc:
-                    logger.warning(
-                        "DeepResearch Bench FACT scoring failed for id %r: %s",
-                        response.instance.metadata.get("id"),
-                        exc,
-                    )
+                if _fact_scoring_disabled():
+                    # Skipped, not zero. Leaving silent zeros here would be indistinguishable
+                    # from "ran and scored nothing", which is exactly the confusion that made an
+                    # earlier all-zero metrics column unreadable.
                     fact_scores = self._zero_fact_scores()
-                    fact_details = []
-                    fact_failed = True
+                    fact_details = [{"fact_scoring": "skipped"}]
+                    fact_failed = False
+                    fact_skipped += 1
+                else:
+                    try:
+                        fact_scores, fact_details = await self._score_fact(
+                            response.instance, answer, fact_judge
+                        )
+                        fact_failed = False
+                    except Exception as exc:
+                        logger.warning(
+                            "DeepResearch Bench FACT scoring failed for id %r: %s",
+                            response.instance.metadata.get("id"),
+                            exc,
+                        )
+                        fact_scores = self._zero_fact_scores()
+                        fact_details = []
+                        fact_failed = True
             else:
                 race_scores = self._zero_race_scores()
                 race_details = None
@@ -1207,6 +1228,14 @@ class DeepResearchBench(Task):
                 output.metadata["deepresearch_fact"] = fact_details
                 for metric_name, score in response.scores.items():
                     output.metadata[f"score:{metric_name}"] = score
+
+        if fact_skipped:
+            logger.warning(
+                "DeepResearch Bench FACT scoring skipped for %d instance(s) because "
+                "DEEPRESEARCH_SKIP_FACT is set; every fact_* metric below is a placeholder "
+                "and must not be read as a score of zero.",
+                fact_skipped,
+            )
 
         if race_failures:
             logger.warning(
