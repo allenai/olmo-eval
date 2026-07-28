@@ -858,12 +858,20 @@ def _fact_scoring_disabled() -> bool:
 
 def build_deepresearch_race_judge_fn() -> JudgeFn:
     """Build the RACE judge with medium effort unless a spec suffix overrides it."""
-    return _build_judge_fn(DEEPRESEARCH_RACE_DEFAULT_JUDGE_SPEC, "DeepResearchBenchRACE", "medium")
+    return _build_judge_fn(
+        os.getenv("OLMO_EVAL_JUDGE", DEEPRESEARCH_RACE_DEFAULT_JUDGE_SPEC),
+        "DeepResearchBenchRACE",
+        "medium",
+    )
 
 
 def build_deepresearch_fact_judge_fn() -> JudgeFn:
     """Build the FACT judge with low effort unless a spec suffix overrides it."""
-    return _build_judge_fn(DEEPRESEARCH_FACT_DEFAULT_JUDGE_SPEC, "DeepResearchBenchFACT", "low")
+    return _build_judge_fn(
+        os.getenv("OLMO_EVAL_JUDGE", DEEPRESEARCH_FACT_DEFAULT_JUDGE_SPEC),
+        "DeepResearchBenchFACT",
+        "low",
+    )
 
 
 @dataclass(frozen=True)
