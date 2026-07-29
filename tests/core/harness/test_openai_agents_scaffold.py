@@ -10,6 +10,7 @@ from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.scaffolds.openai_agents import (
     FORCED_FINAL_ANSWER_INSTRUCTION,
     OpenAIAgentsScaffold,
+    strip_reasoning_prefix,
 )
 
 pytest.importorskip("agents")
@@ -76,6 +77,33 @@ def _patch_scaffold_agent(monkeypatch, agent):
     monkeypatch.setattr(agents, "trace", lambda *args, **kwargs: contextlib.nullcontext())
 
 
+class TestStripReasoningPrefix:
+    """Tests for the scaffold's reasoning-leak guard."""
+
+    def test_plain_answer_is_untouched(self):
+        assert strip_reasoning_prefix("# Report\n\nBody") == "# Report\n\nBody"
+        assert strip_reasoning_prefix("") == ""
+
+    def test_unopened_close_tag_is_stripped(self):
+        """This is the shape a thinking template produces: only the closing tag.
+
+        The opening <think> lives in the generation prompt, so a paired
+        <think>...</think> pattern would not match what the model returns.
+        """
+        leaked = (
+            "I have gathered enough sources. Now I will write the report."
+            "</think> # Comprehensive Analysis\n\nBody"
+        )
+        assert strip_reasoning_prefix(leaked) == "# Comprehensive Analysis\n\nBody"
+
+    def test_paired_block_is_stripped_too(self):
+        assert strip_reasoning_prefix("<think>scratch</think>\n\nAnswer") == "Answer"
+
+    def test_cuts_at_the_first_close_tag(self):
+        """Matches the ResearchQA and DeepResearch Bench extractors."""
+        assert strip_reasoning_prefix("a</think>b</think>c") == "b</think>c"
+
+
 class TestOpenAIAgentsMaxTurns:
     @pytest.mark.anyio
     async def test_max_turns_preserves_trajectory_and_forces_final_answer(self, monkeypatch):
@@ -112,6 +140,34 @@ class TestOpenAIAgentsMaxTurns:
         assert result.final_output.text == "Forced final answer"
         assert result.trajectory is not None
         assert result.trajectory.total_tool_calls == 1
+
+    @pytest.mark.anyio
+    async def test_forced_final_answer_drops_a_leaked_monologue(self, monkeypatch):
+        from agents import Agent, Runner
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+        partial_run_data = _FakeRunData(
+            new_items=_tool_turn_items(agent, output="Tool result before cap"),
+        )
+        run_calls = []
+
+        async def fake_run(**kwargs):
+            run_calls.append(kwargs)
+            if len(run_calls) == 1:
+                raise _max_turns_exceeded_with_run_data(partial_run_data)
+            return SimpleNamespace(final_output="wrapping up now</think>Forced final answer")
+
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+
+        result = await OpenAIAgentsScaffold().run(
+            provider=SimpleNamespace(),
+            config=HarnessConfig(name="test", max_turns=1),
+            request=_agent_request(),
+            enable_compaction=False,
+        )
+
+        assert result.final_output.text == "Forced final answer"
         assert result.trajectory.tool_result_sequence[0].content == "Tool result before cap"
         assert result.trajectory.tool_result_sequence[0].tool_call_id == "call_search"
 
@@ -201,3 +257,35 @@ class TestOpenAIAgentsMaxTurns:
         assert result.trajectory.total_tool_calls == 1
         assert result.trajectory.tool_result_sequence[0].content == "Normal tool result"
         assert len(run_calls) == 1
+
+    @pytest.mark.anyio
+    async def test_normal_completion_drops_a_leaked_monologue(self, monkeypatch):
+        """A model served without a reasoning parser returns monologue + answer.
+
+        The scaffold must store only the answer; the raw text stays in the
+        trajectory so the leak is still visible when debugging a run.
+        """
+        from agents import Agent, Runner
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+        run_result = _FakeRunData(
+            new_items=_tool_turn_items(agent, output="Normal tool result"),
+            final_output=(
+                "I have gathered the sources and will now write the report.</think># Report\n\nBody"
+            ),
+        )
+
+        async def fake_run(**kwargs):
+            return run_result
+
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+
+        result = await OpenAIAgentsScaffold().run(
+            provider=SimpleNamespace(),
+            config=HarnessConfig(name="test", max_turns=3),
+            request=_agent_request(),
+            enable_compaction=False,
+        )
+
+        assert result.final_output.text == "# Report\n\nBody"

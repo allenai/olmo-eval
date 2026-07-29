@@ -30,6 +30,41 @@ FORCED_FINAL_ANSWER_INSTRUCTION = (
     "provide your final answer now. Do not call any tools."
 )
 
+_REASONING_END_TAG = "</think>"
+
+
+def strip_reasoning_prefix(text: str) -> str:
+    """Drop a thinking model's monologue from the front of its final answer.
+
+    A reasoning model that is served without a reasoning parser returns its
+    monologue and its answer concatenated in a single message content field, and
+    the Agents SDK -- which reads that field -- then reports the pair as the run's
+    final output. Modern thinking templates open ``<think>`` in the generation
+    prompt rather than in the completion, so the leaked text is the asymmetric
+    ``"<monologue></think><answer>"`` and a paired ``<think>...</think>`` regex
+    does not match it.
+
+    The correct fix is to serve the model with vLLM's ``--reasoning-parser``,
+    which olmo-eval now passes for thinking models; this guard covers the servers
+    olmo-eval does not launch itself, such as a provider pointed at an external
+    ``base_url``, and any model or vLLM version whose parser we fail to infer.
+
+    Everything up to and including the first ``</think>`` is dropped, matching
+    the deliberately lossy convention already used by the ResearchQA and
+    DeepResearch Bench answer extractors, so that a scaffold answer and a task
+    answer never disagree about where the monologue ends.
+
+    Args:
+        text: The final output text as reported by the scaffold.
+
+    Returns:
+        The answer with any leading reasoning block removed.
+    """
+    end = text.find(_REASONING_END_TAG)
+    if end < 0:
+        return text
+    return text[end + len(_REASONING_END_TAG) :].lstrip()
+
 
 # A tool name the model spelled wrong is a typo, not a different request. The agents SDK
 # disagrees: an unknown name raises ModelBehaviorError, the scaffold turns that into the run's
@@ -485,7 +520,7 @@ class OpenAIAgentsScaffold(Scaffold):
 
         return HarnessResult(
             trajectory=trajectory,
-            final_output=LMOutput(text=final_text or ""),
+            final_output=LMOutput(text=strip_reasoning_prefix(final_text or "")),
             max_turns_reached=max_turns_reached,
             error="Max turns exceeded" if max_turns_reached else None,
         )
@@ -520,7 +555,7 @@ class OpenAIAgentsScaffold(Scaffold):
             max_turns=1,
         )
         final_text = getattr(final_result, "final_output", "")
-        return str(final_text or "")
+        return strip_reasoning_prefix(str(final_text or ""))
 
     def _build_forced_final_input(
         self,
