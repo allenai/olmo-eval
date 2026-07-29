@@ -117,6 +117,7 @@ def register_safety_variants(eval_name: str, subsets: tuple[str, ...]):
         metrics=safety_metrics(SafetyScorer, subsets),
         primary_metric=AccuracyMetric(scorer=SafetyScorer),
         sampling_params=judge_sampling,
+        required_secrets=("OPENAI_API_KEY"),
     )
 
     register_variant(

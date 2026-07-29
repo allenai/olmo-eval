@@ -43,12 +43,12 @@ class DoAnythingNow(SafetyBase):
 
 
 _DOANYTHING_SUBSET_METRICS = (
-    "jailbreak_source::jailbreak_chat",
-    "jailbreak_source::BreakGPT",
-    "jailbreak_source::ChatGPT",
-    "jailbreak_source::LLM Promptwriting",
-    "jailbreak_source::AI Prompt Sharing",
-    "jailbreak_source::ChatGPTJailbreak",
+    "jailbreak_source__jailbreak_chat",
+    "jailbreak_source__BreakGPT",
+    "jailbreak_source__ChatGPT",
+    "jailbreak_source__LLM Promptwriting",
+    "jailbreak_source__AI Prompt Sharing",
+    "jailbreak_source__ChatGPTJailbreak",
 )
 
 
