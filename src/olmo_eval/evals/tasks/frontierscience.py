@@ -373,6 +373,19 @@ class _FrontierScience(Task, ABC):
             for output_index in range(len(response.outputs))
         ]
 
+        # An instance with no output scores 0.0, which is indistinguishable from a
+        # genuine miss unless it is announced: a provider that fails every request
+        # otherwise yields a clean all-zero result with no error anywhere.
+        missing_output = sum(1 for response in responses if not response.outputs)
+        if missing_output:
+            logger.warning(
+                "FrontierScience has no model output for %d/%d instance(s); each scores 0.0 "
+                "without a judge call. If this covers the whole task, generation failed and "
+                "the reported score is not a capability measurement.",
+                missing_output,
+                len(responses),
+            )
+
         async def run(response_index: int, output_index: int) -> dict[str, float]:
             response = responses[response_index]
             async with semaphore:

@@ -320,6 +320,23 @@ class TestOlympiadScoring:
         assert "no parseable verdict for 1/1 output(s)" in caplog.text
 
     @pytest.mark.anyio
+    async def test_warns_when_generation_produced_no_output(self, olympiad, monkeypatch, caplog):
+        """A provider that fails every request must not look like a genuine zero."""
+        responses = [_response(olympiad), _response(olympiad)]
+        for response in responses:
+            response.outputs = []
+        judge, calls = _replies(olympiad)
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        with caplog.at_level(logging.WARNING, logger=frontierscience.__name__):
+            await olympiad.score_responses(responses)
+
+        assert calls == []
+        assert [response.scores["accuracy"] for response in responses] == [0.0, 0.0]
+        assert "no model output for 2/2 instance(s)" in caplog.text
+        assert "not a capability measurement" in caplog.text
+
+    @pytest.mark.anyio
     async def test_recovers_on_a_retry(self, olympiad, monkeypatch):
         response = _response(olympiad)
         judge, calls = _replies(olympiad, "garbage", "VERDICT: CORRECT")
