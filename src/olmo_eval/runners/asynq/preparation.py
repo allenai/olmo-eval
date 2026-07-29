@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -22,6 +23,7 @@ def prepare_task_items(
     model_name: str,
     overrides: dict[str, Any] | None,
     sampling_overrides: dict[str, Any] | None = None,
+    harness_tool_names: Sequence[str] = (),
 ) -> tuple[Task, list[QueueItem]]:
     """Prepare a task and its queue items.
 
@@ -30,6 +32,8 @@ def prepare_task_items(
         model_name: Model name this task is for
         overrides: Optional config overrides (num_fewshot, limit, fewshot_seed)
         sampling_overrides: Optional overrides for sampling params (temperature, max_tokens, etc.)
+        harness_tool_names: Tool names the harness exposes, so a task that names
+            tools in its prompt can describe the ones that really exist.
 
     Returns:
         Tuple of (Task instance for scoring, list of QueueItems)
@@ -39,6 +43,9 @@ def prepare_task_items(
 
     if overrides:
         task.config = replace(task.config, **overrides)
+
+    if harness_tool_names:
+        task.config = replace(task.config, harness_tool_names=tuple(harness_tool_names))
 
     # Build sampling params from overrides
     existing_params = task.config.sampling_params or SamplingParams()
