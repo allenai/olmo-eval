@@ -347,6 +347,8 @@ class BeakerJobConfig:
         timeout: Job timeout (e.g., "24h", "30m").
         retries: Number of retries on failure.
         beaker_image: Container image to use.
+        git_ref: Commit SHA of this repo to run. When None, gantry uses the
+            HEAD of the git repository rooted at the current working directory.
         description: Optional job description.
         weka_buckets: Weka storage mounts.
         nfs: Whether to mount NFS.
@@ -374,6 +376,7 @@ class BeakerJobConfig:
 
     # Beaker settings
     beaker_image: str = BEAKER_DEFAULT_IMAGE
+    git_ref: str | None = None
     description: str | None = None
 
     # Storage - defaults include common eval buckets
@@ -658,6 +661,40 @@ def is_direct_source_package(package: str) -> bool:
         or "://" in normalized
         or normalized.startswith("/")
     )
+
+
+def describe_code_version(git_ref: str | None = None) -> str:
+    """Describe the commit gantry will clone for a job, and where it came from.
+
+    Gantry derives the job's code version from the git repository rooted at the
+    launching process's working directory, not from any olmo-eval option, so the
+    same command run from two checkouts of this repo launches two different
+    commits with no other visible difference. This renders that decision so it
+    can be checked before a job starts.
+
+    Args:
+        git_ref: Explicit commit passed through to gantry, if any.
+
+    Returns:
+        A human-readable description; never raises, since this is diagnostics.
+    """
+    import os
+
+    if git_ref is not None:
+        return f"{git_ref} (pinned via git_ref)"
+
+    cwd = os.getcwd()
+    try:
+        from git.repo import Repo
+
+        # The same lookup gantry performs in GitRepoState.from_env().
+        repo = Repo(".")
+        head = str(repo.commit())
+        branch = "detached HEAD" if repo.head.is_detached else repo.active_branch.name
+        dirty = " [dirty]" if repo.is_dirty() else ""
+        return f"{head} ({branch}){dirty} from cwd {cwd}"
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never block a launch
+        return f"unresolved from cwd {cwd} ({exc})"
 
 
 def build_install_command(
@@ -1065,6 +1102,13 @@ class BeakerLauncher:
         if dry_run:
             self._print_dry_run_config(config, clusters)
 
+        # Gantry resolves the code version from the CURRENT WORKING DIRECTORY
+        # (gantry.git_utils.GitRepoState.from_env -> Repo(".")), not from any
+        # olmo-eval setting. Launching from a second checkout of this repo
+        # therefore silently runs that checkout's HEAD instead of the branch you
+        # think you are on. Report what will actually be cloned.
+        log.info(f"Code version: {describe_code_version(config.git_ref)}")
+
         # Launch the experiment (or show spec if dry_run)
         workload = launch_experiment(
             args=config.command,
@@ -1081,6 +1125,7 @@ class BeakerLauncher:
             retries=config.retries,
             budget=config.budget,
             beaker_image=config.beaker_image,
+            ref=config.git_ref,
             weka=weka_mounts if weka_mounts else None,
             gh_token_secret=self._default_github_token_secret(),
             env_vars=env_vars if env_vars else None,
