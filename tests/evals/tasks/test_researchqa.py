@@ -9,13 +9,16 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, R
 from olmo_eval.evals.tasks import researchqa
 from olmo_eval.evals.tasks.common import get_task, task_exists
 from olmo_eval.evals.tasks.researchqa import (
+    RESEARCHQA_DEFAULT_TOOLS,
     RESEARCHQA_GENERATION_PROMPT,
     RESEARCHQA_LABEL_SCORES,
     build_coverage_judge_prompt,
+    build_generation_prompt,
     build_researchqa_judge_fn,
     normalize_coverage_label,
     parse_coverage_labels,
 )
+from olmo_eval.harness import get_harness_preset
 
 
 @pytest.fixture
@@ -174,6 +177,37 @@ class TestPrompts:
             "Workflow (follow this order)"
         )
         assert RESEARCHQA_GENERATION_PROMPT.endswith("Question: ")
+
+    def test_prompt_names_only_the_tools_the_harness_exposes(self, task):
+        """The prompt has to follow the harness: naming an absent tool makes the model
+        call it, and the scaffold then fails the episode before any turn runs."""
+        task.config.harness_tool_names = get_harness_preset("paper_search_agent").tool_names
+        instance = task.process_doc(_doc())
+        assert instance is not None
+        content = task.format_request(instance).messages[0]["content"]
+
+        assert "semantic_scholar_snippet_search" in content
+        assert "serper" not in content
+        assert "browse_webpage" not in content
+        assert "Search first, and only then answer" in content
+        assert "fetch" not in content.lower()
+
+    def test_prompt_is_unchanged_for_the_default_and_dr_tulu_tool_sets(self):
+        """dr_tulu exposes exactly the tools this prompt used to hardcode, and a
+        harness with no tools falls back to that list, so both must stay untouched."""
+        assert build_generation_prompt() == RESEARCHQA_GENERATION_PROMPT
+        assert build_generation_prompt(RESEARCHQA_DEFAULT_TOOLS) == RESEARCHQA_GENERATION_PROMPT
+        dr_tulu_tools = get_harness_preset("dr_tulu").tool_names
+        assert dr_tulu_tools == RESEARCHQA_DEFAULT_TOOLS
+        assert build_generation_prompt(dr_tulu_tools) == RESEARCHQA_GENERATION_PROMPT
+
+    def test_prompt_routes_an_alternative_fetch_tool_into_the_fetch_step(self):
+        content = build_generation_prompt(
+            ("semantic_scholar_snippet_search", "serper_google_webpage_search", "browse_webpage")
+        )
+        assert "- browse_webpage\n" in content
+        assert "Fetch and read promising source content using browse_webpage." in content
+        assert "serper_fetch_webpage_content" not in content
 
     def test_generation_prompt_omits_cutoff_when_date_is_missing(self, task):
         doc = _doc()

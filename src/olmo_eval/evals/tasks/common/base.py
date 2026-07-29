@@ -165,6 +165,12 @@ class TaskConfig:
     #: beaker launcher mounts each as the user-scoped secret ``{user}_{NAME}``.
     required_secrets: tuple[str, ...] = ()
 
+    #: Tool names the configured harness actually exposes to the agent, empty when
+    #: it exposes none. The runner fills this in from the harness config so a task
+    #: whose prompt names tools can describe what is really callable instead of a
+    #: hardcoded list.
+    harness_tool_names: tuple[str, ...] = ()
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):
