@@ -895,6 +895,12 @@ class BeakerLauncher:
         if use_isolated_vllm_venv:
             vllm_venv = "/opt/vllm-venv"
             steps.append(f"uv venv {vllm_venv}")
+            # flashinfer compiles some kernels on the first forward pass and
+            # shells out to a bare "ninja", resolved through PATH from the
+            # process vLLM runs in. Install it explicitly so the isolated venv
+            # owns a copy instead of relying on a transitive dependency of
+            # whichever vLLM build (or fork) lands here.
+            steps.append(f"uv pip install --python {vllm_venv}/bin/python ninja")
             # Symlink torch and nvidia packages from main venv (already installed)
             steps.append(
                 f"for pkg in /opt/venv/lib/python*/site-packages/torch* "
