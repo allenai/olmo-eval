@@ -927,6 +927,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     self.model_name,
                     overrides or None,
                     sampling_overrides=sampling_overrides or None,
+                    harness_tool_names=self.harness_config.tool_names,
                 )
                 tracker = TaskTracker(
                     model_name=self.model_name,
