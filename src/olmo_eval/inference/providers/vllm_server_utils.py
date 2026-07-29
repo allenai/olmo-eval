@@ -67,10 +67,10 @@ ProgressCallback = Callable[[str], None]
 
 
 @cache
-def _chat_template_has_function_tag(
+def _load_chat_template(
     model_name: str, trust_remote_code: bool = False, revision: str | None = None
-) -> bool | None:
-    """Return whether the model chat template contains '<function=', or None if unavailable."""
+) -> str | None:
+    """Return the model's chat template source, or None if it cannot be resolved."""
     try:
         from transformers import AutoTokenizer
 
@@ -84,9 +84,37 @@ def _chat_template_has_function_tag(
             chat_template = getattr(tokenizer, "chat_template", None)
         if chat_template is None:
             return None
-        return "<function=" in str(chat_template)
+        return str(chat_template)
     except Exception:
         return None
+
+
+@cache
+def _chat_template_has_function_tag(
+    model_name: str, trust_remote_code: bool = False, revision: str | None = None
+) -> bool | None:
+    """Return whether the model chat template contains '<function=', or None if unavailable."""
+    chat_template = _load_chat_template(model_name, trust_remote_code, revision)
+    if chat_template is None:
+        return None
+    return "<function=" in chat_template
+
+
+@cache
+def _chat_template_has_think_tag(
+    model_name: str, trust_remote_code: bool = False, revision: str | None = None
+) -> bool | None:
+    """Return whether the model chat template emits '<think>', or None if unavailable.
+
+    A chat template that writes ``<think>`` into the generation prompt is the
+    signature of a thinking model. It is also the reason the raw completion looks
+    asymmetric: the opening tag is part of the prompt, so only the closing
+    ``</think>`` shows up in what the model generates.
+    """
+    chat_template = _load_chat_template(model_name, trust_remote_code, revision)
+    if chat_template is None:
+        return None
+    return "<think>" in chat_template
 
 
 def _wait_for_server(
@@ -215,6 +243,53 @@ def _infer_tool_call_parser(
     return "hermes"
 
 
+def _infer_reasoning_parser(
+    model_name: str, *, trust_remote_code: bool = False, revision: str | None = None
+) -> str | None:
+    """Infer vLLM's ``--reasoning-parser`` for a thinking model, or None to omit the flag.
+
+    Without a reasoning parser vLLM has no way to tell a model's internal
+    monologue apart from its answer, so it returns the whole raw completion in
+    ``message.content``. For a model whose chat template opens ``<think>`` in the
+    generation prompt, that content is ``"<monologue></think><answer>"`` -- the
+    monologue is prepended to every answer, and any consumer reading
+    ``message.content`` (the OpenAI Agents SDK used by the ``openai_agents``
+    scaffold, for one) stores the monologue as part of the answer. With the
+    parser enabled vLLM splits the two and ``message.content`` is the answer alone.
+
+    Selection is deliberately conservative: the flag is only emitted when the
+    chat template positively contains ``<think>``, because naming a parser whose
+    delimiters the model never emits would make vLLM classify entire responses as
+    reasoning and return an empty answer.
+
+    Args:
+        model_name: Model name or path.
+        trust_remote_code: Whether loading the tokenizer may execute remote code.
+        revision: Optional model revision.
+
+    Returns:
+        A vLLM reasoning parser name, or None if the flag should not be passed.
+    """
+    has_think = _chat_template_has_think_tag(model_name, trust_remote_code, revision)
+    if not has_think:
+        # False (template has no thinking) or None (template unavailable). Guessing
+        # here risks emptying every answer, so leave vLLM at its default.
+        if has_think is None:
+            logger.debug(
+                "Could not read the chat template for %s; not passing --reasoning-parser.",
+                model_name,
+            )
+        return None
+
+    model_lower = model_name.lower()
+    if "olmo" in model_lower:
+        return "olmo3"
+    if "qwen" in model_lower:
+        return "qwen3"
+    # Generic <think>/</think> parser, which is what the remaining thinking models use.
+    return "deepseek_r1"
+
+
 def _get_vllm_python() -> str:
     """Get the Python interpreter to use for vLLM server.
 
@@ -308,6 +383,7 @@ def _build_server_command(
     tokenizer: str | None = None,
     enable_auto_tool_choice: bool = False,
     tool_call_parser: str | None = None,
+    reasoning_parser: str | None = None,
     enable_prefix_caching: bool = True,
     chat_template_kwargs: dict[str, Any] | None = None,
     **kwargs: Any,
@@ -325,6 +401,9 @@ def _build_server_command(
         enable_auto_tool_choice: Enable automatic tool choice
         tool_call_parser: Parser for tool calls (auto-detected if not specified
             when enable_auto_tool_choice is True)
+        reasoning_parser: Parser that separates a thinking model's monologue from its
+            answer (auto-detected from the chat template if not specified; pass
+            "" to suppress auto-detection and leave vLLM at its default)
         enable_prefix_caching: Enable prefix caching for faster inference (default: True)
         chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false}).
             These are applied at request time by the provider for broad vLLM compatibility,
@@ -386,6 +465,18 @@ def _build_server_command(
         # OLMo3 requires custom chat template for tool calling (only when patch is applied)
         if parser == "olmo3" and patch_olmo3_tool_parser:
             cmd.extend(["--chat-template", _get_olmo3_tool_template_path()])
+
+    # Reasoning separation. A thinking model whose server has no reasoning parser
+    # returns its monologue and its answer concatenated in a single content field,
+    # so whatever reads that field stores the monologue as part of the answer.
+    if reasoning_parser is None:
+        reasoning_parser = _infer_reasoning_parser(
+            tokenizer or model_name,
+            trust_remote_code=bool(kwargs.get("trust_remote_code", False)),
+            revision=kwargs.get("revision"),
+        )
+    if reasoning_parser:
+        cmd.extend(["--reasoning-parser", reasoning_parser])
 
     # Prefix caching. vLLM defaults can vary by version, so pass an explicit
     # positive or negative flag instead of relying on omission semantics.

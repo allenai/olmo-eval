@@ -7,17 +7,25 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from olmo_eval.inference.providers.vllm_server_utils import (
+    _build_server_command,
     _chat_template_has_function_tag,
+    _chat_template_has_think_tag,
+    _infer_reasoning_parser,
     _infer_tool_call_parser,
+    _load_chat_template,
 )
 
 
 @pytest.fixture(autouse=True)
 def clear_chat_template_cache():
     """Keep cached tokenizer probes from leaking across tests."""
+    _load_chat_template.cache_clear()
     _chat_template_has_function_tag.cache_clear()
+    _chat_template_has_think_tag.cache_clear()
     yield
+    _load_chat_template.cache_clear()
     _chat_template_has_function_tag.cache_clear()
+    _chat_template_has_think_tag.cache_clear()
 
 
 class TestChatTemplateHasFunctionTag:
@@ -167,3 +175,136 @@ class TestInferToolCallParser:
             assert _infer_tool_call_parser("org/test-unrelated-parser-false") == "hermes"
 
         assert caplog.records == []
+
+
+class TestChatTemplateHasThinkTag:
+    """Tests for thinking-template detection."""
+
+    def test_template_opening_think_returns_true(self):
+        tokenizer = MagicMock()
+        tokenizer.get_chat_template.return_value = "{{ '<|im_start|>assistant\\n<think>\\n' }}"
+
+        with patch("transformers.AutoTokenizer.from_pretrained", return_value=tokenizer):
+            assert _chat_template_has_think_tag("test-think-template-true") is True
+
+    def test_template_without_think_returns_false(self):
+        tokenizer = MagicMock()
+        tokenizer.get_chat_template.return_value = "{{ '<|im_start|>assistant\\n' }}"
+
+        with patch("transformers.AutoTokenizer.from_pretrained", return_value=tokenizer):
+            assert _chat_template_has_think_tag("test-think-template-false") is False
+
+    def test_unavailable_template_returns_none(self):
+        with patch(
+            "transformers.AutoTokenizer.from_pretrained",
+            side_effect=RuntimeError("failed"),
+        ):
+            assert _chat_template_has_think_tag("test-think-template-raises") is None
+
+
+class TestInferReasoningParser:
+    """Tests for reasoning parser inference.
+
+    A thinking model served without a reasoning parser returns its monologue and
+    its answer concatenated in one content field, so the flag has to be inferred;
+    naming a parser for a model that never emits its delimiters would empty every
+    answer instead, so absent evidence the flag has to be omitted.
+    """
+
+    @pytest.mark.parametrize(
+        ("model_name", "parser"),
+        [
+            ("Qwen/Qwen3.5-35B-A3B", "qwen3"),
+            ("allenai/OLMo-3-32B-Think", "olmo3"),
+            ("deepseek-ai/DeepSeek-R1", "deepseek_r1"),
+        ],
+    )
+    def test_thinking_template_selects_family_parser(self, model_name, parser):
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._chat_template_has_think_tag",
+            return_value=True,
+        ):
+            assert _infer_reasoning_parser(model_name) == parser
+
+    def test_non_thinking_template_returns_none(self):
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._chat_template_has_think_tag",
+            return_value=False,
+        ):
+            assert _infer_reasoning_parser("Qwen/Qwen2.5-7B-Instruct") is None
+
+    def test_unreadable_template_returns_none(self):
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._chat_template_has_think_tag",
+            return_value=None,
+        ):
+            assert _infer_reasoning_parser("org/unreachable-model") is None
+
+    def test_forwards_trust_remote_code_and_revision(self):
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._chat_template_has_think_tag",
+            return_value=True,
+        ) as probe:
+            _infer_reasoning_parser("Qwen/Qwen3.5-35B-A3B", trust_remote_code=True, revision="main")
+
+        probe.assert_called_once_with("Qwen/Qwen3.5-35B-A3B", True, "main")
+
+
+class TestServerCommandReasoningParser:
+    """Tests that the inferred reasoning parser reaches the vLLM command line."""
+
+    def test_thinking_model_gets_reasoning_parser_flag(self):
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._infer_reasoning_parser",
+            return_value="qwen3",
+        ):
+            cmd = _build_server_command("Qwen/Qwen3.5-35B-A3B", port=8000)
+
+        assert "--reasoning-parser" in cmd
+        assert cmd[cmd.index("--reasoning-parser") + 1] == "qwen3"
+
+    def test_non_thinking_model_omits_the_flag(self):
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._infer_reasoning_parser",
+            return_value=None,
+        ):
+            cmd = _build_server_command("org/plain-instruct", port=8000)
+
+        assert "--reasoning-parser" not in cmd
+
+    def test_explicit_parser_overrides_inference(self):
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._infer_reasoning_parser"
+        ) as probe:
+            cmd = _build_server_command(
+                "Qwen/Qwen3.5-35B-A3B", port=8000, reasoning_parser="deepseek_r1"
+            )
+
+        probe.assert_not_called()
+        assert cmd[cmd.index("--reasoning-parser") + 1] == "deepseek_r1"
+        assert cmd.count("--reasoning-parser") == 1
+
+    def test_empty_string_suppresses_the_flag(self):
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._infer_reasoning_parser"
+        ) as probe:
+            cmd = _build_server_command("Qwen/Qwen3.5-35B-A3B", port=8000, reasoning_parser="")
+
+        probe.assert_not_called()
+        assert "--reasoning-parser" not in cmd
+
+    def test_inference_probes_the_tokenizer_when_one_is_given(self):
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._infer_reasoning_parser",
+            return_value="qwen3",
+        ) as probe:
+            _build_server_command(
+                "/weka/checkpoints/step-1000",
+                port=8000,
+                tokenizer="Qwen/Qwen3.5-35B-A3B",
+                revision="main",
+            )
+
+        probe.assert_called_once_with(
+            "Qwen/Qwen3.5-35B-A3B", trust_remote_code=False, revision="main"
+        )
