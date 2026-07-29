@@ -13,12 +13,13 @@ Import the tool objects and use .name for HarnessConfig.tool_names.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 import os
 import random
 import re
 import time
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import date
@@ -46,7 +47,9 @@ _WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
 # Semantic Scholar's introductory plan allows ~1 request/second cumulative across
 # all endpoints, which several concurrent agents exhaust immediately. All S2
 # requests pass through a process-global minimum interval (proactive throttle);
-# backoff handles the occasional 429 that still gets through.
+# backoff handles the occasional 429 that still gets through. The limit is
+# enforced per API key, so the interval below is the budget for a single key and
+# _s2_rate_interval() divides it by the number of configured keys.
 _S2_MIN_INTERVAL_S = 1.1  # slightly over 1s for margin
 _s2_rate_lock = asyncio.Lock()
 _s2_last_request_ts = 0.0  # time.monotonic() of the last dispatched S2 request
@@ -105,15 +108,76 @@ def _truncate_webpage_content(text: str) -> str:
     return text
 
 
+def _api_keys_from_env(base_var: str) -> list[str]:
+    """Collect every API key configured for ``base_var``, in a stable order.
+
+    Reads ``<base_var>`` first, then every ``<base_var>_<n>`` in ascending
+    numeric order (so ``_2`` precedes ``_10``). Each variable may hold one key
+    or a comma-separated list, which keeps both deployment shapes usable: one
+    Beaker secret per key, or a single secret holding all of them.
+
+    Blank entries are dropped and duplicates collapse to their first
+    occurrence, so one configured key always yields a one-element list and no
+    key gets a larger share of the request stream than the others.
+    """
+    prefix = f"{base_var}_"
+    numbered: list[tuple[int, str]] = []
+    for name, value in os.environ.items():
+        if not name.startswith(prefix):
+            continue
+        suffix = name[len(prefix) :]
+        if suffix.isdigit():
+            numbered.append((int(suffix), value))
+
+    raw = [os.getenv(base_var, "")]
+    raw.extend(value for _, value in sorted(numbered, key=lambda item: item[0]))
+
+    keys: list[str] = []
+    for value in raw:
+        for candidate in value.split(","):
+            key = candidate.strip()
+            if key and key not in keys:
+                keys.append(key)
+    return keys
+
+
+# Round-robin cursor over the configured keys. The starting offset is random so
+# that independent worker processes sharing a key set do not all open on the
+# same key; within a process the cursor then advances deterministically.
+_api_key_cursor = itertools.count(random.randrange(1 << 16))
+
+
+def _select_api_key(keys: Sequence[str]) -> str:
+    """Pick the key to use for one request, cycling through ``keys``.
+
+    Round-robin rather than random choice: the rate limit is per key, so what
+    matters is that no key receives two requests inside its own interval.
+    Cycling guarantees an exact 1/N share, whereas independent random draws
+    would sometimes land on the same key twice in a row and re-trigger the 429
+    the extra key was added to avoid.
+    """
+    return keys[next(_api_key_cursor) % len(keys)]
+
+
+def _s2_rate_interval() -> float:
+    """Minimum spacing between S2 requests given the configured keys.
+
+    S2 meters per key, so N distinct keys permit N times the aggregate rate
+    while each individual key still sees at most one request per
+    _S2_MIN_INTERVAL_S. Zero or one key keeps the original spacing exactly.
+    """
+    return _S2_MIN_INTERVAL_S / max(1, len(_api_keys_from_env("S2_API_KEY")))
+
+
 async def _s2_rate_gate() -> None:
-    """Block until at least _S2_MIN_INTERVAL_S has elapsed since the last S2 call.
+    """Block until the per-request S2 interval has elapsed since the last call.
 
     Serializes S2 requests across all concurrent agents in this process so the
-    cumulative rate stays under the 1 req/s limit.
+    cumulative rate stays under the limit the configured keys allow.
     """
     global _s2_last_request_ts
     async with _s2_rate_lock:
-        wait = _s2_last_request_ts + _S2_MIN_INTERVAL_S - time.monotonic()
+        wait = _s2_last_request_ts + _s2_rate_interval() - time.monotonic()
         if wait > 0:
             await asyncio.sleep(wait)
         _s2_last_request_ts = time.monotonic()
@@ -198,16 +262,21 @@ async def _get_with_backoff(
 async def semantic_scholar_search(query: str) -> str:
     """Search Semantic Scholar for academic papers and snippets matching a query.
 
+    Authenticates with one of the configured keys (S2_API_KEY and any
+    S2_API_KEY_<n>, each optionally comma-separated), chosen per request so the
+    per-key rate limit is shared across all of them. With no key configured the
+    request is sent unauthenticated, as before.
+
     Args:
         query: Search query for academic papers and snippets.
 
     Returns:
         Formatted search results with paper titles, abstracts, and URLs.
     """
-    api_key = os.getenv("S2_API_KEY")
+    api_keys = _api_keys_from_env("S2_API_KEY")
     headers = {}
-    if api_key:
-        headers["x-api-key"] = api_key
+    if api_keys:
+        headers["x-api-key"] = _select_api_key(api_keys)
 
     sanitized_query = query.strip()
     if not sanitized_query:
