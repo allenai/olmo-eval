@@ -657,6 +657,9 @@ class TestBuildCommandWithTaskPackages:
 
         assert "uv venv /opt/vllm-venv" in install_cmd
         assert "export VLLM_PYTHON=/opt/vllm-venv/bin/python" in install_cmd
+        # flashinfer's runtime JIT shells out to a bare "ninja" from the venv
+        # vLLM runs in, so the isolated venv must own the binary itself.
+        assert "uv pip install --python /opt/vllm-venv/bin/python ninja" in install_cmd
         assert (
             "cd /gantry-runtime && uv pip install "
             "--python /opt/vllm-venv/bin/python "
