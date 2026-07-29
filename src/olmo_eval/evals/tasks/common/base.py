@@ -107,6 +107,7 @@ class OutputScoreAggregation(StrEnum):
 
     MAX = "max"
     FIRST = "first"
+    MEAN = "mean"
 
 
 @hide_unset()
@@ -835,6 +836,8 @@ class Task(ABC):
             return max(ordered_scores)
         if aggregation == OutputScoreAggregation.FIRST:
             return ordered_scores[0]
+        if aggregation == OutputScoreAggregation.MEAN:
+            return sum(ordered_scores) / len(ordered_scores)
         raise ValueError(f"Unsupported output_score_aggregation: {aggregation}")
 
     def _expand_multi_output_responses(self, responses: Sequence[Response]) -> list[Response]:
