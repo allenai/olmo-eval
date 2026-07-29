@@ -191,10 +191,27 @@ def test_strip_think() -> None:
     assert strip_think("<think>scratch</think>Final answer") == "Final answer"
     assert strip_think("<think>first</think><think>second</think>Final") == "Final"
     assert strip_think("<think>reasoning <think>nested</think> Attention Is All You Need") == ""
-    assert strip_think("Before </think> After") == "Before </think> After"
     assert strip_think("<think>gold (truncated)") == ""
     assert strip_think("Final <think>truncated Attention Is All You Need") == "Final "
     assert strip_think("<think>closed</think>Final <think>truncated") == "Final "
+
+
+def test_strip_think_drops_an_unopened_reasoning_region() -> None:
+    """A bare </think> closes reasoning that began in the prompt, not visible text.
+
+    Thinking templates write the opening <think> into the generation prompt, so a
+    completion carries only the closing tag. Treating the monologue as visible
+    text would let a title the model considered and rejected satisfy SAGE's
+    substring match.
+    """
+    assert strip_think("Before </think> After") == " After"
+    assert (
+        strip_think("I should check Attention Is All You Need</think>Final: Deep Residual Learning")
+        == "Final: Deep Residual Learning"
+    )
+    assert strip_think("monologue</think>") == ""
+    # A region that reopens after the unopened close is still handled normally.
+    assert strip_think("monologue</think>Final <think>scratch</think> tail") == "Final  tail"
 
 
 def test_normalized_string_matcher() -> None:

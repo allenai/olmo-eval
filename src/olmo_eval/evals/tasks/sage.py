@@ -115,7 +115,19 @@ def normalize_title(s: str) -> str:
 
 
 def strip_think(text: str) -> str:
-    """Drop balanced and truncated think regions, preserving visible text."""
+    """Drop balanced, unopened and truncated think regions, preserving visible text.
+
+    An unopened ``</think>`` closes a reasoning region that began before the text
+    starts, which is what a modern thinking template produces: it writes the
+    opening ``<think>`` into the generation prompt, so the completion carries only
+    the closing tag. Everything ahead of such a tag is monologue and is dropped.
+
+    Keeping it would be worse here than elsewhere, because SAGE matches a gold
+    title by substring: a title the model merely weighed and then rejected while
+    reasoning would score as a hit, inflating exact match. Dropping it matches the
+    ResearchQA and DeepResearch Bench extractors, which likewise cut at the first
+    ``</think>``.
+    """
     open_tag = "<think>"
     close_tag = "</think>"
     output: list[str] = []
@@ -135,9 +147,9 @@ def strip_think(text: str) -> str:
                 index = next_open + len(open_tag)
                 depth = 1
             else:
-                end = next_close + len(close_tag)
-                output.append(text[index:end])
-                index = end
+                # Unopened close tag: discard this region rather than emitting it.
+                output.clear()
+                index = next_close + len(close_tag)
             continue
 
         if next_open == -1 and next_close == -1:
