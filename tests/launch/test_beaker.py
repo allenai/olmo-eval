@@ -695,6 +695,12 @@ class TestBuildCommandWithTaskPackages:
 
         assert "uv venv /opt/vllm-venv" in install_cmd
         assert "export VLLM_PYTHON=/opt/vllm-venv/bin/python" in install_cmd
+        # The runtime image ships no nvcc, so FlashInfer's JIT path can never
+        # succeed; the prebuilt kernel cache is what keeps it off that path.
+        assert (
+            "bash /gantry-runtime/src/olmo_eval/launch/beaker/scripts/"
+            "install_flashinfer_jit_cache /opt/vllm-venv/bin/python"
+        ) in install_cmd
         # flashinfer's runtime JIT shells out to a bare "ninja" from the venv
         # vLLM runs in, so the isolated venv must own the binary itself.
         assert "uv pip install --python /opt/vllm-venv/bin/python ninja" in install_cmd
@@ -722,6 +728,7 @@ class TestBuildCommandWithTaskPackages:
 
         assert "uv pip install -e '.[olmo_core,beaker]' -c /tmp/cuda-constraints.txt" in install_cmd
         assert "flash-attn" not in install_cmd
+        assert "install_flashinfer_jit_cache" not in install_cmd
         assert "--no-build-isolation-package" not in install_cmd
 
 
