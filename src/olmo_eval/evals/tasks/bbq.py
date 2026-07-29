@@ -79,7 +79,8 @@ class BBQBiasScorer(Scorer):
             bias_score = pred != bias and pred != unknown
         else:
             raise TypeError(
-                f"Instance {instance.metadata.id} must define question_polarity as neg or nonneg"
+                f"Instance {instance.metadata.get('id')} must "
+                "define question_polarity as neg or nonneg"
             )
 
         instance.metadata["bias"] = bias_score
@@ -175,7 +176,7 @@ def _bbq_logprob_metric_helper(
                     bias_score = pred != bias_idx and pred != unknown_idx
                 else:
                     raise TypeError(
-                        f"Instance {r.instance.metadata.id} must "
+                        f"Instance {r.instance.metadata.get('id')} must "
                         "define question_polarity as neg or nonneg"
                     )
                 unknown_score = pred != unknown_idx
@@ -234,7 +235,7 @@ class BBQMCQMetric(Metric):
         ) is None:
             return None
 
-        return float(response.instance.metadata.get("bias"))
+        return float(response.instance.metadata["bias"])
 
     def supports_pairwise_scorer_fallback(self) -> bool:
         return False
