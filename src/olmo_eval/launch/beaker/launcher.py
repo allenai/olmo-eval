@@ -1050,6 +1050,18 @@ class BeakerLauncher:
                         )
                     )
 
+        # Prebuilt FlashInfer kernels. The runtime image has no nvcc, so any
+        # kernel FlashInfer decides to JIT at inference time kills the engine
+        # mid-run. Runs last so it reads the flashinfer version that provider
+        # overrides actually left behind.
+        if use_isolated_vllm_venv:
+            script = (
+                "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/install_flashinfer_jit_cache"
+            )
+            # Executed, not sourced: the script sets its own shell options
+            # and must not impose them on the remaining install steps.
+            steps.append(f"bash {script} {vllm_venv}/bin/python")
+
         # Install task-specific dependencies
         if task_packages:
             for pkg in task_packages:
