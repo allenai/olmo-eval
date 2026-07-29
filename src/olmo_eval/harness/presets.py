@@ -157,7 +157,10 @@ class HarnessPresets:
         For literature-search tasks (e.g. litsearch). Exposes a single paper-search
         tool and declares no required secrets, so it runs against the public
         Semantic Scholar API keyless (rate-limited). For higher rate limits, mount
-        a key with `--secret-env <user>_S2_API_KEY:S2_API_KEY`.
+        a key with `--secret-env <user>_S2_API_KEY:S2_API_KEY`. Additional keys
+        mount as `S2_API_KEY_2`, `S2_API_KEY_3`, ... (or a comma-separated list
+        in any one of them); the tool spreads requests across all of them and
+        raises its request rate proportionally.
         """
         from .tools.search import semantic_scholar_search
 
