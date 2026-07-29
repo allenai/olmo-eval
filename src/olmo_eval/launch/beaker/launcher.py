@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
@@ -691,7 +692,9 @@ def describe_code_version(git_ref: str | None = None) -> str:
         repo = Repo(".")
         head = str(repo.commit())
         branch = "detached HEAD" if repo.head.is_detached else repo.active_branch.name
-        dirty = " [dirty]" if repo.is_dirty() else ""
+        # Gantry clones the committed SHA, so uncommitted edits never reach
+        # the job. Say so plainly rather than with a marker that is easy to miss.
+        dirty = " (uncommitted changes are NOT deployed)" if repo.is_dirty() else ""
         return f"{head} ({branch}){dirty} from cwd {cwd}"
     except Exception as exc:  # noqa: BLE001 - diagnostics must never block a launch
         return f"unresolved from cwd {cwd} ({exc})"
@@ -1107,7 +1110,9 @@ class BeakerLauncher:
         # olmo-eval setting. Launching from a second checkout of this repo
         # therefore silently runs that checkout's HEAD instead of the branch you
         # think you are on. Report what will actually be cloned.
-        _console.print(f"[bold blue]Code version:[/] {describe_code_version(config.git_ref)}")
+        _console.print(
+            f"[bold blue]Code version:[/] {rich_escape(describe_code_version(config.git_ref))}"
+        )
 
         # Launch the experiment (or show spec if dry_run)
         workload = launch_experiment(
