@@ -1153,7 +1153,7 @@ class BeakerLauncher:
         # olmo-eval setting. Launching from a second checkout of this repo
         # therefore silently runs that checkout's HEAD instead of the branch you
         # think you are on. Report what will actually be cloned.
-        log.info(f"Code version: {describe_code_version(config.git_ref)}")
+        _console.print(f"[bold blue]Code version:[/] {describe_code_version(config.git_ref)}")
 
         # Launch the experiment (or show spec if dry_run)
         workload = launch_experiment(
