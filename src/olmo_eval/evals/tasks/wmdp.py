@@ -106,7 +106,7 @@ class WMDPLogprobMCAccuracyMetric(Metric):
 
     def compute_instance(self, response: Response) -> float | None:
         subset, cat = self.name.split("__")
-        if subset != "any" or response.instance.metadata.get(subset) == cat:
+        if subset != "any" and response.instance.metadata.get(subset) != cat:
             return None
         gold_idx = response.instance.metadata.get("gold_idx")
         if gold_idx is None or not response.outputs:

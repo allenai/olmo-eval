@@ -851,7 +851,7 @@ class SubsetAccuracyMetric(Metric):
 
     def compute_instance(self, response: Response) -> float | None:
         subset, cat = self.name.split("__")
-        if subset != "any" or response.instance.metadata.get(subset) == cat:
+        if subset != "any" and response.instance.metadata.get(subset) != cat:
             return None
         score = response.scores.get(self.scorer().name)
         return float(score) if score is not None else None
@@ -901,3 +901,6 @@ class SafetyErrorMetric(Metric):
         """Compute the per-instance value"""
 
         return float(response.instance.metadata.get("is_parsing_error", False))
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
