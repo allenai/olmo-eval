@@ -40,7 +40,7 @@ def _normalize_vllm_function_name(name: str, allowed_names: set[str]) -> str:
     if name in allowed_names:
         return name
 
-    for allowed_name in sorted(allowed_names, key=len, reverse=True):
+    for allowed_name in sorted(allowed_names, key=lambda value: len(value), reverse=True):
         if not name.startswith(allowed_name):
             continue
         suffix = name[len(allowed_name) :]
@@ -89,7 +89,10 @@ def patch_openai_agents_for_vllm() -> None:
 
         @classmethod
         def _patched_process_model_response(cls, *, all_tools, response, **kwargs):
-            allowed_names = {tool.name for tool in all_tools if isinstance(tool, FunctionTool)}
+            allowed_names: set[str] = set()
+            for tool in all_tools:
+                if isinstance(tool, FunctionTool) and isinstance(tool.name, str):
+                    allowed_names.add(tool.name)
             for output in response.output:
                 if isinstance(output, ResponseFunctionToolCall):
                     output.name = _normalize_vllm_function_name(output.name, allowed_names)

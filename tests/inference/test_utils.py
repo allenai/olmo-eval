@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from olmo_eval.inference.utils import (
     _normalize_vllm_function_name,
     patch_openai_agents_for_vllm,
@@ -29,6 +31,8 @@ def test_normalize_vllm_function_name_is_schema_bound():
 
 
 def test_agents_patch_normalizes_response_before_tool_lookup(monkeypatch):
+    pytest.importorskip("agents")
+
     from agents import function_tool
     from agents._run_impl import RunImpl
     from agents.models.chatcmpl_converter import Converter
