@@ -77,4 +77,4 @@ tox_scorer = SafetyScorer(
     judge_request_type=RequestType.COMPLETION,
 )
 
-register_safety_variants("trustllm_jailbreaktrigger", toxigen_subsets, tox_scorer, "wg_judge")
+register_safety_variants("toxigen", toxigen_subsets, tox_scorer, "wg_judge")
