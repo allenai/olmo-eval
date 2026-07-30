@@ -237,7 +237,24 @@ def _get_olmo3_tool_template_path() -> str:
 
 
 # Kwargs that are used for deployment/setup, not vLLM server CLI arguments
-_NON_VLLM_KWARGS = frozenset({"patch_olmo3_tool_parser"})
+_NON_VLLM_KWARGS = frozenset({"patch_gpt_oss_responses_parser", "patch_olmo3_tool_parser"})
+
+
+def _apply_gpt_oss_responses_parser_patch() -> None:
+    """Backport channel-independent function recipients to vLLM 0.19.1."""
+    from pathlib import Path
+
+    from olmo_eval.inference.patches.gpt_oss_responses_parser_patch import (
+        find_harmony_parser,
+        patch_parser,
+    )
+
+    vllm_python = os.environ.get("VLLM_PYTHON")
+    venv_path = str(Path(vllm_python).parent.parent) if vllm_python else None
+    parser_path = find_harmony_parser(venv_path)
+    if parser_path is None:
+        raise RuntimeError("Could not find vLLM's Responses Harmony parser")
+    patch_parser(parser_path)
 
 
 def _apply_olmo3_tool_parser_patch() -> None:
@@ -296,8 +313,8 @@ def _build_server_command(
         chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false}).
             These are applied at request time by the provider for broad vLLM compatibility,
             rather than being forwarded as server CLI flags.
-        **kwargs: Additional vLLM server arguments. May include patch_olmo3_tool_parser
-            which controls whether to use the custom OLMo3 chat template.
+        **kwargs: Additional vLLM server arguments. May include provider-local
+            parser patch flags, which are not forwarded to the vLLM CLI.
 
     Returns:
         Command list for subprocess
@@ -305,7 +322,11 @@ def _build_server_command(
     import json
 
     # Extract deployment kwargs before filtering
+    patch_gpt_oss_responses_parser = kwargs.get("patch_gpt_oss_responses_parser", False)
     patch_olmo3_tool_parser = kwargs.get("patch_olmo3_tool_parser", False)
+
+    if patch_gpt_oss_responses_parser:
+        _apply_gpt_oss_responses_parser_patch()
 
     # Apply OLMo3 tool parser patch at runtime if requested
     # This patches vLLM to handle JSON content in string arguments

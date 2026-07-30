@@ -308,6 +308,22 @@ class TestVLLMServerProviderStartup:
 
         mock_server_cls.assert_not_called()
 
+    def test_gpt_oss_responses_patch_is_applied_but_not_forwarded(self):
+        """The Responses parser patch runs before launch and stays off the CLI."""
+        from olmo_eval.inference.providers.vllm_server_utils import _build_server_command
+
+        with patch(
+            "olmo_eval.inference.providers.vllm_server_utils._apply_gpt_oss_responses_parser_patch"
+        ) as apply_parser_patch:
+            command = _build_server_command(
+                model_name="openai/gpt-oss-20b",
+                port=8000,
+                patch_gpt_oss_responses_parser=True,
+            )
+
+        apply_parser_patch.assert_called_once_with()
+        assert "--patch-gpt-oss-responses-parser" not in command
+
     def test_force_download_refreshes_cache_before_managed_server_startup(self):
         """Managed server startup should refresh HF cache without a vLLM CLI arg."""
         from unittest.mock import call
