@@ -76,6 +76,55 @@ def _patch_scaffold_agent(monkeypatch, agent):
     monkeypatch.setattr(agents, "trace", lambda *args, **kwargs: contextlib.nullcontext())
 
 
+class TestOpenAIAgentsModelApi:
+    @pytest.mark.parametrize(
+        ("agent_api", "expected_model_type"),
+        [
+            ("chat_completions", "OpenAIChatCompletionsModel"),
+            ("responses", "OpenAIResponsesModel"),
+        ],
+    )
+    def test_create_agent_uses_provider_api(self, agent_api, expected_model_type):
+        provider = SimpleNamespace(
+            agent_api=agent_api,
+            model_name="test-model",
+            get_openai_client=lambda: SimpleNamespace(base_url="http://localhost/v1"),
+        )
+
+        agent = OpenAIAgentsScaffold()._create_agent(
+            provider=provider,
+            config=HarnessConfig(name="test"),
+        )
+
+        assert type(agent.model).__name__ == expected_model_type
+
+    def test_create_agent_defaults_to_chat_completions(self):
+        provider = SimpleNamespace(
+            model_name="test-model",
+            get_openai_client=lambda: SimpleNamespace(base_url="http://localhost/v1"),
+        )
+
+        agent = OpenAIAgentsScaffold()._create_agent(
+            provider=provider,
+            config=HarnessConfig(name="test"),
+        )
+
+        assert type(agent.model).__name__ == "OpenAIChatCompletionsModel"
+
+    def test_create_agent_rejects_unknown_api(self):
+        provider = SimpleNamespace(
+            agent_api="completions",
+            model_name="test-model",
+            get_openai_client=lambda: SimpleNamespace(base_url="http://localhost/v1"),
+        )
+
+        with pytest.raises(ValueError, match="provider.agent_api must be one of"):
+            OpenAIAgentsScaffold()._create_agent(
+                provider=provider,
+                config=HarnessConfig(name="test"),
+            )
+
+
 class TestOpenAIAgentsMaxTurns:
     @pytest.mark.anyio
     async def test_max_turns_preserves_trajectory_and_forces_final_answer(self, monkeypatch):

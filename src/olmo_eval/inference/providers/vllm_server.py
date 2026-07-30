@@ -273,6 +273,7 @@ class VLLMServerProvider(InferenceProvider):
         completion_use_prompt_token_ids: bool | None = None,
         completion_client_side_stop_trim: bool | None = None,
         completion_sentencepiece_cleanup: bool | None = None,
+        agent_api: str = "chat_completions",
         **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -306,9 +307,17 @@ class VLLMServerProvider(InferenceProvider):
                 stop sequence client-side after generation.
             completion_sentencepiece_cleanup: If True, replace SentencePiece space markers
                 with actual spaces in completion outputs.
+            agent_api: OpenAI-compatible API used by the agent scaffold. Supported values are
+                ``chat_completions`` and ``responses``. This is provider-local and is not
+                forwarded to the managed vLLM server.
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
+        if agent_api not in {"chat_completions", "responses"}:
+            raise ValueError(
+                f"agent_api must be one of: chat_completions, responses; got {agent_api!r}"
+            )
+        self.agent_api = agent_api
         self._beaker_reporter = BeakerStatusReporter()
         self.timeout = timeout
         self.max_concurrency = max_concurrency

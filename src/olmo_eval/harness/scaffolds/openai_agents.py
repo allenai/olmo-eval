@@ -166,6 +166,7 @@ class OpenAIAgentsScaffold(Scaffold):
         from agents import (  # type: ignore[ty:unresolved-import]
             Agent,
             OpenAIChatCompletionsModel,
+            OpenAIResponsesModel,
             function_tool,
             set_tracing_disabled,
         )
@@ -185,10 +186,21 @@ class OpenAIAgentsScaffold(Scaffold):
             f"model={provider.model_name}"
         )
 
-        model = OpenAIChatCompletionsModel(
-            openai_client=client,
-            model=provider.model_name,
-        )
+        agent_api = getattr(provider, "agent_api", "chat_completions")
+        if agent_api == "responses":
+            model = OpenAIResponsesModel(
+                openai_client=client,
+                model=provider.model_name,
+            )
+        elif agent_api == "chat_completions":
+            model = OpenAIChatCompletionsModel(
+                openai_client=client,
+                model=provider.model_name,
+            )
+        else:
+            raise ValueError(
+                f"provider.agent_api must be one of: chat_completions, responses; got {agent_api!r}"
+            )
 
         agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
 

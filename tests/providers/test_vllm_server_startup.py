@@ -274,6 +274,7 @@ class TestVLLMServerProviderStartup:
             provider = VLLMServerProvider(
                 "test-model",
                 enforce_eager=True,
+                agent_api="responses",
                 add_bos_token=False,
                 prompt_logprobs=1,
                 completion_use_prompt_token_ids=True,
@@ -283,12 +284,29 @@ class TestVLLMServerProviderStartup:
 
         assert provider.base_url == "http://127.0.0.1:8000/v1"
         server_kwargs = mock_server_cls.call_args.kwargs
+        assert provider.agent_api == "responses"
         assert server_kwargs["enforce_eager"] is True
+        assert "agent_api" not in server_kwargs
         assert "add_bos_token" not in server_kwargs
         assert "prompt_logprobs" not in server_kwargs
         assert "completion_use_prompt_token_ids" not in server_kwargs
         assert "completion_client_side_stop_trim" not in server_kwargs
         assert "completion_sentencepiece_cleanup" not in server_kwargs
+
+    def test_invalid_agent_api_is_rejected(self):
+        """Fail before server startup when the selected agent API is unknown."""
+        from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
+
+        with (
+            patch(
+                "olmo_eval.inference.providers.vllm_server_utils.VLLMServerProcess"
+            ) as mock_server_cls,
+            patch("olmo_eval.inference.providers.vllm_server.BeakerStatusReporter"),
+            pytest.raises(ValueError, match="agent_api must be one of"),
+        ):
+            VLLMServerProvider("test-model", agent_api="completions")
+
+        mock_server_cls.assert_not_called()
 
     def test_force_download_refreshes_cache_before_managed_server_startup(self):
         """Managed server startup should refresh HF cache without a vLLM CLI arg."""
