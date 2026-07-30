@@ -27,6 +27,7 @@ import argparse
 import re
 import site
 import sys
+import textwrap
 from pathlib import Path
 
 # The code to insert before ast.parse() to sanitize string content
@@ -62,6 +63,54 @@ SANITIZE_CODE = r'''
             model_output = _sanitize_python_strings(model_output)
 '''
 
+NORMALIZE_FUNCTION_CODE = r'''
+def _normalize_function_calls(text: str) -> str:
+    """Separate top-level calls without inserting commas inside arguments."""
+    text = text.strip()
+    calls = []
+    depth = 0
+    call_start = None
+    quote = None
+    escaped = False
+
+    for index, char in enumerate(text):
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+
+        if char in ("'", '"'):
+            quote = char
+        elif char == "(":
+            if depth == 0:
+                name_start = index
+                while name_start > 0 and (
+                    text[name_start - 1].isalnum() or text[name_start - 1] == "_"
+                ):
+                    name_start -= 1
+                call_start = name_start
+            depth += 1
+        elif char == ")" and depth > 0:
+            depth -= 1
+            if depth == 0 and call_start is not None:
+                calls.append(text[call_start : index + 1].strip())
+                call_start = None
+
+    if calls:
+        return ", ".join(calls)
+    return ", ".join(line.strip() for line in text.splitlines() if line.strip())
+'''
+
+JOIN_BLOCK = """        # Make the newline separated function calls into a list.
+        model_output = ", ".join(
+            [line.strip() for line in model_output.splitlines() if line.strip()]
+        )
+"""
+
 
 def find_olmo3_parser(venv_path: str | None = None) -> Path | None:
     """Find the olmo3_tool_parser.py file in site-packages."""
@@ -87,33 +136,52 @@ def patch_parser(parser_path: Path) -> bool:
     """
     content = parser_path.read_text()
 
-    # Check if already patched
-    if "# PATCHED: Sanitize string arguments" in content:
+    has_sanitizer = "# PATCHED: Sanitize string arguments" in content
+    has_normalizer = "# PATCHED: Preserve multiline function arguments" in content
+    if has_sanitizer and has_normalizer:
         print(f"Parser already patched: {parser_path}")
         return False
 
-    # Find the ast.parse call in extract_tool_calls and add sanitization before it
-    # Pattern matches the line with ast.parse(model_output) capturing the indentation
-    pattern = r"(\n)(\s+)(module = ast\.parse\(model_output\))"
+    new_content = content
+    changed = False
 
-    def replacement(match: re.Match) -> str:
-        newline = match.group(1)
-        indent = match.group(2)
-        ast_parse_line = match.group(3)
-        # Insert sanitization code before ast.parse, adjusting indentation
-        sanitize = SANITIZE_CODE.replace("\n            ", f"\n{indent}")
-        return f"{newline}{sanitize}\n{indent}{ast_parse_line}"
+    if not has_normalizer:
+        if JOIN_BLOCK not in new_content:
+            print(f"Could not find function-call join block in {parser_path}")
+            print("The parser may have a different structure than expected.")
+            return False
+        function_code = textwrap.indent(NORMALIZE_FUNCTION_CODE.strip(), "        ")
+        normalize_code = (
+            "        # PATCHED: Preserve multiline function arguments while "
+            "separating top-level calls.\n"
+            f"{function_code}\n"
+            "        model_output = _normalize_function_calls(model_output)\n"
+        )
+        new_content = new_content.replace(JOIN_BLOCK, normalize_code, 1)
+        changed = True
 
-    new_content, count = re.subn(pattern, replacement, content, count=1)
+    if not has_sanitizer:
+        # Find the ast.parse call in extract_tool_calls and add sanitization before it.
+        pattern = r"(\n)(\s+)(module = ast\.parse\(model_output\))"
 
-    if count == 0:
-        print(f"Could not find ast.parse pattern in {parser_path}")
-        print("The parser may have a different structure than expected.")
-        return False
+        def replacement(match: re.Match) -> str:
+            newline = match.group(1)
+            indent = match.group(2)
+            ast_parse_line = match.group(3)
+            sanitize = SANITIZE_CODE.replace("\n            ", f"\n{indent}")
+            return f"{newline}{sanitize}\n{indent}{ast_parse_line}"
 
-    # Write the patched content
-    parser_path.write_text(new_content)
-    return True
+        new_content, count = re.subn(pattern, replacement, new_content, count=1)
+
+        if count == 0:
+            print(f"Could not find ast.parse pattern in {parser_path}")
+            print("The parser may have a different structure than expected.")
+            return False
+        changed = True
+
+    if changed:
+        parser_path.write_text(new_content)
+    return changed
 
 
 def main() -> int:

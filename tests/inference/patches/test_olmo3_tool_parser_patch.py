@@ -3,6 +3,8 @@
 import ast
 import re
 
+from olmo_eval.inference.patches.olmo3_tool_parser_patch import NORMALIZE_FUNCTION_CODE
+
 
 def _make_sanitizer():
     """Extract and return the sanitizer function from SANITIZE_CODE."""
@@ -27,6 +29,45 @@ def _make_sanitizer():
         return re.sub(r"='(.*?)'(?=\s*(?:,\s*\w+=|\)))", _escape_content, text, flags=re.DOTALL)
 
     return _sanitize_python_strings
+
+
+def _make_normalizer():
+    namespace = {}
+    exec(NORMALIZE_FUNCTION_CODE, namespace)
+    return namespace["_normalize_function_calls"]
+
+
+class TestNormalizeFunctionCalls:
+    def setup_method(self):
+        self.normalize = _make_normalizer()
+
+    def test_preserves_multiline_arguments(self):
+        text = """semantic_scholar_snippet_search(
+  query="tool-augmented language models",
+  num_results=20
+)"""
+        result = self.normalize(text)
+        assert result == text
+        ast.parse(f"[{result}]")
+
+    def test_separates_newline_delimited_calls(self):
+        text = """first(query="a")
+second(query="b")"""
+        result = self.normalize(text)
+        assert result == 'first(query="a"), second(query="b")'
+        ast.parse(f"[{result}]")
+
+    def test_separates_adjacent_calls(self):
+        text = 'first(query="a") second(query="b")'
+        result = self.normalize(text)
+        assert result == 'first(query="a"), second(query="b")'
+        ast.parse(f"[{result}]")
+
+    def test_ignores_parentheses_inside_strings(self):
+        text = 'search(query="attention (linear) models")'
+        result = self.normalize(text)
+        assert result == text
+        ast.parse(f"[{result}]")
 
 
 class TestSanitizePythonStrings:
