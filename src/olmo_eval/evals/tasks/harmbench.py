@@ -52,16 +52,16 @@ class Harmbench(SafetyBase):
 
 
 _HARMBENCH_SUBSET_METRICS = (
-    "functional_category::standard",
-    "functional_category::contextual",
-    "functional_category::copyright",
-    "semantic_category::copyright",
-    "semantic_category::misinformation_disinformation",
-    "semantic_category::chemical_biological",
-    "semantic_category::illegal",
-    "semantic_category::harmful",
-    "semantic_category::cybercrime_intrusion",
-    "semantic_category::harassment_bullying",
+    "functional_category__standard",
+    "functional_category__contextual",
+    "functional_category__copyright",
+    "semantic_category__copyright",
+    "semantic_category__misinformation_disinformation",
+    "semantic_category__chemical_biological",
+    "semantic_category__illegal",
+    "semantic_category__harmful",
+    "semantic_category__cybercrime_intrusion",
+    "semantic_category__harassment_bullying",
 )
 
 

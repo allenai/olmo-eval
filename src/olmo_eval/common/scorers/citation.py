@@ -11,6 +11,7 @@ Ported from astabench citation_eval.py (https://github.com/allenai/asta-bench).
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -47,6 +48,203 @@ JUST_HAS_A_TITLE = "Paper content unavailable. The paper's title is: "
 SEMANTIC_SCHOLAR_BAD_SNIPPET = (
     "Please click on the paper title to read the abstract on Semantic Scholar."
 )
+
+_CITE_TAG_RE = re.compile(
+    r"<\s*cite\b(?=[^>]*(?<![\w-])url\s*=)[^>]*(?<![\w-])url\s*=\s*"
+    r"(?:\"(?P<url_d>[^\"<>]*\S[^\"<>]*)\"|'(?P<url_s>[^'<>]*\S[^'<>]*)')"
+    r"[^>]*>(?P<claim>.*?)<\s*/\s*cite\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _normalize_grounding_text(text: str) -> str:
+    """Normalize text for source-grounding substring checks."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _normalize_grounding_url(url: str) -> str:
+    """Normalize URL strings for cite-mode trajectory lookup."""
+    return str(url).strip().rstrip("/.,;:)]}'\"")
+
+
+def parse_cite_tag_response(text: str) -> dict[str, Any] | None:
+    """Parse prose with ``<cite url="...">claim</cite>`` tags into report JSON."""
+    citations: list[dict[str, Any]] = []
+    citation_ids_by_url: dict[str, str] = {}
+
+    def replace_cite_tag(match: re.Match[str]) -> str:
+        url = (match.group("url_d") or match.group("url_s") or "").strip()
+        if not url:
+            return match.group(0)
+        claim_text = match.group("claim").strip()
+        citation_id = citation_ids_by_url.get(url)
+        if citation_id is None:
+            citation_id = f"[{len(citations) + 1}]"
+            citation_ids_by_url[url] = citation_id
+            citations.append(
+                {
+                    "id": citation_id,
+                    "url": url,
+                    "title": "",
+                    "snippets": [],
+                }
+            )
+        return f"{claim_text} {citation_id}"
+
+    prose, count = _CITE_TAG_RE.subn(replace_cite_tag, text)
+    if count == 0:
+        return None
+
+    return {
+        "sections": [
+            {
+                "title": "",
+                "text": prose.strip(),
+                "citations": citations,
+            }
+        ]
+    }
+
+
+def ground_citations_in_sources(
+    parsed_response: dict[str, Any], source_text: str
+) -> tuple[dict[str, Any], dict[str, float]]:
+    """Filter fabricated citation evidence against retrieved source text.
+
+    This is the anti-fabrication layer for agentic attributed-QA tasks such as
+    ExpertQA, and is reusable by ScholarQA later. ``source_text`` is the
+    concatenated tool output the agent saw during its trajectory.
+
+    Citations with an ``id`` keep only snippets found verbatim in the source
+    text. If no snippet remains, the citation is kept only when its title is
+    also source-grounded, preserving the title-only half-credit path. Citations
+    without an ``id`` are left untouched and excluded from snippet counts, since
+    they are ignored by citation judging.
+    """
+    grounded_response = copy.deepcopy(parsed_response)
+    normalized_source = _normalize_grounding_text(source_text)
+    n_snippets = 0
+    n_grounded = 0
+
+    for section in grounded_response.get("sections", []):
+        sec_iter = [section]
+        if section.get("table") and isinstance(section["table"], dict):
+            sec_iter.append(section["table"])
+
+        for curr_sec in sec_iter:
+            if "citations" not in curr_sec:
+                continue
+
+            grounded_citations = []
+            for citation in curr_sec.get("citations", []):
+                if not citation.get("id"):
+                    grounded_citations.append(citation)
+                    continue
+
+                raw_snippets = citation.get("snippets", [])
+                if isinstance(raw_snippets, str):
+                    raw_snippets = [raw_snippets]
+                elif not isinstance(raw_snippets, list):
+                    raw_snippets = []
+
+                grounded_snippets = []
+                for snippet in raw_snippets:
+                    snippet_text = str(snippet)
+                    if not snippet_text.strip():
+                        continue
+                    n_snippets += 1
+                    normalized_snippet = _normalize_grounding_text(snippet_text)
+                    if len(normalized_snippet) >= 20 and normalized_snippet in normalized_source:
+                        grounded_snippets.append(snippet)
+                        n_grounded += 1
+
+                citation["snippets"] = grounded_snippets
+                title = citation.get("title", "")
+                normalized_title = _normalize_grounding_text(str(title))
+                title_grounded = bool(normalized_title) and normalized_title in normalized_source
+                if grounded_snippets or title_grounded:
+                    grounded_citations.append(citation)
+            curr_sec["citations"] = grounded_citations
+
+    rate = n_grounded / n_snippets if n_snippets else 0.0
+    return grounded_response, {
+        "n_snippets": float(n_snippets),
+        "n_grounded": float(n_grounded),
+        "snippet_grounding_rate": rate,
+    }
+
+
+def ground_citations_by_url(
+    parsed_response: dict[str, Any],
+    url_to_content: dict[str, str],
+    max_evidence_chars: int = 1500,
+) -> tuple[dict[str, Any], dict[str, float]]:
+    """Ground cite-tag citations by URL against trajectory-observed content.
+
+    This is the cite-mode counterpart of ``ground_citations_in_sources``.
+    ``url_to_content`` should contain every URL observed in the trajectory:
+    fetched pages map to their fetched content, while search-result-only URLs map
+    to an empty string and receive title-only half-credit handling downstream.
+    Rates are not comparable across modes because cite mode counts URL citations
+    while JSON mode counts quoted snippets.
+    """
+    grounded_response = copy.deepcopy(parsed_response)
+    normalized_content: dict[str, str] = {}
+    for url, content in url_to_content.items():
+        normalized_url = _normalize_grounding_url(url)
+        if not normalized_url:
+            continue
+        content_text = str(content or "")
+        if normalized_url not in normalized_content or content_text:
+            normalized_content[normalized_url] = content_text
+
+    n_citations = 0
+    n_grounded = 0
+    n_half = 0
+
+    for section in grounded_response.get("sections", []):
+        sec_iter = [section]
+        if section.get("table") and isinstance(section["table"], dict):
+            sec_iter.append(section["table"])
+
+        for curr_sec in sec_iter:
+            if "citations" not in curr_sec:
+                continue
+
+            grounded_citations = []
+            for citation in curr_sec.get("citations", []):
+                raw_url = citation.get("url")
+                if not raw_url:
+                    continue
+
+                citation_url = str(raw_url).strip()
+                normalized_url = _normalize_grounding_url(citation_url)
+                if not normalized_url:
+                    continue
+
+                n_citations += 1
+                if normalized_url not in normalized_content:
+                    continue
+
+                content = normalized_content[normalized_url]
+                if content:
+                    citation["snippets"] = [content[:max_evidence_chars]]
+                    n_grounded += 1
+                else:
+                    citation["snippets"] = []
+                    citation["title"] = citation_url
+                    n_half += 1
+                grounded_citations.append(citation)
+            curr_sec["citations"] = grounded_citations
+
+    rate = n_grounded / n_citations if n_citations else 0.0
+    return grounded_response, {
+        "n_citations": float(n_citations),
+        "n_grounded": float(n_grounded),
+        "n_half": float(n_half),
+        "snippet_grounding_rate": rate,
+    }
+
 
 # from astabench citation_eval.py:CitationEval.score_citation_group
 CITATION_GROUP_PROMPT = """You are a claim validator. For each claim made in the following text you will determine if it is supported by the quote from it's corresponding inline citations. As is typically done in academic writing, assume that consecutive sentences can share citations. Make sure to also include claims presented in table format. For references with only the title available (ie no quotes from the reference are included), judge them as `supporting` if the title indicates that the paper is likely relevant to the claim being considered. Return a JSON object with a single key `claims` which is a list of `claim` objects, one for each sentence in the text. Each `claim` object contains the claim itself (`text`), a list of `supporting` inline citations and `non_supporting` inline citations and finally a boolean `is_fully_supported` which indicates if the claim is entirely supported by the quotations in the associated citations. Each inline citation corresponding to that claim should appear in either `supporting` or `non_supporting`, but not both. Each claim made in the text should appear in your output, but you should skip sentences covering high level introductory information.

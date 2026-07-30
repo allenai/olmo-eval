@@ -44,22 +44,22 @@ class TrustLLM_JailbreakTrigger(SafetyBase):
 
 
 _JAILBREAKTRIGGER_SUBSET_METRICS = (
-    "source::QBB",
-    "source::ITC",
-    "jailbreak_type::Refusal sentence prohibition",
-    "jailbreak_type::leetspeak",
-    "jailbreak_type::bad words",
-    "jailbreak_type::programming",
-    "jailbreak_type::fixed sentence",
-    "jailbreak_type::cot",
-    "jailbreak_type::json_format",
-    "jailbreak_type::no_punctuation",
-    "jailbreak_type::no_long_word",
-    "jailbreak_type::without_the",
-    "jailbreak_type::url_encode",
-    "jailbreak_type::cou",
-    "jailbreak_type::scenario",
-    "jailbreak_type::multitask",
+    "source__QBB",
+    "source__ITC",
+    "jailbreak_type__Refusal sentence prohibition",
+    "jailbreak_type__leetspeak",
+    "jailbreak_type__bad words",
+    "jailbreak_type__programming",
+    "jailbreak_type__fixed sentence",
+    "jailbreak_type__cot",
+    "jailbreak_type__json_format",
+    "jailbreak_type__no_punctuation",
+    "jailbreak_type__no_long_word",
+    "jailbreak_type__without_the",
+    "jailbreak_type__url_encode",
+    "jailbreak_type__cou",
+    "jailbreak_type__scenario",
+    "jailbreak_type__multitask",
 )
 
 

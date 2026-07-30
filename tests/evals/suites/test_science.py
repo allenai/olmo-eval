@@ -80,4 +80,4 @@ def test_science_nojudge_excludes_judge_tasks():
 
 def test_science_judge_contains_judge_tasks():
     expanded = get_suite("science:judge").expand()
-    assert set(expanded) == {"astabench_scholarqa", "expertqa"}
+    assert set(expanded) == {"astabench_scholarqa"}

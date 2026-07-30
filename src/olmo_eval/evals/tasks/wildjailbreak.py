@@ -52,8 +52,8 @@ class WildJailbreak(SafetyBase):
 
 
 _WILDJAILBREAK_SUBSET_METRICS = (
-    "prompt_type::benign",
-    "prompt_type::harmful",
+    "prompt_type__benign",
+    "prompt_type__harmful",
 )
 
 # =============================================================================
