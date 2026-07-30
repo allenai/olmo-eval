@@ -373,16 +373,23 @@ class _FrontierScience(Task, ABC):
             for output_index in range(len(response.outputs))
         ]
 
-        # An instance with no output scores 0.0, which is indistinguishable from a
-        # genuine miss unless it is announced: a provider that fails every request
-        # otherwise yields a clean all-zero result with no error anywhere.
-        missing_output = sum(1 for response in responses if not response.outputs)
-        if missing_output:
+        # An instance the model never answered scores 0.0, which is indistinguishable
+        # from a genuine miss unless it is announced. Two ways to get there: a provider
+        # that failed the request (no output at all), and a reasoning model that spent
+        # its whole token budget before emitting any visible text, which on a provider
+        # that separates reasoning from content leaves an output whose text is empty.
+        # Either way the score stops being a capability measurement.
+        unanswered = sum(
+            1
+            for response in responses
+            if not response.outputs or not any(output.text.strip() for output in response.outputs)
+        )
+        if unanswered:
             logger.warning(
-                "FrontierScience has no model output for %d/%d instance(s); each scores 0.0 "
-                "without a judge call. If this covers the whole task, generation failed and "
-                "the reported score is not a capability measurement.",
-                missing_output,
+                "FrontierScience has no visible model output for %d/%d instance(s); each scores "
+                "0.0. Check the generation length and whether the provider routes reasoning away "
+                "from the response text before reading this score as a capability measurement.",
+                unanswered,
                 len(responses),
             )
 

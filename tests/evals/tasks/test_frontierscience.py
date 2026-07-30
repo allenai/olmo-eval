@@ -320,7 +320,7 @@ class TestOlympiadScoring:
         assert "no parseable verdict for 1/1 output(s)" in caplog.text
 
     @pytest.mark.anyio
-    async def test_warns_when_generation_produced_no_output(self, olympiad, monkeypatch, caplog):
+    async def test_warns_when_the_provider_returned_no_output(self, olympiad, monkeypatch, caplog):
         """A provider that fails every request must not look like a genuine zero."""
         responses = [_response(olympiad), _response(olympiad)]
         for response in responses:
@@ -333,8 +333,28 @@ class TestOlympiadScoring:
 
         assert calls == []
         assert [response.scores["accuracy"] for response in responses] == [0.0, 0.0]
-        assert "no model output for 2/2 instance(s)" in caplog.text
-        assert "not a capability measurement" in caplog.text
+        assert "no visible model output for 2/2 instance(s)" in caplog.text
+        assert "capability measurement" in caplog.text
+
+    @pytest.mark.anyio
+    async def test_warns_when_reasoning_consumed_the_whole_budget(
+        self, olympiad, monkeypatch, caplog
+    ):
+        """An output exists but its text is empty: reasoning was routed away from content."""
+        answered = _response(olympiad, text="Work.\n\nFINAL ANSWER\n42")
+        truncated = _response(olympiad, text="")
+        judge, calls = _replies(olympiad, "VERDICT: CORRECT", "VERDICT: INCORRECT")
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        with caplog.at_level(logging.WARNING, logger=frontierscience.__name__):
+            await olympiad.score_responses([answered, truncated])
+
+        # The empty output is still judged, so the count is what flags the run.
+        assert len(calls) == 2
+        assert answered.scores["accuracy"] == 1.0
+        assert truncated.scores["accuracy"] == 0.0
+        assert "no visible model output for 1/2 instance(s)" in caplog.text
+        assert "routes reasoning away" in caplog.text
 
     @pytest.mark.anyio
     async def test_recovers_on_a_retry(self, olympiad, monkeypatch):
