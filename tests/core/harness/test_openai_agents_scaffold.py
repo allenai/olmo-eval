@@ -127,12 +127,20 @@ class TestOpenAIAgentsModelApi:
 
 class TestOpenAIAgentsMaxTurns:
     @pytest.mark.parametrize(
-        ("agent_api", "expected_tool_choice"),
-        [("chat_completions", "none"), ("responses", None)],
+        ("agent_api", "model_name", "expected_tool_choice", "expected_reasoning_effort"),
+        [
+            ("chat_completions", "test-model", "none", None),
+            ("responses", "openai/gpt-oss-20b", None, "low"),
+        ],
     )
     @pytest.mark.anyio
     async def test_max_turns_preserves_trajectory_and_forces_final_answer(
-        self, monkeypatch, agent_api, expected_tool_choice
+        self,
+        monkeypatch,
+        agent_api,
+        model_name,
+        expected_tool_choice,
+        expected_reasoning_effort,
     ):
         from agents import Agent, Runner
 
@@ -156,7 +164,7 @@ class TestOpenAIAgentsMaxTurns:
         monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
 
         result = await OpenAIAgentsScaffold().run(
-            provider=SimpleNamespace(agent_api=agent_api),
+            provider=SimpleNamespace(agent_api=agent_api, model_name=model_name),
             config=HarnessConfig(name="test", max_turns=1),
             request=_agent_request(),
             enable_compaction=False,
@@ -178,6 +186,8 @@ class TestOpenAIAgentsMaxTurns:
         assert final_call["starting_agent"].handoffs == []
         assert final_call["starting_agent"].mcp_servers == []
         assert final_call["starting_agent"].model_settings.tool_choice == expected_tool_choice
+        reasoning = final_call["starting_agent"].model_settings.reasoning
+        assert (reasoning.effort if reasoning is not None else None) == expected_reasoning_effort
         assert final_call["input"][-1] == {
             "role": "user",
             "content": FORCED_FINAL_ANSWER_INSTRUCTION,
@@ -256,3 +266,44 @@ class TestOpenAIAgentsMaxTurns:
         assert result.trajectory.total_tool_calls == 1
         assert result.trajectory.tool_result_sequence[0].content == "Normal tool result"
         assert len(run_calls) == 1
+
+    @pytest.mark.anyio
+    async def test_empty_gpt_oss_response_forces_low_effort_final_answer(self, monkeypatch):
+        from agents import Agent, Runner
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+        partial_result = _FakeRunData(
+            new_items=_tool_turn_items(agent, output="Evidence before empty completion"),
+            final_output="",
+        )
+        run_calls = []
+
+        def fail_run_streamed(**kwargs):
+            raise AssertionError("Runner.run_streamed should not be used")
+
+        async def fake_run(**kwargs):
+            run_calls.append(kwargs)
+            if len(run_calls) == 1:
+                return partial_result
+            return SimpleNamespace(final_output="Recovered final answer")
+
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run_streamed", staticmethod(fail_run_streamed))
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+
+        result = await OpenAIAgentsScaffold().run(
+            provider=SimpleNamespace(agent_api="responses", model_name="openai/gpt-oss-20b"),
+            config=HarnessConfig(name="test", max_turns=3),
+            request=_agent_request(),
+            enable_compaction=False,
+        )
+
+        assert result.error is None
+        assert result.final_output.text == "Recovered final answer"
+        assert result.trajectory is not None
+        assert result.trajectory.total_tool_calls == 1
+        assert len(run_calls) == 2
+        final_agent = run_calls[1]["starting_agent"]
+        assert final_agent.tools == []
+        assert final_agent.model_settings.tool_choice is None
+        assert final_agent.model_settings.reasoning.effort == "low"

@@ -357,15 +357,18 @@ class OpenAIAgentsScaffold(Scaffold):
                     partial_result = getattr(e, "run_data", None)
                     trajectory = self._convert_trajectory(partial_result)
                     try:
+                        agent_api = getattr(provider, "agent_api", "chat_completions")
+                        model_name = getattr(provider, "model_name", "")
                         final_text = await self._force_final_answer(
                             Runner=Runner,
                             agent=agent,
                             partial_result=partial_result,
                             original_input=input_text,
-                            tool_choice=(
-                                None
-                                if getattr(provider, "agent_api", "chat_completions") == "responses"
-                                else "none"
+                            tool_choice=None if agent_api == "responses" else "none",
+                            reasoning_effort=(
+                                "low"
+                                if agent_api == "responses" and "gpt-oss" in model_name.lower()
+                                else None
                             ),
                         )
                     except Exception:
@@ -409,6 +412,33 @@ class OpenAIAgentsScaffold(Scaffold):
         # Convert result to HarnessResult
         trajectory = self._convert_trajectory(result)
         final_text = result.final_output if hasattr(result, "final_output") else ""
+        agent_api = getattr(provider, "agent_api", "chat_completions")
+        model_name = getattr(provider, "model_name", "")
+
+        # GPT-OSS occasionally ends a successful Responses tool loop with an
+        # analysis-only message, which the API correctly exposes as no final
+        # text. Give that gathered evidence the same bounded no-tool final pass
+        # used at the turn cap instead of silently scoring an empty answer.
+        if (
+            not final_text
+            and trajectory.total_tool_calls > 0
+            and agent_api == "responses"
+            and "gpt-oss" in model_name.lower()
+        ):
+            try:
+                final_text = await self._force_final_answer(
+                    Runner=Runner,
+                    agent=agent,
+                    partial_result=result,
+                    original_input=input_text,
+                    tool_choice=None,
+                    reasoning_effort="low",
+                )
+            except Exception:
+                logger.warning(
+                    "Forced final answer after empty GPT-OSS response failed",
+                    exc_info=True,
+                )
 
         return HarnessResult(
             trajectory=trajectory,
@@ -425,10 +455,19 @@ class OpenAIAgentsScaffold(Scaffold):
         partial_result: Any,
         original_input: str,
         tool_choice: str | None,
+        reasoning_effort: str | None = None,
     ) -> str:
         """Run one no-tool model call to produce a final answer after max_turns."""
         final_input = self._build_forced_final_input(partial_result, original_input)
-        model_settings = replace(agent.model_settings, tool_choice=tool_choice)
+        settings_updates: dict[str, Any] = {"tool_choice": tool_choice}
+        if reasoning_effort is not None:
+            from openai.types.shared import Reasoning
+
+            # A capped GPT-OSS run can consume its entire forced-final budget in
+            # analysis and expose an empty answer. Low effort retains a native
+            # reasoning pass while leaving room for the requested final response.
+            settings_updates["reasoning"] = Reasoning(effort=reasoning_effort)
+        model_settings = replace(agent.model_settings, **settings_updates)
         final_agent = replace(
             agent,
             tools=[],
