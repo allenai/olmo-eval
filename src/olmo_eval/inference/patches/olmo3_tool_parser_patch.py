@@ -43,8 +43,11 @@ SANITIZE_CODE = r'''
                 """Escape problematic characters inside single-quoted string arguments."""
                 def _escape_content(m):
                     content = m.group(1)
-                    # Escape ALL backslashes (model output is raw text, not Python escapes)
-                    content = content.replace('\\', '\\\\')
+                    # Preserve a model-emitted escaped apostrophe: it is already
+                    # valid Python and doubling that backslash makes the quote
+                    # terminate the string. Escape other backslashes because
+                    # model output is raw text rather than an evaluated literal.
+                    content = _re.sub(r"\\(?!')", r"\\\\", content)
                     # Escape literal control chars
                     content = content.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
                     # Escape unescaped single quotes

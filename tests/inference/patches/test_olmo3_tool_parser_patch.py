@@ -13,8 +13,8 @@ def _make_sanitizer():
 
         def _escape_content(m):
             content = m.group(1)
-            # Escape ALL backslashes (model output is raw text, not Python escapes)
-            content = content.replace("\\", "\\\\")
+            # Preserve already escaped apostrophes, but escape other raw backslashes.
+            content = re.sub(r"\\(?!')", r"\\\\", content)
             # Escape literal control chars
             content = content.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
             # Escape unescaped single quotes
@@ -50,6 +50,13 @@ class TestSanitizePythonStrings:
         result = self.sanitize(text)
         assert result == "[submit(answer='Model\\'s approach')]"
         # Verify it parses
+        ast.parse(result)
+
+    def test_preserves_already_escaped_apostrophe(self):
+        """A valid model-emitted escaped apostrophe remains parseable."""
+        text = r"[search(query='familial Alzheimer\'s disease')]"
+        result = self.sanitize(text)
+        assert result == text
         ast.parse(result)
 
     def test_escapes_backslash_in_path(self):
