@@ -126,8 +126,14 @@ class TestOpenAIAgentsModelApi:
 
 
 class TestOpenAIAgentsMaxTurns:
+    @pytest.mark.parametrize(
+        ("agent_api", "expected_tool_choice"),
+        [("chat_completions", "none"), ("responses", None)],
+    )
     @pytest.mark.anyio
-    async def test_max_turns_preserves_trajectory_and_forces_final_answer(self, monkeypatch):
+    async def test_max_turns_preserves_trajectory_and_forces_final_answer(
+        self, monkeypatch, agent_api, expected_tool_choice
+    ):
         from agents import Agent, Runner
 
         agent = Agent(name="test-agent", instructions="Use tools.")
@@ -150,7 +156,7 @@ class TestOpenAIAgentsMaxTurns:
         monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
 
         result = await OpenAIAgentsScaffold().run(
-            provider=SimpleNamespace(),
+            provider=SimpleNamespace(agent_api=agent_api),
             config=HarnessConfig(name="test", max_turns=1),
             request=_agent_request(),
             enable_compaction=False,
@@ -171,7 +177,7 @@ class TestOpenAIAgentsMaxTurns:
         assert final_call["starting_agent"].tools == []
         assert final_call["starting_agent"].handoffs == []
         assert final_call["starting_agent"].mcp_servers == []
-        assert final_call["starting_agent"].model_settings.tool_choice == "none"
+        assert final_call["starting_agent"].model_settings.tool_choice == expected_tool_choice
         assert final_call["input"][-1] == {
             "role": "user",
             "content": FORCED_FINAL_ANSWER_INSTRUCTION,

@@ -362,6 +362,11 @@ class OpenAIAgentsScaffold(Scaffold):
                             agent=agent,
                             partial_result=partial_result,
                             original_input=input_text,
+                            tool_choice=(
+                                None
+                                if getattr(provider, "agent_api", "chat_completions") == "responses"
+                                else "none"
+                            ),
                         )
                     except Exception:
                         logger.warning(
@@ -419,10 +424,11 @@ class OpenAIAgentsScaffold(Scaffold):
         agent: Any,
         partial_result: Any,
         original_input: str,
+        tool_choice: str | None,
     ) -> str:
         """Run one no-tool model call to produce a final answer after max_turns."""
         final_input = self._build_forced_final_input(partial_result, original_input)
-        model_settings = replace(agent.model_settings, tool_choice="none")
+        model_settings = replace(agent.model_settings, tool_choice=tool_choice)
         final_agent = replace(
             agent,
             tools=[],
