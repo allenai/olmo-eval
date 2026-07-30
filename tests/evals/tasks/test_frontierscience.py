@@ -1,9 +1,14 @@
 """Tests for the FrontierScience olympiad and research tracks."""
 
+import asyncio
+import gc
 import logging
+import types
+import weakref
 
 import pytest
 
+from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks import frontierscience
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, get_task, task_exists
@@ -20,6 +25,10 @@ OLYMPIAD_INSTRUCTION = (
     "Think step by step and solve the problem below. At the end of your response, write your "
     "final answer on a new line starting with “FINAL ANSWER”."
 )
+
+#: Captured before ``_no_backoff_sleep`` replaces ``asyncio.sleep`` module-wide, so
+#: concurrency tests can still yield to the event loop for real.
+_real_sleep = asyncio.sleep
 
 
 @pytest.fixture
@@ -131,7 +140,7 @@ class TestProcessDoc:
         assert instance is not None
         assert instance.question.endswith("“FINAL ANSWER”.")
         assert instance.gold_answer == "`\\( 2.31 \\times 10^6 K\\)`"
-        assert instance.metadata["id"] == "bb0539ef-d9fd-4215-bf16-b0eca44a8778"
+        assert instance.metadata["id"] == "bb0539ef-d9fd-4215-bf16-b0eca44a8778:2"
         assert instance.metadata["task_group_id"] == "bb0539ef-d9fd-4215-bf16-b0eca44a8778"
         assert instance.metadata["subject"] == "physics"
         assert instance.metadata["index"] == 2
@@ -140,7 +149,16 @@ class TestProcessDoc:
         instance = olympiad.process_doc(_doc(task_group_id=""), index=5)
 
         assert instance is not None
-        assert instance.metadata["id"] == "frontierscience_olympiad_5"
+        assert instance.metadata["id"] == "frontierscience_olympiad:5"
+
+    def test_ids_are_unique_even_though_task_group_ids_are_not(self, research):
+        """The Research gold set duplicates one task_group_id byte-for-byte."""
+        first = research.process_doc(_doc(task_group_id="dup"), index=11)
+        second = research.process_doc(_doc(task_group_id="dup"), index=12)
+
+        assert first is not None and second is not None
+        assert first.metadata["id"] != second.metadata["id"]
+        assert first.metadata["task_group_id"] == second.metadata["task_group_id"] == "dup"
 
     def test_skips_rows_missing_a_problem_or_answer(self, olympiad):
         assert olympiad.process_doc(_doc(problem="  ")) is None
@@ -453,6 +471,175 @@ class TestResearchScoring:
 
         assert len(calls) == 3
         assert response.scores == {"success_rate": 0.0, "rubric_score": 0.0}
+
+
+class TestRunnerShapedScoring:
+    """The runner calls score_responses once per response, many calls concurrently."""
+
+    @pytest.mark.anyio
+    async def test_judge_concurrency_is_bounded_across_calls(self, olympiad, monkeypatch):
+        context = types.SimpleNamespace(scoring_concurrency=2)
+        in_flight = 0
+        peak = 0
+
+        async def judge(_prompt: str, **_kwargs) -> str:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            try:
+                # A real yield, long enough that any unbounded callers pile up here.
+                await _real_sleep(0.02)
+                return "VERDICT: CORRECT"
+            finally:
+                in_flight -= 1
+
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        # Six separate score_responses calls, as the runner would issue them.
+        await asyncio.gather(
+            *(olympiad.score_responses([_response(olympiad)], context=context) for _ in range(6))
+        )
+
+        assert peak <= 2
+
+    @pytest.mark.anyio
+    async def test_judge_is_built_once_per_task(self, olympiad, monkeypatch):
+        builds = 0
+
+        async def judge(_prompt: str, **_kwargs) -> str:
+            return "VERDICT: CORRECT"
+
+        def build(**_kwargs):
+            nonlocal builds
+            builds += 1
+            return judge
+
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", build)
+
+        for _ in range(3):
+            await olympiad.score_responses([_response(olympiad)])
+
+        assert builds == 1
+
+    @pytest.mark.anyio
+    async def test_concurrency_is_shared_across_tracks(self, olympiad, research, monkeypatch):
+        """Both tracks are scored in the same run and share one judge budget."""
+        context = types.SimpleNamespace(scoring_concurrency=2)
+        in_flight = 0
+        peak = 0
+
+        async def judge(_prompt: str, **_kwargs) -> str:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            try:
+                await _real_sleep(0.02)
+                return "VERDICT: CORRECT"
+            finally:
+                in_flight -= 1
+
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        await asyncio.gather(
+            *(olympiad.score_responses([_response(olympiad)], context=context) for _ in range(3)),
+            *(research.score_responses([_response(research)], context=context) for _ in range(3)),
+        )
+
+        assert peak <= 2
+
+    @pytest.mark.anyio
+    async def test_limiter_is_scoped_to_the_run_not_the_process(self, olympiad, monkeypatch):
+        """A second run must get its own limiter at its own configured concurrency."""
+
+        async def judge(_prompt: str, **_kwargs) -> str:
+            return "VERDICT: CORRECT"
+
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        first = ScoringContext(scoring_concurrency=2)
+        second = ScoringContext(scoring_concurrency=5)
+        await olympiad.score_responses([_response(olympiad)], context=first)
+        await olympiad.score_responses([_response(olympiad)], context=second)
+
+        first_limiter = frontierscience.get_judge_semaphore(first, 2)
+        second_limiter = frontierscience.get_judge_semaphore(second, 5)
+        assert first_limiter is not second_limiter
+        assert first_limiter._value == 2
+        assert second_limiter._value == 5
+
+    def test_limiter_does_not_outlive_its_run(self):
+        """The limiter must not be reachable from module state once the run is gone."""
+        context = ScoringContext(scoring_concurrency=3)
+        semaphore = frontierscience.get_judge_semaphore(context, 3)
+        ref = weakref.ref(semaphore)
+
+        del semaphore, context
+        gc.collect()
+
+        assert ref() is None
+
+    @pytest.mark.anyio
+    async def test_cancellation_is_not_swallowed_as_a_sample_failure(self, olympiad, monkeypatch):
+        response = _response(olympiad)
+
+        async def judge(_prompt: str, **_kwargs) -> str:
+            raise asyncio.CancelledError()
+
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        with pytest.raises(asyncio.CancelledError):
+            await olympiad.score_responses([response])
+
+    @pytest.mark.anyio
+    async def test_one_failed_judge_call_keeps_the_other_samples(self, olympiad, monkeypatch):
+        """A rate limit on one trial must not discard the whole instance."""
+        response = _response(olympiad)
+        response.outputs = [LMOutput(text=f"FINAL ANSWER {i}") for i in range(3)]
+        replies = iter(["VERDICT: CORRECT", "boom", "VERDICT: CORRECT"])
+
+        async def judge(_prompt: str, **_kwargs) -> str:
+            reply = next(replies)
+            if reply == "boom":
+                raise RuntimeError("rate limit exceeded")
+            return reply
+
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        await olympiad.score_responses([response])
+
+        # Mean over the two samples that were judged, not 1/3.
+        assert response.scores["accuracy"] == 1.0
+        # Recorded through the one output-metadata channel the prediction builder keeps.
+        errors = response.outputs[1].metadata["scoring_errors"]["frontierscience_judge"]
+        assert errors["phase"] == "judge"
+        assert "rate limit exceeded" in errors["message"]
+
+    @pytest.mark.anyio
+    async def test_total_judge_failure_raises_and_the_runner_scores_it_zero(
+        self, olympiad, monkeypatch
+    ):
+        """Raising cannot exclude the instance; document what the runner actually does."""
+        from olmo_eval.runners.asynq.results import _record_scoring_failure
+
+        response = _response(olympiad)
+
+        async def judge(_prompt: str, **_kwargs) -> str:
+            raise RuntimeError("rate limit exceeded")
+
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        with pytest.raises(RuntimeError, match="failed for every sample"):
+            await olympiad.score_responses([response])
+
+        # The runner catches, annotates, and keeps the response, so the instance lands
+        # in the metric as 0.0 rather than being dropped from the denominator.
+        _record_scoring_failure(
+            response,
+            scorer_names=list(olympiad._get_scorers()),
+            error={"phase": "response", "type": "RuntimeError"},
+        )
+        assert response.outputs[0].metadata["scoring_errors"]["__response__"]["phase"] == "response"
+        assert olympiad.config.get_primary_metric().compute([response]) == 0.0
 
 
 class TestComputeMetrics:

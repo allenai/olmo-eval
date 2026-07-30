@@ -63,7 +63,7 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, Task, register, register_variant
-from olmo_eval.evals.tasks.common.base import _store_output_score
+from olmo_eval.evals.tasks.common.base import _format_scoring_error, _store_output_score
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +195,27 @@ def build_frontierscience_judge_fn(*, scorer_name: str, max_tokens: int) -> Judg
     )
 
 
+#: Where the shared judge limiter is stashed on the scoring context.
+#:
+#: Judge concurrency is one budget per run, not per task: every FrontierScience track
+#: talks to the same judge API and both tracks are typically scored at once. The
+#: scoring context is the object with exactly that lifetime -- shared across tasks,
+#: discarded with the run. A module-level cache keyed by event loop would instead
+#: leak, because a contended semaphore binds its own loop and the cached value then
+#: keeps its weak key alive, and it would hand a second run on the same loop the
+#: first run's concurrency setting.
+_JUDGE_SEMAPHORE_ATTR = "_frontierscience_judge_semaphore"
+
+
+def get_judge_semaphore(context: Any, concurrency: int) -> asyncio.Semaphore:
+    """Return the judge limiter shared by every FrontierScience task in this run."""
+    semaphore = getattr(context, _JUDGE_SEMAPHORE_ATTR, None)
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+        setattr(context, _JUDGE_SEMAPHORE_ATTR, semaphore)
+    return semaphore
+
+
 async def judge_with_retries(
     judge_fn: JudgeFn,
     prompt: str,
@@ -316,12 +337,18 @@ class _FrontierScience(Task, ABC):
         if subject and subject not in FRONTIERSCIENCE_SUBJECTS:
             logger.warning("FrontierScience: unexpected subject %r at index %d", subject, index)
 
+        # task_group_id is not unique: the Research gold set has 60 rows but 59 distinct
+        # values (one row is duplicated byte-for-byte). Anything that keys on the
+        # instance id -- pairwise storage, pass@k grouping -- would silently merge the
+        # pair, so the row index goes into the id and the raw value is kept alongside.
         task_group_id = str(doc.get("task_group_id") or "")
         return Instance(
             question=problem,
             gold_answer=answer,
             metadata={
-                "id": task_group_id or f"{self.config.name}_{index}",
+                "id": f"{task_group_id}:{index}"
+                if task_group_id
+                else f"{self.config.name}:{index}",
                 "task_group_id": task_group_id,
                 "subject": subject,
                 "index": index,
@@ -335,11 +362,35 @@ class _FrontierScience(Task, ABC):
             messages=({"role": "user", "content": instance.question},),
         )
 
-    def _build_judge_fn(self) -> JudgeFn:
-        return build_frontierscience_judge_fn(
-            scorer_name=type(self).__name__,
-            max_tokens=self.judge_max_tokens,
-        )
+    def _get_judge_fn(self) -> JudgeFn:
+        """Return the run's single judge, built once per task.
+
+        The runner scores one instance per ``score_responses`` call, so building a
+        judge per call would give every instance a fresh client and a fresh copy of
+        the adaptive request-shape cache in ``build_openai_judge_fn`` -- making each
+        instance re-discover the same per-model parameter rejections.
+        """
+        judge_fn = getattr(self, "_judge_fn", None)
+        if judge_fn is None:
+            judge_fn = build_frontierscience_judge_fn(
+                scorer_name=type(self).__name__,
+                max_tokens=self.judge_max_tokens,
+            )
+            self._judge_fn = judge_fn
+        return judge_fn
+
+    def _get_judge_semaphore(self, context: Any) -> asyncio.Semaphore:
+        """Return the judge limiter, shared run-wide when a scoring context exists."""
+        if context is not None:
+            return get_judge_semaphore(context, context.scoring_concurrency)
+
+        # Without a scoring context there is no run-scoped object to hang the limiter
+        # on, so fall back to one per task. Bounded, just not shared across tracks.
+        semaphore = getattr(self, "_judge_semaphore", None)
+        if semaphore is None:
+            semaphore = asyncio.Semaphore(FRONTIERSCIENCE_DEFAULT_SCORING_CONCURRENCY)
+            self._judge_semaphore = semaphore
+        return semaphore
 
     @abstractmethod
     async def _score_output(
@@ -358,14 +409,8 @@ class _FrontierScience(Task, ABC):
     ) -> Sequence[Response]:
         """Judge every output concurrently, then average each instance over its samples."""
         self._extract_answers(responses)
-        judge_fn = self._build_judge_fn()
-
-        concurrency = (
-            context.scoring_concurrency
-            if context is not None
-            else FRONTIERSCIENCE_DEFAULT_SCORING_CONCURRENCY
-        )
-        semaphore = asyncio.Semaphore(max(1, concurrency))
+        judge_fn = self._get_judge_fn()
+        semaphore = self._get_judge_semaphore(context)
 
         jobs = [
             (response_index, output_index)
@@ -373,12 +418,11 @@ class _FrontierScience(Task, ABC):
             for output_index in range(len(response.outputs))
         ]
 
-        # An instance the model never answered scores 0.0, which is indistinguishable
-        # from a genuine miss unless it is announced. Two ways to get there: a provider
-        # that failed the request (no output at all), and a reasoning model that spent
-        # its whole token budget before emitting any visible text, which on a provider
-        # that separates reasoning from content leaves an output whose text is empty.
-        # Either way the score stops being a capability measurement.
+        # A reasoning model that spends its whole token budget before emitting any
+        # visible text leaves an output whose text is empty, which scores 0.0 and is
+        # indistinguishable from a genuine miss unless it is announced. (A provider
+        # request that fails outright never reaches scoring: the runner counts that
+        # instance as failed and drops it from the denominator.)
         unanswered = sum(
             1
             for response in responses
@@ -398,14 +442,58 @@ class _FrontierScience(Task, ABC):
             async with semaphore:
                 return await self._score_output(response, response.outputs[output_index], judge_fn)
 
-        results = await asyncio.gather(*(run(*job) for job in jobs))
+        # A judge call can still fail after its own retries (rate limit, timeout). Keep
+        # the exceptions so one bad call costs its own sample rather than every sample
+        # for that instance, which matters most for the multi-trial :paper variants.
+        results = await asyncio.gather(*(run(*job) for job in jobs), return_exceptions=True)
 
         collected: list[dict[str, dict[int, float]]] = [
             {key: {} for key in self.score_keys} for _ in responses
         ]
+        judge_errors: list[Exception] = []
+        failed_by_response: list[int] = [0] * len(responses)
         for (response_index, output_index), scores in zip(jobs, results, strict=True):
+            if isinstance(scores, BaseException):
+                # Cancellation and other non-Exception failures are control flow, not
+                # data about a sample; swallowing them would turn a cancelled run into
+                # a run with quietly missing trials.
+                if not isinstance(scores, Exception):
+                    raise scores
+                judge_errors.append(scores)
+                failed_by_response[response_index] += 1
+                # Record through the standard scorer-error channel: it is the only
+                # output metadata the prediction builder persists, so an omitted trial
+                # stays auditable after the run.
+                _store_output_score(
+                    responses[response_index].outputs[output_index],
+                    scorer_name=FRONTIERSCIENCE_SCORER_NAME,
+                    score=0.0,
+                    scoring_error=_format_scoring_error(scores, phase="judge"),
+                )
+                continue
             for key, value in scores.items():
                 collected[response_index][key][output_index] = value
+
+        # An instance whose every judge call failed has no score of its own. Raising
+        # hands it to the runner, which annotates every output with the standard
+        # ``__response__`` scoring error and logs the failure. Note the instance still
+        # scores 0.0 and stays in the denominator -- the runner keeps the response and
+        # has no path for excluding a scoring failure from a metric.
+        for response_index, response in enumerate(responses):
+            if response.outputs and failed_by_response[response_index] == len(response.outputs):
+                raise RuntimeError(
+                    "FrontierScience judge failed for every sample of instance "
+                    f"{response.instance.metadata.get('id', response_index)}"
+                ) from judge_errors[0]
+
+        if judge_errors:
+            logger.warning(
+                "FrontierScience judge raised on %d/%d sample(s) after retries; those samples are "
+                "excluded from their instance average. First error: %s",
+                len(judge_errors),
+                len(jobs),
+                judge_errors[0],
+            )
 
         for response, per_key in zip(responses, collected, strict=True):
             for key, output_scores in per_key.items():
