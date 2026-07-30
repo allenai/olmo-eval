@@ -98,17 +98,21 @@ def make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") 
     return f"Question: {question}\n{choices_text}\nAnswer:"
 
 
-def register_safety_variants(eval_name: str, subsets: tuple[str, ...]):
+def register_safety_variants(
+    eval_name: str, subsets: tuple[str, ...], scorer=None, scorer_name=None
+):
     """
     Build the four variants that the base wildguard safety tasks use.
     """
 
     # Initialize the safety scorer
-    _WG_SCORER = SafetyScorer(
-        provider_name="wg_judge",
-        judge_format="wildguard",
-        judge_request_type=RequestType.COMPLETION,
-    )
+    if scorer is None:
+        scorer = SafetyScorer(
+            provider_name="wg_judge",
+            judge_format="wildguard",
+            judge_request_type=RequestType.COMPLETION,
+        )
+        scorer_name = "wg_scorer"
 
     # OpenAI judge variant - uses OpenAI API as the judge
     register_variant(
@@ -122,17 +126,17 @@ def register_safety_variants(eval_name: str, subsets: tuple[str, ...]):
 
     register_variant(
         eval_name,
-        "wg_judge",
-        metrics=safety_metrics(_WG_SCORER, subsets),
-        primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+        scorer_name,
+        metrics=safety_metrics(scorer, subsets),
+        primary_metric=AccuracyMetric(scorer=scorer),
         sampling_params=judge_sampling,
     )
 
     register_variant(
         eval_name,
-        "wg_judge_thinking",
-        metrics=safety_metrics(_WG_SCORER, subsets),
-        primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+        f"{scorer_name}_thinking",
+        metrics=safety_metrics(scorer, subsets),
+        primary_metric=AccuracyMetric(scorer=scorer),
         sampling_params=judge_sampling,
         answer_extractor=extract_think_answer_only,
     )
@@ -140,8 +144,8 @@ def register_safety_variants(eval_name: str, subsets: tuple[str, ...]):
     register_variant(
         eval_name,
         "base",
-        metrics=safety_metrics(_WG_SCORER, subsets),
-        primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+        metrics=safety_metrics(scorer, subsets),
+        primary_metric=AccuracyMetric(scorer=scorer),
         sampling_params=base_sampling,
         formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
     )
