@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceLogprobFormatter
+from olmo_eval.common.formatters import ChatFormatter, MultipleChoiceLogprobFormatter
 from olmo_eval.common.metrics import (
+    AccuracyMetric,
     BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
+from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -18,6 +20,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
+from olmo_eval.evals.extract import extract_mcq_answer
 from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
 
 _STEM = (
@@ -92,6 +95,17 @@ _OTHER = (
 MMLU_SUBJECTS = _STEM + _HUMANITIES + _SOCIAL_SCIENCES + _OTHER
 
 DEFAULT_MMLU_PATH = "cais/mmlu"
+
+_CHAT_SYSTEM_PROMPT = (
+    "Answer the multiple-choice question. Reason carefully, then end your response with "
+    '"ANSWER: X", where X is the letter of the best answer.'
+)
+_CHAT_FORMATTER = ChatFormatter(
+    system_prompt=_CHAT_SYSTEM_PROMPT,
+    assistant_template="ANSWER: {answer}",
+)
+_CHAT_ACCURACY = AccuracyMetric(scorer=MultipleChoiceScorer)
+_CHAT_SAMPLING = SamplingParams(max_tokens=4096, temperature=0.0)
 
 
 def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") -> str:
@@ -174,8 +188,10 @@ class MMLUMCTask(Task):
         return formatter.format(instance, self.get_fewshot())
 
     def extract_answer(self, output: LMOutput) -> Any:
-        """Not used for logprob-based MC; scoring uses MultipleChoiceLogprobScorer."""
-        return None
+        """Extract chat-variant answers; logprob MC does not use this path."""
+        if self.config.answer_extractor is None:
+            return None
+        return self.config.answer_extractor(output.text)
 
     def _build_fewshot(self) -> list[Instance]:
         """Few-shot from dev split in fixed order (first k), matching reference."""
@@ -306,6 +322,15 @@ for _subject in MMLU_SUBJECTS:
     )
     register(f"mmlu_{_subject}")(_cls)
     register_variant(f"mmlu_{_subject}", "mc")
+    register_variant(
+        f"mmlu_{_subject}",
+        "chat",
+        formatter=_CHAT_FORMATTER,
+        metrics=(_CHAT_ACCURACY,),
+        primary_metric=_CHAT_ACCURACY,
+        sampling_params=_CHAT_SAMPLING,
+        answer_extractor=extract_mcq_answer,
+    )
     register_variant(f"mmlu_{_subject}", "olmo3base")
     globals()[f"MMLU_{_subject}"] = _cls
 

@@ -38,6 +38,25 @@ MMLU = register(
     )
 )
 
+MMLU_STEM_CHAT = make_suite("mmlu:stem:chat", _task_names_variant(_STEM, "chat"))
+MMLU_HUMANITIES_CHAT = make_suite("mmlu:humanities:chat", _task_names_variant(_HUMANITIES, "chat"))
+MMLU_SOCIAL_SCIENCES_CHAT = make_suite(
+    "mmlu:social_sciences:chat", _task_names_variant(_SOCIAL_SCIENCES, "chat")
+)
+MMLU_OTHER_CHAT = make_suite("mmlu:other:chat", _task_names_variant(_OTHER, "chat"))
+MMLU_CHAT = register(
+    Suite(
+        name="mmlu:chat",
+        tasks=(
+            MMLU_STEM_CHAT,
+            MMLU_HUMANITIES_CHAT,
+            MMLU_SOCIAL_SCIENCES_CHAT,
+            MMLU_OTHER_CHAT,
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    )
+)
+
 MMLU_BPB = make_suite(
     "mmlu:bpb",
     tuple(f"mmlu_{s}:rc:bpb" for s in MMLU_SUBJECTS),
