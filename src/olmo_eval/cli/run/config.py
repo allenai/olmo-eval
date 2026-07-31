@@ -34,9 +34,7 @@ def _parse_override_value(value: str) -> Any:
             return []
 
     # Parse bool, int, float, or string
-    if value.lower() == "null":
-        return None
-    elif value.lower() == "true":
+    if value.lower() == "true":
         return True
     elif value.lower() == "false":
         return False
