@@ -60,6 +60,7 @@ class TestVLLMServerProviderLogprobs:
             p._max_length = 4096
             p._prompt_logprobs = 5
             p._completion_use_prompt_token_ids = False
+            p._completion_use_chat = False
             p._completion_client_side_stop_trim = False
             p._completion_sentencepiece_cleanup = False
             p._get_tokenizer = MagicMock(return_value=mock_tokenizer)
@@ -163,6 +164,24 @@ class TestVLLMServerProviderLogprobs:
         await provider._generate_chat(client, request, SamplingParams(max_tokens=128))
 
         assert client.chat.completions.create.call_args.kwargs["max_tokens"] == 128
+
+    @pytest.mark.anyio
+    async def test_completion_use_chat_preserves_rendered_prompt(self):
+        """Completion tasks can use a model's chat template without reformatting few-shots."""
+        provider = self._make_provider(completion_use_chat=True)
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=self._make_chat_response("answer"))
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+        provider._client = client
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="rendered few-shot prompt")
+        outputs = await provider._generate_single_impl(request, SamplingParams(max_tokens=128))
+
+        client.completions.create.assert_not_awaited()
+        assert client.chat.completions.create.call_args.kwargs["messages"] == [
+            {"role": "user", "content": "rendered few-shot prompt"}
+        ]
+        assert outputs[0].text == "answer"
 
     def test_describe_request_includes_chat_template_kwargs(self):
         """Chat traces should preserve template kwargs in generation metadata."""

@@ -278,6 +278,7 @@ class TestVLLMServerProviderStartup:
                 add_bos_token=False,
                 prompt_logprobs=1,
                 completion_use_prompt_token_ids=True,
+                completion_use_chat=True,
                 completion_client_side_stop_trim=True,
                 completion_sentencepiece_cleanup=True,
             )
@@ -290,6 +291,7 @@ class TestVLLMServerProviderStartup:
         assert "add_bos_token" not in server_kwargs
         assert "prompt_logprobs" not in server_kwargs
         assert "completion_use_prompt_token_ids" not in server_kwargs
+        assert "completion_use_chat" not in server_kwargs
         assert "completion_client_side_stop_trim" not in server_kwargs
         assert "completion_sentencepiece_cleanup" not in server_kwargs
 

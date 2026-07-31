@@ -271,6 +271,7 @@ class VLLMServerProvider(InferenceProvider):
         add_bos_token: bool | None = None,
         prompt_logprobs: int | None = None,
         completion_use_prompt_token_ids: bool | None = None,
+        completion_use_chat: bool | None = None,
         completion_client_side_stop_trim: bool | None = None,
         completion_sentencepiece_cleanup: bool | None = None,
         agent_api: str = "chat_completions",
@@ -303,6 +304,9 @@ class VLLMServerProvider(InferenceProvider):
                 Defaults to 5 in the current runtime.
             completion_use_prompt_token_ids: If True, locally tokenize completion prompts
                 and send token IDs to /completions instead of raw prompt strings.
+            completion_use_chat: If True, wrap completion prompts in a user message and send
+                them to /chat/completions. This is useful for chat-only model templates while
+                preserving the task's fully rendered few-shot completion prompt.
             completion_client_side_stop_trim: If True, trim completion text at the first
                 stop sequence client-side after generation.
             completion_sentencepiece_cleanup: If True, replace SentencePiece space markers
@@ -326,6 +330,7 @@ class VLLMServerProvider(InferenceProvider):
         self._add_bos_token = add_bos_token
         self._prompt_logprobs = prompt_logprobs if prompt_logprobs is not None else 5
         self._completion_use_prompt_token_ids = bool(completion_use_prompt_token_ids)
+        self._completion_use_chat = bool(completion_use_chat)
         self._completion_client_side_stop_trim = bool(completion_client_side_stop_trim)
         self._completion_sentencepiece_cleanup = bool(completion_sentencepiece_cleanup)
         self._tokenizer_path = tokenizer or model_name
@@ -552,6 +557,7 @@ class VLLMServerProvider(InferenceProvider):
             request.request_type == RequestType.COMPLETION
             and not request.messages
             and request.prompt
+            and not self._completion_use_chat
         )
 
         if use_completions:
@@ -587,6 +593,7 @@ class VLLMServerProvider(InferenceProvider):
             request.request_type == RequestType.COMPLETION
             and not request.messages
             and request.prompt
+            and not self._completion_use_chat
         )
         if use_completions:
             trace["provider"] = "VLLMServerProvider"
