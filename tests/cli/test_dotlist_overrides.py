@@ -54,6 +54,9 @@ class TestParseOverrideValue:
     def test_bool_false(self):
         assert _parse_override_value("False") is False
 
+    def test_null(self):
+        assert _parse_override_value("null") is None
+
     def test_int(self):
         assert _parse_override_value("42") == 42
 
