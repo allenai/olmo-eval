@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    #vis.vega-embed {
+      width: 100%;
+      display: flex;
+    }
+
+    #vis.vega-embed details,
+    #vis.vega-embed details summary {
+      position: relative;
+    }
+  </style>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega@6"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-lite@6.4.1"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-embed@7"></script>
+</head>
+<body>
+  <div id="vis"></div>
+  <script>
+    (function(vegaEmbed) {
+      var spec = {"config": {"view": {"continuousWidth": 300, "continuousHeight": 300, "stroke": null}, "axis": {"domainColor": "#b5b3aa", "gridColor": "#e1e0d9", "labelColor": "#52514e", "titleColor": "#52514e"}, "title": {"anchor": "start", "color": "#0b0b0b", "fontSize": 16, "subtitleFontSize": 12}}, "layer": [{"data": {"values": [{"full_score": 0.06004543908175053, "dev10_score": 0.06004543908175053}, {"full_score": 0.19525322719404076, "dev10_score": 0.19525322719404076}]}, "mark": {"type": "line", "color": "#898781", "strokeDash": [5, 5], "strokeWidth": 1.5}, "encoding": {"x": {"field": "full_score", "scale": {"domain": [0.06004543908175053, 0.19525322719404076], "zero": false}, "type": "quantitative"}, "y": {"field": "dev10_score", "scale": {"domain": [0.06004543908175053, 0.19525322719404076], "zero": false}, "type": "quantitative"}}}, {"data": {"values": [{"model": "OLMo-3 7B Instruct", "full_score": 0.1018, "full_run_id": "01KYB33B3SEBRW9R5382WJE9S6", "dev10_score": 0.07204543908175053, "dev10_run_id": "01KYQP2JJY9GERXC30EBG70Z3C", "label": "OLMo Instruct", "label_y": 0.07204543908175053}, {"model": "GPT-OSS-20b", "full_score": 0.1127, "full_run_id": "01KYJ7BBE991C2H0K307598YKW", "dev10_score": 0.09818418517621999, "dev10_run_id": "01KYQP379Q7QQB75DVE348VAQV", "label": "GPT-OSS", "label_y": 0.10218418517622}, {"model": "Nemotron 3 Nano 30B-A3B", "full_score": 0.1167, "full_run_id": "01KYJE3ZAA23Z2N2JWFSS18H1X", "dev10_score": 0.09340001103391071, "dev10_run_id": "01KYQP3JFSXKH5T76QH93ECYB6", "label": "Nemotron", "label_y": 0.08940001103391071}, {"model": "Qwen3.5 9B Instruct", "full_score": 0.1446, "full_run_id": "01KYJYTGJK69QV3JWYARVKPV0J", "dev10_score": 0.12380944471146806, "dev10_run_id": "01KYQP2S2WG5DBE8VPBKG8T8FP", "label": "Qwen 9B", "label_y": 0.12380944471146806}, {"model": "Qwen3.5-35B-A3B", "full_score": 0.1599, "full_run_id": "01KYJYTXWGRC614A0G6APK2G8J", "dev10_score": 0.17811766613249982, "dev10_run_id": "01KYQP3CSWQTGD51T9FDZ43H8P", "label": "Qwen 35B", "label_y": 0.17511766613249982}, {"model": "Gemma4 26B-A4B", "full_score": 0.1817, "full_run_id": "01KY69TMTF1AV7ZVJ5G13X3M32", "dev10_score": 0.18325322719404075, "dev10_run_id": "01KYQP2ZDGWJQEJT72EH5XW2E6", "label": "Gemma 26B", "label_y": 0.18625322719404075}]}, "mark": {"type": "line", "color": "#e56b2f", "strokeWidth": 2.5}, "encoding": {"x": {"field": "full_score", "scale": {"domain": [0.06004543908175053, 0.19525322719404076], "zero": false}, "type": "quantitative"}, "y": {"field": "dev10_score", "scale": {"domain": [0.06004543908175053, 0.19525322719404076], "zero": false}, "type": "quantitative"}}, "transform": [{"on": "full_score", "regression": "dev10_score"}]}, {"data": {"values": [{"model": "OLMo-3 7B Instruct", "full_score": 0.1018, "full_run_id": "01KYB33B3SEBRW9R5382WJE9S6", "dev10_score": 0.07204543908175053, "dev10_run_id": "01KYQP2JJY9GERXC30EBG70Z3C", "label": "OLMo Instruct", "label_y": 0.07204543908175053}, {"model": "GPT-OSS-20b", "full_score": 0.1127, "full_run_id": "01KYJ7BBE991C2H0K307598YKW", "dev10_score": 0.09818418517621999, "dev10_run_id": "01KYQP379Q7QQB75DVE348VAQV", "label": "GPT-OSS", "label_y": 0.10218418517622}, {"model": "Nemotron 3 Nano 30B-A3B", "full_score": 0.1167, "full_run_id": "01KYJE3ZAA23Z2N2JWFSS18H1X", "dev10_score": 0.09340001103391071, "dev10_run_id": "01KYQP3JFSXKH5T76QH93ECYB6", "label": "Nemotron", "label_y": 0.08940001103391071}, {"model": "Qwen3.5 9B Instruct", "full_score": 0.1446, "full_run_id": "01KYJYTGJK69QV3JWYARVKPV0J", "dev10_score": 0.12380944471146806, "dev10_run_id": "01KYQP2S2WG5DBE8VPBKG8T8FP", "label": "Qwen 9B", "label_y": 0.12380944471146806}, {"model": "Qwen3.5-35B-A3B", "full_score": 0.1599, "full_run_id": "01KYJYTXWGRC614A0G6APK2G8J", "dev10_score": 0.17811766613249982, "dev10_run_id": "01KYQP3CSWQTGD51T9FDZ43H8P", "label": "Qwen 35B", "label_y": 0.17511766613249982}, {"model": "Gemma4 26B-A4B", "full_score": 0.1817, "full_run_id": "01KY69TMTF1AV7ZVJ5G13X3M32", "dev10_score": 0.18325322719404075, "dev10_run_id": "01KYQP2ZDGWJQEJT72EH5XW2E6", "label": "Gemma 26B", "label_y": 0.18625322719404075}]}, "mark": {"type": "circle", "color": "#2a78d6", "opacity": 0.9, "size": 105}, "encoding": {"tooltip": [{"field": "model", "title": "Model", "type": "nominal"}, {"field": "full_score", "format": ".4f", "title": "Full", "type": "quantitative"}, {"field": "dev10_score", "format": ".4f", "title": "Dev10", "type": "quantitative"}, {"field": "full_run_id", "title": "Full run", "type": "nominal"}, {"field": "dev10_run_id", "title": "Dev10 run", "type": "nominal"}], "x": {"axis": {"format": ".3f"}, "field": "full_score", "scale": {"domain": [0.06004543908175053, 0.19525322719404076], "zero": false}, "title": "Full benchmark geomean_fixed", "type": "quantitative"}, "y": {"axis": {"format": ".3f"}, "field": "dev10_score", "scale": {"domain": [0.06004543908175053, 0.19525322719404076], "zero": false}, "title": "Dev10 geomean_fixed", "type": "quantitative"}}}, {"data": {"values": [{"model": "OLMo-3 7B Instruct", "full_score": 0.1018, "full_run_id": "01KYB33B3SEBRW9R5382WJE9S6", "dev10_score": 0.07204543908175053, "dev10_run_id": "01KYQP2JJY9GERXC30EBG70Z3C", "label": "OLMo Instruct", "label_y": 0.07204543908175053}, {"model": "GPT-OSS-20b", "full_score": 0.1127, "full_run_id": "01KYJ7BBE991C2H0K307598YKW", "dev10_score": 0.09818418517621999, "dev10_run_id": "01KYQP379Q7QQB75DVE348VAQV", "label": "GPT-OSS", "label_y": 0.10218418517622}, {"model": "Nemotron 3 Nano 30B-A3B", "full_score": 0.1167, "full_run_id": "01KYJE3ZAA23Z2N2JWFSS18H1X", "dev10_score": 0.09340001103391071, "dev10_run_id": "01KYQP3JFSXKH5T76QH93ECYB6", "label": "Nemotron", "label_y": 0.08940001103391071}, {"model": "Qwen3.5 9B Instruct", "full_score": 0.1446, "full_run_id": "01KYJYTGJK69QV3JWYARVKPV0J", "dev10_score": 0.12380944471146806, "dev10_run_id": "01KYQP2S2WG5DBE8VPBKG8T8FP", "label": "Qwen 9B", "label_y": 0.12380944471146806}, {"model": "Qwen3.5-35B-A3B", "full_score": 0.1599, "full_run_id": "01KYJYTXWGRC614A0G6APK2G8J", "dev10_score": 0.17811766613249982, "dev10_run_id": "01KYQP3CSWQTGD51T9FDZ43H8P", "label": "Qwen 35B", "label_y": 0.17511766613249982}, {"model": "Gemma4 26B-A4B", "full_score": 0.1817, "full_run_id": "01KY69TMTF1AV7ZVJ5G13X3M32", "dev10_score": 0.18325322719404075, "dev10_run_id": "01KYQP2ZDGWJQEJT72EH5XW2E6", "label": "Gemma 26B", "label_y": 0.18625322719404075}]}, "mark": {"type": "text", "align": "left", "color": "#222222", "dx": 7, "fontSize": 11}, "encoding": {"text": {"field": "label", "type": "nominal"}, "x": {"field": "full_score", "scale": {"domain": [0.06004543908175053, 0.19525322719404076], "zero": false}, "type": "quantitative"}, "y": {"field": "label_y", "scale": {"domain": [0.06004543908175053, 0.19525322719404076], "zero": false}, "type": "quantitative"}}}], "height": 430, "title": {"text": "DeepScholar-Bench: dev10 versus full", "subtitle": ["Matched models n=6 \u00b7 Pearson r=0.969 \u00b7 Spearman \u03c1=0.943", "Orange: linear fit \u00b7 dashed grey: identical dev/full score"]}, "width": 620, "$schema": "https://vega.github.io/schema/vega-lite/v6.4.1.json"};
+      var embedOpt = {"mode": "vega-lite"};
+
+      function showError(el, error){
+          el.innerHTML = ('<div style="color:red;">'
+                          + '<p>JavaScript Error: ' + error.message + '</p>'
+                          + "<p>This usually means there's a typo in your chart specification. "
+                          + "See the javascript console for the full traceback.</p>"
+                          + '</div>');
+          throw error;
+      }
+      const el = document.getElementById('vis');
+      vegaEmbed("#vis", spec, embedOpt)
+        .catch(error => showError(el, error));
+    })(vegaEmbed);
+
+  </script>
+</body>
+</html>

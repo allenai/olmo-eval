@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    #vis.vega-embed {
+      width: 100%;
+      display: flex;
+    }
+
+    #vis.vega-embed details,
+    #vis.vega-embed details summary {
+      position: relative;
+    }
+  </style>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega@6"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-lite@6.4.1"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-embed@7"></script>
+</head>
+<body>
+  <div id="vis"></div>
+  <script>
+    (function(vegaEmbed) {
+      var spec = {"config": {"view": {"continuousWidth": 300, "continuousHeight": 300, "stroke": null}, "axis": {"domainColor": "#b5b3aa", "gridColor": "#deddd7", "labelColor": "#66635e", "labelFontSize": 10, "titleColor": "#66635e", "titleFontSize": 11}, "background": "#fcfcfb", "title": {"anchor": "start", "color": "#171717", "fontSize": 15, "subtitleColor": "#66635e", "subtitleFontSize": 11}}, "layer": [{"mark": {"type": "rect", "stroke": "white", "strokeWidth": 1}, "encoding": {"color": {"field": "correlation", "legend": {"orient": "bottom", "title": "Pearson r"}, "scale": {"domain": [-1, 0, 1], "range": ["#b64b3c", "#f4f3ef", "#2a78d6"]}, "type": "quantitative"}, "tooltip": [{"field": "metric_x", "type": "nominal"}, {"field": "metric_y", "type": "nominal"}, {"field": "correlation", "format": ".3f", "type": "quantitative"}], "x": {"axis": {"labelAngle": -38, "labelLimit": 130}, "field": "metric_x", "sort": ["Nugget coverage", "Coverage relevance", "Reference coverage", "Organization", "Document importance", "Citation precision", "Claim coverage"], "title": null, "type": "nominal"}, "y": {"axis": {"labelLimit": 135}, "field": "metric_y", "sort": ["Nugget coverage", "Coverage relevance", "Reference coverage", "Organization", "Document importance", "Citation precision", "Claim coverage"], "title": null, "type": "nominal"}}}, {"mark": {"type": "text", "fontSize": 9}, "encoding": {"color": {"condition": {"test": "abs(datum.correlation) > 0.55", "value": "white"}, "value": "#171717"}, "text": {"field": "correlation", "format": ".2f", "type": "quantitative"}, "x": {"axis": {"labelAngle": -38, "labelLimit": 130}, "field": "metric_x", "sort": ["Nugget coverage", "Coverage relevance", "Reference coverage", "Organization", "Document importance", "Citation precision", "Claim coverage"], "title": null, "type": "nominal"}, "y": {"axis": {"labelLimit": 135}, "field": "metric_y", "sort": ["Nugget coverage", "Coverage relevance", "Reference coverage", "Organization", "Document importance", "Citation precision", "Claim coverage"], "title": null, "type": "nominal"}}}], "data": {"values": [{"metric_x": "Citation precision", "metric_y": "Citation precision", "correlation": 1.0}, {"metric_x": "Claim coverage", "metric_y": "Citation precision", "correlation": 0.9884669102578421}, {"metric_x": "Coverage relevance", "metric_y": "Citation precision", "correlation": 0.29018925444248256}, {"metric_x": "Document importance", "metric_y": "Citation precision", "correlation": 0.7260713242512431}, {"metric_x": "Nugget coverage", "metric_y": "Citation precision", "correlation": 0.20461987626055303}, {"metric_x": "Organization", "metric_y": "Citation precision", "correlation": -0.27259301730965607}, {"metric_x": "Reference coverage", "metric_y": "Citation precision", "correlation": 0.5243139871349813}, {"metric_x": "Citation precision", "metric_y": "Claim coverage", "correlation": 0.9884669102578421}, {"metric_x": "Claim coverage", "metric_y": "Claim coverage", "correlation": 1.0}, {"metric_x": "Coverage relevance", "metric_y": "Claim coverage", "correlation": 0.29085886424042656}, {"metric_x": "Document importance", "metric_y": "Claim coverage", "correlation": 0.7899791659338231}, {"metric_x": "Nugget coverage", "metric_y": "Claim coverage", "correlation": 0.17567866535272872}, {"metric_x": "Organization", "metric_y": "Claim coverage", "correlation": -0.3693955463540252}, {"metric_x": "Reference coverage", "metric_y": "Claim coverage", "correlation": 0.46663914185020483}, {"metric_x": "Citation precision", "metric_y": "Coverage relevance", "correlation": 0.29018925444248256}, {"metric_x": "Claim coverage", "metric_y": "Coverage relevance", "correlation": 0.29085886424042656}, {"metric_x": "Coverage relevance", "metric_y": "Coverage relevance", "correlation": 1.0}, {"metric_x": "Document importance", "metric_y": "Coverage relevance", "correlation": 0.04703759334431209}, {"metric_x": "Nugget coverage", "metric_y": "Coverage relevance", "correlation": 0.4195489623487929}, {"metric_x": "Organization", "metric_y": "Coverage relevance", "correlation": -0.1833408715291107}, {"metric_x": "Reference coverage", "metric_y": "Coverage relevance", "correlation": 0.8771011372447765}, {"metric_x": "Citation precision", "metric_y": "Document importance", "correlation": 0.7260713242512431}, {"metric_x": "Claim coverage", "metric_y": "Document importance", "correlation": 0.7899791659338231}, {"metric_x": "Coverage relevance", "metric_y": "Document importance", "correlation": 0.04703759334431209}, {"metric_x": "Document importance", "metric_y": "Document importance", "correlation": 0.9999999999999998}, {"metric_x": "Nugget coverage", "metric_y": "Document importance", "correlation": 0.39569902083572506}, {"metric_x": "Organization", "metric_y": "Document importance", "correlation": -0.3382422270801028}, {"metric_x": "Reference coverage", "metric_y": "Document importance", "correlation": 0.08838874452009461}, {"metric_x": "Citation precision", "metric_y": "Nugget coverage", "correlation": 0.20461987626055303}, {"metric_x": "Claim coverage", "metric_y": "Nugget coverage", "correlation": 0.17567866535272875}, {"metric_x": "Coverage relevance", "metric_y": "Nugget coverage", "correlation": 0.4195489623487929}, {"metric_x": "Document importance", "metric_y": "Nugget coverage", "correlation": 0.395699020835725}, {"metric_x": "Nugget coverage", "metric_y": "Nugget coverage", "correlation": 1.0}, {"metric_x": "Organization", "metric_y": "Nugget coverage", "correlation": 0.24251305368847523}, {"metric_x": "Reference coverage", "metric_y": "Nugget coverage", "correlation": 0.4629978831093102}, {"metric_x": "Citation precision", "metric_y": "Organization", "correlation": -0.27259301730965607}, {"metric_x": "Claim coverage", "metric_y": "Organization", "correlation": -0.3693955463540252}, {"metric_x": "Coverage relevance", "metric_y": "Organization", "correlation": -0.18334087152911072}, {"metric_x": "Document importance", "metric_y": "Organization", "correlation": -0.3382422270801028}, {"metric_x": "Nugget coverage", "metric_y": "Organization", "correlation": 0.24251305368847523}, {"metric_x": "Organization", "metric_y": "Organization", "correlation": 0.9999999999999998}, {"metric_x": "Reference coverage", "metric_y": "Organization", "correlation": 0.1055124305407746}, {"metric_x": "Citation precision", "metric_y": "Reference coverage", "correlation": 0.5243139871349813}, {"metric_x": "Claim coverage", "metric_y": "Reference coverage", "correlation": 0.46663914185020483}, {"metric_x": "Coverage relevance", "metric_y": "Reference coverage", "correlation": 0.8771011372447765}, {"metric_x": "Document importance", "metric_y": "Reference coverage", "correlation": 0.08838874452009461}, {"metric_x": "Nugget coverage", "metric_y": "Reference coverage", "correlation": 0.4629978831093102}, {"metric_x": "Organization", "metric_y": "Reference coverage", "correlation": 0.10551243054077458}, {"metric_x": "Reference coverage", "metric_y": "Reference coverage", "correlation": 1.0}]}, "height": 410, "title": {"text": "Which metrics move together?", "subtitle": "Clustered by absolute Pearson correlation; n=6 models, so treat as descriptive"}, "width": 440, "$schema": "https://vega.github.io/schema/vega-lite/v6.4.1.json"};
+      var embedOpt = {"mode": "vega-lite"};
+
+      function showError(el, error){
+          el.innerHTML = ('<div style="color:red;">'
+                          + '<p>JavaScript Error: ' + error.message + '</p>'
+                          + "<p>This usually means there's a typo in your chart specification. "
+                          + "See the javascript console for the full traceback.</p>"
+                          + '</div>');
+          throw error;
+      }
+      const el = document.getElementById('vis');
+      vegaEmbed("#vis", spec, embedOpt)
+        .catch(error => showError(el, error));
+    })(vegaEmbed);
+
+  </script>
+</body>
+</html>

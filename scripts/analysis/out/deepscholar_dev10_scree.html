@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    #vis.vega-embed {
+      width: 100%;
+      display: flex;
+    }
+
+    #vis.vega-embed details,
+    #vis.vega-embed details summary {
+      position: relative;
+    }
+  </style>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega@6"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-lite@6.4.1"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-embed@7"></script>
+</head>
+<body>
+  <div id="vis"></div>
+  <script>
+    (function(vegaEmbed) {
+      var spec = {"config": {"view": {"continuousWidth": 300, "continuousHeight": 300, "stroke": null}, "axis": {"domainColor": "#b5b3aa", "gridColor": "#deddd7", "labelColor": "#66635e", "labelFontSize": 10, "titleColor": "#66635e", "titleFontSize": 11}, "background": "#fcfcfb", "title": {"anchor": "start", "color": "#171717", "fontSize": 15, "subtitleColor": "#66635e", "subtitleFontSize": 11}}, "layer": [{"data": {"values": [{"pc": "PC1", "explained_variance": 0.4843310744388802, "cumulative_variance": 0.4843310744388802}, {"pc": "PC2", "explained_variance": 0.2536501037737636, "cumulative_variance": 0.7379811782126438}, {"pc": "PC3", "explained_variance": 0.151397802483545, "cumulative_variance": 0.8893789806961887}, {"pc": "PC4", "explained_variance": 0.09637907473703643, "cumulative_variance": 0.9857580554332251}, {"pc": "PC5", "explained_variance": 0.014241944566774857, "cumulative_variance": 1.0}]}, "mark": {"type": "bar", "color": "#2a78d6", "cornerRadiusTopLeft": 3, "cornerRadiusTopRight": 3}, "encoding": {"tooltip": [{"field": "pc", "type": "nominal"}, {"field": "explained_variance", "format": ".1%", "type": "quantitative"}], "x": {"field": "pc", "sort": null, "title": null, "type": "nominal"}, "y": {"axis": {"format": ".0%"}, "field": "explained_variance", "title": "Share of variance", "type": "quantitative"}}}, {"data": {"values": [{"pc": "PC1", "explained_variance": 0.4843310744388802, "cumulative_variance": 0.4843310744388802}, {"pc": "PC2", "explained_variance": 0.2536501037737636, "cumulative_variance": 0.7379811782126438}, {"pc": "PC3", "explained_variance": 0.151397802483545, "cumulative_variance": 0.8893789806961887}, {"pc": "PC4", "explained_variance": 0.09637907473703643, "cumulative_variance": 0.9857580554332251}, {"pc": "PC5", "explained_variance": 0.014241944566774857, "cumulative_variance": 1.0}]}, "mark": {"type": "text", "dy": -8, "fontSize": 11}, "encoding": {"text": {"field": "explained_variance", "format": ".1%", "type": "quantitative"}, "x": {"field": "pc", "sort": null, "type": "nominal"}, "y": {"field": "explained_variance", "type": "quantitative"}}}, {"data": {"values": [{"pc": "PC1", "explained_variance": 0.4843310744388802, "cumulative_variance": 0.4843310744388802}, {"pc": "PC2", "explained_variance": 0.2536501037737636, "cumulative_variance": 0.7379811782126438}, {"pc": "PC3", "explained_variance": 0.151397802483545, "cumulative_variance": 0.8893789806961887}, {"pc": "PC4", "explained_variance": 0.09637907473703643, "cumulative_variance": 0.9857580554332251}, {"pc": "PC5", "explained_variance": 0.014241944566774857, "cumulative_variance": 1.0}]}, "mark": {"type": "line", "color": "#e56b2f", "point": true, "strokeWidth": 2}, "encoding": {"tooltip": [{"field": "pc", "type": "nominal"}, {"field": "cumulative_variance", "format": ".1%", "type": "quantitative"}], "x": {"field": "pc", "sort": null, "type": "nominal"}, "y": {"axis": {"format": ".0%"}, "field": "cumulative_variance", "type": "quantitative"}}}, {"data": {"values": [{"y": 0.8}]}, "mark": {"type": "rule", "color": "#66635e", "strokeDash": [4, 4]}, "encoding": {"y": {"field": "y", "type": "quantitative"}}}], "height": 270, "title": {"text": "How many dimensions matter?", "subtitle": "Bars: per-PC variance \u00b7 orange: cumulative \u00b7 3 PCs reach 80%"}, "width": 390, "$schema": "https://vega.github.io/schema/vega-lite/v6.4.1.json"};
+      var embedOpt = {"mode": "vega-lite"};
+
+      function showError(el, error){
+          el.innerHTML = ('<div style="color:red;">'
+                          + '<p>JavaScript Error: ' + error.message + '</p>'
+                          + "<p>This usually means there's a typo in your chart specification. "
+                          + "See the javascript console for the full traceback.</p>"
+                          + '</div>');
+          throw error;
+      }
+      const el = document.getElementById('vis');
+      vegaEmbed("#vis", spec, embedOpt)
+        .catch(error => showError(el, error));
+    })(vegaEmbed);
+
+  </script>
+</body>
+</html>

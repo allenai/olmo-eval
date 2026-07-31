@@ -1,0 +1,198 @@
+# Static metadata for the sci-lit eval sweep summary.
+#
+# Transcribed from the "SciLit Eval Matrix" sheet's two reference tabs, plus the
+# things the sheet cannot express: the sci-lit vs sentinel split, display
+# ordering, and suspect-run flags.
+#
+# The results CSV is refetched; this file is hand-maintained.
+
+[evals.ExpertQA]
+ref = "expertqa"
+family = "sci-lit"
+why = "fixed dev100 attributed QA; grounded scientific writing quality"
+
+[evals."LitSearch-open"]
+ref = "litsearch"
+family = "sci-lit"
+why = "fixed dev50 live retrieval; end-to-end paper search against the real S2 API"
+
+[evals."LitSearch-rerank"]
+ref = "litsearch_rerank"
+family = "sci-lit"
+why = "fixed-corpus reranking; reproducible, judge-free measure of paper relevance ranking"
+
+[evals."SAGE-open"]
+ref = "sage_open_ended"
+family = "sci-lit"
+why = "fixed dev50 multi-paper retrieval; breadth of literature awareness"
+
+[evals."SAGE-short"]
+ref = "sage_short_form"
+family = "sci-lit"
+why = "fixed dev50 single-paper identification; precision of targeted lookup"
+
+[evals."DeepScholar-Bench"]
+ref = "deepscholar_bench"
+family = "sci-lit"
+why = "fixed dev10 related-work generation; end-to-end research synthesis"
+
+[evals."FS-Olympiad accuracy"]
+ref = "frontierscience_olympiad"
+family = "frontier-science"
+why = "accuracy over 100 closed-form Olympiad-level biology, chemistry, and physics questions"
+
+[evals."FS-Research success"]
+ref = "frontierscience_research"
+family = "frontier-science"
+why = "hard success rate over 60 open-ended research questions"
+
+[evals."FS-Research rubric"]
+ref = "frontierscience_research"
+family = "frontier-science"
+why = "partial-credit rubric score over the same 60 open-ended research questions"
+
+[evals.IFEval]
+ref = "ifeval_ood"
+family = "sentinel"
+why = "monitors instruction-following hasn't degraded during domain post-training"
+
+[evals.MMLU]
+ref = "mmlu"
+family = "sentinel"
+why = "monitors broad knowledge retention after post-training"
+
+[evals."MATH-500"]
+ref = "math500"
+family = "sentinel"
+why = "monitors reasoning capability hasn't been hurt by domain specialization"
+
+
+# total_b drives the default model ordering (ascending), so charts read as a
+# size gradient.
+
+[models."OLMo-3 7B Instruct"]
+hf_ref = "allenai/Olmo-3-7B-Instruct"
+total_b = 7.0
+active_b = 7.0
+arch = "dense"
+lab = "Ai2"
+
+[models."Olmo-3 7B Think"]
+hf_ref = "allenai/Olmo-3-7B-Think"
+total_b = 7.0
+active_b = 7.0
+arch = "dense"
+lab = "Ai2"
+
+[models."Qwen3.5 9B Instruct"]
+hf_ref = "Qwen/Qwen3.5-9B"
+total_b = 9.0
+active_b = 9.0
+arch = "dense"
+lab = "Alibaba"
+
+[models."GLM-4.1V-9B-Thinking"]
+hf_ref = "zai-org/GLM-4.1V-9B-Thinking"
+total_b = 9.0
+active_b = 9.0
+arch = "dense"
+lab = "Zhipu"
+
+[models."Gemma4 12B-Unified"]
+hf_ref = "google/gemma-4-12B-it"
+total_b = 12.0
+active_b = 12.0
+arch = "dense"
+lab = "Google"
+included = false
+
+[models."GPT-OSS-20b"]
+hf_ref = "openai/gpt-oss-20b"
+total_b = 20.0
+active_b = 3.6
+arch = "moe"
+lab = "OpenAI"
+
+[models."Gemma4 26B-A4B"]
+hf_ref = "google/gemma-4-26B-A4B-it"
+total_b = 26.0
+active_b = 4.0
+arch = "moe"
+lab = "Google"
+
+[models."Nemotron 3 Nano 30B-A3B"]
+hf_ref = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+total_b = 30.0
+active_b = 3.0
+arch = "hybrid-moe"
+lab = "NVIDIA"
+
+[models."Qwen3.5-35B-A3B"]
+hf_ref = "Qwen/Qwen3.5-35B-A3B"
+total_b = 35.0
+active_b = 3.0
+arch = "moe"
+lab = "Alibaba"
+
+
+# Scores that exist but are probably harness artifacts. Excluded from ranks and
+# composites; still drawn, greyed, with the reason attached. Set verified = true
+# once the Beaker run has been checked and the diagnosis confirmed.
+
+[[flags]]
+model = "Olmo-3 7B Think"
+eval = "ExpertQA"
+status = "unsupported"
+reason = "No validated ExpertQA tool-harness profile"
+verified = true
+
+[[flags]]
+model = "OLMo-3 7B Instruct"
+eval = "ExpertQA"
+status = "unsupported"
+reason = "No validated ExpertQA tool-harness profile"
+verified = true
+
+# Qwen3.5-35B-A3B IFEval 0.050 was superseded by 0.420 on run
+# 01KYMNX9NQMHMJ8CR0VDFVPY2D, which confirms the original was a harness bug.
+
+# The LitSearch-rerank mix-up is resolved in the sheet: Gemma4 26B-A4B is back
+# on its own run (0.5914, 01KY7ZC75EVGGAAQ9X09CHD5B9) and Qwen3.5-35B-A3B now
+# carries 0.5936 from 01KYMNX9NQMHMJ8CR0VDFVPY2D, replacing a 0.406 run that
+# had extensive empty outputs. Both flags removed.
+#
+# GPT-OSS-20b MATH-500's corrupted 0.002 run was superseded by the audited
+# chat-formatted 0.822 run 01KYV39D7BAMJRNNQN53RMTR94. Nineteen generations
+# reached the 8,192-token cap and were correctly counted as zero.
+
+[[flags]]
+model = "GLM-4.1V-9B-Thinking"
+eval = "LitSearch-open"
+status = "unsupported"
+reason = "Official chat template has no tools or tool-result branch"
+verified = true
+
+[[flags]]
+model = "GLM-4.1V-9B-Thinking"
+eval = "ExpertQA"
+status = "unsupported"
+reason = "Official chat template has no tools or tool-result branch"
+verified = true
+
+[[flags]]
+model = "GLM-4.1V-9B-Thinking"
+eval = "SAGE-open"
+status = "unsupported"
+reason = "Official chat template has no tools or tool-result branch"
+verified = true
+
+[[flags]]
+model = "GLM-4.1V-9B-Thinking"
+eval = "SAGE-short"
+status = "unsupported"
+reason = "Official chat template has no tools or tool-result branch"
+verified = true
+
+# The timeout-plagued Qwen DeepScholar runs were reflagged and then superseded:
+# 9B 0.042 -> 0.145 (01KYJYTGJK69QV3JWYARVKPV0J) and 35B-A3B 0.130 -> 0.160
+# (01KYJYTXWGRC614A0G6APK2G8J). Both reruns are clean, so the flags are gone.
