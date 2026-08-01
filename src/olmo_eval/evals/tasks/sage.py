@@ -205,6 +205,34 @@ async def exact_match(matcher: Matcher, gold: GoldPaper, output: str) -> float:
 # Anything it cannot resolve is reported as unparsed rather than guessed at, and
 # ``answer_unparsed_rate`` is exported so a reader can tell when
 # ``answer_only_match`` is not trustworthy for a given system.
+#
+# Outputs that both decline and name a paper are the hard case, and they are not
+# rare: measured over five 599-row runs they are 52.9% of AgentDisCo's instances
+# (of which 41.9% decline first and then name a paper), 9.7% Arman's, 5.3% dp1,
+# 3.7% the single-agent baseline and 1.3% Allyson's. Asking "did it commit?" of
+# such an output has no answer, so the rate metrics do not ask. They partition
+# the run four ways -- ``commit_rate``, ``decline_rate``, ``hedge_rate`` and
+# ``answer_unparsed_rate``, which sum to 1 -- and every one of the four is
+# invariant to how a hedge is resolved. Whatever tie-break rule a reader prefers,
+# its commit rate is bounded by ``commit_rate`` and ``commit_rate + hedge_rate``;
+# on AgentDisCo that band is 0.404 to 0.933, which is why no single commit number
+# was reportable before.
+#
+# ``answer_only_match`` still needs one title per output, so it keeps the
+# first-in-reading-order rule; it is stable under that choice (AgentDisCo 0.080
+# to 0.109 across first, last, prefer-commit and prefer-decline).
+#
+# What the five runs show, on those same measurements: reading the stated answer
+# instead of the whole output moves AgentDisCo 0.2805 -> 0.1002 and Allyson's
+# 0.1503 -> 0.0000, while dp1 barely moves, 0.0968 -> 0.0818. Of each system's
+# official ``exact_match`` score, the share earned only outside the answer region
+# is AgentDisCo 0.6%, baseline 4.0%, dp1 0.0%, Arman's 23.8%, Allyson's 86.7%.
+#
+# These metrics do not all re-rank the systems in different ways: across the five
+# runs ``exact_match``, ``answer_only_match``, ``commit_rate`` and
+# ``accuracy_given_commit`` produce three distinct orderings, not four, because
+# ``answer_only_match`` and ``commit_rate`` order the systems identically
+# (AgentDisCo > baseline > dp1 > Arman's > Allyson's).
 
 _THINK_CLOSE = "</think>"
 _THINK_OPEN = "<think>"
@@ -222,10 +250,20 @@ _HEADING_MARK = re.compile(r"^#{1,6}[ \t]*")
 _BULLET_MARK = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])[ \t]+(?=[A-Z0-9\"“*\[(])")
 
-#: Upper bound on a single answer statement. A statement longer than this is
-#: prose, not an answer, and matching a title inside it would reintroduce the
-#: very volume artifact these metrics exist to expose.
-_MAX_STATEMENT_CHARS = 600
+#: Upper bound on the statement string recorded in output metadata, so a
+#: predictions file does not carry a multi-kilobyte blob on every row. It bounds
+#: what is *written down*; extraction reads the whole statement.
+#:
+#: It used to be applied to the statement before matching, on the rationale that
+#: a longer statement is prose rather than an answer. Truncating does not enforce
+#: that rationale: it does not reject a long paragraph, it searches its first 600
+#: characters anyway. Measured over the five 599-row runs, 3.7% of the 187,668
+#: answer statements exceed 600 characters, and truncating them destroyed the
+#: committed title on 13 AgentDisCo instances, 3 of which named the gold paper --
+#: so as a matching bound 600 was not merely arbitrary, it was wrong. What keeps
+#: prose out of the metric is the commit predicate plus a delimited title, not a
+#: character count.
+_MAX_RECORDED_STATEMENT_CHARS = 600
 
 
 def answer_region(text: str) -> str:
@@ -260,7 +298,8 @@ def answer_statements(region: str) -> list[str]:
     Markdown line structure is honoured before sentence structure: heading and
     bullet markers are dropped, and a line ending in a colon is joined to the
     next line, because "the most likely paper is:" puts its answer on the
-    following line. Statements are capped at :data:`_MAX_STATEMENT_CHARS`.
+    following line. Statements are returned whole; see
+    :data:`_MAX_RECORDED_STATEMENT_CHARS` for why they are no longer truncated.
     """
     lines = []
     for raw in region.split("\n"):
@@ -284,7 +323,7 @@ def answer_statements(region: str) -> list[str]:
         for piece in _SENTENCE_BREAK.split(line):
             piece = piece.strip()
             if piece:
-                statements.append(piece[:_MAX_STATEMENT_CHARS])
+                statements.append(piece)
     return statements
 
 
@@ -335,6 +374,22 @@ _TITLE_OBJECT = re.compile(
 )
 
 _ANSWER_NOUN = r"(?:paper|study|article|publication|work|match|answer|candidate|title|manuscript)"
+
+#: A delimited span that describes the answer instead of naming it. Two ways this
+#: arises, both measured on real outputs:
+#:
+#: * the system writes the description first --
+#:   ``The best match is **the 2024 ACL paper** "<Title>"`` used to extract
+#:   ``the 2024 ACL paper``;
+#: * markdown bold pairing manufactures one -- in
+#:   ``**Primary Candidate:** The paper **"<Title>"**`` the closing ``**`` of the
+#:   label and the opening ``**`` of the title bracket the words between them, so
+#:   the first bold span is ``The paper``. That happens on AgentDisCo docs 31,
+#:   321 and 326, and on 326 the span it displaced is the gold title.
+_DESCRIPTOR_SPAN = re.compile(
+    r"(?i)^(?:the|an?|this|that|these|those|his|her|its|their|our|said|above|following)\s+"
+    r"[^\n]{0,80}?" + _ANSWER_NOUN + r"s?$"
+)
 _COMMIT_PATTERNS = (
     r"\bthe\s+(?:single\s+|most\s+likely\s+|best\s+|target\s+|identified\s+|correct\s+"
     r"|matching\s+|closest\s+|strongest\s+|only\s+)*" + _ANSWER_NOUN + r"\b[^.\n]{0,140}?"
@@ -352,16 +407,6 @@ _COMMIT_PATTERNS = (
 )
 COMMIT_RE = re.compile("(?ix)" + "|".join(f"(?:{p})" for p in _COMMIT_PATTERNS))
 
-#: Section headings that quote the prompt back ("Direct Answer: Identification
-#: of the Most Likely Paper or Explicit Statement of No Match") announce an
-#: answer without giving one.
-_PROMPT_ECHO = re.compile(
-    r"(?i)(?:most\s+likely\s+paper'?s?\s+title"
-    r"|explicit(?:ly)?\s+statements?\s+of\s+no\s+match"
-    r"|or\s+explicitly\s+say\s+no\s+match"
-    r"|state\s+the\s+most\s+likely)"
-)
-
 #: An explicit answer label opening a statement. Only after one of these is an
 #: undelimited title accepted, because "Direct Answer: Target Paper Identified"
 #: style headings would otherwise be read as titles.
@@ -376,12 +421,48 @@ _STANDALONE_TITLE = re.compile(
     r"^\W{0,3}(?:\*\*(?P<bold>[^*\n]{10,300})\*\*|\"(?P<double>[^\"\n]{10,300})\")\W{0,3}$"
 )
 
+#: Longest a bold standalone line may be and still read as a section heading
+#: rather than a paper title.
+#:
+#: Bolded section headings look exactly like bare answers: ``**Claims with Strong
+#: Consensus**`` opens a section on Arman's docs 22 and 83 and used to be
+#: extracted as the committed title, and ``**Final Answer**`` above the real
+#: answer has the same shape. Three properties separate them from titles -- a
+#: heading is short, carries no subtitle colon, and has no digits -- and a fourth
+#: separates a heading from a bare answer: body text follows it.
+#:
+#: The bound is measured rather than guessed. SAGE short-form's 599 gold titles
+#: have a median of 12 words, and only 20 of them (3.3%) are five words or fewer
+#: with no colon and no digit, so this rule can cost at most 3.3% of bare-title
+#: answers -- and only for a title that is bolded rather than quoted and has text
+#: after it. On the five runs it costs nothing: the bare answers all survive it,
+#: and the only two extractions it removes are the two headings.
+_MAX_HEADING_WORDS = 5
+
+
+def _is_bold_section_heading(value: str) -> bool:
+    """Whether a bold standalone line reads as a section heading, not a title."""
+    return (
+        len(value.split()) <= _MAX_HEADING_WORDS
+        and ":" not in value
+        and re.search(r"\d", value) is None
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class SageAnswer:
-    """The single answer a short-form output states, per the prompt's contract.
+    """What a short-form output states, per the prompt's contract.
 
-    ``kind`` is one of:
+    Two independent readings are kept, because they answer different questions.
+
+    ``states_commit`` / ``states_decline`` say what the output contains: whether
+    any statement in the answer region names a paper, and whether any declines.
+    Both can be true. They are the basis of every rate metric, and they do not
+    depend on which statement is picked as *the* answer.
+
+    ``kind``, ``statement`` and ``title`` are the single answer, resolved
+    first-in-reading-order, and are what ``answer_only_match`` scores. ``kind``
+    is one of:
 
     ``"commit"``
         The output names a paper. ``title`` holds it.
@@ -391,16 +472,18 @@ class SageAnswer:
         Neither. The output did not follow the contract (typically it is a
         literature survey that never answers), or it worded its answer in a way
         this extractor does not recognise. These are reported, never guessed at.
-
-    ``hedged`` marks outputs that contain both a decline and a named candidate.
-    The classification is the first of the two in reading order; ``hedged``
-    exists so the size of that ambiguous population can be reported.
     """
 
     kind: str
     statement: str
     title: str | None
-    hedged: bool
+    states_commit: bool
+    states_decline: bool
+
+    @property
+    def hedged(self) -> bool:
+        """Whether the output both declines and names a paper."""
+        return self.states_commit and self.states_decline
 
     @property
     def committed(self) -> bool:
@@ -414,14 +497,30 @@ class SageAnswer:
     def unparsed(self) -> bool:
         return self.kind == "unparsed"
 
+    @property
+    def commits_without_hedging(self) -> bool:
+        """Names a paper and declines nowhere -- an unambiguous commit."""
+        return self.states_commit and not self.states_decline
+
+    @property
+    def declines_without_hedging(self) -> bool:
+        """Declines and names no paper -- an unambiguous decline."""
+        return self.states_decline and not self.states_commit
+
 
 def _title_after(tail: str) -> str | None:
-    """Return the first delimited title in ``tail``."""
-    found = _TITLE_OBJECT.search(tail)
-    if not found:
-        return None
-    value = next(group for group in found.groups() if group)
-    return value.strip().strip("*_ \t").strip("\"'“”") or None
+    """Return the first delimited span in ``tail`` that names a paper.
+
+    Spans that describe the answer rather than naming it are skipped; see
+    :data:`_DESCRIPTOR_SPAN`.
+    """
+    for found in _TITLE_OBJECT.finditer(tail):
+        value = next(group for group in found.groups() if group)
+        value = value.strip().strip("*_ \t").strip("\"'“”")
+        if not value or _DESCRIPTOR_SPAN.match(value):
+            continue
+        return value
+    return None
 
 
 def _labelled_title(statement: str) -> str | None:
@@ -441,48 +540,84 @@ def committed_title(statement: str) -> str | None:
     query is", "Answer:") and a title the statement sets apart. Requiring both
     is what keeps incidental prose -- "the identified paper confirms that ..." --
     out of the metric.
+
+    Those two requirements are also what rejects a section heading that quotes
+    the prompt back ("Direct Answer: Identification of the Most Likely Paper's
+    Title"): it delimits no title, and :data:`_ANSWER_LABEL` is anchored at the
+    start of the statement so it cannot skip the leading "Direct ". A separate
+    guard used to match the phrase "most likely paper's title" anywhere in a
+    statement and suppress the commit. It rejected no heading the two
+    requirements did not already reject, and instead suppressed the single most
+    common way these systems phrase a real answer -- "The most likely paper title
+    is **"<Title>"**" -- on 25 statements over 19 instances across the five runs,
+    6 of those statements naming the gold paper. It is gone.
     """
     predicate = COMMIT_RE.search(statement)
-    if not predicate or _PROMPT_ECHO.search(statement):
+    if not predicate:
         return None
     return _title_after(statement[predicate.end() :]) or _labelled_title(statement)
 
 
 def extract_answer(text: str) -> SageAnswer:
-    """Extract the single answer a short-form output states.
+    """Extract what a short-form output states about its answer.
 
-    The answer is the *first* statement in the answer region that either
-    declines or commits to a named title. First, not best and not last: the
-    prompt asks for one answer, so scanning further would let a system raise its
-    score by writing more, which is the artifact these metrics exist to measure.
+    Two things are read out of the answer region.
+
+    ``states_commit`` and ``states_decline`` record whether *any* statement names
+    a paper and whether *any* declines. Nothing about them depends on reading
+    order, which is why the rate metrics are built on them: on the five runs we
+    have, resolving a hedge by first, last, prefer-commit or prefer-decline moves
+    AgentDisCo's commit rate between 0.404 and 0.933, so a metric that depends on
+    the choice is reporting the choice.
+
+    ``kind``/``title`` are the single answer ``answer_only_match`` scores, and
+    that does need one statement, so it takes the *first* statement that declines
+    or commits. First, not best and not last: the prompt asks for one answer, so
+    scanning further would let a system raise its score by writing more, which is
+    the artifact these metrics exist to measure.
     """
     region = answer_region(text)
     statements = answer_statements(region)
 
-    first: SageAnswer | None = None
-    kinds: set[str] = set()
+    first: tuple[str, str, str | None] | None = None
+    states_commit = False
+    states_decline = False
     for statement in statements:
         if DECLINE_RE.search(statement):
-            candidate = SageAnswer("decline", statement, None, False)
+            candidate: tuple[str, str, str | None] = ("decline", statement, None)
+            states_decline = True
         else:
             title = committed_title(statement)
             if title is None:
                 continue
-            candidate = SageAnswer("commit", statement, title, False)
-        kinds.add(candidate.kind)
+            candidate = ("commit", statement, title)
+            states_commit = True
         if first is None:
             first = candidate
 
     if first is not None:
-        return SageAnswer(first.kind, first.statement, first.title, len(kinds) > 1)
+        kind, statement, title = first
+        return SageAnswer(
+            kind,
+            statement[:_MAX_RECORDED_STATEMENT_CHARS],
+            title,
+            states_commit,
+            states_decline,
+        )
 
-    for statement in statements:
+    for index, statement in enumerate(statements):
         bare = _STANDALONE_TITLE.match(statement)
-        if bare:
-            title = (bare.group("bold") or bare.group("double")).strip()
-            return SageAnswer("commit", statement, title, False)
+        if not bare:
+            continue
+        bold = bare.group("bold")
+        value = (bold or bare.group("double")).strip()
+        # A bolded heading with body text under it announces a section, not an
+        # answer; a quoted line is always a title.
+        if bold is not None and index + 1 < len(statements) and _is_bold_section_heading(value):
+            continue
+        return SageAnswer("commit", statement[:_MAX_RECORDED_STATEMENT_CHARS], value, True, False)
 
-    return SageAnswer("unparsed", region[:_MAX_STATEMENT_CHARS], None, False)
+    return SageAnswer("unparsed", region[:_MAX_RECORDED_STATEMENT_CHARS], None, False, False)
 
 
 async def answer_only_match(matcher: Matcher, gold: GoldPaper, output: str) -> float:
@@ -585,14 +720,87 @@ class SageCommitScorer(Scorer):
 
 @dataclass(frozen=True)
 class SageCommitRateMetric(Metric):
-    """Fraction of instances on which the system names a paper.
+    """Fraction of instances naming a paper without also declining.
 
-    The complement is split between explicit declines and outputs that state no
-    answer at all; see ``answer_unparsed_rate``.
+    Read with ``hedge_rate``. Together they are the whole of what the run
+    supports: an output that both declines and names a candidate has no commit
+    value, so ``commit_rate`` counts only unambiguous commits and ``hedge_rate``
+    reports how many were set aside. Any tie-break rule for hedges yields a
+    commit rate somewhere in ``[commit_rate, commit_rate + hedge_rate]``, and
+    that band is why a single number was not reportable: on AgentDisCo it runs
+    0.404 to 0.933, while no other system we have run has a band wider than 0.10.
+
+    ``commit_rate``, ``decline_rate``, ``hedge_rate`` and
+    ``answer_unparsed_rate`` partition the run and sum to 1.
     """
 
     name: str = "commit_rate"
     scorer: type[Scorer] = SageCommitScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        return sum(r.scores.get(self.name, 0.0) for r in responses) / len(responses)
+
+
+@dataclass(frozen=True)
+class SageDeclineScorer(Scorer):
+    """Placeholder scorer; SAGE decline detection is computed in score_responses."""
+
+    name: str = "decline_rate"
+    score_key: str = "sage_declined"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        value = (output.metadata or {}).get(self.score_key, 0.0)
+        return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+@dataclass(frozen=True)
+class SageDeclineRateMetric(Metric):
+    """Fraction of instances on which the system declines and names no paper.
+
+    Abstention, counted on its own terms. ``exact_match`` scores a decline and a
+    wrong guess identically at zero, so without this a system cannot be credited
+    for knowing that it did not find the paper.
+    """
+
+    name: str = "decline_rate"
+    scorer: type[Scorer] = SageDeclineScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        return sum(r.scores.get(self.name, 0.0) for r in responses) / len(responses)
+
+
+@dataclass(frozen=True)
+class SageHedgeScorer(Scorer):
+    """Placeholder scorer; SAGE hedge detection is computed in score_responses."""
+
+    name: str = "hedge_rate"
+    score_key: str = "sage_answer_hedged"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        value = (output.metadata or {}).get(self.score_key, 0.0)
+        return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+@dataclass(frozen=True)
+class SageHedgeRateMetric(Metric):
+    """Fraction of instances that both decline and name a paper.
+
+    This is the second trust bound on the answer metrics, alongside
+    ``answer_unparsed_rate``, and on the runs we have it is the larger one by two
+    orders of magnitude: AgentDisCo's ``answer_unparsed_rate`` is 0.2% while more
+    than half its outputs hedge. Without it exported, a reader sees a low unparsed
+    rate next to a commit rate and concludes the commit rate is settled.
+
+    It is also exactly the width of the band that ``commit_rate`` cannot resolve;
+    see :class:`SageCommitRateMetric`.
+    """
+
+    name: str = "hedge_rate"
+    scorer: type[Scorer] = SageHedgeScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
@@ -616,10 +824,11 @@ class SageAnswerUnparsedScorer(Scorer):
 class SageAnswerUnparsedRateMetric(Metric):
     """Fraction of instances whose output states no answer this task can read.
 
-    This is the trust bound on ``answer_only_match``, ``commit_rate`` and
-    ``accuracy_given_commit``. A high value means the system's outputs do not
-    follow the prompt's "state one title or say no match" contract, and those
-    three metrics should not be compared across systems without saying so.
+    One of two trust bounds on ``answer_only_match``, ``commit_rate`` and
+    ``accuracy_given_commit`` -- the other, usually much larger, is
+    ``hedge_rate``. A high value here means the system's outputs do not follow
+    the prompt's "state one title or say no match" contract, and those three
+    metrics should not be compared across systems without saying so.
     """
 
     name: str = "answer_unparsed_rate"
@@ -631,30 +840,96 @@ class SageAnswerUnparsedRateMetric(Metric):
         return sum(r.scores.get(self.name, 0.0) for r in responses) / len(responses)
 
 
+#: Below this many committed instances, ``accuracy_given_commit`` is a ratio of
+#: small integers and is logged as such. It is not suppressed -- ``commit_count``
+#: is exported next to it so the denominator is always visible -- but the warning
+#: exists because the failure it guards against was real: Allyson's run committed
+#: on 3 instances and scored 0.3333, landing tied with AgentDisCo's 0.3333 from
+#: 309.
+_MIN_COMMITS_FOR_ACCURACY = 30
+
+
 @dataclass(frozen=True)
 class SageAccuracyGivenCommitMetric(Metric):
-    """``exact_match`` restricted to instances where the system named a paper.
+    """``answer_only_match`` restricted to instances with an unambiguous commit.
 
     Separates declining from being wrong: ``exact_match`` scores both 0, so a
     system that guesses on every instance cannot be told apart from one that
-    answers rarely and well. Returns 0.0 when nothing was committed to.
+    answers rarely and well.
 
-    The numerator is ``exact_match``, not ``answer_only_match``, so that this
-    reads as "of the times it answered, how often was the gold paper in the
-    output" on exactly SAGE's own matching rule.
+    Numerator and denominator read the same text. The denominator is the set of
+    outputs that name a paper and do not also decline -- ``commit_rate``'s
+    numerator -- and the numerator asks whether the paper they named was the gold
+    one. Conditioning ``exact_match`` on committing instead, as this metric first
+    did, mixes two texts: it credits a system for "answering correctly" when its
+    stated answer was wrong and the gold title merely turned up in its
+    bibliography. Measured, that was 42% of AgentDisCo's numerator (43 of 103)
+    and 100% of Allyson's (its one hit was a reference-list match) -- exactly the
+    artifact these metrics exist to remove.
+
+    Two things this metric cannot do, both of which need ``commit_count`` and
+    ``commit_rate`` read alongside it:
+
+    * It is not comparable across systems whose commit counts differ by an order
+      of magnitude. ``commit_count`` is exported for that reason, and a run below
+      :data:`_MIN_COMMITS_FOR_ACCURACY` commits is logged.
+    * It is trivially maximised by abstaining. Every system we have run reaches
+      1.000 by committing only on the instances it already gets right --
+      AgentDisCo would do so at ``commit_rate`` 0.084, baseline at 0.089, dp1 at
+      0.082 and Arman's at 0.052. Moving the numerator to ``answer_only_match``
+      does not change that and cannot: any metric conditioned on answering is
+      gameable by answering less, which is why ``commit_rate`` and
+      ``commit_count`` are exported beside it rather than folded into it, and why
+      ``exact_match`` stays the primary metric.
+
+    Returns 0.0 when nothing was committed to, in which case ``commit_count`` is
+    0 and the value carries no information.
     """
 
     name: str = "accuracy_given_commit"
-    scorer: type[Scorer] = SageExactMatchScorer
+    scorer: type[Scorer] = SageAnswerOnlyMatchScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         committed = [r for r in responses if r.scores.get("commit_rate", 0.0) > 0.0]
+        if responses and len(committed) < _MIN_COMMITS_FOR_ACCURACY:
+            logger.warning(
+                "SAGE accuracy_given_commit is computed over %d committed instance(s) of "
+                "%d, below the %d needed to read it as a rate; report it with "
+                "commit_count or not at all.",
+                len(committed),
+                len(responses),
+                _MIN_COMMITS_FOR_ACCURACY,
+            )
         if not committed:
             return 0.0
-        return sum(r.scores.get("exact_match", 0.0) for r in committed) / len(committed)
+        return sum(r.scores.get("answer_only_match", 0.0) for r in committed) / len(committed)
 
     def compute_instance(self, response: Response) -> float | None:
         """No per-instance value: this metric is conditional, not an average."""
+        return None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True)
+class SageCommitCountMetric(Metric):
+    """Number of instances in ``accuracy_given_commit``'s denominator.
+
+    A count, not a rate, and exported for one reason: ``accuracy_given_commit``
+    is a ratio whose denominator varies by two orders of magnitude between the
+    systems it is used to compare, and without the denominator beside it 0.3333
+    from 3 instances reads the same as 0.3333 from 309.
+    """
+
+    name: str = "commit_count"
+    scorer: type[Scorer] = SageCommitScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        return float(sum(1 for r in responses if r.scores.get("commit_rate", 0.0) > 0.0))
+
+    def compute_instance(self, response: Response) -> float | None:
+        """No per-instance value: this metric is a corpus-level count."""
         return None
 
     def supports_pairwise_scorer_fallback(self) -> bool:
@@ -719,8 +994,11 @@ class SageShortForm(_SageRetrieval):
         SageExactMatchMetric(),
         SageAnswerOnlyMatchMetric(),
         SageCommitRateMetric(),
-        SageAccuracyGivenCommitMetric(),
+        SageDeclineRateMetric(),
+        SageHedgeRateMetric(),
         SageAnswerUnparsedRateMetric(),
+        SageAccuracyGivenCommitMetric(),
+        SageCommitCountMetric(),
     )
     # exact_match stays primary: it is SAGE's published metric and the only one
     # comparable with numbers reported outside this harness.
@@ -778,6 +1056,8 @@ class SageShortForm(_SageRetrieval):
             scores: list[float] = []
             answer_scores: list[float] = []
             commit_scores: list[float] = []
+            decline_scores: list[float] = []
+            hedge_scores: list[float] = []
             unparsed_scores: list[float] = []
             for output in response.outputs:
                 em = await exact_match(self.matcher, gold, output.text)
@@ -792,14 +1072,21 @@ class SageShortForm(_SageRetrieval):
                 answer = extract_answer(output.text)
                 aom = await answer_only_match(self.matcher, gold, output.text)
                 answer_scores.append(aom)
-                commit_scores.append(1.0 if answer.committed else 0.0)
+                # The rate metrics read the tie-break-invariant partition, not
+                # the first-in-reading-order ``kind`` that answer_only_match uses.
+                commit_scores.append(1.0 if answer.commits_without_hedging else 0.0)
+                decline_scores.append(1.0 if answer.declines_without_hedging else 0.0)
+                hedge_scores.append(1.0 if answer.hedged else 0.0)
                 unparsed_scores.append(1.0 if answer.unparsed else 0.0)
                 output.metadata["answer_only_match"] = aom
                 output.metadata["sage_answer_kind"] = answer.kind
                 output.metadata["sage_answer_title"] = answer.title
                 output.metadata["sage_answer_statement"] = answer.statement
                 output.metadata["sage_answer_hedged"] = answer.hedged
-                output.metadata["sage_committed"] = 1.0 if answer.committed else 0.0
+                output.metadata["sage_states_commit"] = answer.states_commit
+                output.metadata["sage_states_decline"] = answer.states_decline
+                output.metadata["sage_committed"] = 1.0 if answer.commits_without_hedging else 0.0
+                output.metadata["sage_declined"] = 1.0 if answer.declines_without_hedging else 0.0
                 output.metadata["sage_answer_unparsed"] = 1.0 if answer.unparsed else 0.0
                 _store_output_score(output, scorer_name="answer_only_match", score=aom)
 
@@ -809,6 +1096,12 @@ class SageShortForm(_SageRetrieval):
             )
             response.scores["commit_rate"] = self._aggregate_output_scores(
                 dict(enumerate(commit_scores))
+            )
+            response.scores["decline_rate"] = self._aggregate_output_scores(
+                dict(enumerate(decline_scores))
+            )
+            response.scores["hedge_rate"] = self._aggregate_output_scores(
+                dict(enumerate(hedge_scores))
             )
             response.scores["answer_unparsed_rate"] = self._aggregate_output_scores(
                 dict(enumerate(unparsed_scores))
