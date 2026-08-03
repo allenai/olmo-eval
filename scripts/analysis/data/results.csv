@@ -403,3 +403,608 @@ Qwen3.5-35B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.38,01KYS3EH3EK0JST
 Qwen3.5-35B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.36,01KYS3EH3EK0JSTXX8WQ34ACBE,Fixed dev50 sample; seed 42,True,1
 Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.36,01KYS3ERDVEVKGCBBWKFZ8ZST9,Fixed dev50 sample; seed 42,True,1
 Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.36,01KYS3ERDVEVKGCBBWKFZ8ZST9,Fixed dev50 sample; seed 42,True,1
+OLMo-3 7B Instruct,IFEval,inst_level_loose_acc:ifeval,0.33430232558139533,01KZ2TQZXSD7FRAP9WEAXH202J,,True,2
+OLMo-3 7B Instruct,IFEval,inst_level_strict_acc:ifeval,0.29941860465116277,01KZ2TQZXSD7FRAP9WEAXH202J,,True,2
+OLMo-3 7B Instruct,IFEval,prompt_level_loose_acc:ifeval,0.30666666666666664,01KZ2TQZXSD7FRAP9WEAXH202J,,True,2
+OLMo-3 7B Instruct,IFEval,prompt_level_strict_acc:ifeval,0.28,01KZ2TQZXSD7FRAP9WEAXH202J,,True,2
+OLMo-3 7B Instruct,LitSearch-rerank,recall@20:litsearch_rerank,0.4945840312674483,01KZ2TQZXSD7FRAP9WEAXH202J,,True,2
+OLMo-3 7B Instruct,LitSearch-rerank,recall@5:litsearch_rerank,0.46912339475153547,01KZ2TQZXSD7FRAP9WEAXH202J,,True,2
+OLMo-3 7B Instruct,MATH-500,accuracy:minerva_math_flex,0.362,01KZ2TQZXSD7FRAP9WEAXH202J,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu:humanities/primary_score:average,0.6479535417883476,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu:other/primary_score:average,0.623745473644149,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu:social_sciences/primary_score:average,0.7180243115020786,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu:stem/primary_score:average,0.5786534881878924,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.35,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_anatomy/accuracy:logprob,0.5555555555555556,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_astronomy/accuracy:logprob,0.6578947368421053,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_business_ethics/accuracy:logprob,0.68,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.6528301886792452,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_college_biology/accuracy:logprob,0.7430555555555556,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_college_chemistry/accuracy:logprob,0.46,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_college_computer_science/accuracy:logprob,0.54,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_college_mathematics/accuracy:logprob,0.47,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_college_medicine/accuracy:logprob,0.6705202312138728,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_college_physics/accuracy:logprob,0.4019607843137255,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_computer_security/accuracy:logprob,0.74,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.6170212765957447,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_econometrics/accuracy:logprob,0.5175438596491229,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.6482758620689655,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.6111111111111112,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_formal_logic/accuracy:logprob,0.4444444444444444,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_global_facts/accuracy:logprob,0.35,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_biology/accuracy:logprob,0.7806451612903226,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.5517241379310345,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.78,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.6787878787878788,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_geography/accuracy:logprob,0.7424242424242424,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.8341968911917098,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.6076923076923076,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.4222222222222222,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.6974789915966386,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_physics/accuracy:logprob,0.4900662251655629,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.8146788990825689,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.625,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.7205882352941176,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.7383966244725738,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_human_aging/accuracy:logprob,0.6188340807174888,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_human_sexuality/accuracy:logprob,0.7404580152671756,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_international_law/accuracy:logprob,0.768595041322314,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_jurisprudence/accuracy:logprob,0.7129629629629629,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.7055214723926381,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_machine_learning/accuracy:logprob,0.5267857142857143,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_management/accuracy:logprob,0.7864077669902912,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_marketing/accuracy:logprob,0.8504273504273504,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_medical_genetics/accuracy:logprob,0.72,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_miscellaneous/accuracy:logprob,0.7637292464878672,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_moral_disputes/accuracy:logprob,0.6878612716763006,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.4044692737430168,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_nutrition/accuracy:logprob,0.6568627450980392,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_philosophy/accuracy:logprob,0.6591639871382636,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_prehistory/accuracy:logprob,0.691358024691358,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_professional_accounting/accuracy:logprob,0.4397163120567376,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_professional_law/accuracy:logprob,0.4217731421121252,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_professional_medicine/accuracy:logprob,0.5477941176470589,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_professional_psychology/accuracy:logprob,0.6405228758169934,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_public_relations/accuracy:logprob,0.6727272727272727,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_security_studies/accuracy:logprob,0.7224489795918367,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_sociology/accuracy:logprob,0.7761194029850746,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.85,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_virology/accuracy:logprob,0.4397590361445783,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,mmlu_world_religions/accuracy:logprob,0.7894736842105263,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+OLMo-3 7B Instruct,MMLU,primary_score:average,0.6420942037806169,01KZ2TRE3DFTF2Y6XG9H811NAV,,True,2
+Olmo-3 7B Think,IFEval,inst_level_loose_acc:ifeval,0.32558139534883723,01KZ2TRMGRTHBKS0ADG150DEH2,,True,2
+Olmo-3 7B Think,IFEval,inst_level_strict_acc:ifeval,0.26744186046511625,01KZ2TRMGRTHBKS0ADG150DEH2,,True,2
+Olmo-3 7B Think,IFEval,prompt_level_loose_acc:ifeval,0.3,01KZ2TRMGRTHBKS0ADG150DEH2,,True,2
+Olmo-3 7B Think,IFEval,prompt_level_strict_acc:ifeval,0.24333333333333335,01KZ2TRMGRTHBKS0ADG150DEH2,,True,2
+Olmo-3 7B Think,LitSearch-rerank,recall@20:litsearch_rerank,0.4783361250697934,01KZ2TRMGRTHBKS0ADG150DEH2,,True,2
+Olmo-3 7B Think,LitSearch-rerank,recall@5:litsearch_rerank,0.44533780011166946,01KZ2TRMGRTHBKS0ADG150DEH2,,True,2
+Olmo-3 7B Think,MATH-500,accuracy:minerva_math_flex,0.568,01KZ2TRMGRTHBKS0ADG150DEH2,,True,2
+Olmo-3 7B Think,MMLU,mmlu:humanities/primary_score:average,0.6540814630916503,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu:other/primary_score:average,0.6213982578197089,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu:social_sciences/primary_score:average,0.7229965855483614,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu:stem/primary_score:average,0.5700894332028911,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.34,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_anatomy/accuracy:logprob,0.5259259259259259,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_astronomy/accuracy:logprob,0.7302631578947368,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_business_ethics/accuracy:logprob,0.65,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.6150943396226415,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_college_biology/accuracy:logprob,0.7430555555555556,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_college_chemistry/accuracy:logprob,0.47,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_college_computer_science/accuracy:logprob,0.59,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_college_mathematics/accuracy:logprob,0.41,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_college_medicine/accuracy:logprob,0.6416184971098265,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_college_physics/accuracy:logprob,0.47058823529411764,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_computer_security/accuracy:logprob,0.72,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.6382978723404256,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_econometrics/accuracy:logprob,0.49122807017543857,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.6206896551724138,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.5661375661375662,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_formal_logic/accuracy:logprob,0.49206349206349204,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_global_facts/accuracy:logprob,0.44,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_biology/accuracy:logprob,0.7935483870967742,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.5270935960591133,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.77,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.7212121212121212,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_geography/accuracy:logprob,0.7828282828282829,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.8341968911917098,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.6256410256410256,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.4222222222222222,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.7352941176470589,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_physics/accuracy:logprob,0.48344370860927155,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.8146788990825689,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.5555555555555556,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.7254901960784313,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.7637130801687764,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_human_aging/accuracy:logprob,0.6143497757847534,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_human_sexuality/accuracy:logprob,0.732824427480916,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_international_law/accuracy:logprob,0.8016528925619835,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_jurisprudence/accuracy:logprob,0.75,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.7116564417177914,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_machine_learning/accuracy:logprob,0.4107142857142857,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_management/accuracy:logprob,0.7475728155339806,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_marketing/accuracy:logprob,0.8162393162393162,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_medical_genetics/accuracy:logprob,0.7,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_miscellaneous/accuracy:logprob,0.7650063856960408,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_moral_disputes/accuracy:logprob,0.6676300578034682,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.3664804469273743,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_nutrition/accuracy:logprob,0.6372549019607843,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_philosophy/accuracy:logprob,0.6559485530546624,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_prehistory/accuracy:logprob,0.6944444444444444,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_professional_accounting/accuracy:logprob,0.4432624113475177,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_professional_law/accuracy:logprob,0.4217731421121252,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_professional_medicine/accuracy:logprob,0.6213235294117647,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_professional_psychology/accuracy:logprob,0.6454248366013072,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_public_relations/accuracy:logprob,0.6636363636363637,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_security_studies/accuracy:logprob,0.7142857142857143,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_sociology/accuracy:logprob,0.8159203980099502,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.82,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_virology/accuracy:logprob,0.4819277108433735,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,mmlu_world_religions/accuracy:logprob,0.7309941520467836,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Olmo-3 7B Think,MMLU,primary_score:average,0.6421414349156529,01KZ2TRWPHPPNV6M3B01G61GBR,,True,2
+Qwen3.5 9B Instruct,IFEval,inst_level_loose_acc:ifeval,0.4011627906976744,01KZ2TS1WWFFHHCFB7S1XTAVP0,,True,2
+Qwen3.5 9B Instruct,IFEval,inst_level_strict_acc:ifeval,0.36627906976744184,01KZ2TS1WWFFHHCFB7S1XTAVP0,,True,2
+Qwen3.5 9B Instruct,IFEval,prompt_level_loose_acc:ifeval,0.37333333333333335,01KZ2TS1WWFFHHCFB7S1XTAVP0,,True,2
+Qwen3.5 9B Instruct,IFEval,prompt_level_strict_acc:ifeval,0.33666666666666667,01KZ2TS1WWFFHHCFB7S1XTAVP0,,True,2
+Qwen3.5 9B Instruct,LitSearch-rerank,recall@20:litsearch_rerank,0.6235622557230597,01KZ2TS1WWFFHHCFB7S1XTAVP0,,True,2
+Qwen3.5 9B Instruct,LitSearch-rerank,recall@5:litsearch_rerank,0.5807928531546622,01KZ2TS1WWFFHHCFB7S1XTAVP0,,True,2
+Qwen3.5 9B Instruct,MATH-500,accuracy:minerva_math_flex,0.6,01KZ2TS1WWFFHHCFB7S1XTAVP0,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu:humanities/primary_score:average,0.8232745603519019,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu:other/primary_score:average,0.803167107533356,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu:social_sciences/primary_score:average,0.8633240736026235,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu:stem/primary_score:average,0.7741516035776876,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.64,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_anatomy/accuracy:logprob,0.8148148148148148,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_astronomy/accuracy:logprob,0.9342105263157895,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_business_ethics/accuracy:logprob,0.82,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.8415094339622642,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_college_biology/accuracy:logprob,0.9444444444444444,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_college_chemistry/accuracy:logprob,0.61,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_college_computer_science/accuracy:logprob,0.77,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_college_mathematics/accuracy:logprob,0.65,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_college_medicine/accuracy:logprob,0.8034682080924855,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_college_physics/accuracy:logprob,0.696078431372549,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_computer_security/accuracy:logprob,0.82,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.8978723404255319,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_econometrics/accuracy:logprob,0.7105263157894737,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.8068965517241379,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.7645502645502645,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_formal_logic/accuracy:logprob,0.7142857142857143,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_global_facts/accuracy:logprob,0.5,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_biology/accuracy:logprob,0.9419354838709677,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.7931034482758621,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.85,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.8787878787878788,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_geography/accuracy:logprob,0.9191919191919192,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.9792746113989638,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.8615384615384616,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.5481481481481482,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.9243697478991597,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_physics/accuracy:logprob,0.7218543046357616,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.926605504587156,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.7777777777777778,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.8970588235294118,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.890295358649789,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_human_aging/accuracy:logprob,0.7982062780269058,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_human_sexuality/accuracy:logprob,0.8549618320610687,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_international_law/accuracy:logprob,0.9256198347107438,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_jurisprudence/accuracy:logprob,0.8703703703703703,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.8711656441717791,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_machine_learning/accuracy:logprob,0.7678571428571429,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_management/accuracy:logprob,0.8543689320388349,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_marketing/accuracy:logprob,0.9316239316239316,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_medical_genetics/accuracy:logprob,0.93,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_miscellaneous/accuracy:logprob,0.9054916985951469,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_moral_disputes/accuracy:logprob,0.815028901734104,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.6692737430167598,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_nutrition/accuracy:logprob,0.9019607843137255,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_philosophy/accuracy:logprob,0.8360128617363344,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_prehistory/accuracy:logprob,0.8518518518518519,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_professional_accounting/accuracy:logprob,0.6879432624113475,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_professional_law/accuracy:logprob,0.6114732724902217,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_professional_medicine/accuracy:logprob,0.9007352941176471,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_professional_psychology/accuracy:logprob,0.8415032679738562,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_public_relations/accuracy:logprob,0.7181818181818181,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_security_studies/accuracy:logprob,0.8081632653061225,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_sociology/accuracy:logprob,0.8855721393034826,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.93,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_virology/accuracy:logprob,0.5542168674698795,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,mmlu_world_religions/accuracy:logprob,0.8713450292397661,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+Qwen3.5 9B Instruct,MMLU,primary_score:average,0.8159793362663923,01KZ2TS7R07316MBNC8K6RJ21Q,,True,2
+GLM-4.1V-9B-Thinking,IFEval,inst_level_loose_acc:ifeval,0.2703488372093023,01KZ2TSCVB7WMY7DRRBW9R4AK4,,True,2
+GLM-4.1V-9B-Thinking,IFEval,inst_level_strict_acc:ifeval,0.22965116279069767,01KZ2TSCVB7WMY7DRRBW9R4AK4,,True,2
+GLM-4.1V-9B-Thinking,IFEval,prompt_level_loose_acc:ifeval,0.25333333333333335,01KZ2TSCVB7WMY7DRRBW9R4AK4,,True,2
+GLM-4.1V-9B-Thinking,IFEval,prompt_level_strict_acc:ifeval,0.21666666666666667,01KZ2TSCVB7WMY7DRRBW9R4AK4,,True,2
+GLM-4.1V-9B-Thinking,LitSearch-rerank,recall@20:litsearch_rerank,0.5071468453378001,01KZ2TSCVB7WMY7DRRBW9R4AK4,,True,2
+GLM-4.1V-9B-Thinking,LitSearch-rerank,recall@5:litsearch_rerank,0.4599106644332775,01KZ2TSCVB7WMY7DRRBW9R4AK4,,True,2
+GLM-4.1V-9B-Thinking,MATH-500,accuracy:minerva_math_flex,0.574,01KZ2TSCVB7WMY7DRRBW9R4AK4,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu:humanities/primary_score:average,0.7831964684666324,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu:other/primary_score:average,0.7585382316896176,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu:social_sciences/primary_score:average,0.8240887688581342,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu:stem/primary_score:average,0.6781540866457193,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.47,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_anatomy/accuracy:logprob,0.7777777777777778,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_astronomy/accuracy:logprob,0.881578947368421,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_business_ethics/accuracy:logprob,0.78,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.8075471698113208,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_biology/accuracy:logprob,0.875,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_chemistry/accuracy:logprob,0.54,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_computer_science/accuracy:logprob,0.64,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_mathematics/accuracy:logprob,0.52,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_medicine/accuracy:logprob,0.7572254335260116,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_physics/accuracy:logprob,0.5098039215686274,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_computer_security/accuracy:logprob,0.8,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.825531914893617,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_econometrics/accuracy:logprob,0.5614035087719298,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.7724137931034483,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.6031746031746031,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_formal_logic/accuracy:logprob,0.6428571428571429,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_global_facts/accuracy:logprob,0.45,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_biology/accuracy:logprob,0.8612903225806452,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.6748768472906403,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.83,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.8303030303030303,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_geography/accuracy:logprob,0.9090909090909091,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.9585492227979274,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.7743589743589744,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.45555555555555555,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.8907563025210085,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_physics/accuracy:logprob,0.5960264900662252,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.9119266055045872,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.7175925925925926,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.9166666666666666,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.8860759493670886,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_human_aging/accuracy:logprob,0.7713004484304933,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_human_sexuality/accuracy:logprob,0.8244274809160306,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_international_law/accuracy:logprob,0.8429752066115702,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_jurisprudence/accuracy:logprob,0.8240740740740741,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.8343558282208589,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_machine_learning/accuracy:logprob,0.6339285714285714,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_management/accuracy:logprob,0.883495145631068,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_marketing/accuracy:logprob,0.9230769230769231,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_medical_genetics/accuracy:logprob,0.83,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_miscellaneous/accuracy:logprob,0.8773946360153256,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_moral_disputes/accuracy:logprob,0.7861271676300579,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.6022346368715084,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_nutrition/accuracy:logprob,0.7843137254901961,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_philosophy/accuracy:logprob,0.7909967845659164,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_prehistory/accuracy:logprob,0.8240740740740741,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_professional_accounting/accuracy:logprob,0.6170212765957447,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_professional_law/accuracy:logprob,0.5704041720990873,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_professional_medicine/accuracy:logprob,0.7941176470588235,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_professional_psychology/accuracy:logprob,0.7859477124183006,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_public_relations/accuracy:logprob,0.7454545454545455,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_security_studies/accuracy:logprob,0.7714285714285715,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_sociology/accuracy:logprob,0.8557213930348259,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.9,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_virology/accuracy:logprob,0.5662650602409639,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,mmlu_world_religions/accuracy:logprob,0.8304093567251462,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GLM-4.1V-9B-Thinking,MMLU,primary_score:average,0.7609943889150259,01KZ2TSHX6TZ2HWXDRHJAXKE58,,True,2
+GPT-OSS-20b,IFEval,inst_level_loose_acc:ifeval,0.3488372093023256,01KZ2TSQ5XSMB7182QX9X0N133,,True,2
+GPT-OSS-20b,IFEval,inst_level_strict_acc:ifeval,0.31976744186046513,01KZ2TSQ5XSMB7182QX9X0N133,,True,2
+GPT-OSS-20b,IFEval,prompt_level_loose_acc:ifeval,0.36666666666666664,01KZ2TSQ5XSMB7182QX9X0N133,,True,2
+GPT-OSS-20b,IFEval,prompt_level_strict_acc:ifeval,0.3333333333333333,01KZ2TSQ5XSMB7182QX9X0N133,,True,2
+GPT-OSS-20b,LitSearch-rerank,recall@20:litsearch_rerank,0.5310999441652708,01KZ2TSQ5XSMB7182QX9X0N133,,True,2
+GPT-OSS-20b,LitSearch-rerank,recall@5:litsearch_rerank,0.5123394751535455,01KZ2TSQ5XSMB7182QX9X0N133,,True,2
+GPT-OSS-20b,MATH-500,accuracy:minerva_math_flex,0.826,01KZ2TSQ5XSMB7182QX9X0N133,,True,2
+GPT-OSS-20b,MMLU,mmlu:humanities:chat/primary_score:average,0.8226866822345846,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu:other:chat/primary_score:average,0.8085738561462262,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu:social_sciences:chat/primary_score:average,0.8681539514215585,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu:stem:chat/primary_score:average,0.9115394599721992,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_abstract_algebra:chat/accuracy:multiple_choice,0.95,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_anatomy:chat/accuracy:multiple_choice,0.762962962962963,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_astronomy:chat/accuracy:multiple_choice,0.9342105263157895,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_business_ethics:chat/accuracy:multiple_choice,0.75,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_clinical_knowledge:chat/accuracy:multiple_choice,0.8490566037735849,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_college_biology:chat/accuracy:multiple_choice,0.9513888888888888,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_college_chemistry:chat/accuracy:multiple_choice,0.72,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_college_computer_science:chat/accuracy:multiple_choice,0.92,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_college_mathematics:chat/accuracy:multiple_choice,0.93,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_college_medicine:chat/accuracy:multiple_choice,0.8728323699421965,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_college_physics:chat/accuracy:multiple_choice,0.9803921568627451,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_computer_security:chat/accuracy:multiple_choice,0.89,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_conceptual_physics:chat/accuracy:multiple_choice,0.9276595744680851,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_econometrics:chat/accuracy:multiple_choice,0.7894736842105263,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_electrical_engineering:chat/accuracy:multiple_choice,0.7724137931034483,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_elementary_mathematics:chat/accuracy:multiple_choice,0.9735449735449735,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_formal_logic:chat/accuracy:multiple_choice,0.9126984126984127,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_global_facts:chat/accuracy:multiple_choice,0.49,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_biology:chat/accuracy:multiple_choice,0.9290322580645162,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_chemistry:chat/accuracy:multiple_choice,0.8866995073891626,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_computer_science:chat/accuracy:multiple_choice,0.98,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_european_history:chat/accuracy:multiple_choice,0.8787878787878788,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_geography:chat/accuracy:multiple_choice,0.8939393939393939,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_government_and_politics:chat/accuracy:multiple_choice,0.9637305699481865,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_macroeconomics:chat/accuracy:multiple_choice,0.9076923076923077,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_mathematics:chat/accuracy:multiple_choice,0.9888888888888889,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_microeconomics:chat/accuracy:multiple_choice,0.9411764705882353,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_physics:chat/accuracy:multiple_choice,0.9006622516556292,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_psychology:chat/accuracy:multiple_choice,0.926605504587156,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_statistics:chat/accuracy:multiple_choice,0.8888888888888888,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_us_history:chat/accuracy:multiple_choice,0.9068627450980392,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_high_school_world_history:chat/accuracy:multiple_choice,0.8776371308016878,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_human_aging:chat/accuracy:multiple_choice,0.8071748878923767,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_human_sexuality:chat/accuracy:multiple_choice,0.8778625954198473,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_international_law:chat/accuracy:multiple_choice,0.8677685950413223,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_jurisprudence:chat/accuracy:multiple_choice,0.7592592592592593,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_logical_fallacies:chat/accuracy:multiple_choice,0.8650306748466258,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_machine_learning:chat/accuracy:multiple_choice,0.8839285714285714,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_management:chat/accuracy:multiple_choice,0.8543689320388349,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_marketing:chat/accuracy:multiple_choice,0.9230769230769231,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_medical_genetics:chat/accuracy:multiple_choice,0.96,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_miscellaneous:chat/accuracy:multiple_choice,0.909323116219668,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_moral_disputes:chat/accuracy:multiple_choice,0.7658959537572254,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_moral_scenarios:chat/accuracy:multiple_choice,0.8201117318435754,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_nutrition:chat/accuracy:multiple_choice,0.8660130718954249,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_philosophy:chat/accuracy:multiple_choice,0.7620578778135049,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_prehistory:chat/accuracy:multiple_choice,0.8611111111111112,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_professional_accounting:chat/accuracy:multiple_choice,0.7801418439716312,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_professional_law:chat/accuracy:multiple_choice,0.5697522816166884,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_professional_medicine:chat/accuracy:multiple_choice,0.9227941176470589,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_professional_psychology:chat/accuracy:multiple_choice,0.8447712418300654,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_public_relations:chat/accuracy:multiple_choice,0.7636363636363637,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_security_studies:chat/accuracy:multiple_choice,0.8081632653061225,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_sociology:chat/accuracy:multiple_choice,0.8407960199004975,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_us_foreign_policy:chat/accuracy:multiple_choice,0.86,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_virology:chat/accuracy:multiple_choice,0.572289156626506,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,mmlu_world_religions:chat/accuracy:multiple_choice,0.847953216374269,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+GPT-OSS-20b,MMLU,primary_score:average,0.8527384874436421,01KZ2TSWEQABRZZE5MEY3BACXF,,True,2
+Gemma4 26B-A4B,IFEval,inst_level_loose_acc:ifeval,0.502906976744186,01KZ2TT1DSW3W5DP3H14W2DYY0,,True,2
+Gemma4 26B-A4B,IFEval,inst_level_strict_acc:ifeval,0.45930232558139533,01KZ2TT1DSW3W5DP3H14W2DYY0,,True,2
+Gemma4 26B-A4B,IFEval,prompt_level_loose_acc:ifeval,0.4633333333333333,01KZ2TT1DSW3W5DP3H14W2DYY0,,True,2
+Gemma4 26B-A4B,IFEval,prompt_level_strict_acc:ifeval,0.41333333333333333,01KZ2TT1DSW3W5DP3H14W2DYY0,,True,2
+Gemma4 26B-A4B,LitSearch-rerank,recall@20:litsearch_rerank,0.6243997766610832,01KZ2TT1DSW3W5DP3H14W2DYY0,,True,2
+Gemma4 26B-A4B,LitSearch-rerank,recall@5:litsearch_rerank,0.5897264098269124,01KZ2TT1DSW3W5DP3H14W2DYY0,,True,2
+Gemma4 26B-A4B,MATH-500,accuracy:minerva_math_flex,0.22,01KZ2TT1DSW3W5DP3H14W2DYY0,Invalid protocol: combined Core job omitted Gemma chat wrapping; raw completions hit the output cap on 480/500 instances,False,
+Gemma4 26B-A4B,MMLU,mmlu:humanities:chat/primary_score:average,0.8901456316914873,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu:other:chat/primary_score:average,0.8678393722512671,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu:social_sciences:chat/primary_score:average,0.9075296049736181,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu:stem:chat/primary_score:average,0.9367160869409528,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_abstract_algebra:chat/accuracy:multiple_choice,0.92,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_anatomy:chat/accuracy:multiple_choice,0.8814814814814815,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_astronomy:chat/accuracy:multiple_choice,0.9473684210526315,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_business_ethics:chat/accuracy:multiple_choice,0.86,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_clinical_knowledge:chat/accuracy:multiple_choice,0.9056603773584906,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_college_biology:chat/accuracy:multiple_choice,0.9791666666666666,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_college_chemistry:chat/accuracy:multiple_choice,0.74,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_college_computer_science:chat/accuracy:multiple_choice,0.96,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_college_mathematics:chat/accuracy:multiple_choice,0.99,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_college_medicine:chat/accuracy:multiple_choice,0.9017341040462428,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_college_physics:chat/accuracy:multiple_choice,0.9901960784313726,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_computer_security:chat/accuracy:multiple_choice,0.86,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_conceptual_physics:chat/accuracy:multiple_choice,0.9617021276595744,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_econometrics:chat/accuracy:multiple_choice,0.8333333333333334,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_electrical_engineering:chat/accuracy:multiple_choice,0.896551724137931,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_elementary_mathematics:chat/accuracy:multiple_choice,0.9788359788359788,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_formal_logic:chat/accuracy:multiple_choice,0.9523809523809523,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_global_facts:chat/accuracy:multiple_choice,0.6,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_biology:chat/accuracy:multiple_choice,0.9548387096774194,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_chemistry:chat/accuracy:multiple_choice,0.9507389162561576,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_computer_science:chat/accuracy:multiple_choice,0.98,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_european_history:chat/accuracy:multiple_choice,0.9030303030303031,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_geography:chat/accuracy:multiple_choice,0.9393939393939394,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_government_and_politics:chat/accuracy:multiple_choice,0.9740932642487047,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_macroeconomics:chat/accuracy:multiple_choice,0.9461538461538461,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_mathematics:chat/accuracy:multiple_choice,0.9962962962962963,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_microeconomics:chat/accuracy:multiple_choice,0.9621848739495799,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_physics:chat/accuracy:multiple_choice,0.9271523178807947,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_psychology:chat/accuracy:multiple_choice,0.963302752293578,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_statistics:chat/accuracy:multiple_choice,0.9351851851851852,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_us_history:chat/accuracy:multiple_choice,0.9362745098039216,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_high_school_world_history:chat/accuracy:multiple_choice,0.9282700421940928,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_human_aging:chat/accuracy:multiple_choice,0.8565022421524664,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_human_sexuality:chat/accuracy:multiple_choice,0.916030534351145,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_international_law:chat/accuracy:multiple_choice,0.9173553719008265,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_jurisprudence:chat/accuracy:multiple_choice,0.8796296296296297,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_logical_fallacies:chat/accuracy:multiple_choice,0.901840490797546,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_machine_learning:chat/accuracy:multiple_choice,0.8928571428571429,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_management:chat/accuracy:multiple_choice,0.912621359223301,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_marketing:chat/accuracy:multiple_choice,0.9444444444444444,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_medical_genetics:chat/accuracy:multiple_choice,0.96,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_miscellaneous:chat/accuracy:multiple_choice,0.9476372924648787,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_moral_disputes:chat/accuracy:multiple_choice,0.8526011560693642,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_moral_scenarios:chat/accuracy:multiple_choice,0.823463687150838,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_nutrition:chat/accuracy:multiple_choice,0.9084967320261438,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_philosophy:chat/accuracy:multiple_choice,0.864951768488746,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_prehistory:chat/accuracy:multiple_choice,0.9351851851851852,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_professional_accounting:chat/accuracy:multiple_choice,0.950354609929078,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_professional_law:chat/accuracy:multiple_choice,0.7529335071707953,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_professional_medicine:chat/accuracy:multiple_choice,0.9485294117647058,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_professional_psychology:chat/accuracy:multiple_choice,0.880718954248366,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_public_relations:chat/accuracy:multiple_choice,0.7727272727272727,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_security_studies:chat/accuracy:multiple_choice,0.8571428571428571,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_sociology:chat/accuracy:multiple_choice,0.945273631840796,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_us_foreign_policy:chat/accuracy:multiple_choice,0.9,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_virology:chat/accuracy:multiple_choice,0.572289156626506,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,mmlu_world_religions:chat/accuracy:multiple_choice,0.9239766081871345,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Gemma4 26B-A4B,MMLU,primary_score:average,0.9005576739643313,01KZ2TT6AYRDDF1ACYZC6Q8XF3,,True,2
+Nemotron 3 Nano 30B-A3B,IFEval,inst_level_loose_acc:ifeval,0.33430232558139533,01KZ2TTBH23N5ESWMXQAQG8W68,,True,2
+Nemotron 3 Nano 30B-A3B,IFEval,inst_level_strict_acc:ifeval,0.2877906976744186,01KZ2TTBH23N5ESWMXQAQG8W68,,True,2
+Nemotron 3 Nano 30B-A3B,IFEval,prompt_level_loose_acc:ifeval,0.2966666666666667,01KZ2TTBH23N5ESWMXQAQG8W68,,True,2
+Nemotron 3 Nano 30B-A3B,IFEval,prompt_level_strict_acc:ifeval,0.26,01KZ2TTBH23N5ESWMXQAQG8W68,,True,2
+Nemotron 3 Nano 30B-A3B,LitSearch-rerank,recall@20:litsearch_rerank,0.542322724734785,01KZ2TTBH23N5ESWMXQAQG8W68,,True,2
+Nemotron 3 Nano 30B-A3B,LitSearch-rerank,recall@5:litsearch_rerank,0.5227247347850363,01KZ2TTBH23N5ESWMXQAQG8W68,,True,2
+Nemotron 3 Nano 30B-A3B,MATH-500,accuracy:minerva_math_flex,0.634,01KZ2TTBH23N5ESWMXQAQG8W68,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu:humanities/primary_score:average,0.7674145901020251,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu:other/primary_score:average,0.7492497423123688,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu:social_sciences/primary_score:average,0.8223486531659244,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu:stem/primary_score:average,0.6934816811953333,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.57,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_anatomy/accuracy:logprob,0.7185185185185186,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_astronomy/accuracy:logprob,0.881578947368421,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_business_ethics/accuracy:logprob,0.74,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.7962264150943397,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_biology/accuracy:logprob,0.8611111111111112,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_chemistry/accuracy:logprob,0.59,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_computer_science/accuracy:logprob,0.63,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_mathematics/accuracy:logprob,0.51,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_medicine/accuracy:logprob,0.7514450867052023,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_physics/accuracy:logprob,0.5196078431372549,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_computer_security/accuracy:logprob,0.8,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.8595744680851064,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_econometrics/accuracy:logprob,0.5789473684210527,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.7586206896551724,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.6507936507936508,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_formal_logic/accuracy:logprob,0.5476190476190477,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_global_facts/accuracy:logprob,0.46,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_biology/accuracy:logprob,0.9,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.6945812807881774,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.82,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.8424242424242424,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_geography/accuracy:logprob,0.8737373737373737,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.9637305699481865,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.7897435897435897,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.5074074074074074,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.8739495798319328,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_physics/accuracy:logprob,0.6225165562913907,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.9137614678899083,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.7175925925925926,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.8676470588235294,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.8734177215189873,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_human_aging/accuracy:logprob,0.7443946188340808,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_human_sexuality/accuracy:logprob,0.8320610687022901,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_international_law/accuracy:logprob,0.8677685950413223,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_jurisprudence/accuracy:logprob,0.8425925925925926,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.8220858895705522,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_machine_learning/accuracy:logprob,0.5892857142857143,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_management/accuracy:logprob,0.8446601941747572,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_marketing/accuracy:logprob,0.8931623931623932,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_medical_genetics/accuracy:logprob,0.91,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_miscellaneous/accuracy:logprob,0.879948914431673,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_moral_disputes/accuracy:logprob,0.7947976878612717,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.5083798882681564,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_nutrition/accuracy:logprob,0.826797385620915,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_philosophy/accuracy:logprob,0.77491961414791,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_prehistory/accuracy:logprob,0.8580246913580247,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_professional_accounting/accuracy:logprob,0.5602836879432624,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_professional_law/accuracy:logprob,0.5521512385919165,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_professional_medicine/accuracy:logprob,0.7977941176470589,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_professional_psychology/accuracy:logprob,0.7892156862745098,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_public_relations/accuracy:logprob,0.7181818181818181,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_security_studies/accuracy:logprob,0.7591836734693878,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_sociology/accuracy:logprob,0.8656716417910447,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.91,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_virology/accuracy:logprob,0.5662650602409639,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_world_religions/accuracy:logprob,0.8245614035087719,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Nemotron 3 Nano 30B-A3B,MMLU,primary_score:average,0.7581236666939128,01KZ2TTKE6W44ND11AJCK13T0V,,True,2
+Qwen3.5-35B-A3B,IFEval,inst_level_loose_acc:ifeval,0.4476744186046512,01KZ2TTS90CSPVVFF0KZAGB5J4,,True,2
+Qwen3.5-35B-A3B,IFEval,inst_level_strict_acc:ifeval,0.42151162790697677,01KZ2TTS90CSPVVFF0KZAGB5J4,,True,2
+Qwen3.5-35B-A3B,IFEval,prompt_level_loose_acc:ifeval,0.43,01KZ2TTS90CSPVVFF0KZAGB5J4,,True,2
+Qwen3.5-35B-A3B,IFEval,prompt_level_strict_acc:ifeval,0.4,01KZ2TTS90CSPVVFF0KZAGB5J4,,True,2
+Qwen3.5-35B-A3B,LitSearch-rerank,recall@20:litsearch_rerank,0.6408151870463428,01KZ2TTS90CSPVVFF0KZAGB5J4,,True,2
+Qwen3.5-35B-A3B,LitSearch-rerank,recall@5:litsearch_rerank,0.5944165270798437,01KZ2TTS90CSPVVFF0KZAGB5J4,,True,2
+Qwen3.5-35B-A3B,MATH-500,accuracy:minerva_math_flex,0.712,01KZ2TTS90CSPVVFF0KZAGB5J4,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu:humanities/primary_score:average,0.8506654220434255,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu:other/primary_score:average,0.8364212628071164,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu:social_sciences/primary_score:average,0.8994082764501606,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu:stem/primary_score:average,0.8096555594036215,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.73,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_anatomy/accuracy:logprob,0.837037037037037,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_astronomy/accuracy:logprob,0.9210526315789473,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_business_ethics/accuracy:logprob,0.83,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.8830188679245283,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_college_biology/accuracy:logprob,0.9513888888888888,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_college_chemistry/accuracy:logprob,0.66,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_college_computer_science/accuracy:logprob,0.76,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_college_mathematics/accuracy:logprob,0.69,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_college_medicine/accuracy:logprob,0.8439306358381503,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_college_physics/accuracy:logprob,0.7058823529411765,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_computer_security/accuracy:logprob,0.86,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.9404255319148936,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_econometrics/accuracy:logprob,0.8070175438596491,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.8620689655172413,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.8121693121693122,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_formal_logic/accuracy:logprob,0.7142857142857143,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_global_facts/accuracy:logprob,0.59,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_biology/accuracy:logprob,0.9580645161290322,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.8325123152709359,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.88,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.8787878787878788,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_geography/accuracy:logprob,0.9393939393939394,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.9844559585492227,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.8974358974358975,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.5888888888888889,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.9537815126050421,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_physics/accuracy:logprob,0.7880794701986755,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.9559633027522936,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.8564814814814815,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.9215686274509803,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.9113924050632911,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_human_aging/accuracy:logprob,0.8295964125560538,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_human_sexuality/accuracy:logprob,0.9083969465648855,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_international_law/accuracy:logprob,0.9173553719008265,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_jurisprudence/accuracy:logprob,0.8796296296296297,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.8834355828220859,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_machine_learning/accuracy:logprob,0.7767857142857143,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_management/accuracy:logprob,0.9320388349514563,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_marketing/accuracy:logprob,0.9401709401709402,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_medical_genetics/accuracy:logprob,0.95,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_miscellaneous/accuracy:logprob,0.9399744572158365,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_moral_disputes/accuracy:logprob,0.8439306358381503,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.7486033519553073,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_nutrition/accuracy:logprob,0.8888888888888888,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_philosophy/accuracy:logprob,0.8488745980707395,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_prehistory/accuracy:logprob,0.9166666666666666,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_professional_accounting/accuracy:logprob,0.723404255319149,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_professional_law/accuracy:logprob,0.6701434159061278,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_professional_medicine/accuracy:logprob,0.9375,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_professional_psychology/accuracy:logprob,0.8888888888888888,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_public_relations/accuracy:logprob,0.7727272727272727,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_security_studies/accuracy:logprob,0.8244897959183674,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_sociology/accuracy:logprob,0.9303482587064676,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.93,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_virology/accuracy:logprob,0.5843373493975904,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,mmlu_world_religions/accuracy:logprob,0.9239766081871345,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+Qwen3.5-35B-A3B,MMLU,primary_score:average,0.849037630176081,01KZ2TTYP4Q84SD1XVKAAFJX7V,,True,2
+OLMo-3 7B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.22,01KZ2TV4GFHJKNCKFA36F849NT,Fixed dev50 sample; seed 42,True,2
+OLMo-3 7B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.22,01KZ2TV4GFHJKNCKFA36F849NT,Fixed dev50 sample; seed 42,True,2
+OLMo-3 7B Instruct,SAGE-open-dev50,weighted_recall:weighted_recall,0.019166666666666665,01KZ2TV999JJZ8642WRE8MPW6V,Fixed dev50 sample; seed 42,True,2
+OLMo-3 7B Instruct,SAGE-short-dev50,exact_match:exact_match,0.0,01KZ2TV999JJZ8642WRE8MPW6V,Fixed dev50 sample; seed 42,True,2
+Olmo-3 7B Think,LitSearch-open-dev50,found_rate:exact_match,0.14,01KZ2TVECRKJ5B1703DE21VCVF,Fixed dev50 sample; seed 42,True,2
+Olmo-3 7B Think,LitSearch-open-dev50,gold_recall:exact_match,0.14,01KZ2TVECRKJ5B1703DE21VCVF,Fixed dev50 sample; seed 42,True,2
+Olmo-3 7B Think,SAGE-open-dev50,weighted_recall:weighted_recall,0.003333333333333333,01KZ2TVK68XHSQ18MMANNXYZGV,Fixed dev50 sample; seed 42,True,2
+Olmo-3 7B Think,SAGE-short-dev50,exact_match:exact_match,0.02,01KZ2TVK68XHSQ18MMANNXYZGV,Fixed dev50 sample; seed 42,True,2
+Qwen3.5 9B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.44,01KZ2TVQWZZ0BKJE548C7AB87A,Fixed dev50 sample; seed 42,True,2
+Qwen3.5 9B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.43,01KZ2TVQWZZ0BKJE548C7AB87A,Fixed dev50 sample; seed 42,True,2
+Qwen3.5 9B Instruct,SAGE-open-dev50,weighted_recall:weighted_recall,0.08804945054945054,01KZ2TVYVD9BE9H1MXVYTYND3B,Fixed dev50 sample; seed 42,True,2
+Qwen3.5 9B Instruct,SAGE-short-dev50,exact_match:exact_match,0.54,01KZ2TVYVD9BE9H1MXVYTYND3B,Fixed dev50 sample; seed 42,True,2
+Qwen3.5 9B Instruct,ExpertQA-dev100,answer_precision:sqa_judge,0.7575759330759331,01KZ2TW3MRPNFRYZWNF58NX1BP,Fixed dev100 sample; seed 42,True,2
+Qwen3.5 9B Instruct,ExpertQA-dev100,citation_precision:sqa_judge,0.41472149257699875,01KZ2TW3MRPNFRYZWNF58NX1BP,Fixed dev100 sample; seed 42,True,2
+Qwen3.5 9B Instruct,ExpertQA-dev100,citation_recall:sqa_judge,0.28692145651130313,01KZ2TW3MRPNFRYZWNF58NX1BP,Fixed dev100 sample; seed 42,True,2
+Qwen3.5 9B Instruct,ExpertQA-dev100,global_avg:sqa_judge,0.486406294054745,01KZ2TW3MRPNFRYZWNF58NX1BP,Fixed dev100 sample; seed 42,True,2
+Qwen3.5 9B Instruct,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.6078406194468227,01KZ2TW3MRPNFRYZWNF58NX1BP,Fixed dev100 sample; seed 42,True,2
+GPT-OSS-20b,LitSearch-open-dev50,found_rate:exact_match,0.42,01KZ2TW8G3JBWDGBNP7BM47S01,Fixed dev50 sample; seed 42,True,2
+GPT-OSS-20b,LitSearch-open-dev50,gold_recall:exact_match,0.41,01KZ2TW8G3JBWDGBNP7BM47S01,Fixed dev50 sample; seed 42,True,2
+GPT-OSS-20b,SAGE-open-dev50,weighted_recall:weighted_recall,0.06754639804639805,01KZ2TWDETX2NBYSTKPEC41ZT1,Fixed dev50 sample; seed 42,True,2
+GPT-OSS-20b,SAGE-short-dev50,exact_match:exact_match,0.32,01KZ2TWDETX2NBYSTKPEC41ZT1,Fixed dev50 sample; seed 42,True,2
+GPT-OSS-20b,ExpertQA-dev100,answer_precision:sqa_judge,0.5488766233766235,01KZ2TWJB03BRQN56SG56A84CZ,Fixed dev100 sample; seed 42,True,2
+GPT-OSS-20b,ExpertQA-dev100,citation_precision:sqa_judge,0.3344476252913753,01KZ2TWJB03BRQN56SG56A84CZ,Fixed dev100 sample; seed 42,True,2
+GPT-OSS-20b,ExpertQA-dev100,citation_recall:sqa_judge,0.19492632334435925,01KZ2TWJB03BRQN56SG56A84CZ,Fixed dev100 sample; seed 42,True,2
+GPT-OSS-20b,ExpertQA-dev100,global_avg:sqa_judge,0.35941685733745266,01KZ2TWJB03BRQN56SG56A84CZ,Fixed dev100 sample; seed 42,True,2
+GPT-OSS-20b,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.44938855588855586,01KZ2TWJB03BRQN56SG56A84CZ,Fixed dev100 sample; seed 42,True,2
+Gemma4 26B-A4B,LitSearch-open-dev50,found_rate:exact_match,0.28,01KZ2TWR8HDMNFP0K9A2VAWGPA,Fixed dev50 sample; seed 42,True,2
+Gemma4 26B-A4B,LitSearch-open-dev50,gold_recall:exact_match,0.28,01KZ2TWR8HDMNFP0K9A2VAWGPA,Fixed dev50 sample; seed 42,True,2
+Gemma4 26B-A4B,SAGE-open-dev50,weighted_recall:weighted_recall,0.04526373626373626,01KZ2TWXJEXAFS0XV11PQZJ83Q,Fixed dev50 sample; seed 42,True,2
+Gemma4 26B-A4B,SAGE-short-dev50,exact_match:exact_match,0.38,01KZ2TWXJEXAFS0XV11PQZJ83Q,Fixed dev50 sample; seed 42,True,2
+Gemma4 26B-A4B,ExpertQA-dev100,answer_precision:sqa_judge,0.9156666666666666,01KZ2TX2GENCJWXF0Y3K8CMGNH,Fixed dev100 sample; seed 42,True,2
+Gemma4 26B-A4B,ExpertQA-dev100,citation_precision:sqa_judge,0.6492150272113507,01KZ2TX2GENCJWXF0Y3K8CMGNH,Fixed dev100 sample; seed 42,True,2
+Gemma4 26B-A4B,ExpertQA-dev100,citation_recall:sqa_judge,0.5074183079991904,01KZ2TX2GENCJWXF0Y3K8CMGNH,Fixed dev100 sample; seed 42,True,2
+Gemma4 26B-A4B,ExpertQA-dev100,global_avg:sqa_judge,0.6907666672924025,01KZ2TX2GENCJWXF0Y3K8CMGNH,Fixed dev100 sample; seed 42,True,2
+Gemma4 26B-A4B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.7375761460761461,01KZ2TX2GENCJWXF0Y3K8CMGNH,Fixed dev100 sample; seed 42,True,2
+Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.34,01KZ2TX7MNR6HA8C3BNGFQEHQ3,Fixed dev50 sample; seed 42,True,2
+Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.34,01KZ2TX7MNR6HA8C3BNGFQEHQ3,Fixed dev50 sample; seed 42,True,2
+Nemotron 3 Nano 30B-A3B,SAGE-open-dev50,weighted_recall:weighted_recall,0.05027533577533577,01KZ2TXD7K72RVXWEAZ464GKGT,Fixed dev50 sample; seed 42,True,2
+Nemotron 3 Nano 30B-A3B,SAGE-short-dev50,exact_match:exact_match,0.42,01KZ2TXD7K72RVXWEAZ464GKGT,Fixed dev50 sample; seed 42,True,2
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,answer_precision:sqa_judge,0.9541666666666667,01KZ2TXJMFFPHV64DDD7F668N7,Fixed dev100 sample; seed 42,True,2
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,citation_precision:sqa_judge,0.5350497557997558,01KZ2TXJMFFPHV64DDD7F668N7,Fixed dev100 sample; seed 42,True,2
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,citation_recall:sqa_judge,0.32546306471306474,01KZ2TXJMFFPHV64DDD7F668N7,Fixed dev100 sample; seed 42,True,2
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,global_avg:sqa_judge,0.6048931623931624,01KZ2TXJMFFPHV64DDD7F668N7,Fixed dev100 sample; seed 42,True,2
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.7927472527472527,01KZ2TXJMFFPHV64DDD7F668N7,Fixed dev100 sample; seed 42,True,2
+Qwen3.5-35B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.32,01KZ2TXR320SJ51RV6M46MJ845,Fixed dev50 sample; seed 42,True,2
+Qwen3.5-35B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.31,01KZ2TXR320SJ51RV6M46MJ845,Fixed dev50 sample; seed 42,True,2
+Qwen3.5-35B-A3B,SAGE-open-dev50,weighted_recall:weighted_recall,0.09698595848595849,01KZ2TXX6GDBBTBQKH5DXDJ2F8,Fixed dev50 sample; seed 42,True,2
+Qwen3.5-35B-A3B,SAGE-short-dev50,exact_match:exact_match,0.64,01KZ2TXX6GDBBTBQKH5DXDJ2F8,Fixed dev50 sample; seed 42,True,2
+Qwen3.5-35B-A3B,ExpertQA-dev100,answer_precision:sqa_judge,0.9231428571428572,01KZ2TY2CSHBEXA18HD4FWQDQA,Fixed dev100 sample; seed 42,True,2
+Qwen3.5-35B-A3B,ExpertQA-dev100,citation_precision:sqa_judge,0.4618218389558828,01KZ2TY2CSHBEXA18HD4FWQDQA,Fixed dev100 sample; seed 42,True,2
+Qwen3.5-35B-A3B,ExpertQA-dev100,citation_recall:sqa_judge,0.3567801257968198,01KZ2TY2CSHBEXA18HD4FWQDQA,Fixed dev100 sample; seed 42,True,2
+Qwen3.5-35B-A3B,ExpertQA-dev100,global_avg:sqa_judge,0.5805816072985199,01KZ2TY2CSHBEXA18HD4FWQDQA,Fixed dev100 sample; seed 42,True,2
+Qwen3.5-35B-A3B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.7497271928886116,01KZ2TY2CSHBEXA18HD4FWQDQA,Fixed dev100 sample; seed 42,True,2

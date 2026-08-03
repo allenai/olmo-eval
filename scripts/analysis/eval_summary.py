@@ -3,6 +3,7 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #     "altair~=6.2",
+#     "numpy~=2.4",
 #     "polars~=1.43",
 #     "vl-convert-python~=1.9",
 # ]
@@ -28,6 +29,7 @@ from html import escape
 from pathlib import Path
 
 import altair as alt
+import numpy as np
 import polars as pl
 
 HERE = Path(__file__).parent
@@ -109,6 +111,14 @@ FRONTIER_EVALS = [
     "FS-Research rubric",
 ]
 BASE_EVALS = ["LitSearch-rerank", *FRONTIER_EVALS, *SENTINEL_EVALS]
+ALL_ANALYSIS_EVALS = [*AGENTIC_EVALS, *BASE_EVALS]
+COMPACT_EVAL_LABELS = {
+    "ExpertQA": "ExpertQA",
+    "LitSearch-open": "LitSearch-open",
+    "SAGE-open": "SAGE-open",
+    "SAGE-short": "SAGE-short",
+    "DeepScholar-Bench": "DeepScholar",
+}
 FAMILY_ORDER = ["sci-lit", "frontier-science", "sentinel"]
 FAMILY_LABELS = {
     "sci-lit": "Sci-lit",
@@ -226,13 +236,14 @@ def _attach_status(scores: pl.DataFrame, meta: Metadata) -> pl.DataFrame:
     )
 
 
-def load_scores(csv_path: Path, meta: Metadata) -> tuple[pl.DataFrame, pl.DataFrame]:
+def load_scores(csv_path: Path, meta: Metadata) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """Load primary metrics, preferring fixed dev scopes for agentic evals.
 
     The returned analysis frame has exactly one row per included model/eval.
     Only explicitly numbered replicas are included. Repeated validated runs of
     the same scope are averaged. The second frame retains both trusted full and
-    dev aggregates for paired comparisons.
+    dev aggregates for paired comparisons. The third retains one primary score
+    per run at the analysis-selected scope for replica-expanded covariance.
     """
     analysis_eval = pl.col("eval").replace_strict(DEV_TO_CANONICAL, default=pl.col("eval"))
     for (source_eval, metric), display_eval in FRONTIER_METRIC_EVALS.items():
@@ -298,10 +309,26 @@ def load_scores(csv_path: Path, meta: Metadata) -> tuple[pl.DataFrame, pl.DataFr
         & ~invalid_note
     )
 
-    aggregates = (
-        candidates.group_by("model", "eval", "scope")
+    # Collapse any duplicate representations of a primary metric within a run
+    # before averaging across runs. This makes the bar-chart aggregation an
+    # explicit mean of replicas rather than a mean of raw ledger rows.
+    run_scores = (
+        candidates.group_by("model", "eval", "scope", "run_id")
         .agg(
             score=pl.col("score").mean(),
+            replica=pl.col("replica").first(),
+            metric=pl.col("metric").drop_nulls().first(),
+            notes=pl.col("notes").drop_nulls().first(),
+            valid_for_analysis=pl.col("valid_for_analysis").all(),
+        )
+        .sort(["model", "eval", "scope", "replica", "run_id"])
+    )
+    aggregates = (
+        run_scores.group_by("model", "eval", "scope")
+        .agg(
+            score=pl.col("score").mean(),
+            score_min=pl.col("score").min(),
+            score_max=pl.col("score").max(),
             score_std=pl.col("score").std(),
             run_count=pl.col("run_id").drop_nulls().n_unique(),
             run_id=pl.col("run_id").drop_nulls().first(),
@@ -318,9 +345,15 @@ def load_scores(csv_path: Path, meta: Metadata) -> tuple[pl.DataFrame, pl.DataFr
         ),
         meta,
     )
-    chosen = aggregates.filter(
-        (pl.col("eval").is_in(AGENTIC_EVALS) & (pl.col("scope") == "dev"))
-        | (~pl.col("eval").is_in(AGENTIC_EVALS) & (pl.col("scope") == "full"))
+    selected_scope = (pl.col("eval").is_in(AGENTIC_EVALS) & (pl.col("scope") == "dev")) | (
+        ~pl.col("eval").is_in(AGENTIC_EVALS) & (pl.col("scope") == "full")
+    )
+    chosen = aggregates.filter(selected_scope)
+    selected_runs = _attach_status(
+        run_scores.filter(selected_scope)
+        .join(meta.evals, on="eval", how="left")
+        .join(meta.models, on="model", how="left"),
+        meta,
     )
     grid = meta.models.filter(pl.col("included")).join(meta.evals, how="cross")
     result = _attach_status(grid.join(chosen, on=["model", "eval"], how="left"), meta).with_columns(
@@ -352,7 +385,7 @@ def load_scores(csv_path: Path, meta: Metadata) -> tuple[pl.DataFrame, pl.DataFr
         .then(pl.format("fixed dev mean (n={})", pl.col("run_count")))
         .otherwise(pl.lit("full/base")),
     )
-    return result, scope_scores
+    return result, scope_scores, selected_runs
 
 
 def add_ranks(df: pl.DataFrame) -> pl.DataFrame:
@@ -471,6 +504,8 @@ def chart_coverage(df: pl.DataFrame, meta: Metadata) -> alt.HConcatChart:
                 "model:N",
                 "eval:N",
                 "score:Q",
+                "score_min:Q",
+                "score_max:Q",
                 "source_label:N",
                 "score_std:Q",
                 "status:N",
@@ -530,6 +565,8 @@ def chart_scores(df: pl.DataFrame, meta: Metadata, family: str) -> alt.FacetChar
             "model:N",
             "eval:N",
             "score:Q",
+            alt.Tooltip("score_min:Q", title="replica min", format=".4f"),
+            alt.Tooltip("score_max:Q", title="replica max", format=".4f"),
             "source_label:N",
             "score_std:Q",
             "status:N",
@@ -537,8 +574,19 @@ def chart_scores(df: pl.DataFrame, meta: Metadata, family: str) -> alt.FacetChar
             "reason:N",
         ],
     )
-    values = base.mark_text(align="left", dx=4, fontSize=9).encode(
-        x=alt.X("score:Q"),
+    whisker_base = base.transform_filter(alt.datum.run_count > 1)
+    whiskers = whisker_base.mark_rule(color=INK, strokeWidth=1.25).encode(
+        x=alt.X("score_min:Q"),
+        x2=alt.X2("score_max:Q"),
+    )
+    whisker_min = whisker_base.mark_tick(
+        color=INK, orient="vertical", thickness=1.25, size=10
+    ).encode(x=alt.X("score_min:Q"))
+    whisker_max = whisker_base.mark_tick(
+        color=INK, orient="vertical", thickness=1.25, size=10
+    ).encode(x=alt.X("score_max:Q"))
+    values = base.mark_text(align="left", dx=5, fontSize=9).encode(
+        x=alt.X("score_max:Q"),
         text=alt.Text("value_label:N"),
         # A suspect score near zero draws no visible bar, so its label has to
         # do the work on its own.
@@ -549,27 +597,27 @@ def chart_scores(df: pl.DataFrame, meta: Metadata, family: str) -> alt.FacetChar
     if family == "sci-lit":
         title = "Agentic dev + base scores"
         subtitle = (
-            "Agentic panels use fixed-dev means; rerank remains full/base. "
-            "Grey bars are suspect runs, not low scores."
+            "Bars are replica means; whiskers are replica min–max. Agentic panels use fixed-dev "
+            "scores; rerank remains full/base."
         )
         facet_width, row_step = 235, 23
     elif family == "frontier-science":
         title = "FrontierScience scores"
         subtitle = (
-            "Olympiad accuracy uses 100 closed-form questions; Research success and rubric "
-            "use the same 60 open-ended questions. GPT-OSS is a lower bound: 10/160 responses "
-            "had no visible output after reasoning truncation."
+            "Bars are replica means; whiskers are replica min–max. Olympiad accuracy uses 100 "
+            "closed-form questions; Research success and rubric use the same 60 open-ended "
+            "questions."
         )
         # Three equal, presentation-scale panels fill the slide instead of
         # leaving the FrontierScience charts clustered in its left half.
         facet_width, row_step = 315, 27
     else:
         title = "Sentinel scores"
-        subtitle = "Raw full-set sentinel scores. Grey bars are suspect runs, not low scores."
+        subtitle = "Bars are full-set replica means; whiskers are replica min–max."
         facet_width, row_step = 300, 27
 
     return (
-        (bars + values)
+        (bars + whiskers + whisker_min + whisker_max + values)
         .properties(width=facet_width, height=alt.Step(row_step))
         .facet(alt.Facet("eval:N", sort=evals, title=None), columns=3)
         .resolve_scale(x="independent")
@@ -797,6 +845,29 @@ def _spearman(xs: list[float], ys: list[float]) -> float:
     return num / den if den else 0.0
 
 
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 2:
+        return None
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    centered_x = [value - mean_x for value in xs]
+    centered_y = [value - mean_y for value in ys]
+    denominator = math.sqrt(
+        sum(value**2 for value in centered_x) * sum(value**2 for value in centered_y)
+    )
+    if denominator == 0:
+        return None
+    return sum(x * y for x, y in zip(centered_x, centered_y, strict=True)) / denominator
+
+
+def _sample_covariance(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 2:
+        return None
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    return sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True)) / (len(xs) - 1)
+
+
 def trusted_dev_full_pairs(scope_scores: pl.DataFrame) -> pl.DataFrame:
     dev = scope_scores.filter(
         pl.col("eval").is_in(AGENTIC_EVALS)
@@ -897,10 +968,49 @@ def chart_dev_vs_full(pairs: pl.DataFrame) -> alt.FacetChart | None:
     )
 
 
-def pairwise_rank_correlations(
-    df: pl.DataFrame, x_evals: list[str], y_evals: list[str]
+def _replica_pairs(run_scores: pl.DataFrame, x_eval: str, y_eval: str) -> pl.DataFrame:
+    """Return every within-model Cartesian run pairing for two evals.
+
+    The diagonal is paired by run rather than expanded against itself so it
+    remains a conventional variance/correlation diagonal. Cross-eval cells use
+    all i × j combinations, as a deterministic marginalization over replicas.
+    """
+    x_side = run_scores.filter(pl.col("eval") == x_eval).select(
+        "model",
+        x="score",
+        x_run_id="run_id",
+        x_replica="replica",
+    )
+    if x_eval == y_eval:
+        return x_side.select(
+            "model",
+            "x",
+            "x_run_id",
+            "x_replica",
+            y=pl.col("x"),
+            y_run_id=pl.col("x_run_id"),
+            y_replica=pl.col("x_replica"),
+        )
+    y_side = run_scores.filter(pl.col("eval") == y_eval).select(
+        "model",
+        y="score",
+        y_run_id="run_id",
+        y_replica="replica",
+    )
+    return x_side.join(y_side, on="model", how="inner").drop_nulls(["x", "y"])
+
+
+def pairwise_replica_correlations(
+    run_scores: pl.DataFrame, x_evals: list[str], y_evals: list[str]
 ) -> pl.DataFrame:
-    usable = df.filter(pl.col("status").is_in(RANKABLE_STATUSES)).select("model", "eval", "score")
+    """Compute cross-eval statistics over deterministic Cartesian run pairs.
+
+    ``n_pairs`` is the number of expanded points, not an independent-sample
+    count. ``n_models`` remains the relevant coverage diagnostic.
+    """
+    usable = run_scores.filter(pl.col("status").is_in(RANKABLE_STATUSES)).select(
+        "model", "eval", "score", "run_id", "replica"
+    )
     rows = []
 
     def family(eval_name: str) -> str:
@@ -911,13 +1021,23 @@ def pairwise_rank_correlations(
         return "sci-lit"
 
     for x_eval in x_evals:
-        x_side = usable.filter(pl.col("eval") == x_eval).select("model", x="score")
         for y_eval in y_evals:
-            y_side = usable.filter(pl.col("eval") == y_eval).select("model", y="score")
-            pairs = x_side.join(y_side, on="model", how="inner").drop_nulls(["x", "y"])
-            rho = None
-            if pairs.height >= 3:
-                rho = _spearman(pairs["x"].to_list(), pairs["y"].to_list())
+            pairs = _replica_pairs(usable, x_eval, y_eval)
+            xs = pairs["x"].to_list()
+            ys = pairs["y"].to_list()
+            n_models = pairs["model"].n_unique() if pairs.height else 0
+            rho = _spearman(xs, ys) if pairs.height >= 3 else None
+            pearson = _pearson(xs, ys)
+            covariance = _sample_covariance(xs, ys)
+            variant_rhos = []
+            if pairs.height:
+                for variant in pairs.partition_by(["x_replica", "y_replica"]):
+                    if variant.height < 3 or variant["model"].n_unique() < 3:
+                        continue
+                    variant_rhos.append(_spearman(variant["x"].to_list(), variant["y"].to_list()))
+            if not variant_rhos and rho is not None:
+                variant_rhos = [rho]
+            combinations = pairs.group_by("model").len()["len"].to_list() if pairs.height else []
             rows.append(
                 {
                     "x_eval": x_eval,
@@ -927,15 +1047,293 @@ def pairwise_rank_correlations(
                     "x_family_label": FAMILY_LABELS[family(x_eval)],
                     "y_family_label": FAMILY_LABELS[family(y_eval)],
                     "rho": rho,
-                    "n": pairs.height,
-                    "strong": rho is not None and pairs.height >= 4 and abs(rho) >= 0.7,
+                    "rho_variant_mean": (
+                        sum(variant_rhos) / len(variant_rhos) if variant_rhos else None
+                    ),
+                    "rho_variant_median": (
+                        float(np.median(variant_rhos)) if variant_rhos else None
+                    ),
+                    "rho_min": min(variant_rhos) if variant_rhos else None,
+                    "rho_max": max(variant_rhos) if variant_rhos else None,
+                    "abs_rho_min": min(map(abs, variant_rhos)) if variant_rhos else None,
+                    "abs_rho_max": max(map(abs, variant_rhos)) if variant_rhos else None,
+                    "rho_variant_count": len(variant_rhos),
+                    "pearson_r": pearson,
+                    "sample_covariance": covariance,
+                    "n_models": n_models,
+                    "n_pairs": pairs.height,
+                    "min_pairs_per_model": min(combinations) if combinations else 0,
+                    "max_pairs_per_model": max(combinations) if combinations else 0,
+                    "strong": rho is not None and n_models >= 4 and abs(rho) >= 0.7,
                 }
             )
     return pl.DataFrame(rows).with_columns(
         rho_label=pl.when(pl.col("rho").is_not_null())
         .then(pl.col("rho").round(2).cast(pl.String))
         .otherwise(pl.lit("—")),
-        n_label=pl.format("n={}", pl.col("n")),
+        n_label=pl.format("m={} · p={}", pl.col("n_models"), pl.col("n_pairs")),
+    )
+
+
+def analyze_eval_pca(
+    pairwise: pl.DataFrame, eval_order: list[str]
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """PCA of the pairwise-expanded rank-covariance structure.
+
+    Pairwise-complete correlation matrices can be non-positive-semidefinite
+    because different eval pairs have different model coverage and replica
+    counts. Negative eigenvalues are clipped and the diagonal is renormalized
+    before PCA; diagnostics make that correction explicit.
+    """
+    lookup = {(row["x_eval"], row["y_eval"]): row["rho"] for row in pairwise.iter_rows(named=True)}
+    matrix = np.empty((len(eval_order), len(eval_order)), dtype=float)
+    missing: list[tuple[str, str]] = []
+    for i, x_eval in enumerate(eval_order):
+        for j, y_eval in enumerate(eval_order):
+            value = lookup.get((x_eval, y_eval))
+            if value is None:
+                missing.append((x_eval, y_eval))
+                matrix[i, j] = np.nan
+            else:
+                matrix[i, j] = float(value)
+    if missing:
+        raise ValueError(f"PCA correlation matrix has missing cells: {missing}")
+
+    matrix = (matrix + matrix.T) / 2
+    np.fill_diagonal(matrix, 1.0)
+    raw_eigenvalues, raw_eigenvectors = np.linalg.eigh(matrix)
+    clipped = np.clip(raw_eigenvalues, 0.0, None)
+    projected = raw_eigenvectors @ np.diag(clipped) @ raw_eigenvectors.T
+    scale = np.sqrt(np.clip(np.diag(projected), 1e-12, None))
+    projected = projected / np.outer(scale, scale)
+    projected = (projected + projected.T) / 2
+    np.fill_diagonal(projected, 1.0)
+
+    eigenvalues, eigenvectors = np.linalg.eigh(projected)
+    order = np.argsort(eigenvalues)[::-1]
+    eigenvalues = np.clip(eigenvalues[order], 0.0, None)
+    components = eigenvectors[:, order].T
+    for pc in range(components.shape[0]):
+        anchor = int(np.argmax(np.abs(components[pc])))
+        if components[pc, anchor] < 0:
+            components[pc] *= -1
+    explained = eigenvalues / eigenvalues.sum()
+    cumulative = np.cumsum(explained)
+    retained = int(np.searchsorted(cumulative, 0.8) + 1)
+    loading_correlations = components.T * np.sqrt(eigenvalues)
+
+    variance = pl.DataFrame(
+        {
+            "pc": [f"PC{i + 1}" for i in range(len(eval_order))],
+            "pc_index": list(range(1, len(eval_order) + 1)),
+            "explained_variance": explained,
+            "cumulative_variance": cumulative,
+            "retained_80pct": [i < retained for i in range(len(eval_order))],
+        }
+    )
+    loading_rows = []
+    for eval_index, eval_name in enumerate(eval_order):
+        for pc in range(len(eval_order)):
+            loading_rows.append(
+                {
+                    "eval": eval_name,
+                    "eval_label": CANONICAL_TO_DEV.get(eval_name, eval_name),
+                    "family_label": FAMILY_LABELS[
+                        "frontier-science"
+                        if eval_name in FRONTIER_EVALS
+                        else "sentinel"
+                        if eval_name in SENTINEL_EVALS
+                        else "sci-lit"
+                    ],
+                    "pc": f"PC{pc + 1}",
+                    "pc_index": pc + 1,
+                    "component_loading": float(components[pc, eval_index]),
+                    "loading_correlation": float(loading_correlations[eval_index, pc]),
+                }
+            )
+    loadings = pl.DataFrame(loading_rows)
+
+    redundancy_rows = []
+    for i, x_eval in enumerate(eval_order):
+        for j in range(i + 1, len(eval_order)):
+            y_eval = eval_order[j]
+            rho = matrix[i, j]
+            source = pairwise.filter(
+                (pl.col("x_eval") == x_eval) & (pl.col("y_eval") == y_eval)
+            ).row(0, named=True)
+            redundancy_rows.append(
+                {
+                    "x_eval": x_eval,
+                    "y_eval": y_eval,
+                    "pair_label": (
+                        f"{COMPACT_EVAL_LABELS.get(x_eval, x_eval)} ↔ "
+                        f"{COMPACT_EVAL_LABELS.get(y_eval, y_eval)}"
+                    ),
+                    "rho": float(rho),
+                    "abs_rho": float(abs(rho)),
+                    "rho_min": source["rho_min"],
+                    "rho_max": source["rho_max"],
+                    "abs_rho_min": source["abs_rho_min"],
+                    "abs_rho_max": source["abs_rho_max"],
+                    "rho_variant_mean": source["rho_variant_mean"],
+                    "rho_variant_median": source["rho_variant_median"],
+                    "rho_variant_count": source["rho_variant_count"],
+                    "n_models": source["n_models"],
+                    "n_pairs": source["n_pairs"],
+                }
+            )
+    redundancy = pl.DataFrame(redundancy_rows).sort("abs_rho", descending=True)
+    diagnostics = pl.DataFrame(
+        {
+            "method": ["pairwise-expanded Spearman; PSD eigenvalue clipping + unit diagonal"],
+            "eval_count": [len(eval_order)],
+            "retained_components_80pct": [retained],
+            "minimum_raw_eigenvalue": [float(raw_eigenvalues.min())],
+            "negative_raw_eigenvalues": [int((raw_eigenvalues < -1e-10).sum())],
+            "projection_frobenius_delta": [float(np.linalg.norm(projected - matrix))],
+        }
+    )
+    return variance, loadings, redundancy, diagnostics
+
+
+def chart_eval_pca(
+    variance: pl.DataFrame,
+    loadings: pl.DataFrame,
+    redundancy: pl.DataFrame,
+    diagnostics: pl.DataFrame,
+    eval_order: list[str],
+) -> alt.HConcatChart:
+    retained = int(diagnostics["retained_components_80pct"][0])
+    correction = float(diagnostics["projection_frobenius_delta"][0])
+    scree_data = variance.head(8)
+    pc_order = scree_data["pc"].to_list()
+    scree_base = alt.Chart(scree_data)
+    scree = scree_base.mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+        x=alt.X("pc:N", sort=pc_order, title=None, axis=alt.Axis(labelAngle=-30)),
+        y=alt.Y(
+            "explained_variance:Q",
+            title="share of rank variance",
+            axis=alt.Axis(format=".0%"),
+        ),
+        color=alt.Color(
+            "retained_80pct:N",
+            scale=alt.Scale(domain=[True, False], range=[PRIMARY, DEEMPHASIS]),
+            legend=None,
+        ),
+        tooltip=[
+            "pc:N",
+            alt.Tooltip("explained_variance:Q", format=".1%"),
+            alt.Tooltip("cumulative_variance:Q", format=".1%"),
+        ],
+    )
+    cumulative = scree_base.mark_line(point=True, color=SERIES[1]).encode(
+        x=alt.X("pc:N", sort=pc_order),
+        y=alt.Y("cumulative_variance:Q", axis=alt.Axis(format=".0%"), title=None),
+    )
+    scree_panel = (scree + cumulative).properties(
+        width=260,
+        height=330,
+        title=alt.Title(
+            "Variance by component", subtitle=f"first 8 shown · {retained} PCs reach 80%"
+        ),
+    )
+
+    shown_pcs = pc_order[: min(4, len(pc_order))]
+    loading_data = loadings.filter(pl.col("pc").is_in(shown_pcs)).with_columns(
+        loading_label=pl.col("loading_correlation").round(2).cast(pl.String)
+    )
+    eval_labels = [CANONICAL_TO_DEV.get(name, name) for name in eval_order]
+    loading_base = alt.Chart(loading_data).encode(
+        x=alt.X("pc:N", sort=shown_pcs, title=None, axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("eval_label:N", sort=eval_labels, title=None),
+    )
+    loading_cells = loading_base.mark_rect().encode(
+        color=alt.Color(
+            "loading_correlation:Q",
+            title="eval–PC corr.",
+            scale=alt.Scale(domain=VLAG_DOMAIN, range=VLAG_RANGE, clamp=True),
+        ),
+        tooltip=[
+            "eval_label:N",
+            "pc:N",
+            alt.Tooltip("loading_correlation:Q", format=".3f"),
+            alt.Tooltip("component_loading:Q", format=".3f"),
+        ],
+    )
+    loading_text = loading_base.mark_text(fontSize=8).encode(
+        text="loading_label:N",
+        color=alt.condition(
+            "abs(datum.loading_correlation) >= 0.58", alt.value("white"), alt.value(INK)
+        ),
+    )
+    loading_panel = (loading_cells + loading_text).properties(
+        width=alt.Step(55),
+        height=alt.Step(27),
+        title="Leading component loadings",
+    )
+
+    top_redundancy = redundancy.head(8).with_columns(
+        rho_label=pl.col("rho").round(2).cast(pl.String),
+    )
+    pair_order = top_redundancy["pair_label"].to_list()
+    redundancy_base = alt.Chart(top_redundancy).encode(
+        x=alt.X("abs_rho:Q", title="|Spearman ρ|", scale=alt.Scale(domain=[0, 1])),
+        y=alt.Y(
+            "pair_label:N",
+            sort=pair_order,
+            title=None,
+            axis=alt.Axis(labelLimit=245),
+        ),
+    )
+    redundancy_bars = redundancy_base.mark_bar(color=SERIES[4], cornerRadiusEnd=3).encode(
+        tooltip=[
+            "pair_label:N",
+            alt.Tooltip("rho:Q", format=".3f"),
+            alt.Tooltip("rho_min:Q", title="pairing min ρ", format=".3f"),
+            alt.Tooltip("rho_max:Q", title="pairing max ρ", format=".3f"),
+            alt.Tooltip("rho_variant_count:Q", title="replica pairings"),
+            "n_models:Q",
+            "n_pairs:Q",
+        ]
+    )
+    redundancy_errors = redundancy_base.mark_rule(color=INK, strokeWidth=1.4).encode(
+        x=alt.X("abs_rho_min:Q"),
+        x2=alt.X2("abs_rho_max:Q"),
+    )
+    redundancy_error_min = redundancy_base.mark_tick(
+        color=INK, orient="vertical", thickness=1.4, size=11
+    ).encode(x=alt.X("abs_rho_min:Q"))
+    redundancy_error_max = redundancy_base.mark_tick(
+        color=INK, orient="vertical", thickness=1.4, size=11
+    ).encode(x=alt.X("abs_rho_max:Q"))
+    redundancy_labels = redundancy_base.mark_text(align="left", dx=5, fontSize=8).encode(
+        x=alt.X("abs_rho_max:Q"), text="rho_label:N"
+    )
+    redundancy_panel = (
+        redundancy_bars
+        + redundancy_errors
+        + redundancy_error_min
+        + redundancy_error_max
+        + redundancy_labels
+    ).properties(
+        width=300,
+        height=alt.Step(34),
+        title=alt.Title(
+            "Most redundant eval pairs",
+            subtitle="bar: pooled |ρ| · whisker: replica-pairing min–max",
+        ),
+    )
+
+    return alt.hconcat(scree_panel, loading_panel, redundancy_panel, spacing=30).properties(
+        title=alt.Title(
+            "Evaluation covariance structure",
+            subtitle=[
+                "PCA uses the deterministic Cartesian replica-pair Spearman matrix.",
+                "Score bars are replica means with min–max whiskers.",
+                "Pairwise-complete matrix PSD-projected by eigenvalue clipping "
+                f"(ΔF={correction:.3f}).",
+            ],
+        )
     )
 
 
@@ -977,15 +1375,24 @@ def _correlation_heatmap(
             scale=alt.Scale(domain=VLAG_DOMAIN, range=VLAG_RANGE, clamp=True),
             legend=alt.Legend(title="Spearman ρ") if show_legend else None,
         ),
-        tooltip=["x_label:N", "y_label:N", "rho:Q", "n:Q"],
+        tooltip=[
+            "x_label:N",
+            "y_label:N",
+            alt.Tooltip("rho:Q", title="Spearman ρ", format=".3f"),
+            alt.Tooltip("rho_min:Q", title="pairing min ρ", format=".3f"),
+            alt.Tooltip("rho_max:Q", title="pairing max ρ", format=".3f"),
+            alt.Tooltip("rho_variant_count:Q", title="replica pairings"),
+            alt.Tooltip("pearson_r:Q", title="Pearson r", format=".3f"),
+            alt.Tooltip("sample_covariance:Q", title="sample covariance", format=".4f"),
+            alt.Tooltip("n_models:Q", title="models"),
+            alt.Tooltip("n_pairs:Q", title="replica pairs"),
+            alt.Tooltip("min_pairs_per_model:Q", title="min pairs/model"),
+            alt.Tooltip("max_pairs_per_model:Q", title="max pairs/model"),
+        ],
     )
-    labels = base.mark_text(fontSize=8, dy=-5).encode(
+    labels = base.mark_text(fontSize=8).encode(
         text="rho_label:N",
         color=alt.condition("abs(datum.rho) >= 0.58", alt.value("white"), alt.value(INK)),
-    )
-    sample_sizes = base.mark_text(fontSize=7, dy=7).encode(
-        text="n_label:N",
-        color=alt.condition("abs(datum.rho) >= 0.58", alt.value("white"), alt.value(MUTED)),
     )
     family_scale = alt.Scale(
         domain=[FAMILY_LABELS[name] for name in FAMILY_ORDER],
@@ -1019,7 +1426,7 @@ def _correlation_heatmap(
         )
     )
     return (
-        (cells + bottom_rail + left_rail + labels + sample_sizes)
+        (cells + bottom_rail + left_rail + labels)
         .resolve_scale(color="independent")
         .properties(
             width=alt.Step(width_step),
@@ -1029,11 +1436,11 @@ def _correlation_heatmap(
     )
 
 
-def chart_covariance(df: pl.DataFrame) -> alt.HConcatChart:
-    matrix_evals = [*AGENTIC_EVALS, *FRONTIER_EVALS, *SENTINEL_EVALS]
+def chart_covariance(run_scores: pl.DataFrame) -> alt.HConcatChart:
+    matrix_evals = ALL_ANALYSIS_EVALS
     matrix_labels = [CANONICAL_TO_DEV.get(name, name) for name in matrix_evals]
-    matrix = pairwise_rank_correlations(df, matrix_evals, matrix_evals)
-    predictive = pairwise_rank_correlations(df, AGENTIC_EVALS, BASE_EVALS)
+    matrix = pairwise_replica_correlations(run_scores, matrix_evals, matrix_evals)
+    predictive = pairwise_replica_correlations(run_scores, AGENTIC_EVALS, BASE_EVALS)
     strongest = (
         predictive.filter(pl.col("strong"))
         .with_columns(abs_rho=pl.col("rho").abs())
@@ -1048,9 +1455,9 @@ def chart_covariance(df: pl.DataFrame) -> alt.HConcatChart:
         matrix,
         matrix_labels,
         matrix_labels,
-        "Agentic dev + base-eval covariance",
-        40,
-        36,
+        "All-eval rank covariance",
+        37,
+        33,
         True,
         True,
     )
@@ -1068,8 +1475,9 @@ def chart_covariance(df: pl.DataFrame) -> alt.HConcatChart:
         title=alt.Title(
             "Cross-eval rank covariance",
             subtitle=[
-                "Spearman correlation is covariance after rank-standardizing each eval.",
-                "Cell labels show rho and n; association is not causation.",
+                "Every within-model run_i × run_j combination contributes one point.",
+                "Cells show only rho; model and expanded-pair counts remain in tooltips.",
+                "Expanded pairs are deterministic sensitivity points, not independent samples.",
                 f"Strongest observed: {strongest_label}.",
             ],
         )
@@ -1130,17 +1538,18 @@ SLIDE_NOTES = {
     "scores_sci-lit": (
         "Agentic dev scores",
         "Fixed-sample agentic scores are the primary comparison. Valid repeated runs are "
-        "averaged; LitSearch-rerank remains a full-set base eval.",
+        "averaged, with min–max whiskers; LitSearch-rerank remains a full-set base eval.",
     ),
     "scores_sentinel": (
         "Sentinel scores",
         "Regression monitors for instruction-following, knowledge and reasoning. Read these for "
-        "drift, not for standing.",
+        "drift, not for standing; whiskers span the replica minimum and maximum.",
     ),
     "scores_frontier-science": (
         "FrontierScience",
         "Olympiad accuracy measures closed-form problem solving. Research success is the hard "
-        "binary outcome; rubric score retains partial credit and is the more sensitive measure.",
+        "binary outcome; rubric score retains partial credit and is the more sensitive measure. "
+        "Whiskers span replica minima and maxima where repeats exist.",
     ),
     "profile": (
         "Cross-eval profile",
@@ -1154,8 +1563,16 @@ SLIDE_NOTES = {
     ),
     "covariance": (
         "Which base evals predict agentic performance?",
-        "Rank-standardized covariance across models. The small and uneven n values make these "
-        "descriptive associations, not causal claims.",
+        "Rank-standardized covariance over every within-model Cartesian replica pairing. Pair "
+        "counts are sensitivity points rather than independent observations; use model count to "
+        "judge coverage.",
+    ),
+    "eval_pca": (
+        "What structure do the evaluations share?",
+        "PCA summarizes the pairwise-expanded rank-covariance matrix. Similar loadings and high "
+        "absolute pair correlations flag possible redundancy; redundancy whiskers span the "
+        "replica-pairing range. Signs of PCA components are arbitrary, and all relationships "
+        "remain descriptive.",
     ),
     "summary": (
         "Overall standing",
@@ -1403,7 +1820,7 @@ def main() -> None:
     _register_theme()
 
     meta = load_metadata(args.metadata)
-    df, scope_scores = load_scores(args.csv, meta)
+    df, scope_scores, run_scores = load_scores(args.csv, meta)
     ranked = add_ranks(df)
 
     n_sci_lit = len(meta.sci_lit_evals())
@@ -1453,11 +1870,41 @@ def main() -> None:
     if dev_full is not None:
         save(dev_full, args.out, "dev_vs_full", args.formats)
         generated.append("dev_vs_full")
-    save(chart_covariance(df), args.out, "covariance", args.formats)
+    save(chart_covariance(run_scores), args.out, "covariance", args.formats)
     generated.append("covariance")
-    base_agentic = pairwise_rank_correlations(df, AGENTIC_EVALS, BASE_EVALS)
+    pairwise = pairwise_replica_correlations(run_scores, ALL_ANALYSIS_EVALS, ALL_ANALYSIS_EVALS)
+    pairwise.write_csv(args.out / "pairwise_replica_correlations.csv")
+    print(f"  {args.out / 'pairwise_replica_correlations.csv'}")
+    base_agentic = pairwise_replica_correlations(run_scores, AGENTIC_EVALS, BASE_EVALS)
     base_agentic.write_csv(args.out / "base_agentic_correlations.csv")
     print(f"  {args.out / 'base_agentic_correlations.csv'}")
+    pca_variance, pca_loadings, redundancy, pca_diagnostics = analyze_eval_pca(
+        pairwise, ALL_ANALYSIS_EVALS
+    )
+    pca_variance.write_csv(args.out / "eval_pca_variance.csv")
+    pca_loadings.write_csv(args.out / "eval_pca_loadings.csv")
+    redundancy.write_csv(args.out / "eval_redundancy.csv")
+    pca_diagnostics.write_csv(args.out / "eval_pca_diagnostics.csv")
+    for name in [
+        "eval_pca_variance.csv",
+        "eval_pca_loadings.csv",
+        "eval_redundancy.csv",
+        "eval_pca_diagnostics.csv",
+    ]:
+        print(f"  {args.out / name}")
+    save(
+        chart_eval_pca(
+            pca_variance,
+            pca_loadings,
+            redundancy,
+            pca_diagnostics,
+            ALL_ANALYSIS_EVALS,
+        ),
+        args.out,
+        "eval_pca",
+        args.formats,
+    )
+    generated.append("eval_pca")
     if ranked_models:
         save(
             chart_profile(ranked, meta, ranked_models),
