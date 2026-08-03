@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Append scalar Beaker metrics to the canonical long-form results CSV.
 
-The CSV intentionally uses the same columns as the Results Google Sheet.  A
-metric gets its own row.  For DeepScholar-Bench, only metrics whose base name
-ends in ``_fixed`` are retained.
+The CSV keeps every historical run, while the ``replica`` column identifies
+the explicitly approved analysis cohort. A metric gets its own row. For
+DeepScholar-Bench, only metrics whose base name ends in ``_fixed`` are retained.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ CSV_FIELDS = (
     "Beaker Run ID",
     "Notes",
     "Valid for analysis",
+    "replica",
 )
 
 MODEL_NAMES = {
@@ -108,7 +109,10 @@ def model_display_name(model_ref: str, overrides: dict[str, str]) -> str:
 
 
 def result_rows(
-    payload: dict[str, Any], experiment_id: str, model_overrides: dict[str, str]
+    payload: dict[str, Any],
+    experiment_id: str,
+    model_overrides: dict[str, str],
+    replica: int | None = None,
 ) -> tuple[list[dict[str, str]], int]:
     metrics = payload.get("metrics") or {}
     errors = metrics.get("errors") or []
@@ -162,6 +166,7 @@ def result_rows(
                     "Beaker Run ID": experiment_id,
                     "Notes": note,
                     "Valid for analysis": "True",
+                    "replica": str(replica) if replica is not None else "",
                 }
             )
 
@@ -223,6 +228,7 @@ def result_rows(
                 "Beaker Run ID": experiment_id,
                 "Notes": scope_note(summary_task, config),
                 "Valid for analysis": "True",
+                "replica": str(replica) if replica is not None else "",
             }
         )
         existing.add((eval_name, output_metric))
@@ -303,6 +309,8 @@ def upsert_rows(existing: list[dict[str, str]], incoming: list[dict[str, str]]) 
         blank_model_key = ("", row["Eval Name"], row["Metric"], row["Beaker Run ID"])
         if key not in positions and row["Model Name"] and blank_model_key in positions:
             index = positions.pop(blank_model_key)
+            if existing[index]["replica"] and not row["replica"]:
+                row["replica"] = existing[index]["replica"]
             existing[index] = row
             positions[key] = index
             updated += 1
@@ -310,8 +318,11 @@ def upsert_rows(existing: list[dict[str, str]], incoming: list[dict[str, str]]) 
         if key in positions:
             index = positions[key]
             incoming_validity = existing[index]["Valid for analysis"]
+            incoming_replica = existing[index]["replica"]
             if incoming_validity:
                 row["Valid for analysis"] = incoming_validity
+            if incoming_replica and not row["replica"]:
+                row["replica"] = incoming_replica
             if existing[index] != row:
                 existing[index] = row
                 updated += 1
@@ -343,7 +354,7 @@ def parse_args() -> argparse.Namespace:
         "--seed-from",
         type=Path,
         default=DEFAULT_SEED_CSV,
-        help="Initial seven-column CSV copied when --csv does not yet exist",
+        help="Initial eight-column CSV copied when --csv does not yet exist",
     )
     parser.add_argument(
         "--model-name",
@@ -351,6 +362,11 @@ def parse_args() -> argparse.Namespace:
         default=[],
         metavar="REF=DISPLAY",
         help="Override the display name for a model ref",
+    )
+    parser.add_argument(
+        "--replica",
+        type=int,
+        help="Tag imported rows as an approved analysis replica number",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Pull and print rows without writing"
@@ -365,6 +381,8 @@ def main() -> int:
         return 2
 
     try:
+        if args.replica is not None and args.replica < 1:
+            raise ValueError("--replica must be a positive integer")
         model_overrides = parse_model_overrides(args.model_name)
         experiments = load_experiments(args.group, args.experiment)
         incoming: list[dict[str, str]] = []
@@ -372,7 +390,12 @@ def main() -> int:
         for experiment in experiments:
             job = successful_job(experiment)
             payload = beaker_json("job", "results", str(job["id"]))
-            rows, run_skipped = result_rows(payload, str(experiment["id"]), model_overrides)
+            rows, run_skipped = result_rows(
+                payload,
+                str(experiment["id"]),
+                model_overrides,
+                replica=args.replica,
+            )
             incoming.extend(rows)
             skipped += run_skipped
 

@@ -90,6 +90,7 @@ COLUMN_RENAMES = {
     "Beaker Run ID": "run_id",
     "Notes": "notes",
     "Valid for analysis": "valid_for_analysis",
+    "replica": "replica",
 }
 
 DEV_TO_CANONICAL = {
@@ -229,8 +230,9 @@ def load_scores(csv_path: Path, meta: Metadata) -> tuple[pl.DataFrame, pl.DataFr
     """Load primary metrics, preferring fixed dev scopes for agentic evals.
 
     The returned analysis frame has exactly one row per included model/eval.
-    Repeated validated runs of the same scope are averaged. The second frame
-    retains both trusted full and dev aggregates for paired comparisons.
+    Only explicitly numbered replicas are included. Repeated validated runs of
+    the same scope are averaged. The second frame retains both trusted full and
+    dev aggregates for paired comparisons.
     """
     analysis_eval = pl.col("eval").replace_strict(DEV_TO_CANONICAL, default=pl.col("eval"))
     for (source_eval, metric), display_eval in FRONTIER_METRIC_EVALS.items():
@@ -250,9 +252,11 @@ def load_scores(csv_path: Path, meta: Metadata) -> tuple[pl.DataFrame, pl.DataFr
             _blank_to_null("run_id"),
             _blank_to_null("notes"),
             _blank_to_null("valid_for_analysis"),
+            _blank_to_null("replica"),
         )
         .with_columns(
             pl.col("score").str.strip_chars().cast(pl.Float64, strict=False),
+            pl.col("replica").cast(pl.Int64, strict=False),
             valid_for_analysis=pl.col("valid_for_analysis")
             .fill_null("true")
             .str.to_lowercase()
@@ -289,6 +293,7 @@ def load_scores(csv_path: Path, meta: Metadata) -> tuple[pl.DataFrame, pl.DataFr
     candidates = raw.filter(
         pl.col("model").is_in(included_models)
         & pl.col("score").is_not_null()
+        & pl.col("replica").is_not_null()
         & metric_ok
         & ~invalid_note
     )
