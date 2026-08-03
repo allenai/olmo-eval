@@ -337,6 +337,10 @@ class VLLMServerProvider(InferenceProvider):
         self._max_length: int | None = None
         self._enable_lora = enable_lora
         self._lora_modules = lora_modules
+        # vLLM serves each "--lora-modules name=path" adapter under its own name
+        self._request_model_name = model_name
+        if enable_lora and lora_modules:
+            self._request_model_name = lora_modules[0].split("=", 1)[0]
 
         if base_url:
             # Connect to existing server
@@ -536,7 +540,7 @@ class VLLMServerProvider(InferenceProvider):
 
         # Use remote tokenizer by default (no transformers dependency)
         if self._tokenizer is None:
-            self._tokenizer = RemoteTokenizer(self.base_url, self.model_name)
+            self._tokenizer = RemoteTokenizer(self.base_url, self._request_model_name)
         return self._tokenizer
 
     def get_tokenizer(self) -> Any:
@@ -768,7 +772,7 @@ class VLLMServerProvider(InferenceProvider):
     ) -> list[LMOutput]:
         """Generate using the /v1/completions endpoint."""
         kwargs: dict[str, Any] = {
-            "model": self.model_name,
+            "model": self._request_model_name,
             "prompt": request.prompt,
             "n": params.num_samples,
             "logprobs": 1,  # Request logprobs for metrics
@@ -846,7 +850,7 @@ class VLLMServerProvider(InferenceProvider):
 
         # Build request kwargs
         kwargs: dict[str, Any] = {
-            "model": self.model_name,
+            "model": self._request_model_name,
             "messages": messages,
             "n": params.num_samples,
         }
@@ -1061,7 +1065,7 @@ class VLLMServerProvider(InferenceProvider):
             resp = await http_client.post(
                 f"{self.base_url}/completions",
                 json={
-                    "model": self.model_name,
+                    "model": self._request_model_name,
                     "prompt": full_tokens,
                     "max_tokens": 1,
                     "temperature": params.temperature,

@@ -50,6 +50,7 @@ class TestVLLMServerProviderLogprobs:
         with patch.object(VLLMServerProvider, "__init__", lambda self, *a, **kw: None):
             p = VLLMServerProvider.__new__(VLLMServerProvider)
             p.model_name = "test-model"
+            p._request_model_name = "test-model"
             p.base_url = "http://localhost:8000/v1"
             p._tokenizer = mock_tokenizer
             p._add_bos_token = None

@@ -1,4 +1,4 @@
-"""
+r"""
 StrongReject Safety Evaluation Task
 
 This module implements the StrongReject evaluation task
@@ -8,14 +8,19 @@ Paper: https://arxiv.org/abs/2402.10260
 
 Usage:
 
-    olmo-eval run -m llama3.1-8b -t strongreject:sr_judge
+    olmo-eval run -m llama3.1-8b -t strongreject:sr_judge \
+    -o auxiliary_providers.sr_judge.kind=vllm_server \
+    -o auxiliary_providers.sr_judge.model=google/gemma-2b \
+    -o auxiliary_providers.sr_judge.tokenizer=qylu4156/strongreject-15k-v1 \
+    -o auxiliary_providers.sr_judge.kwargs.enable_lora=true \
+    -o auxiliary_providers.sr_judge.kwargs.lora_modules=[strongreject=qylu4156/strongreject-15k-v1]
 """
 
 import logging
 from typing import Any
 
 from olmo_eval.common.scorers import SafetyScorer
-from olmo_eval.common.types import Instance, RequestType
+from olmo_eval.common.types import Instance
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.tasks.safety_base import SafetyBase, register_safety_variants
@@ -29,7 +34,7 @@ class StrongReject(SafetyBase):
 
     data_source = DataSource(path="allenai/olmo-eval-strongreject", split="test")
 
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
         if not doc.get("subsample"):
             return None
@@ -42,6 +47,7 @@ class StrongReject(SafetyBase):
                 "index": index,
                 "jailbreak": doc.get("jailbreak"),
                 "category": doc.get("category"),
+                "forbidden_prompt": doc.get("forbidden_prompt"),
             },
         )
 
@@ -68,7 +74,6 @@ strongreject_safety_metrics = (
     "jailbreak__distractors",
     "jailbreak__distractors_negated",
     "jailbreak__evil_confidant",
-    "jailbreak__evil_system_prompt",
     "jailbreak__few_shot_json",
     "jailbreak__gcg_transfer_harmbench",
     "jailbreak__gcg_transfer_universal_attacks",
@@ -98,12 +103,6 @@ strongreject_safety_metrics = (
 # Variant Registrations
 # =============================================================================
 
-# OpenAI judge variant - uses OpenAI API as the judge
+sr_scorer = SafetyScorer(provider_name="sr_judge", judge_format="strongreject")
 
-sr_scorer = SafetyScorer(
-    provider_name="wg_judge",
-    judge_format="wildguard",
-    judge_request_type=RequestType.COMPLETION,
-)
-
-register_safety_variants("strongreject", strongreject_safety_metrics, sr_scorer, "wg_judge")
+register_safety_variants("strongreject", strongreject_safety_metrics, sr_scorer, "sr_judge")
