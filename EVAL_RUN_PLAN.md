@@ -1,6 +1,6 @@
 # Evaluation Run Plan
 
-Last updated: 2026-07-31
+Last updated: 2026-08-03
 
 ## Objective
 
@@ -651,6 +651,25 @@ the same examples are compared; stochastic generation supplies run-to-run
 variation. Submit tool-harness work in controlled batches and DeepScholar at
 approximately two concurrent jobs so S2/Serper load does not recreate the old
 retry-budget failures. Audit and log each finalized experiment independently.
+
+### Replica status (2026-08-03)
+
+The standard wave-3 matrix has finalized and is integrated. GPT-OSS's original
+combined SAGE job produced 50 open-ended results but only 49 short-form results;
+only its valid SAGE-open metric was retained. Dedicated replacement experiment
+`01KZ4KMETC985BMDMPCVWWPY99` completed all 50 SAGE-short examples and supplies
+the replica-3 short-form metric. OLMo-3 7B Think Core experiment
+`01KZ49G4BD7DTA6W823ZMJ8A7Q` also finalized successfully and is integrated.
+
+FrontierScience groups `analysis-frontierscience-replica2-20260803` and
+`analysis-frontierscience-replica3-20260803` are complete. All 16 experiments
+finished with 100 Olympiad and 60 Research instances, exit 0, and no evaluation
+errors. Every model now has three logged FrontierScience replicas.
+
+DeepScholar groups `analysis-deepscholar-dev10-replica2-20260803` and
+`analysis-deepscholar-dev10-replica3-20260803` are also complete. All 16
+experiments finished with all ten instances, exit 0, and no evaluation errors.
+Every model now has three logged DeepScholar replicas using `_fixed` metrics.
 
 Replica 2 tool batch 1 was submitted on commit `1f1a6a9`:
 

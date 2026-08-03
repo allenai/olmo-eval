@@ -1,82 +1,82 @@
 Model Name,Eval Name,Metric,Score,Beaker Run ID,Notes,Valid for analysis,replica
-OLMo-3 7B Instruct,ExpertQA,citation_recall:sqa_judge,,,,True,""
-OLMo-3 7B Instruct,LitSearch-open,,,,,True,""
+OLMo-3 7B Instruct,ExpertQA,citation_recall:sqa_judge,,,,True,
+OLMo-3 7B Instruct,LitSearch-open,,,,,True,
 OLMo-3 7B Instruct,LitSearch-rerank,,0.4691,01KXGX4CEYC4M8DMSRSP42XZ3W,,True,1
-OLMo-3 7B Instruct,SAGE-open,,0.0250,,,True,""
-OLMo-3 7B Instruct,SAGE-short,,0.0100,,,True,""
-OLMo-3 7B Instruct,DeepScholar-Bench,geomean_fixed,0.1018,01KYB33B3SEBRW9R5382WJE9S6,,True,""
+OLMo-3 7B Instruct,SAGE-open,,0.0250,,,True,
+OLMo-3 7B Instruct,SAGE-short,,0.0100,,,True,
+OLMo-3 7B Instruct,DeepScholar-Bench,geomean_fixed,0.1018,01KYB33B3SEBRW9R5382WJE9S6,,True,
 OLMo-3 7B Instruct,IFEval,,0.3033,01KXGX4CEYC4M8DMSRSP42XZ3W,,True,1
 OLMo-3 7B Instruct,MMLU,,0.6419,01KXGX4CEYC4M8DMSRSP42XZ3W,,True,1
 OLMo-3 7B Instruct,MATH-500,,0.3700,01KXGX4CEYC4M8DMSRSP42XZ3W,,True,1
-Olmo-3 7B Think,ExpertQA,citation_recall:sqa_judge,0.0076,01KXHFR26TBT2G928EJKSPFW0W,"Default, non-agentic",True,""
-Olmo-3 7B Think,LitSearch-open,,,,,True,""
-Olmo-3 7B Think,LitSearch-rerank,,,,Old run 01KXHFR26TBT2G928EJKSPFW0W was LitSearch-open found_rate rather than rerank recall@5,True,""
-Olmo-3 7B Think,SAGE-open,,,,,True,""
-Olmo-3 7B Think,SAGE-short,,,,,True,""
-Olmo-3 7B Think,DeepScholar-Bench,,,,,True,""
-Olmo-3 7B Think,IFEval,,,,,True,""
-Olmo-3 7B Think,MMLU,,,,,True,""
-Olmo-3 7B Think,MATH-500,,,,,True,""
-Qwen3.5 9B Instruct,ExpertQA,citation_recall:sqa_judge,0.2700,01KYK27SAD4950DKT4YRN1AD0W,Web-search agent,True,""
-Qwen3.5 9B Instruct,LitSearch-open,,0.3500,01KY8MKW3JTTPS065DAKRNG6B9,"this task needs an agentic harness exposing the semantic_scholar_snippet_search tool, else every query scores zero",True,""
+Olmo-3 7B Think,ExpertQA,citation_recall:sqa_judge,0.0076,01KXHFR26TBT2G928EJKSPFW0W,"Default, non-agentic",True,
+Olmo-3 7B Think,LitSearch-open,,,,,True,
+Olmo-3 7B Think,LitSearch-rerank,,,,Old run 01KXHFR26TBT2G928EJKSPFW0W was LitSearch-open found_rate rather than rerank recall@5,True,
+Olmo-3 7B Think,SAGE-open,,,,,True,
+Olmo-3 7B Think,SAGE-short,,,,,True,
+Olmo-3 7B Think,DeepScholar-Bench,,,,,True,
+Olmo-3 7B Think,IFEval,,,,,True,
+Olmo-3 7B Think,MMLU,,,,,True,
+Olmo-3 7B Think,MATH-500,,,,,True,
+Qwen3.5 9B Instruct,ExpertQA,citation_recall:sqa_judge,0.2700,01KYK27SAD4950DKT4YRN1AD0W,Web-search agent,True,
+Qwen3.5 9B Instruct,LitSearch-open,,0.3500,01KY8MKW3JTTPS065DAKRNG6B9,"this task needs an agentic harness exposing the semantic_scholar_snippet_search tool, else every query scores zero",True,
 Qwen3.5 9B Instruct,LitSearch-rerank,,0.5800,01KY8ND3RHEQ3EBKNBJPGC8DT3,,True,1
-Qwen3.5 9B Instruct,SAGE-open,,0.0780,01KY8MKW3JTTPS065DAKRNG6B9,,True,""
-Qwen3.5 9B Instruct,SAGE-short,,0.1270,01KY8MKW3JTTPS065DAKRNG6B9,,True,""
-Qwen3.5 9B Instruct,DeepScholar-Bench,,0.1446,01KYJYTGJK69QV3JWYARVKPV0J,,True,""
+Qwen3.5 9B Instruct,SAGE-open,,0.0780,01KY8MKW3JTTPS065DAKRNG6B9,,True,
+Qwen3.5 9B Instruct,SAGE-short,,0.1270,01KY8MKW3JTTPS065DAKRNG6B9,,True,
+Qwen3.5 9B Instruct,DeepScholar-Bench,,0.1446,01KYJYTGJK69QV3JWYARVKPV0J,,True,
 Qwen3.5 9B Instruct,IFEval,,0.3770,01KY8ND3RHEQ3EBKNBJPGC8DT3,,True,1
 Qwen3.5 9B Instruct,MMLU,,0.8140,01KY8MKJ7A495QT3WYF4C17G29,,True,1
 Qwen3.5 9B Instruct,MATH-500,,0.6120,01KY8ND3RHEQ3EBKNBJPGC8DT3,,True,1
-GLM-4.1V-9B-Thinking,ExpertQA,citation_recall:sqa_judge,0.1903,01KXHFZQ35CR7A14Q5PD055KT6,"Default, non-agentic",True,""
-GLM-4.1V-9B-Thinking,LitSearch-open,,0.0000,01KXHFZQ35CR7A14Q5PD055KT6,"this task needs an agentic harness exposing the semantic_scholar_snippet_search tool, else every query scores zero.",True,""
-GLM-4.1V-9B-Thinking,LitSearch-rerank,,,,,True,""
-GLM-4.1V-9B-Thinking,SAGE-open,,,,,True,""
-GLM-4.1V-9B-Thinking,SAGE-short,,,,,True,""
-GLM-4.1V-9B-Thinking,DeepScholar-Bench,,,,,True,""
-GLM-4.1V-9B-Thinking,IFEval,,,,,True,""
-GLM-4.1V-9B-Thinking,MMLU,,,,,True,""
-GLM-4.1V-9B-Thinking,MATH-500,,,,,True,""
-Gemma4 12B-Unified,ExpertQA,citation_recall:sqa_judge,,,,True,""
-Gemma4 12B-Unified,LitSearch-open,,,,,True,""
-Gemma4 12B-Unified,LitSearch-rerank,,,,,True,""
-Gemma4 12B-Unified,SAGE-open,,,,,True,""
-Gemma4 12B-Unified,SAGE-short,,,,,True,""
-Gemma4 12B-Unified,DeepScholar-Bench,,,,,True,""
-Gemma4 12B-Unified,IFEval,,,,,True,""
-Gemma4 12B-Unified,MMLU,,,,,True,""
-Gemma4 12B-Unified,MATH-500,,,,,True,""
-GPT-OSS-20b,ExpertQA,citation_recall:sqa_judge,,,,True,""
-GPT-OSS-20b,LitSearch-open,,,,,True,""
+GLM-4.1V-9B-Thinking,ExpertQA,citation_recall:sqa_judge,0.1903,01KXHFZQ35CR7A14Q5PD055KT6,"Default, non-agentic",True,
+GLM-4.1V-9B-Thinking,LitSearch-open,,0.0000,01KXHFZQ35CR7A14Q5PD055KT6,"this task needs an agentic harness exposing the semantic_scholar_snippet_search tool, else every query scores zero.",True,
+GLM-4.1V-9B-Thinking,LitSearch-rerank,,,,,True,
+GLM-4.1V-9B-Thinking,SAGE-open,,,,,True,
+GLM-4.1V-9B-Thinking,SAGE-short,,,,,True,
+GLM-4.1V-9B-Thinking,DeepScholar-Bench,,,,,True,
+GLM-4.1V-9B-Thinking,IFEval,,,,,True,
+GLM-4.1V-9B-Thinking,MMLU,,,,,True,
+GLM-4.1V-9B-Thinking,MATH-500,,,,,True,
+Gemma4 12B-Unified,ExpertQA,citation_recall:sqa_judge,,,,True,
+Gemma4 12B-Unified,LitSearch-open,,,,,True,
+Gemma4 12B-Unified,LitSearch-rerank,,,,,True,
+Gemma4 12B-Unified,SAGE-open,,,,,True,
+Gemma4 12B-Unified,SAGE-short,,,,,True,
+Gemma4 12B-Unified,DeepScholar-Bench,,,,,True,
+Gemma4 12B-Unified,IFEval,,,,,True,
+Gemma4 12B-Unified,MMLU,,,,,True,
+Gemma4 12B-Unified,MATH-500,,,,,True,
+GPT-OSS-20b,ExpertQA,citation_recall:sqa_judge,,,,True,
+GPT-OSS-20b,LitSearch-open,,,,,True,
 GPT-OSS-20b,LitSearch-rerank,,0.5138,01KYMNWATNWC1SS7M9A4FWFRQG,,True,1
-GPT-OSS-20b,SAGE-open,,,,,True,""
-GPT-OSS-20b,SAGE-short,,,,,True,""
-GPT-OSS-20b,DeepScholar-Bench,,0.1127,01KYJ7BBE991C2H0K307598YKW,,True,""
+GPT-OSS-20b,SAGE-open,,,,,True,
+GPT-OSS-20b,SAGE-short,,,,,True,
+GPT-OSS-20b,DeepScholar-Bench,,0.1127,01KYJ7BBE991C2H0K307598YKW,,True,
 GPT-OSS-20b,IFEval,,0.3567,01KYMNWATNWC1SS7M9A4FWFRQG,,True,1
 GPT-OSS-20b,MMLU,primary_score:average,0.8506941786422912,01KYWP4WKTAJCHB011TCBB6ZJV,Protocol-fixed low-effort Harmony chat; 13877/14042 nonempty; 165 outputs capped at 8192 tokens; no server errors or protocol leakage; conservative by about 0.005-0.007 macro; audited valid,True,1
-GPT-OSS-20b,MATH-500,,,,,True,""
-Qwen3.5-35B-A3B,ExpertQA,citation_recall:sqa_judge,0.4000,01KYK281WHSTMT4W1MFBGCCBVP,Qwen3.5-35B-A3B,True,""
-Qwen3.5-35B-A3B,LitSearch-open,,0.3350,01KY8ER3MX15WMK80Q1AHYAJ9G,,True,""
+GPT-OSS-20b,MATH-500,,,,,True,
+Qwen3.5-35B-A3B,ExpertQA,citation_recall:sqa_judge,0.4000,01KYK281WHSTMT4W1MFBGCCBVP,Qwen3.5-35B-A3B,True,
+Qwen3.5-35B-A3B,LitSearch-open,,0.3350,01KY8ER3MX15WMK80Q1AHYAJ9G,,True,
 Qwen3.5-35B-A3B,LitSearch-rerank,,0.5936,01KYMNX9NQMHMJ8CR0VDFVPY2D,,True,1
-Qwen3.5-35B-A3B,SAGE-open,,0.0790,01KY8ER3MX15WMK80Q1AHYAJ9G,,True,""
-Qwen3.5-35B-A3B,SAGE-short,,0.1320,01KY8ER3MX15WMK80Q1AHYAJ9G,,True,""
-Qwen3.5-35B-A3B,DeepScholar-Bench,,0.1599,01KYJYTXWGRC614A0G6APK2G8J,,True,""
+Qwen3.5-35B-A3B,SAGE-open,,0.0790,01KY8ER3MX15WMK80Q1AHYAJ9G,,True,
+Qwen3.5-35B-A3B,SAGE-short,,0.1320,01KY8ER3MX15WMK80Q1AHYAJ9G,,True,
+Qwen3.5-35B-A3B,DeepScholar-Bench,,0.1599,01KYJYTXWGRC614A0G6APK2G8J,,True,
 Qwen3.5-35B-A3B,IFEval,prompt_level_loose_acc:ifeval,0.4200,01KYMNX9NQMHMJ8CR0VDFVPY2D,,True,1
 Qwen3.5-35B-A3B,MMLU,,0.8490,01KY8A85XVZHHK61P08GFJSC26,,True,1
 Qwen3.5-35B-A3B,MATH-500,accuracy:minerva_math_flex,0.7120,01KYMNX9NQMHMJ8CR0VDFVPY2D,,True,1
-Gemma4 26B-A4B,ExpertQA,citation_recall:sqa_judge,0.5082,01KY69SZMNDSKT049T6F61W9E2,Web-search agent,True,""
-Gemma4 26B-A4B,LitSearch-open,,0.2446,01KY69T9V1Z5QPW0E0Q6DXCTH0,,True,""
+Gemma4 26B-A4B,ExpertQA,citation_recall:sqa_judge,0.5082,01KY69SZMNDSKT049T6F61W9E2,Web-search agent,True,
+Gemma4 26B-A4B,LitSearch-open,,0.2446,01KY69T9V1Z5QPW0E0Q6DXCTH0,,True,
 Gemma4 26B-A4B,LitSearch-rerank,recall@5:litsearch_rerank,0.5914,01KY7ZC75EVGGAAQ9X09CHD5B9,,True,1
-Gemma4 26B-A4B,SAGE-open,,0.0463,01KY69T9V1Z5QPW0E0Q6DXCTH0,,True,""
-Gemma4 26B-A4B,SAGE-short,,0.0935,01KY69T9V1Z5QPW0E0Q6DXCTH0,,True,""
-Gemma4 26B-A4B,DeepScholar-Bench,,0.1817,01KY69TMTF1AV7ZVJ5G13X3M32,,True,""
+Gemma4 26B-A4B,SAGE-open,,0.0463,01KY69T9V1Z5QPW0E0Q6DXCTH0,,True,
+Gemma4 26B-A4B,SAGE-short,,0.0935,01KY69T9V1Z5QPW0E0Q6DXCTH0,,True,
+Gemma4 26B-A4B,DeepScholar-Bench,,0.1817,01KY69TMTF1AV7ZVJ5G13X3M32,,True,
 Gemma4 26B-A4B,IFEval,,0.4370,01KY7ZC75EVGGAAQ9X09CHD5B9,,True,1
 Gemma4 26B-A4B,MMLU,primary_score:average,0.8990765888892218,01KYWKMEHGAFR1NAF7BN359377,Protocol-fixed generative chat; 14042/14042 nonempty; 14036 A-D extracted; 8 output caps; audited valid,True,1
 Gemma4 26B-A4B,MATH-500,accuracy:minerva_math_flex,0.952,01KYWKMD3XD5PSC103N9PGN76V,Protocol-fixed chat completion; 500/500 instances; no harness errors; audited valid,True,1
-Nemotron 3 Nano 30B-A3B,ExpertQA,citation_recall:sqa_judge,,,,True,""
-Nemotron 3 Nano 30B-A3B,LitSearch-open,,,,,True,""
+Nemotron 3 Nano 30B-A3B,ExpertQA,citation_recall:sqa_judge,,,,True,
+Nemotron 3 Nano 30B-A3B,LitSearch-open,,,,,True,
 Nemotron 3 Nano 30B-A3B,LitSearch-rerank,,0.5227,01KYMNWQMME9FJC2XCG0FGPE7Z,,True,1
-Nemotron 3 Nano 30B-A3B,SAGE-open,,,,,True,""
-Nemotron 3 Nano 30B-A3B,SAGE-short,,,,,True,""
-Nemotron 3 Nano 30B-A3B,DeepScholar-Bench,,0.1167,01KYJE3ZAA23Z2N2JWFSS18H1X,,True,""
+Nemotron 3 Nano 30B-A3B,SAGE-open,,,,,True,
+Nemotron 3 Nano 30B-A3B,SAGE-short,,,,,True,
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench,,0.1167,01KYJE3ZAA23Z2N2JWFSS18H1X,,True,
 Nemotron 3 Nano 30B-A3B,IFEval,,0.2867,01KYMNWQMME9FJC2XCG0FGPE7Z,,True,1
 Nemotron 3 Nano 30B-A3B,MMLU,primary_score:average,0.7581,01KYMNX0MS6ZDV6GS8TBTDDBEK,,True,1
 Nemotron 3 Nano 30B-A3B,MATH-500,,0.6220,01KYMNWQMME9FJC2XCG0FGPE7Z,,True,1
@@ -104,14 +104,14 @@ Gemma4 26B-A4B,DeepScholar-Bench-dev10,geomean_fixed:external,0.1832532271940407
 Gemma4 26B-A4B,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.18943850267379678,01KYQP2ZDGWJQEJT72EH5XW2E6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
 Gemma4 26B-A4B,DeepScholar-Bench-dev10,organization_fixed:external,0.45,01KYQP2ZDGWJQEJT72EH5XW2E6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
 Gemma4 26B-A4B,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.03633228840125392,01KYQP2ZDGWJQEJT72EH5XW2E6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
-GPT-OSS-20b,DeepScholar-Bench-dev10,cite_p_fixed:external,0.05000744592628405,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GPT-OSS-20b,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.06082615937657644,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GPT-OSS-20b,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.2957142857142857,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GPT-OSS-20b,DeepScholar-Bench-dev10,document_importance_fixed:external,0.03016082460381413,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GPT-OSS-20b,DeepScholar-Bench-dev10,geomean_fixed:external,0.09818418517621999,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GPT-OSS-20b,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.22494270435446903,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GPT-OSS-20b,DeepScholar-Bench-dev10,organization_fixed:external,0.7,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GPT-OSS-20b,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.02059113300492611,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
+GPT-OSS-20b,DeepScholar-Bench-dev10,cite_p_fixed:external,0.05000744592628405,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GPT-OSS-20b,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.06082615937657644,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GPT-OSS-20b,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.2957142857142857,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GPT-OSS-20b,DeepScholar-Bench-dev10,document_importance_fixed:external,0.03016082460381413,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GPT-OSS-20b,DeepScholar-Bench-dev10,geomean_fixed:external,0.09818418517621999,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GPT-OSS-20b,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.22494270435446903,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GPT-OSS-20b,DeepScholar-Bench-dev10,organization_fixed:external,0.7,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GPT-OSS-20b,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.02059113300492611,01KYQP379Q7QQB75DVE348VAQV,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
 Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,cite_p_fixed:external,0.290503663003663,01KYQP3CSWQTGD51T9FDZ43H8P,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
 Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.3939758852258852,01KYQP3CSWQTGD51T9FDZ43H8P,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
 Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.4208333333333333,01KYQP3CSWQTGD51T9FDZ43H8P,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
@@ -128,29 +128,29 @@ Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,geomean_fixed:external,0.0934000
 Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.20736567354214414,01KYQP3JFSXKH5T76QH93ECYB6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
 Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,organization_fixed:external,0.4,01KYQP3JFSXKH5T76QH93ECYB6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
 Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.03337662337662338,01KYQP3JFSXKH5T76QH93ECYB6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
-Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.36,01KYR1X9M7JVC80R2S2TA71Q6V,Fixed dev50 sample; seed 42,True,""
-Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.35,01KYR1X9M7JVC80R2S2TA71Q6V,Fixed dev50 sample; seed 42,True,""
-OLMo-3 7B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.16,01KYR1X9MM1G288B3ZNZTBVP8K,Legacy stock tool template; exclude from corrected-profile triplicate; fixed dev50 sample; seed 42,True,""
-OLMo-3 7B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.16,01KYR1X9MM1G288B3ZNZTBVP8K,Legacy stock tool template; exclude from corrected-profile triplicate; fixed dev50 sample; seed 42,True,""
-Qwen3.5 9B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.36,01KYR1Y6S6DWSW0VXVYQGAPMST,Fixed dev50 sample; seed 42,True,""
-Qwen3.5 9B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.35,01KYR1Y6S6DWSW0VXVYQGAPMST,Fixed dev50 sample; seed 42,True,""
-Qwen3.5-35B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.46,01KYR1YE42G7WPDCD25PDM2TE9,Fixed dev50 sample; seed 42,True,""
-Qwen3.5-35B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.45,01KYR1YE42G7WPDCD25PDM2TE9,Fixed dev50 sample; seed 42,True,""
-Gemma4 26B-A4B,LitSearch-open-dev50,found_rate:exact_match,0.28,01KYR2GD0P7ZN4Y4VKQZNNDKMA,Fixed dev50 sample; seed 42,True,""
-Gemma4 26B-A4B,LitSearch-open-dev50,gold_recall:exact_match,0.28,01KYR2GD0P7ZN4Y4VKQZNNDKMA,Fixed dev50 sample; seed 42,True,""
-Gemma4 26B-A4B,SAGE-open-dev50,weighted_recall:weighted_recall,0.049640415140415145,01KYR4T30JWDSB6E33VW61G2NS,Fixed dev50 sample; seed 42,True,""
-Gemma4 26B-A4B,SAGE-short-dev50,exact_match:exact_match,0.42,01KYR4T30JWDSB6E33VW61G2NS,Fixed dev50 sample; seed 42,True,""
-Qwen3.5 9B Instruct,SAGE-open-dev50,weighted_recall:weighted_recall,0.08639682539682539,01KYR4T8MRV9GSV7MH9GBX8B5T,Fixed dev50 sample; seed 42,True,""
-Qwen3.5 9B Instruct,SAGE-short-dev50,exact_match:exact_match,0.54,01KYR4T8MRV9GSV7MH9GBX8B5T,Fixed dev50 sample; seed 42,True,""
+Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.36,01KYR1X9M7JVC80R2S2TA71Q6V,Fixed dev50 sample; seed 42,True,
+Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.35,01KYR1X9M7JVC80R2S2TA71Q6V,Fixed dev50 sample; seed 42,True,
+OLMo-3 7B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.16,01KYR1X9MM1G288B3ZNZTBVP8K,Legacy stock tool template; exclude from corrected-profile triplicate; fixed dev50 sample; seed 42,True,
+OLMo-3 7B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.16,01KYR1X9MM1G288B3ZNZTBVP8K,Legacy stock tool template; exclude from corrected-profile triplicate; fixed dev50 sample; seed 42,True,
+Qwen3.5 9B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.36,01KYR1Y6S6DWSW0VXVYQGAPMST,Fixed dev50 sample; seed 42,True,
+Qwen3.5 9B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.35,01KYR1Y6S6DWSW0VXVYQGAPMST,Fixed dev50 sample; seed 42,True,
+Qwen3.5-35B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.46,01KYR1YE42G7WPDCD25PDM2TE9,Fixed dev50 sample; seed 42,True,
+Qwen3.5-35B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.45,01KYR1YE42G7WPDCD25PDM2TE9,Fixed dev50 sample; seed 42,True,
+Gemma4 26B-A4B,LitSearch-open-dev50,found_rate:exact_match,0.28,01KYR2GD0P7ZN4Y4VKQZNNDKMA,Fixed dev50 sample; seed 42,True,
+Gemma4 26B-A4B,LitSearch-open-dev50,gold_recall:exact_match,0.28,01KYR2GD0P7ZN4Y4VKQZNNDKMA,Fixed dev50 sample; seed 42,True,
+Gemma4 26B-A4B,SAGE-open-dev50,weighted_recall:weighted_recall,0.049640415140415145,01KYR4T30JWDSB6E33VW61G2NS,Fixed dev50 sample; seed 42,True,
+Gemma4 26B-A4B,SAGE-short-dev50,exact_match:exact_match,0.42,01KYR4T30JWDSB6E33VW61G2NS,Fixed dev50 sample; seed 42,True,
+Qwen3.5 9B Instruct,SAGE-open-dev50,weighted_recall:weighted_recall,0.08639682539682539,01KYR4T8MRV9GSV7MH9GBX8B5T,Fixed dev50 sample; seed 42,True,
+Qwen3.5 9B Instruct,SAGE-short-dev50,exact_match:exact_match,0.54,01KYR4T8MRV9GSV7MH9GBX8B5T,Fixed dev50 sample; seed 42,True,
 Qwen3.5-35B-A3B,SAGE-open-dev50,weighted_recall:weighted_recall,0.09883760683760684,01KYR4TEACF1MJBPSC19ZEV13R,Fixed dev50 sample; seed 42,True,1
 Qwen3.5-35B-A3B,SAGE-short-dev50,exact_match:exact_match,0.76,01KYR4TEACF1MJBPSC19ZEV13R,Fixed dev50 sample; seed 42,True,1
-Gemma4 26B-A4B,ExpertQA-dev100,answer_precision:sqa_judge,0.9183333333333333,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,""
-Gemma4 26B-A4B,ExpertQA-dev100,citation_precision:sqa_judge,0.6338224275724276,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,""
-Gemma4 26B-A4B,ExpertQA-dev100,citation_recall:sqa_judge,0.4836235146432515,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,""
-Gemma4 26B-A4B,ExpertQA-dev100,global_avg:sqa_judge,0.6785930918496708,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,""
-Gemma4 26B-A4B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.7751593684093685,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,""
-OLMo-3 7B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.2,01KYRQB65W8NSQRK9XH1J6JJZC,Corrected OLMo3 tool template/parser profile; fixed dev50 sample; seed 42,True,""
-OLMo-3 7B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.2,01KYRQB65W8NSQRK9XH1J6JJZC,Corrected OLMo3 tool template/parser profile; fixed dev50 sample; seed 42,True,""
+Gemma4 26B-A4B,ExpertQA-dev100,answer_precision:sqa_judge,0.9183333333333333,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,
+Gemma4 26B-A4B,ExpertQA-dev100,citation_precision:sqa_judge,0.6338224275724276,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,
+Gemma4 26B-A4B,ExpertQA-dev100,citation_recall:sqa_judge,0.4836235146432515,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,
+Gemma4 26B-A4B,ExpertQA-dev100,global_avg:sqa_judge,0.6785930918496708,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,
+Gemma4 26B-A4B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.7751593684093685,01KYRPBFD93A6PVZCZP8VC952W,Fixed dev100 sample; seed 42,True,
+OLMo-3 7B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.2,01KYRQB65W8NSQRK9XH1J6JJZC,Corrected OLMo3 tool template/parser profile; fixed dev50 sample; seed 42,True,
+OLMo-3 7B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.2,01KYRQB65W8NSQRK9XH1J6JJZC,Corrected OLMo3 tool template/parser profile; fixed dev50 sample; seed 42,True,
 Qwen3.5 9B Instruct,ExpertQA-dev100,answer_precision:sqa_judge,0.707074768368886,01KYRPBGB8PKGG09AMAW7XVW1W,Fixed dev100 sample; seed 42,True,1
 Qwen3.5 9B Instruct,ExpertQA-dev100,citation_precision:sqa_judge,0.4151819010755676,01KYRPBGB8PKGG09AMAW7XVW1W,Fixed dev100 sample; seed 42,True,1
 Qwen3.5 9B Instruct,ExpertQA-dev100,citation_recall:sqa_judge,0.2476049519864783,01KYRPBGB8PKGG09AMAW7XVW1W,Fixed dev100 sample; seed 42,True,1
@@ -163,25 +163,25 @@ Qwen3.5-35B-A3B,ExpertQA-dev100,global_avg:sqa_judge,0.5953840843903715,01KYRPBF
 Qwen3.5-35B-A3B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.8042919727394271,01KYRPBFEMED6DDB0D0D06KFC1,Fixed dev100 sample; seed 42,True,1
 Nemotron 3 Nano 30B-A3B,SAGE-open-dev50,weighted_recall:weighted_recall,0.06628083028083027,01KYRPBFDFWMJKYMZCY24W1SRV,Fixed dev50 sample; seed 42,True,1
 Nemotron 3 Nano 30B-A3B,SAGE-short-dev50,exact_match:exact_match,0.42,01KYRPBFDFWMJKYMZCY24W1SRV,Fixed dev50 sample; seed 42,True,1
-OLMo-3 7B Instruct,SAGE-open-dev50,weighted_recall:weighted_recall,0.01641025641025641,01KYRRFXN8SZVWECF3PWZ7HB9D,Parser-fixed OLMo3 profile at 106ef62; fixed dev50 sample; seed 42,True,""
-OLMo-3 7B Instruct,SAGE-short-dev50,exact_match:exact_match,0.0,01KYRRFXN8SZVWECF3PWZ7HB9D,Parser-fixed OLMo3 profile at 106ef62; fixed dev50 sample; seed 42,True,""
-GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,cite_p_fixed:external,0.03267230756592458,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.04393785883147585,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.24,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,document_importance_fixed:external,0.0,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,geomean_fixed:external,0.0,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.1622103386809269,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,organization_fixed:external,0.15,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
-GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.01,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,""
+OLMo-3 7B Instruct,SAGE-open-dev50,weighted_recall:weighted_recall,0.01641025641025641,01KYRRFXN8SZVWECF3PWZ7HB9D,Parser-fixed OLMo3 profile at 106ef62; fixed dev50 sample; seed 42,True,
+OLMo-3 7B Instruct,SAGE-short-dev50,exact_match:exact_match,0.0,01KYRRFXN8SZVWECF3PWZ7HB9D,Parser-fixed OLMo3 profile at 106ef62; fixed dev50 sample; seed 42,True,
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,cite_p_fixed:external,0.03267230756592458,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.04393785883147585,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.24,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,document_importance_fixed:external,0.0,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,geomean_fixed:external,0.0,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.1622103386809269,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,organization_fixed:external,0.15,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.01,01KYRPC4ETRV5BPMMQMDMPT84V,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,
 Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,answer_precision:sqa_judge,0.9183333333333333,01KYRQXQWH0ZTSPFG6G2H9RTE9,Fixed dev100 sample; seed 42,True,1
 Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,citation_precision:sqa_judge,0.5132947954822955,01KYRQXQWH0ZTSPFG6G2H9RTE9,Fixed dev100 sample; seed 42,True,1
 Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,citation_recall:sqa_judge,0.31705372405372406,01KYRQXQWH0ZTSPFG6G2H9RTE9,Fixed dev100 sample; seed 42,True,1
 Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,global_avg:sqa_judge,0.582893950956451,01KYRQXQWH0ZTSPFG6G2H9RTE9,Fixed dev100 sample; seed 42,True,1
 Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.8167531055900621,01KYRQXQWH0ZTSPFG6G2H9RTE9,Fixed dev100 sample; seed 42,True,1
-Olmo-3 7B Think,LitSearch-open-dev50,found_rate:exact_match,0.14,01KYRVFCN5MKFSVWSXGQG67F5N,Fixed dev50 sample; seed 42,True,""
-Olmo-3 7B Think,LitSearch-open-dev50,gold_recall:exact_match,0.14,01KYRVFCN5MKFSVWSXGQG67F5N,Fixed dev50 sample; seed 42,True,""
-Olmo-3 7B Think,SAGE-open-dev50,weighted_recall:weighted_recall,0.008076923076923077,01KYRV9CPS6QR0TQSY23YAAHQD,Fixed dev50 sample; seed 42,True,""
-Olmo-3 7B Think,SAGE-short-dev50,exact_match:exact_match,0.0,01KYRV9CPS6QR0TQSY23YAAHQD,Fixed dev50 sample; seed 42,True,""
+Olmo-3 7B Think,LitSearch-open-dev50,found_rate:exact_match,0.14,01KYRVFCN5MKFSVWSXGQG67F5N,Fixed dev50 sample; seed 42,True,
+Olmo-3 7B Think,LitSearch-open-dev50,gold_recall:exact_match,0.14,01KYRVFCN5MKFSVWSXGQG67F5N,Fixed dev50 sample; seed 42,True,
+Olmo-3 7B Think,SAGE-open-dev50,weighted_recall:weighted_recall,0.008076923076923077,01KYRV9CPS6QR0TQSY23YAAHQD,Fixed dev50 sample; seed 42,True,
+Olmo-3 7B Think,SAGE-short-dev50,exact_match:exact_match,0.0,01KYRV9CPS6QR0TQSY23YAAHQD,Fixed dev50 sample; seed 42,True,
 Olmo-3 7B Think,DeepScholar-Bench-dev10,cite_p_fixed:external,0.0386048566132582,01KYRVH85J39SXQMMD6EW4694C,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
 Olmo-3 7B Think,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.06762362790851814,01KYRVH85J39SXQMMD6EW4694C,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
 Olmo-3 7B Think,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.35666666666666663,01KYRVH85J39SXQMMD6EW4694C,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,1
@@ -1008,3 +1008,931 @@ Qwen3.5-35B-A3B,ExpertQA-dev100,citation_precision:sqa_judge,0.4618218389558828,
 Qwen3.5-35B-A3B,ExpertQA-dev100,citation_recall:sqa_judge,0.3567801257968198,01KZ2TY2CSHBEXA18HD4FWQDQA,Fixed dev100 sample; seed 42,True,2
 Qwen3.5-35B-A3B,ExpertQA-dev100,global_avg:sqa_judge,0.5805816072985199,01KZ2TY2CSHBEXA18HD4FWQDQA,Fixed dev100 sample; seed 42,True,2
 Qwen3.5-35B-A3B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.7497271928886116,01KZ2TY2CSHBEXA18HD4FWQDQA,Fixed dev100 sample; seed 42,True,2
+OLMo-3 7B Instruct,IFEval,inst_level_loose_acc:ifeval,0.34011627906976744,01KZ49FPR0K0RJ4KNGEQ90C6FY,,True,3
+OLMo-3 7B Instruct,IFEval,inst_level_strict_acc:ifeval,0.313953488372093,01KZ49FPR0K0RJ4KNGEQ90C6FY,,True,3
+OLMo-3 7B Instruct,IFEval,prompt_level_loose_acc:ifeval,0.31333333333333335,01KZ49FPR0K0RJ4KNGEQ90C6FY,,True,3
+OLMo-3 7B Instruct,IFEval,prompt_level_strict_acc:ifeval,0.29,01KZ49FPR0K0RJ4KNGEQ90C6FY,,True,3
+OLMo-3 7B Instruct,LitSearch-rerank,recall@20:litsearch_rerank,0.4962590731434952,01KZ49FPR0K0RJ4KNGEQ90C6FY,,True,3
+OLMo-3 7B Instruct,LitSearch-rerank,recall@5:litsearch_rerank,0.4716359575656058,01KZ49FPR0K0RJ4KNGEQ90C6FY,,True,3
+OLMo-3 7B Instruct,MATH-500,accuracy:minerva_math_flex,0.35,01KZ49FPR0K0RJ4KNGEQ90C6FY,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu:humanities/primary_score:average,0.6490324814007408,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu:other/primary_score:average,0.6244356925121757,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu:social_sciences/primary_score:average,0.7159438994678685,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu:stem/primary_score:average,0.5789660497006842,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.35,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_anatomy/accuracy:logprob,0.5555555555555556,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_astronomy/accuracy:logprob,0.6513157894736842,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_business_ethics/accuracy:logprob,0.68,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.6566037735849056,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_college_biology/accuracy:logprob,0.75,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_college_chemistry/accuracy:logprob,0.46,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_college_computer_science/accuracy:logprob,0.54,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_college_mathematics/accuracy:logprob,0.48,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_college_medicine/accuracy:logprob,0.6763005780346821,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_college_physics/accuracy:logprob,0.4019607843137255,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_computer_security/accuracy:logprob,0.74,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.6212765957446809,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_econometrics/accuracy:logprob,0.5087719298245614,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.6482758620689655,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.6058201058201058,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_formal_logic/accuracy:logprob,0.4523809523809524,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_global_facts/accuracy:logprob,0.35,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_biology/accuracy:logprob,0.7806451612903226,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.5517241379310345,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.78,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.6848484848484848,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_geography/accuracy:logprob,0.7424242424242424,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.8290155440414507,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.6076923076923076,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.4185185185185185,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.6932773109243697,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_physics/accuracy:logprob,0.4900662251655629,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.8128440366972477,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.625,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.7205882352941176,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.7426160337552743,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_human_aging/accuracy:logprob,0.6143497757847534,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_human_sexuality/accuracy:logprob,0.7404580152671756,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_international_law/accuracy:logprob,0.768595041322314,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_jurisprudence/accuracy:logprob,0.7129629629629629,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.7055214723926381,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_machine_learning/accuracy:logprob,0.5267857142857143,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_management/accuracy:logprob,0.7864077669902912,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_marketing/accuracy:logprob,0.8504273504273504,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_medical_genetics/accuracy:logprob,0.73,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_miscellaneous/accuracy:logprob,0.7650063856960408,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_moral_disputes/accuracy:logprob,0.6878612716763006,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.4022346368715084,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_nutrition/accuracy:logprob,0.6535947712418301,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_philosophy/accuracy:logprob,0.6591639871382636,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_prehistory/accuracy:logprob,0.691358024691358,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_professional_accounting/accuracy:logprob,0.4326241134751773,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_professional_law/accuracy:logprob,0.4198174706649283,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_professional_medicine/accuracy:logprob,0.5514705882352942,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_professional_psychology/accuracy:logprob,0.6405228758169934,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_public_relations/accuracy:logprob,0.6727272727272727,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_security_studies/accuracy:logprob,0.7224489795918367,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_sociology/accuracy:logprob,0.7711442786069652,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.85,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_virology/accuracy:logprob,0.4397590361445783,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,mmlu_world_religions/accuracy:logprob,0.7894736842105263,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+OLMo-3 7B Instruct,MMLU,primary_score:average,0.6420945307703673,01KZ49FXT9XJ4K79MXMH5PFFJA,,True,3
+Olmo-3 7B Think,MMLU,mmlu:humanities/primary_score:average,0.6544416727215517,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu:other/primary_score:average,0.6230663396492243,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu:social_sciences/primary_score:average,0.7213327388148284,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu:stem/primary_score:average,0.5683035376124782,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.35,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_anatomy/accuracy:logprob,0.5407407407407407,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_astronomy/accuracy:logprob,0.7368421052631579,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_business_ethics/accuracy:logprob,0.64,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.6150943396226415,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_college_biology/accuracy:logprob,0.7430555555555556,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_college_chemistry/accuracy:logprob,0.47,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_college_computer_science/accuracy:logprob,0.58,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_college_mathematics/accuracy:logprob,0.4,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_college_medicine/accuracy:logprob,0.6416184971098265,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_college_physics/accuracy:logprob,0.46078431372549017,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_computer_security/accuracy:logprob,0.71,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.6382978723404256,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_econometrics/accuracy:logprob,0.4824561403508772,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.6275862068965518,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.5661375661375662,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_formal_logic/accuracy:logprob,0.49206349206349204,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_global_facts/accuracy:logprob,0.44,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_biology/accuracy:logprob,0.7870967741935484,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.5221674876847291,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.77,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.7272727272727273,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_geography/accuracy:logprob,0.7878787878787878,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.844559585492228,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.6256410256410256,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.43333333333333335,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.7310924369747899,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_physics/accuracy:logprob,0.4768211920529801,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.8091743119266055,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.5555555555555556,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.7205882352941176,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.759493670886076,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_human_aging/accuracy:logprob,0.6188340807174888,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_human_sexuality/accuracy:logprob,0.7175572519083969,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_international_law/accuracy:logprob,0.8099173553719008,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_jurisprudence/accuracy:logprob,0.75,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.7116564417177914,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_machine_learning/accuracy:logprob,0.4017857142857143,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_management/accuracy:logprob,0.7475728155339806,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_marketing/accuracy:logprob,0.8162393162393162,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_medical_genetics/accuracy:logprob,0.7,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_miscellaneous/accuracy:logprob,0.7650063856960408,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_moral_disputes/accuracy:logprob,0.6676300578034682,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.3642458100558659,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_nutrition/accuracy:logprob,0.6372549019607843,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_philosophy/accuracy:logprob,0.662379421221865,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_prehistory/accuracy:logprob,0.6975308641975309,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_professional_accounting/accuracy:logprob,0.46099290780141844,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_professional_law/accuracy:logprob,0.4198174706649283,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_professional_medicine/accuracy:logprob,0.6176470588235294,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_professional_psychology/accuracy:logprob,0.6437908496732027,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_public_relations/accuracy:logprob,0.6636363636363637,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_security_studies/accuracy:logprob,0.7142857142857143,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_sociology/accuracy:logprob,0.8159203980099502,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.82,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_virology/accuracy:logprob,0.4819277108433735,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,mmlu_world_religions/accuracy:logprob,0.7251461988304093,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Olmo-3 7B Think,MMLU,primary_score:average,0.6417860721995207,01KZ49GC9YCCC6Z3932HRAQCPC,,True,3
+Qwen3.5 9B Instruct,IFEval,inst_level_loose_acc:ifeval,0.40406976744186046,01KZ49GJQNNJAXBESAK75PH3SD,,True,3
+Qwen3.5 9B Instruct,IFEval,inst_level_strict_acc:ifeval,0.3633720930232558,01KZ49GJQNNJAXBESAK75PH3SD,,True,3
+Qwen3.5 9B Instruct,IFEval,prompt_level_loose_acc:ifeval,0.37333333333333335,01KZ49GJQNNJAXBESAK75PH3SD,,True,3
+Qwen3.5 9B Instruct,IFEval,prompt_level_strict_acc:ifeval,0.3333333333333333,01KZ49GJQNNJAXBESAK75PH3SD,,True,3
+Qwen3.5 9B Instruct,LitSearch-rerank,recall@20:litsearch_rerank,0.6235622557230597,01KZ49GJQNNJAXBESAK75PH3SD,,True,3
+Qwen3.5 9B Instruct,LitSearch-rerank,recall@5:litsearch_rerank,0.5791178112786153,01KZ49GJQNNJAXBESAK75PH3SD,,True,3
+Qwen3.5 9B Instruct,MATH-500,accuracy:minerva_math_flex,0.596,01KZ49GJQNNJAXBESAK75PH3SD,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu:humanities/primary_score:average,0.8220953440517857,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu:other/primary_score:average,0.7988710519313992,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu:social_sciences/primary_score:average,0.8649233844819152,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu:stem/primary_score:average,0.7744946306822685,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.64,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_anatomy/accuracy:logprob,0.8148148148148148,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_astronomy/accuracy:logprob,0.9342105263157895,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_business_ethics/accuracy:logprob,0.8,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.8452830188679246,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_college_biology/accuracy:logprob,0.9444444444444444,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_college_chemistry/accuracy:logprob,0.61,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_college_computer_science/accuracy:logprob,0.77,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_college_mathematics/accuracy:logprob,0.65,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_college_medicine/accuracy:logprob,0.8092485549132948,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_college_physics/accuracy:logprob,0.696078431372549,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_computer_security/accuracy:logprob,0.82,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.8978723404255319,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_econometrics/accuracy:logprob,0.7192982456140351,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.8068965517241379,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.7645502645502645,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_formal_logic/accuracy:logprob,0.7063492063492064,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_global_facts/accuracy:logprob,0.48,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_biology/accuracy:logprob,0.9387096774193548,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.7931034482758621,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.85,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.8727272727272727,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_geography/accuracy:logprob,0.9242424242424242,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.9792746113989638,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.8666666666666667,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.5555555555555556,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.9285714285714286,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_physics/accuracy:logprob,0.7284768211920529,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.9284403669724771,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.7731481481481481,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.8970588235294118,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.890295358649789,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_human_aging/accuracy:logprob,0.7892376681614349,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_human_sexuality/accuracy:logprob,0.8549618320610687,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_international_law/accuracy:logprob,0.9256198347107438,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_jurisprudence/accuracy:logprob,0.8796296296296297,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.8711656441717791,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_machine_learning/accuracy:logprob,0.7678571428571429,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_management/accuracy:logprob,0.8640776699029126,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_marketing/accuracy:logprob,0.9316239316239316,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_medical_genetics/accuracy:logprob,0.91,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_miscellaneous/accuracy:logprob,0.9042145593869731,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_moral_disputes/accuracy:logprob,0.8092485549132948,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.6681564245810055,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_nutrition/accuracy:logprob,0.8986928104575164,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_philosophy/accuracy:logprob,0.8327974276527331,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_prehistory/accuracy:logprob,0.8487654320987654,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_professional_accounting/accuracy:logprob,0.6843971631205674,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_professional_law/accuracy:logprob,0.6140808344198174,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_professional_medicine/accuracy:logprob,0.9044117647058824,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_professional_psychology/accuracy:logprob,0.8366013071895425,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_public_relations/accuracy:logprob,0.7181818181818181,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_security_studies/accuracy:logprob,0.8122448979591836,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_sociology/accuracy:logprob,0.8805970149253731,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.93,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_virology/accuracy:logprob,0.5481927710843374,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,mmlu_world_religions/accuracy:logprob,0.8713450292397661,01KZ49GS52091XPWBDG61XF89S,,True,3
+Qwen3.5 9B Instruct,MMLU,primary_score:average,0.8150961027868422,01KZ49GS52091XPWBDG61XF89S,,True,3
+GLM-4.1V-9B-Thinking,IFEval,inst_level_loose_acc:ifeval,0.2703488372093023,01KZ49GZE7TYZ0NHV3MY7W3DPF,,True,3
+GLM-4.1V-9B-Thinking,IFEval,inst_level_strict_acc:ifeval,0.22965116279069767,01KZ49GZE7TYZ0NHV3MY7W3DPF,,True,3
+GLM-4.1V-9B-Thinking,IFEval,prompt_level_loose_acc:ifeval,0.24666666666666667,01KZ49GZE7TYZ0NHV3MY7W3DPF,,True,3
+GLM-4.1V-9B-Thinking,IFEval,prompt_level_strict_acc:ifeval,0.21333333333333335,01KZ49GZE7TYZ0NHV3MY7W3DPF,,True,3
+GLM-4.1V-9B-Thinking,LitSearch-rerank,recall@20:litsearch_rerank,0.5149637074260189,01KZ49GZE7TYZ0NHV3MY7W3DPF,,True,3
+GLM-4.1V-9B-Thinking,LitSearch-rerank,recall@5:litsearch_rerank,0.4694025683975433,01KZ49GZE7TYZ0NHV3MY7W3DPF,,True,3
+GLM-4.1V-9B-Thinking,MATH-500,accuracy:minerva_math_flex,0.588,01KZ49GZE7TYZ0NHV3MY7W3DPF,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu:humanities/primary_score:average,0.7832420610108629,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu:other/primary_score:average,0.7570693444210861,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu:social_sciences/primary_score:average,0.8243049120364622,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu:stem/primary_score:average,0.6777489722516372,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.46,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_anatomy/accuracy:logprob,0.7777777777777778,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_astronomy/accuracy:logprob,0.868421052631579,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_business_ethics/accuracy:logprob,0.78,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.8075471698113208,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_biology/accuracy:logprob,0.875,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_chemistry/accuracy:logprob,0.56,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_computer_science/accuracy:logprob,0.65,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_mathematics/accuracy:logprob,0.52,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_medicine/accuracy:logprob,0.7572254335260116,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_college_physics/accuracy:logprob,0.5098039215686274,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_computer_security/accuracy:logprob,0.8,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.825531914893617,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_econometrics/accuracy:logprob,0.5614035087719298,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.7724137931034483,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.6058201058201058,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_formal_logic/accuracy:logprob,0.6507936507936508,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_global_facts/accuracy:logprob,0.43,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_biology/accuracy:logprob,0.864516129032258,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.6699507389162561,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.83,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.8303030303030303,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_geography/accuracy:logprob,0.9141414141414141,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.9585492227979274,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.7717948717948718,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.46296296296296297,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.8907563025210085,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_physics/accuracy:logprob,0.5960264900662252,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.9119266055045872,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.7129629629629629,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.9215686274509803,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.8818565400843882,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_human_aging/accuracy:logprob,0.7713004484304933,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_human_sexuality/accuracy:logprob,0.8244274809160306,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_international_law/accuracy:logprob,0.8429752066115702,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_jurisprudence/accuracy:logprob,0.8148148148148148,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.8343558282208589,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_machine_learning/accuracy:logprob,0.6160714285714286,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_management/accuracy:logprob,0.8737864077669902,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_marketing/accuracy:logprob,0.9230769230769231,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_medical_genetics/accuracy:logprob,0.83,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_miscellaneous/accuracy:logprob,0.8773946360153256,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_moral_disputes/accuracy:logprob,0.7861271676300579,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.6044692737430167,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_nutrition/accuracy:logprob,0.7908496732026143,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_philosophy/accuracy:logprob,0.7942122186495176,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_prehistory/accuracy:logprob,0.8179012345679012,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_professional_accounting/accuracy:logprob,0.6099290780141844,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_professional_law/accuracy:logprob,0.5723598435462842,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_professional_medicine/accuracy:logprob,0.7977941176470589,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_professional_psychology/accuracy:logprob,0.7810457516339869,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_public_relations/accuracy:logprob,0.7545454545454545,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_security_studies/accuracy:logprob,0.7673469387755102,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_sociology/accuracy:logprob,0.8557213930348259,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.9,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_virology/accuracy:logprob,0.572289156626506,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,mmlu_world_religions/accuracy:logprob,0.8304093567251462,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GLM-4.1V-9B-Thinking,MMLU,primary_score:average,0.760591322430012,01KZ49H5G1DZFGRYS0SN7KFVQT,,True,3
+GPT-OSS-20b,IFEval,inst_level_loose_acc:ifeval,0.3372093023255814,01KZ49HBPV575NC9EJA2ZT5PKD,,True,3
+GPT-OSS-20b,IFEval,inst_level_strict_acc:ifeval,0.311046511627907,01KZ49HBPV575NC9EJA2ZT5PKD,,True,3
+GPT-OSS-20b,IFEval,prompt_level_loose_acc:ifeval,0.3433333333333333,01KZ49HBPV575NC9EJA2ZT5PKD,,True,3
+GPT-OSS-20b,IFEval,prompt_level_strict_acc:ifeval,0.31333333333333335,01KZ49HBPV575NC9EJA2ZT5PKD,,True,3
+GPT-OSS-20b,LitSearch-rerank,recall@20:litsearch_rerank,0.5381351200446678,01KZ49HBPV575NC9EJA2ZT5PKD,,True,3
+GPT-OSS-20b,LitSearch-rerank,recall@5:litsearch_rerank,0.5165270798436628,01KZ49HBPV575NC9EJA2ZT5PKD,,True,3
+GPT-OSS-20b,MATH-500,accuracy:minerva_math_flex,0.842,01KZ49HBPV575NC9EJA2ZT5PKD,,True,3
+GPT-OSS-20b,MMLU,mmlu:humanities:chat/primary_score:average,0.8121177553872373,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu:other:chat/primary_score:average,0.8150913612349983,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu:social_sciences:chat/primary_score:average,0.8696132966666065,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu:stem:chat/primary_score:average,0.9123811905017397,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_abstract_algebra:chat/accuracy:multiple_choice,0.93,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_anatomy:chat/accuracy:multiple_choice,0.7851851851851852,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_astronomy:chat/accuracy:multiple_choice,0.9342105263157895,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_business_ethics:chat/accuracy:multiple_choice,0.75,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_clinical_knowledge:chat/accuracy:multiple_choice,0.8603773584905661,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_college_biology:chat/accuracy:multiple_choice,0.9444444444444444,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_college_chemistry:chat/accuracy:multiple_choice,0.74,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_college_computer_science:chat/accuracy:multiple_choice,0.92,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_college_mathematics:chat/accuracy:multiple_choice,0.98,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_college_medicine:chat/accuracy:multiple_choice,0.8670520231213873,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_college_physics:chat/accuracy:multiple_choice,0.9803921568627451,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_computer_security:chat/accuracy:multiple_choice,0.86,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_conceptual_physics:chat/accuracy:multiple_choice,0.9234042553191489,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_econometrics:chat/accuracy:multiple_choice,0.8245614035087719,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_electrical_engineering:chat/accuracy:multiple_choice,0.7862068965517242,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_elementary_mathematics:chat/accuracy:multiple_choice,0.9682539682539683,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_formal_logic:chat/accuracy:multiple_choice,0.9206349206349206,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_global_facts:chat/accuracy:multiple_choice,0.53,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_biology:chat/accuracy:multiple_choice,0.9258064516129032,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_chemistry:chat/accuracy:multiple_choice,0.9014778325123153,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_computer_science:chat/accuracy:multiple_choice,0.97,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_european_history:chat/accuracy:multiple_choice,0.896969696969697,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_geography:chat/accuracy:multiple_choice,0.8888888888888888,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_government_and_politics:chat/accuracy:multiple_choice,0.9637305699481865,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_macroeconomics:chat/accuracy:multiple_choice,0.9076923076923077,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_mathematics:chat/accuracy:multiple_choice,0.9666666666666667,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_microeconomics:chat/accuracy:multiple_choice,0.9495798319327731,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_physics:chat/accuracy:multiple_choice,0.9006622516556292,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_psychology:chat/accuracy:multiple_choice,0.9302752293577982,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_statistics:chat/accuracy:multiple_choice,0.9074074074074074,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_us_history:chat/accuracy:multiple_choice,0.8921568627450981,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_high_school_world_history:chat/accuracy:multiple_choice,0.8945147679324894,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_human_aging:chat/accuracy:multiple_choice,0.8071748878923767,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_human_sexuality:chat/accuracy:multiple_choice,0.8702290076335878,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_international_law:chat/accuracy:multiple_choice,0.8016528925619835,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_jurisprudence:chat/accuracy:multiple_choice,0.7314814814814815,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_logical_fallacies:chat/accuracy:multiple_choice,0.8711656441717791,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_machine_learning:chat/accuracy:multiple_choice,0.8839285714285714,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_management:chat/accuracy:multiple_choice,0.883495145631068,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_marketing:chat/accuracy:multiple_choice,0.9230769230769231,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_medical_genetics:chat/accuracy:multiple_choice,0.94,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_miscellaneous:chat/accuracy:multiple_choice,0.9144316730523627,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_moral_disputes:chat/accuracy:multiple_choice,0.7572254335260116,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_moral_scenarios:chat/accuracy:multiple_choice,0.7955307262569833,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_nutrition:chat/accuracy:multiple_choice,0.8823529411764706,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_philosophy:chat/accuracy:multiple_choice,0.7427652733118971,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_prehistory:chat/accuracy:multiple_choice,0.8487654320987654,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_professional_accounting:chat/accuracy:multiple_choice,0.7730496453900709,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_professional_law:chat/accuracy:multiple_choice,0.5567144719687093,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_professional_medicine:chat/accuracy:multiple_choice,0.9227941176470589,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_professional_psychology:chat/accuracy:multiple_choice,0.8431372549019608,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_public_relations:chat/accuracy:multiple_choice,0.7909090909090909,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_security_studies:chat/accuracy:multiple_choice,0.7755102040816326,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_sociology:chat/accuracy:multiple_choice,0.8308457711442786,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_us_foreign_policy:chat/accuracy:multiple_choice,0.86,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_virology:chat/accuracy:multiple_choice,0.572289156626506,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,mmlu_world_religions:chat/accuracy:multiple_choice,0.847953216374269,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+GPT-OSS-20b,MMLU,primary_score:average,0.8523009009476454,01KZ49HJ6JBFD17WGTQQQB9YBF,,True,3
+Gemma4 26B-A4B,IFEval,inst_level_loose_acc:ifeval,0.4941860465116279,01KZ49HSEDAJY9CQBHVR9299QH,,True,3
+Gemma4 26B-A4B,IFEval,inst_level_strict_acc:ifeval,0.45058139534883723,01KZ49HSEDAJY9CQBHVR9299QH,,True,3
+Gemma4 26B-A4B,IFEval,prompt_level_loose_acc:ifeval,0.45666666666666667,01KZ49HSEDAJY9CQBHVR9299QH,,True,3
+Gemma4 26B-A4B,IFEval,prompt_level_strict_acc:ifeval,0.4066666666666667,01KZ49HSEDAJY9CQBHVR9299QH,,True,3
+Gemma4 26B-A4B,LitSearch-rerank,recall@20:litsearch_rerank,0.6227247347850363,01KZ49HSEDAJY9CQBHVR9299QH,,True,3
+Gemma4 26B-A4B,LitSearch-rerank,recall@5:litsearch_rerank,0.5897264098269124,01KZ49HSEDAJY9CQBHVR9299QH,,True,3
+Gemma4 26B-A4B,MATH-500,accuracy:minerva_math_flex,0.222,01KZ49HSEDAJY9CQBHVR9299QH,Invalid protocol: combined Core job omitted Gemma chat wrapping,False,
+Gemma4 26B-A4B,MMLU,mmlu:humanities:chat/primary_score:average,0.8891651996038086,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu:other:chat/primary_score:average,0.8628419866134621,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu:social_sciences:chat/primary_score:average,0.9088325044271711,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu:stem:chat/primary_score:average,0.9385728332902481,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_abstract_algebra:chat/accuracy:multiple_choice,0.94,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_anatomy:chat/accuracy:multiple_choice,0.8814814814814815,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_astronomy:chat/accuracy:multiple_choice,0.9473684210526315,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_business_ethics:chat/accuracy:multiple_choice,0.85,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_clinical_knowledge:chat/accuracy:multiple_choice,0.8981132075471698,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_college_biology:chat/accuracy:multiple_choice,0.9652777777777778,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_college_chemistry:chat/accuracy:multiple_choice,0.73,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_college_computer_science:chat/accuracy:multiple_choice,0.97,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_college_mathematics:chat/accuracy:multiple_choice,0.98,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_college_medicine:chat/accuracy:multiple_choice,0.884393063583815,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_college_physics:chat/accuracy:multiple_choice,0.9901960784313726,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_computer_security:chat/accuracy:multiple_choice,0.87,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_conceptual_physics:chat/accuracy:multiple_choice,0.9617021276595744,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_econometrics:chat/accuracy:multiple_choice,0.8333333333333334,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_electrical_engineering:chat/accuracy:multiple_choice,0.8896551724137931,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_elementary_mathematics:chat/accuracy:multiple_choice,0.9788359788359788,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_formal_logic:chat/accuracy:multiple_choice,0.9603174603174603,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_global_facts:chat/accuracy:multiple_choice,0.64,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_biology:chat/accuracy:multiple_choice,0.9516129032258065,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_chemistry:chat/accuracy:multiple_choice,0.9458128078817734,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_computer_science:chat/accuracy:multiple_choice,0.99,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_european_history:chat/accuracy:multiple_choice,0.9030303030303031,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_geography:chat/accuracy:multiple_choice,0.9292929292929293,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_government_and_politics:chat/accuracy:multiple_choice,0.9740932642487047,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_macroeconomics:chat/accuracy:multiple_choice,0.941025641025641,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_mathematics:chat/accuracy:multiple_choice,0.9925925925925926,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_microeconomics:chat/accuracy:multiple_choice,0.9663865546218487,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_physics:chat/accuracy:multiple_choice,0.9403973509933775,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_psychology:chat/accuracy:multiple_choice,0.9688073394495413,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_statistics:chat/accuracy:multiple_choice,0.9490740740740741,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_us_history:chat/accuracy:multiple_choice,0.9313725490196079,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_high_school_world_history:chat/accuracy:multiple_choice,0.919831223628692,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_human_aging:chat/accuracy:multiple_choice,0.8385650224215246,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_human_sexuality:chat/accuracy:multiple_choice,0.9007633587786259,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_international_law:chat/accuracy:multiple_choice,0.9421487603305785,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_jurisprudence:chat/accuracy:multiple_choice,0.8611111111111112,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_logical_fallacies:chat/accuracy:multiple_choice,0.8957055214723927,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_machine_learning:chat/accuracy:multiple_choice,0.9017857142857143,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_management:chat/accuracy:multiple_choice,0.9029126213592233,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_marketing:chat/accuracy:multiple_choice,0.9401709401709402,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_medical_genetics:chat/accuracy:multiple_choice,0.96,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_miscellaneous:chat/accuracy:multiple_choice,0.9476372924648787,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_moral_disputes:chat/accuracy:multiple_choice,0.8497109826589595,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_moral_scenarios:chat/accuracy:multiple_choice,0.8279329608938547,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_nutrition:chat/accuracy:multiple_choice,0.9084967320261438,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_philosophy:chat/accuracy:multiple_choice,0.8488745980707395,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_prehistory:chat/accuracy:multiple_choice,0.9382716049382716,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_professional_accounting:chat/accuracy:multiple_choice,0.9326241134751773,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_professional_law:chat/accuracy:multiple_choice,0.7627118644067796,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_professional_medicine:chat/accuracy:multiple_choice,0.9411764705882353,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_professional_psychology:chat/accuracy:multiple_choice,0.8839869281045751,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_public_relations:chat/accuracy:multiple_choice,0.7909090909090909,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_security_studies:chat/accuracy:multiple_choice,0.8571428571428571,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_sociology:chat/accuracy:multiple_choice,0.9502487562189055,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_us_foreign_policy:chat/accuracy:multiple_choice,0.91,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_virology:chat/accuracy:multiple_choice,0.5542168674698795,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,mmlu_world_religions:chat/accuracy:multiple_choice,0.9181286549707602,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Gemma4 26B-A4B,MMLU,primary_score:average,0.8998531309836725,01KZ49HZWTPGBJ5DC77YQ3B2V4,,True,3
+Nemotron 3 Nano 30B-A3B,IFEval,inst_level_loose_acc:ifeval,0.3313953488372093,01KZ49J7DRBEKYDWSJY085CDR2,,True,3
+Nemotron 3 Nano 30B-A3B,IFEval,inst_level_strict_acc:ifeval,0.2877906976744186,01KZ49J7DRBEKYDWSJY085CDR2,,True,3
+Nemotron 3 Nano 30B-A3B,IFEval,prompt_level_loose_acc:ifeval,0.29333333333333333,01KZ49J7DRBEKYDWSJY085CDR2,,True,3
+Nemotron 3 Nano 30B-A3B,IFEval,prompt_level_strict_acc:ifeval,0.25666666666666665,01KZ49J7DRBEKYDWSJY085CDR2,,True,3
+Nemotron 3 Nano 30B-A3B,LitSearch-rerank,recall@20:litsearch_rerank,0.5333891680625349,01KZ49J7DRBEKYDWSJY085CDR2,,True,3
+Nemotron 3 Nano 30B-A3B,LitSearch-rerank,recall@5:litsearch_rerank,0.5168062534896706,01KZ49J7DRBEKYDWSJY085CDR2,,True,3
+Nemotron 3 Nano 30B-A3B,MATH-500,accuracy:minerva_math_flex,0.628,01KZ49J7DRBEKYDWSJY085CDR2,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu:humanities/primary_score:average,0.766501070848148,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu:other/primary_score:average,0.7491679151531175,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu:social_sciences/primary_score:average,0.8244411355287365,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu:stem/primary_score:average,0.6926501661732775,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.56,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_anatomy/accuracy:logprob,0.725925925925926,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_astronomy/accuracy:logprob,0.875,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_business_ethics/accuracy:logprob,0.74,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.7962264150943397,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_biology/accuracy:logprob,0.875,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_chemistry/accuracy:logprob,0.58,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_computer_science/accuracy:logprob,0.64,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_mathematics/accuracy:logprob,0.51,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_medicine/accuracy:logprob,0.7398843930635838,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_college_physics/accuracy:logprob,0.5392156862745098,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_computer_security/accuracy:logprob,0.8,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.8595744680851064,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_econometrics/accuracy:logprob,0.5964912280701754,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.7586206896551724,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.6534391534391535,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_formal_logic/accuracy:logprob,0.5555555555555556,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_global_facts/accuracy:logprob,0.46,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_biology/accuracy:logprob,0.9,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.7044334975369458,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.81,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.8303030303030303,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_geography/accuracy:logprob,0.8636363636363636,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.9637305699481865,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.7923076923076923,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.4888888888888889,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.8739495798319328,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_physics/accuracy:logprob,0.6291390728476821,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.9155963302752294,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.7129629629629629,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.8676470588235294,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.8649789029535865,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_human_aging/accuracy:logprob,0.7488789237668162,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_human_sexuality/accuracy:logprob,0.8320610687022901,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_international_law/accuracy:logprob,0.8760330578512396,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_jurisprudence/accuracy:logprob,0.8425925925925926,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.8220858895705522,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_machine_learning/accuracy:logprob,0.5714285714285714,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_management/accuracy:logprob,0.8446601941747572,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_marketing/accuracy:logprob,0.8931623931623932,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_medical_genetics/accuracy:logprob,0.91,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_miscellaneous/accuracy:logprob,0.879948914431673,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_moral_disputes/accuracy:logprob,0.7861271676300579,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.506145251396648,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_nutrition/accuracy:logprob,0.8300653594771242,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_philosophy/accuracy:logprob,0.7781350482315113,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_prehistory/accuracy:logprob,0.8549382716049383,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_professional_accounting/accuracy:logprob,0.5531914893617021,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_professional_law/accuracy:logprob,0.5554106910039114,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_professional_medicine/accuracy:logprob,0.7941176470588235,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_professional_psychology/accuracy:logprob,0.7924836601307189,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_public_relations/accuracy:logprob,0.7181818181818181,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_security_studies/accuracy:logprob,0.7591836734693878,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_sociology/accuracy:logprob,0.8656716417910447,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.92,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_virology/accuracy:logprob,0.572289156626506,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,mmlu_world_religions/accuracy:logprob,0.8245614035087719,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Nemotron 3 Nano 30B-A3B,MMLU,primary_score:average,0.7581900719258199,01KZ49JDJM2EBHCD9JX5RNYQQT,,True,3
+Qwen3.5-35B-A3B,IFEval,inst_level_loose_acc:ifeval,0.4563953488372093,01KZ49JM6EGWQNC22B7NT61QEE,,True,3
+Qwen3.5-35B-A3B,IFEval,inst_level_strict_acc:ifeval,0.42151162790697677,01KZ49JM6EGWQNC22B7NT61QEE,,True,3
+Qwen3.5-35B-A3B,IFEval,prompt_level_loose_acc:ifeval,0.43666666666666665,01KZ49JM6EGWQNC22B7NT61QEE,,True,3
+Qwen3.5-35B-A3B,IFEval,prompt_level_strict_acc:ifeval,0.39666666666666667,01KZ49JM6EGWQNC22B7NT61QEE,,True,3
+Qwen3.5-35B-A3B,LitSearch-rerank,recall@20:litsearch_rerank,0.6433277498604132,01KZ49JM6EGWQNC22B7NT61QEE,,True,3
+Qwen3.5-35B-A3B,LitSearch-rerank,recall@5:litsearch_rerank,0.5902289223897265,01KZ49JM6EGWQNC22B7NT61QEE,,True,3
+Qwen3.5-35B-A3B,MATH-500,accuracy:minerva_math_flex,0.692,01KZ49JM6EGWQNC22B7NT61QEE,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu:humanities/primary_score:average,0.8537146143809775,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu:other/primary_score:average,0.8341397010921446,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu:social_sciences/primary_score:average,0.9003436121006038,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu:stem/primary_score:average,0.8079571714194214,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_abstract_algebra/accuracy:logprob,0.72,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_anatomy/accuracy:logprob,0.8222222222222222,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_astronomy/accuracy:logprob,0.9210526315789473,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_business_ethics/accuracy:logprob,0.83,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_clinical_knowledge/accuracy:logprob,0.8830188679245283,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_college_biology/accuracy:logprob,0.9444444444444444,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_college_chemistry/accuracy:logprob,0.68,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_college_computer_science/accuracy:logprob,0.75,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_college_mathematics/accuracy:logprob,0.67,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_college_medicine/accuracy:logprob,0.838150289017341,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_college_physics/accuracy:logprob,0.6862745098039216,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_computer_security/accuracy:logprob,0.87,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_conceptual_physics/accuracy:logprob,0.9404255319148936,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_econometrics/accuracy:logprob,0.8157894736842105,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_electrical_engineering/accuracy:logprob,0.8551724137931035,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_elementary_mathematics/accuracy:logprob,0.8068783068783069,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_formal_logic/accuracy:logprob,0.7301587301587301,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_global_facts/accuracy:logprob,0.59,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_biology/accuracy:logprob,0.9580645161290322,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_chemistry/accuracy:logprob,0.8472906403940886,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_computer_science/accuracy:logprob,0.88,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_european_history/accuracy:logprob,0.8727272727272727,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_geography/accuracy:logprob,0.9343434343434344,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_government_and_politics/accuracy:logprob,0.9844559585492227,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_macroeconomics/accuracy:logprob,0.8974358974358975,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_mathematics/accuracy:logprob,0.5925925925925926,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_microeconomics/accuracy:logprob,0.9537815126050421,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_physics/accuracy:logprob,0.8013245033112583,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_psychology/accuracy:logprob,0.9559633027522936,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_statistics/accuracy:logprob,0.8518518518518519,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_us_history/accuracy:logprob,0.9215686274509803,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_high_school_world_history/accuracy:logprob,0.9156118143459916,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_human_aging/accuracy:logprob,0.8251121076233184,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_human_sexuality/accuracy:logprob,0.9083969465648855,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_international_law/accuracy:logprob,0.9256198347107438,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_jurisprudence/accuracy:logprob,0.8888888888888888,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_logical_fallacies/accuracy:logprob,0.8834355828220859,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_machine_learning/accuracy:logprob,0.7678571428571429,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_management/accuracy:logprob,0.9320388349514563,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_marketing/accuracy:logprob,0.9401709401709402,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_medical_genetics/accuracy:logprob,0.94,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_miscellaneous/accuracy:logprob,0.9399744572158365,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_moral_disputes/accuracy:logprob,0.8497109826589595,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_moral_scenarios/accuracy:logprob,0.7508379888268156,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_nutrition/accuracy:logprob,0.8921568627450981,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_philosophy/accuracy:logprob,0.842443729903537,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_prehistory/accuracy:logprob,0.9166666666666666,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_professional_accounting/accuracy:logprob,0.7269503546099291,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_professional_law/accuracy:logprob,0.6707953063885267,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_professional_medicine/accuracy:logprob,0.9338235294117647,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_professional_psychology/accuracy:logprob,0.8905228758169934,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_public_relations/accuracy:logprob,0.7727272727272727,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_security_studies/accuracy:logprob,0.8204081632653061,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_sociology/accuracy:logprob,0.9402985074626866,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_us_foreign_policy/accuracy:logprob,0.93,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_virology/accuracy:logprob,0.5843373493975904,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,mmlu_world_religions/accuracy:logprob,0.9298245614035088,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+Qwen3.5-35B-A3B,MMLU,primary_score:average,0.8490387747482868,01KZ49JTJX237PKYRPXR0M4D0T,,True,3
+OLMo-3 7B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.2,01KZ49K0MBW622TV4FRJ17KW7M,Fixed dev50 sample; seed 42,True,3
+OLMo-3 7B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.19,01KZ49K0MBW622TV4FRJ17KW7M,Fixed dev50 sample; seed 42,True,3
+OLMo-3 7B Instruct,SAGE-open-dev50,weighted_recall:weighted_recall,0.01583333333333333,01KZ49K6VMHKEG0G1TFNHNMGB3,Fixed dev50 sample; seed 42,True,3
+OLMo-3 7B Instruct,SAGE-short-dev50,exact_match:exact_match,0.0,01KZ49K6VMHKEG0G1TFNHNMGB3,Fixed dev50 sample; seed 42,True,3
+Olmo-3 7B Think,LitSearch-open-dev50,found_rate:exact_match,0.18,01KZ49KDH6FCB0VZCCBXQWFCQE,Fixed dev50 sample; seed 42,True,3
+Olmo-3 7B Think,LitSearch-open-dev50,gold_recall:exact_match,0.18,01KZ49KDH6FCB0VZCCBXQWFCQE,Fixed dev50 sample; seed 42,True,3
+Olmo-3 7B Think,SAGE-open-dev50,weighted_recall:weighted_recall,0.013076923076923076,01KZ49KKXTMGRF7FKC9DSZCVAN,Fixed dev50 sample; seed 42,True,3
+Olmo-3 7B Think,SAGE-short-dev50,exact_match:exact_match,0.0,01KZ49KKXTMGRF7FKC9DSZCVAN,Fixed dev50 sample; seed 42,True,3
+Qwen3.5 9B Instruct,LitSearch-open-dev50,found_rate:exact_match,0.36,01KZ49KTT3SW7YR1WAS5D4F00Q,Fixed dev50 sample; seed 42,True,3
+Qwen3.5 9B Instruct,LitSearch-open-dev50,gold_recall:exact_match,0.36,01KZ49KTT3SW7YR1WAS5D4F00Q,Fixed dev50 sample; seed 42,True,3
+Qwen3.5 9B Instruct,SAGE-open-dev50,weighted_recall:weighted_recall,0.05061904761904762,01KZ49M1GXWKHBN5GZ80HB3FHG,Fixed dev50 sample; seed 42,True,3
+Qwen3.5 9B Instruct,SAGE-short-dev50,exact_match:exact_match,0.54,01KZ49M1GXWKHBN5GZ80HB3FHG,Fixed dev50 sample; seed 42,True,3
+Qwen3.5 9B Instruct,ExpertQA-dev100,answer_precision:sqa_judge,0.7121380988292754,01KZ49M7K4WYY6Z0G5VAG9BHG8,Fixed dev100 sample; seed 42,True,3
+Qwen3.5 9B Instruct,ExpertQA-dev100,citation_precision:sqa_judge,0.4007854581892289,01KZ49M7K4WYY6Z0G5VAG9BHG8,Fixed dev100 sample; seed 42,True,3
+Qwen3.5 9B Instruct,ExpertQA-dev100,citation_recall:sqa_judge,0.2532971894174555,01KZ49M7K4WYY6Z0G5VAG9BHG8,Fixed dev100 sample; seed 42,True,3
+Qwen3.5 9B Instruct,ExpertQA-dev100,global_avg:sqa_judge,0.4554069154786532,01KZ49M7K4WYY6Z0G5VAG9BHG8,Fixed dev100 sample; seed 42,True,3
+Qwen3.5 9B Instruct,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.6207821443329896,01KZ49M7K4WYY6Z0G5VAG9BHG8,Fixed dev100 sample; seed 42,True,3
+GPT-OSS-20b,LitSearch-open-dev50,found_rate:exact_match,0.36,01KZ49MEKA89B65QT210CAW6PT,Fixed dev50 sample; seed 42,True,3
+GPT-OSS-20b,LitSearch-open-dev50,gold_recall:exact_match,0.33666666666666667,01KZ49MEKA89B65QT210CAW6PT,Fixed dev50 sample; seed 42,True,3
+GPT-OSS-20b,SAGE-open-dev50,weighted_recall:weighted_recall,0.10203724053724054,01KZ49MMGW50FYTBN1W1XGSG7V,Fixed dev50 sample; seed 42,True,3
+GPT-OSS-20b,SAGE-short-dev50,exact_match:exact_match,0.40816326530612246,01KZ49MMGW50FYTBN1W1XGSG7V,Invalid partial run: instance 47 failed with Unknown channel code; metric used 49/50,False,
+GPT-OSS-20b,ExpertQA-dev100,answer_precision:sqa_judge,0.48909722222222224,01KZ49MTE80GQ798ZHS0D6G2RW,Fixed dev100 sample; seed 42,True,3
+GPT-OSS-20b,ExpertQA-dev100,citation_precision:sqa_judge,0.23935768106162844,01KZ49MTE80GQ798ZHS0D6G2RW,Fixed dev100 sample; seed 42,True,3
+GPT-OSS-20b,ExpertQA-dev100,citation_recall:sqa_judge,0.1283656572615551,01KZ49MTE80GQ798ZHS0D6G2RW,Fixed dev100 sample; seed 42,True,3
+GPT-OSS-20b,ExpertQA-dev100,global_avg:sqa_judge,0.28560685351513526,01KZ49MTE80GQ798ZHS0D6G2RW,Fixed dev100 sample; seed 42,True,3
+GPT-OSS-20b,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.40683156755525174,01KZ49MTE80GQ798ZHS0D6G2RW,Fixed dev100 sample; seed 42,True,3
+Gemma4 26B-A4B,LitSearch-open-dev50,found_rate:exact_match,0.2,01KZ49N0A78H6RPNGH3KV5GVEC,Fixed dev50 sample; seed 42,True,3
+Gemma4 26B-A4B,LitSearch-open-dev50,gold_recall:exact_match,0.2,01KZ49N0A78H6RPNGH3KV5GVEC,Fixed dev50 sample; seed 42,True,3
+Gemma4 26B-A4B,SAGE-open-dev50,weighted_recall:weighted_recall,0.033034798534798536,01KZ49N6E6V8JYP9FWGC59N7C7,Fixed dev50 sample; seed 42,True,3
+Gemma4 26B-A4B,SAGE-short-dev50,exact_match:exact_match,0.46,01KZ49N6E6V8JYP9FWGC59N7C7,Fixed dev50 sample; seed 42,True,3
+Gemma4 26B-A4B,ExpertQA-dev100,answer_precision:sqa_judge,0.9371666666666667,01KZ49NCDYXE11YPVGFBMF0N8H,Fixed dev100 sample; seed 42,True,3
+Gemma4 26B-A4B,ExpertQA-dev100,citation_precision:sqa_judge,0.6820237956487957,01KZ49NCDYXE11YPVGFBMF0N8H,Fixed dev100 sample; seed 42,True,3
+Gemma4 26B-A4B,ExpertQA-dev100,citation_recall:sqa_judge,0.5116339355089355,01KZ49NCDYXE11YPVGFBMF0N8H,Fixed dev100 sample; seed 42,True,3
+Gemma4 26B-A4B,ExpertQA-dev100,global_avg:sqa_judge,0.7102747992747993,01KZ49NCDYXE11YPVGFBMF0N8H,Fixed dev100 sample; seed 42,True,3
+Gemma4 26B-A4B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.7685171315612491,01KZ49NCDYXE11YPVGFBMF0N8H,Fixed dev100 sample; seed 42,True,3
+Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.32,01KZ49NK48A87QQQC0YT1ST4H6,Fixed dev50 sample; seed 42,True,3
+Nemotron 3 Nano 30B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.31,01KZ49NK48A87QQQC0YT1ST4H6,Fixed dev50 sample; seed 42,True,3
+Nemotron 3 Nano 30B-A3B,SAGE-open-dev50,weighted_recall:weighted_recall,0.07163369963369964,01KZ49NTGFZK8HD8GENEHBX1Y7,Fixed dev50 sample; seed 42,True,3
+Nemotron 3 Nano 30B-A3B,SAGE-short-dev50,exact_match:exact_match,0.5,01KZ49NTGFZK8HD8GENEHBX1Y7,Fixed dev50 sample; seed 42,True,3
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,answer_precision:sqa_judge,0.9216666666666667,01KZ49P0JZNT0ATCVTKJCX38SZ,Fixed dev100 sample; seed 42,True,3
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,citation_precision:sqa_judge,0.4647804834054834,01KZ49P0JZNT0ATCVTKJCX38SZ,Fixed dev100 sample; seed 42,True,3
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,citation_recall:sqa_judge,0.23530230880230882,01KZ49P0JZNT0ATCVTKJCX38SZ,Fixed dev100 sample; seed 42,True,3
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,global_avg:sqa_judge,0.540583152958153,01KZ49P0JZNT0ATCVTKJCX38SZ,Fixed dev100 sample; seed 42,True,3
+Nemotron 3 Nano 30B-A3B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.8117615995115994,01KZ49P0JZNT0ATCVTKJCX38SZ,Fixed dev100 sample; seed 42,True,3
+Qwen3.5-35B-A3B,LitSearch-open-dev50,found_rate:exact_match,0.4,01KZ49P6N17Y2N21VSBMP0ZVZ9,Fixed dev50 sample; seed 42,True,3
+Qwen3.5-35B-A3B,LitSearch-open-dev50,gold_recall:exact_match,0.39,01KZ49P6N17Y2N21VSBMP0ZVZ9,Fixed dev50 sample; seed 42,True,3
+Qwen3.5-35B-A3B,SAGE-open-dev50,weighted_recall:weighted_recall,0.10207692307692307,01KZ49PCPV0W3MF0596W1VYE6G,Fixed dev50 sample; seed 42,True,3
+Qwen3.5-35B-A3B,SAGE-short-dev50,exact_match:exact_match,0.74,01KZ49PCPV0W3MF0596W1VYE6G,Fixed dev50 sample; seed 42,True,3
+Qwen3.5-35B-A3B,ExpertQA-dev100,answer_precision:sqa_judge,0.9200663992869874,01KZ49PJKWC4G9A10VQRFKMPK8,Fixed dev100 sample; seed 42,True,3
+Qwen3.5-35B-A3B,ExpertQA-dev100,citation_precision:sqa_judge,0.5004827337302773,01KZ49PJKWC4G9A10VQRFKMPK8,Fixed dev100 sample; seed 42,True,3
+Qwen3.5-35B-A3B,ExpertQA-dev100,citation_recall:sqa_judge,0.39411971588083816,01KZ49PJKWC4G9A10VQRFKMPK8,Fixed dev100 sample; seed 42,True,3
+Qwen3.5-35B-A3B,ExpertQA-dev100,global_avg:sqa_judge,0.6048896162993677,01KZ49PJKWC4G9A10VQRFKMPK8,Fixed dev100 sample; seed 42,True,3
+Qwen3.5-35B-A3B,ExpertQA-dev100,snippet_grounding_rate:sqa_judge,0.772917001405314,01KZ49PJKWC4G9A10VQRFKMPK8,Fixed dev100 sample; seed 42,True,3
+Gemma4 26B-A4B,MATH-500,accuracy:minerva_math_flex,0.948,01KZ4EZ2P6K8MW6B6Q6CTHS499,,True,3
+Gemma4 26B-A4B,MATH-500,accuracy:minerva_math_flex,0.946,01KZ4EYQFHHCZ607M3ZWCBYA5K,,True,2
+Olmo-3 7B Think,IFEval,inst_level_loose_acc:ifeval,0.313953488372093,01KZ49G4BD7DTA6W823ZMJ8A7Q,,True,3
+Olmo-3 7B Think,IFEval,inst_level_strict_acc:ifeval,0.25,01KZ49G4BD7DTA6W823ZMJ8A7Q,,True,3
+Olmo-3 7B Think,IFEval,prompt_level_loose_acc:ifeval,0.2833333333333333,01KZ49G4BD7DTA6W823ZMJ8A7Q,,True,3
+Olmo-3 7B Think,IFEval,prompt_level_strict_acc:ifeval,0.22,01KZ49G4BD7DTA6W823ZMJ8A7Q,,True,3
+Olmo-3 7B Think,LitSearch-rerank,recall@20:litsearch_rerank,0.46404243439419324,01KZ49G4BD7DTA6W823ZMJ8A7Q,,True,3
+Olmo-3 7B Think,LitSearch-rerank,recall@5:litsearch_rerank,0.43137911781127863,01KZ49G4BD7DTA6W823ZMJ8A7Q,,True,3
+Olmo-3 7B Think,MATH-500,accuracy:minerva_math_flex,0.554,01KZ49G4BD7DTA6W823ZMJ8A7Q,,True,3
+GPT-OSS-20b,SAGE-short-dev50,exact_match:exact_match,0.3,01KZ4KMETC985BMDMPCVWWPY99,Fixed dev50 sample; seed 42,True,3
+OLMo-3 7B Instruct,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.04,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.0,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.075,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.02,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Research,rubric_score:frontierscience_judge,0.20641666666666666,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.278375,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.22925,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.111625,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Research,success_rate:frontierscience_judge,0.0,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.0,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.0,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+OLMo-3 7B Instruct,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FFC2KQX7JR0DSE2G3HXQZ,,True,2
+Olmo-3 7B Think,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.18,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.0,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.2,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.2,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Research,rubric_score:frontierscience_judge,0.16520416666666668,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.18805,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.194,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.11356250000000001,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Research,success_rate:frontierscience_judge,0.0,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.0,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.0,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+Olmo-3 7B Think,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FFRKZMRQ2K64X2N42BBWB,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.1,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.1,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.125,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.08,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Research,rubric_score:frontierscience_judge,0.17542083333333333,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.198575,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.195,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.1326875,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Research,success_rate:frontierscience_judge,0.0,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.0,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.0,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+GLM-4.1V-9B-Thinking,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FFVQPS8A0386MMPRHPNQK,,True,2
+Gemma4 26B-A4B,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.43,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.1,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.475,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.46,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Research,rubric_score:frontierscience_judge,0.29739166666666667,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.320175,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.35350000000000004,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.2185,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Research,success_rate:frontierscience_judge,0.05,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.05,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.05,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Gemma4 26B-A4B,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.05,01KZ4FG894RTK7NE7RW0T8YDTK,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.36,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.1,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.35,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.42,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,rubric_score:frontierscience_judge,0.3076625,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.3793,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.323125,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.2205625,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,success_rate:frontierscience_judge,0.03333333333333333,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.05,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.05,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FGC23GEV4PC63XAWCCXCV,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.5,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.2,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.55,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.52,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Research,rubric_score:frontierscience_judge,0.33163333333333334,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.34715,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.40175,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.246,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Research,success_rate:frontierscience_judge,0.05,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.05,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.1,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+Qwen3.5-35B-A3B,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FGZWQ1FVGB9TDQ8RDGMRT,,True,2
+GPT-OSS-20b,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.32,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.1,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.325,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.36,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Research,rubric_score:frontierscience_judge,0.33029166666666665,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.38112500000000005,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.3245,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.28525,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Research,success_rate:frontierscience_judge,0.06666666666666667,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.15,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.05,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+GPT-OSS-20b,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FH1ETYZSWE7C5A6RYESE7,,True,2
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,cite_p_fixed:external,0.06742081447963802,01KZ4FK3HRBG2T8SQ9YYP5MCP6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.13962401762324364,01KZ4FK3HRBG2T8SQ9YYP5MCP6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.39166666666666666,01KZ4FK3HRBG2T8SQ9YYP5MCP6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,document_importance_fixed:external,0.10017915795759928,01KZ4FK3HRBG2T8SQ9YYP5MCP6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,geomean_fixed:external,0.13255462526040304,01KZ4FK3HRBG2T8SQ9YYP5MCP6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.18728036669213138,01KZ4FK3HRBG2T8SQ9YYP5MCP6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,organization_fixed:external,0.4,01KZ4FK3HRBG2T8SQ9YYP5MCP6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.025987460815047027,01KZ4FK3HRBG2T8SQ9YYP5MCP6,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,cite_p_fixed:external,0.06282786589272643,01KZ4FKF3WSCMBA7R2NJR6661E,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.08412904842812809,01KZ4FKF3WSCMBA7R2NJR6661E,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.2033333333333333,01KZ4FKF3WSCMBA7R2NJR6661E,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,document_importance_fixed:external,0.03523199500078113,01KZ4FKF3WSCMBA7R2NJR6661E,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,geomean_fixed:external,0.0884813816167244,01KZ4FKF3WSCMBA7R2NJR6661E,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.14683600713012476,01KZ4FKF3WSCMBA7R2NJR6661E,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,organization_fixed:external,0.4,01KZ4FKF3WSCMBA7R2NJR6661E,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.019090909090909092,01KZ4FKF3WSCMBA7R2NJR6661E,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,cite_p_fixed:external,0.22809833690561243,01KZ4FKMGF6RHW8SR53Y15EXH8,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.24896259029927764,01KZ4FKMGF6RHW8SR53Y15EXH8,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.46958333333333335,01KZ4FKMGF6RHW8SR53Y15EXH8,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,document_importance_fixed:external,0.10029411764705883,01KZ4FKMGF6RHW8SR53Y15EXH8,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,geomean_fixed:external,0.18445157857529534,01KZ4FKMGF6RHW8SR53Y15EXH8,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.18453866395042864,01KZ4FKMGF6RHW8SR53Y15EXH8,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,organization_fixed:external,0.5,01KZ4FKMGF6RHW8SR53Y15EXH8,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.029435736677115985,01KZ4FKMGF6RHW8SR53Y15EXH8,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GPT-OSS-20b,DeepScholar-Bench-dev10,cite_p_fixed:external,0.08958605664488017,01KZ4FKSZM3JSZBJ7TPMG0W4MW,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GPT-OSS-20b,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.10585589791472146,01KZ4FKSZM3JSZBJ7TPMG0W4MW,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GPT-OSS-20b,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.4833333333333333,01KZ4FKSZM3JSZBJ7TPMG0W4MW,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GPT-OSS-20b,DeepScholar-Bench-dev10,document_importance_fixed:external,0.02636459989401166,01KZ4FKSZM3JSZBJ7TPMG0W4MW,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GPT-OSS-20b,DeepScholar-Bench-dev10,geomean_fixed:external,0.11932574346416963,01KZ4FKSZM3JSZBJ7TPMG0W4MW,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GPT-OSS-20b,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.21937229437229436,01KZ4FKSZM3JSZBJ7TPMG0W4MW,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GPT-OSS-20b,DeepScholar-Bench-dev10,organization_fixed:external,0.5,01KZ4FKSZM3JSZBJ7TPMG0W4MW,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+GPT-OSS-20b,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.025987460815047027,01KZ4FKSZM3JSZBJ7TPMG0W4MW,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,cite_p_fixed:external,0.026347512390990653,01KZ4FM5F78JTBFKPWKC5Y3MVJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.04848502044443111,01KZ4FM5F78JTBFKPWKC5Y3MVJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.32125,01KZ4FM5F78JTBFKPWKC5Y3MVJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,document_importance_fixed:external,0.02005971931919976,01KZ4FM5F78JTBFKPWKC5Y3MVJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,geomean_fixed:external,0.07193133989586438,01KZ4FM5F78JTBFKPWKC5Y3MVJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.22006408624055682,01KZ4FM5F78JTBFKPWKC5Y3MVJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,organization_fixed:external,0.55,01KZ4FM5F78JTBFKPWKC5Y3MVJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.01,01KZ4FM5F78JTBFKPWKC5Y3MVJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+OLMo-3 7B Instruct,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.04,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.0,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.05,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.04,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Research,rubric_score:frontierscience_judge,0.20527499999999999,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.25420000000000004,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.26125000000000004,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.10037499999999999,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Research,success_rate:frontierscience_judge,0.016666666666666666,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.0,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.05,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+OLMo-3 7B Instruct,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FHFXTFTS6ZH15E4C7YA06,,True,3
+Gemma4 26B-A4B,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.42,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.1,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.4,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.5,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Research,rubric_score:frontierscience_judge,0.3142166666666667,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.332275,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.3815,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.228875,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Research,success_rate:frontierscience_judge,0.05,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.05,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.05,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Gemma4 26B-A4B,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.05,01KZ4FJ7BHC8QHMETN7YMGZYQT,,True,3
+Olmo-3 7B Think,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.16,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.0,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.2,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.16,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Research,rubric_score:frontierscience_judge,0.17447500000000002,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.223325,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.18085,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.11925000000000001,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Research,success_rate:frontierscience_judge,0.0,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.0,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.0,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Olmo-3 7B Think,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FJA1P6M6SAW8WJP1PYS1W,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.54,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.1,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.625,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.56,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Research,rubric_score:frontierscience_judge,0.3268041666666667,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.365475,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.38325,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.2316875,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Research,success_rate:frontierscience_judge,0.05,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.05,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.1,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+Qwen3.5-35B-A3B,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FJBC0HFB2DP5WCZTVZE8G,,True,3
+GPT-OSS-20b,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.34,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.1,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.325,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.4,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Research,rubric_score:frontierscience_judge,0.3066375,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.3781625,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.2935,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.24825,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Research,success_rate:frontierscience_judge,0.05,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.05,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.1,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+GPT-OSS-20b,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FJC3A82FXP2FBWX2P6GDM,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.44,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.2,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.5,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.44,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,rubric_score:frontierscience_judge,0.26787500000000003,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.326625,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.281,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.196,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,success_rate:frontierscience_judge,0.016666666666666666,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.05,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.0,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+Nemotron 3 Nano 30B-A3B,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FJCPKNB0WJKYGYPCYKMDH,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.15,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.2,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.175,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.12,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Research,rubric_score:frontierscience_judge,0.17616250000000003,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.2223,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.1935,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.11268750000000001,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Research,success_rate:frontierscience_judge,0.0,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.0,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.0,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+GLM-4.1V-9B-Thinking,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FJFGD9YS4DF8QASYDXEMG,,True,3
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,cite_p_fixed:external,0.029649122807017543,01KZ4FN1WW83Y7C8H9S8Z781HX,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.11465428276573789,01KZ4FN1WW83Y7C8H9S8Z781HX,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.22523809523809524,01KZ4FN1WW83Y7C8H9S8Z781HX,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,document_importance_fixed:external,0.0625,01KZ4FN1WW83Y7C8H9S8Z781HX,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,geomean_fixed:external,0.09385413016713823,01KZ4FN1WW83Y7C8H9S8Z781HX,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.17032085561497326,01KZ4FN1WW83Y7C8H9S8Z781HX,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,organization_fixed:external,0.3,01KZ4FN1WW83Y7C8H9S8Z781HX,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+OLMo-3 7B Instruct,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.02623376623376623,01KZ4FN1WW83Y7C8H9S8Z781HX,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,cite_p_fixed:external,0.1728979860718991,01KZ4FNJ8SYVZFM9Z04V16ZHGY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.17795321307220618,01KZ4FNJ8SYVZFM9Z04V16ZHGY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.42952380952380953,01KZ4FNJ8SYVZFM9Z04V16ZHGY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,document_importance_fixed:external,0.03230604447385576,01KZ4FNJ8SYVZFM9Z04V16ZHGY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,geomean_fixed:external,0.14574310033112473,01KZ4FNJ8SYVZFM9Z04V16ZHGY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.20325524149053562,01KZ4FNJ8SYVZFM9Z04V16ZHGY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,organization_fixed:external,0.35,01KZ4FNJ8SYVZFM9Z04V16ZHGY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Gemma4 26B-A4B,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.045987460815047024,01KZ4FNJ8SYVZFM9Z04V16ZHGY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GPT-OSS-20b,DeepScholar-Bench-dev10,cite_p_fixed:external,0.038724340175953074,01KZ4FNQHKWZ205EFEJC6V2PAH,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GPT-OSS-20b,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.04229576874738165,01KZ4FNQHKWZ205EFEJC6V2PAH,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GPT-OSS-20b,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.4797619047619047,01KZ4FNQHKWZ205EFEJC6V2PAH,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GPT-OSS-20b,DeepScholar-Bench-dev10,document_importance_fixed:external,0.04429332426612263,01KZ4FNQHKWZ205EFEJC6V2PAH,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GPT-OSS-20b,DeepScholar-Bench-dev10,geomean_fixed:external,0.09125226297347981,01KZ4FNQHKWZ205EFEJC6V2PAH,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GPT-OSS-20b,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.27523130464306933,01KZ4FNQHKWZ205EFEJC6V2PAH,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GPT-OSS-20b,DeepScholar-Bench-dev10,organization_fixed:external,0.55,01KZ4FNQHKWZ205EFEJC6V2PAH,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GPT-OSS-20b,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.01,01KZ4FNQHKWZ205EFEJC6V2PAH,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,cite_p_fixed:external,0.03302626731506042,01KZ4FNCXKDG8KQPVEBGAWPV9T,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.05704159515264993,01KZ4FNCXKDG8KQPVEBGAWPV9T,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.18333333333333335,01KZ4FNCXKDG8KQPVEBGAWPV9T,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,document_importance_fixed:external,1.4929829799940282e-05,01KZ4FNCXKDG8KQPVEBGAWPV9T,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,geomean_fixed:external,0.020707503688703072,01KZ4FNCXKDG8KQPVEBGAWPV9T,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.16585179526355995,01KZ4FNCXKDG8KQPVEBGAWPV9T,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,organization_fixed:external,0.1,01KZ4FNCXKDG8KQPVEBGAWPV9T,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+GLM-4.1V-9B-Thinking,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.019090909090909092,01KZ4FNCXKDG8KQPVEBGAWPV9T,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5 9B Instruct,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.4,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.0,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.4,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.48,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Research,rubric_score:frontierscience_judge,0.23207083333333334,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.204775,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.32825000000000004,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.16318749999999999,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Research,success_rate:frontierscience_judge,0.06666666666666667,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.1,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.1,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FH0J38M7TAKQK525BVWEN,,True,2
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,cite_p_fixed:external,0.04490846599872969,01KZ4FK9J1HYH66V5C0XGCCRT7,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.05252340852746532,01KZ4FK9J1HYH66V5C0XGCCRT7,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.3708333333333333,01KZ4FK9J1HYH66V5C0XGCCRT7,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,document_importance_fixed:external,0.1194733461785485,01KZ4FK9J1HYH66V5C0XGCCRT7,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,geomean_fixed:external,0.10758517557405764,01KZ4FK9J1HYH66V5C0XGCCRT7,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.19261522790934554,01KZ4FK9J1HYH66V5C0XGCCRT7,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,organization_fixed:external,0.35,01KZ4FK9J1HYH66V5C0XGCCRT7,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.023679768507354714,01KZ4FK9J1HYH66V5C0XGCCRT7,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,cite_p_fixed:external,0.24213345864661653,01KZ4FM00YQS2S74TRRHKRTDRZ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.28648652882205516,01KZ4FM00YQS2S74TRRHKRTDRZ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.32083333333333336,01KZ4FM00YQS2S74TRRHKRTDRZ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,document_importance_fixed:external,0.11409313725490196,01KZ4FM00YQS2S74TRRHKRTDRZ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,geomean_fixed:external,0.15349881701802315,01KZ4FM00YQS2S74TRRHKRTDRZ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.17760376878023937,01KZ4FM00YQS2S74TRRHKRTDRZ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,organization_fixed:external,0.15,01KZ4FM00YQS2S74TRRHKRTDRZ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.0296820420958352,01KZ4FM00YQS2S74TRRHKRTDRZ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Olmo-3 7B Think,DeepScholar-Bench-dev10,cite_p_fixed:external,0.007513559100188303,01KZ4FMPXGD0DCSSASVT2BF69K,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Olmo-3 7B Think,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.020447876209227892,01KZ4FMPXGD0DCSSASVT2BF69K,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Olmo-3 7B Think,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.27270833333333333,01KZ4FMPXGD0DCSSASVT2BF69K,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Olmo-3 7B Think,DeepScholar-Bench-dev10,document_importance_fixed:external,0.016209150326797386,01KZ4FMPXGD0DCSSASVT2BF69K,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Olmo-3 7B Think,DeepScholar-Bench-dev10,geomean_fixed:external,0.048231261918406314,01KZ4FMPXGD0DCSSASVT2BF69K,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Olmo-3 7B Think,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.15029921059332824,01KZ4FMPXGD0DCSSASVT2BF69K,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Olmo-3 7B Think,DeepScholar-Bench-dev10,organization_fixed:external,0.25,01KZ4FMPXGD0DCSSASVT2BF69K,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Olmo-3 7B Think,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.023793103448275864,01KZ4FMPXGD0DCSSASVT2BF69K,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,2
+Qwen3.5 9B Instruct,FrontierScience-Olympiad,accuracy:frontierscience_judge,0.39,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Olympiad,accuracy_biology:frontierscience_judge,0.1,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Olympiad,accuracy_chemistry:frontierscience_judge,0.375,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Olympiad,accuracy_physics:frontierscience_judge,0.46,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Research,rubric_score:frontierscience_judge,0.23485416666666667,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Research,rubric_score_biology:frontierscience_judge,0.24175,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Research,rubric_score_chemistry:frontierscience_judge,0.30175,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Research,rubric_score_physics:frontierscience_judge,0.1610625,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Research,success_rate:frontierscience_judge,0.03333333333333333,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Research,success_rate_biology:frontierscience_judge,0.05,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Research,success_rate_chemistry:frontierscience_judge,0.05,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,FrontierScience-Research,success_rate_physics:frontierscience_judge,0.0,01KZ4FJ9EFNZMVY0FQ8MF51JVW,,True,3
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,cite_p_fixed:external,0.20892543077837197,01KZ4FN7D3NX70QVGSGBFRB1BY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.29709322325421395,01KZ4FN7D3NX70QVGSGBFRB1BY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.4716666666666667,01KZ4FN7D3NX70QVGSGBFRB1BY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,document_importance_fixed:external,0.11184309226492521,01KZ4FN7D3NX70QVGSGBFRB1BY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,geomean_fixed:external,0.164467227631082,01KZ4FN7D3NX70QVGSGBFRB1BY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.2487182751888634,01KZ4FN7D3NX70QVGSGBFRB1BY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,organization_fixed:external,0.25,01KZ4FN7D3NX70QVGSGBFRB1BY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5 9B Instruct,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.01598746081504702,01KZ4FN7D3NX70QVGSGBFRB1BY,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,cite_p_fixed:external,0.3317173839232663,01KZ4FNYDA79MQ9RWZSYW74FHJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.3519618453441983,01KZ4FNYDA79MQ9RWZSYW74FHJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.3431998556998557,01KZ4FNYDA79MQ9RWZSYW74FHJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,document_importance_fixed:external,0.06509455748820239,01KZ4FNYDA79MQ9RWZSYW74FHJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,geomean_fixed:external,0.16302565998144022,01KZ4FNYDA79MQ9RWZSYW74FHJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.1505050505050505,01KZ4FNYDA79MQ9RWZSYW74FHJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,organization_fixed:external,0.3,01KZ4FNYDA79MQ9RWZSYW74FHJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Qwen3.5-35B-A3B,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.025987460815047027,01KZ4FNYDA79MQ9RWZSYW74FHJ,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,cite_p_fixed:external,0.05135278535562017,01KZ4FP3VNSHWKZQ8PC9E4FYTA,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.07736373025353653,01KZ4FP3VNSHWKZQ8PC9E4FYTA,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.2833333333333333,01KZ4FP3VNSHWKZQ8PC9E4FYTA,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,document_importance_fixed:external,0.12767067806358284,01KZ4FP3VNSHWKZQ8PC9E4FYTA,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,geomean_fixed:external,0.10899708567219053,01KZ4FP3VNSHWKZQ8PC9E4FYTA,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.19575375604787368,01KZ4FP3VNSHWKZQ8PC9E4FYTA,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,organization_fixed:external,0.25,01KZ4FP3VNSHWKZQ8PC9E4FYTA,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Nemotron 3 Nano 30B-A3B,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.025987460815047027,01KZ4FP3VNSHWKZQ8PC9E4FYTA,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Olmo-3 7B Think,DeepScholar-Bench-dev10,cite_p_fixed:external,0.027430824001143238,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Olmo-3 7B Think,DeepScholar-Bench-dev10,claim_coverage_fixed:external,0.052597596501392875,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Olmo-3 7B Think,DeepScholar-Bench-dev10,coverage_relevance_rate_fixed:external,0.225,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Olmo-3 7B Think,DeepScholar-Bench-dev10,document_importance_fixed:external,0.1071078431372549,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Olmo-3 7B Think,DeepScholar-Bench-dev10,geomean_fixed:external,0.08379648077791946,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Olmo-3 7B Think,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.2383986928104575,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Olmo-3 7B Think,DeepScholar-Bench-dev10,organization_fixed:external,0.35,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+Olmo-3 7B Think,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.01,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3

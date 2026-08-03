@@ -55,6 +55,8 @@ TASK_NAMES = {
     "ifeval_ood": "IFEval",
     "mmlu": "MMLU",
     "math500": "MATH-500",
+    "frontierscience_olympiad": "FrontierScience-Olympiad",
+    "frontierscience_research": "FrontierScience-Research",
 }
 
 

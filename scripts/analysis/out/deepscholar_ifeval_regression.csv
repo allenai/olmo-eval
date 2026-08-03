@@ -1,0 +1,2 @@
+n_models,n_pairs,bootstrap_samples,pearson_r,spearman_rho,slope_median,slope_low,slope_high
+8,72,2000,0.8641180858139325,0.8627367510403472,0.6147838162538883,0.49378581094906054,0.7163692760073762

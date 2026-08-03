@@ -1,2 +1,2 @@
 method,eval_count,retained_components_80pct,minimum_raw_eigenvalue,negative_raw_eigenvalues,projection_frobenius_delta
-pairwise-expanded Spearman; PSD eigenvalue clipping + unit diagonal,12,2,-0.5372664303493977,3,0.7119364779214845
+pairwise-expanded Spearman; PSD eigenvalue clipping + unit diagonal,12,3,-0.42403285950402936,2,0.5564396800597315

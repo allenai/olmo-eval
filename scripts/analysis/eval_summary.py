@@ -57,6 +57,7 @@ SERIES = [
     "#c85b91",
     "#3185a6",
 ]
+MODEL_COLORS = [*SERIES, "#697a27"]
 
 # Reserved status palette — only the coverage grid uses it. The score bars use
 # emphasis (one hue + gray) instead, so a green bar never reads as "good score"
@@ -110,8 +111,15 @@ FRONTIER_EVALS = [
     "FS-Research success",
     "FS-Research rubric",
 ]
-BASE_EVALS = ["LitSearch-rerank", *FRONTIER_EVALS, *SENTINEL_EVALS]
-ALL_ANALYSIS_EVALS = [*AGENTIC_EVALS, *BASE_EVALS]
+# These are direct/non-agentic or judged proxy evaluations, not a uniformly
+# base-model-compatible suite. In particular, IFEval and LitSearch-rerank are
+# chat tasks, FrontierScience is chat + model judge, and this sweep mixes MMLU
+# scoring protocols for models that cannot safely use raw completion logprobs.
+PROXY_EVALS = ["LitSearch-rerank", *FRONTIER_EVALS, *SENTINEL_EVALS]
+# Operationally cheap relative to DeepScholar: no tools, no external judge,
+# and already fast enough to run in full in this sweep.
+CHEAP_EVALS = ["LitSearch-rerank", *SENTINEL_EVALS]
+ALL_ANALYSIS_EVALS = [*AGENTIC_EVALS, *PROXY_EVALS]
 COMPACT_EVAL_LABELS = {
     "ExpertQA": "ExpertQA",
     "LitSearch-open": "LitSearch-open",
@@ -252,6 +260,25 @@ def load_scores(csv_path: Path, meta: Metadata) -> tuple[pl.DataFrame, pl.DataFr
             .then(pl.lit(display_eval))
             .otherwise(analysis_eval)
         )
+    # Keep FrontierScience's subject-level metrics in the long-form ledger
+    # without letting them appear as unknown evaluations. Only the exact
+    # primary metrics survive ``metric_ok`` below; this mapping simply assigns
+    # every auxiliary metric to its parent analysis evaluation first.
+    analysis_eval = (
+        pl.when(pl.col("eval") == "FrontierScience-Olympiad")
+        .then(pl.lit(FRONTIER_EVALS[0]))
+        .when(
+            (pl.col("eval") == "FrontierScience-Research")
+            & pl.col("metric").str.starts_with("success_rate")
+        )
+        .then(pl.lit(FRONTIER_EVALS[1]))
+        .when(
+            (pl.col("eval") == "FrontierScience-Research")
+            & pl.col("metric").str.starts_with("rubric_score")
+        )
+        .then(pl.lit(FRONTIER_EVALS[2]))
+        .otherwise(analysis_eval)
+    )
 
     raw = (
         pl.read_csv(csv_path, infer_schema_length=0)
@@ -426,6 +453,107 @@ def composite(ranked: pl.DataFrame, family: str) -> pl.DataFrame:
     )
 
 
+def _percentile_ranks(values: np.ndarray) -> np.ndarray:
+    """Return average-tie percentile ranks on [0, 1]."""
+    count = len(values)
+    if count == 1:
+        return np.asarray([0.5])
+    order = np.argsort(values, kind="stable")
+    ranks = np.empty(count, dtype=float)
+    start = 0
+    while start < count:
+        end = start + 1
+        while end < count and values[order[end]] == values[order[start]]:
+            end += 1
+        ranks[order[start:end]] = (start + end - 1) / 2
+        start = end
+    return ranks / (count - 1)
+
+
+def bootstrap_rank_intervals(
+    run_scores: pl.DataFrame,
+    meta: Metadata,
+    *,
+    samples: int = 2_000,
+    seed: int = 20_260_804,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Propagate replica variation through ranks and family composites.
+
+    Each draw independently selects one valid run for every measured
+    model/eval cell, then recomputes all within-eval percentile ranks. This is
+    a deterministic Monte Carlo marginalization over observed replicas; it
+    does not pretend that replica runs add new models.
+    """
+    usable = run_scores.filter(pl.col("status").is_in(RANKABLE_STATUSES))
+    models = meta.model_order
+    evals = meta.eval_order
+    model_index = {model: index for index, model in enumerate(models)}
+    eval_index = {eval_name: index for index, eval_name in enumerate(evals)}
+    cell_scores = {
+        (str(model), str(eval_name)): np.asarray(group["score"].to_list(), dtype=float)
+        for (model, eval_name), group in usable.partition_by(
+            ["model", "eval"], as_dict=True
+        ).items()
+    }
+    rng = np.random.default_rng(seed)
+    rank_draws = np.full((samples, len(models), len(evals)), np.nan, dtype=float)
+
+    for draw in range(samples):
+        for eval_name, eval_position in eval_index.items():
+            measured_models: list[int] = []
+            values: list[float] = []
+            for model, model_position in model_index.items():
+                runs = cell_scores.get((model, eval_name))
+                if runs is None:
+                    continue
+                measured_models.append(model_position)
+                values.append(float(runs[rng.integers(len(runs))]))
+            if not values:
+                continue
+            ranks = _percentile_ranks(np.asarray(values, dtype=float))
+            rank_draws[draw, measured_models, eval_position] = ranks
+
+    rank_rows = []
+    for (model, eval_name), _runs in cell_scores.items():
+        distribution = rank_draws[:, model_index[model], eval_index[eval_name]]
+        rank_rows.append(
+            {
+                "model": model,
+                "eval": eval_name,
+                "pct_low": float(np.quantile(distribution, 0.025)),
+                "pct_median": float(np.median(distribution)),
+                "pct_high": float(np.quantile(distribution, 0.975)),
+                "bootstrap_samples": samples,
+            }
+        )
+
+    family_rows = []
+    for family in FAMILY_ORDER:
+        family_evals = meta.evals.filter(pl.col("family") == family)["eval"].to_list()
+        positions = [eval_index[eval_name] for eval_name in family_evals]
+        for model, model_position in model_index.items():
+            distributions = rank_draws[:, model_position, positions]
+            measured = ~np.isnan(distributions)
+            counts = measured.sum(axis=1)
+            valid_draws = counts > 0
+            if not valid_draws.any():
+                continue
+            totals = np.nansum(distributions, axis=1)
+            composite_draws = totals[valid_draws] / counts[valid_draws]
+            family_rows.append(
+                {
+                    "model": model,
+                    "family": family,
+                    "mean_pct_low": float(np.quantile(composite_draws, 0.025)),
+                    "mean_pct_median": float(np.median(composite_draws)),
+                    "mean_pct_high": float(np.quantile(composite_draws, 0.975)),
+                    "bootstrap_samples": int(valid_draws.sum()),
+                }
+            )
+
+    return pl.DataFrame(rank_rows), pl.DataFrame(family_rows)
+
+
 def _register_theme() -> None:
     @alt.theme.register("scilit", enable=True)
     def _theme() -> alt.theme.ThemeConfig:
@@ -476,7 +604,13 @@ def chart_coverage(df: pl.DataFrame, meta: Metadata) -> alt.HConcatChart:
     model_order = meta.model_order
     panels = []
     for index, family in enumerate(FAMILY_ORDER):
-        sub = df.filter(pl.col("family") == family)
+        sub = df.filter(pl.col("family") == family).with_columns(
+            replica_label=pl.when(pl.col("status") == "unsupported")
+            .then(pl.lit("N/A"))
+            .when(pl.col("status").is_in(RANKABLE_STATUSES))
+            .then(pl.col("run_count").cast(pl.Int64).cast(pl.String))
+            .otherwise(pl.lit("0"))
+        )
         evals = [e for e in meta.eval_order if e in set(sub["eval"])]
         base = alt.Chart(sub).encode(
             x=alt.X(
@@ -508,6 +642,7 @@ def chart_coverage(df: pl.DataFrame, meta: Metadata) -> alt.HConcatChart:
                 "score_max:Q",
                 "source_label:N",
                 "score_std:Q",
+                alt.Tooltip("run_count:Q", title="valid replicas"),
                 "status:N",
                 "run_id:N",
                 "reason:N",
@@ -516,7 +651,7 @@ def chart_coverage(df: pl.DataFrame, meta: Metadata) -> alt.HConcatChart:
         # Status color never carries meaning alone: every cell states its value
         # or its state in text.
         labels = base.mark_text(fontSize=9, fontWeight=600).encode(
-            text="cell_label:N",
+            text="replica_label:N",
             color=alt.condition(
                 alt.datum.status == "not-run", alt.value(MUTED), alt.value("#ffffff")
             ),
@@ -536,9 +671,9 @@ def chart_coverage(df: pl.DataFrame, meta: Metadata) -> alt.HConcatChart:
         title=alt.Title(
             "Eval coverage",
             subtitle=[
-                "Cell shows the score where one exists.",
-                "N/A is an unsupported harness combination; — is genuinely not run.",
-                "Suspect scores are excluded from numerical analysis.",
+                "Cell shows the number of valid analysis replicas at the selected scope.",
+                "N/A is an unsupported harness combination; 0 is not run or excluded.",
+                "Color retains coverage status; scores and provenance remain in tooltips.",
             ],
         )
     )
@@ -641,7 +776,9 @@ def chart_profile(ranked: pl.DataFrame, meta: Metadata, models: list[str]) -> al
         pl.DataFrame({"model": models})
         .join(eval_meta, how="cross")
         .join(
-            ranked.filter(pl.col("model").is_in(models)).select("model", "eval", "pct"),
+            ranked.filter(pl.col("model").is_in(models)).select(
+                "model", "eval", "pct", "pct_low", "pct_high"
+            ),
             on=["model", "eval"],
             how="left",
         )
@@ -686,6 +823,17 @@ def chart_profile(ranked: pl.DataFrame, meta: Metadata, models: list[str]) -> al
         color=color,
     )
     lines = base.mark_line(strokeWidth=2, invalid="break-paths-show-domains")
+    interval_base = base.transform_filter(alt.datum.pct_low != None)  # noqa: E711
+    intervals = interval_base.mark_rule(strokeWidth=1.15, opacity=0.62).encode(
+        y=alt.Y("pct_low:Q"),
+        y2=alt.Y2("pct_high:Q"),
+    )
+    interval_low = interval_base.mark_tick(
+        orient="horizontal", thickness=1.15, size=7, opacity=0.62
+    ).encode(y=alt.Y("pct_low:Q"))
+    interval_high = interval_base.mark_tick(
+        orient="horizontal", thickness=1.15, size=7, opacity=0.62
+    ).encode(y=alt.Y("pct_high:Q"))
     points = base.mark_point(size=55, filled=True)
     category_rail = (
         alt.Chart(eval_meta)
@@ -711,7 +859,7 @@ def chart_profile(ranked: pl.DataFrame, meta: Metadata, models: list[str]) -> al
         .encode(text="model:N")
     )
     return (
-        (category_rail + lines + points + labels)
+        (category_rail + lines + intervals + interval_low + interval_high + points + labels)
         .resolve_scale(color="independent")
         .properties(
             width=960,
@@ -720,7 +868,7 @@ def chart_profile(ranked: pl.DataFrame, meta: Metadata, models: list[str]) -> al
                 "Cross-eval profile",
                 subtitle=(
                     "Agentic dev, FrontierScience and sentinels; 1.0 is best-in-eval. "
-                    "Gaps are unmeasured scores."
+                    "Whiskers are 95% replica-resampling intervals; gaps are unmeasured."
                 ),
             ),
         )
@@ -735,29 +883,36 @@ def chart_summary(
     pool: tuple[int, int],
 ) -> alt.HConcatChart:
     order = sci_lit["model"].to_list()
-    main = (
-        alt.Chart(sci_lit)
-        .mark_bar(cornerRadiusEnd=4, color=PRIMARY)
-        .encode(
-            x=alt.X("mean_pct:Q", title="mean percentile rank", scale=alt.Scale(domain=[0, 1])),
-            y=alt.Y(
-                "model:N", sort=order, title=None, axis=alt.Axis(labelLimit=175, labelColor=INK)
-            ),
-            tooltip=["model:N", "mean_pct:Q", "n_evals:Q"],
-        )
+    sci_lit = sci_lit.with_columns(label_x=pl.max_horizontal("mean_pct", "mean_pct_high"))
+    main_base = alt.Chart(sci_lit).encode(
+        y=alt.Y("model:N", sort=order, title=None, axis=alt.Axis(labelLimit=175, labelColor=INK))
+    )
+    main = main_base.mark_bar(cornerRadiusEnd=4, color=PRIMARY).encode(
+        x=alt.X("mean_pct:Q", title="mean percentile rank", scale=alt.Scale(domain=[0, 1])),
+        tooltip=[
+            "model:N",
+            "mean_pct:Q",
+            alt.Tooltip("mean_pct_low:Q", title="bootstrap 2.5%", format=".3f"),
+            alt.Tooltip("mean_pct_high:Q", title="bootstrap 97.5%", format=".3f"),
+            "n_evals:Q",
+        ],
+    )
+    main_interval = main_base.mark_rule(color=INK, strokeWidth=1.3).encode(
+        x=alt.X("mean_pct_low:Q"), x2=alt.X2("mean_pct_high:Q")
+    )
+    main_low = main_base.mark_tick(color=INK, orient="vertical", thickness=1.3, size=10).encode(
+        x=alt.X("mean_pct_low:Q")
+    )
+    main_high = main_base.mark_tick(color=INK, orient="vertical", thickness=1.3, size=10).encode(
+        x=alt.X("mean_pct_high:Q")
     )
     # Coverage on every bar: a mean over 5 evals and a mean over 6 are not the
     # same quantity, and the chart should not pretend otherwise.
-    coverage = (
-        alt.Chart(sci_lit)
-        .mark_text(align="left", dx=4, fontSize=9, color=INK_SECONDARY)
-        .encode(
-            x=alt.X("mean_pct:Q"),
-            y=alt.Y("model:N", sort=order),
-            text=alt.Text("label:N"),
-        )
+    coverage = main_base.mark_text(align="left", dx=4, fontSize=9, color=INK_SECONDARY).encode(
+        x=alt.X("label_x:Q"),
+        text=alt.Text("label:N"),
     )
-    left = (main + coverage).properties(
+    left = (main + main_interval + main_low + main_high + coverage).properties(
         width=350,
         height=alt.Step(29),
         title=alt.Title(
@@ -769,29 +924,37 @@ def chart_summary(
     def companion_panel(
         data: pl.DataFrame, title: str, subtitle: str, color: str
     ) -> alt.LayerChart:
-        bars = (
-            alt.Chart(data)
-            .mark_bar(cornerRadiusEnd=4, color=color)
-            .encode(
-                x=alt.X(
-                    "display_pct:Q", title="mean percentile rank", scale=alt.Scale(domain=[0, 1])
-                ),
-                y=alt.Y("model:N", sort=order, title=None, axis=None),
-                tooltip=["model:N", "mean_pct:Q", "n_evals:Q"],
-            )
+        data = data.with_columns(label_x=pl.max_horizontal("display_pct", "mean_pct_high"))
+        companion_base = alt.Chart(data).encode(
+            y=alt.Y("model:N", sort=order, title=None, axis=None)
         )
+        bars = companion_base.mark_bar(cornerRadiusEnd=4, color=color).encode(
+            x=alt.X("display_pct:Q", title="mean percentile rank", scale=alt.Scale(domain=[0, 1])),
+            tooltip=[
+                "model:N",
+                "mean_pct:Q",
+                alt.Tooltip("mean_pct_low:Q", title="bootstrap 2.5%", format=".3f"),
+                alt.Tooltip("mean_pct_high:Q", title="bootstrap 97.5%", format=".3f"),
+                "n_evals:Q",
+            ],
+        )
+        interval_data = companion_base.transform_filter(alt.datum.n_evals > 0)
+        intervals = interval_data.mark_rule(color=INK, strokeWidth=1.3).encode(
+            x=alt.X("mean_pct_low:Q"), x2=alt.X2("mean_pct_high:Q")
+        )
+        interval_low = interval_data.mark_tick(
+            color=INK, orient="vertical", thickness=1.3, size=10
+        ).encode(x=alt.X("mean_pct_low:Q"))
+        interval_high = interval_data.mark_tick(
+            color=INK, orient="vertical", thickness=1.3, size=10
+        ).encode(x=alt.X("mean_pct_high:Q"))
         # Coverage labels make missing companion scores visible instead of
         # silently dropping a model from the panel.
-        labels = (
-            alt.Chart(data)
-            .mark_text(align="left", dx=4, fontSize=9, color=INK)
-            .encode(
-                x=alt.X("display_pct:Q"),
-                y=alt.Y("model:N", sort=order),
-                text=alt.Text("label:N"),
-            )
+        labels = companion_base.mark_text(align="left", dx=4, fontSize=9, color=INK).encode(
+            x=alt.X("label_x:Q"),
+            text=alt.Text("label:N"),
         )
-        return (bars + labels).properties(
+        return (bars + intervals + interval_low + interval_high + labels).properties(
             width=245,
             height=alt.Step(29),
             title=alt.Title(title, subtitle=subtitle),
@@ -816,7 +979,8 @@ def chart_summary(
                 "FrontierScience and sentinels are shown alongside, never folded into the "
                 "sci-lit composite.",
                 f"Ranks are taken over {pool[0]}-{pool[1]} models per eval, "
-                "so small gaps between bars are not meaningful.",
+                "so small gaps between bars are not meaningful; whiskers are 95% "
+                "replica-resampling intervals.",
             ],
         )
     )
@@ -877,13 +1041,22 @@ def trusted_dev_full_pairs(scope_scores: pl.DataFrame) -> pl.DataFrame:
         "model",
         "eval",
         dev_score="score",
+        dev_min="score_min",
+        dev_max="score_max",
         dev_runs="run_count",
     )
     full = scope_scores.filter(
         pl.col("eval").is_in(AGENTIC_EVALS)
         & (pl.col("scope") == "full")
         & pl.col("status").is_in(RANKABLE_STATUSES)
-    ).select("model", "eval", full_score="score")
+    ).select(
+        "model",
+        "eval",
+        full_score="score",
+        full_min="score_min",
+        full_max="score_max",
+        full_runs="run_count",
+    )
     pairs = dev.join(full, on=["model", "eval"], how="inner").drop_nulls(
         ["dev_score", "full_score"]
     )
@@ -943,8 +1116,26 @@ def chart_dev_vs_full(pairs: pl.DataFrame) -> alt.FacetChart | None:
         .encode(
             x=alt.X("full_score:Q", title="trusted full-set score"),
             y=alt.Y("dev_score:Q", title="fixed-dev score"),
-            tooltip=["model:N", "eval:N", "full_score:Q", "dev_score:Q", "dev_runs:Q"],
+            tooltip=[
+                "model:N",
+                "eval:N",
+                "full_score:Q",
+                "dev_score:Q",
+                "full_runs:Q",
+                "dev_runs:Q",
+            ],
         )
+    )
+    point_base = base.transform_filter(alt.datum.kind == "point")
+    horizontal_errors = point_base.mark_rule(color=INK_SECONDARY, opacity=0.65).encode(
+        x=alt.X("full_min:Q"),
+        x2=alt.X2("full_max:Q"),
+        y=alt.Y("dev_score:Q"),
+    )
+    vertical_errors = point_base.mark_rule(color=INK_SECONDARY, opacity=0.65).encode(
+        x=alt.X("full_score:Q"),
+        y=alt.Y("dev_min:Q"),
+        y2=alt.Y2("dev_max:Q"),
     )
     labels = (
         base.transform_filter(alt.datum.kind == "point")
@@ -952,7 +1143,7 @@ def chart_dev_vs_full(pairs: pl.DataFrame) -> alt.FacetChart | None:
         .encode(x="full_score:Q", y="dev_score:Q", text="model:N")
     )
     return (
-        alt.layer(line, points, labels)
+        alt.layer(line, horizontal_errors, vertical_errors, points, labels)
         .properties(width=205, height=175)
         .facet(alt.Facet("facet_label:N", title=None), columns=3)
         .resolve_scale(x="independent", y="independent")
@@ -961,7 +1152,8 @@ def chart_dev_vs_full(pairs: pl.DataFrame) -> alt.FacetChart | None:
                 "Do fixed dev sets preserve full-set ordering?",
                 subtitle=[
                     "Only model/eval pairs with trusted full and dev results are shown.",
-                    "Dashed line is dev = full; rho is descriptive at these small n values.",
+                    "Rules span replica min–max; dashed line is dev = full.",
+                    "Rho is descriptive at these small n values.",
                 ],
             )
         )
@@ -1075,6 +1267,619 @@ def pairwise_replica_correlations(
     )
 
 
+def deepscholar_ifeval_pairs(run_scores: pl.DataFrame) -> pl.DataFrame:
+    """Expand every valid IFEval × DeepScholar replica combination by model."""
+    usable = run_scores.filter(pl.col("status").is_in(RANKABLE_STATUSES)).select(
+        "model", "eval", "score", "run_id", "replica"
+    )
+    return (
+        _replica_pairs(usable, "IFEval", "DeepScholar-Bench")
+        .rename(
+            {
+                "x": "ifeval_score",
+                "x_run_id": "ifeval_run_id",
+                "x_replica": "ifeval_replica",
+                "y": "deepscholar_score",
+                "y_run_id": "deepscholar_run_id",
+                "y_replica": "deepscholar_replica",
+            }
+        )
+        .sort(["model", "ifeval_replica", "deepscholar_replica"])
+    )
+
+
+def bootstrap_deepscholar_regression(
+    pairs: pl.DataFrame,
+    *,
+    samples: int = 2_000,
+    seed: int = 20_260_803,
+) -> tuple[pl.DataFrame, dict[str, float | int]]:
+    """Fit DeepScholar ~ IFEval with a model-cluster bootstrap.
+
+    All Cartesian replica pairs contribute to each fit. Bootstrap draws happen
+    at the model level so repeated measurements of one model are not treated as
+    independent models when estimating the regression uncertainty.
+    """
+    if pairs.is_empty() or pairs["model"].n_unique() < 2:
+        return pl.DataFrame(), {}
+
+    model_groups = {
+        str(model): (
+            np.asarray(group["ifeval_score"].to_list(), dtype=float),
+            np.asarray(group["deepscholar_score"].to_list(), dtype=float),
+        )
+        for (model,), group in pairs.partition_by("model", as_dict=True).items()
+    }
+    models = sorted(model_groups)
+    x_observed = np.asarray(pairs["ifeval_score"].to_list(), dtype=float)
+    y_observed = np.asarray(pairs["deepscholar_score"].to_list(), dtype=float)
+    x_grid = np.linspace(float(x_observed.min()), float(x_observed.max()), 160)
+    rng = np.random.default_rng(seed)
+    predictions: list[np.ndarray] = []
+    slopes: list[float] = []
+
+    for _ in range(samples):
+        selected = rng.choice(models, size=len(models), replace=True)
+        x_boot = np.concatenate([model_groups[str(model)][0] for model in selected])
+        y_boot = np.concatenate([model_groups[str(model)][1] for model in selected])
+        if np.unique(x_boot).size < 2:
+            continue
+        slope, intercept = np.polyfit(x_boot, y_boot, 1)
+        slopes.append(float(slope))
+        predictions.append(intercept + slope * x_grid)
+
+    if not predictions:
+        return pl.DataFrame(), {}
+
+    prediction_array = np.stack(predictions)
+    slope_array = np.asarray(slopes)
+    band = pl.DataFrame(
+        {
+            "ifeval_score": x_grid,
+            "fit": np.median(prediction_array, axis=0),
+            "fit_low": np.quantile(prediction_array, 0.025, axis=0),
+            "fit_high": np.quantile(prediction_array, 0.975, axis=0),
+        }
+    )
+    xs = x_observed.tolist()
+    ys = y_observed.tolist()
+    pearson = _pearson(xs, ys)
+    summary: dict[str, float | int] = {
+        "n_models": len(models),
+        "n_pairs": pairs.height,
+        "bootstrap_samples": len(predictions),
+        "pearson_r": pearson if pearson is not None else float("nan"),
+        "spearman_rho": _spearman(xs, ys),
+        "slope_median": float(np.median(slope_array)),
+        "slope_low": float(np.quantile(slope_array, 0.025)),
+        "slope_high": float(np.quantile(slope_array, 0.975)),
+    }
+    return band, summary
+
+
+def chart_deepscholar_ifeval(
+    pairs: pl.DataFrame,
+    band: pl.DataFrame,
+    regression: dict[str, float | int],
+) -> alt.LayerChart:
+    """Show per-model replica ranges and the model-cluster bootstrap regression."""
+    models = pairs["model"].unique(maintain_order=True).to_list()
+    model_colors = MODEL_COLORS[: len(models)]
+    centers = (
+        pairs.group_by("model", maintain_order=True)
+        .agg(
+            ifeval_median=pl.col("ifeval_score").median(),
+            ifeval_min=pl.col("ifeval_score").min(),
+            ifeval_max=pl.col("ifeval_score").max(),
+            deepscholar_median=pl.col("deepscholar_score").median(),
+            deepscholar_min=pl.col("deepscholar_score").min(),
+            deepscholar_max=pl.col("deepscholar_score").max(),
+            ifeval_replicas=pl.col("ifeval_run_id").n_unique(),
+            deepscholar_replicas=pl.col("deepscholar_run_id").n_unique(),
+        )
+        .sort(pl.col("model").replace_strict({model: i for i, model in enumerate(models)}))
+    )
+    x_caps = pl.concat(
+        [
+            centers.select(
+                "model",
+                "deepscholar_median",
+                pl.col("ifeval_min").alias("ifeval_extent"),
+            ),
+            centers.select(
+                "model",
+                "deepscholar_median",
+                pl.col("ifeval_max").alias("ifeval_extent"),
+            ),
+        ]
+    )
+    y_caps = pl.concat(
+        [
+            centers.select(
+                "model",
+                "ifeval_median",
+                pl.col("deepscholar_min").alias("deepscholar_extent"),
+            ),
+            centers.select(
+                "model",
+                "ifeval_median",
+                pl.col("deepscholar_max").alias("deepscholar_extent"),
+            ),
+        ]
+    )
+    x_encoding = alt.X(
+        "ifeval_score:Q",
+        title="IFEval prompt-level loose accuracy (full set)",
+        scale=alt.Scale(zero=False),
+        axis=alt.Axis(format=".2f"),
+    )
+    band_chart = (
+        alt.Chart(band)
+        .mark_area(color=PRIMARY, opacity=0.14)
+        .encode(
+            x=x_encoding,
+            y=alt.Y(
+                "fit_low:Q",
+                title="DeepScholar-Bench geomean_fixed (dev10)",
+                scale=alt.Scale(zero=False),
+                axis=alt.Axis(format=".3f"),
+            ),
+            y2="fit_high:Q",
+        )
+    )
+    fit = alt.Chart(band).mark_line(color=PRIMARY, strokeWidth=2.6).encode(x=x_encoding, y="fit:Q")
+    model_color = alt.Color(
+        "model:N",
+        scale=alt.Scale(domain=models, range=model_colors),
+        legend=alt.Legend(title="Model", orient="right", symbolSize=125, symbolType="circle"),
+    )
+    x_ranges = (
+        alt.Chart(centers)
+        .mark_rule(strokeWidth=1.6)
+        .encode(
+            x=alt.X("ifeval_min:Q", scale=alt.Scale(zero=False)),
+            x2="ifeval_max:Q",
+            y=alt.Y("deepscholar_median:Q", scale=alt.Scale(zero=False)),
+            color=model_color,
+        )
+    )
+    y_ranges = (
+        alt.Chart(centers)
+        .mark_rule(strokeWidth=1.6)
+        .encode(
+            x=alt.X("ifeval_median:Q", scale=alt.Scale(zero=False)),
+            y=alt.Y("deepscholar_min:Q", scale=alt.Scale(zero=False)),
+            y2="deepscholar_max:Q",
+            color=model_color,
+        )
+    )
+    x_range_caps = (
+        alt.Chart(x_caps)
+        .mark_tick(orient="vertical", size=10, thickness=1.6)
+        .encode(
+            x=alt.X("ifeval_extent:Q", scale=alt.Scale(zero=False)),
+            y=alt.Y("deepscholar_median:Q", scale=alt.Scale(zero=False)),
+            color=model_color,
+        )
+    )
+    y_range_caps = (
+        alt.Chart(y_caps)
+        .mark_tick(orient="horizontal", size=10, thickness=1.6)
+        .encode(
+            x=alt.X("ifeval_median:Q", scale=alt.Scale(zero=False)),
+            y=alt.Y("deepscholar_extent:Q", scale=alt.Scale(zero=False)),
+            color=model_color,
+        )
+    )
+    points = (
+        alt.Chart(centers)
+        .mark_point(
+            filled=True,
+            shape="circle",
+            opacity=0.9,
+            size=145,
+            stroke=INK,
+            strokeWidth=0.65,
+        )
+        .encode(
+            x=alt.X(
+                "ifeval_median:Q",
+                title="IFEval prompt-level loose accuracy (full set)",
+                scale=alt.Scale(zero=False),
+                axis=alt.Axis(format=".2f"),
+            ),
+            y=alt.Y(
+                "deepscholar_median:Q",
+                title="DeepScholar-Bench geomean_fixed (dev10)",
+                scale=alt.Scale(zero=False),
+                axis=alt.Axis(format=".3f"),
+            ),
+            color=model_color,
+            tooltip=[
+                alt.Tooltip("model:N", title="Model"),
+                alt.Tooltip("ifeval_median:Q", title="IFEval median", format=".4f"),
+                alt.Tooltip("ifeval_min:Q", title="IFEval min", format=".4f"),
+                alt.Tooltip("ifeval_max:Q", title="IFEval max", format=".4f"),
+                alt.Tooltip("deepscholar_median:Q", title="DeepScholar median", format=".4f"),
+                alt.Tooltip("deepscholar_min:Q", title="DeepScholar min", format=".4f"),
+                alt.Tooltip("deepscholar_max:Q", title="DeepScholar max", format=".4f"),
+                alt.Tooltip("ifeval_replicas:Q", title="IFEval replicas"),
+                alt.Tooltip("deepscholar_replicas:Q", title="DeepScholar replicas"),
+            ],
+        )
+    )
+    subtitle = [
+        "One point per model: coordinate-wise replica median; x/y whiskers span replica min–max.",
+        (
+            f"Regression retains all within-model replica combinations; model-cluster bootstrap: "
+            f"m={int(regression['n_models'])}, "
+            f"p={int(regression['n_pairs'])}; Pearson r={regression['pearson_r']:+.2f}, "
+            f"Spearman rho={regression['spearman_rho']:+.2f}."
+        ),
+        (
+            f"Median slope={regression['slope_median']:+.3f} "
+            f"(95% interval {regression['slope_low']:+.3f} to "
+            f"{regression['slope_high']:+.3f}); band is pointwise 95%."
+        ),
+    ]
+    return (
+        band_chart + fit + x_ranges + y_ranges + x_range_caps + y_range_caps + points
+    ).properties(
+        width=850,
+        height=455,
+        title=alt.Title("Can IFEval predict DeepScholar-Bench?", subtitle=subtitle),
+    )
+
+
+RIDGE_ALPHA_GRID = np.logspace(-2, 2, 9)
+PROXY_REGRESSION_LABELS = {
+    "LitSearch-rerank": "LitSearch-rerank",
+    "FS-Olympiad accuracy": "FS-Olympiad",
+    "FS-Research success": "FS-Research success",
+    "FS-Research rubric": "FS-Research rubric",
+    "IFEval": "IFEval",
+    "MMLU": "MMLU",
+    "MATH-500": "MATH-500",
+}
+
+
+def _ridge_fit(
+    x: np.ndarray, y: np.ndarray, alpha: float
+) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]:
+    """Fit ridge with an unpenalized intercept and standardized predictors."""
+    x_mean = x.mean(axis=0)
+    x_scale = x.std(axis=0)
+    x_scale = np.where(x_scale < 1e-12, 1.0, x_scale)
+    x_standard = (x - x_mean) / x_scale
+    y_mean = float(y.mean())
+    gram = x_standard.T @ x_standard + alpha * np.eye(x.shape[1])
+    beta = np.linalg.solve(gram, x_standard.T @ (y - y_mean))
+    return x_mean, x_scale, y_mean, beta
+
+
+def _ridge_predict(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_test: np.ndarray,
+    alpha: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    x_mean, x_scale, y_mean, beta = _ridge_fit(x_train, y_train, alpha)
+    prediction = y_mean + ((x_test - x_mean) / x_scale) @ beta
+    return prediction, beta
+
+
+def _select_ridge_alpha(x: np.ndarray, y: np.ndarray) -> float:
+    """Select ridge strength by leave-one-model-out error."""
+    errors: list[float] = []
+    for alpha in RIDGE_ALPHA_GRID:
+        predictions = np.empty(len(y), dtype=float)
+        for held_out in range(len(y)):
+            train = np.arange(len(y)) != held_out
+            predicted, _ = _ridge_predict(
+                x[train], y[train], x[held_out : held_out + 1], float(alpha)
+            )
+            predictions[held_out] = predicted[0]
+        errors.append(float(np.mean((y - predictions) ** 2)))
+    return float(RIDGE_ALPHA_GRID[int(np.argmin(errors))])
+
+
+def bootstrap_deepscholar_proxy_regression(
+    run_scores: pl.DataFrame,
+    predictor_evals: list[str],
+    *,
+    samples: int = 1_000,
+    seed: int = 20_260_804,
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, dict[str, float | int]]:
+    """Predict DeepScholar from proxy evals with replica-bootstrap nested LOMO ridge.
+
+    The model is evaluated out of sample: each model is held out, ridge strength
+    is selected using only the other models' median scores, and every bootstrap
+    draws one replica independently for each model/evaluation cell. This
+    propagates run-to-run variation without pretending the replicas are new
+    independent models.
+    """
+    evaluations = [*predictor_evals, "DeepScholar-Bench"]
+    usable = run_scores.filter(
+        pl.col("status").is_in(RANKABLE_STATUSES) & pl.col("eval").is_in(evaluations)
+    ).select("model", "eval", "score")
+    lookup: dict[tuple[str, str], np.ndarray] = {}
+    for key, group in usable.partition_by("model", "eval", as_dict=True).items():
+        model, eval_name = key
+        lookup[(str(model), str(eval_name))] = np.asarray(group["score"], dtype=float)
+
+    candidates = usable.filter(pl.col("eval") == "DeepScholar-Bench")["model"].unique(
+        maintain_order=True
+    )
+    models = [
+        str(model)
+        for model in candidates
+        if all((str(model), eval_name) in lookup for eval_name in evaluations)
+    ]
+    if len(models) < 3:
+        return pl.DataFrame(), pl.DataFrame(), pl.DataFrame(), {}
+
+    median_x = np.asarray(
+        [
+            [np.median(lookup[(model, eval_name)]) for eval_name in predictor_evals]
+            for model in models
+        ],
+        dtype=float,
+    )
+    median_y = np.asarray(
+        [np.median(lookup[(model, "DeepScholar-Bench")]) for model in models], dtype=float
+    )
+    outer_alphas: list[float] = []
+    for held_out in range(len(models)):
+        train = np.arange(len(models)) != held_out
+        outer_alphas.append(_select_ridge_alpha(median_x[train], median_y[train]))
+    full_alpha = _select_ridge_alpha(median_x, median_y)
+
+    rng = np.random.default_rng(seed)
+    predictions = np.empty((samples, len(models)), dtype=float)
+    coefficients = np.empty((samples, len(predictor_evals)), dtype=float)
+    metric_rows: list[dict[str, float | int]] = []
+    for sample in range(samples):
+        x = np.asarray(
+            [
+                [rng.choice(lookup[(model, eval_name)]) for eval_name in predictor_evals]
+                for model in models
+            ],
+            dtype=float,
+        )
+        y = np.asarray(
+            [rng.choice(lookup[(model, "DeepScholar-Bench")]) for model in models],
+            dtype=float,
+        )
+        for held_out, alpha in enumerate(outer_alphas):
+            train = np.arange(len(models)) != held_out
+            predicted, _ = _ridge_predict(x[train], y[train], x[held_out : held_out + 1], alpha)
+            predictions[sample, held_out] = predicted[0]
+        _, coefficients[sample] = _ridge_predict(x, y, x[:1], full_alpha)
+        residual = y - predictions[sample]
+        denominator = float(np.sum((y - y.mean()) ** 2))
+        metric_rows.append(
+            {
+                "sample": sample + 1,
+                "pearson_r": float(np.corrcoef(y, predictions[sample])[0, 1]),
+                "spearman_rho": float(_spearman(y.tolist(), predictions[sample].tolist())),
+                "mae": float(np.mean(np.abs(residual))),
+                "r2": float(1 - np.sum(residual**2) / denominator),
+            }
+        )
+
+    prediction_rows: list[dict[str, float | int | str]] = []
+    for index, model in enumerate(models):
+        actual = lookup[(model, "DeepScholar-Bench")]
+        prediction_rows.append(
+            {
+                "model": model,
+                "actual_median": float(np.median(actual)),
+                "actual_min": float(actual.min()),
+                "actual_max": float(actual.max()),
+                "predicted_median": float(np.median(predictions[:, index])),
+                "predicted_low": float(np.quantile(predictions[:, index], 0.025)),
+                "predicted_high": float(np.quantile(predictions[:, index], 0.975)),
+                "ridge_alpha": outer_alphas[index],
+            }
+        )
+    coefficient_rows = [
+        {
+            "eval": eval_name,
+            "eval_label": PROXY_REGRESSION_LABELS[eval_name],
+            "coefficient_median": float(np.median(coefficients[:, index])),
+            "coefficient_low": float(np.quantile(coefficients[:, index], 0.025)),
+            "coefficient_high": float(np.quantile(coefficients[:, index], 0.975)),
+            "ridge_alpha": full_alpha,
+        }
+        for index, eval_name in enumerate(predictor_evals)
+    ]
+    metrics = pl.DataFrame(metric_rows)
+    summary: dict[str, float | int] = {
+        "n_models": len(models),
+        "n_predictors": len(predictor_evals),
+        "bootstrap_samples": samples,
+        "ridge_alpha_full": full_alpha,
+        "ridge_alpha_outer_min": min(outer_alphas),
+        "ridge_alpha_outer_max": max(outer_alphas),
+    }
+    for metric in ["pearson_r", "spearman_rho", "mae", "r2"]:
+        values = np.asarray(metrics[metric], dtype=float)
+        summary[f"{metric}_median"] = float(np.quantile(values, 0.5))
+        summary[f"{metric}_low"] = float(np.quantile(values, 0.025))
+        summary[f"{metric}_high"] = float(np.quantile(values, 0.975))
+    return (
+        pl.DataFrame(prediction_rows),
+        pl.DataFrame(coefficient_rows),
+        metrics,
+        summary,
+    )
+
+
+def chart_deepscholar_proxy_regression(
+    predictions: pl.DataFrame,
+    coefficients: pl.DataFrame,
+    summary: dict[str, float | int],
+    predictor_evals: list[str],
+    *,
+    title: str,
+    predictor_label: str,
+) -> alt.HConcatChart:
+    """Show held-out predictions and bootstrap coefficient stability."""
+    models = predictions["model"].to_list()
+    model_color = alt.Color(
+        "model:N",
+        scale=alt.Scale(domain=models, range=MODEL_COLORS[: len(models)]),
+        legend=alt.Legend(
+            title="Model", orient="bottom", direction="horizontal", columns=4, symbolType="circle"
+        ),
+    )
+    bounds = [
+        float(predictions["actual_min"].min()),
+        float(predictions["predicted_low"].min()),
+        float(predictions["actual_max"].max()),
+        float(predictions["predicted_high"].max()),
+    ]
+    padding = max(bounds) - min(bounds)
+    domain = [min(bounds) - 0.04 * padding, max(bounds) + 0.04 * padding]
+    identity = pl.DataFrame({"actual": domain, "predicted": domain})
+    x = alt.X(
+        "actual_median:Q",
+        title="Observed DeepScholar median",
+        scale=alt.Scale(domain=domain, zero=False),
+        axis=alt.Axis(format=".3f"),
+    )
+    y = alt.Y(
+        "predicted_median:Q",
+        title="Held-out predicted DeepScholar",
+        scale=alt.Scale(domain=domain, zero=False),
+        axis=alt.Axis(format=".3f"),
+    )
+    diagonal = (
+        alt.Chart(identity)
+        .mark_line(color=MUTED, strokeDash=[5, 4], strokeWidth=1.3)
+        .encode(x="actual:Q", y="predicted:Q")
+    )
+    x_ranges = (
+        alt.Chart(predictions)
+        .mark_rule(strokeWidth=1.4)
+        .encode(x="actual_min:Q", x2="actual_max:Q", y=y, color=model_color)
+    )
+    y_ranges = (
+        alt.Chart(predictions)
+        .mark_rule(strokeWidth=1.4)
+        .encode(x=x, y="predicted_low:Q", y2="predicted_high:Q", color=model_color)
+    )
+    points = (
+        alt.Chart(predictions)
+        .mark_point(filled=True, shape="circle", size=125, stroke=INK, strokeWidth=0.6)
+        .encode(
+            x=x,
+            y=y,
+            color=model_color,
+            tooltip=[
+                alt.Tooltip("model:N", title="Model"),
+                alt.Tooltip("actual_median:Q", title="Observed median", format=".4f"),
+                alt.Tooltip("actual_min:Q", title="Observed min", format=".4f"),
+                alt.Tooltip("actual_max:Q", title="Observed max", format=".4f"),
+                alt.Tooltip("predicted_median:Q", title="Predicted median", format=".4f"),
+                alt.Tooltip("predicted_low:Q", title="Predicted 2.5%", format=".4f"),
+                alt.Tooltip("predicted_high:Q", title="Predicted 97.5%", format=".4f"),
+                alt.Tooltip("ridge_alpha:Q", title="Fold ridge alpha", format=".2g"),
+            ],
+        )
+    )
+    prediction_panel = (diagonal + x_ranges + y_ranges + points).properties(
+        width=535,
+        height=405,
+        title=alt.Title(
+            "Held-out model predictions",
+            subtitle="x whisker: observed replica min–max · y whisker: bootstrap 95%",
+        ),
+    )
+
+    coefficient_order = [PROXY_REGRESSION_LABELS[name] for name in predictor_evals]
+    zero = (
+        alt.Chart(pl.DataFrame({"zero": [0]}))
+        .mark_rule(color=MUTED, strokeDash=[4, 3], strokeWidth=1.2)
+        .encode(x="zero:Q")
+    )
+    coefficient_ranges = (
+        alt.Chart(coefficients)
+        .mark_rule(color=SERIES[2], strokeWidth=2)
+        .encode(
+            x=alt.X("coefficient_low:Q", title="DeepScholar score per predictor SD"),
+            x2="coefficient_high:Q",
+            y=alt.Y("eval_label:N", sort=coefficient_order, title=None),
+        )
+    )
+    coefficient_points = (
+        alt.Chart(coefficients)
+        .mark_point(filled=True, color=SERIES[2], size=95, stroke=INK, strokeWidth=0.5)
+        .encode(
+            x="coefficient_median:Q",
+            y=alt.Y("eval_label:N", sort=coefficient_order, title=None),
+            tooltip=[
+                alt.Tooltip("eval_label:N", title="Predictor"),
+                alt.Tooltip("coefficient_median:Q", title="Median", format="+.4f"),
+                alt.Tooltip("coefficient_low:Q", title="2.5%", format="+.4f"),
+                alt.Tooltip("coefficient_high:Q", title="97.5%", format="+.4f"),
+                alt.Tooltip("ridge_alpha:Q", title="Full ridge alpha", format=".2g"),
+            ],
+        )
+    )
+    coefficient_panel = (zero + coefficient_ranges + coefficient_points).properties(
+        width=315,
+        height=405,
+        title=alt.Title(
+            "Standardized ridge coefficients",
+            subtitle="full-model fit · replica-bootstrap 95%",
+        ),
+    )
+    subtitle = [
+        (
+            f"Nested leave-one-model-out ridge: n={int(summary['n_models'])} models, "
+            f"p={int(summary['n_predictors'])} {predictor_label}, "
+            f"{int(summary['bootstrap_samples']):,} replica bootstraps."
+        ),
+        (
+            f"Held-out Pearson r={summary['pearson_r_median']:+.2f} "
+            f"[{summary['pearson_r_low']:+.2f}, {summary['pearson_r_high']:+.2f}]; "
+            f"Spearman rho={summary['spearman_rho_median']:+.2f}; "
+            f"MAE={summary['mae_median']:.3f}."
+        ),
+        "Intervals propagate replica variation only; with eight models this is exploratory.",
+    ]
+    return alt.hconcat(prediction_panel, coefficient_panel, spacing=42).properties(
+        title=alt.Title(title, subtitle=subtitle)
+    )
+
+
+def _pca_from_correlation(
+    matrix: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """PSD-project a correlation matrix and return its PCA decomposition."""
+    matrix = (matrix + matrix.T) / 2
+    np.fill_diagonal(matrix, 1.0)
+    raw_eigenvalues, raw_eigenvectors = np.linalg.eigh(matrix)
+    clipped = np.clip(raw_eigenvalues, 0.0, None)
+    projected = raw_eigenvectors @ np.diag(clipped) @ raw_eigenvectors.T
+    scale = np.sqrt(np.clip(np.diag(projected), 1e-12, None))
+    projected = projected / np.outer(scale, scale)
+    projected = (projected + projected.T) / 2
+    np.fill_diagonal(projected, 1.0)
+
+    eigenvalues, eigenvectors = np.linalg.eigh(projected)
+    order = np.argsort(eigenvalues)[::-1]
+    eigenvalues = np.clip(eigenvalues[order], 0.0, None)
+    components = eigenvectors[:, order].T
+    for pc in range(components.shape[0]):
+        anchor = int(np.argmax(np.abs(components[pc])))
+        if components[pc, anchor] < 0:
+            components[pc] *= -1
+    explained = eigenvalues / eigenvalues.sum()
+    return raw_eigenvalues, projected, eigenvalues, components, explained, np.cumsum(explained)
+
+
 def analyze_eval_pca(
     pairwise: pl.DataFrame, eval_order: list[str]
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
@@ -1101,24 +1906,9 @@ def analyze_eval_pca(
 
     matrix = (matrix + matrix.T) / 2
     np.fill_diagonal(matrix, 1.0)
-    raw_eigenvalues, raw_eigenvectors = np.linalg.eigh(matrix)
-    clipped = np.clip(raw_eigenvalues, 0.0, None)
-    projected = raw_eigenvectors @ np.diag(clipped) @ raw_eigenvectors.T
-    scale = np.sqrt(np.clip(np.diag(projected), 1e-12, None))
-    projected = projected / np.outer(scale, scale)
-    projected = (projected + projected.T) / 2
-    np.fill_diagonal(projected, 1.0)
-
-    eigenvalues, eigenvectors = np.linalg.eigh(projected)
-    order = np.argsort(eigenvalues)[::-1]
-    eigenvalues = np.clip(eigenvalues[order], 0.0, None)
-    components = eigenvectors[:, order].T
-    for pc in range(components.shape[0]):
-        anchor = int(np.argmax(np.abs(components[pc])))
-        if components[pc, anchor] < 0:
-            components[pc] *= -1
-    explained = eigenvalues / eigenvalues.sum()
-    cumulative = np.cumsum(explained)
+    raw_eigenvalues, projected, eigenvalues, components, explained, cumulative = (
+        _pca_from_correlation(matrix)
+    )
     retained = int(np.searchsorted(cumulative, 0.8) + 1)
     loading_correlations = components.T * np.sqrt(eigenvalues)
 
@@ -1196,6 +1986,122 @@ def analyze_eval_pca(
     return variance, loadings, redundancy, diagnostics
 
 
+def bootstrap_pca_intervals(
+    run_scores: pl.DataFrame,
+    variance: pl.DataFrame,
+    loadings: pl.DataFrame,
+    eval_order: list[str],
+    *,
+    samples: int = 1_000,
+    seed: int = 20_260_805,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Propagate replica selection through the PCA correlation structure."""
+    usable = run_scores.filter(pl.col("status").is_in(RANKABLE_STATUSES))
+    models = sorted(usable["model"].unique().to_list())
+    model_index = {model: index for index, model in enumerate(models)}
+    eval_index = {eval_name: index for index, eval_name in enumerate(eval_order)}
+    cell_scores = {
+        (str(model), str(eval_name)): np.asarray(group["score"].to_list(), dtype=float)
+        for (model, eval_name), group in usable.partition_by(
+            ["model", "eval"], as_dict=True
+        ).items()
+    }
+    reference_components = np.empty((len(eval_order), len(eval_order)), dtype=float)
+    for row in loadings.iter_rows(named=True):
+        reference_components[int(row["pc_index"]) - 1, eval_index[row["eval"]]] = float(
+            row["component_loading"]
+        )
+
+    rng = np.random.default_rng(seed)
+    explained_draws: list[np.ndarray] = []
+    cumulative_draws: list[np.ndarray] = []
+    loading_draws: list[np.ndarray] = []
+    for _ in range(samples):
+        scores = np.full((len(models), len(eval_order)), np.nan, dtype=float)
+        for (model, eval_name), runs in cell_scores.items():
+            if eval_name not in eval_index:
+                continue
+            scores[model_index[model], eval_index[eval_name]] = runs[rng.integers(len(runs))]
+
+        correlation = np.eye(len(eval_order), dtype=float)
+        valid = True
+        for left in range(len(eval_order)):
+            for right in range(left + 1, len(eval_order)):
+                observed = ~np.isnan(scores[:, left]) & ~np.isnan(scores[:, right])
+                if observed.sum() < 3:
+                    valid = False
+                    break
+                rho = _spearman(scores[observed, left].tolist(), scores[observed, right].tolist())
+                correlation[left, right] = rho
+                correlation[right, left] = rho
+            if not valid:
+                break
+        if not valid:
+            continue
+
+        _, _, eigenvalues, components, explained, cumulative = _pca_from_correlation(correlation)
+        explained_draws.append(explained)
+        cumulative_draws.append(cumulative)
+
+        # Match bootstrap components to the reference by absolute vector
+        # similarity, then orient their signs to the reference. This prevents
+        # arbitrary sign flips and near-tied component swaps from inflating the
+        # loading intervals.
+        remaining = set(range(len(eval_order)))
+        aligned_components = np.empty_like(components)
+        aligned_eigenvalues = np.empty_like(eigenvalues)
+        for reference_pc in range(len(eval_order)):
+            candidate = max(
+                remaining,
+                key=lambda pc: abs(
+                    float(np.dot(reference_components[reference_pc], components[pc]))
+                ),
+            )
+            remaining.remove(candidate)
+            sign = (
+                1.0
+                if np.dot(reference_components[reference_pc], components[candidate]) >= 0
+                else -1.0
+            )
+            aligned_components[reference_pc] = components[candidate] * sign
+            aligned_eigenvalues[reference_pc] = eigenvalues[candidate]
+        loading_draws.append(aligned_components.T * np.sqrt(aligned_eigenvalues))
+
+    if not explained_draws or not loading_draws:
+        return variance, loadings
+
+    explained_array = np.stack(explained_draws)
+    cumulative_array = np.stack(cumulative_draws)
+    variance_intervals = pl.DataFrame(
+        {
+            "pc_index": list(range(1, len(eval_order) + 1)),
+            "explained_low": np.quantile(explained_array, 0.025, axis=0),
+            "explained_high": np.quantile(explained_array, 0.975, axis=0),
+            "cumulative_low": np.quantile(cumulative_array, 0.025, axis=0),
+            "cumulative_high": np.quantile(cumulative_array, 0.975, axis=0),
+            "bootstrap_samples": len(explained_draws),
+        }
+    )
+    loading_array = np.stack(loading_draws)
+    loading_rows = []
+    for eval_name, eval_position in eval_index.items():
+        for pc in range(len(eval_order)):
+            distribution = loading_array[:, eval_position, pc]
+            loading_rows.append(
+                {
+                    "eval": eval_name,
+                    "pc_index": pc + 1,
+                    "loading_low": float(np.quantile(distribution, 0.025)),
+                    "loading_high": float(np.quantile(distribution, 0.975)),
+                    "bootstrap_samples": len(loading_draws),
+                }
+            )
+    return (
+        variance.join(variance_intervals, on="pc_index", how="left"),
+        loadings.join(pl.DataFrame(loading_rows), on=["eval", "pc_index"], how="left"),
+    )
+
+
 def chart_eval_pca(
     variance: pl.DataFrame,
     loadings: pl.DataFrame,
@@ -1230,47 +2136,79 @@ def chart_eval_pca(
         x=alt.X("pc:N", sort=pc_order),
         y=alt.Y("cumulative_variance:Q", axis=alt.Axis(format=".0%"), title=None),
     )
-    scree_panel = (scree + cumulative).properties(
+    scree_errors = scree_base.mark_rule(color=INK, strokeWidth=1.3).encode(
+        x=alt.X("pc:N", sort=pc_order),
+        y=alt.Y("explained_low:Q"),
+        y2=alt.Y2("explained_high:Q"),
+    )
+    scree_error_low = scree_base.mark_tick(
+        color=INK, orient="horizontal", thickness=1.3, size=9
+    ).encode(x=alt.X("pc:N", sort=pc_order), y=alt.Y("explained_low:Q"))
+    scree_error_high = scree_base.mark_tick(
+        color=INK, orient="horizontal", thickness=1.3, size=9
+    ).encode(x=alt.X("pc:N", sort=pc_order), y=alt.Y("explained_high:Q"))
+    scree_panel = (
+        scree + cumulative + scree_errors + scree_error_low + scree_error_high
+    ).properties(
         width=260,
         height=330,
         title=alt.Title(
-            "Variance by component", subtitle=f"first 8 shown · {retained} PCs reach 80%"
+            "Variance by component",
+            subtitle=f"first 8 · {retained} PCs reach 80% · whisker: replica 95%",
         ),
     )
 
     shown_pcs = pc_order[: min(4, len(pc_order))]
-    loading_data = loadings.filter(pl.col("pc").is_in(shown_pcs)).with_columns(
-        loading_label=pl.col("loading_correlation").round(2).cast(pl.String)
-    )
+    loading_data = loadings.filter(pl.col("pc").is_in(shown_pcs))
     eval_labels = [CANONICAL_TO_DEV.get(name, name) for name in eval_order]
-    loading_base = alt.Chart(loading_data).encode(
-        x=alt.X("pc:N", sort=shown_pcs, title=None, axis=alt.Axis(labelAngle=0)),
-        y=alt.Y("eval_label:N", sort=eval_labels, title=None),
-    )
-    loading_cells = loading_base.mark_rect().encode(
-        color=alt.Color(
-            "loading_correlation:Q",
-            title="eval–PC corr.",
-            scale=alt.Scale(domain=VLAG_DOMAIN, range=VLAG_RANGE, clamp=True),
-        ),
-        tooltip=[
-            "eval_label:N",
-            "pc:N",
-            alt.Tooltip("loading_correlation:Q", format=".3f"),
-            alt.Tooltip("component_loading:Q", format=".3f"),
-        ],
-    )
-    loading_text = loading_base.mark_text(fontSize=8).encode(
-        text="loading_label:N",
-        color=alt.condition(
-            "abs(datum.loading_correlation) >= 0.58", alt.value("white"), alt.value(INK)
-        ),
-    )
-    loading_panel = (loading_cells + loading_text).properties(
-        width=alt.Step(55),
-        height=alt.Step(27),
-        title="Leading component loadings",
-    )
+    loading_panels = []
+    for pc_position, pc in enumerate(shown_pcs):
+        pc_data = loading_data.filter(pl.col("pc") == pc)
+        loading_base = alt.Chart(pc_data).encode(
+            y=alt.Y(
+                "eval_label:N",
+                sort=eval_labels,
+                title=None,
+                axis=alt.Axis(labelLimit=145) if pc_position == 0 else None,
+            )
+        )
+        zero = (
+            alt.Chart(pl.DataFrame({"zero": [0.0]}))
+            .mark_rule(color=AXIS, strokeDash=[3, 3])
+            .encode(x=alt.X("zero:Q"))
+        )
+        loading_intervals = loading_base.mark_rule(color=INK, strokeWidth=1.15).encode(
+            x=alt.X(
+                "loading_low:Q",
+                title="eval–PC corr.",
+                scale=alt.Scale(domain=[-1, 1]),
+                axis=alt.Axis(format=".1f", tickCount=3),
+            ),
+            x2=alt.X2("loading_high:Q"),
+        )
+        loading_points = loading_base.mark_point(
+            filled=True, color=SERIES[pc_position], size=48
+        ).encode(
+            x=alt.X(
+                "loading_correlation:Q",
+                scale=alt.Scale(domain=[-1, 1]),
+                axis=alt.Axis(format=".1f", tickCount=3),
+            ),
+            tooltip=[
+                "eval_label:N",
+                "pc:N",
+                alt.Tooltip("loading_correlation:Q", format=".3f"),
+                alt.Tooltip("loading_low:Q", title="bootstrap 2.5%", format=".3f"),
+                alt.Tooltip("loading_high:Q", title="bootstrap 97.5%", format=".3f"),
+            ],
+        )
+        loading_panels.append(
+            (zero + loading_intervals + loading_points).properties(
+                width=72,
+                height=alt.Step(27),
+                title=(alt.Title(pc, subtitle="loadings · 95%") if pc_position == 0 else pc),
+            )
+        )
 
     top_redundancy = redundancy.head(8).with_columns(
         rho_label=pl.col("rho").round(2).cast(pl.String),
@@ -1324,12 +2262,13 @@ def chart_eval_pca(
         ),
     )
 
-    return alt.hconcat(scree_panel, loading_panel, redundancy_panel, spacing=30).properties(
+    return alt.hconcat(scree_panel, *loading_panels, redundancy_panel, spacing=16).properties(
         title=alt.Title(
             "Evaluation covariance structure",
             subtitle=[
-                "PCA uses the deterministic Cartesian replica-pair Spearman matrix.",
-                "Score bars are replica means with min–max whiskers.",
+                "PCA center uses the Cartesian replica-pair Spearman matrix.",
+                "Variance and loading whiskers are 95% intervals from replica-resampled PCAs.",
+                "Redundancy whiskers retain deterministic replica-pairing min–max.",
                 "Pairwise-complete matrix PSD-projected by eigenvalue clipping "
                 f"(ΔF={correction:.3f}).",
             ],
@@ -1440,7 +2379,7 @@ def chart_covariance(run_scores: pl.DataFrame) -> alt.HConcatChart:
     matrix_evals = ALL_ANALYSIS_EVALS
     matrix_labels = [CANONICAL_TO_DEV.get(name, name) for name in matrix_evals]
     matrix = pairwise_replica_correlations(run_scores, matrix_evals, matrix_evals)
-    predictive = pairwise_replica_correlations(run_scores, AGENTIC_EVALS, BASE_EVALS)
+    predictive = pairwise_replica_correlations(run_scores, AGENTIC_EVALS, PROXY_EVALS)
     strongest = (
         predictive.filter(pl.col("strong"))
         .with_columns(abs_rho=pl.col("rho").abs())
@@ -1464,8 +2403,8 @@ def chart_covariance(run_scores: pl.DataFrame) -> alt.HConcatChart:
     right = _correlation_heatmap(
         predictive,
         [CANONICAL_TO_DEV[name] for name in AGENTIC_EVALS],
-        BASE_EVALS,
-        "Can base evals predict agentic scores?",
+        PROXY_EVALS,
+        "Can proxy evals predict agentic scores?",
         76,
         56,
         False,
@@ -1498,9 +2437,16 @@ def write_summary_md(
     for status in STATUS_ORDER:
         lines.append(f"| {status} | {counts.get(status, [(0,)])[0][0]} |")
 
-    lines += ["", "## Sci-lit standing", "", "| model | mean pct rank | evals |", "|---|---|---|"]
+    lines += [
+        "",
+        "## Sci-lit standing",
+        "",
+        "| model | mean pct rank | replica-resampling 95% | evals |",
+        "|---|---|---|---|",
+    ]
     for row in sci_lit.iter_rows(named=True):
-        lines.append(f"| {row['model']} | {row['mean_pct']:.3f} | {row['n_evals']} |")
+        interval = f"{row['mean_pct_low']:.3f}–{row['mean_pct_high']:.3f}"
+        lines.append(f"| {row['model']} | {row['mean_pct']:.3f} | {interval} | {row['n_evals']} |")
     if excluded:
         lines += ["", f"Below the coverage threshold, not ranked: {', '.join(excluded)}."]
 
@@ -1533,12 +2479,12 @@ SLIDE_NOTES = {
     "coverage": (
         "Where the sweep stands",
         "Agentic cells use fixed dev sets; FrontierScience, base and sentinel cells use full "
-        "scores. Unsupported harness/model combinations remain blank by design.",
+        "scores. Cell text is the valid replica count; unsupported combinations remain N/A.",
     ),
     "scores_sci-lit": (
         "Agentic dev scores",
         "Fixed-sample agentic scores are the primary comparison. Valid repeated runs are "
-        "averaged, with min–max whiskers; LitSearch-rerank remains a full-set base eval.",
+        "averaged, with min–max whiskers; LitSearch-rerank remains a full-set direct eval.",
     ),
     "scores_sentinel": (
         "Sentinel scores",
@@ -1554,30 +2500,51 @@ SLIDE_NOTES = {
     "profile": (
         "Cross-eval profile",
         "Percentile rank across agentic dev, FrontierScience and sentinel evals. The per-eval "
-        "n is on the axis; broken lines mark missing scores.",
+        "n is on the axis; whiskers are 95% replica-resampling intervals and broken lines mark "
+        "missing scores.",
     ),
     "dev_vs_full": (
         "Do the dev sets preserve full-set results?",
         "Trusted paired results only. The fixed subsets are useful for iteration, but deviations "
-        "from the diagonal show why dev scores should not be mixed with full-benchmark history.",
+        "from the diagonal show why dev scores should not be mixed with full-benchmark history; "
+        "rules span replica min–max.",
     ),
     "covariance": (
-        "Which base evals predict agentic performance?",
+        "Which proxy evals predict agentic performance?",
         "Rank-standardized covariance over every within-model Cartesian replica pairing. Pair "
         "counts are sensitivity points rather than independent observations; use model count to "
         "judge coverage.",
     ),
+    "deepscholar_ifeval": (
+        "Can a simple eval predict DeepScholar-Bench?",
+        "Points are coordinate-wise replica medians and two-dimensional whiskers span replica "
+        "minima and maxima. The fitted line and 95% band still use every valid IFEval × "
+        "DeepScholar replica combination; this is descriptive with the current small model pool.",
+    ),
+    "deepscholar_cheap_regression": (
+        "Can cheap direct evals predict DeepScholar-Bench?",
+        "The cheap set is LitSearch-rerank, IFEval, MMLU and MATH-500: direct runs with no "
+        "tools or external judge. Every displayed prediction holds that model out; bootstrap "
+        "intervals draw from the valid replicas in each model/eval cell.",
+    ),
+    "deepscholar_proxy_regression": (
+        "Can the available proxy suite predict DeepScholar-Bench?",
+        "Ridge regularization is necessary because seven predictors are fit over only eight "
+        "models. Every displayed prediction holds that model out; bootstrap intervals draw "
+        "from the three valid replicas in each model/eval cell. Treat coefficient signs as "
+        "exploratory because the proxy evaluations are strongly correlated.",
+    ),
     "eval_pca": (
         "What structure do the evaluations share?",
         "PCA summarizes the pairwise-expanded rank-covariance matrix. Similar loadings and high "
-        "absolute pair correlations flag possible redundancy; redundancy whiskers span the "
-        "replica-pairing range. Signs of PCA components are arbitrary, and all relationships "
-        "remain descriptive.",
+        "absolute pair correlations flag redundancy. PCA whiskers are replica-resampling 95% "
+        "intervals; redundancy whiskers span all replica pairings. Signs remain arbitrary.",
     ),
     "summary": (
         "Overall standing",
         "FrontierScience and sentinels provide context beside the sci-lit composite; neither is "
-        "folded into the primary standing.",
+        "folded into the primary standing. Whiskers are 95% intervals after resampling one valid "
+        "replica per model/eval and recomputing all ranks.",
     ),
 }
 
@@ -1639,6 +2606,63 @@ def write_deck(
         </section>"""
     ]
 
+    predictor_taxonomy = _table(
+        ["evaluation", "cheap for iteration?", "base-compatible as measured?", "role"],
+        [
+            [
+                "LitSearch-rerank",
+                "Yes",
+                "No — chat + structured generation",
+                "Cheap post-training science proxy",
+            ],
+            [
+                "IFEval",
+                "Yes",
+                "No — instruction following by definition",
+                "Cheap post-training control",
+            ],
+            [
+                "MMLU",
+                "Yes",
+                "Mixed here; MC/RC is base-compatible",
+                "Candidate for both tracks after protocol separation",
+            ],
+            [
+                "MATH-500",
+                "Yes",
+                "Mixed here; completion/BPB is base-compatible",
+                "Candidate for both tracks after protocol separation",
+            ],
+            [
+                "FrontierScience Olympiad",
+                "No — judged, long generation",
+                "No — current task is chat + judge",
+                "Medium-cost capability proxy",
+            ],
+            [
+                "FrontierScience Research success + rubric",
+                "No — judged, long generation",
+                "No — current task is chat + judge",
+                "Downstream-like; two metrics from the same answers",
+            ],
+        ],
+    )
+    slides.append(
+        f"""<section class="slide">
+          <p class="eyebrow">Predicting DeepScholar-Bench</p>
+          <h2>“Cheap” and “base-compatible” are different axes</h2>
+          <p class="sub">The current matrix supports a cheap → DeepScholar analysis on
+             instruction checkpoints. It does not contain pre-instruction checkpoints, so it
+             cannot yet estimate base → post-training DeepScholar predictiveness.</p>
+          {predictor_taxonomy}
+          <h3>Recommended base-checkpoint panel</h3>
+          <p class="sub">MMLU MC/RC, SciQ MC/RC, GPQA MC, QASPER yes/no RC,
+             SciRIFF yes/no RC, and LabBench DbQA/ProtocolQA MC. Add MATH completion or BPB
+             if generation cost is acceptable. Run these before instruction tuning, then pair
+             them with DeepScholar on the corresponding post-trained checkpoint.</p>
+        </section>"""
+    )
+
     for name in generated:
         title, note = SLIDE_NOTES[name]
         png = out_dir / f"{name}.png"
@@ -1653,8 +2677,16 @@ def write_deck(
         )
 
     standing = _table(
-        ["model", "mean pct rank", "evals"],
-        [[r["model"], f"{r['mean_pct']:.3f}", r["n_evals"]] for r in sci_lit.iter_rows(named=True)],
+        ["model", "mean pct rank", "replica-resampling 95%", "evals"],
+        [
+            [
+                r["model"],
+                f"{r['mean_pct']:.3f}",
+                f"{r['mean_pct_low']:.3f}–{r['mean_pct_high']:.3f}",
+                r["n_evals"],
+            ]
+            for r in sci_lit.iter_rows(named=True)
+        ],
     )
     suspect = _table(
         ["model", "eval", "score", "reason"],
@@ -1821,12 +2853,17 @@ def main() -> None:
 
     meta = load_metadata(args.metadata)
     df, scope_scores, run_scores = load_scores(args.csv, meta)
-    ranked = add_ranks(df)
+    rank_intervals, composite_intervals = bootstrap_rank_intervals(run_scores, meta)
+    ranked = add_ranks(df).join(rank_intervals, on=["model", "eval"], how="left")
 
     n_sci_lit = len(meta.sci_lit_evals())
     n_frontier = meta.evals.filter(pl.col("family") == "frontier-science").height
     n_sentinel = meta.evals.filter(pl.col("family") == "sentinel").height
-    sci_lit_all = composite(ranked, "sci-lit")
+    sci_lit_all = composite(ranked, "sci-lit").join(
+        composite_intervals.filter(pl.col("family") == "sci-lit").drop("family"),
+        on="model",
+        how="left",
+    )
     sci_lit = sci_lit_all.filter(pl.col("n_evals") >= args.min_coverage).with_columns(
         label=pl.format("n={}/{}", pl.col("n_evals"), pl.lit(n_sci_lit))
     )
@@ -1837,6 +2874,11 @@ def main() -> None:
     def companion_scores(family: str, n_evals: int) -> pl.DataFrame:
         return (
             model_grid.join(composite(ranked, family), on="model", how="left")
+            .join(
+                composite_intervals.filter(pl.col("family") == family).drop("family"),
+                on="model",
+                how="left",
+            )
             .with_columns(
                 n_evals=pl.col("n_evals").fill_null(0),
                 display_pct=pl.col("mean_pct").fill_null(0.0),
@@ -1848,6 +2890,10 @@ def main() -> None:
     sentinel = companion_scores("sentinel", n_sentinel)
 
     print(f"writing to {args.out}")
+    rank_intervals.write_csv(args.out / "rank_bootstrap_intervals.csv")
+    composite_intervals.write_csv(args.out / "composite_bootstrap_intervals.csv")
+    print(f"  {args.out / 'rank_bootstrap_intervals.csv'}")
+    print(f"  {args.out / 'composite_bootstrap_intervals.csv'}")
     generated = [
         "coverage",
         "scores_sci-lit",
@@ -1872,14 +2918,80 @@ def main() -> None:
         generated.append("dev_vs_full")
     save(chart_covariance(run_scores), args.out, "covariance", args.formats)
     generated.append("covariance")
+    deepscholar_pairs = deepscholar_ifeval_pairs(run_scores)
+    deepscholar_pairs.write_csv(args.out / "deepscholar_ifeval_pairs.csv")
+    print(f"  {args.out / 'deepscholar_ifeval_pairs.csv'}")
+    regression_band, regression_summary = bootstrap_deepscholar_regression(deepscholar_pairs)
+    if not regression_band.is_empty():
+        regression_band.write_csv(args.out / "deepscholar_ifeval_bootstrap.csv")
+        pl.DataFrame([regression_summary]).write_csv(args.out / "deepscholar_ifeval_regression.csv")
+        print(f"  {args.out / 'deepscholar_ifeval_bootstrap.csv'}")
+        print(f"  {args.out / 'deepscholar_ifeval_regression.csv'}")
+        save(
+            chart_deepscholar_ifeval(
+                deepscholar_pairs,
+                regression_band,
+                regression_summary,
+            ),
+            args.out,
+            "deepscholar_ifeval",
+            args.formats,
+        )
+        generated.append("deepscholar_ifeval")
+    regression_specs = [
+        (
+            "deepscholar_cheap_regression",
+            CHEAP_EVALS,
+            "Can cheap direct evals predict DeepScholar-Bench?",
+            "cheap direct evals",
+        ),
+        (
+            "deepscholar_proxy_regression",
+            PROXY_EVALS,
+            "Can available proxy evals predict DeepScholar-Bench?",
+            "available proxy evals",
+        ),
+    ]
+    for output_name, predictor_evals, title, predictor_label in regression_specs:
+        predictions, coefficients, bootstrap, regression_summary = (
+            bootstrap_deepscholar_proxy_regression(run_scores, predictor_evals)
+        )
+        if predictions.is_empty():
+            continue
+        predictions.write_csv(args.out / f"{output_name}_predictions.csv")
+        coefficients.write_csv(args.out / f"{output_name}_coefficients.csv")
+        bootstrap.write_csv(args.out / f"{output_name}_bootstrap.csv")
+        pl.DataFrame([regression_summary]).write_csv(args.out / f"{output_name}_summary.csv")
+        for suffix in ["predictions", "coefficients", "bootstrap", "summary"]:
+            print(f"  {args.out / f'{output_name}_{suffix}.csv'}")
+        save(
+            chart_deepscholar_proxy_regression(
+                predictions,
+                coefficients,
+                regression_summary,
+                predictor_evals,
+                title=title,
+                predictor_label=predictor_label,
+            ),
+            args.out,
+            output_name,
+            args.formats,
+        )
+        generated.append(output_name)
     pairwise = pairwise_replica_correlations(run_scores, ALL_ANALYSIS_EVALS, ALL_ANALYSIS_EVALS)
     pairwise.write_csv(args.out / "pairwise_replica_correlations.csv")
     print(f"  {args.out / 'pairwise_replica_correlations.csv'}")
-    base_agentic = pairwise_replica_correlations(run_scores, AGENTIC_EVALS, BASE_EVALS)
-    base_agentic.write_csv(args.out / "base_agentic_correlations.csv")
-    print(f"  {args.out / 'base_agentic_correlations.csv'}")
+    proxy_agentic = pairwise_replica_correlations(run_scores, AGENTIC_EVALS, PROXY_EVALS)
+    proxy_agentic.write_csv(args.out / "proxy_agentic_correlations.csv")
+    print(f"  {args.out / 'proxy_agentic_correlations.csv'}")
     pca_variance, pca_loadings, redundancy, pca_diagnostics = analyze_eval_pca(
         pairwise, ALL_ANALYSIS_EVALS
+    )
+    pca_variance, pca_loadings = bootstrap_pca_intervals(
+        run_scores,
+        pca_variance,
+        pca_loadings,
+        ALL_ANALYSIS_EVALS,
     )
     pca_variance.write_csv(args.out / "eval_pca_variance.csv")
     pca_loadings.write_csv(args.out / "eval_pca_loadings.csv")
