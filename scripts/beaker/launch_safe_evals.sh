@@ -39,7 +39,7 @@ usage() {
 Usage: scripts/beaker/launch_safe_evals.sh [options]
 
 Launches non-following Beaker jobs for one model:
-  core      litsearch_rerank, ifeval_ood, math500
+  core      litsearch_rerank, ifeval_ood, math500; Gemma MATH runs separately
   math      math500 only (uses model-specific generation defaults)
   mmlu      mmlu (kept separate; prone to OOM, needs its own job)
   paper     litsearch
@@ -435,6 +435,10 @@ core_tasks+=(--task ifeval_ood)
 if [[ -n "$LIMIT" ]]; then
     core_tasks+=(--override "limit=${LIMIT}" --override "seed=${SAMPLE_SEED}")
 fi
+# Gemma MATH-500 must use the chat-completion compatibility path, while the
+# other Core tasks retain their validated provider protocol. Preserve a copy
+# of the Core task list before adding MATH so Gemma can submit two experiments.
+core_no_math_tasks=("${core_tasks[@]}")
 core_tasks+=(--task math500)
 core_tasks+=("${math500_task_overrides[@]}")
 math_tasks=(--task math500 "${math500_task_overrides[@]}")
@@ -471,12 +475,27 @@ run_launch() {
 }
 
 if [[ "$ONLY" == all || "$ONLY" == core ]]; then
-    run_launch core \
-        "${common_args[@]}" \
-        --name "${MODEL_SLUG}-safe-core${SCOPE_SUFFIX}-${RUN_TAG}" \
-        "${core_tasks[@]}" \
-        --harness default \
-        "${core_provider_overrides[@]}"
+    if [[ "$MODEL" == "google/gemma-4-26B-A4B-it" ]]; then
+        run_launch core \
+            "${common_args[@]}" \
+            --name "${MODEL_SLUG}-safe-core${SCOPE_SUFFIX}-${RUN_TAG}" \
+            "${core_no_math_tasks[@]}" \
+            --harness default \
+            "${core_provider_overrides[@]}"
+        run_launch math \
+            "${common_args[@]}" \
+            --name "${MODEL_SLUG}-math500${SCOPE_SUFFIX}-${RUN_TAG}" \
+            "${math_tasks[@]}" \
+            --harness default \
+            "${math_provider_overrides[@]}"
+    else
+        run_launch core \
+            "${common_args[@]}" \
+            --name "${MODEL_SLUG}-safe-core${SCOPE_SUFFIX}-${RUN_TAG}" \
+            "${core_tasks[@]}" \
+            --harness default \
+            "${core_provider_overrides[@]}"
+    fi
 fi
 
 if [[ "$ONLY" == math ]]; then

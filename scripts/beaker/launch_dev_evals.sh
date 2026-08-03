@@ -67,7 +67,8 @@ Options:
   -h, --help               Show this help
 
 Use --print-only before launching a new model profile. The default `all` scope
-submits six jobs; it does not follow them.
+submits six jobs (seven for Gemma4 26B-A4B because MATH runs separately); it
+does not follow them.
 EOF
 }
 

@@ -16,8 +16,9 @@ usage() {
     cat <<'EOF'
 Usage: scripts/beaker/launch_replica_wave.sh --replica N [options]
 
-Launches 35 Beaker experiments:
-  - 16 full jobs: Core and MMLU for all eight included models
+Launches 36 Beaker experiments:
+  - 17 full jobs: Core and MMLU for all eight included models, with Gemma
+    MATH-500 split into its required chat-wrapped job
   - 19 fixed-dev agentic jobs for supported model/harness combinations
 
 FrontierScience, DeepScholar, Gemma4 12B, and unsupported tool-harness cells
@@ -105,4 +106,4 @@ for spec in "${AGENTIC[@]}"; do
 done
 
 echo
-echo "Replica ${REPLICA}: ${MODE}; expected experiments: 35; run tag: ${RUN_TAG}"
+echo "Replica ${REPLICA}: ${MODE}; expected experiments: 36; run tag: ${RUN_TAG}"
