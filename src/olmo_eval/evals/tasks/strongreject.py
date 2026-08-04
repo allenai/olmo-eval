@@ -8,12 +8,7 @@ Paper: https://arxiv.org/abs/2402.10260
 
 Usage:
 
-    olmo-eval run -m llama3.1-8b -t strongreject:sr_judge \
-    -o auxiliary_providers.sr_judge.kind=vllm_server \
-    -o auxiliary_providers.sr_judge.model=google/gemma-2b \
-    -o auxiliary_providers.sr_judge.tokenizer=qylu4156/strongreject-15k-v1 \
-    -o auxiliary_providers.sr_judge.kwargs.enable_lora=true \
-    -o auxiliary_providers.sr_judge.kwargs.lora_modules=[strongreject=qylu4156/strongreject-15k-v1]
+    olmo-eval run -m llama3.1-8b -t strongreject:sr_judge
 """
 
 import logging
