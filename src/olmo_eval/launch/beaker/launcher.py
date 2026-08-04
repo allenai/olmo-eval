@@ -894,7 +894,11 @@ class BeakerLauncher:
         # an otherwise compatible vLLM impossible to resolve.
         constraints = "/tmp/cuda-constraints.txt"
         steps.append(
-            f"uv pip freeze -q | grep -E '^(torch|nvidia-)' "
+            # Match torch itself, but not companion packages such as
+            # torchvision or torchaudio. Provider releases pin those companions
+            # alongside their Torch generation and must be allowed to replace
+            # the versions inherited from the base image.
+            f"uv pip freeze -q | grep -E '^(torch(==| @ )|nvidia-)' "
             f"| grep -vE '^nvidia-cutlass-dsl' > {constraints}"
         )
 
