@@ -89,6 +89,56 @@ class ChatFormatter(Formatter):
 
 
 @dataclass(slots=True)
+class MultipleChoiceChatFormatter(Formatter):
+    """Format multiple-choice instances as model-native chat messages."""
+
+    system_prompt: str = ""
+    user_template: str = "{question}\n\n{choices}"
+    choice_template: str = "{label}. {choice}"
+    assistant_template: str = "ANSWER: {answer}"
+    fewshot_answer_key: str | None = "mc_answer"
+
+    @property
+    def request_type(self) -> RequestType:
+        return RequestType.CHAT
+
+    def _format_user(self, instance: Instance) -> str:
+        choices = "\n".join(
+            self.choice_template.format(label=chr(ord("A") + i), choice=choice)
+            for i, choice in enumerate(instance.choices or ())
+        )
+        return self.user_template.format(question=instance.question, choices=choices)
+
+    def format(
+        self,
+        instance: Instance,
+        fewshot: list[Instance] | None = None,
+    ) -> LMRequest:
+        messages: list[dict[str, str]] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        for example in fewshot or []:
+            answer = example.gold_answer or ""
+            if self.fewshot_answer_key is not None:
+                answer = example.metadata.get(self.fewshot_answer_key, answer)
+            messages.extend(
+                (
+                    {"role": "user", "content": self._format_user(example)},
+                    {
+                        "role": "assistant",
+                        "content": self.assistant_template.format(answer=answer),
+                    },
+                )
+            )
+        messages.append({"role": "user", "content": self._format_user(instance)})
+        return LMRequest(
+            request_type=self.request_type,
+            messages=tuple(messages),
+            system_prompt=self.system_prompt if self.system_prompt else None,
+        )
+
+
+@dataclass(slots=True)
 class CompletionFormatter(Formatter):
     """Format instances as completion prompts."""
 

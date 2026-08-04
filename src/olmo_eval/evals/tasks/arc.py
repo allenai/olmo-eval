@@ -13,6 +13,12 @@ from olmo_eval.common.metrics import (
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common.chat_mc import (
+    CHAT_MC_ACCURACY,
+    CHAT_MC_ANSWER_EXTRACTOR,
+    CHAT_MC_FORMATTER,
+    CHAT_MC_SAMPLING,
+)
 from olmo_eval.evals.tasks.common.format_helpers import format_mc as _format_mc
 from olmo_eval.evals.tasks.common.format_helpers import format_rc as _format_rc
 from olmo_eval.evals.tasks.constants.arc import (
@@ -144,6 +150,10 @@ class ARCBase(Task):
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
+        formatter = self.config.formatter
+        if formatter is not None and formatter.request_type == RequestType.CHAT:
+            return formatter.format(instance, self.get_fewshot())
+
         if self._is_bpb():
             return self._format_bpb_request(instance)
 
@@ -222,6 +232,18 @@ register_variant(
     split=Split.TEST,
     metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
+register_variant(
+    "arc_easy",
+    "chat_olmo3base",
+    formatter=CHAT_MC_FORMATTER,
+    num_fewshot=5,
+    fewshot_source="olmes_arc_easy_fixed",
+    split=Split.TEST,
+    metrics=(CHAT_MC_ACCURACY,),
+    primary_metric=CHAT_MC_ACCURACY,
+    sampling_params=CHAT_MC_SAMPLING,
+    answer_extractor=CHAT_MC_ANSWER_EXTRACTOR,
+)
 register_variant("arc_easy", "olmes", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed")
 register_variant("arc_easy", "full")
 
@@ -245,6 +267,18 @@ register_variant(
     num_fewshot=5,
     fewshot_source="olmes_arc_challenge_fixed",
     split=Split.ALL,
+)
+register_variant(
+    "arc_challenge",
+    "chat_olmo3base",
+    formatter=CHAT_MC_FORMATTER,
+    num_fewshot=5,
+    fewshot_source="olmes_arc_challenge_fixed",
+    split=Split.ALL,
+    metrics=(CHAT_MC_ACCURACY,),
+    primary_metric=CHAT_MC_ACCURACY,
+    sampling_params=CHAT_MC_SAMPLING,
+    answer_extractor=CHAT_MC_ANSWER_EXTRACTOR,
 )
 register_variant(
     "arc_challenge", "olmes", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed"

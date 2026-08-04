@@ -23,6 +23,10 @@ make_suite(
     name="arc:mc:olmo3base",
     tasks=("arc_challenge:mc_olmo3base", "arc_easy:mc:olmo3base"),
 )
+make_suite(
+    name="arc:chat:olmo3base",
+    tasks=("arc_challenge:chat_olmo3base", "arc_easy:chat_olmo3base"),
+)
 
 # -- MMLU ---------------------------------------------------------------------
 
@@ -201,6 +205,17 @@ make_suite(
         "medmcqa:mc:olmo3base",
         "medqa_en:mc:olmo3base",
         "sciq:mc:olmo3base",
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+make_suite(
+    name="olmobase:mcqa_stem:chat",
+    tasks=(
+        get_suite("arc:chat:olmo3base"),
+        get_suite("mmlu:stem:chat"),
+        "medmcqa:chat_olmo3base",
+        "medqa_en:chat_olmo3base",
+        "sciq:chat_olmo3base",
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
 )

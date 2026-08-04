@@ -171,6 +171,7 @@ gpt_oss_harness_overrides=()
 gpt_oss_sage_harness_overrides=()
 math500_task_overrides=()
 mmlu_task_overrides=()
+base_eval_task_overrides=()
 olmo3_expertqa_system_prompt="You are a web-search assistant for attributed question answering. Your first response to every question MUST be a call to serper_google_webpage_search. Do not answer from memory and do not emit the final JSON before at least one search result has been returned. After searching, fetch promising pages with serper_fetch_webpage_content, then return only the JSON object required by the user prompt. Use only those two tool names and quote only text copied from fetched page content."
 
 # Prompt logprobs materialize a float32 token-by-vocabulary matrix. Keep the
@@ -186,6 +187,7 @@ mmlu_provider_overrides=(
     --override "provider.kwargs.gpu_memory_utilization=${MMLU_GPU_MEMORY_UTILIZATION}"
 )
 mmlu_suite="mmlu"
+base_eval_suite="olmobase:mcqa_stem"
 
 # Qwen3.5 is a unified vision-language model with a hybrid GDN/MoE language
 # stack. The 35B checkpoint does not leave enough useful headroom on one H100,
@@ -214,6 +216,7 @@ case "$MODEL" in
             --override "temperature=0"
         )
         mmlu_suite="mmlu:chat"
+        base_eval_suite="olmobase:mcqa_stem:chat"
         mmlu_provider_overrides[1]="provider.max_model_len=8192"
         mmlu_provider_overrides+=(--override "provider.kwargs.reasoning_parser=gemma4")
         ;;
@@ -321,6 +324,7 @@ case "$MODEL" in
             --override "temperature=0"
         )
         mmlu_suite="mmlu:chat"
+        base_eval_suite="olmobase:mcqa_stem:chat"
         # The medium-effort canaries exhausted both 4K and 8K completion
         # budgets on simple MMLU items. The paired low-effort seed-42 canary
         # completed 285/285 with zero caps or empty outputs and improved from
@@ -427,9 +431,24 @@ if [[ "$MODEL" == "Qwen/Qwen3.5-9B" || "$MODEL" == "Qwen/Qwen3.5-35B-A3B" ]]; th
     gpqa_provider_overrides+=(--override "provider.kwargs.gdn_prefill_backend=triton")
     base_eval_provider_overrides+=(--override "provider.kwargs.gdn_prefill_backend=triton")
 fi
+case "$MODEL" in
+    google/gemma-4-26B-A4B-it)
+        base_eval_provider_overrides+=(
+            --override "provider.kwargs.reasoning_parser=gemma4"
+        )
+        ;;
+    openai/gpt-oss-20b)
+        base_eval_provider_overrides[1]="provider.max_model_len=16384"
+        base_eval_provider_overrides+=(
+            --override "provider.kwargs.reasoning_parser=openai_gptoss"
+            --override "provider.kwargs.chat_template_kwargs.reasoning_effort=low"
+        )
+        base_eval_task_overrides=(--override "max_tokens=8192")
+        ;;
+esac
 
 core_tasks=(--task litsearch_rerank)
-base_eval_tasks=(--task olmobase:mcqa_stem)
+base_eval_tasks=(--task "$base_eval_suite")
 gpqa_tasks=(--task gpqa_diamond:mc)
 paper_tasks=(--task litsearch)
 sage_tasks=(--task sage_open_ended)
@@ -463,6 +482,28 @@ if [[ ("$ONLY" == all || "$ONLY" == mmlu) && (-n "$LIMIT" || ${#mmlu_task_overri
         fi
         mmlu_tasks+=("${mmlu_task_overrides[@]}")
     done <<<"$mmlu_expanded_tasks"
+fi
+if [[ "$ONLY" == base && (-n "$LIMIT" || ${#base_eval_task_overrides[@]} -gt 0) ]]; then
+    # As with MMLU above, suite-level overrides do not reach expanded tasks.
+    # Retain the suite for aggregation metadata and attach overrides to every
+    # leaf task explicitly.
+    if ! base_eval_expanded_tasks="$(
+        uv run python -c 'import sys; import olmo_eval.evals; from olmo_eval.evals.suites import get_suite; print("\n".join(get_suite(sys.argv[1]).expand()))' "$base_eval_suite"
+    )"; then
+        echo "Failed to expand the base-eval suite for task overrides." >&2
+        exit 1
+    fi
+    while IFS= read -r base_eval_task; do
+        [[ -n "$base_eval_task" ]] || continue
+        base_eval_tasks+=(--task "$base_eval_task")
+        if [[ -n "$LIMIT" ]]; then
+            base_eval_tasks+=(
+                --override "limit=${LIMIT}"
+                --override "seed=${SAMPLE_SEED}"
+            )
+        fi
+        base_eval_tasks+=("${base_eval_task_overrides[@]}")
+    done <<<"$base_eval_expanded_tasks"
 fi
 expertqa_tasks+=(
     "${qwen35_expertqa_task_overrides[@]}"

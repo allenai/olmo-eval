@@ -5,6 +5,7 @@ import pytest
 from olmo_eval.common.formatters import (
     ChatFormatter,
     CompletionFormatter,
+    MultipleChoiceChatFormatter,
     MultipleChoiceFormatter,
     PPLFormatter,
 )
@@ -144,6 +145,42 @@ class TestCompletionFormatter:
         request = formatter.format(instance, None)
 
         assert request.prompt == "Test"
+
+
+class TestMultipleChoiceChatFormatter:
+    def test_formats_choices_and_fewshot_as_chat(self):
+        formatter = MultipleChoiceChatFormatter(
+            system_prompt="Return the answer letter.",
+        )
+        instance = Instance(
+            question="What color is the sky?",
+            gold_answer="B",
+            choices=("Red", "Blue", "Green"),
+        )
+        fewshot = [
+            Instance(
+                question="What color is grass?",
+                gold_answer="Green",
+                choices=("Green", "Purple"),
+                metadata={"mc_answer": "A"},
+            )
+        ]
+
+        request = formatter.format(instance, fewshot)
+
+        assert request.request_type == RequestType.CHAT
+        assert request.messages == (
+            {"role": "system", "content": "Return the answer letter."},
+            {
+                "role": "user",
+                "content": "What color is grass?\n\nA. Green\nB. Purple",
+            },
+            {"role": "assistant", "content": "ANSWER: A"},
+            {
+                "role": "user",
+                "content": "What color is the sky?\n\nA. Red\nB. Blue\nC. Green",
+            },
+        )
 
 
 class TestMultipleChoiceFormatter:

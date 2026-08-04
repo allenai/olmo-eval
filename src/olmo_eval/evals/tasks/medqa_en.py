@@ -8,6 +8,12 @@ from olmo_eval.common.metrics import BPBMetricInstanceAvg, LogprobPerCharMCAccur
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common.chat_mc import (
+    CHAT_MC_ACCURACY,
+    CHAT_MC_ANSWER_EXTRACTOR,
+    CHAT_MC_FORMATTER,
+    CHAT_MC_SAMPLING,
+)
 from olmo_eval.evals.tasks.common.format_helpers import (
     format_mc as _format_mc,
 )
@@ -60,6 +66,10 @@ class MedQAEn(Task):
 
     def format_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
+        formatter = self.config.formatter
+        if formatter is not None and formatter.request_type == RequestType.CHAT:
+            return formatter.format(instance, fewshot)
+
         is_mc = self.config.formatter is not None
 
         parts: list[str] = []
@@ -92,3 +102,14 @@ register_variant("medqa_en", "rc")
 register_variant("medqa_en", "mc", formatter=MultipleChoiceFormatter())
 register_variant("medqa_en", "bpb", metrics=(BPBMetricInstanceAvg(),))
 register_variant("medqa_en", "olmo3base", num_fewshot=5, fewshot_seed=1234)
+register_variant(
+    "medqa_en",
+    "chat_olmo3base",
+    formatter=CHAT_MC_FORMATTER,
+    metrics=(CHAT_MC_ACCURACY,),
+    primary_metric=CHAT_MC_ACCURACY,
+    sampling_params=CHAT_MC_SAMPLING,
+    answer_extractor=CHAT_MC_ANSWER_EXTRACTOR,
+    num_fewshot=5,
+    fewshot_seed=1234,
+)
