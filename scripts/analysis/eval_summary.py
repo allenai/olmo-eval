@@ -670,11 +670,7 @@ def chart_coverage(df: pl.DataFrame, meta: Metadata) -> alt.HConcatChart:
     return alt.hconcat(*panels, spacing=26).properties(
         title=alt.Title(
             "Eval coverage",
-            subtitle=[
-                "Cell shows the number of valid analysis replicas at the selected scope.",
-                "N/A is an unsupported harness combination; 0 is not run or excluded.",
-                "Color retains coverage status; scores and provenance remain in tooltips.",
-            ],
+            subtitle="Cell: valid replicas · N/A: unsupported · 0: not run or excluded",
         )
     )
 
@@ -730,25 +726,21 @@ def chart_scores(df: pl.DataFrame, meta: Metadata, family: str) -> alt.FacetChar
         ),
     )
     if family == "sci-lit":
-        title = "Agentic dev + base scores"
-        subtitle = (
-            "Bars are replica means; whiskers are replica min–max. Agentic panels use fixed-dev "
-            "scores; rerank remains full/base."
-        )
+        title = "Sci-lit scores"
+        subtitle = "Replica mean · whiskers: min–max · agentic: fixed dev · rerank: full set"
         facet_width, row_step = 235, 23
     elif family == "frontier-science":
         title = "FrontierScience scores"
-        subtitle = (
-            "Bars are replica means; whiskers are replica min–max. Olympiad accuracy uses 100 "
-            "closed-form questions; Research success and rubric use the same 60 open-ended "
-            "questions."
-        )
+        subtitle = [
+            "Replica mean · whiskers: min–max",
+            "Research rubric: raw score · Research success: thresholded rubric",
+        ]
         # Three equal, presentation-scale panels fill the slide instead of
         # leaving the FrontierScience charts clustered in its left half.
         facet_width, row_step = 315, 27
     else:
         title = "Sentinel scores"
-        subtitle = "Bars are full-set replica means; whiskers are replica min–max."
+        subtitle = "Full-set replica mean · whiskers: min–max"
         facet_width, row_step = 300, 27
 
     return (
@@ -819,7 +811,7 @@ def chart_profile(ranked: pl.DataFrame, meta: Metadata, models: list[str]) -> al
                 ticks=False,
             ),
         ),
-        y=alt.Y("pct:Q", title="percentile rank within eval", scale=alt.Scale(domain=[0, 1])),
+        y=alt.Y("pct:Q", title="Percentile rank", scale=alt.Scale(domain=[0, 1])),
         color=color,
     )
     lines = base.mark_line(strokeWidth=2, invalid="break-paths-show-domains")
@@ -867,8 +859,7 @@ def chart_profile(ranked: pl.DataFrame, meta: Metadata, models: list[str]) -> al
             title=alt.Title(
                 "Cross-eval profile",
                 subtitle=(
-                    "Agentic dev, FrontierScience and sentinels; 1.0 is best-in-eval. "
-                    "Whiskers are 95% replica-resampling intervals; gaps are unmeasured."
+                    "1 = best within eval · whiskers: replica-bootstrap 95% · gaps: unmeasured"
                 ),
             ),
         )
@@ -917,7 +908,7 @@ def chart_summary(
         height=alt.Step(29),
         title=alt.Title(
             "Sci-lit composite",
-            subtitle=f"mean percentile rank over {n_sci_lit} evals",
+            subtitle=f"Mean percentile rank · {n_sci_lit} evals",
         ),
     )
 
@@ -963,25 +954,22 @@ def chart_summary(
     middle = companion_panel(
         frontier,
         "FrontierScience",
-        "mean rank over three measures",
+        "Mean rank · 3 measures",
         SERIES[2],
     )
     right = companion_panel(
         sentinel,
         "Sentinels",
-        "regression monitors, not the objective",
+        "Comparison only",
         SENTINEL,
     )
     return alt.hconcat(left, middle, right, spacing=24).properties(
         title=alt.Title(
             "Overall standing",
-            subtitle=[
-                "FrontierScience and sentinels are shown alongside, never folded into the "
-                "sci-lit composite.",
-                f"Ranks are taken over {pool[0]}-{pool[1]} models per eval, "
-                "so small gaps between bars are not meaningful; whiskers are 95% "
-                "replica-resampling intervals.",
-            ],
+            subtitle=(
+                f"Composite: Sci-lit only · ranks span {pool[0]}–{pool[1]} models/eval · "
+                "whiskers: replica-bootstrap 95%"
+            ),
         )
     )
 
@@ -1105,8 +1093,8 @@ def chart_dev_vs_full(pairs: pl.DataFrame) -> alt.FacetChart | None:
         base.transform_filter(alt.datum.kind == "diagonal")
         .mark_line(color=AXIS, strokeDash=[5, 4])
         .encode(
-            x=alt.X("full_score:Q", title="trusted full-set score"),
-            y=alt.Y("dev_score:Q", title="fixed-dev score"),
+            x=alt.X("full_score:Q", title="Full-set score"),
+            y=alt.Y("dev_score:Q", title="Fixed-dev score"),
             order="diag_order:Q",
         )
     )
@@ -1114,8 +1102,8 @@ def chart_dev_vs_full(pairs: pl.DataFrame) -> alt.FacetChart | None:
         base.transform_filter(alt.datum.kind == "point")
         .mark_point(filled=True, color=PRIMARY, size=85)
         .encode(
-            x=alt.X("full_score:Q", title="trusted full-set score"),
-            y=alt.Y("dev_score:Q", title="fixed-dev score"),
+            x=alt.X("full_score:Q", title="Full-set score"),
+            y=alt.Y("dev_score:Q", title="Fixed-dev score"),
             tooltip=[
                 "model:N",
                 "eval:N",
@@ -1149,12 +1137,8 @@ def chart_dev_vs_full(pairs: pl.DataFrame) -> alt.FacetChart | None:
         .resolve_scale(x="independent", y="independent")
         .properties(
             title=alt.Title(
-                "Do fixed dev sets preserve full-set ordering?",
-                subtitle=[
-                    "Only model/eval pairs with trusted full and dev results are shown.",
-                    "Rules span replica min–max; dashed line is dev = full.",
-                    "Rho is descriptive at these small n values.",
-                ],
+                "Fixed dev vs. full set",
+                subtitle="Trusted pairs · whiskers: replica min–max · dashed line: dev = full",
             )
         )
     )
@@ -1409,7 +1393,7 @@ def chart_deepscholar_ifeval(
     )
     x_encoding = alt.X(
         "ifeval_score:Q",
-        title="IFEval prompt-level loose accuracy (full set)",
+        title="IFEval accuracy (full)",
         scale=alt.Scale(zero=False),
         axis=alt.Axis(format=".2f"),
     )
@@ -1420,7 +1404,7 @@ def chart_deepscholar_ifeval(
             x=x_encoding,
             y=alt.Y(
                 "fit_low:Q",
-                title="DeepScholar-Bench geomean_fixed (dev10)",
+                title="DeepScholar geomean (dev10)",
                 scale=alt.Scale(zero=False),
                 axis=alt.Axis(format=".3f"),
             ),
@@ -1484,13 +1468,13 @@ def chart_deepscholar_ifeval(
         .encode(
             x=alt.X(
                 "ifeval_median:Q",
-                title="IFEval prompt-level loose accuracy (full set)",
+                title="IFEval accuracy (full)",
                 scale=alt.Scale(zero=False),
                 axis=alt.Axis(format=".2f"),
             ),
             y=alt.Y(
                 "deepscholar_median:Q",
-                title="DeepScholar-Bench geomean_fixed (dev10)",
+                title="DeepScholar geomean (dev10)",
                 scale=alt.Scale(zero=False),
                 axis=alt.Axis(format=".3f"),
             ),
@@ -1509,17 +1493,12 @@ def chart_deepscholar_ifeval(
         )
     )
     subtitle = [
-        "One point per model: coordinate-wise replica median; x/y whiskers span replica min–max.",
+        "Points: replica median · whiskers: min–max · fit: all replica pairs, 95% band",
         (
-            f"Regression retains all within-model replica combinations; model-cluster bootstrap: "
-            f"m={int(regression['n_models'])}, "
-            f"p={int(regression['n_pairs'])}; Pearson r={regression['pearson_r']:+.2f}, "
-            f"Spearman rho={regression['spearman_rho']:+.2f}."
-        ),
-        (
-            f"Median slope={regression['slope_median']:+.3f} "
-            f"(95% interval {regression['slope_low']:+.3f} to "
-            f"{regression['slope_high']:+.3f}); band is pointwise 95%."
+            f"n={int(regression['n_models'])} models · Pearson r={regression['pearson_r']:+.2f} · "
+            f"Spearman ρ={regression['spearman_rho']:+.2f} · slope "
+            f"{regression['slope_median']:+.3f} "
+            f"[{regression['slope_low']:+.3f}, {regression['slope_high']:+.3f}]"
         ),
     ]
     return (
@@ -1527,7 +1506,7 @@ def chart_deepscholar_ifeval(
     ).properties(
         width=850,
         height=455,
-        title=alt.Title("Can IFEval predict DeepScholar-Bench?", subtitle=subtitle),
+        title=alt.Title("IFEval → DeepScholar-Bench", subtitle=subtitle),
     )
 
 
@@ -1792,8 +1771,8 @@ def chart_deepscholar_proxy_regression(
         width=535,
         height=405,
         title=alt.Title(
-            "Held-out model predictions",
-            subtitle="x whisker: observed replica min–max · y whisker: bootstrap 95%",
+            "Held-out predictions",
+            subtitle="x: replica min–max · y: bootstrap 95%",
         ),
     )
 
@@ -1831,23 +1810,22 @@ def chart_deepscholar_proxy_regression(
         width=315,
         height=405,
         title=alt.Title(
-            "Standardized ridge coefficients",
-            subtitle="full-model fit · replica-bootstrap 95%",
+            "Ridge coefficients",
+            subtitle="Standardized · bootstrap 95%",
         ),
     )
     subtitle = [
         (
-            f"Nested leave-one-model-out ridge: n={int(summary['n_models'])} models, "
-            f"p={int(summary['n_predictors'])} {predictor_label}, "
-            f"{int(summary['bootstrap_samples']):,} replica bootstraps."
+            f"Nested leave-one-model-out ridge · n={int(summary['n_models'])} · "
+            f"{int(summary['n_predictors'])} {predictor_label} · "
+            f"{int(summary['bootstrap_samples']):,} bootstrap samples"
         ),
         (
             f"Held-out Pearson r={summary['pearson_r_median']:+.2f} "
             f"[{summary['pearson_r_low']:+.2f}, {summary['pearson_r_high']:+.2f}]; "
-            f"Spearman rho={summary['spearman_rho_median']:+.2f}; "
-            f"MAE={summary['mae_median']:.3f}."
+            f"Spearman ρ={summary['spearman_rho_median']:+.2f}; "
+            f"MAE={summary['mae_median']:.3f}"
         ),
-        "Intervals propagate replica variation only; with eight models this is exploratory.",
     ]
     return alt.hconcat(prediction_panel, coefficient_panel, spacing=42).properties(
         title=alt.Title(title, subtitle=subtitle)
@@ -2110,7 +2088,6 @@ def chart_eval_pca(
     eval_order: list[str],
 ) -> alt.HConcatChart:
     retained = int(diagnostics["retained_components_80pct"][0])
-    correction = float(diagnostics["projection_frobenius_delta"][0])
     scree_data = variance.head(8)
     pc_order = scree_data["pc"].to_list()
     scree_base = alt.Chart(scree_data)
@@ -2154,7 +2131,7 @@ def chart_eval_pca(
         height=330,
         title=alt.Title(
             "Variance by component",
-            subtitle=f"first 8 · {retained} PCs reach 80% · whisker: replica 95%",
+            subtitle=f"{retained} PCs reach 80% · bootstrap 95%",
         ),
     )
 
@@ -2206,7 +2183,7 @@ def chart_eval_pca(
             (zero + loading_intervals + loading_points).properties(
                 width=72,
                 height=alt.Step(27),
-                title=(alt.Title(pc, subtitle="loadings · 95%") if pc_position == 0 else pc),
+                title=(alt.Title(pc, subtitle="Bootstrap 95%") if pc_position == 0 else pc),
             )
         )
 
@@ -2257,20 +2234,22 @@ def chart_eval_pca(
         width=300,
         height=alt.Step(34),
         title=alt.Title(
-            "Most redundant eval pairs",
-            subtitle="bar: pooled |ρ| · whisker: replica-pairing min–max",
+            "Most redundant pairs",
+            subtitle="Bar: pooled |ρ| · whisker: pairing range",
         ),
     )
 
     return alt.hconcat(scree_panel, *loading_panels, redundancy_panel, spacing=16).properties(
         title=alt.Title(
-            "Evaluation covariance structure",
+            "Eval covariance",
             subtitle=[
-                "PCA center uses the Cartesian replica-pair Spearman matrix.",
-                "Variance and loading whiskers are 95% intervals from replica-resampled PCAs.",
-                "Redundancy whiskers retain deterministic replica-pairing min–max.",
-                "Pairwise-complete matrix PSD-projected by eigenvalue clipping "
-                f"(ΔF={correction:.3f}).",
+                "Spearman rank correlation over all within-model replica pairs",
+                "PCA: replica-bootstrap 95% · redundancy: pairing range",
+                (
+                    "Tentative interpretation: PC1 general capability · "
+                    "PC2 answer quality ↔ open retrieval · "
+                    "PC3 literature retrieval ↔ exam knowledge"
+                ),
             ],
         )
     )
@@ -2380,21 +2359,11 @@ def chart_covariance(run_scores: pl.DataFrame) -> alt.HConcatChart:
     matrix_labels = [CANONICAL_TO_DEV.get(name, name) for name in matrix_evals]
     matrix = pairwise_replica_correlations(run_scores, matrix_evals, matrix_evals)
     predictive = pairwise_replica_correlations(run_scores, AGENTIC_EVALS, PROXY_EVALS)
-    strongest = (
-        predictive.filter(pl.col("strong"))
-        .with_columns(abs_rho=pl.col("rho").abs())
-        .sort("abs_rho", descending=True)
-        .head(4)
-    )
-    strongest_label = "; ".join(
-        f"{row['y_label']} → {row['x_label']} {row['rho']:+.2f}"
-        for row in strongest.iter_rows(named=True)
-    )
     left = _correlation_heatmap(
         matrix,
         matrix_labels,
         matrix_labels,
-        "All-eval rank covariance",
+        "All evals",
         37,
         33,
         True,
@@ -2404,7 +2373,7 @@ def chart_covariance(run_scores: pl.DataFrame) -> alt.HConcatChart:
         predictive,
         [CANONICAL_TO_DEV[name] for name in AGENTIC_EVALS],
         PROXY_EVALS,
-        "Can proxy evals predict agentic scores?",
+        "Proxy → agentic",
         76,
         56,
         False,
@@ -2412,13 +2381,8 @@ def chart_covariance(run_scores: pl.DataFrame) -> alt.HConcatChart:
     )
     return alt.hconcat(left, right, spacing=36).properties(
         title=alt.Title(
-            "Cross-eval rank covariance",
-            subtitle=[
-                "Every within-model run_i × run_j combination contributes one point.",
-                "Cells show only rho; model and expanded-pair counts remain in tooltips.",
-                "Expanded pairs are deterministic sensitivity points, not independent samples.",
-                f"Strongest observed: {strongest_label}.",
-            ],
+            "Cross-eval rank correlation",
+            subtitle="Spearman ρ · all within-model replica pairs",
         )
     )
 
@@ -2475,77 +2439,17 @@ def save(chart: alt.TopLevelMixin, out_dir: Path, name: str, formats: list[str])
         print(f"  {target}")
 
 
-SLIDE_NOTES = {
-    "coverage": (
-        "Where the sweep stands",
-        "Agentic cells use fixed dev sets; FrontierScience, base and sentinel cells use full "
-        "scores. Cell text is the valid replica count; unsupported combinations remain N/A.",
-    ),
-    "scores_sci-lit": (
-        "Agentic dev scores",
-        "Fixed-sample agentic scores are the primary comparison. Valid repeated runs are "
-        "averaged, with min–max whiskers; LitSearch-rerank remains a full-set direct eval.",
-    ),
-    "scores_sentinel": (
-        "Sentinel scores",
-        "Regression monitors for instruction-following, knowledge and reasoning. Read these for "
-        "drift, not for standing; whiskers span the replica minimum and maximum.",
-    ),
-    "scores_frontier-science": (
-        "FrontierScience",
-        "Olympiad accuracy measures closed-form problem solving. Research success is the hard "
-        "binary outcome; rubric score retains partial credit and is the more sensitive measure. "
-        "Whiskers span replica minima and maxima where repeats exist.",
-    ),
-    "profile": (
-        "Cross-eval profile",
-        "Percentile rank across agentic dev, FrontierScience and sentinel evals. The per-eval "
-        "n is on the axis; whiskers are 95% replica-resampling intervals and broken lines mark "
-        "missing scores.",
-    ),
-    "dev_vs_full": (
-        "Do the dev sets preserve full-set results?",
-        "Trusted paired results only. The fixed subsets are useful for iteration, but deviations "
-        "from the diagonal show why dev scores should not be mixed with full-benchmark history; "
-        "rules span replica min–max.",
-    ),
-    "covariance": (
-        "Which proxy evals predict agentic performance?",
-        "Rank-standardized covariance over every within-model Cartesian replica pairing. Pair "
-        "counts are sensitivity points rather than independent observations; use model count to "
-        "judge coverage.",
-    ),
-    "deepscholar_ifeval": (
-        "Can a simple eval predict DeepScholar-Bench?",
-        "Points are coordinate-wise replica medians and two-dimensional whiskers span replica "
-        "minima and maxima. The fitted line and 95% band still use every valid IFEval × "
-        "DeepScholar replica combination; this is descriptive with the current small model pool.",
-    ),
-    "deepscholar_cheap_regression": (
-        "Can cheap direct evals predict DeepScholar-Bench?",
-        "The cheap set is LitSearch-rerank, IFEval, MMLU and MATH-500: direct runs with no "
-        "tools or external judge. Every displayed prediction holds that model out; bootstrap "
-        "intervals draw from the valid replicas in each model/eval cell.",
-    ),
-    "deepscholar_proxy_regression": (
-        "Can the available proxy suite predict DeepScholar-Bench?",
-        "Ridge regularization is necessary because seven predictors are fit over only eight "
-        "models. Every displayed prediction holds that model out; bootstrap intervals draw "
-        "from the three valid replicas in each model/eval cell. Treat coefficient signs as "
-        "exploratory because the proxy evaluations are strongly correlated.",
-    ),
-    "eval_pca": (
-        "What structure do the evaluations share?",
-        "PCA summarizes the pairwise-expanded rank-covariance matrix. Similar loadings and high "
-        "absolute pair correlations flag redundancy. PCA whiskers are replica-resampling 95% "
-        "intervals; redundancy whiskers span all replica pairings. Signs remain arbitrary.",
-    ),
-    "summary": (
-        "Overall standing",
-        "FrontierScience and sentinels provide context beside the sci-lit composite; neither is "
-        "folded into the primary standing. Whiskers are 95% intervals after resampling one valid "
-        "replica per model/eval and recomputing all ranks.",
-    ),
+SLIDE_TITLES = {
+    "coverage": "Eval coverage",
+    "scores_sci-lit": "Sci-lit scores",
+    "scores_sentinel": "Sentinel scores",
+    "scores_frontier-science": "FrontierScience scores",
+    "profile": "Cross-eval profile",
+    "dev_vs_full": "Fixed dev vs. full set",
+    "covariance": "Cross-eval rank correlation",
+    "deepscholar_ifeval": "IFEval and DeepScholar-Bench",
+    "eval_pca": "Eval covariance",
+    "summary": "Overall standing",
 }
 
 
@@ -2585,8 +2489,8 @@ def write_deck(
         f'<div class="tile"><div class="tile-v">{value}</div>'
         f'<div class="tile-k">{escape(key)}</div></div>'
         for key, value in [
-            ("supported agentic dev", f"{scored_agentic}/{supported_agentic.height}"),
-            ("cells scored", f"{filled}/{total}"),
+            ("agentic dev", f"{scored_agentic}/{supported_agentic.height}"),
+            ("scored cells", f"{filled}/{total}"),
             ("coverage", f"{filled / total:.0%}"),
             ("suspect", counts["suspect"]),
             ("unsupported", counts["unsupported"]),
@@ -2596,88 +2500,78 @@ def write_deck(
 
     slides = [
         f"""<section class="slide">
-          <p class="eyebrow">Model evaluation · science and agentic benchmarks</p>
+          <p class="eyebrow">Science and agentic benchmarks</p>
           <h1>Science eval sweep</h1>
-          <p class="sub">Complete first-pass coverage for every supported agentic dev profile.
-             Unsupported tool-harness combinations remain intentionally blank.</p>
           <div class="tiles">{tiles}</div>
-          <p class="foot">Generated by <code>scripts/analysis/eval_summary.py</code>.
-             Re-run it after refreshing <code>data/results.csv</code>.</p>
         </section>"""
     ]
 
     predictor_taxonomy = _table(
-        ["evaluation", "cheap for iteration?", "base-compatible as measured?", "role"],
+        ["eval", "cheap", "base-compatible", "use"],
         [
             [
                 "LitSearch-rerank",
                 "Yes",
-                "No — chat + structured generation",
-                "Cheap post-training science proxy",
+                "No — chat",
+                "Post-training science proxy",
             ],
             [
                 "IFEval",
                 "Yes",
-                "No — instruction following by definition",
-                "Cheap post-training control",
+                "No — instruction following",
+                "Post-training control",
             ],
             [
                 "MMLU",
                 "Yes",
-                "Mixed here; MC/RC is base-compatible",
-                "Candidate for both tracks after protocol separation",
+                "MC/RC",
+                "Both; separate protocols",
             ],
             [
                 "MATH-500",
                 "Yes",
-                "Mixed here; completion/BPB is base-compatible",
-                "Candidate for both tracks after protocol separation",
+                "Completion/BPB",
+                "Both; separate protocols",
             ],
             [
-                "FrontierScience Olympiad",
-                "No — judged, long generation",
-                "No — current task is chat + judge",
-                "Medium-cost capability proxy",
+                "FS Olympiad",
+                "No",
+                "No — chat + judge",
+                "Capability proxy",
             ],
             [
-                "FrontierScience Research success + rubric",
-                "No — judged, long generation",
-                "No — current task is chat + judge",
-                "Downstream-like; two metrics from the same answers",
+                "FS Research",
+                "No",
+                "No — chat + judge",
+                "Downstream; shared responses",
             ],
         ],
     )
     slides.append(
         f"""<section class="slide">
-          <p class="eyebrow">Predicting DeepScholar-Bench</p>
-          <h2>“Cheap” and “base-compatible” are different axes</h2>
-          <p class="sub">The current matrix supports a cheap → DeepScholar analysis on
-             instruction checkpoints. It does not contain pre-instruction checkpoints, so it
-             cannot yet estimate base → post-training DeepScholar predictiveness.</p>
+          <h2>“Cheap” ≠ “base-compatible”</h2>
+          <p class="sub">Current data: cheap → DeepScholar on instruction checkpoints.
+             Base → DeepScholar requires paired base and post-training checkpoints.</p>
           {predictor_taxonomy}
-          <h3>Recommended base-checkpoint panel</h3>
+          <h3>Base-checkpoint panel</h3>
           <p class="sub">MMLU MC/RC, SciQ MC/RC, GPQA MC, QASPER yes/no RC,
-             SciRIFF yes/no RC, and LabBench DbQA/ProtocolQA MC. Add MATH completion or BPB
-             if generation cost is acceptable. Run these before instruction tuning, then pair
-             them with DeepScholar on the corresponding post-trained checkpoint.</p>
+             SciRIFF yes/no RC, LabBench DbQA/ProtocolQA MC; optional MATH completion/BPB.</p>
         </section>"""
     )
 
     for name in generated:
-        title, note = SLIDE_NOTES[name]
+        title = SLIDE_TITLES[name]
         png = out_dir / f"{name}.png"
         if not png.exists():
             continue
         slides.append(
             f"""<section class="slide">
-              <p class="eyebrow">Science eval sweep · results</p>
               <div class="figure"><img src="{_data_uri(png)}" alt="{escape(title)}"></div>
-              <p class="reading-note"><span>Reading note</span>{escape(note)}</p>
             </section>"""
         )
 
     standing = _table(
-        ["model", "mean pct rank", "replica-resampling 95%", "evals"],
+        ["model", "mean rank", "95%", "evals"],
         [
             [
                 r["model"],
@@ -2698,16 +2592,14 @@ def write_deck(
         ],
     )
     excluded_note = (
-        '<p class="sub">Below the coverage threshold, not ranked: '
-        f"{escape(', '.join(excluded))}.</p>"
+        f'<p class="sub">Not ranked below coverage threshold: {escape(", ".join(excluded))}.</p>'
         if excluded
         else ""
     )
     slides.append(
         f"""<section class="slide">
-          <h2>Detail</h2>
-          <h3>Sci-lit standing</h3>{standing}{excluded_note}
-          <h3>Suspect scores — excluded from ranking, all unverified</h3>{suspect}
+          <h2>Sci-lit standing</h2>{standing}{excluded_note}
+          <h3>Excluded scores</h3>{suspect}
         </section>"""
     )
 
@@ -2751,17 +2643,10 @@ _DECK_TEMPLATE = """<!doctype html>
   .eyebrow {{ color: var(--accent); font-size: 11px; font-weight: 700;
               letter-spacing: 0.11em; text-transform: uppercase; margin: 0 0 10px; }}
   .sub {{ color: var(--ink2); margin: 0 0 18px; max-width: 82ch; font-size: 15px; }}
-  .foot {{ color: var(--muted); font-size: 13px; margin-top: auto; padding-top: 28px; }}
-  code {{ font-size: 0.92em; background: var(--plane); padding: 1px 5px; border-radius: 4px; }}
   .figure {{ flex: 1; display: flex; align-items: center; justify-content: center;
              overflow: auto; padding: 8px 0 2px; }}
   .figure img {{ max-width: 100%; max-height: calc(100vh - 260px); width: auto; height: auto;
                  display: block; margin: auto; }}
-  .reading-note {{ margin: 12px 0 0; padding: 12px 15px; color: var(--ink2);
-                   background: rgba(255, 255, 255, 0.72); border: 1px solid var(--rule);
-                   border-radius: 11px; font-size: 13px; }}
-  .reading-note span {{ color: var(--ink); font-size: 10px; font-weight: 700;
-                        letter-spacing: 0.08em; text-transform: uppercase; margin-right: 10px; }}
   .tiles {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 12px; margin: 34px 0 24px; }}
   .tile {{ background: rgba(255, 255, 255, 0.72); border: 1px solid var(--rule);
@@ -2937,18 +2822,17 @@ def main() -> None:
             "deepscholar_ifeval",
             args.formats,
         )
-        generated.append("deepscholar_ifeval")
     regression_specs = [
         (
             "deepscholar_cheap_regression",
             CHEAP_EVALS,
-            "Can cheap direct evals predict DeepScholar-Bench?",
+            "Cheap evals → DeepScholar-Bench",
             "cheap direct evals",
         ),
         (
             "deepscholar_proxy_regression",
             PROXY_EVALS,
-            "Can available proxy evals predict DeepScholar-Bench?",
+            "Proxy evals → DeepScholar-Bench",
             "available proxy evals",
         ),
     ]
@@ -2977,7 +2861,6 @@ def main() -> None:
             output_name,
             args.formats,
         )
-        generated.append(output_name)
     pairwise = pairwise_replica_correlations(run_scores, ALL_ANALYSIS_EVALS, ALL_ANALYSIS_EVALS)
     pairwise.write_csv(args.out / "pairwise_replica_correlations.csv")
     print(f"  {args.out / 'pairwise_replica_correlations.csv'}")
@@ -3017,6 +2900,8 @@ def main() -> None:
         args.formats,
     )
     generated.append("eval_pca")
+    if not regression_band.is_empty():
+        generated.append("deepscholar_ifeval")
     if ranked_models:
         save(
             chart_profile(ranked, meta, ranked_models),

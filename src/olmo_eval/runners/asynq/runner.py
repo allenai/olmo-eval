@@ -19,6 +19,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.common.logging import configure_worker_logging, get_logger
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
+    DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS,
     terminate_workers,
     wait_for_init_times,
     wait_for_workers_ready,
@@ -824,8 +825,19 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
 
             # Wait for workers to report their init times (also checks for crashes)
+            provider_startup_timeout = float(
+                self.harness_config.provider.kwargs.get("startup_timeout", 0)
+            )
+            provider_init_timeout = max(
+                DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS,
+                provider_startup_timeout + 60.0,
+            )
             provider_init_seconds = wait_for_init_times(
-                init_queue, num_inference_workers, workers=workers, result_queue=result_queue
+                init_queue,
+                num_inference_workers,
+                workers=workers,
+                result_queue=result_queue,
+                timeout=provider_init_timeout,
             )
             if len(provider_init_seconds) != num_inference_workers:
                 raise RuntimeError(

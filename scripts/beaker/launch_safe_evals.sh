@@ -4,6 +4,7 @@
 #
 # The tasks are split by harness so each benchmark receives the tools it expects:
 #   core:      no tools
+#   base:      base-model STEM multiple-choice suite
 #   gpqa:      GPQA Diamond with base-style multiple-choice log-likelihood scoring
 #   paper:     Semantic Scholar paper search (LitSearch)
 #   sage:      Semantic Scholar + web search + webpage browsing
@@ -21,6 +22,7 @@ GPUS="2"
 MAX_MODEL_LEN="32768"
 SAGE_MAX_MODEL_LEN="65536"
 STARTUP_TIMEOUT="1800"
+BEAKER_IMAGE=""
 MMLU_MAX_MODEL_LEN="4096"
 GPQA_MAX_MODEL_LEN="8192"
 MMLU_MAX_NUM_BATCHED_TOKENS="2048"
@@ -44,6 +46,7 @@ Launches non-following Beaker jobs for one model:
   core      litsearch_rerank, ifeval_ood, math500; Gemma MATH runs separately
   math      math500 only (uses model-specific generation defaults)
   mmlu      mmlu (kept separate; prone to OOM, needs its own job)
+  base      ARC, MMLU-STEM, MedMCQA, MedQA, and SciQ base-model suite
   gpqa      gpqa_diamond:mc (opt-in while the base-eval profile is validated)
   paper     litsearch
   sage      sage_open_ended, sage_short_form (agentic search + browsing)
@@ -52,7 +55,7 @@ Launches non-following Beaker jobs for one model:
 Options:
   --model REF              Hugging Face model ref
   --slug NAME              Name-safe model label used in Beaker job names
-  --only GROUP             all, core, math, mmlu, gpqa, paper, sage, or expertqa (default: all)
+  --only GROUP             all, core, math, mmlu, base, gpqa, paper, sage, or expertqa (default: all)
   --limit N                Run a reproducible random sample of N instances
   --sample-seed N          Seed used with --limit (default: 42)
   --gpus N                 GPUs per job (default: 2)
@@ -70,6 +73,7 @@ Options:
   --mmlu-gpu-memory-utilization F
                            MMLU vLLM memory fraction (default: 0.85)
   --startup-timeout N      vLLM startup timeout in seconds (default: 1800)
+  --image NAME             Beaker image override
   --s2-secret NAME         Beaker secret mapped to S2_API_KEY
   --serper-secret NAME     Beaker secret mapped to SERPER_API_KEY
   --openai-secret NAME     Beaker secret mapped to OPENAI_API_KEY
@@ -99,6 +103,7 @@ while [[ $# -gt 0 ]]; do
         --mmlu-max-batch-tokens) MMLU_MAX_NUM_BATCHED_TOKENS="$2"; shift 2 ;;
         --mmlu-gpu-memory-utilization) MMLU_GPU_MEMORY_UTILIZATION="$2"; shift 2 ;;
         --startup-timeout) STARTUP_TIMEOUT="$2"; shift 2 ;;
+        --image) BEAKER_IMAGE="$2"; shift 2 ;;
         --s2-secret) S2_SECRET="$2"; shift 2 ;;
         --serper-secret) SERPER_SECRET="$2"; shift 2 ;;
         --openai-secret) OPENAI_SECRET="$2"; shift 2 ;;
@@ -110,8 +115,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$ONLY" in
-    all|core|math|mmlu|gpqa|paper|sage|expertqa) ;;
-    *) echo "--only must be one of: all, core, math, mmlu, gpqa, paper, sage, expertqa" >&2; exit 2 ;;
+    all|core|math|mmlu|base|gpqa|paper|sage|expertqa) ;;
+    *) echo "--only must be one of: all, core, math, mmlu, base, gpqa, paper, sage, expertqa" >&2; exit 2 ;;
 esac
 
 if [[ -n "$LIMIT" && ! "$LIMIT" =~ ^[1-9][0-9]*$ ]]; then
@@ -141,6 +146,9 @@ common_args=(
     --gpus "$GPUS"
     --group "$BEAKER_GROUP"
 )
+if [[ -n "$BEAKER_IMAGE" ]]; then
+    common_args+=(--image "$BEAKER_IMAGE")
+fi
 
 if [[ "$DRY_RUN" == true ]]; then
     common_args+=(--dry-run)
@@ -409,11 +417,19 @@ gpqa_provider_overrides=(
     --override "provider.kwargs.language_model_only=true"
     --override "provider.kwargs.tensor_parallel_size=${GPUS}"
 )
+base_eval_provider_overrides=(
+    --override "provider.max_model_len=${GPQA_MAX_MODEL_LEN}"
+    --override "provider.kwargs.startup_timeout=${STARTUP_TIMEOUT}"
+    --override "provider.kwargs.language_model_only=true"
+    --override "provider.kwargs.tensor_parallel_size=${GPUS}"
+)
 if [[ "$MODEL" == "Qwen/Qwen3.5-9B" || "$MODEL" == "Qwen/Qwen3.5-35B-A3B" ]]; then
     gpqa_provider_overrides+=(--override "provider.kwargs.gdn_prefill_backend=triton")
+    base_eval_provider_overrides+=(--override "provider.kwargs.gdn_prefill_backend=triton")
 fi
 
 core_tasks=(--task litsearch_rerank)
+base_eval_tasks=(--task olmobase:mcqa_stem)
 gpqa_tasks=(--task gpqa_diamond:mc)
 paper_tasks=(--task litsearch)
 sage_tasks=(--task sage_open_ended)
@@ -534,6 +550,15 @@ if [[ "$ONLY" == all || "$ONLY" == mmlu ]]; then
         "${mmlu_tasks[@]}" \
         --harness default \
         "${mmlu_provider_overrides[@]}"
+fi
+
+if [[ "$ONLY" == base ]]; then
+    run_launch base \
+        "${common_args[@]}" \
+        --name "${MODEL_SLUG}-base-mcqa-stem-${RUN_TAG}" \
+        "${base_eval_tasks[@]}" \
+        --harness default \
+        "${base_eval_provider_overrides[@]}"
 fi
 
 if [[ "$ONLY" == gpqa ]]; then
