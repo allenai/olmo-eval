@@ -32,7 +32,7 @@ def _clean_short_answer(text: str) -> str:
 
 @register("gsm8k")
 class GSM8K(Task):
-    data_source = DataSource(path="gsm8k", subset="main")
+    data_source = DataSource(path="openai/gsm8k", subset="main")
     metrics = (AccuracyMetric(scorer=ExactMatchScorer),)
     num_fewshot = 8
     sampling_params = SamplingParams(
