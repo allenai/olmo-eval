@@ -76,13 +76,14 @@ class TestClusterWekaSupport:
     @pytest.mark.parametrize(
         "cluster",
         [
+            "ai2/holmes",
             "ai2/titan",
             "ai2/titan-batch-b200-aus-ib",
             "ai2/titan-cirrascale",
         ],
     )
-    def test_titan_clusters_have_weka(self, cluster):
-        """Titan clusters should receive Weka-backed cache environment variables."""
+    def test_weka_clusters_have_weka(self, cluster):
+        """Weka clusters should receive Weka-backed cache environment variables."""
         assert cluster_has_weka(cluster) is True
 
 

@@ -14,6 +14,7 @@ RUN_TAG=""
 MODE="launch"
 CLUSTER="ai2/ceres"
 WORKSPACE="ai2/olmo-eval-debug"
+PRIORITY=""
 
 usage() {
     cat <<'EOF'
@@ -28,6 +29,7 @@ Options:
   --run-tag TAG     Beaker name/group suffix
   --cluster NAME    Beaker cluster (default: ai2/ceres)
   --workspace NAME  Beaker workspace (default: ai2/olmo-eval-debug)
+  --priority LEVEL  Beaker priority (default: high on Holmes, urgent elsewhere)
   --print-only      Print commands without submitting
   --dry-run         Render Beaker launch specs without submitting
   -h, --help        Show this help
@@ -42,6 +44,7 @@ while [[ $# -gt 0 ]]; do
         --run-tag) RUN_TAG="$2"; shift 2 ;;
         --cluster) CLUSTER="$2"; shift 2 ;;
         --workspace) WORKSPACE="$2"; shift 2 ;;
+        --priority) PRIORITY="$2"; shift 2 ;;
         --print-only) MODE="print-only"; shift ;;
         --dry-run) MODE="dry-run"; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -63,6 +66,13 @@ if [[ ! "$SAMPLE_SEED" =~ ^[0-9]+$ ]]; then
 fi
 
 RUN_TAG="${RUN_TAG:-gpqa-canary${LIMIT}-$(date -u +%Y%m%d)}"
+if [[ -z "$PRIORITY" ]]; then
+    if [[ "$CLUSTER" == "ai2/holmes" || "$CLUSTER" == "holmes" ]]; then
+        PRIORITY="high"
+    else
+        PRIORITY="urgent"
+    fi
+fi
 
 # model|slug|gpus. The larger MoE checkpoints retain their validated 2-GPU
 # profiles; the smaller checkpoints need only one H100 for this short task.
@@ -89,6 +99,7 @@ for spec in "${MODELS[@]}"; do
         --gpus "$gpus"
         --cluster "$CLUSTER"
         --workspace "$WORKSPACE"
+        --priority "$PRIORITY"
         --run-tag "$RUN_TAG"
     )
     case "$MODE" in
@@ -99,4 +110,4 @@ for spec in "${MODELS[@]}"; do
 done
 
 echo
-echo "Sentinel wave: ${EVAL}; ${MODE}; experiments: ${#MODELS[@]}; limit: ${LIMIT}; cluster: ${CLUSTER}; workspace: ${WORKSPACE}; run tag: ${RUN_TAG}"
+echo "Sentinel wave: ${EVAL}; ${MODE}; experiments: ${#MODELS[@]}; limit: ${LIMIT}; cluster: ${CLUSTER}; workspace: ${WORKSPACE}; priority: ${PRIORITY}; run tag: ${RUN_TAG}"

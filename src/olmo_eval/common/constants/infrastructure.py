@@ -121,6 +121,7 @@ NEW_CLUSTER_ALIASES: dict[str, str] = {
 # =============================================================================
 
 WEKA_CLUSTERS: set[str] = {
+    "ai2/holmes",
     "ai2/jupiter",
     "ai2/saturn",
     "ai2/ceres",
