@@ -580,6 +580,8 @@ class TestBuildCommandWithTaskPackages:
             "--extra-index-url https://download.pytorch.org/whl/cu130 "
             "--index-strategy unsafe-best-match"
         ) in install_cmd
+        assert "grep -E '^(torch(==| @ )|nvidia-)'" in install_cmd
+        assert "grep -E '^(torch|nvidia-)'" not in install_cmd
 
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""
