@@ -872,7 +872,9 @@ class BeakerLauncher:
 
             _, flags = parse_install_spec(package)
             extra_flags: list[str] = []
-            if "--index-url" not in flags and "--extra-index-url" not in flags:
+            if "--index-url" not in flags:
+                extra_flags.extend(["--index-url", "https://pypi.org/simple"])
+            if "--extra-index-url" not in flags:
                 extra_flags.extend(["--extra-index-url", runtime_torch_index_url])
             if "--index-strategy" not in flags:
                 extra_flags.extend(["--index-strategy", "unsafe-best-match"])

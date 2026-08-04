@@ -64,7 +64,9 @@ def _format_mc(sentence: str, options: tuple[str, ...], answer: str | None = Non
 
 @register("winogrande")
 class Winogrande(Task):
-    data_source = DataSource(path="winogrande", subset="winogrande_xl", split="validation")
+    data_source = DataSource(
+        path="allenai/winogrande", subset="winogrande_xl", split="validation"
+    )
     split = Split.VALIDATION
     metrics = (LogprobMCAccuracyMetric(),)
     num_fewshot = 0
