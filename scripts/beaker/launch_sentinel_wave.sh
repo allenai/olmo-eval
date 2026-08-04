@@ -12,6 +12,8 @@ LIMIT="20"
 SAMPLE_SEED="42"
 RUN_TAG=""
 MODE="launch"
+CLUSTER="ai2/ceres"
+WORKSPACE="ai2/olmo-eval-debug"
 
 usage() {
     cat <<'EOF'
@@ -24,6 +26,8 @@ Options:
   --limit N         Per-model canary size (default: 20)
   --sample-seed N   Sampling seed (default: 42)
   --run-tag TAG     Beaker name/group suffix
+  --cluster NAME    Beaker cluster (default: ai2/ceres)
+  --workspace NAME  Beaker workspace (default: ai2/olmo-eval-debug)
   --print-only      Print commands without submitting
   --dry-run         Render Beaker launch specs without submitting
   -h, --help        Show this help
@@ -36,6 +40,8 @@ while [[ $# -gt 0 ]]; do
         --limit) LIMIT="$2"; shift 2 ;;
         --sample-seed) SAMPLE_SEED="$2"; shift 2 ;;
         --run-tag) RUN_TAG="$2"; shift 2 ;;
+        --cluster) CLUSTER="$2"; shift 2 ;;
+        --workspace) WORKSPACE="$2"; shift 2 ;;
         --print-only) MODE="print-only"; shift ;;
         --dry-run) MODE="dry-run"; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -81,6 +87,8 @@ for spec in "${MODELS[@]}"; do
         --gpqa-limit "$LIMIT"
         --sample-seed "$SAMPLE_SEED"
         --gpus "$gpus"
+        --cluster "$CLUSTER"
+        --workspace "$WORKSPACE"
         --run-tag "$RUN_TAG"
     )
     case "$MODE" in
@@ -91,4 +99,4 @@ for spec in "${MODELS[@]}"; do
 done
 
 echo
-echo "Sentinel wave: ${EVAL}; ${MODE}; experiments: ${#MODELS[@]}; limit: ${LIMIT}; run tag: ${RUN_TAG}"
+echo "Sentinel wave: ${EVAL}; ${MODE}; experiments: ${#MODELS[@]}; limit: ${LIMIT}; cluster: ${CLUSTER}; workspace: ${WORKSPACE}; run tag: ${RUN_TAG}"
