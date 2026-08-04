@@ -3,6 +3,7 @@
 import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.data import DataLoader
 from olmo_eval.evals.tasks.common import get_task, list_tasks
 
 
@@ -248,6 +249,40 @@ class TestProcessDoc:
         with caplog.at_level("WARNING"):
             assert task.process_doc(doc, index=0) is None
         assert "unmapped subdomain" in caplog.text
+
+
+class TestInstances:
+    """Tests for loading and deterministic canary sampling."""
+
+    @staticmethod
+    def _docs(count):
+        return [
+            {
+                "Question": f"Question {index}?",
+                "Correct Answer": f"Correct {index}",
+                "Incorrect Answer 1": f"Wrong 1 {index}",
+                "Incorrect Answer 2": f"Wrong 2 {index}",
+                "Incorrect Answer 3": f"Wrong 3 {index}",
+            }
+            for index in range(count)
+        ]
+
+    def test_limit_is_deterministic(self, monkeypatch):
+        docs = self._docs(10)
+        monkeypatch.setattr(DataLoader, "load", lambda _self, _source: iter(docs))
+
+        task = get_task("gpqa_diamond:mc")
+        task.config.limit = 4
+        task.config.seed = 42
+        first_indices = [instance.metadata["index"] for instance in task.instances]
+
+        repeat = get_task("gpqa_diamond:mc")
+        repeat.config.limit = 4
+        repeat.config.seed = 42
+        repeat_indices = [instance.metadata["index"] for instance in repeat.instances]
+
+        assert len(first_indices) == 4
+        assert first_indices == repeat_indices
 
 
 class TestExtractAnswer:

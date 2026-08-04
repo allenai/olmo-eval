@@ -122,6 +122,10 @@ class GPQATask(Task):
                 instance = self.process_doc(doc, idx)
                 if instance is not None:
                     self._instances_cache.append(instance)
+            if self.config.limit and len(self._instances_cache) > self.config.limit:
+                self._instances_cache = random.Random(self.config.seed).sample(
+                    self._instances_cache, self.config.limit
+                )
         yield from self._instances_cache
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:

@@ -18,6 +18,7 @@ EXPERTQA_LIMIT="100"
 LITSEARCH_LIMIT="50"
 SAGE_LIMIT="50"
 DEEPSCHOLAR_LIMIT="10"
+GPQA_LIMIT="20"
 
 CLUSTER="ai2/ceres"
 WORKSPACE="ai2/olmo-eval-debug"
@@ -45,13 +46,14 @@ Default suite:
 Options:
   --model REF              Hugging Face model ref (required)
   --slug NAME              Name-safe model label (required)
-  --only GROUP             all, small, large, core, mmlu, paper, sage,
+  --only GROUP             all, small, large, core, mmlu, gpqa, paper, sage,
                            expertqa, or deepscholar (default: all)
   --sample-seed N          Fixed random-sample seed for standard tasks (default: 42)
   --expertqa-limit N       ExpertQA dev size (default: 100)
   --litsearch-limit N      LitSearch-open dev size (default: 50)
   --sage-limit N           Per-task SAGE dev size (default: 50)
   --deepscholar-limit N    DeepScholar fixed-prefix size (default: 10)
+  --gpqa-limit N           GPQA fixed-seed canary size (default: 20)
   --gpus N                 GPUs per job (default: 2)
   --cluster NAME           Beaker cluster (default: ai2/ceres)
   --workspace NAME         Beaker workspace (default: ai2/olmo-eval-debug)
@@ -91,6 +93,7 @@ while [[ $# -gt 0 ]]; do
         --litsearch-limit) require_value "$1" "$#"; LITSEARCH_LIMIT="$2"; shift 2 ;;
         --sage-limit) require_value "$1" "$#"; SAGE_LIMIT="$2"; shift 2 ;;
         --deepscholar-limit) require_value "$1" "$#"; DEEPSCHOLAR_LIMIT="$2"; shift 2 ;;
+        --gpqa-limit) require_value "$1" "$#"; GPQA_LIMIT="$2"; shift 2 ;;
         --gpus) require_value "$1" "$#"; GPUS="$2"; shift 2 ;;
         --cluster) require_value "$1" "$#"; CLUSTER="$2"; shift 2 ;;
         --workspace) require_value "$1" "$#"; WORKSPACE="$2"; shift 2 ;;
@@ -115,14 +118,14 @@ if [[ -z "$MODEL" || -z "$MODEL_SLUG" ]]; then
 fi
 
 case "$ONLY" in
-    all|small|large|core|mmlu|paper|sage|expertqa|deepscholar) ;;
+    all|small|large|core|mmlu|gpqa|paper|sage|expertqa|deepscholar) ;;
     *)
-        echo "--only must be one of: all, small, large, core, mmlu, paper, sage, expertqa, deepscholar" >&2
+        echo "--only must be one of: all, small, large, core, mmlu, gpqa, paper, sage, expertqa, deepscholar" >&2
         exit 2
         ;;
 esac
 
-for value_name in EXPERTQA_LIMIT LITSEARCH_LIMIT SAGE_LIMIT DEEPSCHOLAR_LIMIT; do
+for value_name in EXPERTQA_LIMIT LITSEARCH_LIMIT SAGE_LIMIT DEEPSCHOLAR_LIMIT GPQA_LIMIT; do
     value="${!value_name}"
     if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
         echo "${value_name} must be a positive integer" >&2
@@ -217,6 +220,11 @@ if is_selected core; then
 fi
 if is_selected mmlu; then
     run_safe mmlu
+fi
+# GPQA remains opt-in until its log-likelihood profile is validated across the
+# model matrix; the default `all` and replica waves are intentionally unchanged.
+if [[ "$ONLY" == gpqa ]]; then
+    run_safe gpqa "$GPQA_LIMIT"
 fi
 if is_selected paper; then
     run_safe paper "$LITSEARCH_LIMIT"

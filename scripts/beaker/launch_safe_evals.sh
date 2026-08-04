@@ -4,6 +4,7 @@
 #
 # The tasks are split by harness so each benchmark receives the tools it expects:
 #   core:      no tools
+#   gpqa:      GPQA Diamond with base-style multiple-choice log-likelihood scoring
 #   paper:     Semantic Scholar paper search (LitSearch)
 #   sage:      Semantic Scholar + web search + webpage browsing
 #   expertqa:  Serper web search/fetch plus the OpenAI scoring key
@@ -21,6 +22,7 @@ MAX_MODEL_LEN="32768"
 SAGE_MAX_MODEL_LEN="65536"
 STARTUP_TIMEOUT="1800"
 MMLU_MAX_MODEL_LEN="4096"
+GPQA_MAX_MODEL_LEN="8192"
 MMLU_MAX_NUM_BATCHED_TOKENS="2048"
 MMLU_GPU_MEMORY_UTILIZATION="0.85"
 GEMMA4_MATH_MAX_TOKENS="4096"
@@ -42,6 +44,7 @@ Launches non-following Beaker jobs for one model:
   core      litsearch_rerank, ifeval_ood, math500; Gemma MATH runs separately
   math      math500 only (uses model-specific generation defaults)
   mmlu      mmlu (kept separate; prone to OOM, needs its own job)
+  gpqa      gpqa_diamond:mc (opt-in while the base-eval profile is validated)
   paper     litsearch
   sage      sage_open_ended, sage_short_form (agentic search + browsing)
   expertqa  expertqa
@@ -49,7 +52,7 @@ Launches non-following Beaker jobs for one model:
 Options:
   --model REF              Hugging Face model ref
   --slug NAME              Name-safe model label used in Beaker job names
-  --only GROUP             all, core, math, mmlu, paper, sage, or expertqa (default: all)
+  --only GROUP             all, core, math, mmlu, gpqa, paper, sage, or expertqa (default: all)
   --limit N                Run a reproducible random sample of N instances
   --sample-seed N          Seed used with --limit (default: 42)
   --gpus N                 GPUs per job (default: 2)
@@ -61,6 +64,7 @@ Options:
   --max-model-len N        vLLM context length for non-MMLU jobs (default: 32768)
   --sage-max-model-len N   vLLM context length for SAGE jobs (default: 65536)
   --mmlu-max-model-len N   MMLU context length (default: 4096)
+  --gpqa-max-model-len N   GPQA context length (default: 8192)
   --mmlu-max-batch-tokens N
                            MMLU vLLM prefill-token cap (default: 2048)
   --mmlu-gpu-memory-utilization F
@@ -91,6 +95,7 @@ while [[ $# -gt 0 ]]; do
         --max-model-len) MAX_MODEL_LEN="$2"; shift 2 ;;
         --sage-max-model-len) SAGE_MAX_MODEL_LEN="$2"; shift 2 ;;
         --mmlu-max-model-len) MMLU_MAX_MODEL_LEN="$2"; shift 2 ;;
+        --gpqa-max-model-len) GPQA_MAX_MODEL_LEN="$2"; shift 2 ;;
         --mmlu-max-batch-tokens) MMLU_MAX_NUM_BATCHED_TOKENS="$2"; shift 2 ;;
         --mmlu-gpu-memory-utilization) MMLU_GPU_MEMORY_UTILIZATION="$2"; shift 2 ;;
         --startup-timeout) STARTUP_TIMEOUT="$2"; shift 2 ;;
@@ -105,8 +110,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$ONLY" in
-    all|core|math|mmlu|paper|sage|expertqa) ;;
-    *) echo "--only must be one of: all, core, math, mmlu, paper, sage, expertqa" >&2; exit 2 ;;
+    all|core|math|mmlu|gpqa|paper|sage|expertqa) ;;
+    *) echo "--only must be one of: all, core, math, mmlu, gpqa, paper, sage, expertqa" >&2; exit 2 ;;
 esac
 
 if [[ -n "$LIMIT" && ! "$LIMIT" =~ ^[1-9][0-9]*$ ]]; then
@@ -395,13 +400,28 @@ if [[ "$MODEL" == "google/gemma-4-26B-A4B-it" ]]; then
     math_provider_overrides+=(--override "provider.kwargs.completion_use_chat=true")
 fi
 
+# GPQA's :mc variant issues four raw log-likelihood continuations per question.
+# Keep this profile free of chat templates, reasoning parsers, and tool parsers:
+# the canary is intended to test the same base-style protocol on every model.
+gpqa_provider_overrides=(
+    --override "provider.max_model_len=${GPQA_MAX_MODEL_LEN}"
+    --override "provider.kwargs.startup_timeout=${STARTUP_TIMEOUT}"
+    --override "provider.kwargs.language_model_only=true"
+    --override "provider.kwargs.tensor_parallel_size=${GPUS}"
+)
+if [[ "$MODEL" == "Qwen/Qwen3.5-9B" || "$MODEL" == "Qwen/Qwen3.5-35B-A3B" ]]; then
+    gpqa_provider_overrides+=(--override "provider.kwargs.gdn_prefill_backend=triton")
+fi
+
 core_tasks=(--task litsearch_rerank)
+gpqa_tasks=(--task gpqa_diamond:mc)
 paper_tasks=(--task litsearch)
 sage_tasks=(--task sage_open_ended)
 expertqa_tasks=(--task expertqa)
 mmlu_tasks=(--task "$mmlu_suite")
 if [[ -n "$LIMIT" ]]; then
     core_tasks+=(--override "limit=${LIMIT}" --override "seed=${SAMPLE_SEED}")
+    gpqa_tasks+=(--override "limit=${LIMIT}" --override "seed=${SAMPLE_SEED}")
     paper_tasks+=(--override "limit=${LIMIT}" --override "seed=${SAMPLE_SEED}")
     sage_tasks+=(--override "limit=${LIMIT}" --override "seed=${SAMPLE_SEED}")
     expertqa_tasks+=(--override "limit=${LIMIT}" --override "seed=${SAMPLE_SEED}")
@@ -514,6 +534,15 @@ if [[ "$ONLY" == all || "$ONLY" == mmlu ]]; then
         "${mmlu_tasks[@]}" \
         --harness default \
         "${mmlu_provider_overrides[@]}"
+fi
+
+if [[ "$ONLY" == gpqa ]]; then
+    run_launch gpqa \
+        "${common_args[@]}" \
+        --name "${MODEL_SLUG}-gpqa-diamond${SCOPE_SUFFIX}-${RUN_TAG}" \
+        "${gpqa_tasks[@]}" \
+        --harness default \
+        "${gpqa_provider_overrides[@]}"
 fi
 
 if [[ "$ONLY" == all || "$ONLY" == paper ]]; then
