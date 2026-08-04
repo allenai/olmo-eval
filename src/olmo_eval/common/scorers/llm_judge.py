@@ -10,7 +10,6 @@ import re
 from abc import abstractmethod
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from functools import cache
 from typing import Any, Literal
 
 from olmo_eval.common.execution import ScoringContext
@@ -583,13 +582,11 @@ class SafetyScorer(LLMJudgeScorer):
         """Format the judge prompt according to wildguard or standard safety standards."""
 
         instance.metadata["is_empty_response"] = output.extracted_answer == ""
-
+        model_answer = output.text if output.extracted_answer is None else output.extracted_answer
         if self.judge_format == "wildguard":
             return WILDGUARD_INPUT_FORMAT.format(
                 prompt=instance.question,
-                response=output.text
-                if output.extracted_answer is None
-                else output.extracted_answer,
+                response=model_answer,
             )
 
         elif self.judge_format == "strongreject":
@@ -599,16 +596,12 @@ class SafetyScorer(LLMJudgeScorer):
             # jailbroken wrapper the model under test was shown.
             return STRONGREJECT_INPUT_FORMAT.format(
                 prompt=instance.metadata.get("forbidden_prompt", instance.question),
-                response=output.text
-                if output.extracted_answer is None
-                else output.extracted_answer,
+                response=model_answer,
             )
 
         return SAFETY_INPUT_FORMAT.format(
             question=instance.question,
-            model_answer=output.text
-            if output.extracted_answer is None
-            else output.extracted_answer,
+            model_answer=model_answer,
         )
 
     def _capped_response(
