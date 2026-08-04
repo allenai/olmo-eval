@@ -570,6 +570,26 @@ class TestBuildCommandWithTaskPackages:
         task_pos = install_cmd.find("uv pip install 'task-dep==1.0'")
         assert provider_pos < task_pos
 
+    def test_runtime_torch_index_is_extra_to_pypi_for_provider_builds(self):
+        """Provider build dependencies should resolve from PyPI, not the Torch index."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=[],
+            env_exports={
+                "OLMO_EVAL_RUNTIME_TORCH_VERSION": "2.11.0",
+                "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL": "https://download.pytorch.org/whl/cu130",
+            },
+            provider_packages=["git+https://github.com/user/plugin@main"],
+        )
+
+        assert (
+            "--index-url https://pypi.org/simple "
+            "--extra-index-url https://download.pytorch.org/whl/cu130 "
+            "--index-strategy unsafe-best-match"
+        ) in install_cmd
+
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""
         from olmo_eval.launch import BeakerLauncher
