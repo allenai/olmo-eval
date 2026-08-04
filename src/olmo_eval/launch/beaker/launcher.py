@@ -911,10 +911,14 @@ class BeakerLauncher:
                 )
             )
 
-        # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
+        # Generate constraints from pre-installed CUDA packages to prevent uv from changing them.
+        # CUTLASS DSL is the exception: vLLM pins this package independently of
+        # Torch's CUDA package set, so constraining an image's older build makes
+        # an otherwise compatible vLLM impossible to resolve.
         constraints = "/tmp/cuda-constraints.txt"
         steps.append(
-            f"uv pip freeze -q | grep -E '^(torch|torchvision|torchaudio|nvidia-)' > {constraints}"
+            f"uv pip freeze -q | grep -E '^(torch|torchvision|torchaudio|nvidia-)' "
+            f"| grep -vE '^nvidia-cutlass-dsl' > {constraints}"
         )
 
         # Install vLLM in isolated venv when requested (for server mode)
