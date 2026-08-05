@@ -1936,3 +1936,123 @@ Olmo-3 7B Think,DeepScholar-Bench-dev10,geomean_fixed:external,0.083796480777919
 Olmo-3 7B Think,DeepScholar-Bench-dev10,nugget_coverage_fixed:external,0.2383986928104575,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
 Olmo-3 7B Think,DeepScholar-Bench-dev10,organization_fixed:external,0.35,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
 Olmo-3 7B Think,DeepScholar-Bench-dev10,reference_coverage_fixed:external,0.01,01KZ4FPK4RKY9YEG6NM60Z4C62,Fixed dev10 slice; indices 0-9; _fixed metrics only,True,3
+OLMo-3 7B Instruct,ARC,accuracy,0.8617908492908493,01KZ78Y0SFVM78PRVC4QCPQQZY,Base-compatible log-prob MC protocol,True,1
+OLMo-3 7B Instruct,MMLU-STEM,accuracy,0.5775946577170379,01KZ78Y0SFVM78PRVC4QCPQQZY,Base-compatible log-prob MC protocol,True,1
+OLMo-3 7B Instruct,MedMCQA,accuracy,0.4499163279942625,01KZ78Y0SFVM78PRVC4QCPQQZY,Base-compatible log-prob MC protocol,True,1
+OLMo-3 7B Instruct,MedQA,accuracy,0.35035349567949725,01KZ78Y0SFVM78PRVC4QCPQQZY,Base-compatible log-prob MC protocol,True,1
+OLMo-3 7B Instruct,SciQ,accuracy,0.902,01KZ78Y0SFVM78PRVC4QCPQQZY,Base-compatible log-prob MC protocol,True,1
+Nemotron 3 Nano 30B-A3B,ARC,accuracy,0.9351998101998102,01KZ7B5KSGNVHRWGEEZSTBFN5H,Base-compatible log-prob MC protocol,True,1
+Nemotron 3 Nano 30B-A3B,MMLU-STEM,accuracy,0.6964916879438252,01KZ7B5KSGNVHRWGEEZSTBFN5H,Base-compatible log-prob MC protocol,True,1
+Nemotron 3 Nano 30B-A3B,MedMCQA,accuracy,0.5945493664833851,01KZ7B5KSGNVHRWGEEZSTBFN5H,Base-compatible log-prob MC protocol,True,1
+Nemotron 3 Nano 30B-A3B,MedQA,accuracy,0.593872741555381,01KZ7B5KSGNVHRWGEEZSTBFN5H,Base-compatible log-prob MC protocol,True,1
+Nemotron 3 Nano 30B-A3B,SciQ,accuracy,0.945,01KZ7B5KSGNVHRWGEEZSTBFN5H,Base-compatible log-prob MC protocol,True,1
+Qwen3.5 9B Instruct,ARC,accuracy,0.9628180128180128,01KZ7B5KT1X0AJT9K9RQYHBDYV,Base-compatible log-prob MC protocol,True,1
+Qwen3.5 9B Instruct,MMLU-STEM,accuracy,0.7710598428522147,01KZ7B5KT1X0AJT9K9RQYHBDYV,Base-compatible log-prob MC protocol,True,1
+Qwen3.5 9B Instruct,MedMCQA,accuracy,0.656227587855606,01KZ7B5KT1X0AJT9K9RQYHBDYV,Base-compatible log-prob MC protocol,True,1
+Qwen3.5 9B Instruct,MedQA,accuracy,0.5781618224666143,01KZ7B5KT1X0AJT9K9RQYHBDYV,Base-compatible log-prob MC protocol,True,1
+Qwen3.5 9B Instruct,SciQ,accuracy,0.954,01KZ7B5KT1X0AJT9K9RQYHBDYV,Base-compatible log-prob MC protocol,True,1
+Qwen3.5-35B-A3B,ARC,accuracy,0.9700478075478076,01KZ7B5KVCW9HA03MK682NQK2W,Base-compatible log-prob MC protocol,True,1
+Qwen3.5-35B-A3B,MMLU-STEM,accuracy,0.8084259266304286,01KZ7B5KVCW9HA03MK682NQK2W,Base-compatible log-prob MC protocol,True,1
+Qwen3.5-35B-A3B,MedMCQA,accuracy,0.7267511355486493,01KZ7B5KVCW9HA03MK682NQK2W,Base-compatible log-prob MC protocol,True,1
+Qwen3.5-35B-A3B,MedQA,accuracy,0.8248232521602514,01KZ7B5KVCW9HA03MK682NQK2W,Base-compatible log-prob MC protocol,True,1
+Qwen3.5-35B-A3B,SciQ,accuracy,0.972,01KZ7B5KVCW9HA03MK682NQK2W,Base-compatible log-prob MC protocol,True,1
+GLM-4.1V-9B-Thinking,ARC,accuracy,0.954449091949092,01KZ7B5M5ZXYBNG2FEREMS3CRX,Base-compatible log-prob MC protocol,True,1
+GLM-4.1V-9B-Thinking,MMLU-STEM,accuracy,0.6761802581353843,01KZ7B5M5ZXYBNG2FEREMS3CRX,Base-compatible log-prob MC protocol,True,1
+GLM-4.1V-9B-Thinking,MedMCQA,accuracy,0.6110447047573512,01KZ7B5M5ZXYBNG2FEREMS3CRX,Base-compatible log-prob MC protocol,True,1
+GLM-4.1V-9B-Thinking,MedQA,accuracy,0.572663000785546,01KZ7B5M5ZXYBNG2FEREMS3CRX,Base-compatible log-prob MC protocol,True,1
+GLM-4.1V-9B-Thinking,SciQ,accuracy,0.943,01KZ7B5M5ZXYBNG2FEREMS3CRX,Base-compatible log-prob MC protocol,True,1
+Olmo-3 7B Think,ARC,accuracy,0.8737581737581737,01KZ7B6NS9HDM286RMHE0VQP2P,Base-compatible log-prob MC protocol,True,1
+Olmo-3 7B Think,MMLU-STEM,accuracy,0.5710921263062338,01KZ7B6NS9HDM286RMHE0VQP2P,Base-compatible log-prob MC protocol,True,1
+Olmo-3 7B Think,MedMCQA,accuracy,0.4554147740855845,01KZ7B6NS9HDM286RMHE0VQP2P,Base-compatible log-prob MC protocol,True,1
+Olmo-3 7B Think,MedQA,accuracy,0.37549096622152395,01KZ7B6NS9HDM286RMHE0VQP2P,Base-compatible log-prob MC protocol,True,1
+Olmo-3 7B Think,SciQ,accuracy,0.898,01KZ7B6NS9HDM286RMHE0VQP2P,Base-compatible log-prob MC protocol,True,1
+OLMo-3 7B Instruct,ARC,accuracy,0.8617908492908493,01KZ7KYQRQZ3JJXWS975VMF3KT,Base-compatible log-prob MC protocol,True,2
+OLMo-3 7B Instruct,MMLU-STEM,accuracy,0.5775946577170379,01KZ7KYQRQZ3JJXWS975VMF3KT,Base-compatible log-prob MC protocol,True,2
+OLMo-3 7B Instruct,MedMCQA,accuracy,0.4546975854649773,01KZ7KYQRQZ3JJXWS975VMF3KT,Base-compatible log-prob MC protocol,True,2
+OLMo-3 7B Instruct,MedQA,accuracy,0.3534956794972506,01KZ7KYQRQZ3JJXWS975VMF3KT,Base-compatible log-prob MC protocol,True,2
+OLMo-3 7B Instruct,SciQ,accuracy,0.91,01KZ7KYQRQZ3JJXWS975VMF3KT,Base-compatible log-prob MC protocol,True,2
+Olmo-3 7B Think,ARC,accuracy,0.8737581737581737,01KZ7KYWY6PVBVC56W3B58J8RS,Base-compatible log-prob MC protocol,True,2
+Olmo-3 7B Think,MMLU-STEM,accuracy,0.5710921263062338,01KZ7KYWY6PVBVC56W3B58J8RS,Base-compatible log-prob MC protocol,True,2
+Olmo-3 7B Think,MedMCQA,accuracy,0.45732727707387044,01KZ7KYWY6PVBVC56W3B58J8RS,Base-compatible log-prob MC protocol,True,2
+Olmo-3 7B Think,MedQA,accuracy,0.3786331500392773,01KZ7KYWY6PVBVC56W3B58J8RS,Base-compatible log-prob MC protocol,True,2
+Olmo-3 7B Think,SciQ,accuracy,0.911,01KZ7KYWY6PVBVC56W3B58J8RS,Base-compatible log-prob MC protocol,True,2
+GLM-4.1V-9B-Thinking,ARC,accuracy,0.954449091949092,01KZ7KZ38Q45XYHWCVNAEY7956,Base-compatible log-prob MC protocol,True,2
+GLM-4.1V-9B-Thinking,MMLU-STEM,accuracy,0.6761802581353843,01KZ7KZ38Q45XYHWCVNAEY7956,Base-compatible log-prob MC protocol,True,2
+GLM-4.1V-9B-Thinking,MedMCQA,accuracy,0.6072196987807793,01KZ7KZ38Q45XYHWCVNAEY7956,Base-compatible log-prob MC protocol,True,2
+GLM-4.1V-9B-Thinking,MedQA,accuracy,0.572663000785546,01KZ7KZ38Q45XYHWCVNAEY7956,Base-compatible log-prob MC protocol,True,2
+GLM-4.1V-9B-Thinking,SciQ,accuracy,0.945,01KZ7KZ38Q45XYHWCVNAEY7956,Base-compatible log-prob MC protocol,True,2
+Qwen3.5 9B Instruct,ARC,accuracy,0.9626249626249626,01KZ7KZ8DMY3XF07BX9585RAKD,Base-compatible log-prob MC protocol,True,2
+Qwen3.5 9B Instruct,MMLU-STEM,accuracy,0.7743305072345935,01KZ7KZ8DMY3XF07BX9585RAKD,Base-compatible log-prob MC protocol,True,2
+Qwen3.5 9B Instruct,MedMCQA,accuracy,0.6270619172842458,01KZ7KZ8DMY3XF07BX9585RAKD,Base-compatible log-prob MC protocol,True,2
+Qwen3.5 9B Instruct,MedQA,accuracy,0.648075412411626,01KZ7KZ8DMY3XF07BX9585RAKD,Base-compatible log-prob MC protocol,True,2
+Qwen3.5 9B Instruct,SciQ,accuracy,0.961,01KZ7KZ8DMY3XF07BX9585RAKD,Base-compatible log-prob MC protocol,True,2
+Nemotron 3 Nano 30B-A3B,ARC,accuracy,0.9351998101998102,01KZ7KZDK8RHJ3AS804M1FYWXP,Base-compatible log-prob MC protocol,True,2
+Nemotron 3 Nano 30B-A3B,MMLU-STEM,accuracy,0.6963403064035548,01KZ7KZDK8RHJ3AS804M1FYWXP,Base-compatible log-prob MC protocol,True,2
+Nemotron 3 Nano 30B-A3B,MedMCQA,accuracy,0.6045900071718862,01KZ7KZDK8RHJ3AS804M1FYWXP,Base-compatible log-prob MC protocol,True,2
+Nemotron 3 Nano 30B-A3B,MedQA,accuracy,0.6103692065985861,01KZ7KZDK8RHJ3AS804M1FYWXP,Base-compatible log-prob MC protocol,True,2
+Nemotron 3 Nano 30B-A3B,SciQ,accuracy,0.941,01KZ7KZDK8RHJ3AS804M1FYWXP,Base-compatible log-prob MC protocol,True,2
+Qwen3.5-35B-A3B,ARC,accuracy,0.9698373698373699,01KZ7KZJPNE33YZF059EG3M4EZ,Base-compatible log-prob MC protocol,True,2
+Qwen3.5-35B-A3B,MMLU-STEM,accuracy,0.8097107408967056,01KZ7KZJPNE33YZF059EG3M4EZ,Base-compatible log-prob MC protocol,True,2
+Qwen3.5-35B-A3B,MedMCQA,accuracy,0.7260339469280421,01KZ7KZJPNE33YZF059EG3M4EZ,Base-compatible log-prob MC protocol,True,2
+Qwen3.5-35B-A3B,MedQA,accuracy,0.8201099764336214,01KZ7KZJPNE33YZF059EG3M4EZ,Base-compatible log-prob MC protocol,True,2
+Qwen3.5-35B-A3B,SciQ,accuracy,0.97,01KZ7KZJPNE33YZF059EG3M4EZ,Base-compatible log-prob MC protocol,True,2
+OLMo-3 7B Instruct,ARC,accuracy,0.8617908492908493,01KZ7KZQW72X5VXVX5EFM2F0AM,Base-compatible log-prob MC protocol,True,3
+OLMo-3 7B Instruct,MMLU-STEM,accuracy,0.5775946577170379,01KZ7KZQW72X5VXVX5EFM2F0AM,Base-compatible log-prob MC protocol,True,3
+OLMo-3 7B Instruct,MedMCQA,accuracy,0.44441788190294046,01KZ7KZQW72X5VXVX5EFM2F0AM,Base-compatible log-prob MC protocol,True,3
+OLMo-3 7B Instruct,MedQA,accuracy,0.33857030636292224,01KZ7KZQW72X5VXVX5EFM2F0AM,Base-compatible log-prob MC protocol,True,3
+OLMo-3 7B Instruct,SciQ,accuracy,0.915,01KZ7KZQW72X5VXVX5EFM2F0AM,Base-compatible log-prob MC protocol,True,3
+Olmo-3 7B Think,ARC,accuracy,0.8737581737581737,01KZ7KZWZ2N3BGXQP02F66N5TQ,Base-compatible log-prob MC protocol,True,3
+Olmo-3 7B Think,MMLU-STEM,accuracy,0.5710921263062338,01KZ7KZWZ2N3BGXQP02F66N5TQ,Base-compatible log-prob MC protocol,True,3
+Olmo-3 7B Think,MedMCQA,accuracy,0.4537413339708343,01KZ7KZWZ2N3BGXQP02F66N5TQ,Base-compatible log-prob MC protocol,True,3
+Olmo-3 7B Think,MedQA,accuracy,0.3786331500392773,01KZ7KZWZ2N3BGXQP02F66N5TQ,Base-compatible log-prob MC protocol,True,3
+Olmo-3 7B Think,SciQ,accuracy,0.905,01KZ7KZWZ2N3BGXQP02F66N5TQ,Base-compatible log-prob MC protocol,True,3
+GLM-4.1V-9B-Thinking,ARC,accuracy,0.954449091949092,01KZ7M0239817Q8NE56D8G261D,Base-compatible log-prob MC protocol,True,3
+GLM-4.1V-9B-Thinking,MMLU-STEM,accuracy,0.6761802581353843,01KZ7M0239817Q8NE56D8G261D,Base-compatible log-prob MC protocol,True,3
+GLM-4.1V-9B-Thinking,MedMCQA,accuracy,0.6031556299306717,01KZ7M0239817Q8NE56D8G261D,Base-compatible log-prob MC protocol,True,3
+GLM-4.1V-9B-Thinking,MedQA,accuracy,0.5805184603299293,01KZ7M0239817Q8NE56D8G261D,Base-compatible log-prob MC protocol,True,3
+GLM-4.1V-9B-Thinking,SciQ,accuracy,0.949,01KZ7M0239817Q8NE56D8G261D,Base-compatible log-prob MC protocol,True,3
+Qwen3.5 9B Instruct,ARC,accuracy,0.9624492999493,01KZ7M078MN53T6X658PS0TZK4,Base-compatible log-prob MC protocol,True,3
+Qwen3.5 9B Instruct,MMLU-STEM,accuracy,0.7702668870388496,01KZ7M078MN53T6X658PS0TZK4,Base-compatible log-prob MC protocol,True,3
+Qwen3.5 9B Instruct,MedMCQA,accuracy,0.6490557016495339,01KZ7M078MN53T6X658PS0TZK4,Base-compatible log-prob MC protocol,True,3
+Qwen3.5 9B Instruct,MedQA,accuracy,0.5781618224666143,01KZ7M078MN53T6X658PS0TZK4,Base-compatible log-prob MC protocol,True,3
+Qwen3.5 9B Instruct,SciQ,accuracy,0.953,01KZ7M078MN53T6X658PS0TZK4,Base-compatible log-prob MC protocol,True,3
+Nemotron 3 Nano 30B-A3B,ARC,accuracy,0.9353928603928604,01KZ7M0CG2VJQ1C3YTFTVSSFAJ,Base-compatible log-prob MC protocol,True,3
+Nemotron 3 Nano 30B-A3B,MMLU-STEM,accuracy,0.6955529906258175,01KZ7M0CG2VJQ1C3YTFTVSSFAJ,Base-compatible log-prob MC protocol,True,3
+Nemotron 3 Nano 30B-A3B,MedMCQA,accuracy,0.6021993784365288,01KZ7M0CG2VJQ1C3YTFTVSSFAJ,Base-compatible log-prob MC protocol,True,3
+Nemotron 3 Nano 30B-A3B,MedQA,accuracy,0.5930871956009427,01KZ7M0CG2VJQ1C3YTFTVSSFAJ,Base-compatible log-prob MC protocol,True,3
+Nemotron 3 Nano 30B-A3B,SciQ,accuracy,0.943,01KZ7M0CG2VJQ1C3YTFTVSSFAJ,Base-compatible log-prob MC protocol,True,3
+Qwen3.5-35B-A3B,ARC,accuracy,0.9712582712582712,01KZ7M0HQ1P32BMQJEG4R7DRDN,Base-compatible log-prob MC protocol,True,3
+Qwen3.5-35B-A3B,MMLU-STEM,accuracy,0.8098532043675818,01KZ7M0HQ1P32BMQJEG4R7DRDN,Base-compatible log-prob MC protocol,True,3
+Qwen3.5-35B-A3B,MedMCQA,accuracy,0.7293808271575425,01KZ7M0HQ1P32BMQJEG4R7DRDN,Base-compatible log-prob MC protocol,True,3
+Qwen3.5-35B-A3B,MedQA,accuracy,0.8201099764336214,01KZ7M0HQ1P32BMQJEG4R7DRDN,Base-compatible log-prob MC protocol,True,3
+Qwen3.5-35B-A3B,SciQ,accuracy,0.967,01KZ7M0HQ1P32BMQJEG4R7DRDN,Base-compatible log-prob MC protocol,True,3
+Gemma4 26B-A4B,ARC,accuracy,0.9809437684437685,01KZ9AQ1HMS24GJ4YWEXNA5B9V,Base-compatible chat-native MC protocol,True,1
+Gemma4 26B-A4B,MMLU-STEM,accuracy,0.9392750014811951,01KZ9AQ1HMS24GJ4YWEXNA5B9V,Base-compatible chat-native MC protocol,True,1
+Gemma4 26B-A4B,MedMCQA,accuracy,0.749940234281616,01KZ9AQ1HMS24GJ4YWEXNA5B9V,Base-compatible chat-native MC protocol,True,1
+Gemma4 26B-A4B,MedQA,accuracy,0.8829536527886881,01KZ9AQ1HMS24GJ4YWEXNA5B9V,Base-compatible chat-native MC protocol,True,1
+Gemma4 26B-A4B,SciQ,accuracy,0.965,01KZ9AQ1HMS24GJ4YWEXNA5B9V,Base-compatible chat-native MC protocol,True,1
+Gemma4 26B-A4B,ARC,accuracy,0.981522919022919,01KZ9FPAEQM60ZKWZ7Q6600Y2Y,Base-compatible chat-native MC protocol,True,2
+Gemma4 26B-A4B,MMLU-STEM,accuracy,0.9405193904694659,01KZ9FPAEQM60ZKWZ7Q6600Y2Y,Base-compatible chat-native MC protocol,True,2
+Gemma4 26B-A4B,MedMCQA,accuracy,0.751852737269902,01KZ9FPAEQM60ZKWZ7Q6600Y2Y,Base-compatible chat-native MC protocol,True,2
+Gemma4 26B-A4B,MedQA,accuracy,0.8813825608798115,01KZ9FPAEQM60ZKWZ7Q6600Y2Y,Base-compatible chat-native MC protocol,True,2
+Gemma4 26B-A4B,SciQ,accuracy,0.967,01KZ9FPAEQM60ZKWZ7Q6600Y2Y,Base-compatible chat-native MC protocol,True,2
+Gemma4 26B-A4B,ARC,accuracy,0.9813124813124813,01KZ9FPFG0DW4P3NQ3YF1YHZAF,Base-compatible chat-native MC protocol,True,3
+Gemma4 26B-A4B,MMLU-STEM,accuracy,0.9387232069979518,01KZ9FPFG0DW4P3NQ3YF1YHZAF,Base-compatible chat-native MC protocol,True,3
+Gemma4 26B-A4B,MedMCQA,accuracy,0.7516136743963663,01KZ9FPFG0DW4P3NQ3YF1YHZAF,Base-compatible chat-native MC protocol,True,3
+Gemma4 26B-A4B,MedQA,accuracy,0.8821681068342498,01KZ9FPFG0DW4P3NQ3YF1YHZAF,Base-compatible chat-native MC protocol,True,3
+Gemma4 26B-A4B,SciQ,accuracy,0.962,01KZ9FPFG0DW4P3NQ3YF1YHZAF,Base-compatible chat-native MC protocol,True,3
+GPT-OSS-20b,ARC,accuracy,0.9526055276055276,01KZ9APXTTS4PDA8SVV8X3Y4NF,Base-compatible chat-native MC protocol,True,1
+GPT-OSS-20b,MMLU-STEM,accuracy,0.9114959354484355,01KZ9APXTTS4PDA8SVV8X3Y4NF,Base-compatible chat-native MC protocol,True,1
+GPT-OSS-20b,MedMCQA,accuracy,0.6581400908438919,01KZ9APXTTS4PDA8SVV8X3Y4NF,Base-compatible chat-native MC protocol,True,1
+GPT-OSS-20b,MedQA,accuracy,0.800471327572663,01KZ9APXTTS4PDA8SVV8X3Y4NF,Base-compatible chat-native MC protocol,True,1
+GPT-OSS-20b,SciQ,accuracy,0.955,01KZ9APXTTS4PDA8SVV8X3Y4NF,Base-compatible chat-native MC protocol,True,1
+GPT-OSS-20b,ARC,accuracy,0.9520089895089895,01KZ9FQR56P224614Z2Z9WGCX0,Base-compatible chat-native MC protocol,True,2
+GPT-OSS-20b,MMLU-STEM,accuracy,0.9114290788956362,01KZ9FQR56P224614Z2Z9WGCX0,Base-compatible chat-native MC protocol,True,2
+GPT-OSS-20b,MedMCQA,accuracy,0.6669854171647143,01KZ9FQR56P224614Z2Z9WGCX0,Base-compatible chat-native MC protocol,True,2
+GPT-OSS-20b,MedQA,accuracy,0.8153967007069913,01KZ9FQR56P224614Z2Z9WGCX0,Base-compatible chat-native MC protocol,True,2
+GPT-OSS-20b,SciQ,accuracy,0.945,01KZ9FQR56P224614Z2Z9WGCX0,Base-compatible chat-native MC protocol,True,2
+GPT-OSS-20b,ARC,accuracy,0.9508333008333009,01KZ9FQXB7YV3JPT7PCX47RB33,Base-compatible chat-native MC protocol,True,3
+GPT-OSS-20b,MMLU-STEM,accuracy,0.9124510795055367,01KZ9FQXB7YV3JPT7PCX47RB33,Base-compatible chat-native MC protocol,True,3
+GPT-OSS-20b,MedMCQA,accuracy,0.6645947884293569,01KZ9FQXB7YV3JPT7PCX47RB33,Base-compatible chat-native MC protocol,True,3
+GPT-OSS-20b,MedQA,accuracy,0.7800471327572663,01KZ9FQXB7YV3JPT7PCX47RB33,Base-compatible chat-native MC protocol,True,3
+GPT-OSS-20b,SciQ,accuracy,0.958,01KZ9FQXB7YV3JPT7PCX47RB33,Base-compatible chat-native MC protocol,True,3

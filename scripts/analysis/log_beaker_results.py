@@ -59,6 +59,24 @@ TASK_NAMES = {
     "frontierscience_research": "FrontierScience-Research",
 }
 
+# The OLMo-base STEM suite expands into 23 leaf tasks, but the analysis matrix
+# needs its five benchmark aggregates. Raw-logprob and chat-native protocols
+# are normalized to the same eval/metric names; the protocol remains explicit
+# in Notes.
+BASE_SUMMARY_EVALS = {
+    "arc:mc:olmo3base": ("ARC", "log-prob MC"),
+    "arc:chat:olmo3base": ("ARC", "chat-native MC"),
+    "mmlu:stem:mc:olmo3base": ("MMLU-STEM", "log-prob MC"),
+    "mmlu:stem:chat": ("MMLU-STEM", "chat-native MC"),
+    "medmcqa:mc:olmo3base": ("MedMCQA", "log-prob MC"),
+    "medmcqa:chat_olmo3base": ("MedMCQA", "chat-native MC"),
+    "medqa_en:mc:olmo3base": ("MedQA", "log-prob MC"),
+    "medqa_en:chat_olmo3base": ("MedQA", "chat-native MC"),
+    "sciq:mc:olmo3base": ("SciQ", "log-prob MC"),
+    "sciq:chat_olmo3base": ("SciQ", "chat-native MC"),
+}
+BASE_EVAL_NAMES = {eval_name for eval_name, _protocol in BASE_SUMMARY_EVALS.values()}
+
 
 def beaker_json(*args: str) -> Any:
     command = ["beaker", *args, "--format", "json"]
@@ -110,6 +128,61 @@ def model_display_name(model_ref: str, overrides: dict[str, str]) -> str:
     return overrides.get(model_ref) or MODEL_NAMES.get(model_ref) or model_ref.rsplit("/", 1)[-1]
 
 
+def base_suite_rows(
+    metrics: dict[str, Any],
+    experiment_id: str,
+    model: str,
+    replica: int | None,
+) -> list[dict[str, str]] | None:
+    """Return canonical aggregate rows when payload is an OLMo-base STEM suite."""
+    summary = metrics.get("summary") or {}
+    matched = {
+        summary_task: BASE_SUMMARY_EVALS[summary_task]
+        for summary_task in summary
+        if summary_task in BASE_SUMMARY_EVALS
+    }
+    if not matched:
+        return None
+
+    present_evals = {eval_name for eval_name, _protocol in matched.values()}
+    missing = sorted(BASE_EVAL_NAMES - present_evals)
+    if missing:
+        raise ValueError(f"{experiment_id} base suite is missing aggregates: {missing}")
+
+    tasks = metrics.get("tasks") or []
+    limits = {
+        config["limit"]
+        for task in tasks
+        if isinstance((config := task.get("config") or {}).get("limit"), int)
+        and config["limit"] > 0
+    }
+    if len(limits) > 1:
+        raise ValueError(f"{experiment_id} base suite has inconsistent limits: {sorted(limits)}")
+    suffix = f"-dev{next(iter(limits))}" if limits else ""
+
+    rows = []
+    for summary_task, (eval_name, protocol) in matched.items():
+        summary_metric = summary[summary_task]
+        score = summary_metric.get("score") if isinstance(summary_metric, dict) else None
+        if not isinstance(score, (int, float)) or not math.isfinite(float(score)):
+            raise ValueError(f"{experiment_id} has no finite score for {summary_task}")
+        rows.append(
+            {
+                "Model Name": model,
+                "Eval Name": f"{eval_name}{suffix}",
+                "Metric": "accuracy",
+                "Score": repr(float(score)),
+                "Beaker Run ID": experiment_id,
+                "Notes": f"Base-compatible {protocol} protocol",
+                "Valid for analysis": "True",
+                "replica": str(replica) if replica is not None else "",
+            }
+        )
+
+    rows.sort(key=lambda row: row["Eval Name"])
+    return rows
+
+
 def result_rows(
     payload: dict[str, Any],
     experiment_id: str,
@@ -131,6 +204,10 @@ def result_rows(
         provider_config.get("model") or run_config.get("model") or tasks[0].get("model") or ""
     )
     model = model_display_name(model_ref, model_overrides)
+    base_rows = base_suite_rows(metrics, experiment_id, model, replica)
+    if base_rows is not None:
+        return base_rows, 0
+
     eval_counts = Counter(
         display_eval(str(task.get("task", "")), task.get("config") or {}) for task in tasks
     )

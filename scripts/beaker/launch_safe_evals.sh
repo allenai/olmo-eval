@@ -34,6 +34,7 @@ OPENAI_SECRET="roryd_OPENAI_API_KEY"
 ONLY="all"
 LIMIT=""
 SAMPLE_SEED="42"
+BASE_SEED=""
 DRY_RUN=false
 PRINT_ONLY=false
 RUN_TAG="$(date -u +%Y%m%d-%H%M%S)"
@@ -58,6 +59,7 @@ Options:
   --only GROUP             all, core, math, mmlu, base, gpqa, paper, sage, or expertqa (default: all)
   --limit N                Run a reproducible random sample of N instances
   --sample-seed N          Seed used with --limit (default: 42)
+  --base-seed N            Seed and few-shot seed for a full base-suite run
   --gpus N                 GPUs per job (default: 2)
   --cluster NAME           Beaker cluster (default: ai2/ceres)
   --workspace NAME         Beaker workspace (default: ai2/olmo-eval-debug)
@@ -90,6 +92,7 @@ while [[ $# -gt 0 ]]; do
         --only) ONLY="$2"; shift 2 ;;
         --limit) LIMIT="$2"; shift 2 ;;
         --sample-seed) SAMPLE_SEED="$2"; shift 2 ;;
+        --base-seed) BASE_SEED="$2"; shift 2 ;;
         --gpus) GPUS="$2"; shift 2 ;;
         --cluster) CLUSTER="$2"; shift 2 ;;
         --workspace) WORKSPACE="$2"; shift 2 ;;
@@ -126,6 +129,11 @@ fi
 
 if [[ ! "$SAMPLE_SEED" =~ ^[0-9]+$ ]]; then
     echo "--sample-seed must be a non-negative integer" >&2
+    exit 2
+fi
+
+if [[ -n "$BASE_SEED" && ! "$BASE_SEED" =~ ^[0-9]+$ ]]; then
+    echo "--base-seed must be a non-negative integer" >&2
     exit 2
 fi
 
@@ -483,7 +491,7 @@ if [[ ("$ONLY" == all || "$ONLY" == mmlu) && (-n "$LIMIT" || ${#mmlu_task_overri
         mmlu_tasks+=("${mmlu_task_overrides[@]}")
     done <<<"$mmlu_expanded_tasks"
 fi
-if [[ "$ONLY" == base && (-n "$LIMIT" || ${#base_eval_task_overrides[@]} -gt 0) ]]; then
+if [[ "$ONLY" == base && (-n "$LIMIT" || -n "$BASE_SEED" || ${#base_eval_task_overrides[@]} -gt 0) ]]; then
     # As with MMLU above, suite-level overrides do not reach expanded tasks.
     # Retain the suite for aggregation metadata and attach overrides to every
     # leaf task explicitly.
@@ -500,6 +508,11 @@ if [[ "$ONLY" == base && (-n "$LIMIT" || ${#base_eval_task_overrides[@]} -gt 0) 
             base_eval_tasks+=(
                 --override "limit=${LIMIT}"
                 --override "seed=${SAMPLE_SEED}"
+            )
+        elif [[ -n "$BASE_SEED" ]]; then
+            base_eval_tasks+=(
+                --override "seed=${BASE_SEED}"
+                --override "fewshot_seed=${BASE_SEED}"
             )
         fi
         base_eval_tasks+=("${base_eval_task_overrides[@]}")

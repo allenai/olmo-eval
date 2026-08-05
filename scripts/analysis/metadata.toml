@@ -36,6 +36,31 @@ ref = "deepscholar_bench"
 family = "sci-lit"
 why = "fixed dev10 related-work generation; end-to-end research synthesis"
 
+[evals.ARC]
+ref = "arc"
+family = "base"
+why = "base-compatible multiple-choice science reasoning"
+
+[evals."MMLU-STEM"]
+ref = "mmlu_stem"
+family = "base"
+why = "base-compatible multiple-choice STEM knowledge and reasoning"
+
+[evals.MedMCQA]
+ref = "medmcqa"
+family = "base"
+why = "base-compatible multiple-choice medical knowledge"
+
+[evals.MedQA]
+ref = "medqa_en"
+family = "base"
+why = "base-compatible multiple-choice clinical knowledge"
+
+[evals.SciQ]
+ref = "sciq"
+family = "base"
+why = "base-compatible multiple-choice science knowledge"
+
 [evals."FS-Olympiad accuracy"]
 ref = "frontierscience_olympiad"
 family = "frontier-science"

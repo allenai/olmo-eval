@@ -80,11 +80,6 @@ TRUST_ORDER = ["usable", "suspect"]
 # "suspect" on the score charts, and the two must not collide across slides.
 SENTINEL = "#86a6df"
 
-# Vega does not ship seaborn's `vlag` scheme, so use a sampled equivalent:
-# cool blue for negative association, a neutral zero, and warm red positive.
-VLAG_DOMAIN = [-1.0, -0.66, -0.33, 0.0, 0.33, 0.66, 1.0]
-VLAG_RANGE = ["#315f9d", "#7893bc", "#b8c2d2", "#f3f2f1", "#d8b3b1", "#c27475", "#a9434d"]
-
 COLUMN_RENAMES = {
     "Model Name": "model",
     "Eval Name": "eval",
@@ -105,20 +100,20 @@ DEV_TO_CANONICAL = {
 }
 CANONICAL_TO_DEV = {canonical: dev for dev, canonical in DEV_TO_CANONICAL.items()}
 AGENTIC_EVALS = list(DEV_TO_CANONICAL.values())
+BASE_EVALS = ["ARC", "MMLU-STEM", "MedMCQA", "MedQA", "SciQ"]
 SENTINEL_EVALS = ["IFEval", "MMLU", "MATH-500"]
 FRONTIER_EVALS = [
     "FS-Olympiad accuracy",
     "FS-Research success",
     "FS-Research rubric",
 ]
-# These are direct/non-agentic or judged proxy evaluations, not a uniformly
-# base-model-compatible suite. In particular, IFEval and LitSearch-rerank are
-# chat tasks, FrontierScience is chat + model judge, and this sweep mixes MMLU
-# scoring protocols for models that cannot safely use raw completion logprobs.
-PROXY_EVALS = ["LitSearch-rerank", *FRONTIER_EVALS, *SENTINEL_EVALS]
+# Candidate predictors include the base-compatible suite plus direct and
+# judged post-training proxies. Protocol differences remain visible in the
+# source ledger rather than being treated as additional evaluations.
+PROXY_EVALS = [*BASE_EVALS, "LitSearch-rerank", *FRONTIER_EVALS, *SENTINEL_EVALS]
 # Operationally cheap relative to DeepScholar: no tools, no external judge,
 # and already fast enough to run in full in this sweep.
-CHEAP_EVALS = ["LitSearch-rerank", *SENTINEL_EVALS]
+CHEAP_EVALS = [*BASE_EVALS, "LitSearch-rerank", *SENTINEL_EVALS]
 ALL_ANALYSIS_EVALS = [*AGENTIC_EVALS, *PROXY_EVALS]
 COMPACT_EVAL_LABELS = {
     "ExpertQA": "ExpertQA",
@@ -127,14 +122,16 @@ COMPACT_EVAL_LABELS = {
     "SAGE-short": "SAGE-short",
     "DeepScholar-Bench": "DeepScholar",
 }
-FAMILY_ORDER = ["sci-lit", "frontier-science", "sentinel"]
+FAMILY_ORDER = ["sci-lit", "base", "frontier-science", "sentinel"]
 FAMILY_LABELS = {
     "sci-lit": "Sci-lit",
+    "base": "Base",
     "frontier-science": "FrontierScience",
     "sentinel": "Sentinel",
 }
 FAMILY_COLOR = {
     "sci-lit": PRIMARY,
+    "base": SERIES[3],
     "frontier-science": SERIES[2],
     "sentinel": SENTINEL,
 }
@@ -150,6 +147,11 @@ PRIMARY_METRICS = {
     "SAGE-open": "weighted_recall:weighted_recall",
     "SAGE-short": "exact_match:exact_match",
     "DeepScholar-Bench": "geomean_fixed:external",
+    "ARC": "accuracy",
+    "MMLU-STEM": "accuracy",
+    "MedMCQA": "accuracy",
+    "MedQA": "accuracy",
+    "SciQ": "accuracy",
     "IFEval": "prompt_level_loose_acc:ifeval",
     "MMLU": "primary_score:average",
     "MATH-500": "accuracy:minerva_math_flex",
@@ -158,6 +160,16 @@ PRIMARY_METRICS = {
     "FS-Research rubric": "rubric_score:frontierscience_judge",
 }
 INVALID_NOTE_MARKERS = ("legacy stock tool template",)
+
+
+def eval_family(eval_name: str) -> str:
+    if eval_name in BASE_EVALS:
+        return "base"
+    if eval_name in FRONTIER_EVALS:
+        return "frontier-science"
+    if eval_name in SENTINEL_EVALS:
+        return "sentinel"
+    return "sci-lit"
 
 
 @dataclass(frozen=True)
@@ -738,6 +750,10 @@ def chart_scores(df: pl.DataFrame, meta: Metadata, family: str) -> alt.FacetChar
         # Three equal, presentation-scale panels fill the slide instead of
         # leaving the FrontierScience charts clustered in its left half.
         facet_width, row_step = 315, 27
+    elif family == "base":
+        title = "Base eval scores"
+        subtitle = "Base-compatible tasks · full-set replica mean · whiskers: min–max"
+        facet_width, row_step = 235, 25
     else:
         title = "Sentinel scores"
         subtitle = "Full-set replica mean · whiskers: min–max"
@@ -815,17 +831,6 @@ def chart_profile(ranked: pl.DataFrame, meta: Metadata, models: list[str]) -> al
         color=color,
     )
     lines = base.mark_line(strokeWidth=2, invalid="break-paths-show-domains")
-    interval_base = base.transform_filter(alt.datum.pct_low != None)  # noqa: E711
-    intervals = interval_base.mark_rule(strokeWidth=1.15, opacity=0.62).encode(
-        y=alt.Y("pct_low:Q"),
-        y2=alt.Y2("pct_high:Q"),
-    )
-    interval_low = interval_base.mark_tick(
-        orient="horizontal", thickness=1.15, size=7, opacity=0.62
-    ).encode(y=alt.Y("pct_low:Q"))
-    interval_high = interval_base.mark_tick(
-        orient="horizontal", thickness=1.15, size=7, opacity=0.62
-    ).encode(y=alt.Y("pct_high:Q"))
     points = base.mark_point(size=55, filled=True)
     category_rail = (
         alt.Chart(eval_meta)
@@ -851,16 +856,14 @@ def chart_profile(ranked: pl.DataFrame, meta: Metadata, models: list[str]) -> al
         .encode(text="model:N")
     )
     return (
-        (category_rail + lines + intervals + interval_low + interval_high + points + labels)
+        (category_rail + lines + points + labels)
         .resolve_scale(color="independent")
         .properties(
             width=960,
             height=plot_height,
             title=alt.Title(
                 "Cross-eval profile",
-                subtitle=(
-                    "1 = best within eval · whiskers: replica-bootstrap 95% · gaps: unmeasured"
-                ),
+                subtitle="1 = best within eval · gaps: unmeasured",
             ),
         )
     )
@@ -868,6 +871,7 @@ def chart_profile(ranked: pl.DataFrame, meta: Metadata, models: list[str]) -> al
 
 def chart_summary(
     sci_lit: pl.DataFrame,
+    base_scores: pl.DataFrame,
     frontier: pl.DataFrame,
     sentinel: pl.DataFrame,
     n_sci_lit: int,
@@ -951,19 +955,25 @@ def chart_summary(
             title=alt.Title(title, subtitle=subtitle),
         )
 
-    middle = companion_panel(
+    base_panel = companion_panel(
+        base_scores,
+        "Base",
+        "Mean rank · 5 evals",
+        SERIES[3],
+    )
+    frontier_panel = companion_panel(
         frontier,
         "FrontierScience",
         "Mean rank · 3 measures",
         SERIES[2],
     )
-    right = companion_panel(
+    sentinel_panel = companion_panel(
         sentinel,
         "Sentinels",
         "Comparison only",
         SENTINEL,
     )
-    return alt.hconcat(left, middle, right, spacing=24).properties(
+    return alt.hconcat(left, base_panel, frontier_panel, sentinel_panel, spacing=18).properties(
         title=alt.Title(
             "Overall standing",
             subtitle=(
@@ -1189,13 +1199,6 @@ def pairwise_replica_correlations(
     )
     rows = []
 
-    def family(eval_name: str) -> str:
-        if eval_name in FRONTIER_EVALS:
-            return "frontier-science"
-        if eval_name in SENTINEL_EVALS:
-            return "sentinel"
-        return "sci-lit"
-
     for x_eval in x_evals:
         for y_eval in y_evals:
             pairs = _replica_pairs(usable, x_eval, y_eval)
@@ -1220,8 +1223,8 @@ def pairwise_replica_correlations(
                     "y_eval": y_eval,
                     "x_label": CANONICAL_TO_DEV.get(x_eval, x_eval),
                     "y_label": CANONICAL_TO_DEV.get(y_eval, y_eval),
-                    "x_family_label": FAMILY_LABELS[family(x_eval)],
-                    "y_family_label": FAMILY_LABELS[family(y_eval)],
+                    "x_family_label": FAMILY_LABELS[eval_family(x_eval)],
+                    "y_family_label": FAMILY_LABELS[eval_family(y_eval)],
                     "rho": rho,
                     "rho_variant_mean": (
                         sum(variant_rhos) / len(variant_rhos) if variant_rhos else None
@@ -1512,6 +1515,11 @@ def chart_deepscholar_ifeval(
 
 RIDGE_ALPHA_GRID = np.logspace(-2, 2, 9)
 PROXY_REGRESSION_LABELS = {
+    "ARC": "ARC",
+    "MMLU-STEM": "MMLU-STEM",
+    "MedMCQA": "MedMCQA",
+    "MedQA": "MedQA",
+    "SciQ": "SciQ",
     "LitSearch-rerank": "LitSearch-rerank",
     "FS-Olympiad accuracy": "FS-Olympiad",
     "FS-Research success": "FS-Research success",
@@ -1906,13 +1914,7 @@ def analyze_eval_pca(
                 {
                     "eval": eval_name,
                     "eval_label": CANONICAL_TO_DEV.get(eval_name, eval_name),
-                    "family_label": FAMILY_LABELS[
-                        "frontier-science"
-                        if eval_name in FRONTIER_EVALS
-                        else "sentinel"
-                        if eval_name in SENTINEL_EVALS
-                        else "sci-lit"
-                    ],
+                    "family_label": FAMILY_LABELS[eval_family(eval_name)],
                     "pc": f"PC{pc + 1}",
                     "pc_index": pc + 1,
                     "component_loading": float(components[pc, eval_index]),
@@ -1929,20 +1931,31 @@ def analyze_eval_pca(
             source = pairwise.filter(
                 (pl.col("x_eval") == x_eval) & (pl.col("y_eval") == y_eval)
             ).row(0, named=True)
+            abs_rho = float(abs(rho))
+            abs_rho_min = source["abs_rho_min"]
+            abs_rho_max = source["abs_rho_max"]
             redundancy_rows.append(
                 {
                     "x_eval": x_eval,
                     "y_eval": y_eval,
+                    "x_family": eval_family(x_eval),
+                    "y_family": eval_family(y_eval),
                     "pair_label": (
                         f"{COMPACT_EVAL_LABELS.get(x_eval, x_eval)} ↔ "
                         f"{COMPACT_EVAL_LABELS.get(y_eval, y_eval)}"
                     ),
                     "rho": float(rho),
-                    "abs_rho": float(abs(rho)),
+                    "abs_rho": abs_rho,
                     "rho_min": source["rho_min"],
                     "rho_max": source["rho_max"],
-                    "abs_rho_min": source["abs_rho_min"],
-                    "abs_rho_max": source["abs_rho_max"],
+                    "abs_rho_min": abs_rho_min,
+                    "abs_rho_max": abs_rho_max,
+                    "abs_rho_interval_min": (
+                        min(abs_rho, abs_rho_min) if abs_rho_min is not None else abs_rho
+                    ),
+                    "abs_rho_interval_max": (
+                        max(abs_rho, abs_rho_max) if abs_rho_max is not None else abs_rho
+                    ),
                     "rho_variant_mean": source["rho_variant_mean"],
                     "rho_variant_median": source["rho_variant_median"],
                     "rho_variant_count": source["rho_variant_count"],
@@ -2135,7 +2148,7 @@ def chart_eval_pca(
         ),
     )
 
-    shown_pcs = pc_order[: min(4, len(pc_order))]
+    shown_pcs = pc_order[: min(3, len(pc_order))]
     loading_data = loadings.filter(pl.col("pc").is_in(shown_pcs))
     eval_labels = [CANONICAL_TO_DEV.get(name, name) for name in eval_order]
     loading_panels = []
@@ -2183,60 +2196,100 @@ def chart_eval_pca(
             (zero + loading_intervals + loading_points).properties(
                 width=72,
                 height=alt.Step(27),
-                title=(alt.Title(pc, subtitle="Bootstrap 95%") if pc_position == 0 else pc),
+                title=alt.Title(pc, anchor="middle", frame="group"),
             )
         )
 
-    top_redundancy = redundancy.head(8).with_columns(
-        rho_label=pl.col("rho").round(2).cast(pl.String),
-    )
-    pair_order = top_redundancy["pair_label"].to_list()
-    redundancy_base = alt.Chart(top_redundancy).encode(
-        x=alt.X("abs_rho:Q", title="|Spearman ρ|", scale=alt.Scale(domain=[0, 1])),
-        y=alt.Y(
+    downstream_evals = [*AGENTIC_EVALS, "LitSearch-rerank", *FRONTIER_EVALS]
+    base_sentinel_evals = [*BASE_EVALS, *SENTINEL_EVALS]
+    x_is_downstream = pl.col("x_eval").is_in(downstream_evals)
+    y_is_downstream = pl.col("y_eval").is_in(downstream_evals)
+    x_is_base_sentinel = pl.col("x_eval").is_in(base_sentinel_evals)
+    y_is_base_sentinel = pl.col("y_eval").is_in(base_sentinel_evals)
+    redundancy_groups = [
+        (
+            "Downstream ↔ base/sentinel",
+            (x_is_downstream & y_is_base_sentinel) | (x_is_base_sentinel & y_is_downstream),
+        ),
+        (
+            "Base/sentinel ↔ base/sentinel",
+            x_is_base_sentinel & y_is_base_sentinel,
+        ),
+        (
+            "Downstream ↔ downstream",
+            x_is_downstream & y_is_downstream,
+        ),
+    ]
+
+    def redundancy_group_chart(
+        title: str, predicate: pl.Expr, *, show_x_axis: bool
+    ) -> alt.LayerChart:
+        top_pairs = (
+            redundancy.filter(predicate)
+            .head(5)
+            .with_columns(rho_label=pl.col("rho").round(2).cast(pl.String))
+        )
+        pair_order = top_pairs["pair_label"].to_list()
+        pair_axis = alt.Y(
             "pair_label:N",
             sort=pair_order,
             title=None,
+            bandPosition=0.5,
             axis=alt.Axis(labelLimit=245),
-        ),
-    )
-    redundancy_bars = redundancy_base.mark_bar(color=SERIES[4], cornerRadiusEnd=3).encode(
-        tooltip=[
-            "pair_label:N",
-            alt.Tooltip("rho:Q", format=".3f"),
-            alt.Tooltip("rho_min:Q", title="pairing min ρ", format=".3f"),
-            alt.Tooltip("rho_max:Q", title="pairing max ρ", format=".3f"),
-            alt.Tooltip("rho_variant_count:Q", title="replica pairings"),
-            "n_models:Q",
-            "n_pairs:Q",
-        ]
-    )
-    redundancy_errors = redundancy_base.mark_rule(color=INK, strokeWidth=1.4).encode(
-        x=alt.X("abs_rho_min:Q"),
-        x2=alt.X2("abs_rho_max:Q"),
-    )
-    redundancy_error_min = redundancy_base.mark_tick(
-        color=INK, orient="vertical", thickness=1.4, size=11
-    ).encode(x=alt.X("abs_rho_min:Q"))
-    redundancy_error_max = redundancy_base.mark_tick(
-        color=INK, orient="vertical", thickness=1.4, size=11
-    ).encode(x=alt.X("abs_rho_max:Q"))
-    redundancy_labels = redundancy_base.mark_text(align="left", dx=5, fontSize=8).encode(
-        x=alt.X("abs_rho_max:Q"), text="rho_label:N"
-    )
+        )
+        base = alt.Chart(top_pairs)
+        bars = base.mark_bar(color=SERIES[4], cornerRadiusEnd=3, size=17).encode(
+            x=alt.X(
+                "abs_rho:Q",
+                title="|Spearman ρ|" if show_x_axis else None,
+                scale=alt.Scale(domain=[0, 1]),
+                axis=alt.Axis(tickCount=6) if show_x_axis else None,
+            ),
+            y=pair_axis,
+            tooltip=[
+                "pair_label:N",
+                alt.Tooltip("rho:Q", format=".3f"),
+                alt.Tooltip("rho_min:Q", title="pairing min ρ", format=".3f"),
+                alt.Tooltip("rho_max:Q", title="pairing max ρ", format=".3f"),
+                alt.Tooltip("rho_variant_count:Q", title="replica pairings"),
+                "n_models:Q",
+                "n_pairs:Q",
+            ],
+        )
+        errors = base.mark_rule(color=INK, strokeWidth=1.2).encode(
+            x=alt.X("abs_rho_interval_min:Q"),
+            x2=alt.X2("abs_rho_interval_max:Q"),
+            y=pair_axis,
+        )
+        error_min = base.mark_tick(color=INK, orient="vertical", thickness=1.2, size=9).encode(
+            x=alt.X("abs_rho_interval_min:Q"), y=pair_axis
+        )
+        error_max = base.mark_tick(color=INK, orient="vertical", thickness=1.2, size=9).encode(
+            x=alt.X("abs_rho_interval_max:Q"), y=pair_axis
+        )
+        labels = base.mark_text(align="left", dx=4, fontSize=8).encode(
+            x=alt.X("abs_rho_interval_max:Q"), y=pair_axis, text="rho_label:N"
+        )
+        return (bars + errors + error_min + error_max + labels).properties(
+            width=300,
+            height=alt.Step(21),
+            title=title,
+        )
+
+    redundancy_panels = [
+        redundancy_group_chart(title, predicate, show_x_axis=index == 2)
+        for index, (title, predicate) in enumerate(redundancy_groups)
+    ]
     redundancy_panel = (
-        redundancy_bars
-        + redundancy_errors
-        + redundancy_error_min
-        + redundancy_error_max
-        + redundancy_labels
-    ).properties(
-        width=300,
-        height=alt.Step(34),
-        title=alt.Title(
-            "Most redundant pairs",
-            subtitle="Bar: pooled |ρ| · whisker: pairing range",
-        ),
+        alt.vconcat(*redundancy_panels, spacing=15)
+        .resolve_scale(x="shared")
+        .properties(
+            title=alt.Title(
+                "Most redundant pairs",
+                subtitle="Top five per group · bar: pooled |ρ| · whisker: pooled + pairing range",
+                offset=14,
+            )
+        )
     )
 
     return alt.hconcat(scree_panel, *loading_panels, redundancy_panel, spacing=16).properties(
@@ -2244,11 +2297,11 @@ def chart_eval_pca(
             "Eval covariance",
             subtitle=[
                 "Spearman rank correlation over all within-model replica pairs",
-                "PCA: replica-bootstrap 95% · redundancy: pairing range",
+                "PCA: replica-bootstrap 95% · redundancy: pooled + pairing range",
                 (
                     "Tentative interpretation: PC1 general capability · "
-                    "PC2 answer quality ↔ open retrieval · "
-                    "PC3 literature retrieval ↔ exam knowledge"
+                    "PC2 instruction following ↔ open retrieval · "
+                    "PC3 closed-form QA ↔ research synthesis"
                 ),
             ],
         )
@@ -2290,7 +2343,7 @@ def _correlation_heatmap(
     cells = base.mark_rect(stroke=None).encode(
         color=alt.Color(
             "rho:Q",
-            scale=alt.Scale(domain=VLAG_DOMAIN, range=VLAG_RANGE, clamp=True),
+            scale=alt.Scale(domain=[-1, 1], scheme="brownbluegreen", clamp=True),
             legend=alt.Legend(title="Spearman ρ") if show_legend else None,
         ),
         tooltip=[
@@ -2310,7 +2363,7 @@ def _correlation_heatmap(
     )
     labels = base.mark_text(fontSize=8).encode(
         text="rho_label:N",
-        color=alt.condition("abs(datum.rho) >= 0.58", alt.value("white"), alt.value(INK)),
+        color=alt.condition("datum.rho < 0", alt.value("white"), alt.value(INK)),
     )
     family_scale = alt.Scale(
         domain=[FAMILY_LABELS[name] for name in FAMILY_ORDER],
@@ -2364,8 +2417,8 @@ def chart_covariance(run_scores: pl.DataFrame) -> alt.HConcatChart:
         matrix_labels,
         matrix_labels,
         "All evals",
-        37,
-        33,
+        40,
+        40,
         True,
         True,
     )
@@ -2442,6 +2495,7 @@ def save(chart: alt.TopLevelMixin, out_dir: Path, name: str, formats: list[str])
 SLIDE_TITLES = {
     "coverage": "Eval coverage",
     "scores_sci-lit": "Sci-lit scores",
+    "scores_base": "Base eval scores",
     "scores_sentinel": "Sentinel scores",
     "scores_frontier-science": "FrontierScience scores",
     "profile": "Cross-eval profile",
@@ -2510,6 +2564,12 @@ def write_deck(
         ["eval", "cheap", "base-compatible", "use"],
         [
             [
+                "ARC, MMLU-STEM, MedMCQA, MedQA, SciQ",
+                "Yes",
+                "Yes",
+                "Pre- and post-training science proxy",
+            ],
+            [
                 "LitSearch-rerank",
                 "Yes",
                 "No — chat",
@@ -2522,10 +2582,10 @@ def write_deck(
                 "Post-training control",
             ],
             [
-                "MMLU",
+                "Full MMLU sentinel",
                 "Yes",
                 "MC/RC",
-                "Both; separate protocols",
+                "Broad knowledge retention",
             ],
             [
                 "MATH-500",
@@ -2549,13 +2609,10 @@ def write_deck(
     )
     slides.append(
         f"""<section class="slide">
-          <h2>“Cheap” ≠ “base-compatible”</h2>
-          <p class="sub">Current data: cheap → DeepScholar on instruction checkpoints.
-             Base → DeepScholar requires paired base and post-training checkpoints.</p>
+          <h2>Cheap and base-compatible evals</h2>
+          <p class="sub">Base-compatible: valid before instruction tuning ·
+             Cheap: practical for frequent checks</p>
           {predictor_taxonomy}
-          <h3>Base-checkpoint panel</h3>
-          <p class="sub">MMLU MC/RC, SciQ MC/RC, GPQA MC, QASPER yes/no RC,
-             SciRIFF yes/no RC, LabBench DbQA/ProtocolQA MC; optional MATH completion/BPB.</p>
         </section>"""
     )
 
@@ -2742,6 +2799,7 @@ def main() -> None:
     ranked = add_ranks(df).join(rank_intervals, on=["model", "eval"], how="left")
 
     n_sci_lit = len(meta.sci_lit_evals())
+    n_base = meta.evals.filter(pl.col("family") == "base").height
     n_frontier = meta.evals.filter(pl.col("family") == "frontier-science").height
     n_sentinel = meta.evals.filter(pl.col("family") == "sentinel").height
     sci_lit_all = composite(ranked, "sci-lit").join(
@@ -2771,6 +2829,7 @@ def main() -> None:
             .with_columns(label=pl.format("n={}/{}", pl.col("n_evals"), pl.lit(n_evals)))
         )
 
+    base_scores = companion_scores("base", n_base)
     frontier = companion_scores("frontier-science", n_frontier)
     sentinel = companion_scores("sentinel", n_sentinel)
 
@@ -2782,11 +2841,13 @@ def main() -> None:
     generated = [
         "coverage",
         "scores_sci-lit",
+        "scores_base",
         "scores_frontier-science",
         "scores_sentinel",
     ]
     save(chart_coverage(df, meta), args.out, "coverage", args.formats)
     save(chart_scores(df, meta, "sci-lit"), args.out, "scores_sci-lit", args.formats)
+    save(chart_scores(df, meta, "base"), args.out, "scores_base", args.formats)
     save(
         chart_scores(df, meta, "frontier-science"),
         args.out,
@@ -2913,6 +2974,7 @@ def main() -> None:
         save(
             chart_summary(
                 sci_lit,
+                base_scores,
                 frontier,
                 sentinel,
                 n_sci_lit,

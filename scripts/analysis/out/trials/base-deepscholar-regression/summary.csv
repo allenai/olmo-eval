@@ -1,0 +1,2 @@
+n_models,n_predictors,bootstrap_samples,ridge_alpha_full,ridge_alpha_outer_min,ridge_alpha_outer_max,pearson_r_median,pearson_r_low,pearson_r_high,spearman_rho_median,spearman_rho_low,spearman_rho_high,mae_median,mae_low,mae_high,r2_median,r2_low,r2_high
+7,5,1000,1.0,0.01,31.622776601683793,0.49857572721050325,0.031479587580688216,0.9191287486020902,0.375,-0.32142857142857145,0.8928571428571429,0.056110676616764284,0.013928166899594504,0.10013018202050197,-0.8267691616178795,-5.2904004795032,0.7961206590328027
