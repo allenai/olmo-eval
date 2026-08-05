@@ -60,13 +60,7 @@ def prepare_task_items(
     # Always update task config with final sampling params (so finalize_task captures them)
     task.config = replace(task.config, sampling_params=existing_params)
 
-    instances = list(task.instances)
-    if task.config.limit and len(instances) > task.config.limit:
-        # Use random.sample for reproducible random sampling (matches oe-eval-internal behavior)
-        rng = random.Random(task.config.seed)
-        population = instances
-        instances = rng.sample(population, task.config.limit)
-        instances = _drop_already_sampled(population, instances, task.config)
+    instances = select_instances(list(task.instances), task.config)
 
     items = [
         QueueItem(
@@ -82,6 +76,26 @@ def prepare_task_items(
 
     return task, items
 
+
+
+def select_instances(population, config):
+    """Which instances this run should do: the sample, minus any earlier run's share of it.
+
+    `limit` samples reproducibly -- `random.Random(seed).sample(population, limit)` -- so a larger
+    sample at the same seed contains a smaller one. It does not *begin* with it, though:
+    `sample(100)[:40]` is not `sample(40)`. So growing a sample cheaply means excluding the earlier
+    run by membership, which is what OLMO_EVAL_SKIP_SAMPLE_OF_SIZE does.
+
+    Sampling and exclusion are decided together here because separating them hid a bug: the
+    exclusion used to sit inside the sampling branch, and a task with exactly as many instances as
+    the limit never enters that branch.
+    """
+
+    instances = list(population)
+    if config.limit and len(instances) > config.limit:
+        # Use random.sample for reproducible random sampling (matches oe-eval-internal behavior)
+        instances = random.Random(config.seed).sample(instances, config.limit)
+    return _drop_already_sampled(population, instances, config)
 
 
 def _drop_already_sampled(population, sampled, config):
@@ -104,7 +118,8 @@ def _drop_already_sampled(population, sampled, config):
     except ValueError:
         logger.warning("OLMO_EVAL_SKIP_SAMPLE_OF_SIZE=%r is not a number; ignoring", raw)
         return sampled
-    if earlier <= 0 or earlier >= (config.limit or 0) or earlier >= len(population):
+    limit = config.limit or len(population)
+    if earlier <= 0 or earlier >= limit or earlier >= len(population):
         return sampled
 
     already = random.Random(config.seed).sample(population, earlier)
