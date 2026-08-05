@@ -291,12 +291,30 @@ SCIENCE_NOJUDGE_BASE_PC = make_suite(
 # accuracy is closest to the floor. Lower is better, so it does not aggregate with the suites above
 # — DISPLAY_ONLY keeps it per-task.
 
+# The 15 swapped leaves on their own. science:nojudge:base re-scores 32,576 items to change 2,734
+# of them; the other 59 leaves are untouched by the scoring change and their numbers already exist.
+# Running just this block costs a twelfth as much, which is what makes it affordable to run the
+# three scorings side by side.
+
+_GPQA_ALL_SUBJECT = _GPQA_BIOLOGY_TASKS + _GPQA_CHEMISTRY_TASKS + _GPQA_PHYSICS_TASKS
+
+SCIENCE_EXPERT_BASE = make_suite(
+    "science:expert:base",
+    (get_suite("lab_bench:mc"), *(f"{t}:mc" for t in _GPQA_ALL_SUBJECT)),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="GPQA and LAB-Bench alone, scored by likelihood over the options.",
+)
+
+SCIENCE_EXPERT_BASE_PC = make_suite(
+    "science:expert:base_norm",
+    (get_suite("lab_bench:mc_per_char"), *(f"{t}:mc_per_char" for t in _GPQA_ALL_SUBJECT)),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="GPQA and LAB-Bench alone, length-normalized.",
+)
+
 SCIENCE_EXPERT_BPB = make_suite(
     "science:expert:bpb",
-    (
-        get_suite("lab_bench:bpb"),
-        *(f"{t}:bpb" for t in _GPQA_BIOLOGY_TASKS + _GPQA_CHEMISTRY_TASKS + _GPQA_PHYSICS_TASKS),
-    ),
+    (get_suite("lab_bench:bpb"), *(f"{t}:bpb" for t in _GPQA_ALL_SUBJECT)),
     aggregation=AggregationStrategy.DISPLAY_ONLY,
     description="Bits per byte on the GPQA and LAB-Bench leaves. Lower is better; "
     "not comparable to the accuracy suites.",

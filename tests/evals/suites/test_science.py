@@ -119,3 +119,12 @@ def test_science_expert_bpb_covers_the_gpqa_and_lab_bench_leaves():
     swapped = _leaves("science:nojudge") - _leaves("science:nojudge:base")
     assert all(t.endswith(":bpb") for t in bpb)
     assert bpb == {f"{t}:bpb" for t in swapped}
+
+
+def test_science_expert_suites_are_the_swapped_leaves_under_three_scorings():
+    """The narrow suites hold exactly the 15 tasks base/base_norm swap, one scoring each."""
+    swapped = _leaves("science:nojudge") - _leaves("science:nojudge:base")
+    for suite, suffix in (("science:expert:base", "mc"),
+                          ("science:expert:base_norm", "mc_per_char"),
+                          ("science:expert:bpb", "bpb")):
+        assert _leaves(suite) == {f"{t}:{suffix}" for t in swapped}, suite
