@@ -130,6 +130,52 @@ class TestHarnessOverridesProviderDependencies:
         assert job_config.provider_packages is not None
         assert "https://github.com/user/repo@v1.0" in job_config.provider_packages
 
+    def test_min_runtime_reaches_job_config(self):
+        """Allocated scheduling uses an explicit protected runtime, not preemptible=False."""
+        from unittest.mock import patch
+
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+        from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+
+        launch_config = LaunchConfig(
+            name="test",
+            model_specs=["test-model"],
+            task_specs=["humaneval"],
+            cluster="h100",
+            workspace="ai2/test",
+            budget="ai2/test",
+            harness="default",
+            preemptible=None,
+            min_runtime="2h",
+        )
+        exp = ExperimentPlan(
+            name="test",
+            model_spec="test-model",
+            priority="urgent",
+            tasks=["humaneval"],
+            original_task_specs=["humaneval"],
+            total_expanded_tasks=1,
+            num_gpus=1,
+        )
+        assembler = JobConfigAssembler(
+            config=launch_config,
+            effective_image="test-image",
+            effective_groups=[],
+            beaker_username="test-user",
+            common_secrets=[],
+            store_secrets=[],
+            task_secrets=[],
+            inject_aws_credentials=False,
+            inject_gcs_credentials=False,
+        )
+
+        with patch("olmo_eval.cli.beaker.job_assembler.cluster_has_weka", return_value=False):
+            job_config = assembler.assemble(exp)
+
+        assert job_config.preemptible is None
+        assert job_config.min_runtime == "2h"
+
     def test_provider_package_overrides_vllm_extra(self):
         """Test that provider.package overrides the default vllm extra."""
         from olmo_eval.cli.beaker.launch import _apply_harness_overrides

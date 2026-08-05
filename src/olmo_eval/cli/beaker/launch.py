@@ -83,6 +83,11 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Job priority level (low, normal, high, urgent). Can also use @priority suffix on tasks.",
 )
 @click.option("--preemptible/--no-preemptible", default=None, help="Allow preemption")
+@click.option(
+    "--min-runtime",
+    default=None,
+    help="Minimum protected runtime (for example 2h); 0s selects unallocated backfill.",
+)
 @click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
 @click.option("--workspace", "-w", help="Beaker workspace")
@@ -258,6 +263,7 @@ def launch(
     max_gpus_per_node: int | None,
     priority: str | None,
     preemptible: bool | None,
+    min_runtime: str | None,
     timeout: str | None,
     retries: int | None,
     workspace: str | None,
@@ -378,6 +384,7 @@ def launch(
         "max_gpus_per_node": max_gpus_per_node,
         "priority": priority,
         "preemptible": preemptible,
+        "min_runtime": min_runtime,
         "timeout": timeout,
         "retries": retries,
         "workspace": workspace,

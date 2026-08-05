@@ -29,7 +29,8 @@ class LaunchConfig:
 
     max_gpus_per_node: int = 8
     priority: str = "normal"
-    preemptible: bool = True
+    preemptible: bool | None = True
+    min_runtime: str | None = None
     timeout: str = "6h"
     retries: int | None = None
     image: str | None = None
@@ -100,6 +101,7 @@ class LaunchConfigLoader:
         cli_max_gpus_per_node = self.cli_args.get("max_gpus_per_node")
         cli_priority = self.cli_args.get("priority")
         cli_preemptible = self.cli_args.get("preemptible")
+        cli_min_runtime = self.cli_args.get("min_runtime")
         cli_timeout = self.cli_args.get("timeout")
         cli_retries = self.cli_args.get("retries")
         cli_workspace = self.cli_args.get("workspace")
@@ -123,6 +125,11 @@ class LaunchConfigLoader:
             )
             priority = cli_priority if cli_priority is not None else cfg.priority
             preemptible = cli_preemptible if cli_preemptible is not None else cfg.preemptible
+            min_runtime = (
+                cli_min_runtime
+                if cli_min_runtime is not None
+                else getattr(cfg, "min_runtime", None)
+            )
             timeout = cli_timeout if cli_timeout is not None else cfg.timeout
             gpus = cli_gpus if cli_gpus is not None else cfg.gpus
             image = cli_image or cfg.beaker_image
@@ -137,6 +144,7 @@ class LaunchConfigLoader:
             max_gpus_per_node = cli_max_gpus_per_node
             priority = cli_priority
             preemptible = cli_preemptible
+            min_runtime = cli_min_runtime
             timeout = cli_timeout
             gpus = cli_gpus  # None means auto-detect from provider
             image = cli_image
@@ -154,7 +162,10 @@ class LaunchConfigLoader:
             max_gpus_per_node if max_gpus_per_node is not None else DEFAULT_MAX_GPUS_PER_NODE
         )
         priority = priority or "normal"
-        preemptible = preemptible if preemptible is not None else True
+        if min_runtime is not None:
+            preemptible = None
+        else:
+            preemptible = preemptible if preemptible is not None else True
         timeout = timeout or "24h"
 
         self._validate_required(model_specs, task_specs, cluster, workspace, budget)
@@ -189,6 +200,7 @@ class LaunchConfigLoader:
             max_gpus_per_node=max_gpus_per_node,
             priority=priority,
             preemptible=preemptible,
+            min_runtime=min_runtime,
             timeout=timeout,
             retries=retries,
             image=image,

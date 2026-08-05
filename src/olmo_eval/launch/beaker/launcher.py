@@ -344,6 +344,7 @@ class BeakerJobConfig:
         shared_memory: Shared memory size (e.g., "10GiB").
         priority: Job priority level.
         preemptible: Whether the job can be preempted.
+        min_runtime: Minimum protected runtime requested from Beaker.
         timeout: Job timeout (e.g., "24h", "30m").
         retries: Number of retries on failure.
         beaker_image: Container image to use.
@@ -368,7 +369,8 @@ class BeakerJobConfig:
 
     # Job settings
     priority: str = "normal"
-    preemptible: bool = True
+    preemptible: bool | None = True
+    min_runtime: str | None = None
     timeout: str | None = "24h"
     retries: int | None = None
 
@@ -1083,6 +1085,7 @@ class BeakerLauncher:
             shared_memory=config.shared_memory,
             priority=config.priority,
             preemptible=config.preemptible,
+            min_runtime=config.min_runtime,
             task_timeout=config.timeout,
             retries=config.retries,
             budget=config.budget,

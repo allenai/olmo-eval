@@ -605,6 +605,7 @@ class JobConfigAssembler:
             num_gpus=exp.num_gpus,
             priority=exp.priority,
             preemptible=self.config.preemptible,
+            min_runtime=self.config.min_runtime,
             timeout=self.config.timeout,
             shared_memory="10GiB",
             retries=self.config.retries,
