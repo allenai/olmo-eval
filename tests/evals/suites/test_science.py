@@ -70,3 +70,25 @@ def test_science_nojudge_excludes_judge_task():
 def test_science_judge_contains_only_judge_task():
     expanded = get_suite("science:judge").expand()
     assert expanded == ("astabench_scholarqa",)
+
+
+def test_science_nojudge_base_swaps_only_generative_mc_tasks():
+    """science:nojudge:base differs from science:nojudge only by scoring GPQA and LAB-Bench
+    with their `:mc` variants; every other leaf is untouched."""
+    from olmo_eval.evals.suites.registry import get_suite
+
+    def leaves(name):
+        out = []
+
+        def rec(suite):
+            for task in suite.tasks:
+                rec(task) if hasattr(task, "tasks") else out.append(task)
+
+        rec(get_suite(name))
+        return set(out)
+
+    gen, base = leaves("science:nojudge"), leaves("science:nojudge:base")
+    assert len(gen) == len(base)
+    only_gen, only_base = gen - base, base - gen
+    assert only_base == {f"{t}:mc" for t in only_gen}
+    assert all(t.startswith(("gpqa_", "lab_bench_")) for t in only_gen)

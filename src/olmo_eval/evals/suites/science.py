@@ -180,6 +180,67 @@ SCIENCE_NOJUDGE = make_suite(
     description="All current science tasks that do not require external LLM judges.",
 )
 
+# -----------------------------------------------------------------------------
+# Base-model variants
+# -----------------------------------------------------------------------------
+#
+# GPQA and LAB-Bench default to a chat-formatted generative task: a system prompt
+# instructs the model to reason and close with "ANSWER: X", and the letter is
+# regex-extracted from free text. A base or annealed checkpoint has not been
+# tuned to follow that instruction and continues the prompt instead, so the
+# extractor finds no letter and the task scores below chance regardless of
+# whether the model knows the answer. Measured on the 7B anneal arms: control
+# emitted a parseable letter on 28 of 600 lab_bench_seqqa instances, and the nine
+# GPQA splits together scored 14.6% against a 25% floor.
+#
+# The `:mc` variants score the same questions by likelihood over the answer
+# options, which needs no instruction following. Everything else in the hierarchy
+# is already likelihood-scored or generative-with-exact-match, so only these two
+# families are swapped.
+#
+# Scores from these suites are not comparable to their generative counterparts.
+
+_GPQA_BIOLOGY_MC = tuple(f"{t}:mc" for t in _GPQA_BIOLOGY_TASKS)
+_GPQA_CHEMISTRY_MC = tuple(f"{t}:mc" for t in _GPQA_CHEMISTRY_TASKS)
+_GPQA_PHYSICS_MC = tuple(f"{t}:mc" for t in _GPQA_PHYSICS_TASKS)
+
+SCIENCE_BIOLOGY_BASE = make_suite(
+    "science:biology:base",
+    (
+        get_suite("lab_bench:mc"),
+        get_suite("geneturing"),
+        *_GPQA_BIOLOGY_MC,
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="science:biology with GPQA and LAB-Bench scored by likelihood over the options.",
+)
+
+SCIENCE_PHYSICAL_BASE = make_suite(
+    "science:physical:base",
+    (
+        *_GPQA_CHEMISTRY_MC,
+        *_GPQA_PHYSICS_MC,
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="science:physical with GPQA scored by likelihood over the options.",
+)
+
+SCIENCE_NOJUDGE_BASE = make_suite(
+    "science:nojudge:base",
+    (
+        SCIENCE_CORE,
+        SCIENCE_BIOLOGY_BASE,
+        SCIENCE_MEDICINE,
+        SCIENCE_PHYSICAL_BASE,
+        "qasper_yesno",
+        "sciriff_yesno",
+        SCIENCE_MATH,
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="science:nojudge for base and annealed checkpoints that do not follow "
+    "the 'end with ANSWER: X' instruction.",
+)
+
 SCIENCE_JUDGE = make_suite(
     "science:judge",
     (get_suite("astabench"),),
