@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import random
 from collections.abc import Sequence
 from dataclasses import replace
@@ -63,7 +64,9 @@ def prepare_task_items(
     if task.config.limit and len(instances) > task.config.limit:
         # Use random.sample for reproducible random sampling (matches oe-eval-internal behavior)
         rng = random.Random(task.config.seed)
-        instances = rng.sample(instances, task.config.limit)
+        population = instances
+        instances = rng.sample(population, task.config.limit)
+        instances = _drop_already_sampled(population, instances, task.config)
 
     items = [
         QueueItem(
@@ -79,6 +82,41 @@ def prepare_task_items(
 
     return task, items
 
+
+
+def _drop_already_sampled(population, sampled, config):
+    """Remove the instances a smaller sample at the same seed would have selected.
+
+    Growing a sample from 40 to 100 should cost 60 runs, not 100. The larger sample provably
+    contains the smaller one at a fixed seed, but it does not *begin* with it -- `sample(100)[:40]`
+    is not `sample(40)` -- so the earlier run's instances have to be excluded by membership rather
+    than by position.
+
+    Set OLMO_EVAL_SKIP_SAMPLE_OF_SIZE to the earlier run's limit. Off unless set, and ignored
+    unless it is smaller than the current limit.
+    """
+
+    raw = os.environ.get("OLMO_EVAL_SKIP_SAMPLE_OF_SIZE", "").strip()
+    if not raw:
+        return sampled
+    try:
+        earlier = int(raw)
+    except ValueError:
+        logger.warning("OLMO_EVAL_SKIP_SAMPLE_OF_SIZE=%r is not a number; ignoring", raw)
+        return sampled
+    if earlier <= 0 or earlier >= (config.limit or 0) or earlier >= len(population):
+        return sampled
+
+    already = random.Random(config.seed).sample(population, earlier)
+    seen = {id(instance) for instance in already}
+    remaining = [instance for instance in sampled if id(instance) not in seen]
+    logger.info(
+        "OLMO_EVAL_SKIP_SAMPLE_OF_SIZE=%d: running %d of the %d sampled instances",
+        earlier,
+        len(remaining),
+        len(sampled),
+    )
+    return remaining
 
 def build_requests_from_items(items: list[QueueItem], task_name: str) -> list[dict]:
     """Build request objects from queue items for early writing.
