@@ -172,8 +172,14 @@ class OpenAIAgentsScaffold(Scaffold):
 
         from olmo_eval.inference.utils import patch_openai_agents_for_vllm
 
-        # Disable trace export to OpenAI's backend (we don't have OPENAI_API_KEY set)
-        set_tracing_disabled(True)
+        # Keep spans off OpenAI's backend. When local file export is configured it has
+        # already replaced the backend processor, and disabling tracing outright would
+        # silence the local exporter too -- which is why {output_dir}/traces/ was never
+        # written for any agent run.
+        from olmo_eval.harness.scaffolds.tracing import file_trace_output_configured
+
+        if not file_trace_output_configured():
+            set_tracing_disabled(True)
 
         patch_openai_agents_for_vllm()
 

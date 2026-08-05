@@ -13,6 +13,16 @@ from agents.tracing.processors import BatchTraceProcessor  # type: ignore[ty:unr
 
 logger = logging.getLogger(__name__)
 
+# Set once local file export is installed. The scaffold reads it to decide whether it
+# still needs to disable tracing outright to keep spans off OpenAI's backend.
+_file_output_configured = False
+
+
+def file_trace_output_configured() -> bool:
+    """True when spans are being written to a local directory."""
+
+    return _file_output_configured
+
 
 class FileSpanExporter:
     """Exports traces to per-trace JSONL files.
@@ -137,7 +147,11 @@ def configure_trace_output(output_dir: str) -> None:
     Args:
         output_dir: Base directory for trace output.
     """
+    global _file_output_configured
     exporter = FileSpanExporter(output_dir)
     processor = BatchTraceProcessor(exporter)
+    # This replaces the default processor, which is what would have uploaded spans to
+    # OpenAI's backend, so nothing further is needed to keep them local.
     set_trace_processors([processor])
+    _file_output_configured = True
     logger.info(f"Agent traces will be written to {output_dir}/traces/")
