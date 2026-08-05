@@ -804,7 +804,7 @@ def contract_report_to_sqa(text: str) -> dict[str, Any] | None:
             return
         cites: list[dict[str, Any]] = []
 
-        def repl(mm: "re.Match[str]") -> str:
+        def repl(mm: re.Match[str]) -> str:
             cid, ev = mm.group(1), mm.group(2).strip()
             marker = f"[{cid}]"
             cites.append({"id": marker, "snippets": [ev]})

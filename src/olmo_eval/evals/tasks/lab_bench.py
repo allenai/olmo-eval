@@ -133,6 +133,12 @@ class LabBenchTask(Task):
         cls.sampling_params = _DEFAULT_SAMPLING
         register(name)(cls)
         register_variant(name, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
+        # `:mc` argmaxes summed logprob, which favours the shortest option; `:mc_per_char` divides
+        # by the option's character count first (oe-eval-internal's acc_per_char). Unlike
+        # `:olmo3base` it keeps the choices in the prompt and stays 0-shot, so it differs from `:mc`
+        # in the normalization alone.
+        register_variant(name, "mc_per_char", formatter=MultipleChoiceFormatter(),
+                         metrics=(_PER_CHAR_ACCURACY,), primary_metric=_PER_CHAR_ACCURACY)
         register_variant(name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),))
         register_variant(
             name,
@@ -291,6 +297,7 @@ End your response with "ANSWER: X" where X is the letter of your chosen answer."
 
 _DEFAULT_ACCURACY = AccuracyMetric(scorer=MultipleChoiceScorer)
 _DEFAULT_METRICS = (_DEFAULT_ACCURACY, PrecisionMetric(), CoverageMetric())
+_PER_CHAR_ACCURACY = LogprobPerCharMCAccuracyMetric()
 _DEFAULT_SAMPLING = SamplingParams(temperature=0.0, max_tokens=1024)
 
 

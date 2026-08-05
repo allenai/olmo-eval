@@ -92,3 +92,30 @@ def test_science_nojudge_base_swaps_only_generative_mc_tasks():
     only_gen, only_base = gen - base, base - gen
     assert only_base == {f"{t}:mc" for t in only_gen}
     assert all(t.startswith(("gpqa_", "lab_bench_")) for t in only_gen)
+
+
+def _leaves(name):
+    from olmo_eval.evals.suites.registry import get_suite
+
+    out = []
+
+    def rec(suite):
+        for task in suite.tasks:
+            rec(task) if hasattr(task, "tasks") else out.append(task)
+
+    rec(get_suite(name))
+    return set(out)
+
+
+def test_science_nojudge_base_norm_differs_only_in_mc_normalization():
+    base, norm = _leaves("science:nojudge:base"), _leaves("science:nojudge:base_norm")
+    assert len(base) == len(norm)
+    assert {t.replace(":mc", ":mc_per_char") for t in base - norm} == norm - base
+
+
+def test_science_expert_bpb_covers_the_gpqa_and_lab_bench_leaves():
+    """Every leaf is a `:bpb` variant, and they are exactly the leaves that base/base_norm swap."""
+    bpb = _leaves("science:expert:bpb")
+    swapped = _leaves("science:nojudge") - _leaves("science:nojudge:base")
+    assert all(t.endswith(":bpb") for t in bpb)
+    assert bpb == {f"{t}:bpb" for t in swapped}

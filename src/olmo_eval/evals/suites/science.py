@@ -241,6 +241,67 @@ SCIENCE_NOJUDGE_BASE = make_suite(
     "the 'end with ANSWER: X' instruction.",
 )
 
+# Length-normalized counterpart of the above. `:mc` argmaxes the summed logprob of each option,
+# which is a sum of negatives and so favours the shortest one; GPQA and LAB-Bench options vary
+# enough in length for that to bias the score. `:mc_per_char` divides by the option's characters
+# first. Same 15 leaves, same everything else — read the pair to see how much of a difference the
+# normalization makes.
+
+_GPQA_BIOLOGY_PC = tuple(f"{t}:mc_per_char" for t in _GPQA_BIOLOGY_TASKS)
+_GPQA_CHEMISTRY_PC = tuple(f"{t}:mc_per_char" for t in _GPQA_CHEMISTRY_TASKS)
+_GPQA_PHYSICS_PC = tuple(f"{t}:mc_per_char" for t in _GPQA_PHYSICS_TASKS)
+
+SCIENCE_BIOLOGY_BASE_PC = make_suite(
+    "science:biology:base_norm",
+    (get_suite("lab_bench:mc_per_char"), get_suite("geneturing"), *_GPQA_BIOLOGY_PC),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="science:biology:base with length-normalized MC scoring.",
+)
+
+SCIENCE_PHYSICAL_BASE_PC = make_suite(
+    "science:physical:base_norm",
+    (*_GPQA_CHEMISTRY_PC, *_GPQA_PHYSICS_PC),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="science:physical:base with length-normalized MC scoring.",
+)
+
+SCIENCE_NOJUDGE_BASE_PC = make_suite(
+    "science:nojudge:base_norm",
+    (
+        SCIENCE_CORE,
+        SCIENCE_BIOLOGY_BASE_PC,
+        SCIENCE_MEDICINE,
+        SCIENCE_PHYSICAL_BASE_PC,
+        "qasper_yesno",
+        "sciriff_yesno",
+        SCIENCE_MATH,
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="science:nojudge:base with GPQA and LAB-Bench scored by "
+    "character-length-normalized logprob.",
+)
+
+# Bits per byte over the same 15 leaves, scoped to them rather than the whole hierarchy because
+# only 30 of science:nojudge's 74 leaves have a `:bpb` variant, and averaging bits together with
+# accuracies would be meaningless anyway.
+#
+# BPB is continuous where accuracy is thresholded: accuracy only moves when the argmax flips, so a
+# model that raises the gold answer's probability without overtaking the top distractor scores
+# identically. That makes BPB the more sensitive read on a small anneal, and it is the block where
+# accuracy is closest to the floor. Lower is better, so it does not aggregate with the suites above
+# — DISPLAY_ONLY keeps it per-task.
+
+SCIENCE_EXPERT_BPB = make_suite(
+    "science:expert:bpb",
+    (
+        get_suite("lab_bench:bpb"),
+        *(f"{t}:bpb" for t in _GPQA_BIOLOGY_TASKS + _GPQA_CHEMISTRY_TASKS + _GPQA_PHYSICS_TASKS),
+    ),
+    aggregation=AggregationStrategy.DISPLAY_ONLY,
+    description="Bits per byte on the GPQA and LAB-Bench leaves. Lower is better; "
+    "not comparable to the accuracy suites.",
+)
+
 SCIENCE_JUDGE = make_suite(
     "science:judge",
     (get_suite("astabench"),),

@@ -22,7 +22,11 @@ from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg
+from olmo_eval.common.metrics import (
+    AccuracyMetric,
+    BPBMetricInstanceAvg,
+    LogprobPerCharMCAccuracyMetric,
+)
 from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import (
     Instance,
@@ -99,6 +103,13 @@ End your response with "ANSWER: X" where X is the letter of your chosen answer."
 _DEFAULT_ACCURACY = AccuracyMetric(scorer=MultipleChoiceScorer)
 _DEFAULT_METRICS = (_DEFAULT_ACCURACY,)
 _DEFAULT_SAMPLING = SamplingParams(temperature=0.0, max_tokens=1024)
+
+# `:mc` argmaxes the summed logprob of each option, which is a sum of negatives and so favours the
+# shortest option. GPQA distractors vary enough in length for that to bias the score. `:mc_per_char`
+# divides by the option's character count first (oe-eval-internal's acc_per_char).
+# This metric reads the outputs directly rather than `extracted_answer`, so a sample's displayed
+# letter comes from _extract_answers' unnormalized argmax and can disagree with the score.
+_PER_CHAR_ACCURACY = LogprobPerCharMCAccuracyMetric()
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +281,8 @@ for _subset in _SUBSETS:
     globals()[_cls.__name__] = _cls
     register(_subset)(_cls)
     register_variant(_subset, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
+    register_variant(_subset, "mc_per_char", formatter=MultipleChoiceFormatter(),
+                     metrics=(_PER_CHAR_ACCURACY,), primary_metric=_PER_CHAR_ACCURACY)
     register_variant(_subset, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),))
 
     # Subject-filtered tasks
@@ -294,6 +307,10 @@ for _subset in _SUBSETS:
         register(_task_name)(_cls_subj)
         register_variant(
             _task_name, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS
+        )
+        register_variant(
+            _task_name, "mc_per_char", formatter=MultipleChoiceFormatter(),
+            metrics=(_PER_CHAR_ACCURACY,), primary_metric=_PER_CHAR_ACCURACY,
         )
         register_variant(
             _task_name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),)

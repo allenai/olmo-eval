@@ -27,6 +27,12 @@ LAB_BENCH_MC = make_suite(
     description="LAB-Bench with logprob-based MC scoring",
 )
 
+LAB_BENCH_MC_PER_CHAR = make_suite(
+    "lab_bench:mc_per_char",
+    tuple(f"{t}:mc_per_char" for t in _LAB_BENCH_TASKS),
+    description="LAB-Bench with character-length-normalized logprob MC scoring",
+)
+
 LAB_BENCH_BPB = make_suite(
     "lab_bench:bpb",
     tuple(f"{t}:bpb" for t in _LAB_BENCH_TASKS),
