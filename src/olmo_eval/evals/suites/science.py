@@ -320,6 +320,24 @@ SCIENCE_EXPERT_BPB = make_suite(
     "not comparable to the accuracy suites.",
 )
 
+# Literature-grounding probe, scorable on a base checkpoint.
+#
+# Everything else here asks the model to pick an option or produce text. Whether a claim is
+# actually supported by a given piece of evidence is the capability behind literature synthesis,
+# and the LLM-judged citation metrics score it leniently — astabench's judge is told to count a
+# title-only reference as supporting when the title merely looks relevant, and such citations then
+# enter precision at half weight. This scores the same question by likelihood instead: one claim
+# under a supporting context and under a hard negative, with no generation and no instruction to
+# follow. Chance is effect_size 0 / win_rate 0.5.
+
+SCIENCE_GROUNDING = make_suite(
+    "science:grounding",
+    ("scifact_claim_evidence_within", "scifact_claim_evidence_cross"),
+    aggregation=AggregationStrategy.DISPLAY_ONLY,
+    description="Claim-evidence contrastive probe on SciFact. Likelihood only, base-model safe; "
+    "not comparable to the accuracy suites.",
+)
+
 SCIENCE_JUDGE = make_suite(
     "science:judge",
     (get_suite("astabench"),),

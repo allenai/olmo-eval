@@ -128,3 +128,49 @@ def test_science_expert_suites_are_the_swapped_leaves_under_three_scorings():
                           ("science:expert:base_norm", "mc_per_char"),
                           ("science:expert:bpb", "bpb")):
         assert _leaves(suite) == {f"{t}:{suffix}" for t in swapped}, suite
+
+
+def test_science_grounding_is_likelihood_only_and_base_safe():
+    """Both leaves score by likelihood, so an annealed base checkpoint can be measured."""
+    from olmo_eval.common.types import RequestType
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    leaves = _leaves("science:grounding")
+    assert leaves == {"scifact_claim_evidence_within", "scifact_claim_evidence_cross"}
+    for name in leaves:
+        assert get_task(name).request_type == RequestType.LOGLIKELIHOOD
+
+
+def test_contrastive_metrics_are_at_chance_when_contexts_are_uninformative():
+    from olmo_eval.common.types import Instance
+    from olmo_eval.evals.tasks.scifact_claim_evidence import (
+        ContrastiveEffectSize,
+        ContrastiveWinRate,
+    )
+
+    class _Out:
+        def __init__(self, lp):
+            self.logprobs = [{"logprob": lp}]
+
+    class _Resp:
+        def __init__(self, inst, lp):
+            self.instance, self.outputs = inst, [_Out(lp)]
+
+    # identical logprobs on both sides of every pair -> no separation
+    resps = []
+    for i in range(50):
+        for kind in ("gold", "neg"):
+            inst = Instance(question="q", gold_answer="a",
+                            metadata={"pair_id": str(i), "kind": kind, "cond": "within"})
+            resps.append(_Resp(inst, -10.0))
+    assert ContrastiveEffectSize().compute(resps) == 0.0
+    assert ContrastiveWinRate().compute(resps) == 0.0  # no pair has gold > neg
+
+    # gold strictly better on every pair -> win rate 1.0
+    resps = []
+    for i in range(50):
+        for kind, lp in (("gold", -9.0), ("neg", -10.0)):
+            inst = Instance(question="q", gold_answer="a",
+                            metadata={"pair_id": str(i), "kind": kind, "cond": "within"})
+            resps.append(_Resp(inst, lp))
+    assert ContrastiveWinRate().compute(resps) == 1.0
