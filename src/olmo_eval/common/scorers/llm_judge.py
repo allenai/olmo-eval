@@ -333,6 +333,11 @@ class LLMJudgeScorer(ContextScorer):
         request_type: RequestType = RequestType.CHAT,
     ) -> str:
         """Score using configured provider from inference pool."""
+        if self.provider_name is None:
+            raise RuntimeError("provider_name is required for provider-based scoring.")
+        if context.inference_pool is None:
+            raise RuntimeError("No inference pool configured.")
+
         provider = self._require_provider(context)
 
         sampling_params = SamplingParams(
@@ -341,6 +346,8 @@ class LLMJudgeScorer(ContextScorer):
             truncate_prompt_tokens=truncate_prompt_tokens,
             truncation_side=truncation_side,
         )
+
+        provider = context.get_provider(self.provider_name)
 
         if request_type == RequestType.COMPLETION:
             request = LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)

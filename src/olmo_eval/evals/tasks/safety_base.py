@@ -1,14 +1,10 @@
 """
-HarmBench Safety Evaluation Task
 
-This module implements the HarmBench Safety evaluation task
-as previously implemented in allenai/safety-eval
+Base Task structure for implementing safety evaluations
 
-Paper: https://arxiv.org/abs/2402.04249
+Inherited by: BBQ, Do_Anything_Now, HarmBench, StrongReject,
+TrustLLM JailbreakTrigger, WildGuard, WildJailbreak, WMDP, XSTest
 
-Usage:
-
-    olmo-eval run -m llama3.1-8b -t harmbench:wg_judge
 """
 
 import logging
