@@ -112,7 +112,7 @@ def register_safety_variants(
             judge_format="wildguard",
             judge_request_type=RequestType.COMPLETION,
         )
-        scorer_name = "wg_scorer"
+        scorer_name = "wg_judge"
 
     # OpenAI judge variant - uses OpenAI API as the judge
     register_variant(
