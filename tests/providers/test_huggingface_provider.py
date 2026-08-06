@@ -12,6 +12,7 @@ from olmo_eval.inference.providers.huggingface import HuggingFaceProvider
 def provider() -> HuggingFaceProvider:
     instance = HuggingFaceProvider.__new__(HuggingFaceProvider)
     instance.model = SimpleNamespace(config=SimpleNamespace(max_position_embeddings=2048))
+    instance.generation_use_cache = None
     return instance
 
 
@@ -33,3 +34,12 @@ def test_uncapped_with_no_prompt_uses_full_context(provider: HuggingFaceProvider
 def test_uncapped_floors_at_one_when_prompt_exceeds_context(provider: HuggingFaceProvider) -> None:
     kwargs = provider._build_generate_kwargs(SamplingParams(max_tokens=None), prompt_len=5000)
     assert kwargs["max_new_tokens"] == 1
+
+
+@pytest.mark.parametrize("use_cache", [True, False])
+def test_explicit_generation_cache_override(
+    provider: HuggingFaceProvider, use_cache: bool
+) -> None:
+    provider.generation_use_cache = use_cache
+    kwargs = provider._build_generate_kwargs(SamplingParams(max_tokens=32), prompt_len=100)
+    assert kwargs["use_cache"] is use_cache

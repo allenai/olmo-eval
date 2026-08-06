@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.types import (
@@ -59,12 +60,23 @@ class HuggingFaceProvider(InferenceProvider):
         }
     )
 
-    def __init__(self, model_name: str, tokenizer: str | None = None, **model_kwargs) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        tokenizer: str | None = None,
+        model_plugin: str | None = None,
+        generation_use_cache: bool | None = None,
+        **model_kwargs,
+    ) -> None:
         """Initialize the provider.
 
         Args:
             model_name: HuggingFace model identifier or local path.
             tokenizer: Tokenizer path/identifier. If not specified, uses the model path.
+            model_plugin: Optional Python module with a ``register()`` function that registers
+                custom model classes with Transformers before loading the model.
+            generation_use_cache: Explicitly control KV/recurrent cache use in ``generate()``.
+                If unset, use the model's generation-config default.
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
         try:
@@ -74,6 +86,13 @@ class HuggingFaceProvider(InferenceProvider):
                 "transformers is required for HuggingFaceProvider. "
                 "Install with: pip install transformers"
             ) from e
+
+        if model_plugin is not None:
+            plugin = importlib.import_module(model_plugin)
+            register = getattr(plugin, "register", None)
+            if not callable(register):
+                raise ValueError(f"Model plugin {model_plugin!r} has no callable register()")
+            register()
 
         # Strip kwargs meant for other providers (e.g., vLLM)
         for key in self._IGNORED_KWARGS:
@@ -89,6 +108,7 @@ class HuggingFaceProvider(InferenceProvider):
         self.device = _get_device()
         self.model.to(self.device)
         self.model.eval()
+        self.generation_use_cache = generation_use_cache
 
     def get_tokenizer(self) -> Any:
         """Get the tokenizer for this provider."""
@@ -118,6 +138,8 @@ class HuggingFaceProvider(InferenceProvider):
             "max_new_tokens": max_new_tokens,
             "do_sample": do_sample,
         }
+        if self.generation_use_cache is not None:
+            kwargs["use_cache"] = self.generation_use_cache
 
         if do_sample:
             if params.temperature > 0:
