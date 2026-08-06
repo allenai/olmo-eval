@@ -18,6 +18,13 @@ from olmo_eval.common.logging import configure_worker_logging
 from .config import Capability, SandboxConfig, SandboxMode
 from .executor import SandboxExecutor
 
+_MAX_SANDBOX_START_WORKERS = 16
+
+
+def _sandbox_start_worker_count(executor_count: int) -> int:
+    """Return the bounded number of concurrent sandbox startup workers."""
+    return min(executor_count, _MAX_SANDBOX_START_WORKERS)
+
 
 @dataclass
 class ExecutorBinding:
@@ -125,7 +132,11 @@ class SandboxManager:
         # Start all executors in thread pool to avoid blocking event loop
         # swe-rex's DockerDeployment.start() has blocking subprocess calls
         start_time = time.time()
-        self._logger.info(f"Starting {len(self._executors)} sandbox executors...")
+        start_workers = _sandbox_start_worker_count(len(self._executors))
+        self._logger.info(
+            f"Starting {len(self._executors)} sandbox executors "
+            f"with up to {start_workers} concurrent starts..."
+        )
 
         def start_in_thread(executor: SandboxExecutor) -> None:
             """Run executor.start() in a dedicated thread with its own event loop."""
@@ -137,7 +148,7 @@ class SandboxManager:
                 loop.close()
 
         loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self._executors)) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=start_workers) as pool:
             futures = [loop.run_in_executor(pool, start_in_thread, e) for e in self._executors]
             results = await asyncio.gather(*futures, return_exceptions=True)
 
