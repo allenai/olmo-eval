@@ -195,19 +195,18 @@ def _build_pairs() -> tuple[dict[str, Any], ...]:
     for i, t in enumerate(gtoks):
         for w in t:
             inv[w].append(i)
-    gidx = {(g[0], g[2]): i for i, g in enumerate(gold)}
-
     rng = random.Random(SEED)
     recs: list[dict[str, Any]] = []
-    for cid, claim, did, rat, idx in gold:
+    # keyed on the rationale index, not (claim, doc): a claim can carry several SUPPORT rationales
+    # in one abstract, and sharing an id across them collapses their pairs into one
+    for gi, (_cid, claim, did, rat, idx) in enumerate(gold):
         sents = corpus[did]["abstract"]
         pool = [i for i in range(len(sents)) if i not in idx and len(sents[i].split()) >= 6]
         for j, ni in enumerate(rng.sample(pool, min(N_WITHIN, len(pool)))):
-            pid = f"{cid}_{did}_within{j}"
+            pid = f"g{gi}_within{j}"
             recs.append(_rec(pid, "within", "gold", claim, rat))
             recs.append(_rec(pid, "within", "neg", claim, sents[ni]))
 
-        gi = gidx[(cid, did)]
         ctoks = _toks(claim)
         cand: collections.Counter = collections.Counter()
         for w in gtoks[gi]:
@@ -222,7 +221,7 @@ def _build_pairs() -> tuple[dict[str, Any], ...]:
                 cand[j] += gvec[gi].get(w, 0.0) * gvec[j].get(w, 0.0)
         if cand:
             j, _ = cand.most_common(1)[0]
-            pid = f"{cid}_{did}_cross"
+            pid = f"g{gi}_cross"
             recs.append(_rec(pid, "cross", "gold", claim, rat))
             recs.append(_rec(pid, "cross", "neg", claim, gold[j][3]))
     log.info("SciFact probe: %d rationales -> %d pairs", len(gold), len(recs) // 2)

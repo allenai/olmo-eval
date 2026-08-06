@@ -174,3 +174,16 @@ def test_contrastive_metrics_are_at_chance_when_contexts_are_uninformative():
                             metadata={"pair_id": str(i), "kind": kind, "cond": "within"})
             resps.append(_Resp(inst, lp))
     assert ContrastiveWinRate().compute(resps) == 1.0
+
+
+def test_scifact_pair_ids_are_unique_per_side():
+    """A claim can carry several SUPPORT rationales in one abstract; if they share a pair id the
+    metric's gold/neg dict overwrites and silently discards pairs."""
+    import collections
+
+    from olmo_eval.evals.tasks.scifact_claim_evidence import _build_pairs
+
+    recs = _build_pairs()
+    for cond in ("within", "cross"):
+        counts = collections.Counter(r["pair_id"] for r in recs if r["cond"] == cond)
+        assert counts and all(v == 2 for v in counts.values()), cond
