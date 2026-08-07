@@ -102,6 +102,7 @@ class SandboxExecutor:
         self._runtime: Any = None
         self._session_created: bool = False
         self._session_lock: asyncio.Lock = asyncio.Lock()
+        self._unhealthy_reason: str | None = None
 
     def _log(self, level: int, msg: str) -> None:
         """Log a message with optional name prefix."""
@@ -172,6 +173,7 @@ class SandboxExecutor:
 
         self._deployment = deployment
         self._runtime = deployment.runtime
+        self._unhealthy_reason = None
         self._log(logging.DEBUG, "Sandbox deployment ready!")
 
         if (
@@ -447,6 +449,8 @@ class SandboxExecutor:
                     exit_code=-1,
                     error="timeout",
                 )
+            if self._is_transport_error(e):
+                self._mark_unhealthy(e)
             raise
 
         # Combine stdout and stderr
@@ -759,6 +763,9 @@ class SandboxExecutor:
 
         except Exception as e:
             error_msg = str(e) or repr(e)
+            if self._is_transport_error(e):
+                self._mark_unhealthy(e)
+                raise
             self._log(logging.DEBUG, f"Code execution failed: {error_msg}")
             return ExecutionResult(
                 success=False,
@@ -843,4 +850,31 @@ class SandboxExecutor:
     @property
     def is_running(self) -> bool:
         """Check if the sandbox is running."""
-        return self._deployment is not None and self._runtime is not None
+        return (
+            self._deployment is not None
+            and self._runtime is not None
+            and self._unhealthy_reason is None
+        )
+
+    @staticmethod
+    def _is_transport_error(exc: Exception) -> bool:
+        """Return whether an exception means the sandbox connection is unusable."""
+        return isinstance(
+            exc,
+            (
+                aiohttp.ClientConnectionError,
+                BrokenPipeError,
+                ConnectionAbortedError,
+                ConnectionResetError,
+            ),
+        )
+
+    def _mark_unhealthy(self, exc: Exception) -> None:
+        """Quarantine this executor after a transport-level failure."""
+        if self._unhealthy_reason is not None:
+            return
+        self._unhealthy_reason = str(exc) or repr(exc)
+        self._log(
+            logging.WARNING,
+            f"Quarantining unresponsive sandbox: {self._unhealthy_reason}",
+        )

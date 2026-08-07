@@ -266,11 +266,15 @@ class SandboxManager:
         matching = [
             (i, e)
             for i, e in enumerate(self._executors)
-            if required_capabilities <= e.config.capabilities and i not in self._bound_executors
+            if (
+                required_capabilities <= e.config.capabilities
+                and i not in self._bound_executors
+                and e.is_running
+            )
         ]
 
         if not matching:
-            available = [e.config.capabilities for e in self._executors]
+            available = [e.config.capabilities for e in self._executors if e.is_running]
             raise ValueError(
                 f"No sandbox supports capabilities {required_capabilities}. Available: {available}"
             )
@@ -368,7 +372,11 @@ class SandboxManager:
             available = [
                 (i, e)
                 for i, e in enumerate(self._executors)
-                if required <= e.config.capabilities and i not in self._bound_executors
+                if (
+                    required <= e.config.capabilities
+                    and i not in self._bound_executors
+                    and e.is_running
+                )
             ]
             if not available:
                 raise ValueError(f"No available executor for {required}")
@@ -410,7 +418,7 @@ class SandboxManager:
     @property
     def is_running(self) -> bool:
         """Check if any executors are running."""
-        return len(self._executors) > 0 and all(e.is_running for e in self._executors)
+        return any(e.is_running for e in self._executors)
 
     @property
     def executor_count(self) -> int:
