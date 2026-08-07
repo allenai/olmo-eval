@@ -30,6 +30,59 @@ FORCED_FINAL_ANSWER_INSTRUCTION = (
 )
 
 
+# A tool name the model spelled wrong is a typo, not a different request. The agents SDK
+# disagrees: an unknown name raises ModelBehaviorError, the scaffold turns that into the run's
+# final output, and the whole instance becomes the 85-character string "[Tool error: Tool
+# semantic_scholarly_snippet_search not found in agent openai_agents]".
+#
+# Measured on a 200-instance DeepSeek smoke: 9 instances, 4.5%, died that way, every one of them
+# a misspelling of the single tool the harness offers -- semantic_scholarly, semantic_schol,
+# semantic_scholarlar, semantic_schollar, semantic_schololar, semantic_semantic_scholar. The Qwen
+# baseline produced zero, so repairing this cannot move a number already measured; it only stops
+# one backbone's spelling from being scored as a research failure.
+#
+# The repair is recorded rather than silent. A run that quietly fixed its own inputs would look
+# clean while hiding how often the model could not name its own tool, and that count is worth
+# having -- it is a real property of the model.
+TOOL_NAME_REPAIR_CUTOFF = 0.75
+
+
+def _repair_tool_names(output, tool_names, logger):
+    """Snap near-miss tool names onto the tool they were meant to be. Returns the repair count.
+
+    Only near misses: `difflib` similarity must clear TOOL_NAME_REPAIR_CUTOFF, so a genuinely
+    different name the model invented -- `web_search` against a paper-search tool scores about
+    0.3 -- is left alone to fail loudly rather than being routed somewhere it did not ask for.
+    """
+    import difflib
+
+    if not tool_names:
+        return 0
+    repaired = 0
+    for item in output or []:
+        name = getattr(item, "name", None)
+        if not isinstance(name, str) or name in tool_names:
+            continue
+        match = difflib.get_close_matches(name, tool_names, n=1, cutoff=TOOL_NAME_REPAIR_CUTOFF)
+        if not match:
+            logger.warning(
+                "Tool name repair: %r matches no available tool above %.2f; leaving it to fail",
+                name,
+                TOOL_NAME_REPAIR_CUTOFF,
+            )
+            continue
+        ratio = difflib.SequenceMatcher(None, name, match[0]).ratio()
+        logger.warning(
+            "Tool name repair: model called %r; routing to %r (similarity %.3f)",
+            name,
+            match[0],
+            ratio,
+        )
+        item.name = match[0]
+        repaired += 1
+    return repaired
+
+
 @register_scaffold("openai_agents")
 class OpenAIAgentsScaffold(Scaffold):
     """Scaffold that delegates execution to OpenAI Agents SDK.
@@ -191,12 +244,22 @@ class OpenAIAgentsScaffold(Scaffold):
             f"model={provider.model_name}"
         )
 
-        model = OpenAIChatCompletionsModel(
+        agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
+        tool_names = [n for n in (getattr(t, "name", None) for t in agent_tools) if n]
+
+        class _RepairingModel(OpenAIChatCompletionsModel):
+            """OpenAIChatCompletionsModel that fixes a misspelled tool name before the SDK
+            looks it up, because the lookup's only other outcome is ending the run."""
+
+            async def get_response(self, *args, **kwargs):
+                response = await super().get_response(*args, **kwargs)
+                _repair_tool_names(getattr(response, "output", None), tool_names, logger)
+                return response
+
+        model = _RepairingModel(
             openai_client=client,
             model=provider.model_name,
         )
-
-        agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
 
         agent = Agent(
             name=self.name,
