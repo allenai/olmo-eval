@@ -81,10 +81,10 @@ def prepare_task_items(
 def select_instances(population, config):
     """Which instances this run should do: the sample, minus any earlier run's share of it.
 
-    `limit` samples reproducibly -- `random.Random(seed).sample(population, limit)` -- so a larger
-    sample at the same seed contains a smaller one. It does not *begin* with it, though:
-    `sample(100)[:40]` is not `sample(40)`. So growing a sample cheaply means excluding the earlier
-    run by membership, which is what OLMO_EVAL_SKIP_SAMPLE_OF_SIZE does.
+    `limit` samples reproducibly -- `random.Random(seed).sample(population, limit)` -- so the same
+    seed and population always give the same instances. Growing a sample cheaply means excluding
+    the earlier run by membership, which is what OLMO_EVAL_SKIP_SAMPLE_OF_SIZE does. Excluding it
+    by position would be wrong: `sample(100)[:40]` is not `sample(40)`.
 
     Sampling and exclusion are decided together here because separating them hid a bug: the
     exclusion used to sit inside the sampling branch, and a task with exactly as many instances as
@@ -101,10 +101,20 @@ def select_instances(population, config):
 def _drop_already_sampled(population, sampled, config):
     """Remove the instances a smaller sample at the same seed would have selected.
 
-    Growing a sample from 40 to 100 should cost 60 runs, not 100. The larger sample provably
-    contains the smaller one at a fixed seed, but it does not *begin* with it -- `sample(100)[:40]`
-    is not `sample(40)` -- so the earlier run's instances have to be excluded by membership rather
-    than by position.
+    Growing a sample from 40 to 100 should cost 60 runs, not 100.
+
+    An earlier version of this docstring claimed the larger sample "provably contains" the smaller
+    one at a fixed seed. That is false. CPython's `sample` switches between a selection-set
+    algorithm and a partial shuffle depending on k relative to n, so two draws at the same seed
+    need not agree: on a 600-item population `sample(50)` is not inside `sample(100)` or
+    `sample(300)`, and for `sample(500)` containment holds at seed 42 but fails for 68 of the
+    first 200 seeds.
+
+    Nothing here depends on it. The exclusion is by membership, so the instances this run skips
+    are exactly the ones the earlier run did, and `run | earlier` covers the target sample whether
+    or not `earlier` sits inside it. Containment decides only whether the earlier run was entirely
+    useful -- a question to answer by measuring the two sets at the sizes actually in use, not by
+    assuming a property the standard library does not offer.
 
     Set OLMO_EVAL_SKIP_SAMPLE_OF_SIZE to the earlier run's limit. Off unless set, and ignored
     unless it is smaller than the current limit.

@@ -88,3 +88,29 @@ def test_no_limit_means_the_whole_set(monkeypatch):
     pop = population(597)
 
     assert select_instances(pop, Config(limit=None)) == pop
+
+
+def test_coverage_does_not_depend_on_the_larger_sample_containing_the_smaller(monkeypatch):
+    """The union covers the target even where `sample` does not nest -- and it often does not.
+
+    The feature was justified by the claim that a larger sample at a fixed seed contains a smaller
+    one. CPython does not offer that: `sample` switches between a selection-set algorithm and a
+    partial shuffle depending on k relative to n, so the two draws can disagree. This test pins
+    both halves -- that non-nesting is real, so nobody re-derives the assumption, and that the
+    exclusion is correct anyway.
+    """
+    pop = population(600)
+    small = set(random.Random(42).sample(pop, 50))
+
+    # Non-nesting is not hypothetical: these are the sizes this repo actually samples at.
+    assert not small <= set(random.Random(42).sample(pop, 100))
+    assert not small <= set(random.Random(42).sample(pop, 300))
+
+    # What the runner guarantees: whatever the earlier run did, plus what this run does, covers
+    # the whole target sample. Checked at a size where nesting fails.
+    monkeypatch.setenv("OLMO_EVAL_SKIP_SAMPLE_OF_SIZE", "50")
+    remaining = select_instances(pop, Config(limit=100))
+    target = set(random.Random(42).sample(pop, 100))
+    assert target <= set(remaining) | small
+    # And it costs only what the earlier run did not already cover.
+    assert len(remaining) == len(target - small)
