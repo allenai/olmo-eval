@@ -50,7 +50,17 @@ _WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
 # backoff handles the occasional 429 that still gets through. The limit is
 # enforced per API key, so the interval below is the budget for a single key and
 # _s2_rate_interval() divides it by the number of configured keys.
-_S2_MIN_INTERVAL_S = 1.1  # slightly over 1s for margin
+# Default sized for Semantic Scholar's introductory plan, which allows about 1 request/second per
+# key. A provisioned key allows far more, and this being a hard-coded constant meant every run
+# throttled itself to the free-tier rate whatever key it was given: a 1,846-instance run took 6.5
+# hours against keys measured to sustain 13 requests/second each, with 429s first appearing at 26.
+#
+# Set OLMO_EVAL_S2_MIN_INTERVAL to the per-key spacing your keys actually permit. It is divided by
+# the number of configured keys, as before, so 0.2 with two keys gives 10 requests/second in
+# aggregate. Measure before raising it, and do not read the error to decide: the 429 body S2
+# returns to an authenticated caller over its limit is byte-identical to the one it returns to an
+# unauthenticated caller, so the message cannot tell you which of the two you hit.
+_S2_MIN_INTERVAL_S = float(os.environ.get("OLMO_EVAL_S2_MIN_INTERVAL", "1.1"))
 _s2_rate_lock = asyncio.Lock()
 _s2_last_request_ts = 0.0  # time.monotonic() of the last dispatched S2 request
 
