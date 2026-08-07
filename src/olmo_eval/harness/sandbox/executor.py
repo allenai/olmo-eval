@@ -9,7 +9,8 @@ import logging
 import os
 import time
 import uuid
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 import aiohttp
 
@@ -19,6 +20,18 @@ from .config import SandboxConfig, SandboxMode
 from .diagnostics import start_internal_monitor
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+_TRANSPORT_RETRIES = 3
+_TRANSPORT_RETRY_INITIAL_DELAY = 0.25
+_HEALTH_CHECK_RETRIES = 3
+_HEALTH_CHECK_RETRY_INITIAL_DELAY = 0.5
+_HEALTH_CHECK_TIMEOUT = 5.0
+
+
+def _exponential_backoff(initial_delay: float, retry: int) -> float:
+    """Return an exponential backoff delay for a one-indexed retry."""
+    return initial_delay * (2 ** (retry - 1))
 
 
 def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
@@ -102,7 +115,8 @@ class SandboxExecutor:
         self._runtime: Any = None
         self._session_created: bool = False
         self._session_lock: asyncio.Lock = asyncio.Lock()
-        self._unhealthy_reason: str | None = None
+        self._quarantined_reason: str | None = None
+        self._health_check_lock: asyncio.Lock = asyncio.Lock()
 
     def _log(self, level: int, msg: str) -> None:
         """Log a message with optional name prefix."""
@@ -173,7 +187,7 @@ class SandboxExecutor:
 
         self._deployment = deployment
         self._runtime = deployment.runtime
-        self._unhealthy_reason = None
+        self._quarantined_reason = None
         self._log(logging.DEBUG, "Sandbox deployment ready!")
 
         if (
@@ -434,11 +448,13 @@ class SandboxExecutor:
             return await self._execute_streaming(command, effective_timeout, prefix)
 
         try:
-            response = await self._runtime.execute(
-                Command(
-                    command=["bash", "-c", command],
-                    timeout=effective_timeout,
-                )
+            runtime_command = Command(
+                command=["bash", "-c", command],
+                timeout=effective_timeout,
+            )
+            response = await self._run_with_transport_retries(
+                lambda: self._runtime.execute(runtime_command),
+                operation="command execution",
             )
         except Exception as e:
             # Check for timeout errors (swerex.exceptions.CommandTimeoutError)
@@ -449,8 +465,6 @@ class SandboxExecutor:
                     exit_code=-1,
                     error="timeout",
                 )
-            if self._is_transport_error(e):
-                self._mark_unhealthy(e)
             raise
 
         # Combine stdout and stderr
@@ -744,11 +758,13 @@ class SandboxExecutor:
 
             effective_timeout = timeout if timeout is not None else self.config.command_timeout
 
-            response = await self._runtime.execute(
-                Command(
-                    command=[interpreter, "-c", code],
-                    timeout=effective_timeout,
-                )
+            runtime_command = Command(
+                command=[interpreter, "-c", code],
+                timeout=effective_timeout,
+            )
+            response = await self._run_with_transport_retries(
+                lambda: self._runtime.execute(runtime_command),
+                operation="code execution",
             )
 
             output = response.stdout or ""
@@ -764,7 +780,6 @@ class SandboxExecutor:
         except Exception as e:
             error_msg = str(e) or repr(e)
             if self._is_transport_error(e):
-                self._mark_unhealthy(e)
                 raise
             self._log(logging.DEBUG, f"Code execution failed: {error_msg}")
             return ExecutionResult(
@@ -853,12 +868,12 @@ class SandboxExecutor:
         return (
             self._deployment is not None
             and self._runtime is not None
-            and self._unhealthy_reason is None
+            and self._quarantined_reason is None
         )
 
     @staticmethod
     def _is_transport_error(exc: Exception) -> bool:
-        """Return whether an exception means the sandbox connection is unusable."""
+        """Return whether an exception came from the sandbox transport."""
         return isinstance(
             exc,
             (
@@ -869,12 +884,83 @@ class SandboxExecutor:
             ),
         )
 
-    def _mark_unhealthy(self, exc: Exception) -> None:
-        """Quarantine this executor after a transport-level failure."""
-        if self._unhealthy_reason is not None:
-            return
-        self._unhealthy_reason = str(exc) or repr(exc)
-        self._log(
-            logging.WARNING,
-            f"Quarantining unresponsive sandbox: {self._unhealthy_reason}",
-        )
+    async def _run_with_transport_retries(
+        self,
+        operation_fn: Callable[[], Awaitable[_T]],
+        *,
+        operation: str,
+    ) -> _T:
+        """Retry transient transport failures before considering quarantine."""
+        max_attempts = _TRANSPORT_RETRIES + 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = await operation_fn()
+            except Exception as exc:
+                if not self._is_transport_error(exc):
+                    raise
+                if attempt >= max_attempts:
+                    await self._quarantine_if_unresponsive(exc)
+                    raise
+                delay = _exponential_backoff(
+                    _TRANSPORT_RETRY_INITIAL_DELAY,
+                    attempt,
+                )
+                self._log(
+                    logging.WARNING,
+                    f"Transport failure during {operation} "
+                    f"(attempt {attempt}/{max_attempts}): {exc}; retrying in {delay}s",
+                )
+                await asyncio.sleep(delay)
+            else:
+                if attempt > 1:
+                    self._log(
+                        logging.INFO,
+                        f"Recovered {operation} after {attempt} attempts",
+                    )
+                return result
+
+        raise AssertionError("transport retry loop exited unexpectedly")
+
+    async def _quarantine_if_unresponsive(self, transport_error: Exception) -> None:
+        """Quarantine only after repeated independent health checks fail."""
+        async with self._health_check_lock:
+            if self._quarantined_reason is not None:
+                return
+
+            max_attempts = _HEALTH_CHECK_RETRIES + 1
+            last_health_error = "health check returned false"
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    alive = bool(await self._deployment.is_alive(timeout=_HEALTH_CHECK_TIMEOUT))
+                except Exception as exc:
+                    alive = False
+                    last_health_error = str(exc) or repr(exc)
+
+                if alive:
+                    self._log(
+                        logging.WARNING,
+                        "Sandbox remained healthy after transport retries were exhausted; "
+                        "keeping it in rotation",
+                    )
+                    return
+
+                if attempt < max_attempts:
+                    delay = _exponential_backoff(
+                        _HEALTH_CHECK_RETRY_INITIAL_DELAY,
+                        attempt,
+                    )
+                    self._log(
+                        logging.WARNING,
+                        f"Sandbox health check failed (attempt {attempt}/{max_attempts}); "
+                        f"retrying in {delay}s",
+                    )
+                    await asyncio.sleep(delay)
+
+            self._quarantined_reason = (
+                f"transport error: {transport_error}; health check: {last_health_error}"
+            )
+            self._log(
+                logging.WARNING,
+                f"Quarantining sandbox after {max_attempts} failed transport attempts "
+                f"and {max_attempts} failed health checks: {self._quarantined_reason}",
+            )

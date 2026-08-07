@@ -1,4 +1,4 @@
-"""Tests for quarantining unresponsive sandbox executors."""
+"""Tests for retrying and quarantining unresponsive sandbox executors."""
 
 from __future__ import annotations
 
@@ -10,53 +10,136 @@ from olmo_eval.harness.sandbox.executor import SandboxExecutor
 from olmo_eval.harness.sandbox.manager import SandboxManager
 
 
-class _FailingRuntime:
-    async def execute(self, command: object) -> None:
-        raise aiohttp.ConnectionTimeoutError("Connection timeout to host")
+class _Runtime:
+    def __init__(
+        self,
+        failures: int,
+        transport_error: type[Exception] = aiohttp.ConnectionTimeoutError,
+    ) -> None:
+        self.failures = failures
+        self.transport_error = transport_error
+        self.calls = 0
+
+    async def execute(self, command: object) -> object:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise self.transport_error("transport failure")
+        return type("Response", (), {"stdout": "ok", "stderr": "", "exit_code": 0})()
 
 
-class _BrokenPipeRuntime:
-    async def execute(self, command: object) -> None:
-        raise BrokenPipeError("broken pipe")
+class _Deployment:
+    def __init__(self, health: list[bool]) -> None:
+        self.health = health
+        self.calls = 0
+
+    async def is_alive(self, *, timeout: float) -> bool:
+        result = self.health[min(self.calls, len(self.health) - 1)]
+        self.calls += 1
+        return result
 
 
-def _running_executor(name: str) -> SandboxExecutor:
+def _executor(
+    *,
+    runtime_failures: int,
+    health: list[bool],
+    transport_error: type[Exception] = aiohttp.ConnectionTimeoutError,
+) -> SandboxExecutor:
     executor = SandboxExecutor(
         SandboxConfig(image="test", mode=SandboxMode.MODAL),
-        name=name,
+        name="test-sandbox",
     )
-    executor._deployment = object()
-    executor._runtime = object()
+    executor._runtime = _Runtime(runtime_failures, transport_error)
+    executor._deployment = _Deployment(health)
     return executor
 
 
+@pytest.fixture(autouse=True)
+def no_retry_delays(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_sleep(_delay: float) -> None:
+        pass
+
+    monkeypatch.setattr("olmo_eval.harness.sandbox.executor.asyncio.sleep", no_sleep)
+
+
 @pytest.mark.anyio
-async def test_transport_failure_quarantines_executor() -> None:
-    executor = _running_executor("broken")
-    executor._runtime = _FailingRuntime()
+@pytest.mark.parametrize(
+    "transport_error",
+    [aiohttp.ConnectionTimeoutError, BrokenPipeError, ConnectionResetError],
+)
+async def test_single_transport_failure_recovers_without_quarantine(
+    transport_error: type[Exception],
+) -> None:
+    executor = _executor(
+        runtime_failures=1,
+        health=[True],
+        transport_error=transport_error,
+    )
+
+    result = await executor.execute_command("true")
+
+    assert result.success is True
+    assert executor._runtime.calls == 2
+    assert executor._deployment.calls == 0
+    assert executor.is_running is True
+
+
+@pytest.mark.anyio
+async def test_healthy_probe_prevents_quarantine_after_retries() -> None:
+    executor = _executor(runtime_failures=4, health=[True])
 
     with pytest.raises(aiohttp.ConnectionTimeoutError):
         await executor.execute_command("true")
 
-    assert executor.is_running is False
+    assert executor._runtime.calls == 4
+    assert executor._deployment.calls == 1
+    assert executor.is_running is True
 
 
 @pytest.mark.anyio
-async def test_execute_code_propagates_transport_failure_after_quarantine() -> None:
-    executor = _running_executor("broken")
-    executor._runtime = _BrokenPipeRuntime()
+async def test_repeated_transport_and_health_failures_quarantine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delays: list[float] = []
 
-    with pytest.raises(BrokenPipeError):
-        await executor.execute_code("print('hello')")
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
 
+    monkeypatch.setattr("olmo_eval.harness.sandbox.executor.asyncio.sleep", record_sleep)
+    executor = _executor(runtime_failures=4, health=[False, False, False, False])
+
+    with pytest.raises(aiohttp.ConnectionTimeoutError):
+        await executor.execute_command("true")
+
+    assert executor._runtime.calls == 4
+    assert executor._deployment.calls == 4
     assert executor.is_running is False
+    assert delays == [0.25, 0.5, 1.0, 0.5, 1.0, 2.0]
 
 
-def test_manager_skips_quarantined_executor() -> None:
+@pytest.mark.anyio
+async def test_transport_retries_use_exponential_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delays: list[float] = []
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("olmo_eval.harness.sandbox.executor.asyncio.sleep", record_sleep)
+    executor = _executor(runtime_failures=3, health=[True])
+
+    result = await executor.execute_command("true")
+
+    assert result.success is True
+    assert executor._runtime.calls == 4
+    assert delays == [0.25, 0.5, 1.0]
+
+
+def test_manager_skips_only_confirmed_unresponsive_executor() -> None:
     manager = SandboxManager([])
-    broken = _running_executor("broken")
-    healthy = _running_executor("healthy")
-    broken._mark_unhealthy(BrokenPipeError("broken pipe"))
+    broken = _executor(runtime_failures=0, health=[True])
+    healthy = _executor(runtime_failures=0, health=[True])
+    broken._quarantined_reason = "confirmed unhealthy"
     manager._executors = [broken, healthy]
 
     assert manager.is_running is True
