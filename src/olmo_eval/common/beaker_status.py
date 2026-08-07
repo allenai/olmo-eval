@@ -37,12 +37,19 @@ class BeakerStatusReporter:
         self._git_suffix = _git_suffix()
         self._workload: BeakerWorkload | None = None
         self._last_update: float = float("-inf")
+        # The env var is the only thing that says we are inside a Beaker job. A configured
+        # Beaker client is not: a developer running locally has one, which is how reading the
+        # variable unguarded turned "no-op outside Beaker" into a KeyError that kills the run.
+        workload_id = os.environ.get("BEAKER_WORKLOAD_ID")
+        if not workload_id:
+            self._client = None
+            return
         try:
             self._client: Beaker | None = Beaker.from_env()
         except BeakerConfigurationError:
             self._client = None
             return
-        self._workload = self._client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+        self._workload = self._client.workload.get(workload_id)
 
     def update(self, message: str, force: bool = False) -> None:
         """Push a status message to the Beaker workload description.
