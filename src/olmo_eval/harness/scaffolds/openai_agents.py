@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Sequence
 from contextvars import ContextVar
 from dataclasses import replace
@@ -261,11 +262,31 @@ class OpenAIAgentsScaffold(Scaffold):
             model=provider.model_name,
         )
 
+        # Some reasoning models refuse function tools on /v1/chat/completions at their default
+        # effort and accept them only at "none": gpt-5.6-sol returns HTTP 400 "Function tools with
+        # reasoning_effort are not supported ... use /v1/responses or set reasoning_effort to
+        # none" for both the absent setting and "low", and succeeds at "none". The scaffold builds
+        # OpenAIChatCompletionsModel and nothing else, so without this the model cannot be run
+        # here at all.
+        #
+        # Unset by default, so every existing run sends exactly what it sent before. Reach for it
+        # knowing what it costs: it runs a reasoning model with its reasoning switched off, and
+        # the Responses API is the route that does not.
+        agent_kwargs = {}
+        effort = os.environ.get("OLMO_EVAL_REASONING_EFFORT", "").strip()
+        if effort:
+            from agents import ModelSettings  # type: ignore[ty:unresolved-import]
+            from openai.types.shared import Reasoning
+
+            logger.info("Agent reasoning effort set to %r from OLMO_EVAL_REASONING_EFFORT", effort)
+            agent_kwargs["model_settings"] = ModelSettings(reasoning=Reasoning(effort=effort))
+
         agent = Agent(
             name=self.name,
             instructions=config.system_prompt or "",
             model=model,
             tools=agent_tools,
+            **agent_kwargs,
         )
 
         return agent
@@ -479,7 +500,13 @@ class OpenAIAgentsScaffold(Scaffold):
     ) -> str:
         """Run one no-tool model call to produce a final answer after max_turns."""
         final_input = self._build_forced_final_input(partial_result, original_input)
-        model_settings = replace(agent.model_settings, tool_choice="none")
+        # tool_choice is left unset, not set to "none". The forced-final agent below is built with
+        # tools=[], so a tool call is already impossible and the setting adds nothing -- while
+        # OpenAI rejects the pair outright with HTTP 400 "'tool_choice' is only allowed when
+        # 'tools' are specified". vLLM and DeepSeek accept it, so this surfaced only on
+        # gpt-5.6-sol, and only on the instances that reach max_turns: 2 of 100 in a smoke.
+        # convert_tool_choice(None) returns `omit`, so the parameter is not sent at all.
+        model_settings = replace(agent.model_settings, tool_choice=None)
         final_agent = replace(
             agent,
             tools=[],
