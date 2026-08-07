@@ -93,6 +93,13 @@ class LiteLLMProvider(InferenceProvider):
 
         Returns cached client on subsequent calls to avoid connection pool leaks.
 
+        The key is read from ``HARNESS_API_KEY`` first and falls back to ``OPENAI_API_KEY``.
+        Those are two different credentials whenever the model under test is not an OpenAI one.
+        The LLM judge in ``common/scorers/llm_judge.py`` builds its own ``AsyncOpenAI`` from
+        ``OPENAI_API_KEY`` with no base URL, so it always talks to OpenAI; a run that pointed this
+        provider at a third-party endpoint by overwriting ``OPENAI_API_KEY`` would silently send
+        its judge there too, and would report scores under a judge name it did not use.
+
         Returns:
             AsyncOpenAI client if base_url is set, None otherwise.
         """
@@ -104,7 +111,7 @@ class LiteLLMProvider(InferenceProvider):
 
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
-                api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
+                api_key=os.getenv("HARNESS_API_KEY") or os.getenv("OPENAI_API_KEY", "EMPTY"),
             )
 
         return self._client
