@@ -360,6 +360,7 @@ class SandboxExecutor:
                     image=modal_image,
                     startup_timeout=self.config.startup_timeout,
                     runtime_timeout=self.config.runtime_timeout,
+                    deployment_timeout=self.config.deployment_timeout,
                     modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
                 )
 

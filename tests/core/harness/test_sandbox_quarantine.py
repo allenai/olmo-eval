@@ -144,3 +144,28 @@ def test_manager_skips_only_confirmed_unresponsive_executor() -> None:
 
     assert manager.is_running is True
     assert manager.get_executor(Capability.DEFAULT) is healthy
+
+
+def test_modal_deployment_receives_configured_lifetime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _ModalDeployment:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr("swerex.deployment.modal.ModalDeployment", _ModalDeployment)
+    executor = SandboxExecutor(
+        SandboxConfig(
+            image="python:3.12",
+            mode=SandboxMode.MODAL,
+            runtime_timeout=120.0,
+            deployment_timeout=14_400.0,
+        )
+    )
+
+    executor.get_deployment()
+
+    assert captured["runtime_timeout"] == 120.0
+    assert captured["deployment_timeout"] == 14_400.0
