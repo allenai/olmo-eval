@@ -1,0 +1,66 @@
+"""Modal deployment adapter with encrypted tunnels and reliable HTTP transport."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+
+import modal  # type: ignore[import-untyped]
+from swerex.deployment.modal import ModalDeployment
+
+from .remote_runtime import ReliableRemoteRuntime
+
+
+class ReliableModalDeployment(ModalDeployment):
+    """SWE-ReX Modal deployment that avoids its legacy unencrypted transport."""
+
+    def __init__(self, *, max_connections: int, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._max_connections = max_connections
+
+    async def start(self) -> None:
+        if self._runtime is not None and self._sandbox is not None:
+            self.logger.warning("Deployment is already started. Ignoring duplicate start() call.")
+            return
+
+        self.logger.info("Starting modal sandbox with encrypted runtime tunnel")
+        self._hooks.on_custom_step("Starting modal sandbox")
+        started_at = time.time()
+        token = self._get_token()
+        modal_kwargs = dict(self._modal_kwargs)
+        modal_kwargs.pop("unencrypted_ports", None)
+        modal_kwargs.pop("encrypted_ports", None)
+        self._sandbox = await modal.Sandbox.create.aio(
+            "/usr/bin/env",
+            "bash",
+            "-c",
+            self._start_swerex_cmd(token),
+            image=self._image,
+            timeout=int(self._deployment_timeout),
+            encrypted_ports=[self._port],
+            app=self._app,
+            **modal_kwargs,
+        )
+        tunnels = await self._sandbox.tunnels.aio()
+        tunnel = tunnels[self._port]
+        creation_seconds = time.time() - started_at
+        self.logger.info(
+            "Sandbox (%s) created in %.2fs",
+            self._sandbox.object_id,
+            creation_seconds,
+        )
+        self.logger.info("Check sandbox logs at %s", await self.get_modal_log_url())
+        await asyncio.sleep(1)
+        self.logger.info("Starting runtime at encrypted tunnel %s", tunnel.url)
+        self._hooks.on_custom_step("Starting runtime")
+        self._runtime = ReliableRemoteRuntime(
+            host=tunnel.url,
+            timeout=self._runtime_timeout,
+            auth_token=token,
+            logger=self.logger,
+            max_connections=self._max_connections,
+        )
+        remaining_timeout = max(0, self._startup_timeout - creation_seconds)
+        runtime_started_at = time.time()
+        await self._wait_until_alive(timeout=remaining_timeout)
+        self.logger.info("Runtime started in %.2fs", time.time() - runtime_started_at)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import logging
 import os
 import time
@@ -18,6 +19,7 @@ from olmo_eval.common.execution.environment import ExecutionResult
 
 from .config import SandboxConfig, SandboxMode
 from .diagnostics import start_internal_monitor
+from .errors import SandboxTransportError
 
 logger = logging.getLogger(__name__)
 
@@ -295,9 +297,7 @@ class SandboxExecutor:
 
             case SandboxMode.MODAL:
                 try:
-                    from swerex.deployment.modal import (  # type: ignore[ty:unresolved-import]
-                        ModalDeployment,
-                    )
+                    from .modal_deployment import ReliableModalDeployment
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex modal support not installed. "
@@ -356,12 +356,13 @@ class SandboxExecutor:
                 else:
                     modal_image = modal.Image.from_registry(image)
 
-                return ModalDeployment(
+                return ReliableModalDeployment(
                     image=modal_image,
                     startup_timeout=self.config.startup_timeout,
                     runtime_timeout=self.config.runtime_timeout,
                     deployment_timeout=self.config.deployment_timeout,
                     modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
+                    max_connections=self.config.max_concurrency,
                 )
 
     async def stop(self) -> None:
@@ -882,6 +883,8 @@ class SandboxExecutor:
                 BrokenPipeError,
                 ConnectionAbortedError,
                 ConnectionResetError,
+                TimeoutError,
+                json.JSONDecodeError,
             ),
         )
 
@@ -892,7 +895,10 @@ class SandboxExecutor:
         operation: str,
     ) -> _T:
         """Retry transient transport failures before considering quarantine."""
-        max_attempts = _TRANSPORT_RETRIES + 1
+        retries = (
+            0 if getattr(self._runtime, "handles_transport_retries", False) else _TRANSPORT_RETRIES
+        )
+        max_attempts = retries + 1
         for attempt in range(1, max_attempts + 1):
             try:
                 result = await operation_fn()
@@ -901,7 +907,9 @@ class SandboxExecutor:
                     raise
                 if attempt >= max_attempts:
                     await self._quarantine_if_unresponsive(exc)
-                    raise
+                    raise SandboxTransportError(
+                        f"{operation} exhausted {max_attempts} transport attempt(s): {exc}"
+                    ) from exc
                 delay = _exponential_backoff(
                     _TRANSPORT_RETRY_INITIAL_DELAY,
                     attempt,

@@ -594,10 +594,11 @@ class VLLMServerProvider(InferenceProvider):
                 trace["generation_kwargs"]["top_p"] = params.top_p
             if params.do_sample and params.temperature > 0 and params.top_k is not None:
                 trace["generation_kwargs"]["top_k"] = params.top_k
-            if params.truncate_prompt_tokens is not None:
-                trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
-            if params.truncation_side is not None:
-                trace["generation_kwargs"]["truncation_side"] = params.truncation_side
+            truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(request, params)
+            if truncate_prompt_tokens is not None:
+                trace["generation_kwargs"]["truncate_prompt_tokens"] = truncate_prompt_tokens
+            if truncation_side is not None:
+                trace["generation_kwargs"]["truncation_side"] = truncation_side
             trace["stop_sequences"] = self._get_completion_stop_sequences(params) or []
             trace["input_mode"] = (
                 "prompt_token_ids" if self._completion_use_prompt_token_ids else "text"
@@ -620,10 +621,11 @@ class VLLMServerProvider(InferenceProvider):
             generation_kwargs["top_p"] = params.top_p
         if self.chat_template_kwargs:
             generation_kwargs["chat_template_kwargs"] = dict(self.chat_template_kwargs)
-        if params.truncate_prompt_tokens is not None:
-            generation_kwargs["truncate_prompt_tokens"] = params.truncate_prompt_tokens
-        if params.truncation_side is not None:
-            generation_kwargs["truncation_side"] = params.truncation_side
+        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(request, params)
+        if truncate_prompt_tokens is not None:
+            generation_kwargs["truncate_prompt_tokens"] = truncate_prompt_tokens
+        if truncation_side is not None:
+            generation_kwargs["truncation_side"] = truncation_side
         trace["generation_kwargs"] = generation_kwargs
         trace["stop_sequences"] = list(params.stop_sequences or ())
         trace["input_mode"] = "messages"
@@ -663,6 +665,37 @@ class VLLMServerProvider(InferenceProvider):
 
         tokenizer = self._get_tokenizer(require_local=True)
         return tokenizer.encode(prompt, add_special_tokens=bool(self._add_bos_token))
+
+    def _get_prompt_truncation(
+        self,
+        request: LMRequest,
+        params: SamplingParams,
+    ) -> tuple[int | None, str | None]:
+        """Resolve prompt truncation needed to keep generation within the context window."""
+        if params.max_tokens is None:
+            return params.truncate_prompt_tokens, params.truncation_side
+
+        max_length = request.max_length or self.max_length
+        if params.max_tokens >= max_length:
+            raise ValueError(
+                f"max_tokens ({params.max_tokens}) must be less than the model context length "
+                f"({max_length}) so the request has room for a prompt"
+            )
+
+        available_prompt_tokens = max_length - params.max_tokens
+        if params.truncate_prompt_tokens is None:
+            truncate_prompt_tokens = available_prompt_tokens
+        else:
+            # An explicit smaller limit remains authoritative, but a larger one cannot
+            # be allowed to make the request exceed the model context window.
+            truncate_prompt_tokens = min(
+                params.truncate_prompt_tokens,
+                available_prompt_tokens,
+            )
+
+        # Match lm-eval's historical behavior: retain the end of an overlong prompt.
+        truncation_side = params.truncation_side or "left"
+        return truncate_prompt_tokens, truncation_side
 
     def _postprocess_completion_text(self, text: str, stop_sequences: list[str] | None) -> str:
         """Apply optional legacy completion post-processing."""
@@ -777,10 +810,11 @@ class VLLMServerProvider(InferenceProvider):
         stop_sequences = self._get_completion_stop_sequences(params)
         if stop_sequences:
             kwargs["stop"] = stop_sequences
-        if params.truncate_prompt_tokens is not None:
-            extra_body["truncate_prompt_tokens"] = params.truncate_prompt_tokens
-        if params.truncation_side is not None:
-            extra_body["truncation_side"] = params.truncation_side
+        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(request, params)
+        if truncate_prompt_tokens is not None:
+            extra_body["truncate_prompt_tokens"] = truncate_prompt_tokens
+        if truncation_side is not None:
+            extra_body["truncation_side"] = truncation_side
         if self._completion_use_prompt_token_ids:
             http_client = self._get_raw_http_client()
             response = await http_client.post(
@@ -851,10 +885,11 @@ class VLLMServerProvider(InferenceProvider):
         extra_body: dict[str, Any] = {}
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             extra_body["top_k"] = params.top_k
-        if params.truncate_prompt_tokens is not None:
-            extra_body["truncate_prompt_tokens"] = params.truncate_prompt_tokens
-        if params.truncation_side is not None:
-            extra_body["truncation_side"] = params.truncation_side
+        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(request, params)
+        if truncate_prompt_tokens is not None:
+            extra_body["truncate_prompt_tokens"] = truncate_prompt_tokens
+        if truncation_side is not None:
+            extra_body["truncation_side"] = truncation_side
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         if tools:

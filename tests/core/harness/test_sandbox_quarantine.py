@@ -6,6 +6,7 @@ import aiohttp
 import pytest
 
 from olmo_eval.harness.sandbox.config import Capability, SandboxConfig, SandboxMode
+from olmo_eval.harness.sandbox.errors import SandboxTransportError
 from olmo_eval.harness.sandbox.executor import SandboxExecutor
 from olmo_eval.harness.sandbox.manager import SandboxManager
 
@@ -87,7 +88,7 @@ async def test_single_transport_failure_recovers_without_quarantine(
 async def test_healthy_probe_prevents_quarantine_after_retries() -> None:
     executor = _executor(runtime_failures=4, health=[True])
 
-    with pytest.raises(aiohttp.ConnectionTimeoutError):
+    with pytest.raises(SandboxTransportError):
         await executor.execute_command("true")
 
     assert executor._runtime.calls == 4
@@ -107,7 +108,7 @@ async def test_repeated_transport_and_health_failures_quarantine(
     monkeypatch.setattr("olmo_eval.harness.sandbox.executor.asyncio.sleep", record_sleep)
     executor = _executor(runtime_failures=4, health=[False, False, False, False])
 
-    with pytest.raises(aiohttp.ConnectionTimeoutError):
+    with pytest.raises(SandboxTransportError):
         await executor.execute_command("true")
 
     assert executor._runtime.calls == 4
@@ -155,7 +156,10 @@ def test_modal_deployment_receives_configured_lifetime(
         def __init__(self, **kwargs: object) -> None:
             captured.update(kwargs)
 
-    monkeypatch.setattr("swerex.deployment.modal.ModalDeployment", _ModalDeployment)
+    monkeypatch.setattr(
+        "olmo_eval.harness.sandbox.modal_deployment.ReliableModalDeployment",
+        _ModalDeployment,
+    )
     executor = SandboxExecutor(
         SandboxConfig(
             image="python:3.12",
@@ -169,3 +173,4 @@ def test_modal_deployment_receives_configured_lifetime(
 
     assert captured["runtime_timeout"] == 120.0
     assert captured["deployment_timeout"] == 14_400.0
+    assert captured["max_connections"] == 4

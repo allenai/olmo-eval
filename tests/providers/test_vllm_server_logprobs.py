@@ -137,6 +137,67 @@ class TestVLLMServerProviderLogprobs:
         assert client.completions.create.call_args.kwargs["max_tokens"] == 64
 
     @pytest.mark.anyio
+    async def test_generate_completion_truncates_prompt_to_context_budget(self, provider):
+        """Completion prompts should leave room for the requested output tokens."""
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        await provider._generate_completion(client, request, SamplingParams(max_tokens=1024))
+
+        extra_body = client.completions.create.call_args.kwargs["extra_body"]
+        assert extra_body["truncate_prompt_tokens"] == 3072
+        assert extra_body["truncation_side"] == "left"
+
+        trace = provider.describe_request(request, SamplingParams(max_tokens=1024))
+        assert trace is not None
+        assert trace["generation_kwargs"]["truncate_prompt_tokens"] == 3072
+        assert trace["generation_kwargs"]["truncation_side"] == "left"
+
+    @pytest.mark.anyio
+    async def test_generate_completion_preserves_stricter_explicit_truncation(self, provider):
+        """Explicit truncation settings remain effective when they fit the context budget."""
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        params = SamplingParams(
+            max_tokens=1024,
+            truncate_prompt_tokens=512,
+            truncation_side="right",
+        )
+        await provider._generate_completion(client, request, params)
+
+        extra_body = client.completions.create.call_args.kwargs["extra_body"]
+        assert extra_body["truncate_prompt_tokens"] == 512
+        assert extra_body["truncation_side"] == "right"
+
+    @pytest.mark.anyio
+    async def test_generate_completion_caps_explicit_truncation_to_context_budget(self, provider):
+        """An explicit prompt limit cannot exceed the safe context budget."""
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        params = SamplingParams(max_tokens=1024, truncate_prompt_tokens=3500)
+        await provider._generate_completion(client, request, params)
+
+        extra_body = client.completions.create.call_args.kwargs["extra_body"]
+        assert extra_body["truncate_prompt_tokens"] == 3072
+
+    @pytest.mark.anyio
+    async def test_generate_completion_rejects_output_that_fills_context(self, provider):
+        """A generation budget that leaves no prompt room should fail locally."""
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        with pytest.raises(ValueError, match="must be less than the model context length"):
+            await provider._generate_completion(client, request, SamplingParams(max_tokens=4096))
+
+        client.completions.create.assert_not_called()
+
+    @pytest.mark.anyio
     async def test_generate_chat_omits_max_tokens_when_none(self, provider):
         """max_tokens=None means uncapped: omit the field rather than sending null."""
         provider.chat_template_kwargs = None
