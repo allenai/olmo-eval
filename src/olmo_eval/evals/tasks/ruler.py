@@ -74,13 +74,20 @@ class RulerTask(Task):
 
     Each RULER task variant (e.g., niah_s_1__4096) is registered as a separate task
     with specific configuration from RULER_TASKS.
+
+    Subclasses (e.g. RulerLcTask) can point at a different task registry, name
+    prefix, and data root by overriding ``_tasks_registry``, ``_name_prefix``,
+    and ``_get_data_root``.
     """
+
+    _tasks_registry: dict[str, dict[str, Any]] = RULER_TASKS
+    _name_prefix: str = "ruler_"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        task_name = config.name.removeprefix("ruler_")
+        task_name = config.name.removeprefix(self._name_prefix)
         self.task_name = task_name
-        self.ruler_config = RULER_TASKS[task_name]
+        self.ruler_config = self._tasks_registry[task_name]
 
         # Extract context size from task name
         task_type, context_size_str = task_name.rsplit("__", 1)
@@ -90,6 +97,10 @@ class RulerTask(Task):
         # Load dataset during initialization
         self._dataset = None
         self._templates = None
+
+    def _get_data_root(self) -> str:
+        """Return the root directory containing this task family's data files."""
+        return download_ruler_data()
 
     def _load_data(self) -> None:
         """Load RULER dataset if not already loaded.
@@ -103,8 +114,7 @@ class RulerTask(Task):
         if self._dataset is not None:
             return
 
-        # Download RULER data if needed
-        root_dir = download_ruler_data()
+        root_dir = self._get_data_root()
 
         # Get data path from config
         data_path = os.path.join(root_dir, self.ruler_config["data"])
@@ -248,11 +258,24 @@ class RulerTask(Task):
         return output.text
 
 
-def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
+def make_ruler_task_class(
+    task_name: str,
+    task_cfg: dict,
+    *,
+    base_cls: type[RulerTask] = RulerTask,
+    class_prefix: str = "Ruler",
+) -> type[RulerTask]:
     """Create a task subclass for a RULER task variant.
 
     Subclasses carry only class-level attributes (metrics, sampling_params, limit);
     all runtime state is derived from config.name inside RulerTask.__init__.
+
+    Args:
+        task_name: Task variant key (e.g., "niah_s_1__4096"), matching a key in
+            base_cls's ``_tasks_registry``.
+        task_cfg: Task configuration dict (see RULER_TASKS/RULER_LC_TASKS).
+        base_cls: RulerTask subclass to build on (allows other data sources/prefixes).
+        class_prefix: Prefix for the generated class name.
     """
     # QA tasks use RulerQAScorer which applies HELMET-style normalization
     # (removes articles/punctuation, normalizes whitespace) matching the old framework.
@@ -261,10 +284,10 @@ def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
         ("\n", "Ċ", "ĊĊ", "<0x0A>") if task_cfg.get("stop_new_line", False) else None
     )
     return type(
-        f"Ruler_{task_name}",
-        (RulerTask,),
+        f"{class_prefix}_{task_name}",
+        (base_cls,),
         {
-            "__module__": __name__,
+            "__module__": base_cls.__module__,
             "metrics": (RecallMetric(scorer=RulerQAScorer),)
             if task_cfg["tag"] == "qa"
             else (RecallMetric(),),
@@ -282,7 +305,7 @@ def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
 
 # Dynamically register all RULER tasks
 for _task_name, _task_config in RULER_TASKS.items():
-    _cls = _make_ruler_task_class(_task_name, _task_config)
+    _cls = make_ruler_task_class(_task_name, _task_config)
     # Inject into module globals so pickle can find the class by name
     globals()[_cls.__name__] = _cls
     register(f"ruler_{_task_name}")(_cls)
