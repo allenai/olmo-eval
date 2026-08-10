@@ -6,6 +6,7 @@ from typing import Any
 
 import aiohttp
 import pytest
+from swerex.runtime.abstract import CloseResponse
 
 from olmo_eval.harness.sandbox.remote_runtime import ReliableRemoteRuntime
 
@@ -36,11 +37,17 @@ class _RequestContext:
 
 
 class _Session:
-    closed = False
-
     def __init__(self, outcomes: list[Exception | _Response]) -> None:
         self.outcomes = outcomes
         self.headers: list[dict[str, str]] = []
+        self.enters = 0
+
+    async def __aenter__(self) -> _Session:
+        self.enters += 1
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
 
     def post(self, _url: str, **kwargs: Any) -> _RequestContext:
         self.headers.append(kwargs["headers"])
@@ -64,7 +71,7 @@ async def test_retries_reuse_request_id_with_exponential_backoff(
         timeout=30.0,
         max_connections=2,
     )
-    monkeypatch.setattr(runtime, "_get_session", lambda: session)
+    monkeypatch.setattr(runtime, "_new_session", lambda: session)
     monkeypatch.setattr(runtime, "_handle_response_errors", _no_response_error)
     delays: list[float] = []
 
@@ -77,6 +84,7 @@ async def test_retries_reuse_request_id_with_exponential_backoff(
 
     assert result.value == "ok"
     assert delays == [0.25, 0.5]
+    assert session.enters == 3
     assert len({headers["X-Request-ID"] for headers in session.headers}) == 1
 
 
@@ -91,7 +99,7 @@ async def test_default_transport_retries_is_three(
         timeout=30.0,
         max_connections=2,
     )
-    monkeypatch.setattr(runtime, "_get_session", lambda: session)
+    monkeypatch.setattr(runtime, "_new_session", lambda: session)
     monkeypatch.setattr(runtime, "_handle_response_errors", _no_response_error)
     delays: list[float] = []
 
@@ -104,8 +112,30 @@ async def test_default_transport_retries_is_three(
         await runtime._request("execute", None, _Result)
 
     assert len(session.headers) == 4
+    assert session.enters == 4
     assert delays == [0.25, 0.5, 1.0]
     assert len({headers["X-Request-ID"] for headers in session.headers}) == 1
+
+
+@pytest.mark.anyio
+async def test_close_suppresses_expected_disconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = ReliableRemoteRuntime(
+        host="https://sandbox.example",
+        auth_token="token",
+        timeout=30.0,
+        max_connections=2,
+    )
+
+    async def disconnect(*_args: object, **_kwargs: object) -> None:
+        raise aiohttp.ServerDisconnectedError()
+
+    monkeypatch.setattr(runtime, "_request", disconnect)
+
+    result = await runtime.close()
+
+    assert isinstance(result, CloseResponse)
 
 
 async def _no_response_error(_response: _Response) -> None:

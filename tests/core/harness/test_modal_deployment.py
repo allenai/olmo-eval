@@ -12,7 +12,7 @@ from olmo_eval.harness.sandbox.modal_deployment import ReliableModalDeployment
 
 
 @pytest.mark.anyio
-async def test_modal_deployment_uses_encrypted_tunnel(
+async def test_modal_deployment_uses_isolated_transport_and_safe_shutdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -21,6 +21,7 @@ async def test_modal_deployment_uses_encrypted_tunnel(
         object_id="sb-1",
         tunnels=SimpleNamespace(aio=_return_value({8880: tunnel})),
         poll=SimpleNamespace(aio=_return_value(None)),
+        terminate=SimpleNamespace(aio=_record_call(captured, "terminate_calls")),
     )
 
     async def create(*args: object, **kwargs: Any) -> object:
@@ -33,7 +34,7 @@ async def test_modal_deployment_uses_encrypted_tunnel(
             captured["runtime"] = kwargs
 
         async def close(self) -> None:
-            pass
+            captured["close_calls"] = captured.get("close_calls", 0) + 1
 
     deployment = object.__new__(ReliableModalDeployment)
     deployment._runtime = None
@@ -68,16 +69,25 @@ async def test_modal_deployment_uses_encrypted_tunnel(
     await deployment.start()
 
     kwargs = captured["kwargs"]
-    assert kwargs["encrypted_ports"] == [8880]
-    assert "unencrypted_ports" not in kwargs
+    assert kwargs["unencrypted_ports"] == [8880]
+    assert "encrypted_ports" not in kwargs
     assert kwargs["cpu"] == 2
     assert captured["runtime"]["host"] == "https://sandbox.example"
     assert captured["runtime"]["max_connections"] == 4
     await deployment.stop()
+    assert captured["terminate_calls"] == 1
+    assert captured.get("close_calls", 0) == 0
 
 
 def _return_value(value: Any):
     async def inner(*_args: object, **_kwargs: object) -> Any:
         return value
+
+    return inner
+
+
+def _record_call(captured: dict[str, Any], key: str):
+    async def inner(*_args: object, **_kwargs: object) -> None:
+        captured[key] = captured.get(key, 0) + 1
 
     return inner

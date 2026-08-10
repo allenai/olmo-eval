@@ -15,7 +15,7 @@ from swerex.runtime.remote import RemoteRuntime
 
 
 class ReliableRemoteRuntime(RemoteRuntime):
-    """Remote runtime with pooled connections and idempotent transport retries."""
+    """Remote runtime with isolated connections and idempotent transport retries."""
 
     handles_transport_retries = True
 
@@ -28,21 +28,18 @@ class ReliableRemoteRuntime(RemoteRuntime):
         **kwargs: Any,
     ) -> None:
         super().__init__(logger=logger, **kwargs)
-        self._max_connections = max(1, max_connections)
+        # Retained for constructor compatibility with the deployment adapter.
+        # Do not pool connections: Modal/SWE-ReX closes idle connections and
+        # reusing them causes synchronized ServerDisconnectedError bursts.
+        del max_connections
         self._transport_retries = max(0, transport_retries)
-        self._session: aiohttp.ClientSession | None = None
 
-    def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=self._config.timeout)
-            connector = aiohttp.TCPConnector(
-                limit=self._max_connections,
-                limit_per_host=self._max_connections,
-                keepalive_timeout=30.0,
-                enable_cleanup_closed=True,
-            )
-            self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
-        return self._session
+    def _new_session(self) -> aiohttp.ClientSession:
+        """Create an isolated session for one transport attempt."""
+        return aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(force_close=True),
+            timeout=aiohttp.ClientTimeout(total=self._config.timeout),
+        )
 
     async def _request(
         self,
@@ -61,12 +58,14 @@ class ReliableRemoteRuntime(RemoteRuntime):
 
         for attempt in range(1, max_attempts + 1):
             try:
-                session = self._get_session()
-                async with session.post(
-                    request_url,
-                    json=payload.model_dump() if payload else None,
-                    headers=headers,
-                ) as response:
+                async with (
+                    self._new_session() as session,
+                    session.post(
+                        request_url,
+                        json=payload.model_dump() if payload else None,
+                        headers=headers,
+                    ) as response,
+                ):
                     await self._handle_response_errors(response)
                     body = await response.json()
                     if attempt > 1:
@@ -108,8 +107,8 @@ class ReliableRemoteRuntime(RemoteRuntime):
 
     async def close(self) -> CloseResponse:
         try:
-            return await self._request("close", None, CloseResponse)
-        finally:
-            if self._session is not None:
-                await self._session.close()
-                self._session = None
+            return await self._request("close", None, CloseResponse, num_retries=0)
+        except (aiohttp.ClientError, TimeoutError, ConnectionError, json.JSONDecodeError):
+            # The close endpoint may terminate the server before its response
+            # reaches the client. Shutdown is best-effort and must never leak.
+            return CloseResponse()

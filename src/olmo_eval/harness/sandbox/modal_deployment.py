@@ -1,8 +1,9 @@
-"""Modal deployment adapter with encrypted tunnels and reliable HTTP transport."""
+"""Modal deployment adapter with reliable HTTP transport and shutdown."""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 
 import modal  # type: ignore[import-untyped]
@@ -12,7 +13,7 @@ from .remote_runtime import ReliableRemoteRuntime
 
 
 class ReliableModalDeployment(ModalDeployment):
-    """SWE-ReX Modal deployment that avoids its legacy unencrypted transport."""
+    """SWE-ReX Modal deployment with isolated request transport."""
 
     def __init__(self, *, max_connections: int, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -23,7 +24,7 @@ class ReliableModalDeployment(ModalDeployment):
             self.logger.warning("Deployment is already started. Ignoring duplicate start() call.")
             return
 
-        self.logger.info("Starting modal sandbox with encrypted runtime tunnel")
+        self.logger.info("Starting modal sandbox")
         self._hooks.on_custom_step("Starting modal sandbox")
         started_at = time.time()
         token = self._get_token()
@@ -37,7 +38,7 @@ class ReliableModalDeployment(ModalDeployment):
             self._start_swerex_cmd(token),
             image=self._image,
             timeout=int(self._deployment_timeout),
-            encrypted_ports=[self._port],
+            unencrypted_ports=[self._port],
             app=self._app,
             **modal_kwargs,
         )
@@ -51,7 +52,7 @@ class ReliableModalDeployment(ModalDeployment):
         )
         self.logger.info("Check sandbox logs at %s", await self.get_modal_log_url())
         await asyncio.sleep(1)
-        self.logger.info("Starting runtime at encrypted tunnel %s", tunnel.url)
+        self.logger.info("Starting runtime at %s", tunnel.url)
         self._hooks.on_custom_step("Starting runtime")
         self._runtime = ReliableRemoteRuntime(
             host=tunnel.url,
@@ -64,3 +65,15 @@ class ReliableModalDeployment(ModalDeployment):
         runtime_started_at = time.time()
         await self._wait_until_alive(timeout=remaining_timeout)
         self.logger.info("Runtime started in %.2fs", time.time() - runtime_started_at)
+
+    async def stop(self) -> None:
+        """Terminate Modal directly without calling the runtime over HTTP."""
+        # SandboxExecutor already force-terminates first. Keep this idempotent
+        # for callers that stop the deployment directly, and never call /close
+        # on a server that has already been terminated.
+        if self._sandbox is not None:
+            with contextlib.suppress(Exception):
+                await self._sandbox.terminate.aio()
+        self._runtime = None
+        self._sandbox = None
+        self._app = None
