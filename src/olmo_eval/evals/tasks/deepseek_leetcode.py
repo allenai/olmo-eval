@@ -106,8 +106,17 @@ class DeepSeekLeetCode(Task):
 register_variant(
     "deepseek_leetcode",
     "olmo3base",
-    # The public dataset has prompts and tests but no reference solutions, so
-    # valid answered few-shot examples cannot be constructed from it.
-    num_fewshot=0,
+    num_fewshot=3,
+    fewshot_seed=1234,
     primary_metric=PassAtKMetric(k=1, scorer=CodeExecutionScorer),
 )
+
+
+@register("deepseek_leetcode:olmo3base:v2")
+class DeepSeekLeetCodeOlmo3BaseV2(DeepSeekLeetCode):
+    """OLMo3 preset without invalid, unanswered few-shot examples."""
+
+    # The public dataset has prompts and tests but no reference solutions, so
+    # valid answered few-shot examples cannot be constructed from it.
+    num_fewshot = 0
+    primary_metric = PassAtKMetric(k=1, scorer=CodeExecutionScorer)

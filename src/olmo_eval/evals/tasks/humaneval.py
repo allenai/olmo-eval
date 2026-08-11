@@ -216,8 +216,25 @@ register_variant(
     "olmo3base",
     num_fewshot=3,
     fewshot_seed=1234,
-    formatter=CompletionFormatter(),
 )
+
+
+@register("codex_humaneval:olmo3base:v2")
+class CodexHumanEvalOlmo3BaseV2(CodexHumanEval):
+    """Codex HumanEval few-shot preset with completion formatting enabled."""
+
+    num_fewshot = 3
+    fewshot_seed = 1234
+    formatter = CompletionFormatter()
+
+
+register_variant(
+    "codex_humaneval:olmo3base:v2",
+    "bpb",
+    formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
+    metrics=(BPBMetricInstanceAvg(),),
+)
+
 
 # Chat variants for instruction-tuned models
 # Use with agent scaffolds: humaneval:chat:pass_at_1

@@ -212,12 +212,14 @@ _VARIANTS: dict = {
         "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
         "metrics": (BPBMetricInstanceAvg(),),
     },
-    "3shot": {"num_fewshot": 3, "formatter": CompletionFormatter()},
+    "3shot": {"num_fewshot": 3},
     "olmo3base": {
         "num_fewshot": 3,
         "fewshot_seed": 1234,
-        "formatter": CompletionFormatter(),
     },
+    # Applied after a few-shot preset, e.g. ``:3shot:v2`` or
+    # ``:olmo3base:v2``, so demonstrations are actually serialized.
+    "v2": {"formatter": CompletionFormatter()},
 }
 
 for _base, _prefix in [

@@ -3,7 +3,7 @@
 from typing import Any
 
 # fmt: off
-MBPP_FEWSHOT_SOURCES: list[dict[str, Any]] = [
+MBPP_FEWSHOT_SOURCES_V2: list[dict[str, Any]] = [
     {
         "text": "Write a function to find the similar elements from the given two tuple lists.",
         "code": (
@@ -201,3 +201,29 @@ MBPP_FEWSHOT_SOURCES: list[dict[str, Any]] = [
     },
 ]
 # fmt: on
+
+# Preserve the byte-for-byte few-shot answers used by the original task.  These
+# strings were accidentally assembled without line breaks, which is why the v2
+# fixtures above exist, but changing them in place would make historical task
+# names non-reproducible.
+_MBPP_FEWSHOT_CODE_V1: tuple[str, ...] = (
+    "def similar_elements(test_tup1, test_tup2): res = tuple(set(test_tup1) & set(test_tup2)) return (res)",
+    "import math def is_not_prime(n): result = False for i in range(2,int(math.sqrt(n)) + 1): if n % i == 0: result = True return result",
+    "import heapq as hq def heap_queue_largest(nums,n): largest_nums = hq.nlargest(n, nums) return largest_nums",
+    "def count_ways(n): A = [0] * (n + 1) B = [0] * (n + 1) A[0] = 1 A[1] = 0 B[0] = 0 B[1] = 1 for i in range(2, n+1): A[i] = A[i - 2] + 2 * B[i - 1] B[i] = A[i - 1] + B[i - 2] return A[n]",
+    "def is_Power_Of_Two (x): return x and (not(x & (x - 1))) def differ_At_One_Bit_Pos(a,b): return is_Power_Of_Two(a ^ b)",
+    "import re def find_char_long(text): return (re.findall(r'\\b\\w{4,}\\b', text))",
+    "def square_nums(nums): square_nums = list(map(lambda x: x ** 2, nums)) return square_nums",
+    "def find_Rotations(str): tmp = str + str n = len(str) for i in range(1,n + 1): substring = tmp[i: i+n] if (str == substring): return i return n",
+    "import heapq def small_nnum(list1,n): smallest=heapq.nsmallest(n,list1) return smallest",
+    "R = 3 C = 3 def min_cost(cost, m, n): tc = [[0 for x in range(C)] for x in range(R)] tc[0][0] = cost[0][0] for i in range(1, m+1): tc[i][0] = tc[i-1][0] + cost[i][0] for j in range(1, n+1): tc[0][j] = tc[0][j-1] + cost[0][j] for i in range(1, m+1): for j in range(1, n+1): tc[i][j] = min(tc[i-1][j-1], tc[i-1][j], tc[i][j-1]) + cost[i][j] return tc[m][n]",
+)
+
+MBPP_FEWSHOT_SOURCES_V1: list[dict[str, Any]] = [
+    {**source, "code": code}
+    for source, code in zip(MBPP_FEWSHOT_SOURCES_V2, _MBPP_FEWSHOT_CODE_V1, strict=True)
+]
+
+# The unversioned name is the historical v1 fixture. New task definitions must
+# opt in to MBPP_FEWSHOT_SOURCES_V2 explicitly.
+MBPP_FEWSHOT_SOURCES = MBPP_FEWSHOT_SOURCES_V1

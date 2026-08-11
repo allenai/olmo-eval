@@ -17,6 +17,8 @@ _MT_MBPP_VARIANTS: tuple[tuple[str, str], ...] = (
     (":bpb", " with BPB evaluation"),
     (":3shot", " with 3-shot prompting"),
     (":3shot:bpb", " with 3-shot BPB evaluation"),
+    (":3shot:v2", " with corrected v2 3-shot prompting"),
+    (":3shot:v2:bpb", " with corrected v2 3-shot BPB evaluation"),
 )
 
 # Generate all suites programmatically
@@ -40,6 +42,13 @@ _MT_MBPP_V2FIX_3SHOT_BPB_NESTED = Suite(
     description="Multilingual MBPP v2 with 3-shot BPB evaluation",
 )
 
+_MT_MBPP_V2FIX_3SHOT_V2_BPB_NESTED = Suite(
+    name="mt_mbpp_v2fix:3shot:v2:bpb",
+    tasks=tuple(f"{t}:3shot:v2:bpb" for t in MULTILINGUAL_MBPP_TASKS_V2),
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Multilingual MBPP v2 with corrected 3-shot BPB evaluation",
+)
+
 # OLMo3 base_easy code BPB suite (average of averages)
 # Each child (task or nested suite) gets equal weight:
 OLMO3_BASE_EASY_CODE_BPB = register(
@@ -48,6 +57,19 @@ OLMO3_BASE_EASY_CODE_BPB = register(
         tasks=("humaneval:3shot:bpb", "mbpp:3shot:bpb", _MT_MBPP_V2FIX_3SHOT_BPB_NESTED),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
         description="OLMo3 base_easy code BPB suite (average of averages)",
+    )
+)
+
+OLMO3_BASE_EASY_CODE_BPB_V2 = register(
+    Suite(
+        name="olmo3:base_easy:code:bpb:v2",
+        tasks=(
+            "humaneval:3shot:bpb",
+            "mbpp:3shot:v2:bpb",
+            _MT_MBPP_V2FIX_3SHOT_V2_BPB_NESTED,
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        description="OLMo3 base_easy code BPB suite with versioned few-shot fixes",
     )
 )
 
@@ -166,6 +188,38 @@ register(
         ),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
         description="OLMoBase code generation evaluation suite for small models",
+    )
+)
+
+register(
+    Suite(
+        name="olmobase:code:v2",
+        tasks=(
+            "bigcodebench:olmo3base",
+            "humaneval:olmo3base",
+            "deepseek_leetcode:olmo3base:v2",
+            "ds1000:olmo3base",
+            "mbpp:olmo3base:v2",
+            _MULTIPL_E_HUMANEVAL_OLMO3BASE,
+            _MULTIPL_E_MBPP_OLMO3BASE,
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        description="OLMoBase code generation suite with versioned few-shot fixes",
+    )
+)
+
+register(
+    Suite(
+        name="olmobase:code_small:v2",
+        tasks=(
+            "humaneval:olmo3base",
+            "ds1000:olmo3base",
+            "mbpp:olmo3base:v2",
+            _MULTIPL_E_HUMANEVAL_OLMO3BASE,
+            _MULTIPL_E_MBPP_OLMO3BASE,
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        description="OLMoBase small-model code suite with versioned few-shot fixes",
     )
 )
 
