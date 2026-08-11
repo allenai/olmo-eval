@@ -225,6 +225,7 @@ def _register_humaneval_task(lang: str) -> None:
         "v2",
         sampling_params=replace(
             olmo3base_sampling_params,
+            stop_sequences=None,
             truncate_prompt_tokens=1024,
         ),
     )
@@ -301,6 +302,7 @@ def _register_mbpp_task(lang: str) -> None:
         "v2",
         sampling_params=replace(
             olmo3base_sampling_params,
+            stop_sequences=None,
             truncate_prompt_tokens=1024,
         ),
     )
