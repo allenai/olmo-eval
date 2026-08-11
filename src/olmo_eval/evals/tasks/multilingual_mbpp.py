@@ -14,7 +14,7 @@ import random
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import PPLFormatter
+from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import BPBMetricInstanceAvg
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader
@@ -212,8 +212,12 @@ _VARIANTS: dict = {
         "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
         "metrics": (BPBMetricInstanceAvg(),),
     },
-    "3shot": {"num_fewshot": 3},
-    "olmo3base": {"num_fewshot": 3, "fewshot_seed": 1234},
+    "3shot": {"num_fewshot": 3, "formatter": CompletionFormatter()},
+    "olmo3base": {
+        "num_fewshot": 3,
+        "fewshot_seed": 1234,
+        "formatter": CompletionFormatter(),
+    },
 }
 
 for _base, _prefix in [

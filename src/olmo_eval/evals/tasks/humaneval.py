@@ -211,7 +211,13 @@ register_variant(
     formatter=CompletionFormatter(),
 )
 
-register_variant("codex_humaneval", "olmo3base", num_fewshot=3, fewshot_seed=1234)
+register_variant(
+    "codex_humaneval",
+    "olmo3base",
+    num_fewshot=3,
+    fewshot_seed=1234,
+    formatter=CompletionFormatter(),
+)
 
 # Chat variants for instruction-tuned models
 # Use with agent scaffolds: humaneval:chat:pass_at_1

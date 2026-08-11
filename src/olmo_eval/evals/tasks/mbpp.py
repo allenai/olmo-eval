@@ -59,6 +59,9 @@ class MBPPBase(Task):
             metadata={
                 "id": doc["task_id"],
                 "answer_prefix": func_sig,
+                # CompletionFormatter must append only the function body because
+                # ``question`` already ends with the function signature.
+                "fewshot_answer": doc["code"][len(func_sig) :],
                 "test": tests,
             },
         )
@@ -160,7 +163,8 @@ class MBPPPlusBase(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Build prompt from text and function signature
-        question = doc["prompt"].strip() + doc["code"].split(":")[0] + ":"
+        func_sig = doc["code"].split(":")[0] + ":"
+        question = doc["prompt"].strip() + func_sig
 
         # Build test code
         tests = doc.get("test_setup_code", "") or ""
@@ -174,6 +178,7 @@ class MBPPPlusBase(Task):
             metadata={
                 "id": doc["task_id"],
                 "answer_prefix": question,
+                "fewshot_answer": doc["code"][len(func_sig) :],
                 "test": tests,
             },
         )
@@ -277,12 +282,14 @@ register_variant(
     "mbpp",
     "3shot",
     num_fewshot=3,
+    formatter=CompletionFormatter(fewshot_answer_key="fewshot_answer"),
 )
 
 register_variant(
     "mbpp_plus",
     "3shot",
     num_fewshot=3,
+    formatter=CompletionFormatter(fewshot_answer_key="fewshot_answer"),
 )
 
 # =============================================================================

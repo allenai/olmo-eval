@@ -106,7 +106,8 @@ class DeepSeekLeetCode(Task):
 register_variant(
     "deepseek_leetcode",
     "olmo3base",
-    num_fewshot=3,
-    fewshot_seed=1234,
+    # The public dataset has prompts and tests but no reference solutions, so
+    # valid answered few-shot examples cannot be constructed from it.
+    num_fewshot=0,
     primary_metric=PassAtKMetric(k=1, scorer=CodeExecutionScorer),
 )
