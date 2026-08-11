@@ -1,5 +1,5 @@
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
@@ -374,3 +374,13 @@ class HumanEvalOlmo3Base(HumanEval):
             for output in response.outputs:
                 raw = output.text or ""
                 output.extracted_answer = response.instance.metadata["answer_prefix"] + raw
+
+
+register_variant(
+    "humaneval:olmo3base",
+    "v2",
+    sampling_params=replace(
+        HumanEvalOlmo3Base.sampling_params,
+        truncate_prompt_tokens=1536,
+    ),
+)

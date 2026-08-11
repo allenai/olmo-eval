@@ -142,10 +142,31 @@ _MULTIPL_E_MBPP_OLMO3BASE = register(
         description="MULTIPL_E MBPP (6 languages) OLMo3 base pass@k evaluation",
     )
 )
+_MULTIPL_E_HUMANEVAL_OLMO3BASE_V2 = register(
+    Suite(
+        name="multipl_e_humaneval:olmo3base:v2",
+        tasks=tuple(f"{t}:olmo3base:v2" for t in MULTIPL_E_HUMANEVAL_TASKS),
+        aggregation=AggregationStrategy.AVERAGE,
+        description="MULTIPL_E HumanEval OLMo3 base evaluation without prompt truncation",
+    )
+)
+_MULTIPL_E_MBPP_OLMO3BASE_V2 = register(
+    Suite(
+        name="multipl_e_mbpp:olmo3base:v2",
+        tasks=tuple(f"{t}:olmo3base:v2" for t in MULTIPL_E_MBPP_TASKS),
+        aggregation=AggregationStrategy.AVERAGE,
+        description="MULTIPL_E MBPP OLMo3 base evaluation without prompt truncation",
+    )
+)
 make_suite(
     "multipl_e:olmo3base",
     tuple(f"{t}:olmo3base" for t in MULTIPL_E_HUMANEVAL_TASKS + MULTIPL_E_MBPP_TASKS),
     description="MULTIPL_E HumanEval + MBPP (6 languages each) OLMo3 base pass@k evaluation",
+)
+make_suite(
+    "multipl_e:olmo3base:v2",
+    tuple(f"{t}:olmo3base:v2" for t in MULTIPL_E_HUMANEVAL_TASKS + MULTIPL_E_MBPP_TASKS),
+    description="MULTIPL_E OLMo3 base evaluation without prompt truncation",
 )
 
 # FIM infilling suite
@@ -195,16 +216,19 @@ register(
     Suite(
         name="olmobase:code:v2",
         tasks=(
-            "bigcodebench:olmo3base",
-            "humaneval:olmo3base",
+            "bigcodebench:olmo3base:v2",
+            "humaneval:olmo3base:v2",
             "deepseek_leetcode:olmo3base:v2",
-            "ds1000:olmo3base",
+            "ds1000:olmo3base:v2",
             "mbpp:olmo3base:v2",
-            _MULTIPL_E_HUMANEVAL_OLMO3BASE,
-            _MULTIPL_E_MBPP_OLMO3BASE,
+            _MULTIPL_E_HUMANEVAL_OLMO3BASE_V2,
+            _MULTIPL_E_MBPP_OLMO3BASE_V2,
         ),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description="OLMoBase code generation suite with versioned few-shot fixes",
+        description=(
+            "OLMoBase code generation suite with versioned few-shot fixes and "
+            "full-prompt budgets; use max_model_len>=8192"
+        ),
     )
 )
 
@@ -212,14 +236,17 @@ register(
     Suite(
         name="olmobase:code_small:v2",
         tasks=(
-            "humaneval:olmo3base",
-            "ds1000:olmo3base",
+            "humaneval:olmo3base:v2",
+            "ds1000:olmo3base:v2",
             "mbpp:olmo3base:v2",
-            _MULTIPL_E_HUMANEVAL_OLMO3BASE,
-            _MULTIPL_E_MBPP_OLMO3BASE,
+            _MULTIPL_E_HUMANEVAL_OLMO3BASE_V2,
+            _MULTIPL_E_MBPP_OLMO3BASE_V2,
         ),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description="OLMoBase small-model code suite with versioned few-shot fixes",
+        description=(
+            "OLMoBase small-model code suite with versioned few-shot fixes and "
+            "full-prompt budgets; use max_model_len>=4096 (8192 recommended)"
+        ),
     )
 )
 

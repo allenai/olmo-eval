@@ -8,7 +8,7 @@ Dataset: davidheineman/deepseek-leetcode
 
 import re
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.metrics import PassAtKMetric
@@ -120,3 +120,7 @@ class DeepSeekLeetCodeOlmo3BaseV2(DeepSeekLeetCode):
     # valid answered few-shot examples cannot be constructed from it.
     num_fewshot = 0
     primary_metric = PassAtKMetric(k=1, scorer=CodeExecutionScorer)
+    sampling_params = replace(
+        DeepSeekLeetCode.sampling_params,
+        truncate_prompt_tokens=2048,
+    )

@@ -96,6 +96,19 @@ def test_deepseek_v2_preserves_legacy_fewshot_configuration() -> None:
     assert get_task("deepseek_leetcode:olmo3base:v2").config.num_fewshot == 0
 
 
+def test_ds1000_v2_preserves_protocol_and_declares_prompt_limit() -> None:
+    legacy = get_task("ds1000:olmo3base")
+    v2 = get_task("ds1000:olmo3base:v2")
+
+    assert v2.config.num_fewshot == legacy.config.num_fewshot == 3
+    assert v2.config.sampling_params is not None
+    assert legacy.config.sampling_params is not None
+    assert v2.config.sampling_params.max_tokens == legacy.config.sampling_params.max_tokens == 1024
+    assert legacy.config.sampling_params.truncate_prompt_tokens is None
+    assert v2.config.sampling_params.truncate_prompt_tokens == 4096
+    assert v2.config.to_dict()["sampling_params"]["truncate_prompt_tokens"] == 4096
+
+
 @pytest.mark.parametrize(
     "task_spec",
     [

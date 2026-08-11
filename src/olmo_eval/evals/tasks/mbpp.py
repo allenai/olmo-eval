@@ -1,7 +1,7 @@
 """MBPP code generation task implementations."""
 
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
@@ -491,6 +491,10 @@ class MBPPOlmo3BaseV2(MBPPOlmo3Base):
     """OLMo3 MBPP prompt with executable, multiline few-shot examples."""
 
     fewshot_sources = MBPP_FEWSHOT_SOURCES_V2
+    sampling_params = replace(
+        MBPPOlmo3Base.sampling_params,
+        truncate_prompt_tokens=2048,
+    )
 
 
 register_variant(
