@@ -154,6 +154,21 @@ register(
     )
 )
 
+register(
+    Suite(
+        name="olmobase:code_small",
+        tasks=(
+            "humaneval:olmo3base",
+            "ds1000:olmo3base",
+            "mbpp:olmo3base",
+            _MULTIPL_E_HUMANEVAL_OLMO3BASE,
+            _MULTIPL_E_MBPP_OLMO3BASE,
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        description="OLMoBase code generation evaluation suite for small models",
+    )
+)
+
 make_suite(
     "olmobase:code_fim",
     (
