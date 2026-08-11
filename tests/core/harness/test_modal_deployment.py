@@ -69,8 +69,8 @@ async def test_modal_deployment_uses_isolated_transport_and_safe_shutdown(
     await deployment.start()
 
     kwargs = captured["kwargs"]
-    assert kwargs["unencrypted_ports"] == [8880]
-    assert "encrypted_ports" not in kwargs
+    assert kwargs["encrypted_ports"] == [8880]
+    assert "unencrypted_ports" not in kwargs
     assert kwargs["cpu"] == 2
     assert captured["runtime"]["host"] == "https://sandbox.example"
     assert captured["runtime"]["max_connections"] == 4

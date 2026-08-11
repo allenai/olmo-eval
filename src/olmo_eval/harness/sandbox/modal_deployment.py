@@ -1,4 +1,4 @@
-"""Modal deployment adapter with reliable HTTP transport and shutdown."""
+"""Modal deployment adapter with encrypted HTTP transport and reliable shutdown."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .remote_runtime import ReliableRemoteRuntime
 
 
 class ReliableModalDeployment(ModalDeployment):
-    """SWE-ReX Modal deployment with isolated request transport."""
+    """SWE-ReX Modal deployment with encrypted, isolated request transport."""
 
     def __init__(self, *, max_connections: int, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -24,7 +24,7 @@ class ReliableModalDeployment(ModalDeployment):
             self.logger.warning("Deployment is already started. Ignoring duplicate start() call.")
             return
 
-        self.logger.info("Starting modal sandbox")
+        self.logger.info("Starting modal sandbox with encrypted runtime tunnel")
         self._hooks.on_custom_step("Starting modal sandbox")
         started_at = time.time()
         token = self._get_token()
@@ -38,7 +38,7 @@ class ReliableModalDeployment(ModalDeployment):
             self._start_swerex_cmd(token),
             image=self._image,
             timeout=int(self._deployment_timeout),
-            unencrypted_ports=[self._port],
+            encrypted_ports=[self._port],
             app=self._app,
             **modal_kwargs,
         )
@@ -52,7 +52,7 @@ class ReliableModalDeployment(ModalDeployment):
         )
         self.logger.info("Check sandbox logs at %s", await self.get_modal_log_url())
         await asyncio.sleep(1)
-        self.logger.info("Starting runtime at %s", tunnel.url)
+        self.logger.info("Starting runtime at encrypted tunnel %s", tunnel.url)
         self._hooks.on_custom_step("Starting runtime")
         self._runtime = ReliableRemoteRuntime(
             host=tunnel.url,
