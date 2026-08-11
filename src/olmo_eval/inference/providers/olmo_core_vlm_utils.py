@@ -25,7 +25,9 @@ import sys
 import types
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol, overload
+
+import olmo_eval.inference.providers.olmo_core_utils as core_utils
 
 if TYPE_CHECKING:
     import torch
@@ -66,6 +68,22 @@ IMAGE_SPECIAL_TOKENS = (
 )
 IMAGE_PLACEHOLDER_TOKEN = "<|image|>"
 END_OF_TURN_TOKEN = "<|im_end|>"
+
+
+class VLMTokenizerProtocol(core_utils.TokenizerProtocol, Protocol):
+    """Tokenizer surface the multimodal provider needs on top of the text one.
+
+    ``convert_tokens_to_ids`` maps the image special-token names above to the
+    vocab IDs the provider splices into prompts.
+    """
+
+    bos_token_id: int | None
+
+    @overload
+    def convert_tokens_to_ids(self, tokens: str) -> int | None: ...
+
+    @overload
+    def convert_tokens_to_ids(self, tokens: list[str]) -> list[int]: ...
 
 
 @dataclass(frozen=True)
@@ -550,9 +568,12 @@ def convert_olmo_core_to_molmo2_hf_state_dict(
         out[f"{dst}.self_attn.att_proj.weight"] = torch.cat(
             [take(f"{src}.attention.w_{p}.weight") for p in ("q", "k", "v")], dim=0
         )
-        biases = [maybe(f"{src}.attention.w_{p}.bias") for p in ("q", "k", "v")]
-        if all(bias is not None for bias in biases):
-            out[f"{dst}.self_attn.att_proj.bias"] = torch.cat(biases, dim=0)  # type: ignore[arg-type]
+        # `maybe` pops, so resolve all three before filtering: attention biases are
+        # fused only when q, k and v all carry one.
+        qkv_biases = [maybe(f"{src}.attention.w_{p}.bias") for p in ("q", "k", "v")]
+        biases = [bias for bias in qkv_biases if bias is not None]
+        if len(biases) == len(qkv_biases):
+            out[f"{dst}.self_attn.att_proj.bias"] = torch.cat(biases, dim=0)
         out[f"{dst}.self_attn.attn_out.weight"] = take(f"{src}.attention.w_out.weight")
         for norm in ("q_norm", "k_norm"):
             tensor = maybe(f"{src}.attention.{norm}.weight")

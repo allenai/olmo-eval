@@ -24,7 +24,7 @@ import dataclasses
 import gc
 import logging
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import olmo_eval.inference.providers.olmo_core_vlm_utils as vlm_utils
 from olmo_eval.common.debug import is_debug_requests
@@ -115,7 +115,10 @@ class OlmoCoreVLMProvider(InferenceProvider):
             }.items()
             if value
         }
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
+        self.tokenizer: vlm_utils.VLMTokenizerProtocol = cast(
+            vlm_utils.VLMTokenizerProtocol,
+            AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs),
+        )
         self._resolve_special_token_ids(tokenizer_path)
 
         self.model_config = vlm_utils.build_model_config(
