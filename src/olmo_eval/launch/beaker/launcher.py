@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shlex
 from dataclasses import dataclass, field
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
@@ -944,15 +945,54 @@ class BeakerLauncher:
 
         # Install provider-specific dependencies
         if provider_packages:
-            for pkg in provider_packages:
-                steps.append(
-                    build_install_command(
-                        provider_package_spec(pkg),
-                        constraints,
-                        venv_path=vllm_venv if use_isolated_vllm_venv else None,
-                        force_reinstall=True,
-                    )
+            for i, pkg in enumerate(provider_packages):
+                github_match = re.search(
+                    r"github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?(?:@([^\s]+))?$",
+                    pkg,
                 )
+                if github_match:
+                    # Clone directly so we control the git invocation and can
+                    # inject GITHUB_TOKEN into the URL without relying on
+                    # git config or credential helpers reaching uv's subprocess.
+                    # GitHub token auth requires user:token format (token as password).
+                    gh_path = github_match.group(1)
+                    revision = github_match.group(2)
+                    repo_name = gh_path.split("/")[-1]
+                    clone_dir = f"/tmp/provider-src-{i}"
+                    steps.append(
+                        f'if [ -n "$GITHUB_TOKEN" ]; then '
+                        f"git clone --quiet --depth=1 "
+                        f'"https://x-access-token:${{GITHUB_TOKEN}}@github.com/{gh_path}" '
+                        f"{clone_dir}; "
+                        f"else "
+                        f"git clone --quiet --depth=1 "
+                        f'"https://github.com/{gh_path}" '
+                        f"{clone_dir}; "
+                        f"fi"
+                    )
+                    if revision:
+                        steps.append(
+                            f"git -C {clone_dir} fetch --quiet --depth=1 origin "
+                            f"{shlex.quote(revision)} && "
+                            f"git -C {clone_dir} checkout --quiet --detach FETCH_HEAD"
+                        )
+                    steps.append(
+                        build_install_command(
+                            provider_package_spec(f"{repo_name} @ {clone_dir}"),
+                            constraints,
+                            venv_path=vllm_venv if use_isolated_vllm_venv else None,
+                            force_reinstall=True,
+                        )
+                    )
+                else:
+                    steps.append(
+                        build_install_command(
+                            provider_package_spec(pkg),
+                            constraints,
+                            venv_path=vllm_venv if use_isolated_vllm_venv else None,
+                            force_reinstall=True,
+                        )
+                    )
 
         # Install task-specific dependencies
         if task_packages:
@@ -1024,6 +1064,12 @@ class BeakerLauncher:
         # the workload description via BeakerStatusReporter.
         if not any(name == "BEAKER_TOKEN" for name, _ in env_secrets):
             env_secrets.append(("BEAKER_TOKEN", f"{self.beaker.user_name}_BEAKER_TOKEN"))
+
+        # Inject GITHUB_TOKEN so provider package installs can clone private repos.
+        # Gantry only mounts this automatically for private olmo-eval repos; since
+        # olmo-eval is public, we must add it explicitly.
+        if not any(name == "GITHUB_TOKEN" for name, _ in env_secrets):
+            env_secrets.append(("GITHUB_TOKEN", self._default_github_token_secret()))
 
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:
