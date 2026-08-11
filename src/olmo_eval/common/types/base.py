@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 from olmo_eval.common.repr import hide_unset
 
@@ -238,7 +238,7 @@ class LMRequest:
 class SamplingParams:
     """Parameters for language model sampling."""
 
-    max_tokens: int = 512
+    max_tokens: int | None = 512  # None means generate to the model's context limit
     temperature: float = 0.0
     top_p: float | None = None
     top_k: int | None = None
@@ -246,6 +246,8 @@ class SamplingParams:
     num_samples: int = 1
     logprobs: int | None = None
     do_sample: bool = True
+    truncate_prompt_tokens: int | None = None
+    truncation_side: Literal["left", "right"] | None = None
 
 
 @dataclass(slots=True)

@@ -35,6 +35,7 @@ dependencies = [
     "ifbench @ git+https://github.com/allenai/IFBench.git@finbarr/clean-install",
     # syllapy (transitive via ifbench) imports pkg_resources, which setuptools>=81 removes.
     "setuptools<81",
+    "bm25s>=0.3.9",
 ]
 
 [project.urls]
@@ -43,6 +44,9 @@ Repository = "https://github.com/allenai/olmo-eval"
 Issues = "https://github.com/allenai/olmo-eval/issues"
 
 [project.optional-dependencies]
+crawl4ai = [
+    "crawl4ai>=0.8",
+]
 hf = [
     "transformers>=5.4.0",
     # Required by the released Molmo2 remote code (image_processing_molmo2.py imports both at
@@ -139,6 +143,7 @@ conflicts = [
 
 [tool.setuptools.package-data]
 "olmo_eval.analysis.pairwise_viewer" = ["static/*.css", "static/*.js", "templates/*.html"]
+"olmo_eval.evals.tasks" = ["*.jsonl"]
 
 [dependency-groups]
 dev = [
@@ -181,6 +186,7 @@ select = [
 "src/olmo_eval/common/constants/models.py" = ["E501"]
 # Verbatim prompt templates from asta-bench reference implementation
 "src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
+"src/olmo_eval/common/scorers/citation.py" = ["E501"]
 # Verbatim prompt templates and gold snippets from scicode-bench reference implementation
 "src/olmo_eval/evals/external/benchmarks/scicode/prompts.py" = ["E501"]
 # Embedded fewshot data with long string literals
@@ -249,6 +255,7 @@ allowed-unresolved-imports = [
     "cached_path.**",
     "instructions_registry.**",
     "instructions.**",
+    "crawl4ai.**",
 ]
 
 [tool.gantry]

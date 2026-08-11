@@ -336,6 +336,23 @@ def test_generate_uses_olmes_batch_contract(
     assert module.free_calls == 1
 
 
+def test_generate_uncapped_fills_context(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, module, _ = fake_provider
+    provider.max_length = 32
+
+    provider.generate(
+        [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
+        SamplingParams(max_tokens=None),
+    )
+
+    call = module.generate_calls[0]
+    # The 2-token prompt isn't truncated, and generation fills the rest of the budget.
+    assert call["input_ids"].tolist() == [[10, 11]]
+    assert call["max_length"] == 32
+
+
 def test_generate_left_truncates_to_leave_completion_room(
     fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
 ) -> None:

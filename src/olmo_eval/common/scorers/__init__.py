@@ -14,6 +14,13 @@ from .base import (
     Scorer,
     SQuADF1Scorer,
 )
+from .citation import (
+    CITATION_GROUP_PROMPT,
+    JUST_HAS_A_TITLE,
+    compute_citation_scores_from_groups,
+    score_citation_group,
+    score_citations_for_sections,
+)
 from .code_execution import CodeExecutionScorer, MultiplEScorer
 from .dense_caption_judge import DenseCaptionJudgeScorer
 from .execution import ContextScorer, ExecutionScorer, SandboxRequiredError
@@ -58,7 +65,9 @@ __all__ = [
     "AnlsScorer",
     "BitsPerByteScorer",
     "build_openai_judge_fn",
+    "CITATION_GROUP_PROMPT",
     "CodeExecutionScorer",
+    "compute_citation_scores_from_groups",
     "ContextScorer",
     "DenseCaptionJudgeScorer",
     "ExactMatchFlexScorer",
@@ -68,6 +77,7 @@ __all__ = [
     "F1Scorer",
     "IFEvalScorer",
     "JudgeFn",
+    "JUST_HAS_A_TITLE",
     "LLMJudgeScorer",
     "LogprobScorer",
     "MathVerifyScorer",
@@ -86,6 +96,8 @@ __all__ = [
     "SafetyScorer",
     "ScifiRelaxedScorer",
     "SandboxRequiredError",
+    "score_citation_group",
+    "score_citations_for_sections",
     "Scorer",
     "SQuADF1Scorer",
     "SimpleQAGrade",

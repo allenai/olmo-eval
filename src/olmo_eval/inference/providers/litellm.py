@@ -125,9 +125,12 @@ class LiteLLMProvider(InferenceProvider):
             "model": self.model_name,
             "messages": messages,
             "n": params.num_samples,
-            "max_completion_tokens": params.max_tokens,
             **self.api_kwargs,
         }
+        # max_tokens=None means "uncapped"; omit the field so the API uses its
+        # own context-bounded default rather than receiving a literal null.
+        if params.max_tokens is not None:
+            kwargs["max_completion_tokens"] = params.max_tokens
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
@@ -247,6 +250,11 @@ class LiteLLMProvider(InferenceProvider):
         )
 
         params = self._default_sampling_params(sampling_params)
+        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
+            logger.warning(
+                "truncate_prompt_tokens or truncation_side has been set in the params, "
+                "but is not supported for the LiteLLMProvider and will not be used."
+            )
         progress = ProgressLogger(total=len(requests), desc="Generating", logger=logger)
 
         async def process(req: LMRequest) -> list[LMOutput]:
@@ -376,6 +384,11 @@ class LiteLLMProvider(InferenceProvider):
         )
 
         params = self._default_sampling_params(sampling_params)
+        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
+            logger.warning(
+                "truncate_prompt_tokens or truncation_side has been set in the params, "
+                "but is not supported for the LiteLLMProvider and will not be used."
+            )
         progress = ProgressLogger(total=len(requests), desc="Logprobs", logger=logger)
 
         def on_progress(done: int, total: int) -> None:
