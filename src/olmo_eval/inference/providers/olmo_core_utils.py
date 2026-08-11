@@ -334,7 +334,15 @@ def _validate_olmo_core_checkpoint(
         raise _checkpoint_value_error(checkpoint_dir, reason)
 
     state_metadata = getattr(metadata, "state_dict_metadata", {}) or {}
-    if not any(str(key).startswith("model") for key in state_metadata):
+    # Conventional generation checkpoints use ``model.*`` keys. OLMo DDP
+    # optimizer-backed checkpoints instead store authoritative weights as
+    # ``module.<parameter>.main``; current OLMo-core generation supports both.
+    has_model_state = any(str(key).startswith("model") for key in state_metadata)
+    has_ddp_main_state = any(
+        str(key).startswith("module.") and str(key).endswith(".main")
+        for key in state_metadata
+    )
+    if not (has_model_state or has_ddp_main_state):
         raise _checkpoint_value_error(
             checkpoint_dir,
             "distributed checkpoint metadata does not contain model state keys",

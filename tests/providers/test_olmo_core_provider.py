@@ -194,6 +194,20 @@ def _metadata_reader(path: str | Path) -> SimpleNamespace:
     raise FileNotFoundError(path)
 
 
+def test_checkpoint_validation_accepts_ddp_optimizer_main_state(tmp_path: Path) -> None:
+    _write_raw_checkpoint(tmp_path)
+
+    info = olmo_core_utils._validate_olmo_core_checkpoint(
+        str(tmp_path),
+        TokenizerConfig=FakeTokenizerConfig,
+        get_checkpoint_metadata=lambda _: SimpleNamespace(
+            state_dict_metadata={"module.embeddings.weight.main": object()}
+        ),
+    )
+
+    assert info.metadata_dir == str(tmp_path / "model_and_optim")
+
+
 def _fake_olmo_core_imports(
     *,
     cuda_available: bool = False,
