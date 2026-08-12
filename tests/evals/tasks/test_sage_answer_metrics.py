@@ -82,10 +82,17 @@ def test_answer_region_drops_unopened_reasoning_region():
     """A closing tag with no opening tag means everything before it is reasoning."""
     text = f"Maybe it is {GOLD_TITLE}, let me check.</think>\nNo match was found."
     assert answer_region(text) == "No match was found."
-    # strip_think alone keeps it, which is why exact_match still sees it.
+    # This test was written when strip_think kept the unopened region, so a title
+    # guessed in the monologue still scored under exact_match and answer_region was
+    # the only thing that dropped it. `Treat an unopened </think> as reasoning in
+    # SAGE` closed that path too, so both drop it now and the contrast is gone.
+    # Recorded rather than deleted: it means exact_match is NOT byte-identical to
+    # the metric the published SAGE numbers were measured under -- a run whose gold
+    # title appeared only inside a leaked monologue used to score it and no longer
+    # does.
     from olmo_eval.evals.tasks.sage import strip_think
 
-    assert GOLD_TITLE in strip_think(text)
+    assert GOLD_TITLE not in strip_think(text)
 
 
 def test_answer_region_drops_trailing_reference_list():
