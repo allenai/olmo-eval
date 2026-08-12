@@ -882,7 +882,9 @@ class BeakerLauncher:
                 steps.append(
                     f"cd /gantry-runtime && uv pip install "
                     f"--python {vllm_venv}/bin/python "
-                    f'--cache-dir "$UV_CACHE_DIR" '
+                    # UV_CACHE_DIR is only exported on Weka clusters; expand to nothing
+                    # elsewhere rather than passing an empty --cache-dir, which uv rejects.
+                    f'${{UV_CACHE_DIR:+--cache-dir "$UV_CACHE_DIR"}} '
                     f"-c {vllm_lock_constraints} -e '.[vllm]'"
                 )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
