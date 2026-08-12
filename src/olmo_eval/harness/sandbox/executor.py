@@ -151,53 +151,62 @@ class SandboxExecutor:
         self._log(logging.DEBUG, "Starting sandbox deployment...")
         prefix = f"[{self.name}] " if self.name else ""
 
-        # For Modal deployments, patch app lookup during deployment creation
-        # AND startup to use unique app names and avoid conflicts between
-        # concurrent runs.  The patch must cover both get_deployment() and
-        # deployment.start() because swe-rex calls modal.App.lookup("swe-rex")
-        # in both phases.
-        if self.config.mode == SandboxMode.MODAL:
-            from unittest.mock import patch
+        try:
+            # For Modal deployments, patch app lookup during deployment creation
+            # AND startup to use unique app names and avoid conflicts between
+            # concurrent runs.  The patch must cover both get_deployment() and
+            # deployment.start() because swe-rex calls modal.App.lookup("swe-rex")
+            # in both phases.
+            if self.config.mode == SandboxMode.MODAL:
+                from unittest.mock import patch
 
-            import modal  # type: ignore[ty:unresolved-import]
+                import modal  # type: ignore[ty:unresolved-import]
 
-            app_name = self._modal_app_name or _get_modal_app_name()
-            if not self._modal_app_name:
-                # Only log if we generated it (manager logs its own)
-                self._log(logging.INFO, f"Using Modal app: {app_name}")
-            original_lookup = modal.App.lookup
+                app_name = self._modal_app_name or _get_modal_app_name()
+                if not self._modal_app_name:
+                    # Only log if we generated it (manager logs its own)
+                    self._log(logging.INFO, f"Using Modal app: {app_name}")
+                original_lookup = modal.App.lookup
 
-            def patched_lookup(name: str, *args, **kwargs):
-                if name == "swe-rex":
-                    name = app_name
-                return original_lookup(name, *args, **kwargs)
+                def patched_lookup(name: str, *args, **kwargs):
+                    if name == "swe-rex":
+                        name = app_name
+                    return original_lookup(name, *args, **kwargs)
 
-            with patch.object(modal.App, "lookup", patched_lookup):
-                deployment = self.get_deployment()
+                with patch.object(modal.App, "lookup", patched_lookup):
+                    self._deployment = self.get_deployment()
+                    await _run_with_progress(
+                        self._deployment.start(),
+                        f"{prefix}Waiting for sandbox runtime",
+                        interval=5.0,
+                    )
+            else:
+                self._deployment = self.get_deployment()
                 await _run_with_progress(
-                    deployment.start(),
+                    self._deployment.start(),
                     f"{prefix}Waiting for sandbox runtime",
                     interval=5.0,
                 )
-        else:
-            deployment = self.get_deployment()
-            await _run_with_progress(
-                deployment.start(),
-                f"{prefix}Waiting for sandbox runtime",
-                interval=5.0,
-            )
 
-        self._deployment = deployment
-        self._runtime = deployment.runtime
-        self._quarantined_reason = None
-        self._log(logging.DEBUG, "Sandbox deployment ready!")
+            self._runtime = self._deployment.runtime
+            self._quarantined_reason = None
+            self._log(logging.DEBUG, "Sandbox deployment ready!")
 
-        if (
-            self.config.enable_diagnostics
-            and self.config.log_dir
-            and self.config.mode == SandboxMode.DOCKER
-        ):
-            await start_internal_monitor(self._runtime, self.name)
+            if (
+                self.config.enable_diagnostics
+                and self.config.log_dir
+                and self.config.mode == SandboxMode.DOCKER
+            ):
+                await start_internal_monitor(self._runtime, self.name)
+        except BaseException:
+            try:
+                await self.stop()
+            except BaseException as cleanup_error:
+                self._log(
+                    logging.WARNING,
+                    f"Failed to clean up deployment after startup failure: {cleanup_error}",
+                )
+            raise
 
     def get_deployment(self) -> Any:
         """Create the appropriate deployment based on configuration.
@@ -297,7 +306,7 @@ class SandboxExecutor:
 
             case SandboxMode.MODAL:
                 try:
-                    from .modal_deployment import ReliableModalDeployment
+                    from .modal_deployment import ManagedModalDeployment
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex modal support not installed. "
@@ -356,7 +365,7 @@ class SandboxExecutor:
                 else:
                     modal_image = modal.Image.from_registry(image)
 
-                return ReliableModalDeployment(
+                return ManagedModalDeployment(
                     image=modal_image,
                     startup_timeout=self.config.startup_timeout,
                     runtime_timeout=self.config.runtime_timeout,

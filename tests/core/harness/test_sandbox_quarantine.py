@@ -157,7 +157,7 @@ def test_modal_deployment_receives_configured_lifetime(
             captured.update(kwargs)
 
     monkeypatch.setattr(
-        "olmo_eval.harness.sandbox.modal_deployment.ReliableModalDeployment",
+        "olmo_eval.harness.sandbox.modal_deployment.ManagedModalDeployment",
         _ModalDeployment,
     )
     executor = SandboxExecutor(

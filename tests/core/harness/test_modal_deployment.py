@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from olmo_eval.harness.sandbox.modal_deployment import ReliableModalDeployment
+from olmo_eval.harness.sandbox.modal_deployment import ManagedModalDeployment
 
 
 @pytest.mark.anyio
@@ -36,7 +36,7 @@ async def test_modal_deployment_uses_isolated_transport_and_safe_shutdown(
         async def close(self) -> None:
             captured["close_calls"] = captured.get("close_calls", 0) + 1
 
-    deployment = object.__new__(ReliableModalDeployment)
+    deployment = object.__new__(ManagedModalDeployment)
     deployment._runtime = None
     deployment._sandbox = None
     deployment._port = 8880
@@ -77,6 +77,72 @@ async def test_modal_deployment_uses_isolated_transport_and_safe_shutdown(
     await deployment.stop()
     assert captured["terminate_calls"] == 1
     assert captured.get("close_calls", 0) == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure_stage", ["tunnel", "health_check"])
+async def test_modal_deployment_terminates_sandbox_when_startup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    captured: dict[str, Any] = {}
+    tunnel = SimpleNamespace(url="https://sandbox.example")
+
+    async def tunnels() -> dict[int, object]:
+        if failure_stage == "tunnel":
+            raise RuntimeError("tunnel lookup failed")
+        return {8880: tunnel}
+
+    sandbox = SimpleNamespace(
+        object_id="sb-1",
+        tunnels=SimpleNamespace(aio=tunnels),
+        terminate=SimpleNamespace(aio=_record_call(captured, "terminate_calls")),
+    )
+
+    class _Runtime:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+    deployment = object.__new__(ManagedModalDeployment)
+    deployment._runtime = None
+    deployment._sandbox = None
+    deployment._port = 8880
+    deployment._image = object()
+    deployment._deployment_timeout = 600.0
+    deployment._runtime_timeout = 60.0
+    deployment._startup_timeout = 30.0
+    deployment._modal_kwargs = {}
+    deployment._app = object()
+    deployment._max_connections = 4
+    deployment._hooks = SimpleNamespace(on_custom_step=lambda _step: None)
+    deployment.logger = logging.getLogger(__name__)
+    monkeypatch.setattr(deployment, "_get_token", lambda: "token")
+    monkeypatch.setattr(deployment, "_start_swerex_cmd", lambda _token: "start")
+    monkeypatch.setattr(deployment, "get_modal_log_url", _return_value("https://logs"))
+
+    async def wait_until_alive(**_kwargs: object) -> None:
+        raise RuntimeError("health check failed")
+
+    monkeypatch.setattr(deployment, "_wait_until_alive", wait_until_alive)
+    monkeypatch.setattr(
+        "olmo_eval.harness.sandbox.modal_deployment.modal.Sandbox",
+        SimpleNamespace(create=SimpleNamespace(aio=_return_value(sandbox))),
+    )
+    monkeypatch.setattr(
+        "olmo_eval.harness.sandbox.modal_deployment.ReliableRemoteRuntime",
+        _Runtime,
+    )
+    monkeypatch.setattr(
+        "olmo_eval.harness.sandbox.modal_deployment.asyncio.sleep",
+        _return_value(None),
+    )
+
+    with pytest.raises(RuntimeError, match="failed"):
+        await deployment.start()
+
+    assert captured["terminate_calls"] == 1
+    assert deployment._sandbox is None
+    assert deployment._runtime is None
 
 
 def _return_value(value: Any):

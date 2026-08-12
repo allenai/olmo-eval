@@ -219,11 +219,8 @@ _MBPP_FEWSHOT_CODE_V1: tuple[str, ...] = (
     "R = 3 C = 3 def min_cost(cost, m, n): tc = [[0 for x in range(C)] for x in range(R)] tc[0][0] = cost[0][0] for i in range(1, m+1): tc[i][0] = tc[i-1][0] + cost[i][0] for j in range(1, n+1): tc[0][j] = tc[0][j-1] + cost[0][j] for i in range(1, m+1): for j in range(1, n+1): tc[i][j] = min(tc[i-1][j-1], tc[i-1][j], tc[i][j-1]) + cost[i][j] return tc[m][n]",
 )
 
-MBPP_FEWSHOT_SOURCES_V1: list[dict[str, Any]] = [
+# Keep the unversioned fixture byte-for-byte compatible with the original task.
+MBPP_FEWSHOT_SOURCES: list[dict[str, Any]] = [
     {**source, "code": code}
     for source, code in zip(MBPP_FEWSHOT_SOURCES_V2, _MBPP_FEWSHOT_CODE_V1, strict=True)
 ]
-
-# The unversioned name is the historical v1 fixture. New task definitions must
-# opt in to MBPP_FEWSHOT_SOURCES_V2 explicitly.
-MBPP_FEWSHOT_SOURCES = MBPP_FEWSHOT_SOURCES_V1

@@ -217,6 +217,8 @@ class SandboxManager:
             else:
                 config_successes[config_idx].append(executor)
 
+        startup_error: RuntimeError | None = None
+
         # Check minimum requirements per config
         for config_idx, config in enumerate(self._configs):
             if (
@@ -234,11 +236,12 @@ class SandboxManager:
             failed_count = len(config_failures[config_idx])
 
             if started_count < min_required:
-                raise RuntimeError(
+                startup_error = RuntimeError(
                     f"Sandbox config {config_idx} ({config.image}): "
                     f"only {started_count}/{min_required} required instances started "
                     f"({failed_count} failed)"
                 )
+                break
 
             if failed_count > 0:
                 self._logger.warning(
@@ -246,6 +249,15 @@ class SandboxManager:
                     f"{started_count}/{config.resolved_instances} instances started "
                     f"({failed_count} failed, min_required={min_required})"
                 )
+
+        if startup_error is not None:
+            await self.stop()
+            raise startup_error
+
+        failed_executors = [
+            executor for failures in config_failures.values() for executor, _ in failures
+        ]
+        await self._stop_executors(failed_executors)
 
         # Keep only successfully started executors
         self._executors = [e for successes in config_successes.values() for e in successes]
@@ -283,7 +295,7 @@ class SandboxManager:
             self._bound_executors.clear()
             self._capacity_condition.notify_all()
 
-        await asyncio.gather(*[e.stop() for e in self._executors])
+        await self._stop_executors(self._executors)
         self._executors.clear()
         self._round_robin_indices.clear()
         self._active_operations.clear()
@@ -291,6 +303,16 @@ class SandboxManager:
 
         with contextlib.suppress(Exception):
             atexit.unregister(self._atexit_cleanup)
+
+    async def _stop_executors(self, executors: Sequence[SandboxExecutor]) -> None:
+        """Best-effort stop every executor without abandoning later cleanups."""
+        results = await asyncio.gather(
+            *(executor.stop() for executor in executors),
+            return_exceptions=True,
+        )
+        for executor, result in zip(executors, results, strict=True):
+            if isinstance(result, BaseException):
+                self._logger.warning(f"Executor {executor.name} failed to stop: {result}")
 
     def _atexit_cleanup(self) -> None:
         """Synchronous cleanup for atexit. Runs stop() if executors are still active."""
