@@ -350,3 +350,91 @@ class TestRecoverAnswerFromReasoning:
         assert recover_answer_from_reasoning(
             self._Result([self._Item({"role": "assistant", "content": None})])) == ""
 
+class TestReasoningFieldAlias:
+    """vLLM emits `reasoning`; the Agents SDK reads `reasoning_content`.
+
+    `chatcmpl_converter.message_to_output_items` gates on
+    `hasattr(message, "reasoning_content")`. One suffix apart, so the SDK builds no reasoning item
+    and the answer is discarded before `new_items` exists. Measured on litsearch__single: 11 of 11
+    empty runs had 2,105 characters of answer sitting in `reasoning`.
+
+    The first fix for this searched `new_items` and found nothing, because by then the field was
+    already gone. These tests cover the alias at the client boundary, which is the last point at
+    which it still exists.
+    """
+
+    class _Msg:
+        def __init__(self, **kw):
+            for k, v in kw.items():
+                setattr(self, k, v)
+
+    class _Choice:
+        def __init__(self, message):
+            self.message = message
+
+    class _Completion:
+        def __init__(self, choices):
+            self.choices = choices
+
+    def test_reasoning_is_aliased_onto_reasoning_content(self):
+        from olmo_eval.harness.scaffolds.openai_agents import _alias_reasoning_field
+
+        msg = self._Msg(content=None, reasoning="the answer")
+        _alias_reasoning_field(self._Completion([self._Choice(msg)]))
+        assert getattr(msg, "reasoning_content", None) == "the answer"
+
+    def test_an_existing_reasoning_content_is_not_overwritten(self):
+        from olmo_eval.harness.scaffolds.openai_agents import _alias_reasoning_field
+
+        msg = self._Msg(content=None, reasoning="from vllm", reasoning_content="already here")
+        _alias_reasoning_field(self._Completion([self._Choice(msg)]))
+        assert msg.reasoning_content == "already here"
+
+    def test_a_message_without_reasoning_is_untouched(self):
+        from olmo_eval.harness.scaffolds.openai_agents import _alias_reasoning_field
+
+        msg = self._Msg(content="a normal answer")
+        _alias_reasoning_field(self._Completion([self._Choice(msg)]))
+        assert getattr(msg, "reasoning_content", None) in (None, "")
+
+
+class TestRecoverFromReasoningItem:
+    """Once aliased, the SDK stores it as a ResponseReasoningItem, not as a message.
+
+    Its text is in `summary[].text`. The earlier recovery looked for a `reasoning` attribute and
+    so still found nothing -- the two halves of this fix each fail alone.
+    """
+
+    class _Item:
+        def __init__(self, raw):
+            self.raw_item = raw
+
+    class _Result:
+        def __init__(self, items):
+            self.new_items = items
+            self.final_output = ""
+
+    def test_text_in_a_summary_is_recovered(self):
+        from olmo_eval.harness.scaffolds.openai_agents import recover_answer_from_reasoning
+
+        result = self._Result([
+            self._Item({"summary": [{"text": "the recovered answer", "type": "summary_text"}]}),
+        ])
+        assert recover_answer_from_reasoning(result) == "the recovered answer"
+
+    def test_multiple_summary_parts_are_joined(self):
+        from olmo_eval.harness.scaffolds.openai_agents import recover_answer_from_reasoning
+
+        result = self._Result([
+            self._Item({"summary": [{"text": "first"}, {"text": "second"}]}),
+        ])
+        assert recover_answer_from_reasoning(result) == "first\n\nsecond"
+
+    def test_a_message_with_content_still_wins(self):
+        from olmo_eval.harness.scaffolds.openai_agents import recover_answer_from_reasoning
+
+        result = self._Result([
+            self._Item({"role": "assistant", "content": "a real answer"}),
+        ])
+        assert recover_answer_from_reasoning(result) == ""
+

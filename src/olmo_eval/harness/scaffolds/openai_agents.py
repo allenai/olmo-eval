@@ -33,6 +33,63 @@ FORCED_FINAL_ANSWER_INSTRUCTION = (
 _REASONING_END_TAG = "</think>"
 
 
+def _alias_reasoning_field(completion: Any) -> Any:
+    """Copy `reasoning` onto `reasoning_content` so the SDK's own path can see it.
+
+    `Converter.message_to_output_items` tests `hasattr(message, "reasoning_content")`. vLLM's
+    reasoning parser emits `reasoning`. Both are pydantic extras, so this is a rename and not a
+    reinterpretation -- and it happens here because after `get_response` returns, the message has
+    already been converted and the field is gone.
+    """
+    for choice in getattr(completion, "choices", None) or []:
+        msg = getattr(choice, "message", None)
+        if msg is None:
+            continue
+        if getattr(msg, "reasoning_content", None):
+            continue
+        text = getattr(msg, "reasoning", None)
+        if isinstance(text, str) and text.strip():
+            try:
+                object.__setattr__(msg, "reasoning_content", text)
+            except Exception:
+                try:
+                    msg.reasoning_content = text
+                except Exception:
+                    pass
+    return completion
+
+
+class _ReasoningAliasingCompletions:
+    """Wraps `client.chat.completions` so every response carries the aliased field."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    async def create(self, *args: Any, **kwargs: Any) -> Any:
+        return _alias_reasoning_field(await self._inner.create(*args, **kwargs))
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class _ReasoningAliasingChat:
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.completions = _ReasoningAliasingCompletions(inner.completions)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class _ReasoningAliasingClient:
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.chat = _ReasoningAliasingChat(inner.chat)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 def _message_field(raw: Any, name: str) -> str:
     """Read a field off an SDK item that may be an object or a plain dict."""
     if raw is None:
@@ -63,6 +120,24 @@ def recover_answer_from_reasoning(result: Any) -> str:
     items = getattr(result, "new_items", None) or []
     for item in reversed(list(items)):
         raw = getattr(item, "raw_item", None) or item
+
+        # The SDK stores a reasoning message as a ResponseReasoningItem, whose text is in
+        # summary[].text rather than in any `reasoning` attribute. Looking only for the attribute
+        # found nothing on 11 of 11 runs whose answer was sitting right there.
+        summary = getattr(raw, "summary", None)
+        if summary is None and isinstance(raw, dict):
+            summary = raw.get("summary")
+        if summary:
+            parts = []
+            for entry in summary:
+                t = getattr(entry, "text", None)
+                if t is None and isinstance(entry, dict):
+                    t = entry.get("text")
+                if isinstance(t, str) and t.strip():
+                    parts.append(t.strip())
+            if parts:
+                return "\n\n".join(parts)
+
         if _message_field(raw, "role") not in ("assistant", ""):
             continue
         if _message_field(raw, "content").strip():
@@ -314,7 +389,7 @@ class OpenAIAgentsScaffold(Scaffold):
         patch_openai_agents_for_vllm()
 
         # Create model using provider's OpenAI client
-        client = provider.get_openai_client()
+        client = _ReasoningAliasingClient(provider.get_openai_client())
         logger.debug(
             f"Creating agent with client: {type(client).__name__}, "
             f"base_url={getattr(client, 'base_url', 'unknown')}, "
