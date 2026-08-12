@@ -61,6 +61,21 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             max_model_len=int(os.environ.get("OLMO3_EVAL_MAX_LEN", "32768")),
             kwargs={"gpu_memory_utilization": 0.7},
         ),
+        # OLMo-3-7B micro-anneal checkpoints converted to HF. Path is per-run via
+        # $OLMO3_EVAL_MODEL, as for olmo3-7b-sft above. These are base checkpoints with
+        # max_position_embeddings 8192 and default (non-YaRN) rope, so the length cap stays at
+        # the model's own limit rather than the SFT preset's 32768.
+        # gpu_memory_utilization 0.7 is load-bearing: the science:expert and science:nojudge:base
+        # suites request prompt_logprobs over LAB-Bench prompts near the full 8192 context, and
+        # the float32 logits tensor that produces is ~3 GiB. At vLLM's 0.9 default the KV cache
+        # leaves too little headroom and the engine dies of CUDA OOM mid-run, which surfaces as a
+        # near-zero score rather than a failure.
+        "olmo3-7b-anneal": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model=os.environ.get("OLMO3_EVAL_MODEL", ""),
+            max_model_len=int(os.environ.get("OLMO3_EVAL_MAX_LEN", "8192")),
+            kwargs={"gpu_memory_utilization": 0.7},
+        ),
         # The released, post-trained OLMo-3-7B SFT checkpoint (general instruction tuning,
         # NOT our deep-research data). Native olmo3 (Olmo3ForCausalLM, YaRN rope). Used as an
         # ALTERNATE baseline anchor, evaluated on the STOCK pythonic harness (-H dr_tulu) — its
