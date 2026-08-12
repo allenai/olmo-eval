@@ -293,3 +293,60 @@ class TestOpenAIAgentsMaxTurns:
         )
 
         assert result.final_output.text == "# Report\n\nBody"
+
+class TestRecoverAnswerFromReasoning:
+    """The answer a reasoning model wrote into `reasoning` instead of `content`.
+
+    The shape below is copied from a real run in the dev matrix --
+    `litsearch__single` case 10, which issued 4 tool calls and produced 5 generations, and whose
+    last message is `{"content": null, "tool_calls": [], "reasoning": "Based on the search
+    results..."}`. The Agents SDK reads `content`, so the run scored as a non-answer. 8 of 50
+    litsearch runs and 9 of 50 researchqa runs looked like that.
+
+    This is the mirror of `strip_reasoning_prefix`, which handles the same split failing the
+    other way.
+    """
+
+    class _Item:
+        def __init__(self, raw):
+            self.raw_item = raw
+
+    class _Result:
+        def __init__(self, items, final_output=""):
+            self.new_items = items
+            self.final_output = final_output
+
+    def test_answer_in_reasoning_is_recovered(self):
+        from olmo_eval.harness.scaffolds.openai_agents import recover_answer_from_reasoning
+
+        result = self._Result([
+            self._Item({"role": "assistant", "content": None, "tool_calls": [],
+                        "reasoning": "Based on the search results, the paper is X."}),
+        ])
+        assert recover_answer_from_reasoning(result) == "Based on the search results, the paper is X."
+
+    def test_deepseek_style_reasoning_content_is_also_read(self):
+        from olmo_eval.harness.scaffolds.openai_agents import recover_answer_from_reasoning
+
+        result = self._Result([
+            self._Item({"role": "assistant", "content": "", "reasoning_content": "The answer."}),
+        ])
+        assert recover_answer_from_reasoning(result) == "The answer."
+
+    def test_a_real_answer_in_content_is_not_overridden(self):
+        """A run that answered normally must be untouched, reasoning present or not."""
+        from olmo_eval.harness.scaffolds.openai_agents import recover_answer_from_reasoning
+
+        result = self._Result([
+            self._Item({"role": "assistant", "content": "The paper is X.",
+                        "reasoning": "let me think about this"}),
+        ])
+        assert recover_answer_from_reasoning(result) == ""
+
+    def test_nothing_anywhere_returns_empty(self):
+        from olmo_eval.harness.scaffolds.openai_agents import recover_answer_from_reasoning
+
+        assert recover_answer_from_reasoning(self._Result([])) == ""
+        assert recover_answer_from_reasoning(
+            self._Result([self._Item({"role": "assistant", "content": None})])) == ""
+

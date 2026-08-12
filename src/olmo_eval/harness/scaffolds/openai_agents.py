@@ -33,6 +33,47 @@ FORCED_FINAL_ANSWER_INSTRUCTION = (
 _REASONING_END_TAG = "</think>"
 
 
+def _message_field(raw: Any, name: str) -> str:
+    """Read a field off an SDK item that may be an object or a plain dict."""
+    if raw is None:
+        return ""
+    v = getattr(raw, name, None)
+    if v is None and isinstance(raw, dict):
+        v = raw.get(name)
+    return v if isinstance(v, str) else ""
+
+
+def recover_answer_from_reasoning(result: Any) -> str:
+    """Return the answer a reasoning model put in `reasoning` and not in `content`.
+
+    The mirror image of `strip_reasoning_prefix`. That one covers a model served *without* a
+    reasoning parser, whose monologue and answer arrive concatenated in `content`. This one
+    covers what happens when the split does work and the model puts everything on the reasoning
+    side: the final message is `{"content": null, "tool_calls": [], "reasoning": "<the answer>"}`,
+    the Agents SDK reads `content` and reports an empty final output, and the run is scored as a
+    non-answer.
+
+    Measured on the dev matrix: 8 of 50 litsearch runs and 9 of 50 researchqa runs on the
+    single-agent arm, every one of which had searched and written -- 4 tool calls and 5
+    generations in the first of them. A non-answer rate of 16-18% that was not a non-answer.
+
+    Only consulted when the SDK's own final output is empty, so a run that answered normally is
+    untouched.
+    """
+    items = getattr(result, "new_items", None) or []
+    for item in reversed(list(items)):
+        raw = getattr(item, "raw_item", None) or item
+        if _message_field(raw, "role") not in ("assistant", ""):
+            continue
+        if _message_field(raw, "content").strip():
+            return ""      # content was there after all; nothing to recover
+        for field in ("reasoning", "reasoning_content"):
+            text = _message_field(raw, field).strip()
+            if text:
+                return text
+    return ""
+
+
 def strip_reasoning_prefix(text: str) -> str:
     """Drop a thinking model's monologue from the front of its final answer.
 
@@ -517,6 +558,8 @@ class OpenAIAgentsScaffold(Scaffold):
         # Convert result to HarnessResult
         trajectory = self._convert_trajectory(result)
         final_text = result.final_output if hasattr(result, "final_output") else ""
+        if not (final_text or "").strip():
+            final_text = recover_answer_from_reasoning(result)
 
         return HarnessResult(
             trajectory=trajectory,
