@@ -147,7 +147,10 @@ _MULTIPL_E_HUMANEVAL_OLMO3BASE_V2 = register(
         name="multipl_e_humaneval:olmo3base:v2",
         tasks=tuple(f"{t}:olmo3base:v2" for t in MULTIPL_E_HUMANEVAL_TASKS),
         aggregation=AggregationStrategy.AVERAGE,
-        description="MULTIPL_E HumanEval OLMo3 base evaluation without prompt truncation",
+        description=(
+            "MULTIPL_E HumanEval (6 languages) OLMo3 base v2 evaluation using dataset "
+            "stop sequences"
+        ),
     )
 )
 _MULTIPL_E_MBPP_OLMO3BASE_V2 = register(
@@ -155,7 +158,9 @@ _MULTIPL_E_MBPP_OLMO3BASE_V2 = register(
         name="multipl_e_mbpp:olmo3base:v2",
         tasks=tuple(f"{t}:olmo3base:v2" for t in MULTIPL_E_MBPP_TASKS),
         aggregation=AggregationStrategy.AVERAGE,
-        description="MULTIPL_E MBPP OLMo3 base evaluation without prompt truncation",
+        description=(
+            "MULTIPL_E MBPP (6 languages) OLMo3 base v2 evaluation using dataset stop sequences"
+        ),
     )
 )
 make_suite(
@@ -166,7 +171,10 @@ make_suite(
 make_suite(
     "multipl_e:olmo3base:v2",
     tuple(f"{t}:olmo3base:v2" for t in MULTIPL_E_HUMANEVAL_TASKS + MULTIPL_E_MBPP_TASKS),
-    description="MULTIPL_E OLMo3 base evaluation without prompt truncation",
+    description=(
+        "MULTIPL_E HumanEval + MBPP (6 languages each) OLMo3 base v2 evaluation using "
+        "dataset stop sequences"
+    ),
 )
 
 # FIM infilling suite
@@ -225,10 +233,7 @@ register(
             _MULTIPL_E_MBPP_OLMO3BASE_V2,
         ),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description=(
-            "OLMoBase code generation suite with versioned few-shot fixes and "
-            "full-prompt budgets; use max_model_len>=8192"
-        ),
+        description="OLMoBase code generation evaluation suite (v2)",
     )
 )
 
@@ -243,10 +248,7 @@ register(
             _MULTIPL_E_MBPP_OLMO3BASE_V2,
         ),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description=(
-            "OLMoBase small-model code suite with versioned few-shot fixes and "
-            "full-prompt budgets; use max_model_len>=4096 (8192 recommended)"
-        ),
+        description="OLMoBase code generation evaluation suite for small models (v2)",
     )
 )
 

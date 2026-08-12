@@ -8,7 +8,7 @@ from olmo_eval.evals.tasks.common import get_task
 
 
 @pytest.mark.parametrize("benchmark", ["humaneval", "mbpp"])
-def test_olmo3base_v2_uses_dataset_stop_sequences(benchmark: str) -> None:
+def test_olmo3base_v2_uses_dataset_stops_with_prompt_cap(benchmark: str) -> None:
     task = get_task(f"multipl_e_{benchmark}_java:olmo3base:v2")
     instance = Instance(
         question="class Problem {",
@@ -19,6 +19,7 @@ def test_olmo3base_v2_uses_dataset_stop_sequences(benchmark: str) -> None:
 
     assert sampling_params is not None
     assert sampling_params.stop_sequences == ("\n    }\n",)
+    assert sampling_params.truncate_prompt_tokens == 1024
 
 
 @pytest.mark.parametrize("benchmark", ["humaneval", "mbpp"])
