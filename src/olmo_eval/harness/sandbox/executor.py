@@ -24,7 +24,7 @@ from .errors import SandboxTransportError
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-_TRANSPORT_RETRIES = 3
+_TRANSPORT_RETRIES = 1
 _TRANSPORT_RETRY_INITIAL_DELAY = 0.25
 _HEALTH_CHECK_RETRIES = 3
 _HEALTH_CHECK_RETRY_INITIAL_DELAY = 0.5
@@ -371,7 +371,6 @@ class SandboxExecutor:
                     runtime_timeout=self.config.runtime_timeout,
                     deployment_timeout=self.config.deployment_timeout,
                     modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
-                    max_connections=self.config.max_concurrency,
                 )
 
     async def stop(self) -> None:
@@ -885,6 +884,11 @@ class SandboxExecutor:
     @staticmethod
     def _is_transport_error(exc: Exception) -> bool:
         """Return whether an exception came from the sandbox transport."""
+        # SWE-ReX attaches extra_info to exceptions decoded from a 511 response.
+        # Those came from the executed command and must not be retried even when
+        # their Python type also looks like a connection or timeout error.
+        if hasattr(exc, "extra_info"):
+            return False
         return isinstance(
             exc,
             (
@@ -904,10 +908,7 @@ class SandboxExecutor:
         operation: str,
     ) -> _T:
         """Retry transient transport failures before considering quarantine."""
-        retries = (
-            0 if getattr(self._runtime, "handles_transport_retries", False) else _TRANSPORT_RETRIES
-        )
-        max_attempts = retries + 1
+        max_attempts = _TRANSPORT_RETRIES + 1
         for attempt in range(1, max_attempts + 1):
             try:
                 result = await operation_fn()
@@ -979,6 +980,6 @@ class SandboxExecutor:
             )
             self._log(
                 logging.WARNING,
-                f"Quarantining sandbox after {max_attempts} failed transport attempts "
+                "Quarantining sandbox after transport retries were exhausted "
                 f"and {max_attempts} failed health checks: {self._quarantined_reason}",
             )

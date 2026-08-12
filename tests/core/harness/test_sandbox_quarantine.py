@@ -39,6 +39,12 @@ class _Deployment:
         return result
 
 
+class _RemoteExecutionConnectionError(ConnectionResetError):
+    """Connection-shaped error returned by command execution via SWE-ReX."""
+
+    extra_info: dict[str, object] = {}
+
+
 def _executor(
     *,
     runtime_failures: int,
@@ -91,7 +97,7 @@ async def test_healthy_probe_prevents_quarantine_after_retries() -> None:
     with pytest.raises(SandboxTransportError):
         await executor.execute_command("true")
 
-    assert executor._runtime.calls == 4
+    assert executor._runtime.calls == 2
     assert executor._deployment.calls == 1
     assert executor.is_running is True
 
@@ -111,14 +117,14 @@ async def test_repeated_transport_and_health_failures_quarantine(
     with pytest.raises(SandboxTransportError):
         await executor.execute_command("true")
 
-    assert executor._runtime.calls == 4
+    assert executor._runtime.calls == 2
     assert executor._deployment.calls == 4
     assert executor.is_running is False
-    assert delays == [0.25, 0.5, 1.0, 0.5, 1.0, 2.0]
+    assert delays == [0.25, 0.5, 1.0, 2.0]
 
 
 @pytest.mark.anyio
-async def test_transport_retries_use_exponential_backoff(
+async def test_transport_retry_uses_backoff(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     delays: list[float] = []
@@ -127,13 +133,28 @@ async def test_transport_retries_use_exponential_backoff(
         delays.append(delay)
 
     monkeypatch.setattr("olmo_eval.harness.sandbox.executor.asyncio.sleep", record_sleep)
-    executor = _executor(runtime_failures=3, health=[True])
+    executor = _executor(runtime_failures=1, health=[True])
 
     result = await executor.execute_command("true")
 
     assert result.success is True
-    assert executor._runtime.calls == 4
-    assert delays == [0.25, 0.5, 1.0]
+    assert executor._runtime.calls == 2
+    assert delays == [0.25]
+
+
+@pytest.mark.anyio
+async def test_remote_execution_error_is_not_retried() -> None:
+    executor = _executor(
+        runtime_failures=1,
+        health=[True],
+        transport_error=_RemoteExecutionConnectionError,
+    )
+
+    with pytest.raises(_RemoteExecutionConnectionError):
+        await executor.execute_command("true")
+
+    assert executor._runtime.calls == 1
+    assert executor._deployment.calls == 0
 
 
 def test_manager_skips_only_confirmed_unresponsive_executor() -> None:
@@ -173,4 +194,3 @@ def test_modal_deployment_receives_configured_lifetime(
 
     assert captured["runtime_timeout"] == 120.0
     assert captured["deployment_timeout"] == 14_400.0
-    assert captured["max_connections"] == 4

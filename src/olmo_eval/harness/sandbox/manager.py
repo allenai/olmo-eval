@@ -17,7 +17,7 @@ from olmo_eval.common.execution.environment import ExecutionResult
 from olmo_eval.common.logging import configure_worker_logging
 
 from .config import Capability, SandboxConfig, SandboxMode
-from .errors import SandboxInfrastructureError, SandboxTransportError
+from .errors import SandboxInfrastructureError
 from .executor import SandboxExecutor
 
 _MAX_SANDBOX_START_WORKERS = 16
@@ -550,10 +550,7 @@ class SandboxManager:
                     try:
                         return await operation(executor)
                     except Exception as exc:
-                        transport_exhausted = isinstance(exc, SandboxTransportError)
-                        if not failover_on_quarantine or (
-                            executor.is_running and not transport_exhausted
-                        ):
+                        if not failover_on_quarantine or executor.is_running:
                             raise
                         last_infrastructure_error = exc
                         excluded = excluded | {id(executor)}

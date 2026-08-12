@@ -111,15 +111,15 @@ async def test_scoring_environment_fails_over_after_quarantine() -> None:
 
 
 @pytest.mark.anyio
-async def test_scoring_environment_fails_over_after_exhausted_transport_retries() -> None:
+async def test_scoring_environment_does_not_fail_over_from_healthy_sandbox() -> None:
     broken = _TrackingExecutor("broken", fail_transport=True)
     healthy = _TrackingExecutor("healthy")
     manager = _manager(broken, healthy)
     environment = manager.for_capabilities(Capability.DEFAULT)
 
-    result = await environment.execute_code("pass")
+    with pytest.raises(SandboxTransportError):
+        await environment.execute_code("pass")
 
-    assert result.success is True
     assert broken.is_running is True
     assert broken.calls == 1
-    assert healthy.calls == 1
+    assert healthy.calls == 0

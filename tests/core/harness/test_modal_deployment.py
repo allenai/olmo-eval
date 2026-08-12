@@ -1,4 +1,4 @@
-"""Tests for the reliable Modal deployment adapter."""
+"""Tests for the managed Modal deployment adapter."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from olmo_eval.harness.sandbox.modal_deployment import ManagedModalDeployment
 
 
 @pytest.mark.anyio
-async def test_modal_deployment_uses_isolated_transport_and_safe_shutdown(
+async def test_modal_deployment_uses_standard_transport_and_safe_shutdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -46,7 +46,6 @@ async def test_modal_deployment_uses_isolated_transport_and_safe_shutdown(
     deployment._startup_timeout = 30.0
     deployment._modal_kwargs = {"unencrypted_ports": [9999], "cpu": 2}
     deployment._app = object()
-    deployment._max_connections = 4
     deployment._hooks = SimpleNamespace(on_custom_step=lambda _step: None)
     deployment.logger = logging.getLogger(__name__)
     monkeypatch.setattr(deployment, "_get_token", lambda: "token")
@@ -58,7 +57,7 @@ async def test_modal_deployment_uses_isolated_transport_and_safe_shutdown(
         SimpleNamespace(create=SimpleNamespace(aio=create)),
     )
     monkeypatch.setattr(
-        "olmo_eval.harness.sandbox.modal_deployment.ReliableRemoteRuntime",
+        "olmo_eval.harness.sandbox.modal_deployment.RemoteRuntime",
         _Runtime,
     )
     monkeypatch.setattr(
@@ -73,7 +72,6 @@ async def test_modal_deployment_uses_isolated_transport_and_safe_shutdown(
     assert "unencrypted_ports" not in kwargs
     assert kwargs["cpu"] == 2
     assert captured["runtime"]["host"] == "https://sandbox.example"
-    assert captured["runtime"]["max_connections"] == 4
     await deployment.stop()
     assert captured["terminate_calls"] == 1
     assert captured.get("close_calls", 0) == 0
@@ -113,7 +111,6 @@ async def test_modal_deployment_terminates_sandbox_when_startup_fails(
     deployment._startup_timeout = 30.0
     deployment._modal_kwargs = {}
     deployment._app = object()
-    deployment._max_connections = 4
     deployment._hooks = SimpleNamespace(on_custom_step=lambda _step: None)
     deployment.logger = logging.getLogger(__name__)
     monkeypatch.setattr(deployment, "_get_token", lambda: "token")
@@ -129,7 +126,7 @@ async def test_modal_deployment_terminates_sandbox_when_startup_fails(
         SimpleNamespace(create=SimpleNamespace(aio=_return_value(sandbox))),
     )
     monkeypatch.setattr(
-        "olmo_eval.harness.sandbox.modal_deployment.ReliableRemoteRuntime",
+        "olmo_eval.harness.sandbox.modal_deployment.RemoteRuntime",
         _Runtime,
     )
     monkeypatch.setattr(

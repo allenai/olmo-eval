@@ -8,16 +8,11 @@ import time
 
 import modal  # type: ignore[import-untyped]
 from swerex.deployment.modal import ModalDeployment
-
-from .remote_runtime import ReliableRemoteRuntime
+from swerex.runtime.remote import RemoteRuntime
 
 
 class ManagedModalDeployment(ModalDeployment):
     """SWE-ReX Modal deployment with managed lifecycle and encrypted transport."""
-
-    def __init__(self, *, max_connections: int, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._max_connections = max_connections
 
     async def start(self) -> None:
         if self._runtime is not None and self._sandbox is not None:
@@ -55,12 +50,11 @@ class ManagedModalDeployment(ModalDeployment):
             await asyncio.sleep(1)
             self.logger.info("Starting runtime at encrypted tunnel %s", tunnel.url)
             self._hooks.on_custom_step("Starting runtime")
-            self._runtime = ReliableRemoteRuntime(
+            self._runtime = RemoteRuntime(
                 host=tunnel.url,
                 timeout=self._runtime_timeout,
                 auth_token=token,
                 logger=self.logger,
-                max_connections=self._max_connections,
             )
             remaining_timeout = max(0, self._startup_timeout - creation_seconds)
             runtime_started_at = time.time()
