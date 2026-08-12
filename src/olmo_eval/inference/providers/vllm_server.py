@@ -284,7 +284,8 @@ class VLLMServerProvider(InferenceProvider):
             max_concurrency: Maximum number of concurrent requests.
             max_retries: Maximum number of retries for transient errors.
             tensor_parallel_size: Number of GPUs for tensor parallelism (server mode).
-            max_model_len: Maximum model context length (server mode).
+            max_model_len: Authoritative maximum model context length. Passed to managed
+                servers and used directly instead of metadata discovery for external servers.
             tokenizer: Tokenizer path override (server mode).
             enable_auto_tool_choice: Enable automatic tool choice (server mode).
             tool_call_parser: Tool call parser name (server mode).
@@ -329,7 +330,11 @@ class VLLMServerProvider(InferenceProvider):
         self._openai_module: Any = None
         self._tokenizer: Any = None
         self._server: VLLMServerProcess | None = None  # type: ignore[possibly-unresolved-reference]
-        self._max_length: int | None = None
+        if max_model_len is not None and max_model_len <= 0:
+            raise ValueError("max_model_len must be positive when set")
+        self._max_length: int | None = max_model_len
+        self._max_length_source: str | None = "configured" if max_model_len is not None else None
+        self._max_length_discovery_attempted = max_model_len is not None
 
         if base_url:
             # Connect to existing server
@@ -350,7 +355,7 @@ class VLLMServerProvider(InferenceProvider):
                 refresh_hf_cache(model_name, **refresh_kwargs)
                 if tokenizer and tokenizer != model_name:
                     refresh_hf_cache(tokenizer, **refresh_kwargs)
-            if max_model_len:
+            if max_model_len is not None:
                 srv_kwargs["max_model_len"] = max_model_len
             if tokenizer:
                 srv_kwargs["tokenizer"] = tokenizer
@@ -388,30 +393,52 @@ class VLLMServerProvider(InferenceProvider):
         self.close()
 
     @property
-    def max_length(self) -> int:
-        """Get the maximum model context length from the server."""
+    def max_length(self) -> int | None:
+        """Get an authoritative model context length, if one is available."""
+        if self._max_length is not None or self._max_length_discovery_attempted:
+            return self._max_length
+
+        self._max_length_discovery_attempted = True
+        client = httpx.Client(timeout=30.0)
+        try:
+            resp = client.get(f"{self.base_url}/models")
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise ValueError("/models response is not a JSON object")
+            model_records = data.get("data", [])
+            if not isinstance(model_records, list):
+                raise ValueError("/models response does not contain a list in 'data'")
+
+            for model_info in model_records:
+                if not isinstance(model_info, dict) or model_info.get("id") != self.model_name:
+                    continue
+                max_len = model_info.get("max_model_len")
+                if max_len is None:
+                    break
+                discovered_max_length = int(max_len)
+                if discovered_max_length <= 0:
+                    raise ValueError("max_model_len reported by /models must be positive")
+                self._max_length = discovered_max_length
+                self._max_length_source = "server"
+                break
+        except (httpx.HTTPError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Could not determine max_model_len from %s/models (%s); "
+                "leaving the context length unknown",
+                self.base_url,
+                exc,
+            )
+            return None
+        finally:
+            client.close()
+
         if self._max_length is None:
-            # Query /v1/models endpoint for max_model_len
-            client = httpx.Client(timeout=30.0)
-            try:
-                resp = client.get(f"{self.base_url}/models")
-                resp.raise_for_status()
-                data = resp.json()
-                for model_info in data.get("data", []):
-                    max_len = model_info.get("max_model_len")
-                    if max_len is not None:
-                        self._max_length = int(max_len)
-                        break
-            finally:
-                client.close()
-            if self._max_length is None:
-                # Fallback to a large default if server doesn't report it
-                self._max_length = 4096
-                logger.warning(
-                    "Could not determine max_model_len from server, defaulting to %d",
-                    self._max_length,
-                )
-        assert self._max_length is not None
+            logger.warning(
+                "Server model metadata does not provide max_model_len for %r; "
+                "leaving the context length unknown",
+                self.model_name,
+            )
         return self._max_length
 
     def _get_or_create_client(self) -> AsyncOpenAI:
@@ -594,7 +621,7 @@ class VLLMServerProvider(InferenceProvider):
                 trace["generation_kwargs"]["top_p"] = params.top_p
             if params.do_sample and params.temperature > 0 and params.top_k is not None:
                 trace["generation_kwargs"]["top_k"] = params.top_k
-            truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(request, params)
+            truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
             if truncate_prompt_tokens is not None:
                 trace["generation_kwargs"]["truncate_prompt_tokens"] = truncate_prompt_tokens
             if truncation_side is not None:
@@ -621,7 +648,7 @@ class VLLMServerProvider(InferenceProvider):
             generation_kwargs["top_p"] = params.top_p
         if self.chat_template_kwargs:
             generation_kwargs["chat_template_kwargs"] = dict(self.chat_template_kwargs)
-        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(request, params)
+        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
         if truncate_prompt_tokens is not None:
             generation_kwargs["truncate_prompt_tokens"] = truncate_prompt_tokens
         if truncation_side is not None:
@@ -668,34 +695,10 @@ class VLLMServerProvider(InferenceProvider):
 
     def _get_prompt_truncation(
         self,
-        request: LMRequest,
         params: SamplingParams,
     ) -> tuple[int | None, str | None]:
-        """Resolve prompt truncation needed to keep generation within the context window."""
-        if params.max_tokens is None:
-            return params.truncate_prompt_tokens, params.truncation_side
-
-        max_length = request.max_length or self.max_length
-        if params.max_tokens >= max_length:
-            raise ValueError(
-                f"max_tokens ({params.max_tokens}) must be less than the model context length "
-                f"({max_length}) so the request has room for a prompt"
-            )
-
-        available_prompt_tokens = max_length - params.max_tokens
-        if params.truncate_prompt_tokens is None:
-            truncate_prompt_tokens = available_prompt_tokens
-        else:
-            # An explicit smaller limit remains authoritative, but a larger one cannot
-            # be allowed to make the request exceed the model context window.
-            truncate_prompt_tokens = min(
-                params.truncate_prompt_tokens,
-                available_prompt_tokens,
-            )
-
-        # Match lm-eval's historical behavior: retain the end of an overlong prompt.
-        truncation_side = params.truncation_side or "left"
-        return truncate_prompt_tokens, truncation_side
+        """Return only caller-requested prompt truncation settings."""
+        return params.truncate_prompt_tokens, params.truncation_side
 
     def _postprocess_completion_text(self, text: str, stop_sequences: list[str] | None) -> str:
         """Apply optional legacy completion post-processing."""
@@ -810,7 +813,7 @@ class VLLMServerProvider(InferenceProvider):
         stop_sequences = self._get_completion_stop_sequences(params)
         if stop_sequences:
             kwargs["stop"] = stop_sequences
-        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(request, params)
+        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
         if truncate_prompt_tokens is not None:
             extra_body["truncate_prompt_tokens"] = truncate_prompt_tokens
         if truncation_side is not None:
@@ -885,7 +888,7 @@ class VLLMServerProvider(InferenceProvider):
         extra_body: dict[str, Any] = {}
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             extra_body["top_k"] = params.top_k
-        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(request, params)
+        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
         if truncate_prompt_tokens is not None:
             extra_body["truncate_prompt_tokens"] = truncate_prompt_tokens
         if truncation_side is not None:
@@ -1064,13 +1067,13 @@ class VLLMServerProvider(InferenceProvider):
             if not context_enc and context == "":
                 context_enc = tokenizer.encode("", add_special_tokens=True)
 
-            # Left-truncate to max_length - 1 to match inline vLLM provider behavior.
-            # This ensures long prompts are handled the same way as oe-eval-internal:
-            # the context is left-truncated while preserving the continuation tokens.
-            # Use per-request max_length if set (e.g., from task config), else provider default.
-            max_len = request.max_length or self.max_length
             full_tokens = context_enc + continuation_enc
-            if len(full_tokens) > max_len - 1:
+            # Loglikelihood scoring intentionally left-truncates only when the task,
+            # provider configuration, or server metadata supplies an authoritative limit.
+            max_len = request.max_length if request.max_length is not None else self.max_length
+            if max_len is not None and max_len <= 1:
+                raise ValueError("max_length must be greater than 1 for loglikelihood requests")
+            if max_len is not None and len(full_tokens) > max_len - 1:
                 full_tokens = full_tokens[-(max_len - 1) :]
                 overflow = len(context_enc) + len(continuation_enc) - (max_len - 1)
                 context_len = max(0, len(context_enc) - overflow)

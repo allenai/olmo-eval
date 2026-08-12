@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
@@ -15,11 +16,11 @@ class TestVLLMServerProviderLogprobs:
         """Create a real provider instance configured for an existing server."""
         from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
 
+        kwargs.setdefault("max_model_len", 4096)
         with patch("olmo_eval.inference.providers.vllm_server.BeakerStatusReporter"):
             provider = VLLMServerProvider(
                 "test-model", base_url="http://localhost:8000/v1", **kwargs
             )
-        provider._max_length = 4096
         return provider
 
     def _make_fake_transformers(self, tokenizer):
@@ -58,12 +59,75 @@ class TestVLLMServerProviderLogprobs:
             p._raw_http_client = None
             p._server = None
             p._max_length = 4096
+            p._max_length_source = "configured"
+            p._max_length_discovery_attempted = True
             p._prompt_logprobs = 5
             p._completion_use_prompt_token_ids = False
             p._completion_client_side_stop_trim = False
             p._completion_sentencepiece_cleanup = False
             p._get_tokenizer = MagicMock(return_value=mock_tokenizer)
             return p
+
+    def test_external_provider_uses_explicit_max_model_len_without_discovery(self):
+        """An explicit external-server limit is authoritative and avoids /models."""
+        with patch("olmo_eval.inference.providers.vllm_server.httpx.Client") as client_cls:
+            provider = self._make_provider(max_model_len=131072)
+
+            assert provider.max_length == 131072
+            assert provider._max_length_source == "configured"
+
+        client_cls.assert_not_called()
+
+    def test_missing_models_endpoint_leaves_max_length_unknown(self):
+        """A server without /models must not acquire a guessed context length."""
+        provider = self._make_provider(max_model_len=None)
+        request = httpx.Request("GET", f"{provider.base_url}/models")
+        response = httpx.Response(404, request=request)
+        client = MagicMock()
+        client.get.return_value = response
+
+        with patch(
+            "olmo_eval.inference.providers.vllm_server.httpx.Client", return_value=client
+        ) as client_cls:
+            assert provider.max_length is None
+            assert provider.max_length is None
+
+        client_cls.assert_called_once_with(timeout=30.0)
+        client.get.assert_called_once_with(f"{provider.base_url}/models")
+        client.close.assert_called_once()
+        assert provider._max_length is None
+        assert provider._max_length_source is None
+
+    def test_model_record_without_max_model_len_leaves_length_unknown(self):
+        """Incomplete model metadata must not fall back to 4096."""
+        provider = self._make_provider(max_model_len=None)
+        response = MagicMock()
+        response.json.return_value = {"data": [{"id": "test-model"}]}
+        client = MagicMock()
+        client.get.return_value = response
+
+        with patch("olmo_eval.inference.providers.vllm_server.httpx.Client", return_value=client):
+            assert provider.max_length is None
+
+        assert provider._max_length is None
+        assert provider._max_length_source is None
+
+    def test_valid_model_record_provides_authoritative_length(self):
+        """A valid matching model record is cached as a server-sourced limit."""
+        provider = self._make_provider(max_model_len=None)
+        response = MagicMock()
+        response.json.return_value = {"data": [{"id": "test-model", "max_model_len": 65536}]}
+        client = MagicMock()
+        client.get.return_value = response
+
+        with patch(
+            "olmo_eval.inference.providers.vllm_server.httpx.Client", return_value=client
+        ) as client_cls:
+            assert provider.max_length == 65536
+            assert provider.max_length == 65536
+
+        client_cls.assert_called_once_with(timeout=30.0)
+        assert provider._max_length_source == "server"
 
     def _make_vllm_response(self, prompt_logprobs):
         """Build a JSON response matching vLLM's prompt_logprobs format."""
@@ -137,22 +201,24 @@ class TestVLLMServerProviderLogprobs:
         assert client.completions.create.call_args.kwargs["max_tokens"] == 64
 
     @pytest.mark.anyio
-    async def test_generate_completion_truncates_prompt_to_context_budget(self, provider):
-        """Completion prompts should leave room for the requested output tokens."""
+    async def test_generate_completion_does_not_synthesize_prompt_truncation(self, provider):
+        """Long generation prompts remain intact unless truncation is explicitly requested."""
         client = MagicMock()
         client.completions.create = AsyncMock(return_value=self._make_completion_response())
 
-        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        prompt = "token " * 5000
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
         await provider._generate_completion(client, request, SamplingParams(max_tokens=1024))
 
-        extra_body = client.completions.create.call_args.kwargs["extra_body"]
-        assert extra_body["truncate_prompt_tokens"] == 3072
-        assert extra_body["truncation_side"] == "left"
+        call_kwargs = client.completions.create.call_args.kwargs
+        assert call_kwargs["prompt"] == prompt
+        assert "truncate_prompt_tokens" not in call_kwargs["extra_body"]
+        assert "truncation_side" not in call_kwargs["extra_body"]
 
         trace = provider.describe_request(request, SamplingParams(max_tokens=1024))
         assert trace is not None
-        assert trace["generation_kwargs"]["truncate_prompt_tokens"] == 3072
-        assert trace["generation_kwargs"]["truncation_side"] == "left"
+        assert "truncate_prompt_tokens" not in trace["generation_kwargs"]
+        assert "truncation_side" not in trace["generation_kwargs"]
 
     @pytest.mark.anyio
     async def test_generate_completion_preserves_stricter_explicit_truncation(self, provider):
@@ -173,8 +239,8 @@ class TestVLLMServerProviderLogprobs:
         assert extra_body["truncation_side"] == "right"
 
     @pytest.mark.anyio
-    async def test_generate_completion_caps_explicit_truncation_to_context_budget(self, provider):
-        """An explicit prompt limit cannot exceed the safe context budget."""
+    async def test_generate_completion_preserves_exact_explicit_truncation(self, provider):
+        """The provider must not silently lower an explicit prompt truncation limit."""
         client = MagicMock()
         client.completions.create = AsyncMock(return_value=self._make_completion_response())
 
@@ -183,19 +249,21 @@ class TestVLLMServerProviderLogprobs:
         await provider._generate_completion(client, request, params)
 
         extra_body = client.completions.create.call_args.kwargs["extra_body"]
-        assert extra_body["truncate_prompt_tokens"] == 3072
+        assert extra_body["truncate_prompt_tokens"] == 3500
+        assert "truncation_side" not in extra_body
 
     @pytest.mark.anyio
-    async def test_generate_completion_rejects_output_that_fills_context(self, provider):
-        """A generation budget that leaves no prompt room should fail locally."""
+    async def test_generate_completion_leaves_context_validation_to_server(self, provider):
+        """Finite generation must not depend on local context discovery or validation."""
         client = MagicMock()
         client.completions.create = AsyncMock(return_value=self._make_completion_response())
 
         request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
-        with pytest.raises(ValueError, match="must be less than the model context length"):
-            await provider._generate_completion(client, request, SamplingParams(max_tokens=4096))
+        await provider._generate_completion(client, request, SamplingParams(max_tokens=4096))
 
-        client.completions.create.assert_not_called()
+        call_kwargs = client.completions.create.call_args.kwargs
+        assert call_kwargs["max_tokens"] == 4096
+        assert "truncate_prompt_tokens" not in call_kwargs["extra_body"]
 
     @pytest.mark.anyio
     async def test_generate_chat_omits_max_tokens_when_none(self, provider):
@@ -223,7 +291,36 @@ class TestVLLMServerProviderLogprobs:
         )
         await provider._generate_chat(client, request, SamplingParams(max_tokens=128))
 
-        assert client.chat.completions.create.call_args.kwargs["max_tokens"] == 128
+        call_kwargs = client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["max_tokens"] == 128
+        assert "extra_body" not in call_kwargs
+
+    @pytest.mark.anyio
+    async def test_generate_chat_preserves_exact_explicit_truncation(self, provider):
+        """Chat generation forwards caller-requested truncation without tightening it."""
+        provider.chat_template_kwargs = None
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=[{"role": "user", "content": "Hi"}],
+        )
+        params = SamplingParams(
+            max_tokens=1024,
+            truncate_prompt_tokens=3500,
+            truncation_side="right",
+        )
+
+        await provider._generate_chat(client, request, params)
+
+        extra_body = client.chat.completions.create.call_args.kwargs["extra_body"]
+        assert extra_body["truncate_prompt_tokens"] == 3500
+        assert extra_body["truncation_side"] == "right"
+
+        trace = provider.describe_request(request, params)
+        assert trace is not None
+        assert trace["generation_kwargs"]["truncate_prompt_tokens"] == 3500
+        assert trace["generation_kwargs"]["truncation_side"] == "right"
 
     def test_describe_request_includes_chat_template_kwargs(self):
         """Chat traces should preserve template kwargs in generation metadata."""
@@ -289,6 +386,8 @@ class TestVLLMServerProviderLogprobs:
         payload = mock_http.post.call_args.kwargs["json"]
         assert payload["prompt"] == [11, 12, 13]
         assert payload["add_special_tokens"] is False
+        assert "truncate_prompt_tokens" not in payload
+        assert "truncation_side" not in payload
         client.completions.create.assert_not_called()
 
     def test_build_completion_output_sets_is_greedy_from_top_logprobs(self, provider):
@@ -418,6 +517,67 @@ class TestVLLMServerProviderLogprobs:
             assert output.logprobs[0]["logprob"] == -0.1
             assert output.metadata["sum_logits"] == pytest.approx(-0.1)
             assert output.metadata["num_tokens"] == 1
+
+    @pytest.mark.anyio
+    async def test_logprobs_does_not_truncate_when_context_length_is_unknown(self, provider):
+        """Unknown server metadata must not impose a guessed loglikelihood window."""
+        provider._max_length = None
+        provider._max_length_source = None
+        provider._max_length_discovery_attempted = True
+        context_tokens = list(range(4097))
+        continuation_tokens = [5000]
+
+        with patch(
+            "olmo_eval.inference.providers.vllm_server.encode_context_and_continuation"
+        ) as mock_encode:
+            mock_encode.return_value = (context_tokens, continuation_tokens)
+            prompt_logprobs = [None] * len(context_tokens) + [
+                {"5000": {"logprob": -0.1, "decoded_token": "answer"}}
+            ]
+            mock_http = AsyncMock()
+            mock_http.post.return_value = self._make_vllm_response(prompt_logprobs)
+            provider._get_raw_http_client = MagicMock(return_value=mock_http)
+
+            request = LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt="long prompt",
+                continuations=(" answer",),
+            )
+            outputs = await provider._logprobs_single_impl(request)
+
+        payload = mock_http.post.call_args.kwargs["json"]
+        assert payload["prompt"] == context_tokens + continuation_tokens
+        assert len(outputs) == 1
+        assert outputs[0].metadata["num_tokens"] == 1
+
+    @pytest.mark.anyio
+    async def test_logprobs_respects_authoritative_request_max_length(self, provider):
+        """An explicit task limit still enables intentional loglikelihood truncation."""
+        with patch(
+            "olmo_eval.inference.providers.vllm_server.encode_context_and_continuation"
+        ) as mock_encode:
+            mock_encode.return_value = ([0, 1, 2, 3], [4])
+            prompt_logprobs = [
+                None,
+                {"3": {"logprob": -0.2, "decoded_token": "ctx"}},
+                {"4": {"logprob": -0.1, "decoded_token": "answer"}},
+            ]
+            mock_http = AsyncMock()
+            mock_http.post.return_value = self._make_vllm_response(prompt_logprobs)
+            provider._get_raw_http_client = MagicMock(return_value=mock_http)
+
+            request = LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt="prompt",
+                continuations=(" answer",),
+                max_length=4,
+            )
+            outputs = await provider._logprobs_single_impl(request)
+
+        payload = mock_http.post.call_args.kwargs["json"]
+        assert payload["prompt"] == [2, 3, 4]
+        assert len(outputs) == 1
+        assert outputs[0].metadata["num_tokens"] == 1
 
     @pytest.mark.anyio
     async def test_logprobs_threads_sampling_temperature(self, provider):
