@@ -1,35 +1,36 @@
-"""RULER long-context (ruler-lc) tasks.
+"""RULER-plus (ruler-plus) tasks.
 
 Long-context companion to ruler.py: same task types, scorers, and prompting
-behavior, but reads pre-generated data from local disk (see ruler_lc_loader.py)
-instead of the allenai/ruler_data HuggingFace release, and extends context
-sizes beyond the original 131072-token cap. Data is generated with
-https://github.com/jopetty/RULER via scripts/generate-data.sh.
+behavior, but downloads pre-generated data from the allenai/ruler-plus
+HuggingFace dataset repo (see ruler_plus_loader.py) instead of the
+allenai/ruler_data HuggingFace release, and extends context sizes beyond the
+original 131072-token cap. Data is generated with https://github.com/jopetty/RULER
+via scripts/generate-data.sh.
 """
 
 from typing import Any
 
 from olmo_eval.common.types import Instance
-from olmo_eval.data.ruler_lc_loader import get_ruler_lc_data_root
-from olmo_eval.data.ruler_lc_tasks import RULER_LC_TASKS
+from olmo_eval.data.ruler_plus_loader import get_ruler_plus_data_root
+from olmo_eval.data.ruler_plus_tasks import RULER_PLUS_TASKS
 from olmo_eval.evals.tasks.common.registry import register
 from olmo_eval.evals.tasks.ruler import RulerTask, make_ruler_task_class
 
 
-class RulerLcTask(RulerTask):
-    """RULER task variant backed by the local ruler-lc dataset.
+class RulerPlusTask(RulerTask):
+    """RULER task variant backed by the ruler-plus dataset.
 
-    ruler-lc records always carry a preformatted ``input`` plus a trailing
+    ruler-plus records always carry a preformatted ``input`` plus a trailing
     ``answer_prefix`` that must be concatenated with no separator, unlike
     ruler.py's chat/system-template fallback path for records without a
     preformatted ``input``.
     """
 
-    _tasks_registry: dict[str, dict[str, Any]] = RULER_LC_TASKS
-    _name_prefix: str = "ruler_lc_"
+    _tasks_registry: dict[str, dict[str, Any]] = RULER_PLUS_TASKS
+    _name_prefix: str = "ruler_plus_"
 
     def _get_data_root(self) -> str:
-        return get_ruler_lc_data_root()
+        return get_ruler_plus_data_root()
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         question = doc.get("input")
@@ -53,11 +54,18 @@ class RulerLcTask(RulerTask):
         )
 
 
-# Dynamically register all ruler-lc tasks
-for _task_name, _task_config in RULER_LC_TASKS.items():
+# Number of samples to draw per task/context-size condition.
+_RULER_PLUS_LIMIT = 512
+
+# Dynamically register all ruler-plus tasks
+for _task_name, _task_config in RULER_PLUS_TASKS.items():
     _cls = make_ruler_task_class(
-        _task_name, _task_config, base_cls=RulerLcTask, class_prefix="RulerLc"
+        _task_name,
+        _task_config,
+        base_cls=RulerPlusTask,
+        class_prefix="RulerPlus",
+        limit=_RULER_PLUS_LIMIT,
     )
     # Inject into module globals so pickle can find the class by name
     globals()[_cls.__name__] = _cls
-    register(f"ruler_lc_{_task_name}")(_cls)
+    register(f"ruler_plus_{_task_name}")(_cls)

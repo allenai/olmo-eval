@@ -1,9 +1,9 @@
-"""RULER long-context (ruler-lc) task configurations.
+"""RULER-plus (ruler-plus) task configurations.
 
 Mirrors ruler_tasks.py, but describes the extended-context RULER dataset
 generated with https://github.com/jopetty/RULER (scripts/generate-data.sh)
-and read from local disk (see ruler_lc_loader.py) instead of the
-allenai/ruler_data HuggingFace release.
+and downloaded from the allenai/ruler-plus HuggingFace dataset repo (see
+ruler_plus_loader.py) instead of the allenai/ruler_data HuggingFace release.
 """
 
 # Context sizes to generate tasks for, including sizes beyond the original 131072 cap
@@ -13,7 +13,7 @@ CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 104857
 _DEFAULT_MAX_GEN_TOKS = 50
 
 # Base task configurations. data_template is relative to the dataset root
-# (see ruler_lc_loader.get_ruler_lc_data_root) and takes a {size} placeholder.
+# (see ruler_plus_loader.get_ruler_plus_data_root) and takes a {size} placeholder.
 _BASE_TASKS = {
     # NIAH (Needle in a Haystack) - Single variants
     "niah_s_1": {
@@ -91,8 +91,8 @@ _BASE_TASKS = {
 }
 
 
-def _generate_ruler_lc_tasks() -> dict:
-    """Generate RULER_LC_TASKS dictionary from base configurations.
+def _generate_ruler_plus_tasks() -> dict:
+    """Generate RULER_PLUS_TASKS dictionary from base configurations.
 
     Creates task definitions for all combinations of base tasks and context sizes.
 
@@ -121,5 +121,5 @@ def _generate_ruler_lc_tasks() -> dict:
     return tasks
 
 
-# Generate the full RULER_LC_TASKS dictionary
-RULER_LC_TASKS = _generate_ruler_lc_tasks()
+# Generate the full RULER_PLUS_TASKS dictionary
+RULER_PLUS_TASKS = _generate_ruler_plus_tasks()

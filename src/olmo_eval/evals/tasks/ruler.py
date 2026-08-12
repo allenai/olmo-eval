@@ -75,7 +75,7 @@ class RulerTask(Task):
     Each RULER task variant (e.g., niah_s_1__4096) is registered as a separate task
     with specific configuration from RULER_TASKS.
 
-    Subclasses (e.g. RulerLcTask) can point at a different task registry, name
+    Subclasses (e.g. RulerPlusTask) can point at a different task registry, name
     prefix, and data root by overriding ``_tasks_registry``, ``_name_prefix``,
     and ``_get_data_root``.
     """
@@ -264,6 +264,7 @@ def make_ruler_task_class(
     *,
     base_cls: type[RulerTask] = RulerTask,
     class_prefix: str = "Ruler",
+    limit: int = 100,
 ) -> type[RulerTask]:
     """Create a task subclass for a RULER task variant.
 
@@ -273,9 +274,10 @@ def make_ruler_task_class(
     Args:
         task_name: Task variant key (e.g., "niah_s_1__4096"), matching a key in
             base_cls's ``_tasks_registry``.
-        task_cfg: Task configuration dict (see RULER_TASKS/RULER_LC_TASKS).
+        task_cfg: Task configuration dict (see RULER_TASKS/RULER_PLUS_TASKS).
         base_cls: RulerTask subclass to build on (allows other data sources/prefixes).
         class_prefix: Prefix for the generated class name.
+        limit: Number of samples to draw per task/context-size condition.
     """
     # QA tasks use RulerQAScorer which applies HELMET-style normalization
     # (removes articles/punctuation, normalizes whitespace) matching the old framework.
@@ -298,7 +300,7 @@ def make_ruler_task_class(
                 max_tokens=task_cfg.get("max_gen_toks", 50),
                 stop_sequences=stop_sequences,
             ),
-            "limit": 100,
+            "limit": limit,
         },
     )
 
