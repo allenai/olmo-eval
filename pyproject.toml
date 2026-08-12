@@ -66,6 +66,13 @@ litellm = [
 agents = [
     "openai-agents~=0.7.0",
     "httpx~=0.28.1",
+    # openai-agents 0.7.0 builds InputTokensDetails(cached_tokens=...) and openai 2.46 made
+    # cache_write_tokens required, so every response from a provider that fills
+    # prompt_tokens_details raises ValidationError. vLLM omits the field and the SDK falls back to
+    # a default, so this only fires on API backbones -- it is invisible until the day you point the
+    # agent harness at one. The same pin lives in the `clients` extra; an install that takes
+    # `agents` without `clients` had nothing holding openai down.
+    "openai~=2.21.0",
 ]
 analysis = [
     "matplotlib~=3.10.8",
