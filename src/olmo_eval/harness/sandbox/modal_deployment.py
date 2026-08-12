@@ -6,9 +6,9 @@ import asyncio
 import contextlib
 import time
 
-import modal  # type: ignore[ty:unresolved-import]
-from swerex.deployment.modal import ModalDeployment  # type: ignore[ty:unresolved-import]
-from swerex.runtime.remote import RemoteRuntime  # type: ignore[ty:unresolved-import]
+import modal
+from swerex.deployment.modal import ModalDeployment
+from swerex.runtime.remote import RemoteRuntime
 
 
 class ManagedModalDeployment(ModalDeployment):

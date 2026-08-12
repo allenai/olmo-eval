@@ -244,6 +244,8 @@ allowed-unresolved-imports = [
     "instructions_registry.**",
     "instructions.**",
     "crawl4ai.**",
+    "modal.**",
+    "swerex.**",
 ]
 
 [tool.gantry]
