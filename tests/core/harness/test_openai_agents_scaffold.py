@@ -178,7 +178,11 @@ class TestOpenAIAgentsMaxTurns:
         assert final_call["starting_agent"].tools == []
         assert final_call["starting_agent"].handoffs == []
         assert final_call["starting_agent"].mcp_servers == []
-        assert final_call["starting_agent"].model_settings.tool_choice == "none"
+        # `Send no tool_choice on the closing call` deliberately stopped setting this:
+        # tools=[] paired with tool_choice="none" is an HTTP 400 on OpenAI, and it failed
+        # quietly -- the instance kept its partial answer and counted as a success. The
+        # assertion was left on the old contract, so this test has been red ever since.
+        assert final_call["starting_agent"].model_settings.tool_choice is None
         assert final_call["input"][-1] == {
             "role": "user",
             "content": FORCED_FINAL_ANSWER_INSTRUCTION,
