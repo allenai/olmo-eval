@@ -17,6 +17,8 @@ MOLMO2_IMAGE_QA_TASKS = (
     "countbench_qa",
     "pixmo_count",
     "ai2d",
+    "charxiv_descriptive",
+    "charxiv_reasoning",
 )
 
 make_suite(
