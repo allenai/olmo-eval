@@ -218,21 +218,56 @@ def _rewrite_legacy_class_names(config: Any) -> Any:
     return config
 
 
-def build_model_config(info: MultimodalCheckpointInfo, *, image_patch_token_id: int) -> Any:
+def build_model_config(
+    info: MultimodalCheckpointInfo,
+    *,
+    image_patch_token_id: int,
+    attention_backend: str | None = "torch",
+) -> Any:
     """Build the OLMo-core ``MultimodalLMConfig`` for a checkpoint.
 
     :param image_patch_token_id: The ``<im_patch>`` vocab ID resolved from the
         tokenizer; only used for the mm_olmo format (OLMo-core configs carry
         their own).
+    :param attention_backend: Normalize every attention config to this backend
+        (``None`` keeps the checkpoint's). Training configs often pin ``flex``
+        or ``flash_2``, but eval needs the dense ``torch`` backend: it is the
+        one that supports the bidirectional image-token ``or_mask`` AND the
+        KV-cached decoding installed by :func:`enable_kv_cache`.
     """
     from olmo_core.nn.vision.multimodal import MultimodalLMConfig
 
     if info.format in ("olmo_core_dcp", "olmo_core_unsharded"):
         model_config = _rewrite_legacy_class_names(info.model_config)
-        return MultimodalLMConfig.from_dict(model_config)
-    return _mm_olmo_model_config_to_multimodal_lm_config(
-        info.model_config, image_patch_token_id=image_patch_token_id
-    )
+        cfg = MultimodalLMConfig.from_dict(model_config)
+    else:
+        cfg = _mm_olmo_model_config_to_multimodal_lm_config(
+            info.model_config, image_patch_token_id=image_patch_token_id
+        )
+    if attention_backend is not None:
+        _normalize_attention_backend(cfg, attention_backend)
+    return cfg
+
+
+def _normalize_attention_backend(cfg: Any, backend: str) -> None:
+    """Set ``backend`` on every nested attention/sequence-mixer config."""
+    from olmo_core.nn.attention import AttentionBackendName
+
+    backend_value = AttentionBackendName(backend)
+
+    def set_backend(config: Any) -> None:
+        mixer = getattr(config, "sequence_mixer", None) or getattr(config, "attention", None)
+        if mixer is None and hasattr(config, "backend"):
+            mixer = config
+        if mixer is not None and hasattr(mixer, "backend"):
+            setattr(mixer, "backend", backend_value)  # noqa: B010
+
+    for section in (cfg.lm, cfg.vision, cfg.connector):
+        apply = getattr(section, "apply", None)
+        if callable(apply):
+            apply(set_backend)
+        else:
+            set_backend(section)
 
 
 def _mm_olmo_model_config_to_multimodal_lm_config(
@@ -662,6 +697,15 @@ def _cached_torch_backend_class() -> type:
     ``(B, 1, T, T)`` over the current forward's tokens) are aligned to the key
     axis by left-padding, which is exact for the prefill call (``pos == 0``,
     the only call that passes them).
+
+    Variable-length batches are supported through cache left-padding: rows are
+    right-aligned in the cache (``kv_cache_manager.cache_leftpad`` holds each
+    row's pad length, set by :func:`prepare_kv_caches`) so every row's last
+    prompt token lands in the final prefill slot and all rows share one write
+    position per decode step. Real queries then must not attend the pad slots
+    (their K/V is garbage from pad tokens), while pad-slot queries keep their
+    causal rows so no softmax row is fully masked (a fully-masked row turns
+    into NaN attention that would poison later layers through the cached K/V).
     """
     global _CACHED_BACKEND_CLS
     if _CACHED_BACKEND_CLS is not None:
@@ -748,8 +792,9 @@ def _cached_torch_backend_class() -> type:
             k_full = k_cache[:, :total].to(q.dtype)
             v_full = v_cache[:, :total].to(q.dtype)
 
+            has_leftpad = getattr(kv_cache_manager, "_has_leftpad", False)
             attn_mask: torch.Tensor | None = None
-            if seq_len > 1 or or_mask is not None or and_mask is not None:
+            if seq_len > 1 or or_mask is not None or and_mask is not None or has_leftpad:
                 base = torch.ones(seq_len, total, device=q.device, dtype=torch.bool).tril(
                     diagonal=pos
                 )
@@ -766,6 +811,14 @@ def _cached_torch_backend_class() -> type:
                     base = base | _align_keys(or_mask, False)
                 if and_mask is not None:
                     base = base & _align_keys(and_mask, True)
+                if has_leftpad:
+                    leftpad = kv_cache_manager.cache_leftpad.to(device=q.device, dtype=torch.long)
+                    # Real queries never see pad-slot keys; pad-slot queries keep
+                    # their causal rows so no softmax row is fully masked.
+                    key_ok = torch.arange(total, device=q.device) >= leftpad[:, None]
+                    q_abs = pos + torch.arange(seq_len, device=q.device)
+                    pad_query = q_abs[None, :] < leftpad[:, None]
+                    base = base & (key_ok[:, None, None, :] | pad_query[:, None, :, None])
                 attn_mask = base
 
             n_rep = self.n_heads // self.n_kv_heads
@@ -819,20 +872,112 @@ def enable_kv_cache(model: Any) -> bool:
     return True
 
 
-def prepare_kv_caches(model: Any, batch_size: int, max_seq_len: int) -> None:
-    """Initialize (or reset) a KV cache on every LM attention block."""
+_EXPLICIT_POSITION_KV_MANAGER_CLS: type | None = None
+
+
+def _explicit_position_kv_manager_class() -> type:
+    """Build (once) a ``KVCacheManager`` subclass for explicit-position decoding.
+
+    ``Attention.forward`` derives the RoPE ``start_pos`` from
+    ``kv_cache_manager.current_position()``, but RoPE forbids combining
+    ``start_pos`` with explicit ``position_ids``. The decode loop drives RoPE
+    entirely through per-row ``position_ids`` (required for variable-length
+    batches, where each row sits at a different absolute position), so this
+    manager reports no position of its own.
+    """
+    global _EXPLICIT_POSITION_KV_MANAGER_CLS
+    if _EXPLICIT_POSITION_KV_MANAGER_CLS is not None:
+        return _EXPLICIT_POSITION_KV_MANAGER_CLS
+
+    from olmo_core.nn.attention.kv_cache import KVCacheManager
+
+    class ExplicitPositionKVCacheManager(KVCacheManager):
+        def current_position(self) -> None:  # type: ignore[override]
+            return None
+
+    _EXPLICIT_POSITION_KV_MANAGER_CLS = ExplicitPositionKVCacheManager
+    return ExplicitPositionKVCacheManager
+
+
+def prepare_kv_caches(
+    model: Any,
+    batch_size: int,
+    max_seq_len: int,
+    leftpad: torch.Tensor | None = None,
+) -> None:
+    """Initialize (or reset) a KV cache on every LM attention block.
+
+    :param leftpad: Per-row left-pad lengths ``(batch_size,)`` for
+        variable-length batches; rows are right-aligned in the cache and the
+        cached backend masks the pad slots out of every real query's row.
+    """
+    manager_cls = _explicit_position_kv_manager_class()
+    has_leftpad = leftpad is not None and bool((leftpad > 0).any())
     for attention in _lm_attention_modules(model):
-        if attention.kv_cache_manager is None:
-            attention.init_kv_cache_manager(batch_size, max_seq_len)
+        manager = attention.kv_cache_manager
+        if isinstance(manager, manager_cls):
+            manager.reset(batch_size, max_seq_len)
         else:
-            attention.kv_cache_manager.reset(batch_size, max_seq_len)
-        attention.kv_cache_manager._position_mirror = 0
+            manager = manager_cls(
+                batch_size=batch_size,
+                max_seq_len=max_seq_len,
+                num_kv_heads=attention.n_kv_heads,
+                head_dim=attention.head_dim,
+                device=attention.w_k.weight.device,
+            )
+            attention.kv_cache_manager = manager
+        if leftpad is not None:
+            manager.cache_leftpad.copy_(leftpad)
+        manager._has_leftpad = has_leftpad
+        manager._position_mirror = 0
 
 
 def free_kv_caches(model: Any) -> None:
     """Drop all LM KV caches so subsequent forwards run uncached."""
     for attention in _lm_attention_modules(model):
         attention.kv_cache_manager = None
+
+
+def rope_buffers(model: Any, max_seq_len: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Full-length RoPE sin/cos tables covering positions ``0..max_seq_len - 1``.
+
+    Explicit-``position_ids`` RoPE gathers rows from the sin/cos tables, but
+    ``RotaryEmbedding.forward`` sizes its internal tables from the current
+    forward's ``seq_len`` (1 during decode) when ``start_pos`` is absent —
+    far short of the decode positions. The tables must therefore be passed in
+    explicitly; this builds them once per batch. The Transformer broadcasts one
+    buffer pair to every block, so all blocks must share one RoPE config
+    (asserted here; per-position table rows do not depend on table length, so
+    these buffers match what shorter internal tables would hold).
+    """
+    ropes = [
+        rope
+        for attention in _lm_attention_modules(model)
+        if (rope := getattr(attention, "rope", None)) is not None
+    ]
+    if not ropes:
+        raise ValueError("Model has no RoPE modules; cannot run explicit-position decoding")
+    configs = {
+        (
+            type(rope).__name__,
+            getattr(rope, "theta", None),
+            getattr(rope, "rotary_dim", None),
+            repr(getattr(rope, "scaling", None)),
+        )
+        for rope in ropes
+    }
+    if len(configs) != 1:
+        raise ValueError(
+            f"LM blocks use differing RoPE configs ({sorted(configs)}); batched "
+            "explicit-position decoding requires one shared config"
+        )
+    buffers = ropes[0].get_buffers(max_seq_len, next(iter(model.lm.parameters())).device)
+    if buffers.pos_sin is None or buffers.pos_cos is None:
+        raise ValueError(
+            f"{type(ropes[0]).__name__} does not expose sin/cos RoPE buffers; batched "
+            "explicit-position decoding requires RotaryEmbedding"
+        )
+    return buffers.pos_sin, buffers.pos_cos
 
 
 def resolve_max_length(info: MultimodalCheckpointInfo, explicit_max_length: int | None) -> int:
