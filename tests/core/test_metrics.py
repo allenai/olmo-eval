@@ -10,6 +10,8 @@ from olmo_eval.common.metrics import (
     BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
+    NGramCopyingBPBMetricByteAvg,
+    NGramCopyingBPBMetricInstanceAvg,
     SafetyErrorMetric,
 )
 from olmo_eval.common.scorers import MultipleChoiceScorer
@@ -565,3 +567,66 @@ class TestSafetyErrorMetric:
         errors = metric.compute(responses)
 
         assert errors == 0
+
+
+class TestNGramCopyingBPBMetric:
+    """Tests for NGramCopyingBPBMetricInstanceAvg / NGramCopyingBPBMetricByteAvg."""
+
+    def _make_response(self, tokens: list[str], logprobs: list[float]) -> Response:
+        """Build a single-output, teacher-forced (loglikelihood) Response from tokens."""
+        entries = [
+            {"token": tok, "logprob": lp, "bytes": list(tok.encode("utf-8"))}
+            for tok, lp in zip(tokens, logprobs, strict=True)
+        ]
+        text = "".join(tokens)
+        output = LMOutput(text=text, logprobs=entries)
+        return Response(
+            instance=Instance(question="", gold_answer=text),
+            request=LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt=""),
+            outputs=[output],
+        )
+
+    def test_instance_avg_masks_repeated_positions_only(self):
+        """`a b c a b` at k=1: only positions 3,4 ('a','b') are masked in."""
+        metric = NGramCopyingBPBMetricInstanceAvg(k=1)
+        response = self._make_response(["a", "b", "c", "a", "b"], [-1.0, -1.0, -1.0, -1.0, -1.0])
+
+        # Masked positions 3,4: total_logprob=-2.0, total_bytes=2.
+        expected = 2.0 / (2 * math.log(2))
+        assert metric.compute_instance(response) == pytest.approx(expected)
+        assert metric.compute([response]) == pytest.approx(expected)
+
+    def test_documents_without_repeats_are_excluded(self):
+        """A document with zero positions meeting the threshold is excluded, not zero."""
+        metric = NGramCopyingBPBMetricInstanceAvg(k=1)
+        no_repeats = self._make_response(["p", "q", "r", "s"], [-1.0, -1.0, -1.0, -1.0])
+        with_repeats = self._make_response(
+            ["a", "b", "c", "a", "b"], [-1.0, -1.0, -1.0, -1.0, -1.0]
+        )
+
+        assert metric.compute_instance(no_repeats) is None
+        # Corpus average over both should equal the single qualifying document's value.
+        expected = 2.0 / (2 * math.log(2))
+        assert metric.compute([no_repeats, with_repeats]) == pytest.approx(expected)
+        assert metric.compute([no_repeats]) == 0.0
+
+    def test_byte_avg_weights_by_masked_byte_count(self):
+        """Byte-avg weights each document's contribution by its masked byte count.
+
+        Doc A = "a b a": mask (k=1) is [F,F,T]; masked logprob=-2.0, bytes=1.
+        Doc B = "p p p p": mask (k=1) is [F,T,T,T]; masked logprob=-3.0, bytes=3.
+        """
+        instance_metric = NGramCopyingBPBMetricInstanceAvg(k=1)
+        byte_metric = NGramCopyingBPBMetricByteAvg(k=1)
+        doc_a = self._make_response(["a", "b", "a"], [-1.0, -1.0, -2.0])
+        doc_b = self._make_response(["p", "p", "p", "p"], [-1.0, -1.0, -1.0, -1.0])
+
+        bpb_a = 2.0 / (1 * math.log(2))
+        bpb_b = 3.0 / (3 * math.log(2))
+        assert instance_metric.compute_instance(doc_a) == pytest.approx(bpb_a)
+        assert instance_metric.compute_instance(doc_b) == pytest.approx(bpb_b)
+
+        # Unweighted mean of the two per-document values.
+        assert instance_metric.compute([doc_a, doc_b]) == pytest.approx((bpb_a + bpb_b) / 2)
+        # Byte-weighted: pools logprobs/bytes across documents before dividing.
+        assert byte_metric.compute([doc_a, doc_b]) == pytest.approx(5.0 / (4 * math.log(2)))
