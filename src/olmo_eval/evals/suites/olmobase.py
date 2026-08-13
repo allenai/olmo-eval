@@ -116,6 +116,12 @@ make_suite(
     name="mt_mbpp_v2fix:bpb:olmo3base",
     tasks=tuple(f"mt_mbpp_v2fix_{lang}:bpb:olmo3base" for lang in MULTILINGUAL_MBPP_LANGUAGES),
 )
+make_suite(
+    name="mt_mbpp_v2fix:bpb:olmo3base:v2",
+    # Keep BPB last so its PPL formatter takes precedence over the corrected
+    # completion formatter supplied by the v2 few-shot variant.
+    tasks=tuple(f"mt_mbpp_v2fix_{lang}:olmo3base:v2:bpb" for lang in MULTILINGUAL_MBPP_LANGUAGES),
+)
 
 # =============================================================================
 # OlmoBaseEval
@@ -189,6 +195,16 @@ make_suite(
         "codex_humaneval:bpb:olmo3base",
         "mbpp:bpb:olmo3base",
         get_suite("mt_mbpp:bpb:olmo3base"),
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+make_suite(
+    name="olmobase:easy:code:bpb:v2",
+    tasks=(
+        "codex_humaneval:olmo3base:v2:bpb",
+        "mbpp:bpb:olmo3base",
+        get_suite("mt_mbpp_v2fix:bpb:olmo3base:v2"),
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
 )
