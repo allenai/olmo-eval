@@ -892,7 +892,7 @@ def _explicit_position_kv_manager_class() -> type:
     from olmo_core.nn.attention.kv_cache import KVCacheManager
 
     class ExplicitPositionKVCacheManager(KVCacheManager):
-        def current_position(self) -> None:  # type: ignore[override]
+        def current_position(self) -> Any:
             return None
 
     _EXPLICIT_POSITION_KV_MANAGER_CLS = ExplicitPositionKVCacheManager

@@ -484,6 +484,11 @@ class OlmoCoreVLMProvider(InferenceProvider):
         pad_id = self.tokenizer.pad_token_id
         if pad_id is None:
             pad_id = self.tokenizer.eos_token_id
+        if pad_id is None:
+            raise ValueError(
+                "Tokenizer defines neither pad_token_id nor eos_token_id; "
+                "left-padded batching needs a pad token"
+            )
 
         ids = torch.full((batch, seq_len), pad_id, dtype=torch.long, device=self.device)
         leftpad = torch.zeros(batch, dtype=torch.int32, device=self.device)
