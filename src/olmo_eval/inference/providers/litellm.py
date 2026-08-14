@@ -129,7 +129,7 @@ class LiteLLMProvider(InferenceProvider):
         request: LMRequest,
         params: SamplingParams,
     ) -> list[dict[str, Any]]:
-        """Truncate message content while preserving a valid chat-message structure."""
+        """Truncate prompt content while preserving valid chat-message structure."""
         if params.truncate_prompt_tokens is None:
             return [dict(message) for message in messages]
 
@@ -166,14 +166,10 @@ class LiteLLMProvider(InferenceProvider):
             if current_count <= limit:
                 return truncated
 
-        # Chat-template overhead can itself exceed the requested limit after all
-        # textual content is exhausted. Drop complete messages from the requested
-        # truncation side while retaining at least one structurally valid message.
+        # Chat-template overhead can remain after all textual content is exhausted.
+        # Drop complete messages from the requested side while retaining at least one.
         while current_count > limit and len(truncated) > 1:
-            if side == "left":
-                truncated.pop(0)
-            else:
-                truncated.pop()
+            truncated.pop(0 if side == "left" else -1)
             current_count = token_count()
 
         if current_count > limit:
@@ -187,12 +183,14 @@ class LiteLLMProvider(InferenceProvider):
         self, request: LMRequest, params: SamplingParams
     ) -> list[LMOutput]:
         """Generate completions for a single request."""
+        # Build messages from request
         if request.messages:
             messages = [dict(m) for m in request.messages]
         else:
             messages = [{"role": "user", "content": request.prompt}]
         messages = self._truncate_messages(messages, request, params)
 
+        # Prepare API kwargs
         kwargs: dict[str, Any] = {
             "api_base": self.api_base,
             "model": self.model_name,
@@ -200,14 +198,20 @@ class LiteLLMProvider(InferenceProvider):
             "n": params.num_samples,
             **self.api_kwargs,
         }
+        # max_tokens=None means "uncapped"; omit the field so the API uses its
+        # own context-bounded default rather than receiving a literal null.
         if params.max_tokens is not None:
             kwargs["max_completion_tokens"] = params.max_tokens
 
+        # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)[:_MAX_STOP_SEQUENCES]
+        # Always request logprobs for metrics computation
         kwargs["logprobs"] = True
-        kwargs["top_logprobs"] = 1
+        kwargs["top_logprobs"] = (
+            1  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
+        )
 
         response = await self._litellm.acompletion(**kwargs)
 
@@ -215,6 +219,7 @@ class LiteLLMProvider(InferenceProvider):
         for choice in response.choices:
             text = choice.message.content or ""
 
+            # Convert logprobs to standard format
             logprob_entries: list[LogProbEntry] | None = None
             metadata: dict[str, Any] = {}
             logprobs_data = getattr(choice, "logprobs", None)
@@ -227,6 +232,7 @@ class LiteLLMProvider(InferenceProvider):
                         entry["bytes"] = lp_bytes
                     logprob_entries.append(entry)
 
+                # Compute metadata from logprobs
                 sum_logits = sum(entry["logprob"] for entry in logprob_entries)
                 num_tokens = len(logprob_entries)
                 metadata = {
@@ -302,7 +308,18 @@ class LiteLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Async generate completions."""
+        """Async generate completions.
+
+        This is the native async implementation that should be used
+        in async contexts to avoid nested event loops.
+
+        Args:
+            requests: Batch of requests to process.
+            sampling_params: Sampling configuration.
+
+        Returns:
+            List of output lists, one per request.
+        """
         from olmo_eval.common.progress import ProgressLogger
         from olmo_eval.inference.dispatch import dispatch_concurrent
 
@@ -335,7 +352,17 @@ class LiteLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Generate completions (sync wrapper)."""
+        """Generate completions (sync wrapper).
+
+        For async contexts, prefer using agenerate() directly.
+
+        Args:
+            requests: Batch of requests to process.
+            sampling_params: Sampling configuration.
+
+        Returns:
+            List of output lists, one per request.
+        """
         return run_async(self.agenerate(requests, sampling_params))
 
     async def _logprobs_single_impl(
@@ -365,7 +392,7 @@ class LiteLLMProvider(InferenceProvider):
                 max_completion_tokens=50,
                 temperature=params.temperature,
                 logprobs=True,
-                top_logprobs=1,
+                top_logprobs=1,  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
                 **self.api_kwargs,
             )
 
@@ -413,7 +440,18 @@ class LiteLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Async compute logprobs for continuations."""
+        """Async compute logprobs for continuations.
+
+        Note: Most API providers don't support true continuation logprobs.
+        This implementation provides an approximation by generating a response
+        and returning those logprobs.
+
+        Args:
+            requests: Batch of requests with continuations to score.
+
+        Returns:
+            List of output lists with logprobs populated.
+        """
         from olmo_eval.common.progress import ProgressLogger
         from olmo_eval.inference.dispatch import dispatch_concurrent
 
@@ -443,5 +481,18 @@ class LiteLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Compute logprobs for continuations (sync wrapper)."""
+        """Compute logprobs for continuations (sync wrapper).
+
+        Note: Most API providers don't support true continuation logprobs.
+        This implementation provides an approximation by generating a response
+        and returning those logprobs.
+
+        For async contexts, prefer using alogprobs() directly.
+
+        Args:
+            requests: Batch of requests with continuations to score.
+
+        Returns:
+            List of output lists with logprobs populated.
+        """
         return run_async(self.alogprobs(requests, sampling_params))
