@@ -140,6 +140,97 @@ def _compute_child_average(
         )
 
 
+def _compute_weighted_child_average(
+    child: str | Any,
+    priority_suffix: str,
+    task_results: dict[str, dict[str, Any]],
+) -> ChildAverageResult | None:
+    """Compute a direct child's score, preserving nested weighted suites."""
+    from olmo_eval.evals.suites.registry import AggregationStrategy, Suite
+
+    if isinstance(child, Suite) and child.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
+        return _compute_weighted_suite_average(child, priority_suffix, task_results)
+    return _compute_child_average(child, priority_suffix, task_results)
+
+
+def _compute_weighted_suite_average(
+    suite: Any,
+    priority_suffix: str,
+    task_results: dict[str, dict[str, Any]],
+) -> ChildAverageResult | None:
+    """Compute a weighted average over a suite's direct children.
+
+    Each metric is normalized over the weights of children that actually produced
+    that metric. This keeps a missing task from implicitly contributing a zero.
+    Nested weighted suites are recursively reduced before the parent weight is
+    applied.
+    """
+    assert suite.weights is not None
+
+    metric_totals: dict[str, float] = {}
+    metric_weights: dict[str, float] = {}
+    primary_total = 0.0
+    primary_weight = 0.0
+    tasks_included: list[str] = []
+
+    for child, weight in zip(suite.tasks, suite.weights, strict=True):
+        if weight == 0:
+            continue
+        result = _compute_weighted_child_average(child, priority_suffix, task_results)
+        if result is None:
+            continue
+
+        tasks_included.extend(result.tasks)
+        for metric_key, value in _flatten_nested_metrics(result.metrics).items():
+            metric_totals[metric_key] = metric_totals.get(metric_key, 0.0) + value * weight
+            metric_weights[metric_key] = metric_weights.get(metric_key, 0.0) + weight
+
+        if result.primary_score is not None:
+            primary_total += result.primary_score * weight
+            primary_weight += weight
+
+    averaged_flat = {
+        metric_key: total / metric_weights[metric_key]
+        for metric_key, total in metric_totals.items()
+        if metric_weights[metric_key] > 0
+    }
+    if not averaged_flat:
+        return None
+
+    return ChildAverageResult(
+        metrics=_unflatten_metrics(averaged_flat),
+        tasks=tasks_included,
+        primary_score=primary_total / primary_weight if primary_weight > 0 else None,
+        nested_suite=suite,
+        nested_suite_key=f"{suite.name}{priority_suffix}",
+    )
+
+
+def _add_nested_suite_result(
+    suite_aggregations: dict[str, dict[str, Any]],
+    result: ChildAverageResult,
+    parent_suite: str,
+) -> None:
+    """Record a nested suite result using the same shape as top-level aggregates."""
+    if result.nested_suite is None or not result.nested_suite_key:
+        return
+
+    nested_metrics = dict(result.metrics)
+    nested_result: dict[str, Any] = {
+        "metrics": nested_metrics,
+        "tasks": result.tasks,
+        "num_tasks": len(result.tasks),
+        "aggregation": result.nested_suite.aggregation.value,
+        "parent_suite": parent_suite,
+    }
+    if result.nested_suite.weights is not None:
+        nested_result["weights"] = list(result.nested_suite.weights)
+    if result.primary_score is not None:
+        nested_metrics["primary_score"] = {"average": result.primary_score}
+        nested_result["primary_metric"] = "primary_score:average"
+    suite_aggregations[result.nested_suite_key] = nested_result
+
+
 def compute_suite_aggregations(
     task_specs: list[str],
     task_results: dict[str, dict[str, Any]],
@@ -151,6 +242,8 @@ def compute_suite_aggregations(
     - AVERAGE: Simple average of all expanded task scores
     - AVERAGE_OF_AVERAGES: Average over children, where nested suites are
       averaged first (each child gets equal weight)
+    - WEIGHTED_AVERAGE: Weighted average over direct children, recursively
+      preserving weights for nested weighted suites
 
     Handles specs with priority suffixes (@priority).
     When a suite has these suffixes, they are propagated to expanded task lookups.
@@ -163,7 +256,7 @@ def compute_suite_aggregations(
         Dict mapping suite name -> {"metrics": {...}, "tasks": [...], "aggregation": ...}
     """
     from olmo_eval.evals.suites import get_suite, suite_exists
-    from olmo_eval.evals.suites.registry import AggregationStrategy
+    from olmo_eval.evals.suites.registry import AggregationStrategy, Suite
 
     suite_aggregations: dict[str, dict[str, Any]] = {}
 
@@ -183,7 +276,36 @@ def compute_suite_aggregations(
         if suite.aggregation == AggregationStrategy.NONE:
             continue
 
-        if suite.aggregation == AggregationStrategy.AVERAGE_OF_AVERAGES:
+        if suite.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
+            weighted_result = _compute_weighted_suite_average(suite, priority_suffix, task_results)
+            if weighted_result is None:
+                continue
+
+            aggregated_metrics = dict(weighted_result.metrics)
+            nested_suites_included: list[str] = []
+            assert suite.weights is not None
+            for child, weight in zip(suite.tasks, suite.weights, strict=True):
+                if weight == 0 or not isinstance(child, Suite):
+                    continue
+                child_result = _compute_weighted_child_average(child, priority_suffix, task_results)
+                if child_result is None or not child_result.nested_suite_key:
+                    continue
+                nested_suites_included.append(child_result.nested_suite_key)
+                _add_nested_suite_result(suite_aggregations, child_result, spec)
+
+            suite_result: dict[str, Any] = {
+                "metrics": aggregated_metrics,
+                "tasks": weighted_result.tasks,
+                "num_tasks": len(weighted_result.tasks),
+                "nested_suites": nested_suites_included,
+                "aggregation": suite.aggregation.value,
+                "weights": list(suite.weights),
+            }
+            if weighted_result.primary_score is not None:
+                aggregated_metrics["primary_score"] = {"average": weighted_result.primary_score}
+                suite_result["primary_metric"] = "primary_score:average"
+            suite_aggregations[spec] = suite_result
+        elif suite.aggregation == AggregationStrategy.AVERAGE_OF_AVERAGES:
             # Average of averages: each child (task or nested suite) gets equal weight
             # Process each child separately, then average the child averages
             child_averages: dict[str, list[float]] = {}  # Flat "metric:scorer" -> values
@@ -213,20 +335,7 @@ def compute_suite_aggregations(
                 # If this child is a nested Suite, also report its aggregation separately
                 if result.nested_suite is not None and result.nested_suite_key:
                     nested_suites_included.append(result.nested_suite_key)
-                    nested_result: dict[str, Any] = {
-                        "metrics": result.metrics,
-                        "tasks": result.tasks,
-                        "num_tasks": len(result.tasks),
-                        "aggregation": result.nested_suite.aggregation.value,
-                        "parent_suite": spec,
-                    }
-                    if result.primary_score is not None:
-                        nested_result["metrics"] = dict(result.metrics)
-                        nested_result["metrics"]["primary_score"] = {
-                            "average": result.primary_score
-                        }
-                        nested_result["primary_metric"] = "primary_score:average"
-                    suite_aggregations[result.nested_suite_key] = nested_result
+                    _add_nested_suite_result(suite_aggregations, result, spec)
 
             if not child_averages:
                 continue
@@ -237,7 +346,7 @@ def compute_suite_aggregations(
             }
             aggregated_metrics = _unflatten_metrics(averaged_flat)
 
-            suite_result: dict[str, Any] = {
+            suite_result = {
                 "metrics": aggregated_metrics,
                 "tasks": all_tasks_included,
                 "num_tasks": len(all_tasks_included),
