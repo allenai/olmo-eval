@@ -152,7 +152,11 @@ ROSTER: dict[str, RosterRow] = {
         subset="qdmatch_nq", spec="qdmatch", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
     ),
     "ctc_qdmatch_hpqa": RosterRow(
-        subset="qdmatch_hpqa", spec="qdmatch", rungs=_LADDER_TO_512K, eval_size=dict(_SUB500_XLONG)
+        subset="qdmatch_hpqa",
+        spec="qdmatch",
+        rungs=_LADDER_FULL[:-2],
+        eval_size=dict(_SUB500_XLONG),
+        note="caps at 256k: 4,000 recoverable HotpotQA units, and a 512k example needs ~7k",
     ),
     "ctc_outlier_amzn": RosterRow(
         subset="outlier_amzn", spec="outlier", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
