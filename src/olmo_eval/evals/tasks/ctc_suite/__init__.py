@@ -322,11 +322,18 @@ class CTCSuiteTask(Task):
         """Same as the base loader, except ``CTC_SUITE_DATA_ROOT`` (read here, at load time)
         substitutes the local ``<subset>/rung_<tokens>.jsonl`` file for the HF split -- for
         offline runs and for validating a ladder before it is uploaded."""
+        from olmo_eval.data import DataLoader
+
         root = os.environ.get(DATA_ROOT_ENV)
         if not root:
-            yield from super()._load_instances(split=split)
+            # Use the variant's DataSource AS-IS: its split IS the rung label. The base loader
+            # would route through config.get_data_source(), which substitutes the config-level
+            # default split ("test") and 404s -- this suite has no "test" split anywhere.
+            for index, doc in enumerate(DataLoader().load(self.config.data_source)):
+                instance = self.process_doc(doc, index)
+                if instance is not None:
+                    yield instance
             return
-        from olmo_eval.data import DataLoader
 
         rung = self.config.data_source.split  # the split label IS the rung label
         tokens = self.row.rung_alias.get(rung, RUNG_TOKENS[rung])
