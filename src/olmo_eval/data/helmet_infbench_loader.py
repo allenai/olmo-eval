@@ -49,9 +49,39 @@ INFBENCH_SUBSETS: dict[str, dict[str, Any]] = {
             "Question: {question}"
         ),
         "system_template": "Answer:",
-        "demo_template": "[story text]\nQuestion: {question}\nAnswer: {answer}",
+        "demo_template": "[story text]\nQuestion: {question}\nAnswer: {answer[0]}",
+    },
+    "choice_eng": {
+        "split": "longbook_choice_eng",
+        "user_template": (
+            "You are given a story and a question with multiple choices. Choose the best "
+            "answer from the options provided. Only one of the following options is "
+            "correct, output the answer using one single letter (A, B, C, or D). Don't "
+            "say anything else.\n\n{demo}{context}\n\nQuestion: {question}\n"
+            "Options:\n{options}"
+        ),
+        "system_template": "Answer:",
+        "demo_template": (
+            "[story text]\nQuestion: {question}\nOptions:\n{options}\nAnswer: {answer[0]}"
+        ),
+        "multiple_choice": True,
     },
 }
+
+
+def _process_multiple_choice(example: dict[str, Any]) -> dict[str, Any]:
+    """Render the options block and rewrite the answer as a letter.
+
+    HELMET stores two acceptable forms of the gold answer -- the bare letter
+    and "letter. option text" -- because a model may produce either; both are
+    accepted at scoring time.
+    """
+    options = "A. {}\nB. {}\nC. {}\nD. {}".format(*example["options"])
+    letter = chr(ord("A") + example["options"].index(example["answer"][0]))
+    return {
+        "options": options,
+        "answer": [letter, f"{letter}. {example['answer'][0]}"],
+    }
 
 
 def _load_reference_tokenizer(name: str):
@@ -109,7 +139,13 @@ def load_infbench_dataset(
         spec["split"]
     ]
 
-    data = data.map(lambda example: {"question": example["input"], "demo": ""})
+    def process_example(example: dict[str, Any]) -> dict[str, Any]:
+        update = {"question": example["input"], "demo": ""}
+        if spec.get("multiple_choice"):
+            update.update(_process_multiple_choice(example))
+        return update
+
+    data = data.map(process_example)
 
     # HELMET filters to contexts of >=65536 reference tokens before sampling.
     # Every InfiniteBench story clears that bar (the shortest is ~78k tokens),
@@ -128,9 +164,7 @@ def load_infbench_dataset(
             # depend on how many instances are being evaluated
             demos = demo_pool.filter(lambda x: x["id"] != example["id"])
             demos = demos.shuffle(seed=seed).select(range(shots))
-            demo_text = "\n\n".join(
-                demo_template.format(question=d["question"], answer=d["answer"][0]) for d in demos
-            )
+            demo_text = "\n\n".join(demo_template.format(**d) for d in demos)
             return {"demo": f"For example:\n\n{demo_text}\n\nNow, read the following story:\n\n"}
 
         data = data.map(add_demos)

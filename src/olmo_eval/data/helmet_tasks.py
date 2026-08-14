@@ -111,6 +111,18 @@ _BASE_TASKS: dict[str, dict] = {
         # not appended to the prompt as a partial assistant turn
         "use_chat_template": True,
     },
+    "infbench_choice_eng": {
+        "kind": "infbench",
+        # same loader and task class as qa_eng, but scored by exact match on
+        # the chosen letter rather than ROUGE
+        "metrics_key": "infbench_choice",
+        "tag": "longqa",
+        "infbench_subset": "choice_eng",
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _INFBENCH_QA_MAX_GEN_TOKS,
+        "shots": 2,
+        "use_chat_template": True,
+    },
 }
 
 
@@ -140,6 +152,9 @@ def _generate_helmet_tasks() -> dict:
 
             task: dict = {
                 "kind": base_config["kind"],
+                # which metric set to score with; defaults to the task kind,
+                # but subsets sharing a loader can score differently
+                "metrics_key": base_config.get("metrics_key", base_config["kind"]),
                 "length_name": LENGTH_NAMES[size],
                 "shots": shots,
                 "max_gen_toks": max_gen_toks,
