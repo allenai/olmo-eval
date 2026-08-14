@@ -10,6 +10,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.retry import retry_with_backoff
+from olmo_eval.inference.tokenizer_utils import resolve_prompt_truncation_limit, resolve_truncation_side
 from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
@@ -109,17 +110,89 @@ class LiteLLMProvider(InferenceProvider):
 
         return self._client
 
+    def _max_input_tokens(self, request: LMRequest, params: SamplingParams) -> int | None:
+        """Best-effort input budget for ``truncate_prompt_tokens=-1``."""
+        if request.max_length is not None:
+            reserved_output = params.max_tokens if params.max_tokens is not None else 0
+            return max(request.max_length - reserved_output, 1)
+
+        try:
+            model_info = self._litellm.get_model_info(self.model_name)
+        except Exception:
+            return None
+        max_input_tokens = model_info.get("max_input_tokens") if isinstance(model_info, dict) else None
+        return max_input_tokens if isinstance(max_input_tokens, int) and max_input_tokens > 0 else None
+
+    def _truncate_messages(
+        self,
+        messages: list[dict[str, Any]],
+        request: LMRequest,
+        params: SamplingParams,
+    ) -> list[dict[str, Any]]:
+        """Truncate message content while preserving a valid chat-message structure."""
+        if params.truncate_prompt_tokens is None:
+            return [dict(message) for message in messages]
+
+        limit = resolve_prompt_truncation_limit(
+            params.truncate_prompt_tokens,
+            max_input_tokens=self._max_input_tokens(request, params),
+        )
+        assert limit is not None
+        side = resolve_truncation_side(params.truncation_side, default="right")
+        truncated = [dict(message) for message in messages]
+
+        def token_count() -> int:
+            return int(self._litellm.token_counter(model=self.model_name, messages=truncated))
+
+        current_count = token_count()
+        if current_count <= limit:
+            return truncated
+
+        indices = range(len(truncated)) if side == "left" else range(len(truncated) - 1, -1, -1)
+        for index in indices:
+            content = truncated[index].get("content")
+            if not isinstance(content, str) or not content:
+                continue
+            token_ids = list(self._litellm.encode(model=self.model_name, text=content))
+            if not token_ids:
+                continue
+            excess = max(current_count - limit, 0)
+            remove_count = min(excess, len(token_ids))
+            if remove_count <= 0:
+                break
+            kept = token_ids[remove_count:] if side == "left" else token_ids[:-remove_count]
+            truncated[index]["content"] = self._litellm.decode(model=self.model_name, tokens=kept)
+            current_count = token_count()
+            if current_count <= limit:
+                return truncated
+
+        # Chat-template overhead can itself exceed the requested limit after all
+        # textual content is exhausted. Drop complete messages from the requested
+        # truncation side while retaining at least one structurally valid message.
+        while current_count > limit and len(truncated) > 1:
+            if side == "left":
+                truncated.pop(0)
+            else:
+                truncated.pop()
+            current_count = token_count()
+
+        if current_count > limit:
+            raise ValueError(
+                f"LiteLLM prompt cannot fit within truncate_prompt_tokens={limit}; "
+                f"chat-template overhead is {current_count} tokens."
+            )
+        return truncated
+
     async def _generate_single_impl(
         self, request: LMRequest, params: SamplingParams
     ) -> list[LMOutput]:
         """Generate completions for a single request."""
-        # Build messages from request
         if request.messages:
             messages = [dict(m) for m in request.messages]
         else:
             messages = [{"role": "user", "content": request.prompt}]
+        messages = self._truncate_messages(messages, request, params)
 
-        # Prepare API kwargs
         kwargs: dict[str, Any] = {
             "api_base": self.api_base,
             "model": self.model_name,
@@ -127,20 +200,14 @@ class LiteLLMProvider(InferenceProvider):
             "n": params.num_samples,
             **self.api_kwargs,
         }
-        # max_tokens=None means "uncapped"; omit the field so the API uses its
-        # own context-bounded default rather than receiving a literal null.
         if params.max_tokens is not None:
             kwargs["max_completion_tokens"] = params.max_tokens
 
-        # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)[:_MAX_STOP_SEQUENCES]
-        # Always request logprobs for metrics computation
         kwargs["logprobs"] = True
-        kwargs["top_logprobs"] = (
-            1  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
-        )
+        kwargs["top_logprobs"] = 1
 
         response = await self._litellm.acompletion(**kwargs)
 
@@ -148,7 +215,6 @@ class LiteLLMProvider(InferenceProvider):
         for choice in response.choices:
             text = choice.message.content or ""
 
-            # Convert logprobs to standard format
             logprob_entries: list[LogProbEntry] | None = None
             metadata: dict[str, Any] = {}
             logprobs_data = getattr(choice, "logprobs", None)
@@ -161,7 +227,6 @@ class LiteLLMProvider(InferenceProvider):
                         entry["bytes"] = lp_bytes
                     logprob_entries.append(entry)
 
-                # Compute metadata from logprobs
                 sum_logits = sum(entry["logprob"] for entry in logprob_entries)
                 num_tokens = len(logprob_entries)
                 metadata = {
@@ -194,6 +259,10 @@ class LiteLLMProvider(InferenceProvider):
                 "logprobs": True,
                 "top_logprobs": 1,
             }
+            if params.truncate_prompt_tokens is not None:
+                trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+            if params.truncation_side is not None:
+                trace["generation_kwargs"]["truncation_side"] = params.truncation_side
             trace["stop_sequences"] = []
             return trace
 
@@ -209,6 +278,10 @@ class LiteLLMProvider(InferenceProvider):
         }
         if params.top_p is not None:
             trace["generation_kwargs"]["top_p"] = params.top_p
+        if params.truncate_prompt_tokens is not None:
+            trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+        if params.truncation_side is not None:
+            trace["generation_kwargs"]["truncation_side"] = params.truncation_side
         trace["stop_sequences"] = list(params.stop_sequences or ())[:_MAX_STOP_SEQUENCES]
         return trace
 
@@ -229,18 +302,7 @@ class LiteLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Async generate completions.
-
-        This is the native async implementation that should be used
-        in async contexts to avoid nested event loops.
-
-        Args:
-            requests: Batch of requests to process.
-            sampling_params: Sampling configuration.
-
-        Returns:
-            List of output lists, one per request.
-        """
+        """Async generate completions."""
         from olmo_eval.common.progress import ProgressLogger
         from olmo_eval.inference.dispatch import dispatch_concurrent
 
@@ -250,11 +312,6 @@ class LiteLLMProvider(InferenceProvider):
         )
 
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the LiteLLMProvider and will not be used."
-            )
         progress = ProgressLogger(total=len(requests), desc="Generating", logger=logger)
 
         async def process(req: LMRequest) -> list[LMOutput]:
@@ -278,17 +335,7 @@ class LiteLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Generate completions (sync wrapper).
-
-        For async contexts, prefer using agenerate() directly.
-
-        Args:
-            requests: Batch of requests to process.
-            sampling_params: Sampling configuration.
-
-        Returns:
-            List of output lists, one per request.
-        """
+        """Generate completions (sync wrapper)."""
         return run_async(self.agenerate(requests, sampling_params))
 
     async def _logprobs_single_impl(
@@ -307,15 +354,18 @@ class LiteLLMProvider(InferenceProvider):
         cont_prompts = request.continuation_prompts
         for i, continuation in enumerate(request.continuations or ()):
             content = cont_prompts[i] if cont_prompts else default_content
+            messages = self._truncate_messages(
+                [{"role": "user", "content": content}], request, params
+            )
 
             response = await self._litellm.acompletion(
                 api_base=self.api_base,
                 model=self.model_name,
-                messages=[{"role": "user", "content": content}],
+                messages=messages,
                 max_completion_tokens=50,
                 temperature=params.temperature,
                 logprobs=True,
-                top_logprobs=1,  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
+                top_logprobs=1,
                 **self.api_kwargs,
             )
 
@@ -363,18 +413,7 @@ class LiteLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Async compute logprobs for continuations.
-
-        Note: Most API providers don't support true continuation logprobs.
-        This implementation provides an approximation by generating a response
-        and returning those logprobs.
-
-        Args:
-            requests: Batch of requests with continuations to score.
-
-        Returns:
-            List of output lists with logprobs populated.
-        """
+        """Async compute logprobs for continuations."""
         from olmo_eval.common.progress import ProgressLogger
         from olmo_eval.inference.dispatch import dispatch_concurrent
 
@@ -384,11 +423,6 @@ class LiteLLMProvider(InferenceProvider):
         )
 
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the LiteLLMProvider and will not be used."
-            )
         progress = ProgressLogger(total=len(requests), desc="Logprobs", logger=logger)
 
         def on_progress(done: int, total: int) -> None:
@@ -409,18 +443,5 @@ class LiteLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Compute logprobs for continuations (sync wrapper).
-
-        Note: Most API providers don't support true continuation logprobs.
-        This implementation provides an approximation by generating a response
-        and returning those logprobs.
-
-        For async contexts, prefer using alogprobs() directly.
-
-        Args:
-            requests: Batch of requests with continuations to score.
-
-        Returns:
-            List of output lists with logprobs populated.
-        """
+        """Compute logprobs for continuations (sync wrapper)."""
         return run_async(self.alogprobs(requests, sampling_params))
