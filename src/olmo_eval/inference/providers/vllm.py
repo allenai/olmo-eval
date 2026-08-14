@@ -11,7 +11,7 @@ from olmo_eval.common.debug import is_debug_provider, is_debug_requests
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation, truncate_token_ids
 
 logger = logging.getLogger(__name__)
 
@@ -121,13 +121,11 @@ class VLLMProvider(InferenceProvider):
                 before initializing vLLM.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
-        # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_PROVIDER=1, otherwise WARNING
         if is_debug_provider():
             os.environ["VLLM_LOGGING_LEVEL"] = "DEBUG"
         else:
             os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
-        # Configure vLLM logger with worker_id if provided
         if worker_id:
             _configure_vllm_logger(worker_id)
 
@@ -164,23 +162,14 @@ class VLLMProvider(InferenceProvider):
                 )
 
         engine_kwargs.setdefault("gpu_memory_utilization", 0.8)
-
-        # Configure attention backend if specified (e.g., FLASHINFER, FLASH_ATTN)
         if attention_backend:
             engine_kwargs.setdefault("attention_backend", attention_backend)
-
-        # Use separate tokenizer if specified
         if tokenizer:
             engine_kwargs.setdefault("tokenizer", tokenizer)
-
-        # Disable tqdm loading bar by default, enable with --debug-provider
         engine_kwargs.setdefault("use_tqdm_on_load", is_debug_provider())
 
         # Extract add_bos_token before passing to LLM (not a valid vLLM EngineArgs parameter).
-        # When False, prompts will be pre-tokenized without special tokens and passed as token IDs,
-        # matching the old framework's behavior (tokenizer(text, add_special_tokens=False)).
         self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
-
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
 
     @property
@@ -194,42 +183,44 @@ class VLLMProvider(InferenceProvider):
         """Get the tokenizer for this provider."""
         return self.llm.get_tokenizer()
 
-    def _encode_pair(self, context: str, continuation: str) -> tuple[list[int], list[int]]:
-        """Encode context and continuation separately (robust to non-additive tokenization).
+    def _max_input_tokens(self, params: SamplingParams) -> int:
+        reserved_output = params.max_tokens if params.max_tokens is not None else 1
+        return max(self.max_length - reserved_output, 1)
 
-        Matches lm_eval behavior: trailing spaces from context are moved to continuation
-        before tokenization to ensure consistent token boundaries.
-        """
+    def _prompt_token_ids(self, prompt: str, params: SamplingParams) -> list[int]:
         tokenizer = self.llm.get_tokenizer()
+        encode_kwargs: dict[str, Any] = {}
+        if self._add_bos_token is not None:
+            encode_kwargs["add_special_tokens"] = self._add_bos_token
+        token_ids = tokenizer.encode(prompt, **encode_kwargs)
+        return truncate_token_ids(
+            token_ids,
+            params.truncate_prompt_tokens,
+            params.truncation_side,
+            tokenizer=tokenizer,
+            max_input_tokens=self._max_input_tokens(params),
+        )
 
-        # Match lm_eval behavior: move trailing spaces from context to continuation
+    def _encode_pair(self, context: str, continuation: str) -> tuple[list[int], list[int]]:
+        """Encode context and continuation separately (robust to non-additive tokenization)."""
+        tokenizer = self.llm.get_tokenizer()
         n_spaces = len(context) - len(context.rstrip())
         if n_spaces > 0:
             continuation = context[-n_spaces:] + continuation
             context = context[:-n_spaces]
-
         whole_enc = tokenizer.encode(context + continuation, add_special_tokens=False)
         context_enc = tokenizer.encode(context, add_special_tokens=False)
         continuation_enc = whole_enc[len(context_enc) :]
-
         return context_enc, continuation_enc
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
         """Convert SamplingParams to vLLM SamplingParams."""
         from vllm import SamplingParams as VLLMSamplingParams
 
-        # Handle do_sample=False (greedy decoding)
         temperature = 0.0 if not params.do_sample else params.temperature
         top_p = None if not params.do_sample else params.top_p
         top_k = None if not params.do_sample else params.top_k
-
-        # vLLM natively accepts max_tokens=None as "generate to the context limit",
-        # matching our uncapped contract, so pass it through unchanged.
-        kwargs: dict[str, Any] = {
-            "max_tokens": params.max_tokens,
-            "n": params.num_samples,
-        }
-
+        kwargs: dict[str, Any] = {"max_tokens": params.max_tokens, "n": params.num_samples}
         if temperature is not None:
             kwargs["temperature"] = temperature
         if top_p is not None:
@@ -238,9 +229,7 @@ class VLLMProvider(InferenceProvider):
             kwargs["top_k"] = top_k
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
-        # Always request logprobs (default to 1) for metrics computation
         kwargs["logprobs"] = params.logprobs if params.logprobs is not None else 1
-
         return VLLMSamplingParams(**kwargs)
 
     def _format_prompt(self, request: LMRequest) -> str:
@@ -250,11 +239,8 @@ class VLLMProvider(InferenceProvider):
             if not hasattr(tokenizer, "apply_chat_template"):
                 raise ValueError("CHAT requests require a tokenizer with apply_chat_template")
             return tokenizer.apply_chat_template(
-                list(request.messages),
-                tokenize=False,
-                add_generation_prompt=True,
+                list(request.messages), tokenize=False, add_generation_prompt=True
             )
-
         return request.prompt
 
     def generate(
@@ -263,32 +249,22 @@ class VLLMProvider(InferenceProvider):
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the VLLMProvider and will not be used."
-            )
         vllm_params = self._build_sampling_params(params)
-
         prompt_strs = [self._format_prompt(req) for req in requests]
 
         if is_debug_requests():
             for i, prompt in enumerate(prompt_strs):
                 logger.info(f"Prompt {i}:\n{prompt}")
 
-        # When add_bos_token=False, pre-tokenize without special tokens and pass token IDs.
-        # This bypasses vLLM's internal tokenization, matching the old framework behavior of
-        # calling tokenizer(text, add_special_tokens=False) before passing to vLLM.
-        if self._add_bos_token is False:
-            tokenizer = self.llm.get_tokenizer()
+        # Prompt truncation requires token IDs so the caller-requested side can be
+        # applied before vLLM sees the request. add_bos_token=False already uses this path.
+        if params.truncate_prompt_tokens is not None or self._add_bos_token is False:
             vllm_prompts: list = [
-                {"prompt_token_ids": tokenizer.encode(p, add_special_tokens=False)}
-                for p in prompt_strs
+                {"prompt_token_ids": self._prompt_token_ids(prompt, params)} for prompt in prompt_strs
             ]
         else:
             vllm_prompts = prompt_strs
 
-        # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
 
         results: list[list[LMOutput]] = []
@@ -296,8 +272,6 @@ class VLLMProvider(InferenceProvider):
             request_outputs: list[LMOutput] = []
             for completion in output.outputs:
                 logprobs = _convert_logprobs(completion.logprobs)
-
-                # Compute metadata from logprobs
                 metadata: dict[str, Any] = {}
                 if logprobs:
                     sum_logits = sum(entry.get("logprob", 0.0) for entry in logprobs)
@@ -307,16 +281,8 @@ class VLLMProvider(InferenceProvider):
                         "num_tokens": num_tokens,
                         "num_tokens_all": num_tokens,
                     }
-
-                request_outputs.append(
-                    LMOutput(
-                        text=completion.text,
-                        logprobs=logprobs,
-                        metadata=metadata,
-                    )
-                )
+                request_outputs.append(LMOutput(text=completion.text, logprobs=logprobs, metadata=metadata))
             results.append(request_outputs)
-
         return results
 
     def describe_request(
@@ -338,6 +304,10 @@ class VLLMProvider(InferenceProvider):
                 "temperature": params.temperature,
                 "prompt_logprobs": 1,
             }
+            if params.truncate_prompt_tokens is not None:
+                trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+            if params.truncation_side is not None:
+                trace["generation_kwargs"]["truncation_side"] = params.truncation_side
             trace["stop_sequences"] = []
             trace["input_mode"] = "prompt_token_ids"
             return trace
@@ -356,8 +326,16 @@ class VLLMProvider(InferenceProvider):
             trace["generation_kwargs"]["top_p"] = vllm_params.top_p
         if getattr(vllm_params, "top_k", None) is not None:
             trace["generation_kwargs"]["top_k"] = vllm_params.top_k
+        if params.truncate_prompt_tokens is not None:
+            trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+        if params.truncation_side is not None:
+            trace["generation_kwargs"]["truncation_side"] = params.truncation_side
         trace["stop_sequences"] = list(params.stop_sequences or ())
-        trace["input_mode"] = "prompt_token_ids" if self._add_bos_token is False else "text"
+        trace["input_mode"] = (
+            "prompt_token_ids"
+            if params.truncate_prompt_tokens is not None or self._add_bos_token is False
+            else "text"
+        )
         return trace
 
     def logprobs(
@@ -368,11 +346,6 @@ class VLLMProvider(InferenceProvider):
         from vllm import SamplingParams as VLLMSamplingParams
 
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the VLLMProvider and will not be used."
-            )
         vllm_params = VLLMSamplingParams(
             prompt_logprobs=1,
             max_tokens=1,
@@ -381,13 +354,10 @@ class VLLMProvider(InferenceProvider):
 
         tokenizer = self.llm.get_tokenizer()
         default_max_len = self.max_length
-
-        # Build token sequences for all continuations
         token_inputs: list[list[int]] = []
-        request_meta: list[tuple[int, int, int]] = []  # (ctxlen, num_tokens_all, overflow)
+        request_meta: list[tuple[int, int, int]] = []
 
         for request in requests:
-            # Use per-request max_length if set (e.g., from task config), else provider default.
             max_len = request.max_length or default_max_len
             continuations = request.continuations or ()
             cont_prompts = request.continuation_prompts
@@ -396,22 +366,22 @@ class VLLMProvider(InferenceProvider):
                 context_enc, continuation_enc = encode_context_and_continuation(
                     tokenizer, prompt, continuation
                 )
+                context_enc = truncate_token_ids(
+                    context_enc,
+                    params.truncate_prompt_tokens,
+                    params.truncation_side,
+                    tokenizer=tokenizer,
+                    max_input_tokens=max(max_len - len(continuation_enc), 1),
+                )
 
-                # Calculate overflow and left-truncate to max_length - 1
                 full_len = len(context_enc) + len(continuation_enc)
                 overflow = full_len - (max_len - 1)
                 inp = (context_enc + continuation_enc)[-(max_len - 1) :]
-
-                # Adjust ctxlen based on overflow
-                ctxlen = len(context_enc) - max(0, overflow)
-                ctxlen = max(0, ctxlen)  # Ensure non-negative
+                ctxlen = max(0, len(context_enc) - max(0, overflow))
 
                 token_inputs.append(inp)
                 request_meta.append((ctxlen, len(inp), overflow))
 
-        # Call vLLM with token IDs instead of strings
-        # Pass as list of dicts with prompt_token_ids key
-        # Disable tqdm progress bar - we use our own worker-scoped logging
         prompts = [{"prompt_token_ids": tokens} for tokens in token_inputs]
 
         if is_debug_requests():
@@ -419,8 +389,6 @@ class VLLMProvider(InferenceProvider):
             logger.info(f"Sampling params: {vllm_params}")
 
         outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params, use_tqdm=False)
-
-        # Parse results back to per-request structure
         output_iter = iter(outputs)
         meta_iter = iter(request_meta)
         tokens_iter = iter(token_inputs)
@@ -429,43 +397,31 @@ class VLLMProvider(InferenceProvider):
         for request in requests:
             continuations = request.continuations or ()
             request_outputs = []
-
             for continuation in continuations:
                 output = next(output_iter)
                 ctxlen, num_tokens_all, overflow = next(meta_iter)
                 inp = next(tokens_iter)
-
                 logprob_entries: list[LogProbEntry] = []
                 total = 0.0
                 is_greedy = True
 
                 prompt_logprobs = output.prompt_logprobs or []
-                # Skip the first ctxlen positions (context tokens)
                 cont_logprobs = prompt_logprobs[ctxlen:] if ctxlen < len(prompt_logprobs) else []
-                # Get continuation token IDs from the actual input
                 cont_tokens = inp[ctxlen:]
 
                 for token_id, token_probs in zip(cont_tokens, cont_logprobs, strict=True):
                     if not token_probs:
                         continue
-
-                    # Check if this token is the argmax (greedy choice).
-                    # Must check BEFORE the lp_obj gate so we catch non-greedy tokens
-                    # even when they aren't in the top-k returned by prompt_logprobs.
                     if is_greedy:
                         max_token_id = max(
-                            token_probs.keys(),
-                            key=lambda tid: _coerce_logprob_to_num(token_probs[tid]),
+                            token_probs.keys(), key=lambda tid: _coerce_logprob_to_num(token_probs[tid])
                         )
                         if max_token_id != token_id:
                             is_greedy = False
-
-                    # Look up logprob for the actual continuation token (not first key in dict)
                     lp_obj = token_probs.get(token_id)
                     if lp_obj is None:
                         continue
                     logprob_val = _coerce_logprob_to_num(lp_obj)
-
                     token_str = _get_token_string(lp_obj, token_id, tokenizer)
                     logprob_entries.append(
                         {
@@ -483,16 +439,14 @@ class VLLMProvider(InferenceProvider):
                         logprobs=logprob_entries,
                         metadata={
                             "total_logprob": total,
-                            "sum_logits": total,  # Alias for compatibility
+                            "sum_logits": total,
                             "num_tokens": num_tokens,
                             "num_tokens_all": num_tokens_all,
                             "is_greedy": is_greedy,
                         },
                     )
                 )
-
             results.append(request_outputs)
-
         return results
 
     async def agenerate(
@@ -500,17 +454,7 @@ class VLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Async generate completions.
-
-        Runs the synchronous vLLM generate in a thread pool to avoid blocking.
-
-        Args:
-            requests: Batch of requests to process.
-            sampling_params: Sampling configuration.
-
-        Returns:
-            List of output lists, one per request.
-        """
+        """Async generate completions."""
         return await asyncio.to_thread(self.generate, requests, sampling_params)
 
     async def alogprobs(
@@ -518,14 +462,5 @@ class VLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        """Async compute logprobs for continuations.
-
-        Runs the synchronous vLLM logprobs in a thread pool to avoid blocking.
-
-        Args:
-            requests: Batch of requests with continuations to score.
-
-        Returns:
-            List of output lists with logprobs populated.
-        """
+        """Async compute logprobs for continuations."""
         return await asyncio.to_thread(self.logprobs, requests, sampling_params)
