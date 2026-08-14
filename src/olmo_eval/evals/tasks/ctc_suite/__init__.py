@@ -269,11 +269,14 @@ class CTCScorer(Scorer):
         example = instance.metadata["example"]
         cleaned = _apply_stop(output.text or "", STOP_PRESETS[spec.stop])
         parsed = spec.parse(cleaned, len(example["documents"]))
-        gold_field = spec.extra.get("gold_field", "gold_doc_indices")
-        # When the declared field is absent or empty (oolong's gold lives in _meta.gold_list /
-        # answers), hand score() the whole example -- the specs that need that path document
-        # accepting "the example carrying them".
-        gold = example.get(gold_field) or example
+        # Gold resolution mirrors the reference runner: the whole example when the spec asks
+        # for it (rerank's scorer needs ce_scores), else the declared field, else the example
+        # again when that field is absent/empty (oolong's gold lives in _meta.gold_list).
+        if spec.extra.get("score_takes_example"):
+            gold = example
+        else:
+            gold_field = spec.extra.get("gold_field", "gold_doc_indices")
+            gold = example.get(gold_field) or example
         scored = spec.score(parsed, gold)
         value = scored.get(spec.primary_metric, 0.0)
         if output.metadata is None:
