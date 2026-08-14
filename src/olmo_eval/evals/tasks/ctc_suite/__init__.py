@@ -187,7 +187,13 @@ ROSTER: dict[str, RosterRow] = {
         rungs=("r2k", "r4k", "r8k", "r16k"),
         note="corpus is a contiguous Gutenberg passage; rung ceiling is bounded by book length",
     ),
-    "ctc_xabsence": RosterRow(subset="xabsence", spec="xabsence"),
+    "ctc_xabsence": RosterRow(
+        subset="xabsence",
+        spec="xabsence",
+        note="the one-sided EXACT-COPY Gutenberg build (2026-08-14): B-side twins are "
+        "byte-identical and orphans sit A-side only. Supersedes the PubMed paraphrase build, "
+        "kept in the dataset as the xabsence_paraphrase config",
+    ),
     "ctc_rerank": RosterRow(
         subset="rerank", spec="rerank", rungs=_LADDER_TO_512K, eval_size=dict(_SUB500_XLONG)
     ),
