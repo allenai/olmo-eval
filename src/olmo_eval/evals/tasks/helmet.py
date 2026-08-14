@@ -6,21 +6,34 @@ currently the `json_kv` recall task (JSON key-value retrieval, based on
 https://github.com/nelson-liu/lost-in-the-middle), calibrated up to 2m
 tokens against the Olmo 3 tokenizer. Data is published as the ai2-internal
 `allenai/helmet-plus` dataset on the Hub.
+
+The ICL tasks are carried over from standard HELMET at its original 4k-128k
+lengths. They aren't length-extendable the way `json_kv` is -- their context
+is built from real labelled examples, so length is capped by how many
+demonstrations the source datasets actually contain -- but they're included
+here so a HELMET run covers more than recall alone.
 """
 
+import re
 from collections.abc import Iterator
 from typing import Any, cast
 
-from olmo_eval.common.metrics import RecallMetric
+from olmo_eval.common.metrics import AccuracyMetric, RecallMetric
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.data.helmet_icl_loader import load_icl_dataset
 from olmo_eval.data.helmet_loader import load_json_kv_dataset
 from olmo_eval.data.helmet_tasks import HELMET_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 from olmo_eval.evals.tasks.common.registry import register
 
 
-class HelmetJsonKvTask(Task):
-    """HELMET-plus json_kv task: extract a value for a given key from a long JSON blob."""
+class HelmetTask(Task):
+    """Shared plumbing for HELMET-plus tasks.
+
+    Subclasses implement `_load_dataset` to fetch their data; everything from
+    prompt assembly onward is common, since all HELMET tasks share the same
+    `user_template` / `system_template` prompt shape.
+    """
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
@@ -35,23 +48,15 @@ class HelmetJsonKvTask(Task):
         self._dataset = None
         self._templates = None
 
-    def _load_data(self) -> None:
-        """Load the helmet-plus dataset if not already loaded.
+    def _load_dataset(self) -> dict[str, Any]:
+        """Return the loader payload: `data` plus the HELMET prompt templates."""
+        raise NotImplementedError
 
-        HELMET-plus data is pre-generated at specific context lengths (e.g.
-        256k, 2m tokens) and published as JSONL files on the Hub, so it's
-        downloaded and cached via huggingface_hub rather than the standard
-        dataset pipeline.
-        """
+    def _load_data(self) -> None:
         if self._dataset is not None:
             return
 
-        loaded = load_json_kv_dataset(
-            length_name=self.helmet_config["length_name"],
-            shots=self.helmet_config["shots"],
-            max_samples=self.config.limit,
-            seed=self.config.seed,
-        )
+        loaded = self._load_dataset()
 
         self._dataset = loaded["data"]
         self._templates = {
@@ -122,25 +127,100 @@ class HelmetJsonKvTask(Task):
         return output.text
 
 
-def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetJsonKvTask]:
+class HelmetJsonKvTask(HelmetTask):
+    """HELMET-plus json_kv task: extract a value for a given key from a long JSON blob."""
+
+    def _load_dataset(self) -> dict[str, Any]:
+        """Load the helmet-plus json_kv data for this task's length tier.
+
+        HELMET-plus data is pre-generated at specific context lengths (e.g.
+        256k, 2m tokens) and published as JSONL files on the Hub, so it's
+        downloaded and cached via huggingface_hub rather than the standard
+        dataset pipeline.
+        """
+        return load_json_kv_dataset(
+            length_name=self.helmet_config["length_name"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+
+def _parse_labeled_output(text: str, prefix: str) -> str | None:
+    """Pull the answer out of a `label: N`-style completion.
+
+    Mirrors HELMET's `parse_output` (utils.py): prefer the text following the
+    prefix, otherwise fall back to the first line, then strip a repeated
+    prefix that chat-style models often echo back.
+    """
+    patterns = [
+        re.compile(f"(?:{re.escape(prefix)})(.*)(?:\n|$)", flags=re.IGNORECASE),
+        re.compile(r"(?:^)(.*)(?:\n|$)"),
+    ]
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match is not None:
+            return re.sub(
+                f"^{re.escape(prefix)}", "", match[1].strip(), flags=re.IGNORECASE
+            ).strip()
+    return None
+
+
+class HelmetIclTask(HelmetTask):
+    """HELMET ICL task: label a text given many labelled demonstrations in context."""
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_icl_dataset(
+            icl_dataset=self.helmet_config["icl_dataset"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        return _parse_labeled_output(output.text, prefix="label:")
+
+
+_TASK_CLASSES: dict[str, type[HelmetTask]] = {
+    "json_kv": HelmetJsonKvTask,
+    "icl": HelmetIclTask,
+}
+
+# Per-kind metric configuration. HELMET scores json_kv with substring exact
+# match (RecallMetric's substring scorer is equivalent for a single gold
+# answer) and ICL with exact match; see HELMET's scripts/collect_results.py.
+_TASK_METRICS: dict[str, tuple] = {
+    "json_kv": ((RecallMetric(),), "recall"),
+    "icl": ((AccuracyMetric(name="exact_match"),), "exact_match"),
+}
+
+
+def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
     """Create a task subclass for a HELMET-plus task variant.
 
     Subclasses carry only class-level attributes (metrics, sampling_params, limit);
-    all runtime state is derived from config.name inside HelmetJsonKvTask.__init__.
+    all runtime state is derived from config.name inside HelmetTask.__init__.
     """
+    kind = task_cfg["kind"]
+    base_cls = _TASK_CLASSES[kind]
+    metrics, primary_metric = _TASK_METRICS[kind]
+
+    stop_sequences = ("\n",) if task_cfg.get("stop_new_line") else None
+
     return type(
         f"Helmet_{task_name}",
-        (HelmetJsonKvTask,),
+        (base_cls,),
         {
             "__module__": __name__,
-            "metrics": (RecallMetric(),),
-            "primary_metric": "recall",
+            "metrics": metrics,
+            "primary_metric": primary_metric,
             "sampling_params": SamplingParams(
                 temperature=0.0,
                 top_p=1.0,
                 max_tokens=task_cfg["max_gen_toks"],
+                stop_sequences=stop_sequences,
             ),
-            "limit": 100,
+            "limit": task_cfg["limit"],
         },
     )
 
