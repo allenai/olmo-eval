@@ -41,8 +41,21 @@ _DEFAULT_SHOTS = 2
 _DEFAULT_LIMIT = 100
 
 # Shot counts per ICL dataset, aligned with STANDARD_CONTEXT_SIZES. These are
-# HELMET's own calibrated values (scripts/generate_configs.py): for ICL the
-# number of demonstrations, not truncation, is what sets the context length.
+# HELMET's own values (scripts/generate_configs.py): for ICL the number of
+# demonstrations, not truncation, is what sets the context length.
+#
+# Caveat worth knowing when reading results: HELMET fit these against a
+# Llama-2-era tokenizer, so under Olmo 3's larger vocabulary the rendered
+# prompts come out at ~0.78-0.85x their nominal length -- "icl_*__4096" is
+# really ~3.3-3.5k tokens, and "__131072" is closer to 105k. They are kept
+# as-is anyway so our ICL numbers stay directly comparable to published
+# HELMET results; the alternative trades that comparability for internal
+# consistency with json_kv, which is calibrated against Olmo 3 and does hit
+# its nominal lengths. Run scripts/internal/calibrate_helmet_icl_shots.py to
+# measure the current shortfall or to generate Olmo-3-calibrated counts.
+#
+# Note also that trec has only 5452 training examples, so its longest tiers
+# repeat demonstrations (balance_labels samples with replacement).
 _ICL_SHOTS = {
     "trec_coarse": [200, 400, 800, 1600, 3300, 6600],
     "trec_fine": [200, 400, 800, 1600, 3200, 6400],
