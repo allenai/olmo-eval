@@ -23,7 +23,7 @@ from olmo_eval.data.helmet_tasks import CONTEXT_SIZES, HELMET_TASKS
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, register
 
 # Task categories (tags), in the order HELMET reports them
-CATEGORIES = ["recall", "icl"]
+CATEGORIES = ["recall", "longqa", "icl"]
 
 
 # Create suites for each (category, context_size) combination
