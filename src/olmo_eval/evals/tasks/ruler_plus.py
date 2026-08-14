@@ -11,7 +11,7 @@ via scripts/generate-data.sh.
 from typing import Any
 
 from olmo_eval.common.types import Instance
-from olmo_eval.data.ruler_plus_loader import get_ruler_plus_data_root
+from olmo_eval.data.ruler_plus_loader import get_ruler_plus_data_file, load_ruler_plus_shard
 from olmo_eval.data.ruler_plus_tasks import RULER_PLUS_TASKS
 from olmo_eval.evals.tasks.common.registry import register
 from olmo_eval.evals.tasks.ruler import RulerTask, make_ruler_task_class
@@ -29,8 +29,25 @@ class RulerPlusTask(RulerTask):
     _tasks_registry: dict[str, dict[str, Any]] = RULER_PLUS_TASKS
     _name_prefix: str = "ruler_plus_"
 
-    def _get_data_root(self) -> str:
-        return get_ruler_plus_data_root()
+    def _load_data(self) -> None:
+        """Download only the requested shard and reservoir-sample it.
+
+        Bypasses RulerTask._load_data's root-dir-plus-full-file-load path:
+        ruler-plus shards can be many GB (contexts run up to 2097152 tokens),
+        and every task only needs the one shard matching its task type and
+        context size, not the rest of the dataset repo. ruler-plus records
+        never need the system/user templates that RulerTask._load_data also
+        prepares (process_doc below always expects a preformatted ``input``).
+        """
+        if self._dataset is not None:
+            return
+
+        data_path = get_ruler_plus_data_file(self.ruler_config["data"])
+        self._dataset = load_ruler_plus_shard(
+            data_path=data_path,
+            max_samples=self.config.limit,
+            seed=42,
+        )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         question = doc.get("input")

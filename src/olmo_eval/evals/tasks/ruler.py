@@ -75,9 +75,11 @@ class RulerTask(Task):
     Each RULER task variant (e.g., niah_s_1__4096) is registered as a separate task
     with specific configuration from RULER_TASKS.
 
-    Subclasses (e.g. RulerPlusTask) can point at a different task registry, name
-    prefix, and data root by overriding ``_tasks_registry``, ``_name_prefix``,
-    and ``_get_data_root``.
+    Subclasses point at a different task registry and name prefix by overriding
+    ``_tasks_registry`` and ``_name_prefix``, and customize data loading by
+    overriding ``_get_data_root`` (data lives under a shared root, as with the
+    default HuggingFace tarball release) or ``_load_data`` (e.g. RulerPlusTask,
+    where each task needs only one shard of a much larger dataset repo).
     """
 
     _tasks_registry: dict[str, dict[str, Any]] = RULER_TASKS

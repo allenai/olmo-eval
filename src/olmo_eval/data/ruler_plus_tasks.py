@@ -13,7 +13,7 @@ CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 104857
 _DEFAULT_MAX_GEN_TOKS = 50
 
 # Base task configurations. data_template is relative to the dataset root
-# (see ruler_plus_loader.get_ruler_plus_data_root) and takes a {size} placeholder.
+# (see ruler_plus_loader.get_ruler_plus_data_file) and takes a {size} placeholder.
 _BASE_TASKS = {
     # NIAH (Needle in a Haystack) - Single variants
     "niah_s_1": {
