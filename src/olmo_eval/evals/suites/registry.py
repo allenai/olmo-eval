@@ -6,6 +6,7 @@ collections of related evaluation tasks.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -31,12 +32,14 @@ class AggregationStrategy(StrEnum):
         NONE: No aggregation - just collect individual task results.
         AVERAGE: Compute simple average of all task scores.
         AVERAGE_OF_AVERAGES: Average over child suite averages.
+        WEIGHTED_AVERAGE: Average direct children using explicit weights.
         DISPLAY_ONLY: Display child results without computing suite average.
     """
 
     NONE = "none"
     AVERAGE = "average"
     AVERAGE_OF_AVERAGES = "average_of_averages"
+    WEIGHTED_AVERAGE = "weighted_average"
     DISPLAY_ONLY = "display_only"
 
 
@@ -52,12 +55,29 @@ class Suite:
         tasks: Tuple of task names or nested Suite references.
         aggregation: Strategy for combining task results.
         description: Optional human-readable description.
+        weights: Direct-child weights for ``WEIGHTED_AVERAGE`` suites.
     """
 
     name: str
     tasks: tuple[str | Suite, ...]
     aggregation: AggregationStrategy = AggregationStrategy.AVERAGE
     description: str = ""
+    weights: tuple[float, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
+            if self.weights is None:
+                raise ValueError("weights are required when aggregation='weighted_average'")
+            if len(self.weights) != len(self.tasks):
+                raise ValueError(
+                    f"weights must match tasks one-for-one: got {len(self.weights)} weights for {len(self.tasks)} tasks"
+                )
+            if any(not math.isfinite(weight) or weight < 0 for weight in self.weights):
+                raise ValueError("weights must be finite and non-negative")
+            if not any(weight > 0 for weight in self.weights):
+                raise ValueError("at least one weight must be positive")
+        elif self.weights is not None:
+            raise ValueError("weights can only be set when aggregation='weighted_average'")
 
     @property
     def expanded_tasks(self) -> tuple[str, ...]:
@@ -161,9 +181,10 @@ def make_suite(
     tasks: tuple[str | Suite, ...],
     aggregation: AggregationStrategy = AggregationStrategy.AVERAGE,
     description: str = "",
+    weights: tuple[float, ...] | None = None,
 ) -> Suite:
     """Create and register a suite."""
-    suite = Suite(name=name, tasks=tasks, aggregation=aggregation, description=description)
+    suite = Suite(name=name, tasks=tasks, aggregation=aggregation, description=description, weights=weights)
     return register(suite)
 
 
