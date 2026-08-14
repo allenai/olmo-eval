@@ -16,9 +16,12 @@ here so a HELMET run covers more than recall alone.
 
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any, cast
 
 from olmo_eval.common.metrics import AccuracyMetric, RecallMetric, RougeLF1Metric
+from olmo_eval.common.scorers import Scorer
+from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.helmet_icl_loader import load_icl_dataset
 from olmo_eval.data.helmet_infbench_loader import load_infbench_dataset
@@ -208,6 +211,50 @@ class HelmetInfbenchTask(HelmetTask):
         return parsed if parsed else output.text
 
 
+@dataclass(frozen=True, slots=True)
+class InfbenchChoiceScorer(Scorer):
+    """Exact match for InfiniteBench multiple choice, following HELMET.
+
+    HELMET accepts the answer in any of the forms a model realistically emits,
+    so this counts a response correct when the raw generation, or its
+    "Answer:"-stripped form, normalizes to either the bare letter ("B") or the
+    letter with its option text ("B. Paris") -- or when the latter appears
+    anywhere in the generation, which is what catches a verbose model that
+    answers in a sentence.
+
+    It reads `output.text` rather than only `extracted_answer` because that
+    last substring rule is defined against the untouched generation.
+    """
+
+    name: str = "exact_match"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        metadata = instance.metadata or {}
+        golds = metadata.get("all_gold_answers") or []
+        if not golds:
+            gold = instance.gold_answer
+            if gold is None:
+                return 0.0
+            golds = list(gold) if isinstance(gold, (list, tuple)) else [gold]
+        golds = [str(g) for g in golds]
+
+        raw = output.text or ""
+        candidates = [raw]
+        parsed = _parse_labeled_output(raw, prefix="Answer:")
+        if parsed:
+            candidates.append(parsed)
+
+        normalized_golds = {_squad_normalize_answer(g) for g in golds}
+        if any(_squad_normalize_answer(c) in normalized_golds for c in candidates):
+            return 1.0
+
+        # golds[1] is the "letter. option text" form
+        if len(golds) > 1 and golds[1].lower() in raw.lower():
+            return 1.0
+
+        return 0.0
+
+
 _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "json_kv": HelmetJsonKvTask,
     "icl": HelmetIclTask,
@@ -221,6 +268,10 @@ _TASK_METRICS: dict[str, tuple] = {
     "json_kv": ((RecallMetric(),), "recall"),
     "icl": ((AccuracyMetric(name="exact_match"),), "exact_match"),
     "infbench": ((RougeLF1Metric(),), "rougeL_f1"),
+    "infbench_choice": (
+        (AccuracyMetric(name="exact_match", scorer=InfbenchChoiceScorer),),
+        "exact_match",
+    ),
 }
 
 
@@ -230,9 +281,8 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
     Subclasses carry only class-level attributes (metrics, sampling_params, limit);
     all runtime state is derived from config.name inside HelmetTask.__init__.
     """
-    kind = task_cfg["kind"]
-    base_cls = _TASK_CLASSES[kind]
-    metrics, primary_metric = _TASK_METRICS[kind]
+    base_cls = _TASK_CLASSES[task_cfg["kind"]]
+    metrics, primary_metric = _TASK_METRICS[task_cfg["metrics_key"]]
 
     stop_sequences = ("\n",) if task_cfg.get("stop_new_line") else None
 
