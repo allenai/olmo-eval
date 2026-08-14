@@ -18,9 +18,10 @@ import re
 from collections.abc import Iterator
 from typing import Any, cast
 
-from olmo_eval.common.metrics import AccuracyMetric, RecallMetric
+from olmo_eval.common.metrics import AccuracyMetric, RecallMetric, RougeLF1Metric
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.helmet_icl_loader import load_icl_dataset
+from olmo_eval.data.helmet_infbench_loader import load_infbench_dataset
 from olmo_eval.data.helmet_loader import load_json_kv_dataset
 from olmo_eval.data.helmet_tasks import HELMET_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
@@ -85,7 +86,13 @@ class HelmetTask(Task):
             raise RuntimeError("Templates not loaded. Call _load_data() first.")
 
         question = self._templates["user"].format(**doc)
-        prepend_text = self._templates["system"]
+
+        # With a chat template the answer prefix is left off rather than fed in
+        # as a partial assistant turn, matching how HELMET runs its chat-format
+        # tasks (and how ruler.py handles the same distinction).
+        prepend_text = (
+            "" if self.helmet_config.get("use_chat_template") else self._templates["system"]
+        )
 
         answer = doc.get("answer")
 
@@ -181,9 +188,30 @@ class HelmetIclTask(HelmetTask):
         return _parse_labeled_output(output.text, prefix="label:")
 
 
+class HelmetInfbenchTask(HelmetTask):
+    """HELMET LongQA task: answer a question about a book-length story."""
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_infbench_dataset(
+            subset=self.helmet_config["infbench_subset"],
+            max_context_tokens=self.helmet_config["max_context_tokens"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        # HELMET scores the raw generation and the "Answer:"-stripped version,
+        # keeping whichever is better; stripping here is the closer of the two
+        # for a chat model that echoes the prefix, and a no-op otherwise.
+        parsed = _parse_labeled_output(output.text, prefix="Answer:")
+        return parsed if parsed else output.text
+
+
 _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "json_kv": HelmetJsonKvTask,
     "icl": HelmetIclTask,
+    "infbench": HelmetInfbenchTask,
 }
 
 # Per-kind metric configuration. HELMET scores json_kv with substring exact
@@ -192,6 +220,7 @@ _TASK_CLASSES: dict[str, type[HelmetTask]] = {
 _TASK_METRICS: dict[str, tuple] = {
     "json_kv": ((RecallMetric(),), "recall"),
     "icl": ((AccuracyMetric(name="exact_match"),), "exact_match"),
+    "infbench": ((RougeLF1Metric(),), "rougeL_f1"),
 }
 
 

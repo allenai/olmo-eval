@@ -69,6 +69,13 @@ _ICL_SHOTS = {
 _ICL_LIMIT = 500
 _ICL_MAX_GEN_TOKS = 20
 
+# LongQA reserves part of each length tier for the prompt and the generation,
+# and gives the rest to the story: HELMET names these tasks with a postfix of
+# `length - 200 - generation_max_length` and truncates the context to exactly
+# that many reference-tokenizer tokens (see generate_configs.py).
+_LONGQA_PROMPT_RESERVE = 200
+_INFBENCH_QA_MAX_GEN_TOKS = 10
+
 # Base task configurations, keyed by HELMET task type.
 _BASE_TASKS: dict[str, dict] = {
     "json_kv": {
@@ -90,6 +97,19 @@ _BASE_TASKS: dict[str, dict] = {
             "stop_new_line": True,
         }
         for name, shots in _ICL_SHOTS.items()
+    },
+    "infbench_qa_eng": {
+        "kind": "infbench",
+        "tag": "longqa",
+        "infbench_subset": "qa_eng",
+        # capped at standard HELMET's lengths: the context is a real book, so
+        # it can't be stretched the way json_kv's synthetic context can
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _INFBENCH_QA_MAX_GEN_TOKS,
+        "shots": 2,
+        # HELMET runs LongQA with a chat template, so the "Answer:" prefix is
+        # not appended to the prompt as a partial assistant turn
+        "use_chat_template": True,
     },
 }
 
@@ -116,18 +136,26 @@ def _generate_helmet_tasks() -> dict:
                 else base_config.get("shots", _DEFAULT_SHOTS)
             )
 
+            max_gen_toks = base_config.get("max_gen_toks", _DEFAULT_MAX_GEN_TOKS)
+
             task: dict = {
                 "kind": base_config["kind"],
                 "length_name": LENGTH_NAMES[size],
                 "shots": shots,
-                "max_gen_toks": base_config.get("max_gen_toks", _DEFAULT_MAX_GEN_TOKS),
+                "max_gen_toks": max_gen_toks,
                 "limit": base_config.get("limit", _DEFAULT_LIMIT),
                 "tag": base_config["tag"],
             }
             if "icl_dataset" in base_config:
                 task["icl_dataset"] = base_config["icl_dataset"]
+            if "infbench_subset" in base_config:
+                task["infbench_subset"] = base_config["infbench_subset"]
+                # the story gets whatever the prompt and the generation don't
+                task["max_context_tokens"] = size - _LONGQA_PROMPT_RESERVE - max_gen_toks
             if base_config.get("stop_new_line"):
                 task["stop_new_line"] = True
+            if base_config.get("use_chat_template"):
+                task["use_chat_template"] = True
 
             tasks[task_name] = task
 
