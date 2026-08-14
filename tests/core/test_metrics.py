@@ -11,7 +11,6 @@ from olmo_eval.common.metrics import (
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
     NGramCopyingBPBMetricByteAvg,
-    NGramCopyingBPBMetricInstanceAvg,
     SafetyErrorMetric,
 )
 from olmo_eval.common.scorers import MultipleChoiceScorer
@@ -570,7 +569,7 @@ class TestSafetyErrorMetric:
 
 
 class TestNGramCopyingBPBMetric:
-    """Tests for NGramCopyingBPBMetricInstanceAvg / NGramCopyingBPBMetricByteAvg."""
+    """Tests for NGramCopyingBPBMetricByteAvg."""
 
     def _make_response(self, tokens: list[str], logprobs: list[float]) -> Response:
         """Build a single-output, teacher-forced (loglikelihood) Response from tokens."""
@@ -586,9 +585,9 @@ class TestNGramCopyingBPBMetric:
             outputs=[output],
         )
 
-    def test_instance_avg_masks_repeated_positions_only(self):
+    def test_masks_repeated_positions_only(self):
         """`a b c a b` at k=1: only positions 3,4 ('a','b') are masked in."""
-        metric = NGramCopyingBPBMetricInstanceAvg(k=1)
+        metric = NGramCopyingBPBMetricByteAvg(k=1)
         response = self._make_response(["a", "b", "c", "a", "b"], [-1.0, -1.0, -1.0, -1.0, -1.0])
 
         # Masked positions 3,4: total_logprob=-2.0, total_bytes=2.
@@ -596,37 +595,36 @@ class TestNGramCopyingBPBMetric:
         assert metric.compute_instance(response) == pytest.approx(expected)
         assert metric.compute([response]) == pytest.approx(expected)
 
-    def test_documents_without_repeats_are_excluded(self):
-        """A document with zero positions meeting the threshold is excluded, not zero."""
-        metric = NGramCopyingBPBMetricInstanceAvg(k=1)
+    def test_documents_without_repeats_contribute_nothing(self):
+        """A document with zero positions meeting the threshold doesn't shift the pooled value."""
+        metric = NGramCopyingBPBMetricByteAvg(k=1)
         no_repeats = self._make_response(["p", "q", "r", "s"], [-1.0, -1.0, -1.0, -1.0])
         with_repeats = self._make_response(
             ["a", "b", "c", "a", "b"], [-1.0, -1.0, -1.0, -1.0, -1.0]
         )
 
         assert metric.compute_instance(no_repeats) is None
-        # Corpus average over both should equal the single qualifying document's value.
+        # Pooling with a zero-copy document should equal pooling without it.
         expected = 2.0 / (2 * math.log(2))
         assert metric.compute([no_repeats, with_repeats]) == pytest.approx(expected)
         assert metric.compute([no_repeats]) == 0.0
 
-    def test_byte_avg_weights_by_masked_byte_count(self):
-        """Byte-avg weights each document's contribution by its masked byte count.
+    def test_weights_by_masked_byte_count(self):
+        """Pooling weights each document's contribution by its masked byte count.
 
         Doc A = "a b a": mask (k=1) is [F,F,T]; masked logprob=-2.0, bytes=1.
         Doc B = "p p p p": mask (k=1) is [F,T,T,T]; masked logprob=-3.0, bytes=3.
         """
-        instance_metric = NGramCopyingBPBMetricInstanceAvg(k=1)
-        byte_metric = NGramCopyingBPBMetricByteAvg(k=1)
+        metric = NGramCopyingBPBMetricByteAvg(k=1)
         doc_a = self._make_response(["a", "b", "a"], [-1.0, -1.0, -2.0])
         doc_b = self._make_response(["p", "p", "p", "p"], [-1.0, -1.0, -1.0, -1.0])
 
         bpb_a = 2.0 / (1 * math.log(2))
         bpb_b = 3.0 / (3 * math.log(2))
-        assert instance_metric.compute_instance(doc_a) == pytest.approx(bpb_a)
-        assert instance_metric.compute_instance(doc_b) == pytest.approx(bpb_b)
+        assert metric.compute_instance(doc_a) == pytest.approx(bpb_a)
+        assert metric.compute_instance(doc_b) == pytest.approx(bpb_b)
 
-        # Unweighted mean of the two per-document values.
-        assert instance_metric.compute([doc_a, doc_b]) == pytest.approx((bpb_a + bpb_b) / 2)
-        # Byte-weighted: pools logprobs/bytes across documents before dividing.
-        assert byte_metric.compute([doc_a, doc_b]) == pytest.approx(5.0 / (4 * math.log(2)))
+        # Pools logprobs/bytes across documents before dividing once, rather than
+        # averaging the two per-document values unweighted -- doc B's larger masked
+        # span (3 bytes vs. 1) pulls the pooled result further toward its own bpb.
+        assert metric.compute([doc_a, doc_b]) == pytest.approx(5.0 / (4 * math.log(2)))

@@ -8,7 +8,6 @@ from olmo_eval.common.metrics import (
     CorpusPerplexityMetric,
     Metric,
     NGramCopyingBPBMetricByteAvg,
-    NGramCopyingBPBMetricInstanceAvg,
 )
 from olmo_eval.common.types import (
     Instance,
@@ -131,12 +130,8 @@ register_variant(
 
 
 def _ngram_copying_metrics() -> tuple[Metric, ...]:
-    """Build instance-avg and byte-avg n-gram-copying BPB metrics for every threshold."""
-    return tuple(
-        metric_cls(k=k)
-        for k in NGRAM_COPYING_K_VALUES
-        for metric_cls in (NGramCopyingBPBMetricInstanceAvg, NGramCopyingBPBMetricByteAvg)
-    )
+    """Build the corpus-level n-gram-copying BPB metric for every threshold."""
+    return tuple(NGramCopyingBPBMetricByteAvg(k=k) for k in NGRAM_COPYING_K_VALUES)
 
 
 register_variant(

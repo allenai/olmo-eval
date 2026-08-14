@@ -23,45 +23,13 @@ def _ngram_copying_masked_totals(
 
 
 @dataclass(frozen=True, slots=True)
-class NGramCopyingBPBMetricInstanceAvg(Metric):
-    """Arithmetic mean of per-document BPB restricted to length-k+ repeated n-grams.
-
-    Documents with no positions meeting the threshold are excluded from the average.
-    """
-
-    name: str = field(init=False)
-    k: int = 1
-    scorer: NGramCopyingBPBScorer = field(init=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "name", f"ngram_copying_bpb_instance_avg_k{self.k}")
-        object.__setattr__(self, "scorer", NGramCopyingBPBScorer(k=self.k))
-
-    def compute(self, responses: Sequence[Response]) -> float:
-        values = [value for r in responses if (value := self.compute_instance(r)) is not None]
-        return sum(values) / len(values) if values else 0.0
-
-    def compute_instance(self, response: Response) -> float | None:
-        totals = _ngram_copying_masked_totals(response, self.scorer)
-        if totals is None:
-            return None
-        total_logprob, total_bytes = totals
-        if total_bytes == 0:
-            return None
-        return -total_logprob / (total_bytes * math.log(2))
-
-    def supports_pairwise_scorer_fallback(self) -> bool:
-        return False
-
-    def pairwise_higher_is_better(self) -> bool:
-        return False
-
-
-@dataclass(frozen=True, slots=True)
 class NGramCopyingBPBMetricByteAvg(Metric):
-    """Byte-weighted (corpus-level) BPB restricted to length-k+ repeated n-grams.
+    """Corpus-level BPB restricted to length-k+ repeated n-grams.
 
-    Documents with no positions meeting the threshold are excluded from the sum.
+    Sums masked logprobs and masked bytes independently across all documents in
+    the corpus, then divides once. Documents with no positions meeting the
+    threshold contribute nothing to either sum, so they're handled without any
+    special-casing rather than being explicitly excluded.
     """
 
     name: str = field(init=False)
