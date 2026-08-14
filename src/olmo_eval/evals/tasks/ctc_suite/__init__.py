@@ -172,7 +172,10 @@ ROSTER: dict[str, RosterRow] = {
     "ctc_outlier_fixedm": RosterRow(
         subset="outlier_fixedM",
         spec="outlier",
-        note="K pinned at 3 -- the control for the scale-K row",
+        rungs=_LADDER_TO_512K,
+        eval_size=dict(_SUB500_XLONG),
+        note="K pinned at 3 -- the control for the scale-K row. Caps at 512k: three majority "
+        "topics need ~2,400 same-topic chunks each at 1M and the wiki pool cannot supply that",
     ),
     "ctc_oolong": RosterRow(
         subset="oolong", spec="oolong", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
