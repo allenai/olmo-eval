@@ -133,6 +133,8 @@ def _truncate_to_tokens(text: str, tokenizer: Any, max_tokens: int) -> tuple[str
     Returns:
         Tuple of (text, whether it was truncated).
     """
+    print("third path")
+    print("text", text)
     tokens = tokenizer.encode(text, add_special_tokens=False)
     if len(tokens) <= max_tokens:
         return text, False
@@ -383,10 +385,7 @@ class LLMJudgeScorer(ContextScorer):
         outputs = results[0] if results else []
         print(request)
         print(outputs)
-        test_request = LMRequest(
-            request_type=RequestType.CHAT,
-            messages=({"role": "user", "content": prompt},),
-        )
+        test_request = LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
         test_results = await provider.agenerate(
             [test_request], SamplingParams(temperature=0, top_p=1, max_tokens=20)
         )
@@ -614,7 +613,12 @@ class SafetyScorer(LLMJudgeScorer):
             )
 
         elif self.judge_format == "strongreject":
+            print("testing strongreject")
+            print("model_answer", model_answer)
+            print("context", context)
             model_answer, was_truncated = self._capped_response(model_answer, context)
+            print("model_answer", model_answer)
+            print("was_truncated", was_truncated)
             instance.metadata["is_truncated_response"] = was_truncated
             # The StrongREJECT judge grades against the original forbidden request, not the
             # jailbroken wrapper the model under test was shown.
@@ -641,10 +645,12 @@ class SafetyScorer(LLMJudgeScorer):
             Tuple of (response, whether it was truncated).
         """
         if context is None or self.provider_name is None:
+            print("first path")
             return model_answer, False
         try:
             tokenizer = self._require_provider(context).get_tokenizer()
         except NotImplementedError:
+            print("second path")
             return model_answer, False
         return _truncate_to_tokens(model_answer, tokenizer, self.max_response_tokens)
 
