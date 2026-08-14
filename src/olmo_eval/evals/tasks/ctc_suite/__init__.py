@@ -14,7 +14,7 @@ rules are vendored verbatim from the ``ctc`` package (AI2 OLMo-core branch ``pra
 produced the suite's published numbers. Do not edit the vendored files here; fix upstream and
 re-vendor. One spec (plain ``grouping``) is registered locally below from the vendored factory.
 
-**Data.** Private HF dataset ``PrasannSinghal/ctc-suite-eval``: one config per task, one split
+**Data.** Public HF dataset ``PrasannSinghal/ctc-suite-eval``: one config per task, one split
 per rung (``r2k`` ... ``r1m``). Set ``CTC_SUITE_DATA_ROOT=/path/to/ladders`` to read local
 ``<task>/rung_<tokens>.jsonl`` files instead (same files the HF dataset is built from).
 
@@ -52,7 +52,7 @@ from ._vendor.ctc.tasks._grouping import make_grouping_spec
 
 __all__ = ["HF_DATASET", "ROSTER", "CTCScorer", "CTCMeanMetric", "CTCSuiteTask"]
 
-#: Private HF dataset holding every rung file. One config per ROSTER row, one split per rung.
+#: Public HF dataset holding every rung file. One config per ROSTER row, one split per rung.
 HF_DATASET = "PrasannSinghal/ctc-suite-eval"
 
 #: Env var pointing at a local ladder tree (``<subset>/rung_<tokens>.jsonl``) for offline runs.

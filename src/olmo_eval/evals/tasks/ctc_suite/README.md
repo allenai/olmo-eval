@@ -9,7 +9,7 @@ median prompt length through the reference prompt path, not a document count.
 ## Quickstart
 
 ```bash
-export HF_TOKEN=...        # needs read access to PrasannSinghal/ctc-suite-eval (private)
+# no token needed: the dataset (PrasannSinghal/ctc-suite-eval) is public
 
 # preview without a model
 uv run olmo-eval run -m mock -t ctc_contradiction:r32k --dry-run
@@ -76,8 +76,8 @@ cap is documented on its RosterRow.
 - Gold conventions are pinned by test: the pair family stores 1-based indices, the retrieval
   family 0-based, and answering with the wrong base scores zero silently — the class of bug the
   vendoring exists to prevent (`tests/evals/tasks/test_ctc_suite.py`).
-- Data: `PrasannSinghal/ctc-suite-eval` (private HF; parquet, one config per task, one split per
-  rung). `CTC_SUITE_DATA_ROOT=/path` substitutes a local `<subset>/rung_<tokens>.jsonl` tree at
+- Data: `PrasannSinghal/ctc-suite-eval` (public HF; parquet, one config per task, one split per
+  rung). Gold answers included: exclude from pretraining corpora. `CTC_SUITE_DATA_ROOT=/path` substitutes a local `<subset>/rung_<tokens>.jsonl` tree at
   load time. Hub copies strip builder-metadata keys and serialize the free-form `meta` dict to a
   JSON string (schema stability across splits); grading reads neither.
 - Data generation, ladder builders, and per-rung realized-token measurements live in the OLMo-core
