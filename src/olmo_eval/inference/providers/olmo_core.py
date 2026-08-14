@@ -16,6 +16,7 @@ from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import (
     encode_context_and_continuation,
     get_bos_token_ids,
+    truncate_token_ids,
 )
 
 if TYPE_CHECKING:
@@ -297,6 +298,26 @@ class OlmoCoreProvider(InferenceProvider):
             return get_bos_token_ids(self.tokenizer, fallback_to_eos=True) + token_ids
         return token_ids
 
+    def _apply_requested_prompt_truncation(
+        self,
+        token_ids: list[int],
+        params: SamplingParams,
+        *,
+        max_input_tokens: int | None = None,
+    ) -> list[int]:
+        if params.truncate_prompt_tokens is None:
+            return token_ids
+        if max_input_tokens is None:
+            reserved_output = params.max_tokens if params.max_tokens is not None else 1
+            max_input_tokens = max(self.max_length - reserved_output, 1)
+        return truncate_token_ids(
+            token_ids,
+            params.truncate_prompt_tokens,
+            params.truncation_side,
+            tokenizer=self.tokenizer,
+            max_input_tokens=max_input_tokens,
+        )
+
     def _format_prompt(self, request: LMRequest) -> str:
         if request.request_type == RequestType.CHAT and request.messages:
             if not hasattr(self.tokenizer, "apply_chat_template"):
@@ -421,12 +442,7 @@ class OlmoCoreProvider(InferenceProvider):
         params: SamplingParams,
         prompt_token_ids: list[list[int]],
     ) -> SamplingParams:
-        """Resolve an uncapped (``max_tokens=None``) request to a concrete budget.
-
-        "Uncapped" means generate to the model's context limit, so reserve the
-        room left after the longest prompt. Downstream length validation and
-        truncation then operate on a concrete int.
-        """
+        """Resolve an uncapped (``max_tokens=None``) request to a concrete budget."""
         if params.max_tokens is not None:
             return params
         longest_prompt = max((len(ids) for ids in prompt_token_ids), default=0)
@@ -536,11 +552,6 @@ class OlmoCoreProvider(InferenceProvider):
             return []
 
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the OlmoCoreProvider and will not be used."
-            )
         results: list[list[LMOutput]] = []
         try:
             for chunk in self._iter_chunks(requests):
@@ -563,6 +574,10 @@ class OlmoCoreProvider(InferenceProvider):
                 logger.info(f"Prompt {i}:\n{prompt}")
 
         encoded_prompts = [self._encode_prompt(prompt) for prompt in prompt_strs]
+        encoded_prompts = [
+            self._apply_requested_prompt_truncation(token_ids, params)
+            for token_ids in encoded_prompts
+        ]
         params = self._resolve_max_tokens(params, encoded_prompts)
         generation_kwargs = self._build_generation_kwargs(params)
         prompt_token_ids = self._left_truncate_prompts_for_generation(encoded_prompts, params)
@@ -620,6 +635,10 @@ class OlmoCoreProvider(InferenceProvider):
             trace["generation_kwargs"] = {
                 "temperature": params.temperature,
             }
+            if params.truncate_prompt_tokens is not None:
+                trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+            if params.truncation_side is not None:
+                trace["generation_kwargs"]["truncation_side"] = params.truncation_side
             trace["stop_sequences"] = []
             return trace
 
@@ -632,6 +651,10 @@ class OlmoCoreProvider(InferenceProvider):
             "completions_only": False,
             "max_length": "<padded_prompt_length + max_tokens>",
         }
+        if params.truncate_prompt_tokens is not None:
+            trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+        if params.truncation_side is not None:
+            trace["generation_kwargs"]["truncation_side"] = params.truncation_side
         trace["stop_sequences"] = list(params.stop_sequences or ())
         return trace
 
@@ -641,23 +664,20 @@ class OlmoCoreProvider(InferenceProvider):
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the OlmoCoreProvider and will not be used."
-            )
-        del sampling_params
-        del params
         if not requests:
             return []
 
         self._free_inference_cache()
         results: list[list[LMOutput]] = []
         for chunk in self._iter_chunks(requests):
-            results.extend(self._logprobs_chunk(chunk))
+            results.extend(self._logprobs_chunk(chunk, params))
         return results
 
-    def _logprob_inputs_for_request(self, request: LMRequest) -> list[core_utils.LogprobInput]:
+    def _logprob_inputs_for_request(
+        self,
+        request: LMRequest,
+        params: SamplingParams,
+    ) -> list[core_utils.LogprobInput]:
         max_len = request.max_length or self.max_length
         if max_len <= 0:
             raise ValueError("OlmoCoreProvider requires max_length > 0 for logprobs")
@@ -669,6 +689,11 @@ class OlmoCoreProvider(InferenceProvider):
             context_ids, continuation_ids = self._encode_logprob_context_and_continuation(
                 prompt,
                 continuation,
+            )
+            context_ids = self._apply_requested_prompt_truncation(
+                context_ids,
+                params,
+                max_input_tokens=max(max_len - len(continuation_ids), 1),
             )
             if not continuation_ids:
                 rows.append(
@@ -754,10 +779,14 @@ class OlmoCoreProvider(InferenceProvider):
             },
         )
 
-    def _logprobs_chunk(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+    def _logprobs_chunk(
+        self,
+        requests: list[LMRequest],
+        params: SamplingParams,
+    ) -> list[list[LMOutput]]:
         import torch
 
-        rows_by_request = [self._logprob_inputs_for_request(request) for request in requests]
+        rows_by_request = [self._logprob_inputs_for_request(request, params) for request in requests]
         token_inputs = [row.input_ids for rows in rows_by_request for row in rows]
 
         if token_inputs:
