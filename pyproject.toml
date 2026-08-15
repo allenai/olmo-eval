@@ -202,6 +202,9 @@ select = [
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
 # Verbatim tables/templates vendored from the mm_olmo reference implementation
 "src/olmo_eval/common/image_qa/*" = ["E501"]
+# CharXiv grading prompts are vendored byte-for-byte from the official repo; their trailing
+# whitespace is part of the official prompt bytes and must not be stripped.
+"src/olmo_eval/common/image_qa/charxiv.py" = ["E501", "W291", "W293"]
 "tests/core/test_image_qa_scorers.py" = ["E501"]
 [tool.ruff.format]
 docstring-code-format = true

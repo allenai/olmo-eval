@@ -666,19 +666,24 @@ olmo-eval evaluates vision-language models on image benchmarks. Tasks attach ima
 to `LMRequest.images` and the provider decides how to render them, so the task
 definition is the same regardless of which multimodal provider runs it.
 
-Three families of image tasks are built in:
+Four families of image tasks are built in:
 
 | Family | Suite | Tasks |
 | --- | --- | --- |
 | Image-QA | `molmo2_imageqa` | `chart_qa`, `vqa2`, `doc_qa`, `info_qa`, `text_vqa`, `real_world_qa`, `mmmu`, `mmmu_pro`, `math_vista`, `countbench_qa`, `pixmo_count`, `ai2d` |
 | Dense caption | `molmo2_imageqa_caption` | the image-QA tasks plus `dense_caption` |
 | Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
+| Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
 
 Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
 `dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
 and computes no cross-task average. Pointing tasks score point-in-mask
 precision/recall/f1 by maximum bipartite matching rather than VQA-style answers,
-which is why they are a separate suite.
+which is why they are a separate suite. Multi-image tasks attach a *list* of images
+per instance (capped at 20, matching the mm_olmo eval config) and score multiple
+choice answers by MMMU-style option-letter parsing; besides the primary `all`
+accuracy each task reports per-category breakdowns (MuirBench's 12 task types,
+BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
 
 ### Setup
 
@@ -721,6 +726,9 @@ uv run olmo-eval run -m molmo2-4b -t mmmu_pro
 
 # Pointing benchmarks
 uv run olmo-eval run -m molmo2-4b -t molmo2_pointing
+
+# Multi-image benchmarks
+uv run olmo-eval run -m molmo2-4b -t molmo2_multiimage
 
 # Inspect the suite without loading a model
 uv run olmo-eval suite inspect molmo2_imageqa
@@ -765,8 +773,12 @@ which resolves images from `instance.metadata["image_path"]` or
 `instance.metadata["image"]` (a PIL image or a zero-arg callable returning one —
 use `load_instance_image` for either form) and anchors data reads under
 `$MOLMO_DATA_DIR`. Pointing tasks subclass `PointingTask`
-(`evals/tasks/common/pointing_base.py`). Registration and variants work exactly as
-described in [Adding New Tasks](#adding-new-tasks).
+(`evals/tasks/common/pointing_base.py`). Multi-image tasks subclass
+`MultiImageQATask` (`evals/tasks/common/multi_image_base.py`), which resolves
+`instance.metadata["images"]` — a callable returning the image list, or a sequence
+of PIL images / zero-arg callables / file paths — and sends them all on one
+request. Registration and variants work exactly as described in
+[Adding New Tasks](#adding-new-tasks).
 
 ## Querying Results
 

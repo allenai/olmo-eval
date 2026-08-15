@@ -232,6 +232,14 @@ class ProviderConfig:
                 f"provider.dependencies must be a list, not a string: {deps!r}. "
                 "Use provider.dependencies=[url1,url2] syntax."
             )
+        # Unknown keys flow into kwargs (same semantics as with_overrides), so
+        # dotted CLI overrides like `-o provider.batch_size=8` reach the provider
+        # constructor instead of being silently dropped.
+        from dataclasses import fields as dc_fields
+
+        known = {f.name for f in dc_fields(cls)} | {"model_name"}
+        extra_kwargs = {k: v for k, v in data.items() if k not in known}
+        merged_kwargs = {**data.get("kwargs", {}), **extra_kwargs}
         return cls(
             kind=data.get("kind", ProviderKind.VLLM),
             model=data.get("model", data.get("model_name", "")),
@@ -248,7 +256,7 @@ class ProviderConfig:
             required_secrets=tuple(data.get("required_secrets", [])),
             package=data.get("package"),
             dependencies=tuple(deps),
-            kwargs=data.get("kwargs", {}),
+            kwargs=merged_kwargs,
         )
 
     def with_overrides(self, **overrides: Any) -> ProviderConfig:

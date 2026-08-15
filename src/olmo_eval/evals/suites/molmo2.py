@@ -17,6 +17,8 @@ MOLMO2_IMAGE_QA_TASKS = (
     "countbench_qa",
     "pixmo_count",
     "ai2d",
+    "charxiv_descriptive",
+    "charxiv_reasoning",
 )
 
 make_suite(
@@ -46,4 +48,20 @@ make_suite(
     MOLMO2_POINTING_TASKS,
     aggregation=AggregationStrategy.AVERAGE,
     description="Molmo2's image-pointing benchmarks (primary metric is f1, 0-1).",
+)
+
+# Multi-image benchmarks — a separate family again: each instance carries a list
+# of images, scored by the mm_olmo MuirBenchEval-family protocol (option-letter
+# accuracy). Matches mm_olmo eval_molmo2.py's MULTI_IMAGE_TASKS.
+MOLMO2_MULTI_IMAGE_TASKS = (
+    "muir_bench",
+    "mmiu",
+    "blink",
+)
+
+make_suite(
+    "molmo2_multiimage",
+    MOLMO2_MULTI_IMAGE_TASKS,
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Molmo2's multi-image benchmarks (primary metrics are accuracy, 0-1).",
 )
