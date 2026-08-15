@@ -33,6 +33,8 @@ from .llm_judge import (
     SimpleQAJudgeScorer,
     build_openai_judge_fn,
 )
+from .ngram_copying import NGramCopyingBPBScorer, compute_repeated_ngram_mask
+from .rouge import RougeLF1Scorer, RougeLRecallScorer
 from .substring import SubstringRecallScorer
 from .tools import (
     ToolArgumentScorer,
@@ -52,6 +54,7 @@ __all__ = [
     "CITATION_GROUP_PROMPT",
     "CodeExecutionScorer",
     "compute_citation_scores_from_groups",
+    "compute_repeated_ngram_mask",
     "ContextScorer",
     "ExactMatchFlexScorer",
     "ExactMatchScorer",
@@ -66,8 +69,11 @@ __all__ = [
     "MinervaMathScorer",
     "MultipleChoiceScorer",
     "MultiplEScorer",
+    "NGramCopyingBPBScorer",
     "PerplexityScorer",
     "ProcessScorer",
+    "RougeLF1Scorer",
+    "RougeLRecallScorer",
     "RubricJudgeScorer",
     "SafetyScorer",
     "SandboxRequiredError",
