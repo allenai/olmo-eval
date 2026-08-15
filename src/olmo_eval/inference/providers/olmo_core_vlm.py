@@ -124,6 +124,12 @@ class OlmoCoreVLMProvider(InferenceProvider):
         self.model_config = vlm_utils.build_model_config(
             self.checkpoint_info, image_patch_token_id=self.image_patch_token_id
         )
+        if use_cache and vlm_utils.use_dense_attention_backend(self.model_config):
+            logger.info(
+                "Checkpoint records the fused 'flex' attention backend, which cannot carry a "
+                "KV cache; using the dense 'torch' backend, which has the same masking "
+                "semantics, so decoding stays cached. Pass use_cache=False to keep 'flex'."
+            )
         if self.model_config.image_patch_token_id != self.image_patch_token_id:
             raise ValueError(
                 f"Checkpoint image_patch_token_id ({self.model_config.image_patch_token_id}) "
@@ -155,6 +161,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
         # KV-cached decoding mutates per-block cache state on the shared model,
         # so concurrent agenerate/alogprobs threads must take turns.
         self._model_lock = threading.Lock()
+        self._embedding_weight_cache: torch.Tensor | None = None
 
     @staticmethod
     def _resolve_max_model_len_alias(
@@ -323,6 +330,24 @@ class OlmoCoreVLMProvider(InferenceProvider):
             )
         return contextlib.nullcontext()
 
+    def _embedding_weight(self) -> torch.Tensor:
+        """Token-embedding matrix spanning the extra vocab block when there is one.
+
+        Checkpoints trained with extra vocab keep the image special-token rows in a
+        second ``extra_weight`` parameter, so a lookup against ``weight`` alone would
+        index out of bounds for those IDs. Cached because the weights are frozen for
+        the provider's lifetime and the embedding runs once per decode step.
+        """
+        import torch
+
+        if self._embedding_weight_cache is None:
+            embeddings = self.model.lm.embeddings
+            extra = getattr(embeddings, "extra_weight", None)
+            self._embedding_weight_cache = (
+                embeddings.weight if extra is None else torch.cat([embeddings.weight, extra], dim=0)
+            )
+        return self._embedding_weight_cache
+
     def _embed(self, token_ids: torch.Tensor) -> torch.Tensor:
         """LM token embeddings with the model's configured scale/norm applied.
 
@@ -333,7 +358,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
         import torch.nn.functional as F
 
         lm = self.model.lm
-        h = F.embedding(token_ids, lm.embeddings.weight, padding_idx=lm.embeddings.padding_idx)
+        h = F.embedding(token_ids, self._embedding_weight(), padding_idx=lm.embeddings.padding_idx)
         if lm.embed_scale is not None:
             h = h * lm.embed_scale
         if lm.embedding_norm is not None:

@@ -750,10 +750,13 @@ automatically; `olmo_core_vlm` forces it:
 
 ```bash
 uv run olmo-eval run \
-    -o provider.kind=olmo_core \
+    --harness default -o provider.kind=olmo_core \
     -m /weka/path/to/multimodal-checkpoint \
     -t molmo2_imageqa
 ```
+
+`-o` must follow `--harness` or `-t`, so the provider override needs an explicit
+`--harness default` ahead of it.
 
 ### Adding a multimodal task
 

@@ -819,6 +819,25 @@ def enable_kv_cache(model: Any) -> bool:
     return True
 
 
+def use_dense_attention_backend(model_config: Any) -> bool:
+    """Point the LM's attention at the dense ``torch`` backend, reporting whether it moved.
+
+    Checkpoints trained with ``OLMO2_FLEX_ATTN=1`` record the fused ``flex`` backend.
+    It reproduces the dense backend's ``(causal | or_mask) & and_mask`` semantics, but
+    only the dense backend can carry a KV cache here, since the cached decode path
+    subclasses it. Backends other than ``flex`` are left alone.
+    """
+    from olmo_core.nn.attention import AttentionBackendName
+
+    lm = getattr(model_config, "lm", None)
+    block = getattr(lm, "block", None)
+    sequence_mixer = getattr(block, "sequence_mixer", None)
+    if getattr(sequence_mixer, "backend", None) != AttentionBackendName.flex:
+        return False
+    sequence_mixer.backend = AttentionBackendName.torch
+    return True
+
+
 def prepare_kv_caches(model: Any, batch_size: int, max_seq_len: int) -> None:
     """Initialize (or reset) a KV cache on every LM attention block."""
     for attention in _lm_attention_modules(model):
