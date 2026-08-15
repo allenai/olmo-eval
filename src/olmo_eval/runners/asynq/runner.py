@@ -941,6 +941,14 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         from rich.table import Table
 
+        # tqdm creates its class-level write lock lazily, so concurrent first uses can
+        # race and leave a loader reading `tqdm._lock` before it exists. Dataset loads
+        # below run in parallel, so claim the lock once up front.
+        with contextlib.suppress(ImportError):
+            import tqdm as tqdm_module
+
+            tqdm_module.tqdm.get_lock()
+
         # Collect prepared tasks in parallel, but accumulate results for deterministic ordering
         prepared_results: dict[str, tuple[TaskTracker, list[QueueItem]]] = {}
         with ThreadPoolExecutor(max_workers=min(32, len(expanded_tasks))) as executor:

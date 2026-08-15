@@ -187,6 +187,8 @@ class DenseCaptionEval(Task):
     sampling_params = SamplingParams(temperature=0.0, max_tokens=448)
     metrics = _DEFAULT_METRICS
     primary_metric = _AVG_METRIC
+    #: Image decoding is needed to build instances, whichever provider runs them.
+    dependencies = ["pillow"]
     # None => reproduce mm_olmo's per-example seeded `long_caption` template (the released
     # Molmo2-4B behavior). Set to a fixed string on a subclass to force one prompt.
     caption_prompt: str | None = None

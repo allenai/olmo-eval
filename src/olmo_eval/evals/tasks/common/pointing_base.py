@@ -46,6 +46,9 @@ __all__ = [
 class PointingTask(Task):
     """Base class for the image-pointing benchmark tasks."""
 
+    #: Image decoding is needed to build instances, whichever provider runs them.
+    dependencies = ["pillow"]
+
     @property
     def instances(self) -> Iterator[Instance]:
         if self._instances_cache is None:

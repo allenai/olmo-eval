@@ -132,6 +132,9 @@ def load_instance_images(instance: Instance) -> list:
 class MultiImageQATask(Task):
     """Base class for the multi-image QA benchmark tasks."""
 
+    #: Image decoding is needed to build instances, whichever provider runs them.
+    dependencies = ["pillow"]
+
     #: mm_olmo eval-time image cap (``eval_molmo2.py`` sets ``max_images = 20``;
     #: the data formatter truncates the image list to this length).
     max_images: int = 20
