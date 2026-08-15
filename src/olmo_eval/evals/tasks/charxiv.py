@@ -184,6 +184,9 @@ async def _gather_bounded(coros, context: ScoringContext | None):
 
 @register("charxiv_descriptive")
 class CharxivDescriptiveTask(ImageQATask):
+    #: The judge calls OpenAI; without the client every instance scores zero
+    #: instead of failing the run.
+    dependencies = ["pillow", "openai"]
     sampling_params = SamplingParams(temperature=0.0, max_tokens=1024)
     metrics = _DESC_METRICS
     primary_metric = _DESC_METRICS[0]  # descriptive_overall
@@ -253,6 +256,9 @@ class CharxivDescriptiveTask(ImageQATask):
 
 @register("charxiv_reasoning")
 class CharxivReasoningTask(ImageQATask):
+    #: The judge calls OpenAI; without the client every instance scores zero
+    #: instead of failing the run.
+    dependencies = ["pillow", "openai"]
     sampling_params = SamplingParams(temperature=0.0, max_tokens=1024)
     metrics = _REAS_METRICS
     primary_metric = _REAS_METRICS[0]  # reasoning_overall

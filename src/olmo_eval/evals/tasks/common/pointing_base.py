@@ -46,8 +46,11 @@ __all__ = [
 class PointingTask(Task):
     """Base class for the image-pointing benchmark tasks."""
 
-    #: Image decoding is needed to build instances, whichever provider runs them.
-    dependencies = ["pillow"]
+    #: Image decoding builds the instances; the scorer decodes COCO-RLE masks with
+    #: pycocotools and matches points to them with scipy. All three are needed
+    #: whichever provider runs the task, and a missing scorer dependency scores
+    #: every instance zero rather than failing the run.
+    dependencies = ["pillow", "pycocotools", "scipy"]
 
     @property
     def instances(self) -> Iterator[Instance]:
