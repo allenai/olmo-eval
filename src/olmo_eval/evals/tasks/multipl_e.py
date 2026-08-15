@@ -8,7 +8,7 @@ Dataset: nuprl/MultiPL-E
 """
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.metrics import PassAtKMetric
@@ -199,17 +199,18 @@ def _register_humaneval_task(lang: str) -> None:
             num_samples=20,
         ),
     )
+    olmo3base_sampling_params = SamplingParams(
+        max_tokens=1024,
+        temperature=0.6,
+        top_p=0.6,
+        do_sample=True,
+        num_samples=32,
+        stop_sequences=MULTIPL_E_STOP_TOKENS[lang],
+    )
     register_variant(
         task_name,
         "olmo3base",
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.6,
-            top_p=0.6,
-            do_sample=True,
-            num_samples=32,
-            stop_sequences=MULTIPL_E_STOP_TOKENS[lang],
-        ),
+        sampling_params=olmo3base_sampling_params,
         metrics=(
             PassAtKMetric(k=1, scorer=scorer_cls),
             PassAtKMetric(k=2, scorer=scorer_cls),
@@ -218,6 +219,15 @@ def _register_humaneval_task(lang: str) -> None:
             PassAtKMetric(k=16, scorer=scorer_cls),
         ),
         primary_metric=PassAtKMetric(k=1, scorer=scorer_cls),
+    )
+    register_variant(
+        task_name,
+        "v2",
+        sampling_params=replace(
+            olmo3base_sampling_params,
+            stop_sequences=None,
+            truncate_prompt_tokens=1024,
+        ),
     )
 
 
@@ -266,17 +276,18 @@ def _register_mbpp_task(lang: str) -> None:
             num_samples=20,
         ),
     )
+    olmo3base_sampling_params = SamplingParams(
+        max_tokens=1024,
+        temperature=0.6,
+        top_p=0.6,
+        do_sample=True,
+        num_samples=32,
+        stop_sequences=MULTIPL_E_STOP_TOKENS[lang],
+    )
     register_variant(
         task_name,
         "olmo3base",
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.6,
-            top_p=0.6,
-            do_sample=True,
-            num_samples=32,
-            stop_sequences=MULTIPL_E_STOP_TOKENS[lang],
-        ),
+        sampling_params=olmo3base_sampling_params,
         metrics=(
             PassAtKMetric(k=1, scorer=scorer_cls),
             PassAtKMetric(k=2, scorer=scorer_cls),
@@ -285,6 +296,15 @@ def _register_mbpp_task(lang: str) -> None:
             PassAtKMetric(k=16, scorer=scorer_cls),
         ),
         primary_metric=PassAtKMetric(k=1, scorer=scorer_cls),
+    )
+    register_variant(
+        task_name,
+        "v2",
+        sampling_params=replace(
+            olmo3base_sampling_params,
+            stop_sequences=None,
+            truncate_prompt_tokens=1024,
+        ),
     )
 
 

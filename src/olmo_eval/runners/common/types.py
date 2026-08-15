@@ -46,6 +46,8 @@ class TaskResult:
         }
         if self.primary_metric:
             result["primary_metric"] = self.primary_metric
+        if self.error:
+            result["error"] = self.error
         if include_predictions and self.predictions:
             result["predictions"] = self.predictions
         return result
