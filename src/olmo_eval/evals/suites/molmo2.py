@@ -50,6 +50,21 @@ make_suite(
     description="Molmo2's image-pointing benchmarks (primary metric is f1, 0-1).",
 )
 
+# The mm_olmo `_mp` variants: same scoring, but the prompt is built from a bare label by
+# the model's own formatter, so it follows the checkpoint (see `pointing_prompts`).
+MOLMO2_POINTING_MP_TASKS = (
+    "pixmo_points_eval_mp",
+    "sa_co_gold_subset_mp",
+    "sa_co_gold_point_4k_mp",
+)
+
+make_suite(
+    "molmo2_pointing_mp",
+    MOLMO2_POINTING_MP_TASKS,
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Molmo2's image-pointing benchmarks with mm_olmo's model-prompt (_mp) inputs.",
+)
+
 # Multi-image benchmarks — a separate family again: each instance carries a list
 # of images, scored by the mm_olmo MuirBenchEval-family protocol (option-letter
 # accuracy). Matches mm_olmo eval_molmo2.py's MULTI_IMAGE_TASKS.
