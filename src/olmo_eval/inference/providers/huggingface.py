@@ -103,7 +103,7 @@ class HuggingFaceProvider(InferenceProvider):
         logger.info(
             "Loading %s with %s (is_encoder_decoder=%s)",
             model_name,
-            auto_class.__name__,
+            getattr(auto_class, "__name__", auto_class),
             self.is_encoder_decoder,
         )
         self.model: Any = auto_class.from_pretrained(model_name, **model_kwargs)
