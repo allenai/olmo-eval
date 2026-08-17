@@ -381,10 +381,12 @@ class LLMJudgeScorer(ContextScorer):
             prompt=prompt,
             continuations=choices,
         )
+        results_original = await provider.alogprobs([request])
+        print("original", results_original)
         results = await provider.alogprobs([request], SamplingParams(temperature=0, top_p=1))
         outputs = results[0] if results else []
         print(request)
-        print(outputs)
+        print("new_results", outputs)
         test_request = LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
         test_results = await provider.agenerate(
             [test_request], SamplingParams(temperature=0, top_p=1, max_tokens=20)
