@@ -80,6 +80,9 @@ _NARRATIVEQA_MAX_GEN_TOKS = 100
 # RAG answers are short spans (configs/rag.yaml)
 _RAG_MAX_GEN_TOKS = 20
 
+# re-ranking emits a full `ID3 > ID1 > ...` ordering, so it needs far more room
+_RERANK_MAX_GEN_TOKS = 200
+
 # Base task configurations, keyed by HELMET task type.
 _BASE_TASKS: dict[str, dict] = {
     "json_kv": {
@@ -137,6 +140,15 @@ _BASE_TASKS: dict[str, dict] = {
             # the cutoff in the task name (kilt_popqa_3 -> log10(s_pop) < 3)
             "popqa": {"popularity_threshold": 3.0},
         }.items()
+    },
+    "msmarco_rerank_psg": {
+        "kind": "msmarco",
+        "tag": "rerank",
+        # candidate-list depth is fixed in the pre-retrieved files
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _RERANK_MAX_GEN_TOKS,
+        "shots": 2,
+        "stop_new_line": True,
     },
     "narrativeqa": {
         "kind": "narrativeqa",

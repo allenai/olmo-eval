@@ -29,7 +29,7 @@ from olmo_eval.data.helmet_tasks import CONTEXT_SIZES, HELMET_TASKS
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, register
 
 # Task categories (tags), in the order HELMET reports them
-CATEGORIES = ["recall", "rag", "longqa", "icl"]
+CATEGORIES = ["recall", "rag", "rerank", "longqa", "icl"]
 
 
 def _tasks_for(category: str, size: int, judged: bool | None = None) -> list[str]:
