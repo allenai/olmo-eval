@@ -19,10 +19,11 @@ Three deliberate differences from `suites/ruler.py`:
    length sweep into a misleading trend line. Use `helmet_recall__*` for the
    extended tiers.
 
-3. Some HELMET tasks are graded by an LLM judge (currently `narrativeqa`), so
-   running them needs a judge configured. Following the execution-oriented
-   split in `suites/science.py`, `helmet_all__*` is the umbrella that includes
-   them and `helmet_nojudge__*` is the subset that runs without one.
+3. Some HELMET tasks are graded by an LLM judge (`narrativeqa` and both
+   summarization tasks), so running them needs a judge configured. Following
+   the execution-oriented split in `suites/science.py`, `helmet_all__*` is the
+   umbrella that includes them and `helmet_nojudge__*` is the subset that runs
+   without one.
 """
 
 from olmo_eval.data.helmet_tasks import CONTEXT_SIZES, HELMET_TASKS

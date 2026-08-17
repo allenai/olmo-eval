@@ -125,6 +125,28 @@ class HelmetLongQAJudgeScorer(LLMJudgeScorer):
             return 0.0
         return (fluency * correctness) / LONGQA_MAX_RAW_SCORE
 
+    async def ascore_with_context(self, instance: Instance, output: LMOutput, context) -> float:
+        """Score via provider or judge_fn, with room for the rubric's reasoning.
+
+        Overrides the base only to raise the provider path's token budget: the
+        base default is 10 tokens, sized for letter-grade judges, but this
+        rubric asks the judge to reason step by step before emitting JSON --
+        under the default every provider-judged response would truncate before
+        the verdict and silently score zero. The judge_fn path is unaffected
+        (its budget is set at construction).
+        """
+        self._validate_provider(context)
+        prompt = self.format_judge_prompt(instance, output)
+
+        if self.provider_name is not None:
+            response = await self._score_with_provider(
+                prompt, context, max_tokens=HELMET_JUDGE_MAX_TOKENS
+            )
+        else:
+            response = await self._score_with_judge_fn(prompt)
+
+        return self.parse_judge_response(response)
+
 
 @dataclass(frozen=True)
 class HelmetSummJudgeScorer(LLMJudgeScorer):

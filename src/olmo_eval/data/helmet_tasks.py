@@ -1,16 +1,15 @@
-"""HELMET-plus task configurations.
+"""HELMET task configurations, covering all seven of HELMET's categories.
 
-This module defines the HELMET task variants published as the
-`allenai/helmet-plus` dataset, a strict superset of standard HELMET's
-4k-128k lengths that also extends select synthetic subsets up to 2m
-tokens. Only synthetic subsets can be extended past standard HELMET's 128k
-ceiling, since real-document tasks (LongQA, Summ, RAG, ...) are capped by
-how long the source documents actually are; currently that's just the
-`json_kv` recall task.
+Recall (json_kv), RAG (KILT), re-ranking (MS MARCO), LongQA (InfiniteBench,
+NarrativeQA), summarization (InfiniteBench, Multi-LexSum), ICL, and citation
+(ALCE). Only the synthetic recall task extends past standard HELMET's 128k
+ceiling (to 2m, calibrated against the Olmo 3 tokenizer); every other
+category is capped by real documents, fixed retrieval depth, or finite
+demonstration pools.
 
 Length coverage is therefore ragged, and each task declares its own
-`context_sizes`: `json_kv` spans the full 4k-2m range, while the ICL tasks
-stop at standard HELMET's 128k.
+`context_sizes`: `json_kv` spans the full 4k-2m range, everything else stops
+at standard HELMET's 128k.
 
 Tasks are generated programmatically from base configurations, following the
 same pattern as `ruler_tasks.py`.

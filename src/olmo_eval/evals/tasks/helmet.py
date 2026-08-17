@@ -1,17 +1,18 @@
-"""HELMET-plus: long-context extension of HELMET, up to 2m tokens.
+"""HELMET tasks: all seven categories, with recall extended to 2m tokens.
 
-Standard HELMET (https://github.com/princeton-nlp/HELMET) tops out at 128k
-tokens of context. HELMET-plus extends select synthetic subsets further,
-currently the `json_kv` recall task (JSON key-value retrieval, based on
-https://github.com/nelson-liu/lost-in-the-middle), calibrated up to 2m
-tokens against the Olmo 3 tokenizer. Data is published as the ai2-internal
-`allenai/helmet-plus` dataset on the Hub.
+Standard HELMET (https://github.com/princeton-nlp/HELMET) evaluates seven
+task categories at 4k-128k tokens of context: recall, RAG, re-ranking,
+LongQA, summarization, ICL, and citation (ALCE). All seven are registered
+here. The synthetic recall task (`json_kv`) is additionally extended to 2m
+tokens, calibrated against the Olmo 3 tokenizer; the other categories are
+capped at 128k because their length comes from real documents, fixed-depth
+retrieval, or finite demonstration pools.
 
-The ICL tasks are carried over from standard HELMET at its original 4k-128k
-lengths. They aren't length-extendable the way `json_kv` is -- their context
-is built from real labelled examples, so length is capped by how many
-demonstrations the source datasets actually contain -- but they're included
-here so a HELMET run covers more than recall alone.
+Pre-generated and pre-retrieved data lives on the ai2-internal
+`allenai/helmet-plus` Hub dataset; the remaining tasks pull their sources
+from the Hub at load time. `narrativeqa` and both summarization tasks are
+graded by an LLM judge (see `helmet_judge.py`) and therefore need a judge
+configured -- the `helmet_nojudge__*` suites exclude them.
 """
 
 import re
@@ -237,6 +238,35 @@ class HelmetInfbenchTask(HelmetTask):
 
 
 @dataclass(frozen=True, slots=True)
+class HelmetExactMatchScorer(Scorer):
+    """Exact match under HELMET's answer normalization.
+
+    HELMET's `exact_match` (drqa_exact_match_score in utils.py) compares
+    answers after lowercasing, stripping punctuation, dropping articles, and
+    collapsing whitespace. The generic ExactMatchScorer only lowercases and
+    strips, so a model answering `label: 42.` or `"42"` would score 0 here but
+    1 under HELMET -- a real divergence on realistic ICL outputs, since the
+    stop-at-newline sampling leaves trailing punctuation intact.
+    """
+
+    name: str = "exact_match"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.extracted_answer is None:
+            return 0.0
+
+        golds = (instance.metadata or {}).get("all_gold_answers")
+        if not golds:
+            gold = instance.gold_answer
+            if gold is None:
+                return 0.0
+            golds = list(gold) if isinstance(gold, (list, tuple)) else [gold]
+
+        prediction = _squad_normalize_answer(str(output.extracted_answer))
+        return float(any(_squad_normalize_answer(str(g)) == prediction for g in golds))
+
+
+@dataclass(frozen=True, slots=True)
 class InfbenchChoiceScorer(Scorer):
     """Exact match for InfiniteBench multiple choice, following HELMET.
 
@@ -382,7 +412,9 @@ _TASK_CLASSES: dict[str, type[HelmetTask]] = {
 # answer) and ICL with exact match; see HELMET's scripts/collect_results.py.
 _TASK_METRICS: dict[str, tuple] = {
     "json_kv": ((RecallMetric(),), "recall"),
-    "icl": ((AccuracyMetric(name="exact_match"),), "exact_match"),
+    # HELMET-normalized exact match, not the generic scorer -- see
+    # HelmetExactMatchScorer for why the difference is load-bearing
+    "icl": ((AccuracyMetric(name="exact_match", scorer=HelmetExactMatchScorer),), "exact_match"),
     "infbench": ((RougeLF1Metric(),), "rougeL_f1"),
     "infbench_choice": (
         (AccuracyMetric(name="exact_match", scorer=InfbenchChoiceScorer),),
