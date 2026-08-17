@@ -35,7 +35,7 @@ from .llm_judge import (
 )
 from .retrieval import NDCGScorer, ndcg_at_k
 from .rouge import RougeLF1Scorer, RougeLRecallScorer
-from .substring import SubstringRecallScorer
+from .substring import SubstringExactMatchScorer, SubstringRecallScorer
 from .tools import (
     ToolArgumentScorer,
     ToolCallScorer,
@@ -83,6 +83,7 @@ __all__ = [
     "SQuADF1Scorer",
     "SimpleQAGrade",
     "SimpleQAJudgeScorer",
+    "SubstringExactMatchScorer",
     "SubstringRecallScorer",
     "ToolArgumentScorer",
     "ToolCallScorer",

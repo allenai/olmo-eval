@@ -23,9 +23,11 @@ from olmo_eval.common.metrics import AccuracyMetric, RecallMetric, RougeLF1Metri
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.scorers.helmet_judge import HelmetLongQAJudgeScorer
+from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.helmet_icl_loader import load_icl_dataset
 from olmo_eval.data.helmet_infbench_loader import load_infbench_dataset
+from olmo_eval.data.helmet_kilt_loader import load_kilt_dataset
 from olmo_eval.data.helmet_loader import load_json_kv_dataset
 from olmo_eval.data.helmet_narrativeqa_loader import load_narrativeqa_dataset
 from olmo_eval.data.helmet_tasks import HELMET_TASKS
@@ -282,11 +284,32 @@ class HelmetNarrativeQaTask(HelmetTask):
         return parsed if parsed else output.text
 
 
+class HelmetKiltTask(HelmetTask):
+    """HELMET RAG task: answer an open-domain question from retrieved passages."""
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_kilt_dataset(
+            task=self.helmet_config["kilt_task"],
+            length_name=self.helmet_config["length_name"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+            popularity_threshold=self.helmet_config.get("popularity_threshold"),
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        # the prompt asks for "Answer: [answer]", and HELMET scores the parsed
+        # form as well as the raw text, keeping whichever is better
+        parsed = _parse_labeled_output(output.text, prefix="Answer:")
+        return parsed if parsed else output.text
+
+
 _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "json_kv": HelmetJsonKvTask,
     "icl": HelmetIclTask,
     "infbench": HelmetInfbenchTask,
     "narrativeqa": HelmetNarrativeQaTask,
+    "kilt": HelmetKiltTask,
 }
 
 # Per-kind metric configuration. HELMET scores json_kv with substring exact
@@ -299,6 +322,11 @@ _TASK_METRICS: dict[str, tuple] = {
     "infbench_choice": (
         (AccuracyMetric(name="exact_match", scorer=InfbenchChoiceScorer),),
         "exact_match",
+    ),
+    # HELMET scores RAG with substring exact match over the answer aliases
+    "kilt": (
+        (AccuracyMetric(name="substring_exact_match", scorer=SubstringExactMatchScorer),),
+        "substring_exact_match",
     ),
     # HELMET's gpt-4-score, normalized to [0, 1]; see HelmetLongQAJudgeScorer
     "narrativeqa": (

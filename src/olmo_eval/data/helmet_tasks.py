@@ -77,6 +77,9 @@ _LONGQA_PROMPT_RESERVE = 200
 _INFBENCH_QA_MAX_GEN_TOKS = 10
 _NARRATIVEQA_MAX_GEN_TOKS = 100
 
+# RAG answers are short spans (configs/rag.yaml)
+_RAG_MAX_GEN_TOKS = 20
+
 # Base task configurations, keyed by HELMET task type.
 _BASE_TASKS: dict[str, dict] = {
     "json_kv": {
@@ -111,6 +114,29 @@ _BASE_TASKS: dict[str, dict] = {
         # HELMET runs LongQA with a chat template, so the "Answer:" prefix is
         # not appended to the prompt as a partial assistant turn
         "use_chat_template": True,
+    },
+    **{
+        f"kilt_{name}": {
+            "kind": "kilt",
+            "tag": "rag",
+            "kilt_task": f"kilt_{name}",
+            # retrieval depth is baked into the pre-retrieved files, so these
+            # cannot be pushed past standard HELMET's lengths
+            "context_sizes": STANDARD_CONTEXT_SIZES,
+            "max_gen_toks": _RAG_MAX_GEN_TOKS,
+            "shots": 2,
+            # the answer is a single short line, so stop at the newline
+            "stop_new_line": True,
+            **extra,
+        }
+        for name, extra in {
+            "nq": {},
+            "triviaqa": {},
+            "hotpotqa": {},
+            # HELMET evaluates PopQA restricted to long-tail entities, encoding
+            # the cutoff in the task name (kilt_popqa_3 -> log10(s_pop) < 3)
+            "popqa": {"popularity_threshold": 3.0},
+        }.items()
     },
     "narrativeqa": {
         "kind": "narrativeqa",
@@ -178,6 +204,10 @@ def _generate_helmet_tasks() -> dict:
                 task["judged"] = True
             if base_config["kind"] == "narrativeqa":
                 task["max_context_tokens"] = size - _LONGQA_PROMPT_RESERVE - max_gen_toks
+            if "kilt_task" in base_config:
+                task["kilt_task"] = base_config["kilt_task"]
+                if "popularity_threshold" in base_config:
+                    task["popularity_threshold"] = base_config["popularity_threshold"]
             if "icl_dataset" in base_config:
                 task["icl_dataset"] = base_config["icl_dataset"]
             if "infbench_subset" in base_config:

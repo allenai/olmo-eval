@@ -106,9 +106,7 @@ def load_narrativeqa_dataset(
         # to run; seeding here makes the prompt reproducible.
         demos = all_data["train"].shuffle(seed=seed).select(range(shots))
         rendered = "\n\n".join(
-            _DEMO_TEMPLATE.format(
-                question=d["question"]["text"], answer=d["answers"][0]["text"]
-            )
+            _DEMO_TEMPLATE.format(question=d["question"]["text"], answer=d["answers"][0]["text"])
             for d in demos
         )
         demo_text = (
