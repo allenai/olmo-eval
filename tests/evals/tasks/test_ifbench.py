@@ -170,10 +170,11 @@ class TestIFEvalScorer(unittest.TestCase):
         under another. That made loose (which includes the unmodified response
         as one of its variants) score *below* strict, which loose ⊇ strict
         makes impossible. Repeated across trials because the bug was
-        probabilistic, not deterministic.
+        probabilistic, not deterministic: each trial flips with p≈0.04 under
+        the old code, so 200 trials catch the regression with p>0.999.
         """
         response_text = " ".join(["word"] * 250)
-        for _ in range(50):
+        for _ in range(200):
             instance = _make_instance(
                 "Write between X and Y words.", ["count:word_count_range"], [{}]
             )
