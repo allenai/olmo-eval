@@ -19,7 +19,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, cast
 
-from olmo_eval.common.metrics import AccuracyMetric, RecallMetric, RougeLF1Metric
+from olmo_eval.common.metrics import AccuracyMetric, NDCGMetric, RecallMetric, RougeLF1Metric
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.scorers.helmet_judge import HelmetLongQAJudgeScorer
@@ -29,6 +29,7 @@ from olmo_eval.data.helmet_icl_loader import load_icl_dataset
 from olmo_eval.data.helmet_infbench_loader import load_infbench_dataset
 from olmo_eval.data.helmet_kilt_loader import load_kilt_dataset
 from olmo_eval.data.helmet_loader import load_json_kv_dataset
+from olmo_eval.data.helmet_msmarco_loader import load_msmarco_dataset, parse_rankings
 from olmo_eval.data.helmet_narrativeqa_loader import load_narrativeqa_dataset
 from olmo_eval.data.helmet_tasks import HELMET_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
@@ -112,6 +113,9 @@ class HelmetTask(Task):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
+        if "qrel" in doc:
+            # graded relevance judgements for the re-ranking scorer
+            metadata["qrel"] = doc["qrel"]
         if "question" in doc:
             # The bare question, kept separate from `Instance.question`, which is
             # the whole rendered prompt. An LLM judge needs this one -- handing it
@@ -304,12 +308,29 @@ class HelmetKiltTask(HelmetTask):
         return parsed if parsed else output.text
 
 
+class HelmetMsMarcoTask(HelmetTask):
+    """HELMET re-ranking task: order candidate passages by relevance to a query."""
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_msmarco_dataset(
+            length_name=self.helmet_config["length_name"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        # a ranked list of document ids, which NDCGScorer scores against qrel
+        return parse_rankings(output.text or "")
+
+
 _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "json_kv": HelmetJsonKvTask,
     "icl": HelmetIclTask,
     "infbench": HelmetInfbenchTask,
     "narrativeqa": HelmetNarrativeQaTask,
     "kilt": HelmetKiltTask,
+    "msmarco": HelmetMsMarcoTask,
 }
 
 # Per-kind metric configuration. HELMET scores json_kv with substring exact
@@ -323,6 +344,8 @@ _TASK_METRICS: dict[str, tuple] = {
         (AccuracyMetric(name="exact_match", scorer=InfbenchChoiceScorer),),
         "exact_match",
     ),
+    # HELMET's headline re-ranking metric
+    "msmarco": ((NDCGMetric(),), "ndcg_at_10"),
     # HELMET scores RAG with substring exact match over the answer aliases
     "kilt": (
         (AccuracyMetric(name="substring_exact_match", scorer=SubstringExactMatchScorer),),
