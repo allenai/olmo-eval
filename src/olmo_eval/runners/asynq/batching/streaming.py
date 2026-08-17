@@ -78,21 +78,18 @@ class StreamingStrategy(BatchingStrategy):
                 try:
                     return await loop.run_in_executor(None, lambda: item_queue.get(timeout=0.1))
                 except queue.Empty:
-                    if failure is not None:
-                        raise failure from None
-                    if not in_flight:
-                        try:
-                            return await loop.run_in_executor(
-                                None, lambda: item_queue.get(timeout=1.0)
-                            )
-                        except queue.Empty:
-                            return None
-                    await asyncio.sleep(0.01)
+                    pass
+                if failure is not None:
+                    raise failure
+                if not in_flight:
+                    try:
+                        return await loop.run_in_executor(None, lambda: item_queue.get(timeout=1.0))
+                    except queue.Empty:
+                        return None
+                await asyncio.sleep(0.01)
 
         try:
             while True:
-                if failure is not None:
-                    raise failure
                 item = await get_item()
                 if failure is not None:
                     raise failure

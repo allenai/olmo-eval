@@ -54,18 +54,20 @@ def _consume_pending_instance(pending_instances: set[InstanceKey], result_item: 
     pending_instances.remove(key)
 
 
-def _format_worker_failure(error: object, pending_instances: set[InstanceKey]) -> str:
-    """Combine a fatal worker error with unresolved-instance accounting."""
+def _format_pending_instances(pending_instances: set[InstanceKey]) -> str:
+    """Summarize unresolved inference results for failure messages."""
     ordered = sorted(pending_instances)
     preview = ", ".join(
         f"{model_name}:{spec}[{instance_idx}]" for model_name, spec, instance_idx in ordered[:10]
     )
     if len(ordered) > 10:
         preview += f", ... and {len(ordered) - 10} more"
-    return (
-        f"Worker process crashed with {len(pending_instances)} inference result(s) "
-        f"pending ({preview}): {error}"
-    )
+    return f"{len(ordered)} inference result(s) pending ({preview})"
+
+
+def _format_worker_failure(error: object, pending_instances: set[InstanceKey]) -> str:
+    """Combine a fatal worker error with unresolved-instance accounting."""
+    return f"Worker process crashed with {_format_pending_instances(pending_instances)}: {error}"
 
 
 def _format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
@@ -250,101 +252,111 @@ async def process_results(
         )
     last_health_check = time.time()
     health_check_interval = 5.0
+    workers_exited = False
 
-    # Collect instance results and score each inline
-    while pending_instances:
-        _reap_done_tasks()
+    try:
+        # Collect instance results and score each inline
+        while pending_instances:
+            _reap_done_tasks()
 
-        try:
-            result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: result_queue.get(timeout=1.0)
-            )
-        except queue.Empty:
-            if time.time() - last_health_check > health_check_interval:
-                try:
-                    check_workers_alive(workers, result_queue)
-                except RuntimeError as e:
-                    fatal_message = _format_worker_failure(e, pending_instances)
+            try:
+                result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: result_queue.get(timeout=1.0)
+                )
+            except queue.Empty:
+                if workers_exited:
+                    exit_codes = [worker.exitcode for worker in workers]
+                    fatal_message = (
+                        f"All inference workers exited (exit codes: {exit_codes}) with "
+                        f"{_format_pending_instances(pending_instances)}"
+                    )
                     logger.error(f"FATAL: {fatal_message}")
-                    scoring_progress.close()
-                    raise RuntimeError(fatal_message) from e
-                last_health_check = time.time()
-            continue
+                    raise RuntimeError(fatal_message) from None
+                workers_exited = all(worker.exitcode is not None for worker in workers)
+                if time.time() - last_health_check > health_check_interval:
+                    try:
+                        check_workers_alive(workers, result_queue)
+                    except RuntimeError as e:
+                        fatal_message = _format_worker_failure(e, pending_instances)
+                        logger.error(f"FATAL: {fatal_message}")
+                        raise RuntimeError(fatal_message) from e
+                    last_health_check = time.time()
+                continue
 
-        # Check for fatal worker crash
-        if result_item.task_id == WORKER_FATAL:
-            fatal_message = _format_worker_failure(result_item.error, pending_instances)
-            logger.error(f"FATAL: {fatal_message}")
-            scoring_progress.close()
-            raise RuntimeError(fatal_message)
+            # Check for fatal worker crash
+            if result_item.task_id == WORKER_FATAL:
+                fatal_message = _format_worker_failure(result_item.error, pending_instances)
+                logger.error(f"FATAL: {fatal_message}")
+                raise RuntimeError(fatal_message)
 
-        _consume_pending_instance(pending_instances, result_item)
-        tracker = trackers[result_item.task_id]
+            _consume_pending_instance(pending_instances, result_item)
+            tracker = trackers[result_item.task_id]
 
-        if tracker.error:
-            continue
+            if tracker.error:
+                continue
 
-        # Check for hard failures (no outputs at all)
-        # Soft failures (error with outputs, like MaxTurnsExceeded) should still be scored
-        if result_item.error and not result_item.outputs:
-            logger.warning(
-                f"Instance {result_item.instance_idx} failed for {result_item.task_id}: "
-                f"{result_item.error}"
+            # Check for hard failures (no outputs at all)
+            # Soft failures (error with outputs, like MaxTurnsExceeded) should still be scored
+            if result_item.error and not result_item.outputs:
+                logger.warning(
+                    f"Instance {result_item.instance_idx} failed for {result_item.task_id}: "
+                    f"{result_item.error}"
+                )
+                tracker.add_failure(result_item.instance_idx, result_item.error)
+                scoring_progress.update(1)
+                check_task_completion(result_item.task_id)
+                continue
+
+            if result_item.error:
+                # Soft error - log warning but continue to scoring
+                logger.debug(
+                    f"Instance {result_item.instance_idx} completed with warning for "
+                    f"{result_item.task_id}: {result_item.error}"
+                )
+
+            # Build response
+            trajectory = None
+            if result_item.outputs:
+                meta = result_item.outputs[0].metadata or {}
+                traj_dict = meta.get("trajectory")
+                if traj_dict:
+                    trajectory = AgentTrajectory.from_dict(traj_dict)
+
+            assert result_item.instance is not None
+            assert result_item.request is not None
+            response = Response(
+                instance=result_item.instance,
+                request=result_item.request,
+                outputs=result_item.outputs,
+                trajectory=trajectory,
+                request_trace=result_item.request_trace,
             )
-            tracker.add_failure(result_item.instance_idx, result_item.error)
-            scoring_progress.update(1)
-            check_task_completion(result_item.task_id)
-            continue
 
-        if result_item.error:
-            # Soft error - log warning but continue to scoring
-            logger.debug(
-                f"Instance {result_item.instance_idx} completed with warning for "
-                f"{result_item.task_id}: {result_item.error}"
+            # Score inline as an async task
+            assert tracker.task is not None
+            scoring_task = asyncio.create_task(
+                score_and_store(
+                    spec=result_item.task_id,
+                    instance_idx=result_item.instance_idx,
+                    response=response,
+                    task=tracker.task,
+                )
             )
+            in_flight_scoring.add(scoring_task)
 
-        # Build response
-        trajectory = None
-        if result_item.outputs:
-            meta = result_item.outputs[0].metadata or {}
-            traj_dict = meta.get("trajectory")
-            if traj_dict:
-                trajectory = AgentTrajectory.from_dict(traj_dict)
+        # Wait for all in-flight scoring to complete
+        if in_flight_scoring:
+            await asyncio.gather(*in_flight_scoring, return_exceptions=True)
 
-        assert result_item.instance is not None
-        assert result_item.request is not None
-        response = Response(
-            instance=result_item.instance,
-            request=result_item.request,
-            outputs=result_item.outputs,
-            trajectory=trajectory,
-            request_trace=result_item.request_trace,
-        )
+        # Final check — all tasks should be complete
+        if tasks_complete < total_tasks:
+            # Some tasks may have had all instances fail during inference
+            for spec in trackers:
+                if spec not in results:
+                    check_task_completion(spec)
+    finally:
+        scoring_progress.close()
 
-        # Score inline as an async task
-        assert tracker.task is not None
-        scoring_task = asyncio.create_task(
-            score_and_store(
-                spec=result_item.task_id,
-                instance_idx=result_item.instance_idx,
-                response=response,
-                task=tracker.task,
-            )
-        )
-        in_flight_scoring.add(scoring_task)
-
-    # Wait for all in-flight scoring to complete
-    if in_flight_scoring:
-        await asyncio.gather(*in_flight_scoring, return_exceptions=True)
-
-    # Final check — all tasks should be complete
-    if tasks_complete < total_tasks:
-        # Some tasks may have had all instances fail during inference
-        for spec in trackers:
-            if spec not in results:
-                check_task_completion(spec)
-
-    scoring_progress.close()
     return results
 
 
