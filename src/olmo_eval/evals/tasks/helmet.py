@@ -22,10 +22,12 @@ from typing import Any, cast
 from olmo_eval.common.metrics import AccuracyMetric, RecallMetric, RougeLF1Metric
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
+from olmo_eval.common.scorers.helmet_judge import HelmetLongQAJudgeScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.helmet_icl_loader import load_icl_dataset
 from olmo_eval.data.helmet_infbench_loader import load_infbench_dataset
 from olmo_eval.data.helmet_loader import load_json_kv_dataset
+from olmo_eval.data.helmet_narrativeqa_loader import load_narrativeqa_dataset
 from olmo_eval.data.helmet_tasks import HELMET_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 from olmo_eval.evals.tasks.common.registry import register
@@ -108,6 +110,11 @@ class HelmetTask(Task):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
+        if "question" in doc:
+            # The bare question, kept separate from `Instance.question`, which is
+            # the whole rendered prompt. An LLM judge needs this one -- handing it
+            # the prompt would ship a book-length context to the judge.
+            metadata["judge_question"] = doc["question"]
 
         return Instance(
             question=question,
@@ -255,10 +262,31 @@ class InfbenchChoiceScorer(Scorer):
         return 0.0
 
 
+class HelmetNarrativeQaTask(HelmetTask):
+    """HELMET LongQA task: answer a question about a novel or movie script.
+
+    Graded by an LLM judge (see `HelmetLongQAJudgeScorer`), so running it needs
+    a judge configured -- `OPENAI_API_KEY` for the default OpenAI judge.
+    """
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_narrativeqa_dataset(
+            max_context_tokens=self.helmet_config["max_context_tokens"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        parsed = _parse_labeled_output(output.text, prefix="Answer:")
+        return parsed if parsed else output.text
+
+
 _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "json_kv": HelmetJsonKvTask,
     "icl": HelmetIclTask,
     "infbench": HelmetInfbenchTask,
+    "narrativeqa": HelmetNarrativeQaTask,
 }
 
 # Per-kind metric configuration. HELMET scores json_kv with substring exact
@@ -271,6 +299,11 @@ _TASK_METRICS: dict[str, tuple] = {
     "infbench_choice": (
         (AccuracyMetric(name="exact_match", scorer=InfbenchChoiceScorer),),
         "exact_match",
+    ),
+    # HELMET's gpt-4-score, normalized to [0, 1]; see HelmetLongQAJudgeScorer
+    "narrativeqa": (
+        (AccuracyMetric(name="gpt4_score", scorer=HelmetLongQAJudgeScorer()),),
+        "gpt4_score",
     ),
 }
 
