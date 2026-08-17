@@ -164,14 +164,10 @@ class TestIFEvalScorer(unittest.TestCase):
     def test_loose_never_stricter_than_strict_with_random_kwargs(self) -> None:
         """``count:word_count_range`` draws random min/max words when unset.
 
-        The instruction must be built once and reused for the strict check and
-        every loose variant — rebuilding per variant would redraw those random
-        bounds, letting the same response text pass under one draw and fail
-        under another. That made loose (which includes the unmodified response
-        as one of its variants) score *below* strict, which loose ⊇ strict
-        makes impossible. Repeated across trials because the bug was
-        probabilistic, not deterministic: each trial flips with p≈0.04 under
-        the old code, so 200 trials catch the regression with p>0.999.
+        The verifier must be built once and reused across the strict check and
+        all loose variants; rebuilding per check redraws the bounds, letting
+        loose (a superset of strict) score below strict. Flip probability is
+        ~0.04 per trial under rebuild-per-check, hence 200 trials.
         """
         response_text = " ".join(["word"] * 250)
         for _ in range(200):
