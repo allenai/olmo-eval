@@ -7,6 +7,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from olmo_eval.inference.errors import TerminalProviderError
+
 logger = logging.getLogger(__name__)
 
 
@@ -114,6 +116,10 @@ class ContinuousBatchDispatcher[T, R]:
         try:
             result = await self.process_fn(item)
             return (result, None)
+        except TerminalProviderError:
+            # A dead provider cannot safely process retries or additional work.
+            # Propagate to the inference worker so it emits WORKER_FATAL and exits.
+            raise
         except Exception as e:
             logger.warning("dispatch: process_fn raised %s: %s", type(e).__name__, e)
             return (None, e)

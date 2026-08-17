@@ -31,6 +31,48 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+InstanceKey = tuple[str, str, int]
+
+
+def _build_pending_instance_keys(trackers: dict[str, TaskTracker]) -> set[InstanceKey]:
+    """Build the exact set of inference results expected from workers."""
+    return {
+        (tracker.model_name, spec, instance_idx)
+        for spec, tracker in trackers.items()
+        for instance_idx in range(tracker.total_instances)
+    }
+
+
+def _consume_pending_instance(pending_instances: set[InstanceKey], result_item: ResultItem) -> None:
+    """Mark a result received, rejecting duplicate or unexpected identities."""
+    key = (result_item.model_name, result_item.task_id, result_item.instance_idx)
+    if key not in pending_instances:
+        raise RuntimeError(
+            "Received duplicate or unexpected inference result for "
+            f"{result_item.task_id}[{result_item.instance_idx}]"
+        )
+    pending_instances.remove(key)
+
+
+def _format_pending_instances(pending_instances: set[InstanceKey], limit: int = 10) -> str:
+    """Format a bounded, deterministic preview of unresolved instances."""
+    ordered = sorted(pending_instances)
+    preview = ", ".join(
+        f"{model_name}:{spec}[{instance_idx}]" for model_name, spec, instance_idx in ordered[:limit]
+    )
+    if len(ordered) > limit:
+        preview = f"{preview}, ... and {len(ordered) - limit} more"
+    return preview
+
+
+def _format_worker_failure(error: object, pending_instances: set[InstanceKey]) -> str:
+    """Combine a fatal worker error with exact unresolved-instance accounting."""
+    pending_preview = _format_pending_instances(pending_instances)
+    return (
+        f"Worker process crashed with {len(pending_instances)} inference result(s) "
+        f"pending ({pending_preview}): {error}"
+    )
+
 
 def _format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
     """Build a JSON-serializable scoring error payload."""
@@ -205,12 +247,18 @@ async def process_results(
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
 
-    pending_instances = total_instances
+    pending_instances = _build_pending_instance_keys(trackers)
+    if len(pending_instances) != total_instances:
+        raise RuntimeError(
+            "Inference accounting mismatch before processing: "
+            f"runner expected {total_instances} instance(s), "
+            f"task trackers describe {len(pending_instances)}"
+        )
     last_health_check = time.time()
     health_check_interval = 5.0
 
     # Collect instance results and score each inline
-    while pending_instances > 0:
+    while pending_instances:
         _reap_done_tasks()
 
         try:
@@ -219,17 +267,25 @@ async def process_results(
             )
         except queue.Empty:
             if time.time() - last_health_check > health_check_interval:
-                check_workers_alive(workers, result_queue)
+                try:
+                    check_workers_alive(workers, result_queue)
+                except RuntimeError as e:
+                    fatal_message = _format_worker_failure(e, pending_instances)
+                    logger.error(f"FATAL: {fatal_message}")
+                    scoring_progress.close()
+                    raise RuntimeError(fatal_message) from e
                 last_health_check = time.time()
             continue
 
         # Check for fatal worker crash
         if result_item.task_id == WORKER_FATAL:
-            logger.error(f"FATAL: Worker crashed! {result_item.error}")
-            raise RuntimeError(f"Worker process crashed: {result_item.error}")
+            fatal_message = _format_worker_failure(result_item.error, pending_instances)
+            logger.error(f"FATAL: {fatal_message}")
+            scoring_progress.close()
+            raise RuntimeError(fatal_message)
 
+        _consume_pending_instance(pending_instances, result_item)
         tracker = trackers[result_item.task_id]
-        pending_instances -= 1
 
         if tracker.error:
             continue

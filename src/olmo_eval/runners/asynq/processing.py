@@ -7,6 +7,7 @@ import multiprocessing as mp
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.inference.errors import classify_terminal_provider_error
 from olmo_eval.inference.metrics.core.stats import compute_batch_hash
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
 
@@ -137,6 +138,15 @@ async def process_chat_request(
     except Exception as e:
         import traceback
 
+        terminal_error = classify_terminal_provider_error(e)
+        if terminal_error is not None:
+            log.critical(
+                "Terminal provider error on CHAT instance %s: %s",
+                item.instance_idx,
+                terminal_error,
+            )
+            raise terminal_error from e
+
         error_detail = _format_error_detail(e)
         full_tb = traceback.format_exc()
         log.error(f"Error on CHAT instance {item.instance_idx}: {error_detail}\n{full_tb}")
@@ -218,6 +228,15 @@ async def process_batch(
         harness.flush_metrics(batch_hash)
 
     except Exception as e:
+        terminal_error = classify_terminal_provider_error(e)
+        if terminal_error is not None:
+            log.critical(
+                "Terminal provider error for batch of %s item(s): %s",
+                len(items),
+                terminal_error,
+            )
+            raise terminal_error from e
+
         # Batch failed - report error for all items
         error_detail = _format_error_detail(e)
         log.error(f"Batch error ({len(items)} items): {error_detail}")
