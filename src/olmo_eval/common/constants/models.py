@@ -72,6 +72,36 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             max_model_len=4096,
             kwargs={"gpu_memory_utilization": 0.7},
         ),
+        # Qwen3 SFT checkpoints
+        **{
+            f"bk/qwen3-{size}-{mix}-{frac}": ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-{mix}-{frac}-v1-hf",
+                trust_remote_code=True,
+                max_model_len=4096,
+                kwargs={"gpu_memory_utilization": 0.85},
+            )
+            for size in ["1-7b", "4b", "8b"]
+            for mix, frac in [
+                ("baseline", "50pct"), ("chat", "50pct"), ("agentic", "50pct"),
+                ("baseline", "75pct"), ("chat", "75pct"), ("agentic", "75pct"),
+            ]
+        },
+        **{
+            f"bk/qwen3-{size}-{mix}-full": ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-{full_name}-v1-hf",
+                trust_remote_code=True,
+                max_model_len=4096,
+                kwargs={"gpu_memory_utilization": 0.85},
+            )
+            for size in ["1-7b", "4b", "8b"]
+            for mix, full_name in [
+                ("baseline", "baseline"),
+                ("chat", "full-chat"),
+                ("agentic", "agentic"),
+            ]
+        },
         "olmo-2-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="allenai/OLMo-2-1124-7B",
