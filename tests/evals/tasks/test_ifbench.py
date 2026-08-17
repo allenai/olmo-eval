@@ -161,6 +161,31 @@ class TestIFEvalScorer(unittest.TestCase):
         self.assertEqual(result["strict"], [False])
         self.assertEqual(result["loose"], [True])
 
+    def test_loose_never_stricter_than_strict_with_random_kwargs(self) -> None:
+        """``count:word_count_range`` draws random min/max words when unset.
+
+        The instruction must be built once and reused for the strict check and
+        every loose variant — rebuilding per variant would redraw those random
+        bounds, letting the same response text pass under one draw and fail
+        under another. That made loose (which includes the unmodified response
+        as one of its variants) score *below* strict, which loose ⊇ strict
+        makes impossible. Repeated across trials because the bug was
+        probabilistic, not deterministic.
+        """
+        response_text = " ".join(["word"] * 250)
+        for _ in range(50):
+            instance = _make_instance(
+                "Write between X and Y words.", ["count:word_count_range"], [{}]
+            )
+            output = LMOutput(text=response_text)
+            IFEvalScorer().score(instance, output)
+            result = output.metadata["ifeval"]
+            if result["strict"][0]:
+                self.assertTrue(
+                    result["loose"][0],
+                    "loose scored False while strict scored True on the same response",
+                )
+
 
 class TestIFEvalMetrics(unittest.TestCase):
     INSTRUCTION_ID = "count:numbers"
