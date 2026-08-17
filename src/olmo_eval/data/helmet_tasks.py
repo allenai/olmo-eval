@@ -89,6 +89,11 @@ _INFBENCH_SUM_MAX_GEN_TOKS = 1200
 _MULTI_LEXSUM_MAX_GEN_TOKS = 400
 _MULTI_LEXSUM_PROMPT_RESERVE = 300
 
+# ALCE writes a cited paragraph; the nocite variants are given more room
+# because they are run zero-shot (configs/alce_nocite.yaml)
+_ALCE_MAX_GEN_TOKS = 300
+_ALCE_NOCITE_MAX_GEN_TOKS = 600
+
 # Base task configurations, keyed by HELMET task type.
 _BASE_TASKS: dict[str, dict] = {
     "json_kv": {
@@ -178,6 +183,26 @@ _BASE_TASKS: dict[str, dict] = {
         "use_chat_template": True,
         "judged": True,
     },
+    **{
+        name: {
+            "kind": "alce",
+            "metrics_key": metrics_key,
+            "tag": "cite",
+            "alce_task": name,
+            # every tier reads the same 2000-document pool and shows a prefix
+            # of it, so the ceiling is where the pool runs out
+            "context_sizes": STANDARD_CONTEXT_SIZES,
+            "max_gen_toks": gen_toks,
+            "shots": shots,
+            "use_chat_template": True,
+        }
+        for name, metrics_key, gen_toks, shots in [
+            ("alce_asqa", "alce_asqa", _ALCE_MAX_GEN_TOKS, 2),
+            ("alce_qampari", "alce_qampari", _ALCE_MAX_GEN_TOKS, 2),
+            ("alce_asqa_nocite", "alce_asqa", _ALCE_NOCITE_MAX_GEN_TOKS, 0),
+            ("alce_qampari_nocite", "alce_qampari", _ALCE_NOCITE_MAX_GEN_TOKS, 0),
+        ]
+    },
     "narrativeqa": {
         "kind": "narrativeqa",
         # graded by an LLM judge rather than string overlap, so it only runs
@@ -245,6 +270,8 @@ def _generate_helmet_tasks() -> dict:
             if base_config["kind"] in ("narrativeqa", "multi_lexsum"):
                 reserve = base_config.get("prompt_reserve", _LONGQA_PROMPT_RESERVE)
                 task["max_context_tokens"] = size - reserve - max_gen_toks
+            if "alce_task" in base_config:
+                task["alce_task"] = base_config["alce_task"]
             if "kilt_task" in base_config:
                 task["kilt_task"] = base_config["kilt_task"]
                 if "popularity_threshold" in base_config:
