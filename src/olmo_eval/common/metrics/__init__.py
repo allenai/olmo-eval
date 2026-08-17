@@ -27,6 +27,7 @@ from .ifeval import (
     IFEvalPromptLooseAccuracy,
     IFEvalPromptStrictAccuracy,
 )
+from .retrieval import NDCGMetric
 from .rouge import RougeLF1Metric, RougeLRecallMetric
 
 __all__ = [
@@ -45,6 +46,7 @@ __all__ = [
     "LogprobPerTokenMCAccuracyMetric",
     "LogprobUncondMCAccuracyMetric",
     "MeanPerplexityMetric",
+    "NDCGMetric",
     "Metric",
     "PassAtKMetric",
     "PassPowKMetric",

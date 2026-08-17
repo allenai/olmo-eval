@@ -33,6 +33,7 @@ from .llm_judge import (
     SimpleQAJudgeScorer,
     build_openai_judge_fn,
 )
+from .retrieval import NDCGScorer, ndcg_at_k
 from .rouge import RougeLF1Scorer, RougeLRecallScorer
 from .substring import SubstringRecallScorer
 from .tools import (
@@ -67,6 +68,8 @@ __all__ = [
     "MinervaMathScorer",
     "MultipleChoiceScorer",
     "MultiplEScorer",
+    "NDCGScorer",
+    "ndcg_at_k",
     "PerplexityScorer",
     "ProcessScorer",
     "RougeLF1Scorer",
