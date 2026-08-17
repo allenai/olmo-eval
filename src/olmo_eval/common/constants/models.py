@@ -72,36 +72,94 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             max_model_len=4096,
             kwargs={"gpu_memory_utilization": 0.7},
         ),
-        # Qwen3 SFT checkpoints
+        # Qwen3 SFT checkpoints — paths from HF conversion experiments
         **{
-            f"bk/qwen3-{size}-{mix}-{frac}": ProviderConfig(
+            f"bk/qwen3-{size}-baseline-full": ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
-                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-{mix}-{frac}-v1-hf",
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-75pct-v2-hf",
+                trust_remote_code=True,
+                max_model_len=4096,
+                kwargs={"gpu_memory_utilization": 0.85},
+            )
+            for size in ["0-6b", "1-7b", "4b", "8b"]
+        },
+        **{
+            f"bk/qwen3-{size}-baseline-50pct": ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-50pct-v2-hf",
                 trust_remote_code=True,
                 max_model_len=4096,
                 kwargs={"gpu_memory_utilization": 0.85},
             )
             for size in ["1-7b", "4b", "8b"]
-            for mix, frac in [
-                ("baseline", "50pct"), ("chat", "50pct"), ("agentic", "50pct"),
-                ("baseline", "75pct"), ("chat", "75pct"), ("agentic", "75pct"),
-            ]
         },
         **{
-            f"bk/qwen3-{size}-{mix}-full": ProviderConfig(
+            f"bk/qwen3-{size}-chat-full": ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
-                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-{full_name}-v1-hf",
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-full-chat-v1-hf",
                 trust_remote_code=True,
                 max_model_len=4096,
                 kwargs={"gpu_memory_utilization": 0.85},
             )
-            for size in ["1-7b", "4b", "8b"]
-            for mix, full_name in [
-                ("baseline", "baseline"),
-                ("chat", "full-chat"),
-                ("agentic", "agentic"),
-            ]
+            for size in ["0-6b", "1-7b", "4b", "8b"]
         },
+        **{
+            f"bk/qwen3-{size}-chat-50pct": ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-nemotron-50pct-v1-hf",
+                trust_remote_code=True,
+                max_model_len=4096,
+                kwargs={"gpu_memory_utilization": 0.85},
+            )
+            for size in ["0-6b", "1-7b", "4b", "8b"]
+        },
+        **{
+            f"bk/qwen3-{size}-drop-coding-full": ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-drop-coding-v1-hf",
+                trust_remote_code=True,
+                max_model_len=4096,
+                kwargs={"gpu_memory_utilization": 0.85},
+            )
+            for size in ["0-6b", "1-7b", "4b", "8b"]
+        },
+        **{
+            f"bk/qwen3-{size}-drop-coding-50pct": ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-drop-coding-50pct-v1-hf",
+                trust_remote_code=True,
+                max_model_len=4096,
+                kwargs={"gpu_memory_utilization": 0.85},
+            )
+            for size in ["0-6b", "1-7b", "4b", "8b"]
+        },
+        **{
+            f"bk/qwen3-{size}-agentic-full": ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-agentic-v1-hf",
+                trust_remote_code=True,
+                max_model_len=4096,
+                kwargs={"gpu_memory_utilization": 0.85},
+            )
+            for size in ["0-6b", "1-7b", "4b"]
+        },
+        **{
+            f"bk/qwen3-{size}-agentic-50pct": ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                model=f"/weka/oe-training-default/baileyk/checkpoints/qwen3-{size}-agentic-50pct-v1-hf",
+                trust_remote_code=True,
+                max_model_len=4096,
+                kwargs={"gpu_memory_utilization": 0.85},
+            )
+            for size in ["0-6b", "1-7b", "4b", "8b"]
+        },
+        "bk/qwen3-1-7b-agentic-75pct": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="/weka/oe-training-default/baileyk/checkpoints/qwen3-1-7b-agentic-75pct-v1-hf",
+            trust_remote_code=True,
+            max_model_len=4096,
+            kwargs={"gpu_memory_utilization": 0.85},
+        ),
         "olmo-2-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="allenai/OLMo-2-1124-7B",
