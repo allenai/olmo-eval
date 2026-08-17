@@ -1,9 +1,17 @@
-"""HELMET InfiniteBench (LongQA) data loading.
+"""HELMET InfiniteBench data loading (LongQA and summarization).
 
 Ports HELMET's `load_infbench` (https://github.com/princeton-nlp/HELMET,
-data.py): a book-length story plus a question about it. Unlike the recall
+data.py): a book-length story, with either a question about it (`qa_eng`,
+`choice_eng`) or a request to summarize it (`sum_eng`). Unlike the recall
 tasks, length here comes from truncating a real document, so these tasks stop
 at standard HELMET's 128k -- the books themselves set the ceiling.
+
+`sum_eng` is graded by an LLM judge against key points extracted ahead of time,
+which ship separately from the dataset and are attached here. Its few-shot
+demos embed complete gold summaries (upstream does the same), costing more than
+the 200-token prompt reserve HELMET budgets, so the rendered prompt runs a few
+percent over nominal at the shortest tiers (~8.4k at the 8k tier) and
+proportionally less above.
 
 Contexts are truncated with a *fixed reference tokenizer* (Llama 2, as
 upstream) rather than the tokenizer of whichever model is being evaluated.
@@ -13,10 +21,13 @@ results. It does mean the realized length under Olmo 3 differs from nominal,
 the same trade already taken for the ICL tasks -- see `helmet_tasks.py`.
 """
 
+import json
 import logging
 from typing import Any
 
 from datasets import Features, Sequence, Value, load_dataset
+
+from olmo_eval.data.helmet_loader import download_helmet_plus_file
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +76,20 @@ INFBENCH_SUBSETS: dict[str, dict[str, Any]] = {
             "[story text]\nQuestion: {question}\nOptions:\n{options}\nAnswer: {answer[0]}"
         ),
         "multiple_choice": True,
+    },
+    "sum_eng": {
+        "split": "longbook_sum_eng",
+        "user_template": (
+            "You are given a book and you are tasked to summarize it. Write a summary of "
+            "about 1000 to 1200 words. Only write about the plot and characters of the "
+            "story. Do not discuss the themes or background of the book. Do not provide "
+            "any analysis or commentary.\n\n{demo}{context}\n\nNow summarize the book."
+        ),
+        "system_template": "Summary:",
+        "demo_template": "[story text]\nSummary: {answer[0]}",
+        # graded by an LLM judge against pre-extracted key points, which ship
+        # separately from the dataset itself
+        "keypoints_file": "infbench/longbook_sum_eng_keypoints.jsonl",
     },
 }
 
@@ -169,6 +194,16 @@ def load_infbench_dataset(
 
         data = data.map(add_demos)
 
+    keypoints = {}
+    if spec.get("keypoints_file"):
+        # judge inputs, keyed by the InfiniteBench row id
+        with open(download_helmet_plus_file(spec["keypoints_file"]), encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    record = json.loads(line)
+                    keypoints[record["id"]] = record["keypoints"]
+
     tokenizer = _load_reference_tokenizer(reference_tokenizer)
     separator_length = len(tokenizer(TRUNCATION_POSTFIX)["input_ids"])
 
@@ -186,8 +221,15 @@ def load_infbench_dataset(
 
     data = data.map(truncate)
 
+    rows = data.to_list()
+    if keypoints:
+        for row in rows:
+            row["keypoints"] = keypoints.get(row["id"], [])
+            # the expert reference the precision rubric grades against
+            row["expert_summary"] = row["answer"][0] if row.get("answer") else ""
+
     return {
-        "data": data.to_list(),
+        "data": rows,
         "prompt_template": spec["user_template"] + "\n\n" + spec["system_template"],
         "user_template": spec["user_template"],
         "system_template": spec["system_template"],

@@ -83,6 +83,12 @@ _RAG_MAX_GEN_TOKS = 20
 # re-ranking emits a full `ID3 > ID1 > ...` ordering, so it needs far more room
 _RERANK_MAX_GEN_TOKS = 200
 
+# summarization writes paragraphs, and multi_lexsum reserves 300 tokens of the
+# tier for prompt and buffer where the other long-context tasks reserve 200
+_INFBENCH_SUM_MAX_GEN_TOKS = 1200
+_MULTI_LEXSUM_MAX_GEN_TOKS = 400
+_MULTI_LEXSUM_PROMPT_RESERVE = 300
+
 # Base task configurations, keyed by HELMET task type.
 _BASE_TASKS: dict[str, dict] = {
     "json_kv": {
@@ -150,6 +156,28 @@ _BASE_TASKS: dict[str, dict] = {
         "shots": 2,
         "stop_new_line": True,
     },
+    "infbench_sum_eng": {
+        "kind": "infbench",
+        "metrics_key": "summ_book",
+        "tag": "summ",
+        "infbench_subset": "sum_eng",
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _INFBENCH_SUM_MAX_GEN_TOKS,
+        "shots": 2,
+        "use_chat_template": True,
+        "judged": True,
+    },
+    "multi_lexsum": {
+        "kind": "multi_lexsum",
+        "metrics_key": "summ_lawsuit",
+        "tag": "summ",
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _MULTI_LEXSUM_MAX_GEN_TOKS,
+        "prompt_reserve": _MULTI_LEXSUM_PROMPT_RESERVE,
+        "shots": 2,
+        "use_chat_template": True,
+        "judged": True,
+    },
     "narrativeqa": {
         "kind": "narrativeqa",
         # graded by an LLM judge rather than string overlap, so it only runs
@@ -214,8 +242,9 @@ def _generate_helmet_tasks() -> dict:
             }
             if base_config.get("judged"):
                 task["judged"] = True
-            if base_config["kind"] == "narrativeqa":
-                task["max_context_tokens"] = size - _LONGQA_PROMPT_RESERVE - max_gen_toks
+            if base_config["kind"] in ("narrativeqa", "multi_lexsum"):
+                reserve = base_config.get("prompt_reserve", _LONGQA_PROMPT_RESERVE)
+                task["max_context_tokens"] = size - reserve - max_gen_toks
             if "kilt_task" in base_config:
                 task["kilt_task"] = base_config["kilt_task"]
                 if "popularity_threshold" in base_config:
