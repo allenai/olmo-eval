@@ -48,28 +48,46 @@ def _reference_answers(instance: Instance) -> list[str]:
     return [str(gold)]
 
 
+def _prediction_candidates(output: LMOutput) -> list[str]:
+    """The extracted answer and the raw generation, deduplicated.
+
+    HELMET scores both and keeps the better (its `default_post_process` takes
+    the max of metrics on the raw and the parsed output), so scoring only the
+    extracted answer would under-credit a multi-line generation whose
+    answer-prefix parse picked the wrong line.
+    """
+    candidates = []
+    for value in (output.extracted_answer, output.text):
+        if value is None:
+            continue
+        text = str(value)
+        if text and text not in candidates:
+            candidates.append(text)
+    return candidates
+
+
 @dataclass(frozen=True, slots=True)
 class RougeLF1Scorer(Scorer):
     """Max ROUGE-L F-measure over all reference answers.
 
     Taking the max over references mirrors HELMET's `calculate_metrics`, which
-    scores against every acceptable answer and keeps the best.
+    scores against every acceptable answer and keeps the best; taking it over
+    the raw and extracted generations mirrors its `default_post_process`.
     """
 
     name: str = "rougeL_f1"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        if output.extracted_answer is None:
-            return 0.0
-        prediction = str(output.extracted_answer)
+        predictions = _prediction_candidates(output)
         references = _reference_answers(instance)
-        if not references:
+        if not predictions or not references:
             return 0.0
 
         scorer = _get_rouge_scorer("rougeL")
         return max(
             scorer.score(target=reference, prediction=prediction)["rougeL"].fmeasure
             for reference in references
+            for prediction in predictions
         )
 
 
@@ -84,15 +102,14 @@ class RougeLRecallScorer(Scorer):
     name: str = "rougeL_recall"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        if output.extracted_answer is None:
-            return 0.0
-        prediction = str(output.extracted_answer)
+        predictions = _prediction_candidates(output)
         references = _reference_answers(instance)
-        if not references:
+        if not predictions or not references:
             return 0.0
 
         scorer = _get_rouge_scorer("rougeL")
         return max(
             scorer.score(target=reference, prediction=prediction)["rougeL"].recall
             for reference in references
+            for prediction in predictions
         )

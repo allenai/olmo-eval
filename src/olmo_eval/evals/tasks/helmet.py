@@ -1,17 +1,18 @@
-"""HELMET-plus: long-context extension of HELMET, up to 2m tokens.
+"""HELMET tasks: all seven categories, with recall extended to 2m tokens.
 
-Standard HELMET (https://github.com/princeton-nlp/HELMET) tops out at 128k
-tokens of context. HELMET-plus extends select synthetic subsets further,
-currently the `json_kv` recall task (JSON key-value retrieval, based on
-https://github.com/nelson-liu/lost-in-the-middle), calibrated up to 2m
-tokens against the Olmo 3 tokenizer. Data is published as the ai2-internal
-`allenai/helmet-plus` dataset on the Hub.
+Standard HELMET (https://github.com/princeton-nlp/HELMET) evaluates seven
+task categories at 4k-128k tokens of context: recall, RAG, re-ranking,
+LongQA, summarization, ICL, and citation (ALCE). All seven are registered
+here. The synthetic recall task (`json_kv`) is additionally extended to 2m
+tokens, calibrated against the Olmo 3 tokenizer; the other categories are
+capped at 128k because their length comes from real documents, fixed-depth
+retrieval, or finite demonstration pools.
 
-The ICL tasks are carried over from standard HELMET at its original 4k-128k
-lengths. They aren't length-extendable the way `json_kv` is -- their context
-is built from real labelled examples, so length is capped by how many
-demonstrations the source datasets actually contain -- but they're included
-here so a HELMET run covers more than recall alone.
+Pre-generated and pre-retrieved data lives on the ai2-internal
+`allenai/helmet-plus` Hub dataset; the remaining tasks pull their sources
+from the Hub at load time. `narrativeqa` and both summarization tasks are
+graded by an LLM judge (see `helmet_judge.py`) and therefore need a judge
+configured -- the `helmet_nojudge__*` suites exclude them.
 """
 
 import re
@@ -19,13 +20,21 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, cast
 
-from olmo_eval.common.metrics import AccuracyMetric, RecallMetric, RougeLF1Metric
+from olmo_eval.common.metrics import AccuracyMetric, NDCGMetric, RecallMetric, RougeLF1Metric
 from olmo_eval.common.scorers import Scorer
+from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
+from olmo_eval.common.scorers.helmet_judge import HelmetLongQAJudgeScorer, HelmetSummJudgeScorer
+from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.data.helmet_alce_loader import load_alce_dataset
 from olmo_eval.data.helmet_icl_loader import load_icl_dataset
 from olmo_eval.data.helmet_infbench_loader import load_infbench_dataset
+from olmo_eval.data.helmet_kilt_loader import load_kilt_dataset
 from olmo_eval.data.helmet_loader import load_json_kv_dataset
+from olmo_eval.data.helmet_msmarco_loader import load_msmarco_dataset, parse_rankings
+from olmo_eval.data.helmet_multilexsum_loader import load_multi_lexsum_dataset
+from olmo_eval.data.helmet_narrativeqa_loader import load_narrativeqa_dataset
 from olmo_eval.data.helmet_tasks import HELMET_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 from olmo_eval.evals.tasks.common.registry import register
@@ -108,6 +117,23 @@ class HelmetTask(Task):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
+        for scoring_field in ("qa_pairs", "qampari_answers"):
+            if scoring_field in doc:
+                # ALCE scoring inputs, kept out of the prompt
+                metadata[scoring_field] = doc[scoring_field]
+        for judge_field in ("keypoints", "expert_summary"):
+            if judge_field in doc:
+                # inputs the summarization judge needs; extracted ahead of time
+                # and shipped with the data rather than derived at scoring time
+                metadata[judge_field] = doc[judge_field]
+        if "qrel" in doc:
+            # graded relevance judgements for the re-ranking scorer
+            metadata["qrel"] = doc["qrel"]
+        if "question" in doc:
+            # The bare question, kept separate from `Instance.question`, which is
+            # the whole rendered prompt. An LLM judge needs this one -- handing it
+            # the prompt would ship a book-length context to the judge.
+            metadata["judge_question"] = doc["question"]
 
         return Instance(
             question=question,
@@ -212,6 +238,35 @@ class HelmetInfbenchTask(HelmetTask):
 
 
 @dataclass(frozen=True, slots=True)
+class HelmetExactMatchScorer(Scorer):
+    """Exact match under HELMET's answer normalization.
+
+    HELMET's `exact_match` (drqa_exact_match_score in utils.py) compares
+    answers after lowercasing, stripping punctuation, dropping articles, and
+    collapsing whitespace. The generic ExactMatchScorer only lowercases and
+    strips, so a model answering `label: 42.` or `"42"` would score 0 here but
+    1 under HELMET -- a real divergence on realistic ICL outputs, since the
+    stop-at-newline sampling leaves trailing punctuation intact.
+    """
+
+    name: str = "exact_match"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.extracted_answer is None:
+            return 0.0
+
+        golds = (instance.metadata or {}).get("all_gold_answers")
+        if not golds:
+            gold = instance.gold_answer
+            if gold is None:
+                return 0.0
+            golds = list(gold) if isinstance(gold, (list, tuple)) else [gold]
+
+        prediction = _squad_normalize_answer(str(output.extracted_answer))
+        return float(any(_squad_normalize_answer(str(g)) == prediction for g in golds))
+
+
+@dataclass(frozen=True, slots=True)
 class InfbenchChoiceScorer(Scorer):
     """Exact match for InfiniteBench multiple choice, following HELMET.
 
@@ -255,10 +310,101 @@ class InfbenchChoiceScorer(Scorer):
         return 0.0
 
 
+class HelmetNarrativeQaTask(HelmetTask):
+    """HELMET LongQA task: answer a question about a novel or movie script.
+
+    Graded by an LLM judge (see `HelmetLongQAJudgeScorer`), so running it needs
+    a judge configured -- `OPENAI_API_KEY` for the default OpenAI judge.
+    """
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_narrativeqa_dataset(
+            max_context_tokens=self.helmet_config["max_context_tokens"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        parsed = _parse_labeled_output(output.text, prefix="Answer:")
+        return parsed if parsed else output.text
+
+
+class HelmetKiltTask(HelmetTask):
+    """HELMET RAG task: answer an open-domain question from retrieved passages."""
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_kilt_dataset(
+            task=self.helmet_config["kilt_task"],
+            length_name=self.helmet_config["length_name"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+            popularity_threshold=self.helmet_config.get("popularity_threshold"),
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        # the prompt asks for "Answer: [answer]", and HELMET scores the parsed
+        # form as well as the raw text, keeping whichever is better
+        parsed = _parse_labeled_output(output.text, prefix="Answer:")
+        return parsed if parsed else output.text
+
+
+class HelmetMsMarcoTask(HelmetTask):
+    """HELMET re-ranking task: order candidate passages by relevance to a query."""
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_msmarco_dataset(
+            length_name=self.helmet_config["length_name"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        # a ranked list of document ids, which NDCGScorer scores against qrel
+        return parse_rankings(output.text or "")
+
+
+class HelmetMultiLexSumTask(HelmetTask):
+    """HELMET summarization task: summarize the filings of a civil rights lawsuit."""
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_multi_lexsum_dataset(
+            max_context_tokens=self.helmet_config["max_context_tokens"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+
+class HelmetAlceTask(HelmetTask):
+    """HELMET Cite task: answer a question and cite the documents used.
+
+    Only ALCE's answer-correctness metrics are scored here. Whether the
+    citations actually support the claims is AutoAIS's job, which needs an NLI
+    model this task does not yet wire up.
+    """
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_alce_dataset(
+            task=self.helmet_config["alce_task"],
+            length_name=self.helmet_config["length_name"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+
 _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "json_kv": HelmetJsonKvTask,
     "icl": HelmetIclTask,
     "infbench": HelmetInfbenchTask,
+    "narrativeqa": HelmetNarrativeQaTask,
+    "kilt": HelmetKiltTask,
+    "msmarco": HelmetMsMarcoTask,
+    "multi_lexsum": HelmetMultiLexSumTask,
+    "alce": HelmetAlceTask,
 }
 
 # Per-kind metric configuration. HELMET scores json_kv with substring exact
@@ -266,11 +412,41 @@ _TASK_CLASSES: dict[str, type[HelmetTask]] = {
 # answer) and ICL with exact match; see HELMET's scripts/collect_results.py.
 _TASK_METRICS: dict[str, tuple] = {
     "json_kv": ((RecallMetric(),), "recall"),
-    "icl": ((AccuracyMetric(name="exact_match"),), "exact_match"),
+    # HELMET-normalized exact match, not the generic scorer -- see
+    # HelmetExactMatchScorer for why the difference is load-bearing
+    "icl": ((AccuracyMetric(name="exact_match", scorer=HelmetExactMatchScorer),), "exact_match"),
     "infbench": ((RougeLF1Metric(),), "rougeL_f1"),
     "infbench_choice": (
         (AccuracyMetric(name="exact_match", scorer=InfbenchChoiceScorer),),
         "exact_match",
+    ),
+    # HELMET's headline re-ranking metric
+    "msmarco": ((NDCGMetric(),), "ndcg_at_10"),
+    # HELMET scores RAG with substring exact match over the answer aliases
+    "kilt": (
+        (AccuracyMetric(name="substring_exact_match", scorer=SubstringExactMatchScorer),),
+        "substring_exact_match",
+    ),
+    # ALCE answer correctness. The citation-grounding half (citation_rec /
+    # citation_prec) needs AutoAIS and is not wired up yet.
+    "alce_asqa": ((AccuracyMetric(name="str_em", scorer=AlceStrEmScorer),), "str_em"),
+    "alce_qampari": (
+        (AccuracyMetric(name="qampari_rec_top5", scorer=AlceQampariRecTop5Scorer),),
+        "qampari_rec_top5",
+    ),
+    # HELMET's gpt-4-f1: fluency-gated F1 over key points, via three judge calls
+    "summ_book": (
+        (AccuracyMetric(name="gpt4_f1", scorer=HelmetSummJudgeScorer(is_book=True)),),
+        "gpt4_f1",
+    ),
+    "summ_lawsuit": (
+        (AccuracyMetric(name="gpt4_f1", scorer=HelmetSummJudgeScorer(is_book=False)),),
+        "gpt4_f1",
+    ),
+    # HELMET's gpt-4-score, normalized to [0, 1]; see HelmetLongQAJudgeScorer
+    "narrativeqa": (
+        (AccuracyMetric(name="gpt4_score", scorer=HelmetLongQAJudgeScorer()),),
+        "gpt4_score",
     ),
 }
 

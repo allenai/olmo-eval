@@ -1,16 +1,15 @@
-"""HELMET-plus task configurations.
+"""HELMET task configurations, covering all seven of HELMET's categories.
 
-This module defines the HELMET task variants published as the
-`allenai/helmet-plus` dataset, a strict superset of standard HELMET's
-4k-128k lengths that also extends select synthetic subsets up to 2m
-tokens. Only synthetic subsets can be extended past standard HELMET's 128k
-ceiling, since real-document tasks (LongQA, Summ, RAG, ...) are capped by
-how long the source documents actually are; currently that's just the
-`json_kv` recall task.
+Recall (json_kv), RAG (KILT), re-ranking (MS MARCO), LongQA (InfiniteBench,
+NarrativeQA), summarization (InfiniteBench, Multi-LexSum), ICL, and citation
+(ALCE). Only the synthetic recall task extends past standard HELMET's 128k
+ceiling (to 2m, calibrated against the Olmo 3 tokenizer); every other
+category is capped by real documents, fixed retrieval depth, or finite
+demonstration pools.
 
 Length coverage is therefore ragged, and each task declares its own
-`context_sizes`: `json_kv` spans the full 4k-2m range, while the ICL tasks
-stop at standard HELMET's 128k.
+`context_sizes`: `json_kv` spans the full 4k-2m range, everything else stops
+at standard HELMET's 128k.
 
 Tasks are generated programmatically from base configurations, following the
 same pattern as `ruler_tasks.py`.
@@ -75,6 +74,24 @@ _ICL_MAX_GEN_TOKS = 20
 # that many reference-tokenizer tokens (see generate_configs.py).
 _LONGQA_PROMPT_RESERVE = 200
 _INFBENCH_QA_MAX_GEN_TOKS = 10
+_NARRATIVEQA_MAX_GEN_TOKS = 100
+
+# RAG answers are short spans (configs/rag.yaml)
+_RAG_MAX_GEN_TOKS = 20
+
+# re-ranking emits a full `ID3 > ID1 > ...` ordering, so it needs far more room
+_RERANK_MAX_GEN_TOKS = 200
+
+# summarization writes paragraphs, and multi_lexsum reserves 300 tokens of the
+# tier for prompt and buffer where the other long-context tasks reserve 200
+_INFBENCH_SUM_MAX_GEN_TOKS = 1200
+_MULTI_LEXSUM_MAX_GEN_TOKS = 400
+_MULTI_LEXSUM_PROMPT_RESERVE = 300
+
+# ALCE writes a cited paragraph; the nocite variants are given more room
+# because they are run zero-shot (configs/alce_nocite.yaml)
+_ALCE_MAX_GEN_TOKS = 300
+_ALCE_NOCITE_MAX_GEN_TOKS = 600
 
 # Base task configurations, keyed by HELMET task type.
 _BASE_TASKS: dict[str, dict] = {
@@ -110,6 +127,92 @@ _BASE_TASKS: dict[str, dict] = {
         # HELMET runs LongQA with a chat template, so the "Answer:" prefix is
         # not appended to the prompt as a partial assistant turn
         "use_chat_template": True,
+    },
+    **{
+        f"kilt_{name}": {
+            "kind": "kilt",
+            "tag": "rag",
+            "kilt_task": f"kilt_{name}",
+            # retrieval depth is baked into the pre-retrieved files, so these
+            # cannot be pushed past standard HELMET's lengths
+            "context_sizes": STANDARD_CONTEXT_SIZES,
+            "max_gen_toks": _RAG_MAX_GEN_TOKS,
+            "shots": 2,
+            # the answer is a single short line, so stop at the newline
+            "stop_new_line": True,
+            **extra,
+        }
+        for name, extra in {
+            "nq": {},
+            "triviaqa": {},
+            "hotpotqa": {},
+            # HELMET evaluates PopQA restricted to long-tail entities, encoding
+            # the cutoff in the task name (kilt_popqa_3 -> log10(s_pop) < 3)
+            "popqa": {"popularity_threshold": 3.0},
+        }.items()
+    },
+    "msmarco_rerank_psg": {
+        "kind": "msmarco",
+        "tag": "rerank",
+        # candidate-list depth is fixed in the pre-retrieved files
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _RERANK_MAX_GEN_TOKS,
+        "shots": 2,
+        "stop_new_line": True,
+    },
+    "infbench_sum_eng": {
+        "kind": "infbench",
+        "metrics_key": "summ_book",
+        "tag": "summ",
+        "infbench_subset": "sum_eng",
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _INFBENCH_SUM_MAX_GEN_TOKS,
+        "shots": 2,
+        "use_chat_template": True,
+        "judged": True,
+    },
+    "multi_lexsum": {
+        "kind": "multi_lexsum",
+        "metrics_key": "summ_lawsuit",
+        "tag": "summ",
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _MULTI_LEXSUM_MAX_GEN_TOKS,
+        "prompt_reserve": _MULTI_LEXSUM_PROMPT_RESERVE,
+        "shots": 2,
+        "use_chat_template": True,
+        "judged": True,
+    },
+    **{
+        name: {
+            "kind": "alce",
+            "metrics_key": metrics_key,
+            "tag": "cite",
+            "alce_task": name,
+            # every tier reads the same 2000-document pool and shows a prefix
+            # of it, so the ceiling is where the pool runs out
+            "context_sizes": STANDARD_CONTEXT_SIZES,
+            "max_gen_toks": gen_toks,
+            "shots": shots,
+            "use_chat_template": True,
+        }
+        for name, metrics_key, gen_toks, shots in [
+            ("alce_asqa", "alce_asqa", _ALCE_MAX_GEN_TOKS, 2),
+            ("alce_qampari", "alce_qampari", _ALCE_MAX_GEN_TOKS, 2),
+            ("alce_asqa_nocite", "alce_asqa", _ALCE_NOCITE_MAX_GEN_TOKS, 0),
+            ("alce_qampari_nocite", "alce_qampari", _ALCE_NOCITE_MAX_GEN_TOKS, 0),
+        ]
+    },
+    "narrativeqa": {
+        "kind": "narrativeqa",
+        # graded by an LLM judge rather than string overlap, so it only runs
+        # where a judge is configured -- see suites/helmet.py
+        "metrics_key": "narrativeqa",
+        "tag": "longqa",
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _NARRATIVEQA_MAX_GEN_TOKS,
+        "shots": 2,
+        "use_chat_template": True,
+        "judged": True,
     },
     "infbench_choice_eng": {
         "kind": "infbench",
@@ -161,6 +264,17 @@ def _generate_helmet_tasks() -> dict:
                 "limit": base_config.get("limit", _DEFAULT_LIMIT),
                 "tag": base_config["tag"],
             }
+            if base_config.get("judged"):
+                task["judged"] = True
+            if base_config["kind"] in ("narrativeqa", "multi_lexsum"):
+                reserve = base_config.get("prompt_reserve", _LONGQA_PROMPT_RESERVE)
+                task["max_context_tokens"] = size - reserve - max_gen_toks
+            if "alce_task" in base_config:
+                task["alce_task"] = base_config["alce_task"]
+            if "kilt_task" in base_config:
+                task["kilt_task"] = base_config["kilt_task"]
+                if "popularity_threshold" in base_config:
+                    task["popularity_threshold"] = base_config["popularity_threshold"]
             if "icl_dataset" in base_config:
                 task["icl_dataset"] = base_config["icl_dataset"]
             if "infbench_subset" in base_config:

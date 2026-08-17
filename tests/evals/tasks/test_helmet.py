@@ -1,0 +1,422 @@
+"""Offline tests for the HELMET tasks, scorers, and suite structure.
+
+Everything here runs without network or GPU: scorers and parsers are pure
+functions, task/suite structure is import-time registration, and the one
+loader test writes its own fixture file. Reference expectations were derived
+from HELMET's own implementations (utils.py, eval_alce.py,
+scripts/eval_gpt4_*.py) -- where a case is labeled "HELMET gives X", it was
+checked against upstream code.
+"""
+
+import json
+
+import pytest
+
+from olmo_eval.common.scorers import (
+    NDCGScorer,
+    RougeLF1Scorer,
+    SubstringExactMatchScorer,
+    SubstringRecallScorer,
+    ndcg_at_k,
+)
+from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
+from olmo_eval.common.scorers.helmet_judge import (
+    HelmetLongQAJudgeScorer,
+    HelmetSummJudgeScorer,
+    parse_judge_json,
+)
+from olmo_eval.common.scorers.helmet_summ_prompts import (
+    FLUENCY_PROMPT,
+    FLUENCY_PROMPT_BOOK,
+    PRECISION_PROMPT,
+    PRECISION_PROMPT_BOOK,
+    RECALL_PROMPT,
+    RECALL_PROMPT_BOOK,
+)
+from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.data.helmet_icl_loader import _balance_labels
+from olmo_eval.data.helmet_kilt_loader import _load_jsonl, _sampled_rows
+from olmo_eval.data.helmet_msmarco_loader import parse_rankings
+from olmo_eval.data.helmet_tasks import HELMET_TASKS, STANDARD_CONTEXT_SIZES
+from olmo_eval.evals.tasks.helmet import (
+    HelmetExactMatchScorer,
+    InfbenchChoiceScorer,
+    _parse_labeled_output,
+)
+
+
+def _instance(gold=None, **metadata) -> Instance:
+    return Instance(question="q", gold_answer=gold, metadata=metadata)
+
+
+def _output(text: str, extracted=None) -> LMOutput:
+    out = LMOutput(text=text)
+    out.extracted_answer = extracted if extracted is not None else text
+    return out
+
+
+# ---------------------------------------------------------------------------
+# answer parsing
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("42", "42"),
+        (" 42\n", "42"),
+        ("label: 42", "42"),
+        ("Label: 42\nfoo", "42"),
+        ("label:42", "42"),
+        # the prefix match wins over the first line, as in HELMET's parse_output
+        ("7\nlabel: 9", "9"),
+        ("", ""),
+        ("LABEL:  13  ", "13"),
+    ],
+)
+def test_parse_labeled_output_matches_helmet(raw, expected):
+    assert _parse_labeled_output(raw, prefix="label:") == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Ranking: ID3 > ID1 > ID2", ["3", "1", "2"]),
+        ("[ID: 8305152] > [ID: 12] > [ID: 7]", ["8305152", "12", "7"]),
+        # duplicates keep their first (best) position
+        ("Ranking: 5 > 3 > 5 > 9", ["5", "3", "9"]),
+        ("The ranking is: 100 > 200 > 300", ["100", "200", "300"]),
+        ("Ranking: ID10>ID20>ID30", ["10", "20", "30"]),
+    ],
+)
+def test_parse_rankings_matches_helmet(raw, expected):
+    assert parse_rankings(raw) == expected
+
+
+def test_parse_rankings_unparseable_output_scores_zero():
+    ranking = parse_rankings("no ranking here")
+    assert ndcg_at_k(ranking, {"1": 3, "2": 1}, 10) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# NDCG (reference values computed with pytrec_eval, trec_eval's linear gain)
+
+
+def test_ndcg_matches_pytrec_eval_reference():
+    relevance = {"d1": 3, "d2": 0, "d3": 2, "d4": 1, "d5": 0}
+    ranking = ["d3", "d1", "d5", "d2", "d4"]
+    assert ndcg_at_k(ranking, relevance, 3) == pytest.approx(0.817494, abs=1e-6)
+    assert ndcg_at_k(ranking, relevance, 10) == pytest.approx(0.898733, abs=1e-6)
+
+
+def test_ndcg_edge_cases():
+    relevance = {"d1": 3, "d2": 1}
+    # ideal ranking comes from all judged docs, so omissions cost score
+    assert ndcg_at_k(["d2"], relevance, 10) < 1.0
+    assert ndcg_at_k(["d1", "d2"], relevance, 10) == 1.0
+    assert ndcg_at_k([], relevance, 10) == 0.0
+    assert ndcg_at_k(["unjudged"], relevance, 10) == 0.0
+    assert ndcg_at_k(["d1"], {}, 10) == 0.0
+
+
+def test_ndcg_scorer_reads_qrel_pair_list():
+    inst = _instance(qrel=[["d1", "3"], ["d2", "0"], ["d3", "2"]])
+    out = LMOutput(text="")
+    out.extracted_answer = ["d1", "d3", "d2"]
+    assert NDCGScorer().score(inst, out) == 1.0
+    out.extracted_answer = "not a list"
+    assert NDCGScorer().score(inst, out) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# substring / exact match
+
+
+def test_substring_exact_match_is_max_over_aliases_not_fraction():
+    golds = ["Barack Obama", "Obama", "President Obama"]
+    inst = _instance(gold=golds, all_gold_answers=golds)
+    out = _output("Answer: Barack Obama")
+    # one alias found = fully correct; the recall scorer would give 1/3
+    assert SubstringExactMatchScorer().score(inst, out) == 1.0
+    assert SubstringRecallScorer().score(inst, out) == pytest.approx(2 / 3)
+
+
+def test_substring_exact_match_uses_helmet_normalization():
+    inst = _instance(gold=["United States"], all_gold_answers=["United States"])
+    assert (
+        SubstringExactMatchScorer().score(inst, _output("the answer is THE united states")) == 1.0
+    )
+    assert SubstringExactMatchScorer().score(inst, _output("I do not know")) == 0.0
+
+
+def test_helmet_exact_match_normalizes_punctuation_and_articles():
+    # HELMET's drqa-normalized EM scores these 1; the generic scorer scored 0
+    inst = _instance(gold="42")
+    assert HelmetExactMatchScorer().score(inst, _output("42.")) == 1.0
+    assert HelmetExactMatchScorer().score(inst, _output('"42"')) == 1.0
+    assert HelmetExactMatchScorer().score(inst, _output("42")) == 1.0
+    assert HelmetExactMatchScorer().score(inst, _output("label 7")) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# InfiniteBench multiple choice
+
+
+@pytest.mark.parametrize(
+    ("prediction", "expected"),
+    [
+        ("B", 1.0),
+        ("b", 1.0),
+        ("B.", 1.0),
+        ("B. Paris", 1.0),
+        ("Answer: B", 1.0),
+        ("The answer is B. Paris", 1.0),  # embedded long form counts
+        ("B. Paris is correct", 1.0),
+        ("C", 0.0),
+        ("I think the answer is B", 0.0),  # bare letter in prose does NOT count
+        ("", 0.0),
+        ("Answer: C", 0.0),
+    ],
+)
+def test_infbench_choice_scorer_matches_helmet(prediction, expected):
+    golds = ["B", "B. Paris"]
+    inst = _instance(gold=golds, all_gold_answers=golds)
+    assert InfbenchChoiceScorer().score(inst, _output(prediction)) == expected
+
+
+# ---------------------------------------------------------------------------
+# ALCE
+
+
+def test_alce_str_em_partial_credit_and_citation_stripping():
+    qa_pairs = [
+        {"short_answers": ["Daei", "Ali Daei"]},
+        {"short_answers": ["Bican"]},
+        {"short_answers": ["Pele"]},
+    ]
+    inst = _instance(qa_pairs=qa_pairs)
+    scorer = AlceStrEmScorer()
+    # citations must be stripped before matching; 2 of 3 sub-answers present
+    assert scorer.score(
+        inst, _output("Ali Daei scored most [1]. Bican also [2].")
+    ) == pytest.approx(2 / 3)
+    assert scorer.score(inst, _output("Nobody knows.")) == 0.0
+    assert scorer.score(inst, _output("Daei, Bican, and Pele [1][2][3].")) == 1.0
+
+
+def test_alce_qampari_rec_top5_caps_at_five():
+    answers = [
+        ["Heat"],
+        ["Mai, the Psychic Girl"],
+        ["Akira"],
+        ["Nausicaa"],
+        ["Ghost"],
+        ["Lone Wolf"],
+    ]
+    inst = _instance(qampari_answers=answers)
+    scorer = AlceQampariRecTop5Scorer()
+    # 5 of 6 found, denominator capped at 5 -> full credit
+    assert scorer.score(inst, _output("Heat, Akira, Ghost, Nausicaa, Lone Wolf, Extra")) == 1.0
+    assert scorer.score(inst, _output("Heat, Akira")) == pytest.approx(2 / 5)
+    assert scorer.score(inst, _output("nothing relevant")) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# LLM-judge parsing and combination
+
+
+def test_longqa_judge_parses_and_normalizes():
+    scorer = HelmetLongQAJudgeScorer()
+    # fluency x correctness / 3
+    assert scorer.parse_judge_response('Reasoning. {"fluency": 1, "correctness": 3}') == 1.0
+    assert scorer.parse_judge_response('x {"fluency": 1, "correctness": 2}') == pytest.approx(2 / 3)
+    # the fluency gate zeroes a correct but disfluent answer
+    assert scorer.parse_judge_response('x {"fluency": 0, "correctness": 3}') == 0.0
+    # the LAST json object is the verdict
+    assert scorer.parse_judge_response('{"a": 1} then {"fluency": 1, "correctness": 3}') == 1.0
+    # malformed output scores zero rather than raising
+    assert scorer.parse_judge_response("no json at all") == 0.0
+    assert scorer.parse_judge_response('{"fluency": 1}') == 0.0
+    assert parse_judge_json("{fluency: 1}") is None
+
+
+def test_summ_judge_combination_matches_helmet_formula():
+    combine = HelmetSummJudgeScorer.combine
+    # fluency * 2*rec*prec/(rec+prec), rec = 4/7, prec = 3/4
+    rec, prec = 4 / 7, 3 / 4
+    expected = 2 * rec * prec / (rec + prec)
+    assert combine(
+        {"fluency": 1}, {"recall": 4}, {"precision": 3, "sentence_count": 4}, 7
+    ) == pytest.approx(expected)
+    # disfluency gates everything
+    assert combine({"fluency": 0}, {"recall": 7}, {"precision": 4, "sentence_count": 4}, 7) == 0.0
+    # zero denominators and missing/malformed verdicts degrade to 0, not raise
+    assert combine({"fluency": 1}, {"recall": 0}, {"precision": 3, "sentence_count": 5}, 10) == 0.0
+    assert combine(None, {"recall": 1}, {"precision": 1, "sentence_count": 1}, 5) == 0.0
+    assert combine({"x": 1}, {"recall": 1}, {"precision": 1, "sentence_count": 1}, 5) == 0.0
+
+
+def test_summ_prompts_format_cleanly():
+    """The rubrics contain literal JSON braces; a bad escape would raise here."""
+    for prompt in (FLUENCY_PROMPT, FLUENCY_PROMPT_BOOK):
+        assert "{text}" in prompt and prompt.format(text="s")
+    for prompt in (RECALL_PROMPT, RECALL_PROMPT_BOOK):
+        assert prompt.format(keypoints="1. k", summary="s")
+    for prompt in (PRECISION_PROMPT, PRECISION_PROMPT_BOOK):
+        assert prompt.format(expert_summary="e", summary="s")
+
+
+def _prompts_third(inst, out):
+    return HelmetSummJudgeScorer(is_book=True)._prompts(inst, out)[2]
+
+
+def test_summ_judge_selects_rubric_variant_by_task():
+    inst = _instance(keypoints=["k1", "k2"], expert_summary="expert", judge_question="")
+    out = _output("A summary.")
+    fluency_book, recall_book, _ = HelmetSummJudgeScorer(is_book=True)._prompts(inst, out)
+    fluency_law, recall_law, _ = HelmetSummJudgeScorer(is_book=False)._prompts(inst, out)
+    # the recall rubric names its domain; fluency variants differ only in examples
+    assert "novel" in recall_book.lower() and "lawsuit" not in recall_book.lower()
+    assert "lawsuit" in recall_law.lower() and "novel" not in recall_law.lower()
+    assert fluency_book != fluency_law
+    # the judge inputs are embedded where the rubric expects them
+    assert "1. k1" in recall_book and "expert" in _prompts_third(inst, out)
+
+
+# ---------------------------------------------------------------------------
+# ROUGE takes the best of raw and extracted, per HELMET's default_post_process
+
+
+def test_rouge_scores_max_of_raw_and_extracted():
+    inst = _instance(gold=["the cat sat on the mat"], all_gold_answers=["the cat sat on the mat"])
+    out = LMOutput(text="the cat sat on the mat")
+    out.extracted_answer = "unrelated words entirely"  # a bad parse must not zero the score
+    assert RougeLF1Scorer().score(inst, out) == 1.0
+
+
+# ---------------------------------------------------------------------------
+# ICL demo balancing (pure function)
+
+
+def test_balance_labels_is_deterministic_and_covers_labels():
+    records = [{"label": i % 5, "text": f"t{i}"} for i in range(50)]
+    first = _balance_labels(records, "label", 10, seed=7)
+    second = _balance_labels(records, "label", 10, seed=7)
+    assert first == second
+    assert len(first) == 10
+    # 10 shots over 5 labels -> every label appears exactly twice
+    counts = {label: 0 for label in range(5)}
+    for record in first:
+        counts[record["label"]] += 1
+    assert all(count == 2 for count in counts.values())
+
+
+# ---------------------------------------------------------------------------
+# KILT streaming sampler (fixture file; no network)
+
+
+def test_sampled_rows_identical_to_full_load(tmp_path):
+    rows = []
+    for question in range(20):
+        for depth in (0.0, 0.5, 0.95):  # dep-style repeats per question
+            rows.append({"question": f"q{question}", "depth": depth, "s_pop": 10 ** (question % 6)})
+    path = tmp_path / "test.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    import math
+    import random
+
+    def old_path(max_samples, keep=None):
+        loaded = _load_jsonl(str(path))
+        if keep is not None:
+            loaded = [r for r in loaded if keep(r)]
+        if max_samples is not None:
+            keys = sorted({r["question"] for r in loaded})
+            kept = set(random.Random(42).sample(keys, min(max_samples, len(keys))))
+            loaded = [r for r in loaded if r["question"] in kept]
+        return loaded
+
+    def popularity(r):
+        return math.log10(r["s_pop"]) < 3.0
+
+    for cap in (3, 10, None):
+        assert _sampled_rows(str(path), cap, 42) == old_path(cap)
+        assert _sampled_rows(str(path), cap, 42, keep=popularity) == old_path(cap, keep=popularity)
+    # sampling caps questions, not rows: each question carries its 3 depths
+    sampled = _sampled_rows(str(path), 3, 42)
+    assert len(sampled) == 9
+    assert len({r["question"] for r in sampled}) == 3
+
+
+# ---------------------------------------------------------------------------
+# task registry and suite structure
+
+
+def test_helmet_task_inventory():
+    by_tag: dict[str, int] = {}
+    for config in HELMET_TASKS.values():
+        by_tag[config["tag"]] = by_tag.get(config["tag"], 0) + 1
+    assert by_tag == {
+        "recall": 10,  # 4k-2m
+        "rag": 24,
+        "rerank": 6,
+        "longqa": 18,
+        "summ": 12,
+        "icl": 30,
+        "cite": 24,
+    }
+    assert len(HELMET_TASKS) == 124
+
+
+def test_helmet_context_budgets_match_helmet():
+    # HELMET truncates to `size - reserve - generation`; these are its numbers
+    assert HELMET_TASKS["narrativeqa__4096"]["max_context_tokens"] == 4096 - 200 - 100
+    assert HELMET_TASKS["infbench_qa_eng__4096"]["max_context_tokens"] == 4096 - 200 - 10
+    assert HELMET_TASKS["infbench_sum_eng__4096"]["max_context_tokens"] == 4096 - 200 - 1200
+    # multi_lexsum reserves 300 where the others reserve 200
+    assert HELMET_TASKS["multi_lexsum__4096"]["max_context_tokens"] == 4096 - 300 - 400
+
+
+def test_helmet_task_config_details():
+    # PopQA is restricted to long-tail entities (kilt_popqa_3 upstream)
+    assert HELMET_TASKS["kilt_popqa__4096"]["popularity_threshold"] == 3.0
+    assert "popularity_threshold" not in HELMET_TASKS["kilt_nq__4096"]
+    # nocite ALCE variants run zero-shot with a larger budget, per HELMET
+    assert HELMET_TASKS["alce_asqa_nocite__4096"]["shots"] == 0
+    assert HELMET_TASKS["alce_asqa_nocite__4096"]["max_gen_toks"] == 600
+    assert HELMET_TASKS["alce_asqa__4096"]["shots"] == 2
+    # ICL shot counts are HELMET's own (comparability over recalibration)
+    assert [HELMET_TASKS[f"icl_banking77__{size}"]["shots"] for size in STANDARD_CONTEXT_SIZES] == [
+        180,
+        360,
+        720,
+        1450,
+        2900,
+        5900,
+    ]
+    # judged tasks are flagged, so the nojudge suites can exclude them
+    judged = {name for name, config in HELMET_TASKS.items() if config.get("judged")}
+    assert judged == {
+        f"{task}__{size}"
+        for task in ("narrativeqa", "infbench_sum_eng", "multi_lexsum")
+        for size in STANDARD_CONTEXT_SIZES
+    }
+
+
+def test_helmet_suite_structure():
+    import olmo_eval.evals.suites.helmet  # noqa: F401 - triggers registration
+    from olmo_eval.evals.suites.registry import get_suite
+
+    assert len(get_suite("helmet_all__4096").expanded_tasks) == 20
+    assert len(get_suite("helmet_cite__4096").expanded_tasks) == 4
+    # nojudge excludes exactly the three judged tasks
+    all_tasks = set(get_suite("helmet_all__4096").expanded_tasks)
+    nojudge = set(get_suite("helmet_nojudge__4096").expanded_tasks)
+    assert all_tasks - nojudge == {
+        "helmet_narrativeqa__4096",
+        "helmet_infbench_sum_eng__4096",
+        "helmet_multi_lexsum__4096",
+    }
+    # above 128k only recall extends; a combined suite there would mislead
+    with pytest.raises(KeyError):
+        get_suite("helmet_all__2097152")
+    assert len(get_suite("helmet_recall__2097152").expanded_tasks) == 1

@@ -71,7 +71,12 @@ class HuggingFaceProvider(InferenceProvider):
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
         try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import (
+                AutoConfig,
+                AutoModelForCausalLM,
+                AutoModelForSeq2SeqLM,
+                AutoTokenizer,
+            )
         except ImportError as e:
             raise ImportError(
                 "transformers is required for HuggingFaceProvider. "
@@ -88,7 +93,20 @@ class HuggingFaceProvider(InferenceProvider):
             key: value for key, value in model_kwargs.items() if key in self._TOKENIZER_KWARGS
         }
         self.tokenizer: Any = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
-        self.model: Any = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+
+        # Encoder-decoder models (T5, BART, ...) need a different auto-class and
+        # have different generate() semantics, so detect them from the config
+        # rather than requiring callers to declare it.
+        config = AutoConfig.from_pretrained(model_name, **tokenizer_kwargs)
+        self.is_encoder_decoder: bool = bool(getattr(config, "is_encoder_decoder", False))
+        auto_class = AutoModelForSeq2SeqLM if self.is_encoder_decoder else AutoModelForCausalLM
+        logger.info(
+            "Loading %s with %s (is_encoder_decoder=%s)",
+            model_name,
+            getattr(auto_class, "__name__", auto_class),
+            self.is_encoder_decoder,
+        )
+        self.model: Any = auto_class.from_pretrained(model_name, **model_kwargs)
         self.device = _get_device()
         self.model.to(self.device)
         self.model.eval()
@@ -176,13 +194,19 @@ class HuggingFaceProvider(InferenceProvider):
                 with torch.no_grad():
                     output_ids = self.model.generate(**encoded, **gen_kwargs)[0]
 
-                gen_ids = output_ids[prompt_len:]
+                # A causal LM returns the prompt followed by the continuation, so
+                # the prompt has to be sliced off. An encoder-decoder returns only
+                # decoder tokens, and slicing would eat the answer.
+                gen_ids = output_ids if self.is_encoder_decoder else output_ids[prompt_len:]
                 gen_ids, text = self._truncate_at_stop(gen_ids, params.stop_sequences)
 
                 # Always compute logprobs for metrics
                 logprob_entries = None
                 metadata: dict[str, Any] = {}
-                if len(gen_ids) > 0:
+                # the scoring below reads logits at prompt-relative positions of a
+                # single concatenated sequence, which only holds for a causal LM;
+                # encoder-decoder logprobs would need a decoder-side forward pass
+                if len(gen_ids) > 0 and not self.is_encoder_decoder:
                     seq = torch.cat([encoded["input_ids"][0], gen_ids]).unsqueeze(0)
                     with torch.no_grad():
                         logits = self.model(seq).logits
