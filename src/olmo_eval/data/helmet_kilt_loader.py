@@ -62,6 +62,51 @@ def _load_jsonl(path: str) -> list[dict[str, Any]]:
     return records
 
 
+def _sampled_rows(
+    path: str,
+    max_samples: int | None,
+    seed: int,
+    keep=None,
+) -> list[dict[str, Any]]:
+    """Load rows, sampling by question without holding the whole file parsed.
+
+    The 128k tiers are 1-3GB of JSONL that expand severalfold when parsed
+    (upstream HELMET avoids this by memory-mapping arrow), and each question
+    repeats once per gold-passage depth. So: one pass parses rows only long
+    enough to record each line's key (and apply `keep`, the PopQA popularity
+    filter), the kept questions are sampled, and a second pass parses only the
+    lines that survive. Selection is identical to sampling after a full load --
+    same sorted unique key set, same RNG draw -- just without the resident
+    memory. With no cap there is nothing to skip, so the file loads directly.
+    """
+    if max_samples is None:
+        rows = _load_jsonl(path)
+        return [r for r in rows if keep(r)] if keep is not None else rows
+
+    line_keys: list[Any] = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                line_keys.append(None)
+                continue
+            row = json.loads(line)
+            if keep is not None and not keep(row):
+                line_keys.append(None)
+                continue
+            line_keys.append(row["id"] if "id" in row else row["question"])
+
+    unique = sorted({k for k in line_keys if k is not None})
+    kept = set(random.Random(seed).sample(unique, min(max_samples, len(unique))))
+
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for line, line_key in zip(f, line_keys, strict=True):
+            if line_key in kept:
+                rows.append(json.loads(line))
+    return rows
+
+
 def _render_passages(contexts: list[dict[str, Any]]) -> str:
     return "\n\n".join(_PASSAGE_TEMPLATE.format(**ctx) for ctx in contexts)
 
@@ -120,25 +165,24 @@ def load_kilt_dataset(
 
     entry = manifest[task][length_name]
     logger.info("Fetching %s data for %s (%s)...", task, length_name, entry["test_file"])
-    data = _load_jsonl(download_helmet_plus_file(entry["test_file"]))
+    test_path = download_helmet_plus_file(entry["test_file"])
     demo_pool = _load_jsonl(download_helmet_plus_file(entry["demo_file"]))
 
+    below_threshold = None
     if popularity_threshold is not None:
         import math
 
         def below_threshold(record: dict[str, Any]) -> bool:
             return math.log10(record["s_pop"]) < popularity_threshold
 
-        data = [r for r in data if below_threshold(r)]
         demo_pool = [r for r in demo_pool if below_threshold(r)]
 
-    # some sources have no id, in which case the question stands in as the key
-    key = "id" if data and "id" in data[0] else "question"
+    data = _sampled_rows(test_path, max_samples, seed, keep=below_threshold)
+    if not data:
+        raise ValueError(f"No rows loaded for {task} at {length_name} from {test_path}")
 
-    if max_samples is not None:
-        keys = sorted({r[key] for r in data})
-        kept = set(random.Random(seed).sample(keys, min(max_samples, len(keys))))
-        data = [r for r in data if r[key] in kept]
+    # some sources have no id, in which case the question stands in as the key
+    key = "id" if "id" in data[0] else "question"
 
     def build(sample: dict[str, Any]) -> dict[str, Any]:
         demo_text = ""
