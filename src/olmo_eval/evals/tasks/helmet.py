@@ -21,10 +21,12 @@ from typing import Any, cast
 
 from olmo_eval.common.metrics import AccuracyMetric, NDCGMetric, RecallMetric, RougeLF1Metric
 from olmo_eval.common.scorers import Scorer
+from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.scorers.helmet_judge import HelmetLongQAJudgeScorer, HelmetSummJudgeScorer
 from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.data.helmet_alce_loader import load_alce_dataset
 from olmo_eval.data.helmet_icl_loader import load_icl_dataset
 from olmo_eval.data.helmet_infbench_loader import load_infbench_dataset
 from olmo_eval.data.helmet_kilt_loader import load_kilt_dataset
@@ -114,6 +116,10 @@ class HelmetTask(Task):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
+        for scoring_field in ("qa_pairs", "qampari_answers"):
+            if scoring_field in doc:
+                # ALCE scoring inputs, kept out of the prompt
+                metadata[scoring_field] = doc[scoring_field]
         for judge_field in ("keypoints", "expert_summary"):
             if judge_field in doc:
                 # inputs the summarization judge needs; extracted ahead of time
@@ -342,6 +348,24 @@ class HelmetMultiLexSumTask(HelmetTask):
         )
 
 
+class HelmetAlceTask(HelmetTask):
+    """HELMET Cite task: answer a question and cite the documents used.
+
+    Only ALCE's answer-correctness metrics are scored here. Whether the
+    citations actually support the claims is AutoAIS's job, which needs an NLI
+    model this task does not yet wire up.
+    """
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_alce_dataset(
+            task=self.helmet_config["alce_task"],
+            length_name=self.helmet_config["length_name"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+
 _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "json_kv": HelmetJsonKvTask,
     "icl": HelmetIclTask,
@@ -350,6 +374,7 @@ _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "kilt": HelmetKiltTask,
     "msmarco": HelmetMsMarcoTask,
     "multi_lexsum": HelmetMultiLexSumTask,
+    "alce": HelmetAlceTask,
 }
 
 # Per-kind metric configuration. HELMET scores json_kv with substring exact
@@ -369,6 +394,13 @@ _TASK_METRICS: dict[str, tuple] = {
     "kilt": (
         (AccuracyMetric(name="substring_exact_match", scorer=SubstringExactMatchScorer),),
         "substring_exact_match",
+    ),
+    # ALCE answer correctness. The citation-grounding half (citation_rec /
+    # citation_prec) needs AutoAIS and is not wired up yet.
+    "alce_asqa": ((AccuracyMetric(name="str_em", scorer=AlceStrEmScorer),), "str_em"),
+    "alce_qampari": (
+        (AccuracyMetric(name="qampari_rec_top5", scorer=AlceQampariRecTop5Scorer),),
+        "qampari_rec_top5",
     ),
     # HELMET's gpt-4-f1: fluency-gated F1 over key points, via three judge calls
     "summ_book": (
