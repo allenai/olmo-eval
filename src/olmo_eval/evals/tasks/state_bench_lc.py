@@ -49,9 +49,69 @@ STATE_BENCH_TOKEN_STRATA = (
     "tokens_2m_plus",
 )
 
-STATE_BENCH_STRATA_BY_CONFIG = {
-    config_name: STATE_BENCH_TOKEN_STRATA for config_name in STATE_BENCH_CONFIGS
+STATE_BENCH_CONFIGS_SET = frozenset(STATE_BENCH_CONFIGS)
+
+# Token strata are half-open [min, max) token ranges, and the state-bench staging pipeline
+# omits a stratum from a rendered config when that config has no rows inside it. A task
+# pointing at an omitted split fails at dataset load, so strata are enumerated per config
+# rather than as a full config x stratum cross product.
+#
+# Generation is capped at `extra_assignments.max: 64000` (state-bench
+# `configs/experiments/default.yaml`), and that cap was sized against ruler -- the most
+# token-dense formatter, at roughly 15.2 tokens per assignment -- so ruler just grazes 1m
+# tokens and every sparser formatter tops out proportionally lower. Only the nine configs
+# below put rows above the 524_288-token floor of `tokens_1m`; the other nine never reach
+# it, so this is intended dataset behavior rather than missing or unpublished data.
+#
+# The same cap puts `tokens_2m_plus` out of reach entirely: ruler peaks at 982_531 tokens,
+# short of that stratum's 1_048_576-token floor, so no config stages the split and the
+# stratum maps to no configs at all.
+#
+# Strata absent from this mapping are available for every config.
+STATE_BENCH_CONFIGS_BY_STRATUM: dict[str, frozenset[str]] = {
+    "tokens_1m": frozenset(
+        {
+            "cube-painting--periodic",
+            "integer-code--aperiodic",
+            "integer-code--periodic",
+            "integer-code--r-trivial",
+            "ruler--aperiodic",
+            "ruler--periodic",
+            "ruler--r-trivial",
+            "spreadsheet-cells--periodic",
+            "status-lights--periodic",
+        }
+    ),
+    "tokens_2m_plus": frozenset(),
 }
+
+
+def state_bench_configs_for_stratum(token_stratum: str) -> tuple[str, ...]:
+    """Return the dataset configs that have a staged split for a token stratum."""
+    available = STATE_BENCH_CONFIGS_BY_STRATUM.get(token_stratum, STATE_BENCH_CONFIGS_SET)
+    return tuple(config_name for config_name in STATE_BENCH_CONFIGS if config_name in available)
+
+
+def state_bench_strata_for_config(config_name: str) -> tuple[str, ...]:
+    """Return the token strata that a dataset config has staged splits for."""
+    return tuple(
+        token_stratum
+        for token_stratum in STATE_BENCH_TOKEN_STRATA
+        if config_name in STATE_BENCH_CONFIGS_BY_STRATUM.get(token_stratum, STATE_BENCH_CONFIGS_SET)
+    )
+
+
+STATE_BENCH_STRATA_BY_CONFIG = {
+    config_name: state_bench_strata_for_config(config_name) for config_name in STATE_BENCH_CONFIGS
+}
+
+# (config, stratum) pairs deliberately not registered, for coverage reporting.
+STATE_BENCH_OMITTED_SPLITS = tuple(
+    (config_name, token_stratum)
+    for token_stratum in STATE_BENCH_TOKEN_STRATA
+    for config_name in STATE_BENCH_CONFIGS
+    if token_stratum not in STATE_BENCH_STRATA_BY_CONFIG[config_name]
+)
 
 
 def state_bench_task_name(config_name: str, token_stratum: str) -> str:
