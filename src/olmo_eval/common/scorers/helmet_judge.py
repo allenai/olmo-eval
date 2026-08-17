@@ -11,6 +11,14 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from olmo_eval.common.scorers.helmet_summ_prompts import (
+    FLUENCY_PROMPT,
+    FLUENCY_PROMPT_BOOK,
+    PRECISION_PROMPT,
+    PRECISION_PROMPT_BOOK,
+    RECALL_PROMPT,
+    RECALL_PROMPT_BOOK,
+)
 from olmo_eval.common.scorers.llm_judge import JudgeFn, LLMJudgeScorer, build_openai_judge_fn
 from olmo_eval.common.types import Instance, LMOutput
 
@@ -116,3 +124,111 @@ class HelmetLongQAJudgeScorer(LLMJudgeScorer):
         except (TypeError, ValueError):
             return 0.0
         return (fluency * correctness) / LONGQA_MAX_RAW_SCORE
+
+
+@dataclass(frozen=True)
+class HelmetSummJudgeScorer(LLMJudgeScorer):
+    """HELMET's summarization judge: fluency-gated F1 over key points.
+
+    Ports `scripts/eval_gpt4_summ.py`. Unlike the LongQA judge this needs three
+    separate judge calls per summary, because the rubrics grade different
+    things and would interfere if merged into one prompt:
+
+    - fluency   -> 0/1, is the summary coherent and non-repetitive
+    - recall    -> how many of the pre-extracted key points it covers
+    - precision -> how many of its own sentences the expert summary supports
+
+    which combine as HELMET's `gpt-4-f1`::
+
+        recall = found_key_points / total_key_points
+        precision = supported_sentences / sentence_count
+        f1 = fluency * 2 * recall * precision / (recall + precision)
+
+    Fluency multiplies rather than averages, so a disfluent summary scores zero
+    however much it covers -- that is deliberate upstream, since degenerate
+    repetition can otherwise score well on recall.
+
+    The key points are not derived at scoring time: they were extracted ahead of
+    time and ship with HELMET's data, reaching the scorer via instance metadata.
+    An instance without them cannot be graded, and scores 0.0.
+
+    `is_book` selects the novel-summary rubric variants (infbench_sum_eng) over
+    the civil-lawsuit ones (multi_lexsum).
+    """
+
+    name: str = "gpt4_f1"
+    is_book: bool = False
+    judge_fn: JudgeFn = field(
+        default_factory=lambda: _build_helmet_judge_fn("HelmetSummJudgeScorer")
+    )
+
+    def _prompts(self, instance: Instance, output: LMOutput) -> tuple[str, str, str]:
+        metadata = instance.metadata or {}
+        summary = (output.text or "").strip()
+        key_points = metadata.get("keypoints") or []
+        numbered = "\n".join(f"{i + 1}. {kp}" for i, kp in enumerate(key_points))
+        # the expert reference: the long summary for lawsuits, the gold summary
+        # itself for books, matching how upstream fills each template
+        expert = metadata.get("expert_summary") or ""
+
+        if self.is_book:
+            return (
+                FLUENCY_PROMPT_BOOK.format(text=summary),
+                RECALL_PROMPT_BOOK.format(keypoints=numbered, summary=summary),
+                PRECISION_PROMPT_BOOK.format(expert_summary=expert, summary=summary),
+            )
+        return (
+            FLUENCY_PROMPT.format(text=summary),
+            RECALL_PROMPT.format(keypoints=numbered, summary=summary),
+            PRECISION_PROMPT.format(expert_summary=expert, summary=summary),
+        )
+
+    def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
+        """Unused: this scorer issues three prompts, see `ascore_with_context`."""
+        return self._prompts(instance, output)[0]
+
+    def parse_judge_response(self, response: str) -> float:
+        """Unused: the three responses are combined in `ascore_with_context`."""
+        raise RuntimeError("HelmetSummJudgeScorer combines three judge responses.")
+
+    @staticmethod
+    def combine(
+        fluency: dict | None,
+        recall: dict | None,
+        precision: dict | None,
+        num_key_points: int,
+    ) -> float:
+        """Combine the three verdicts into HELMET's gpt-4-f1."""
+        if fluency is None or recall is None or precision is None:
+            return 0.0
+        try:
+            fluency_score = float(fluency["fluency"])
+            found = float(recall["recall"])
+            supported = float(precision["precision"])
+            sentence_count = float(precision["sentence_count"])
+        except (KeyError, TypeError, ValueError):
+            return 0.0
+
+        rec = found / num_key_points if num_key_points > 0 else 0.0
+        prec = supported / sentence_count if sentence_count > 0 else 0.0
+        if rec + prec <= 0:
+            return 0.0
+        return fluency_score * 2 * (rec * prec) / (rec + prec)
+
+    async def ascore_with_context(self, instance: Instance, output: LMOutput, context) -> float:
+        self._validate_provider(context)
+        key_points = (instance.metadata or {}).get("keypoints") or []
+        if not key_points:
+            return 0.0
+
+        verdicts = []
+        for prompt in self._prompts(instance, output):
+            if self.provider_name is not None:
+                response = await self._score_with_provider(
+                    prompt, context, max_tokens=HELMET_JUDGE_MAX_TOKENS
+                )
+            else:
+                response = await self._score_with_judge_fn(prompt)
+            verdicts.append(parse_judge_json(response))
+
+        return self.combine(*verdicts, num_key_points=len(key_points))

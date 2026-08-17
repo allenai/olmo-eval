@@ -22,7 +22,7 @@ from typing import Any, cast
 from olmo_eval.common.metrics import AccuracyMetric, NDCGMetric, RecallMetric, RougeLF1Metric
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
-from olmo_eval.common.scorers.helmet_judge import HelmetLongQAJudgeScorer
+from olmo_eval.common.scorers.helmet_judge import HelmetLongQAJudgeScorer, HelmetSummJudgeScorer
 from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.helmet_icl_loader import load_icl_dataset
@@ -30,6 +30,7 @@ from olmo_eval.data.helmet_infbench_loader import load_infbench_dataset
 from olmo_eval.data.helmet_kilt_loader import load_kilt_dataset
 from olmo_eval.data.helmet_loader import load_json_kv_dataset
 from olmo_eval.data.helmet_msmarco_loader import load_msmarco_dataset, parse_rankings
+from olmo_eval.data.helmet_multilexsum_loader import load_multi_lexsum_dataset
 from olmo_eval.data.helmet_narrativeqa_loader import load_narrativeqa_dataset
 from olmo_eval.data.helmet_tasks import HELMET_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
@@ -113,6 +114,11 @@ class HelmetTask(Task):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
+        for judge_field in ("keypoints", "expert_summary"):
+            if judge_field in doc:
+                # inputs the summarization judge needs; extracted ahead of time
+                # and shipped with the data rather than derived at scoring time
+                metadata[judge_field] = doc[judge_field]
         if "qrel" in doc:
             # graded relevance judgements for the re-ranking scorer
             metadata["qrel"] = doc["qrel"]
@@ -324,6 +330,18 @@ class HelmetMsMarcoTask(HelmetTask):
         return parse_rankings(output.text or "")
 
 
+class HelmetMultiLexSumTask(HelmetTask):
+    """HELMET summarization task: summarize the filings of a civil rights lawsuit."""
+
+    def _load_dataset(self) -> dict[str, Any]:
+        return load_multi_lexsum_dataset(
+            max_context_tokens=self.helmet_config["max_context_tokens"],
+            shots=self.helmet_config["shots"],
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+
 _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "json_kv": HelmetJsonKvTask,
     "icl": HelmetIclTask,
@@ -331,6 +349,7 @@ _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "narrativeqa": HelmetNarrativeQaTask,
     "kilt": HelmetKiltTask,
     "msmarco": HelmetMsMarcoTask,
+    "multi_lexsum": HelmetMultiLexSumTask,
 }
 
 # Per-kind metric configuration. HELMET scores json_kv with substring exact
@@ -350,6 +369,15 @@ _TASK_METRICS: dict[str, tuple] = {
     "kilt": (
         (AccuracyMetric(name="substring_exact_match", scorer=SubstringExactMatchScorer),),
         "substring_exact_match",
+    ),
+    # HELMET's gpt-4-f1: fluency-gated F1 over key points, via three judge calls
+    "summ_book": (
+        (AccuracyMetric(name="gpt4_f1", scorer=HelmetSummJudgeScorer(is_book=True)),),
+        "gpt4_f1",
+    ),
+    "summ_lawsuit": (
+        (AccuracyMetric(name="gpt4_f1", scorer=HelmetSummJudgeScorer(is_book=False)),),
+        "gpt4_f1",
     ),
     # HELMET's gpt-4-score, normalized to [0, 1]; see HelmetLongQAJudgeScorer
     "narrativeqa": (
