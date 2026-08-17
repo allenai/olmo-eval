@@ -3,8 +3,9 @@
 Mirrors the suite structure in `suites/ruler.py`:
 - Per-category suites for each size: helmet_recall__262144, helmet_icl__4096, etc.
 - Combined suites for each size: helmet_all__4096, etc.
+- A judge-free execution split: helmet_nojudge__4096, etc.
 
-Two deliberate differences from `suites/ruler.py`:
+Three deliberate differences from `suites/ruler.py`:
 
 1. `helmet_all__*` aggregates the *category* suites rather than flat-averaging
    every task, matching how the HELMET paper reports an overall number. A flat
@@ -17,6 +18,11 @@ Two deliberate differences from `suites/ruler.py`:
    from the same suite at shorter lengths -- exactly the thing that turns a
    length sweep into a misleading trend line. Use `helmet_recall__*` for the
    extended tiers.
+
+3. Some HELMET tasks are graded by an LLM judge (currently `narrativeqa`), so
+   running them needs a judge configured. Following the execution-oriented
+   split in `suites/science.py`, `helmet_all__*` is the umbrella that includes
+   them and `helmet_nojudge__*` is the subset that runs without one.
 """
 
 from olmo_eval.data.helmet_tasks import CONTEXT_SIZES, HELMET_TASKS
@@ -26,18 +32,25 @@ from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, register
 CATEGORIES = ["recall", "longqa", "icl"]
 
 
-# Create suites for each (category, context_size) combination
+def _tasks_for(category: str, size: int, judged: bool | None = None) -> list[str]:
+    """Task names in a category at a size, optionally filtered by judge use."""
+    return [
+        f"helmet_{name}"
+        for name, config in HELMET_TASKS.items()
+        if config["tag"] == category
+        and name.endswith(f"__{size}")
+        and (judged is None or bool(config.get("judged")) == judged)
+    ]
+
+
 for size in CONTEXT_SIZES:
     category_suites: list[Suite] = []
+    nojudge_suites: list[Suite] = []
+    extra_suites: list[Suite] = []
 
     for category in CATEGORIES:
-        tasks = [
-            f"helmet_{task_name}"
-            for task_name, task_config in HELMET_TASKS.items()
-            if task_config["tag"] == category and task_name.endswith(f"__{size}")
-        ]
-
-        if len(tasks) == 0:
+        tasks = _tasks_for(category, size)
+        if not tasks:
             continue
 
         suite = Suite(
@@ -49,14 +62,52 @@ for size in CONTEXT_SIZES:
         register(suite)
         category_suites.append(suite)
 
+        # judge-free counterpart, used to build helmet_nojudge__*; it only needs
+        # to exist as its own suite when the category has a judged task in it
+        unjudged = _tasks_for(category, size, judged=False)
+        if not unjudged:
+            continue
+        if len(unjudged) == len(tasks):
+            nojudge_suites.append(suite)
+        else:
+            nojudge_suite = Suite(
+                name=f"helmet_{category}_nojudge__{size}",
+                tasks=tuple(unjudged),
+                aggregation=AggregationStrategy.AVERAGE,
+                description=(
+                    f"HELMET-plus {category} tasks at {size} context length, "
+                    "excluding LLM-judged tasks"
+                ),
+            )
+            nojudge_suites.append(nojudge_suite)
+            extra_suites.append(nojudge_suite)
+
     if len(category_suites) > 1:
-        all_tasks_suite = Suite(
-            name=f"helmet_all__{size}",
-            tasks=tuple(category_suites),
-            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-            description=(
-                f"All HELMET-plus tasks at {size} context length "
-                f"(mean over category averages: {', '.join(CATEGORIES)})"
-            ),
+        register(
+            Suite(
+                name=f"helmet_all__{size}",
+                tasks=tuple(category_suites),
+                aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+                description=(
+                    f"All HELMET-plus tasks at {size} context length "
+                    f"(mean over category averages: {', '.join(CATEGORIES)}). "
+                    "Includes LLM-judged tasks; use helmet_nojudge__* to skip them."
+                ),
+            )
         )
-        register(all_tasks_suite)
+
+    # only worth registering when it would actually differ from helmet_all__*
+    if len(nojudge_suites) > 1 and nojudge_suites != category_suites:
+        for suite in extra_suites:
+            register(suite)
+        register(
+            Suite(
+                name=f"helmet_nojudge__{size}",
+                tasks=tuple(nojudge_suites),
+                aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+                description=(
+                    f"HELMET-plus tasks at {size} context length that need no LLM "
+                    "judge (mean over category averages)"
+                ),
+            )
+        )

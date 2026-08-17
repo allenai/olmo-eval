@@ -75,6 +75,7 @@ _ICL_MAX_GEN_TOKS = 20
 # that many reference-tokenizer tokens (see generate_configs.py).
 _LONGQA_PROMPT_RESERVE = 200
 _INFBENCH_QA_MAX_GEN_TOKS = 10
+_NARRATIVEQA_MAX_GEN_TOKS = 100
 
 # Base task configurations, keyed by HELMET task type.
 _BASE_TASKS: dict[str, dict] = {
@@ -110,6 +111,18 @@ _BASE_TASKS: dict[str, dict] = {
         # HELMET runs LongQA with a chat template, so the "Answer:" prefix is
         # not appended to the prompt as a partial assistant turn
         "use_chat_template": True,
+    },
+    "narrativeqa": {
+        "kind": "narrativeqa",
+        # graded by an LLM judge rather than string overlap, so it only runs
+        # where a judge is configured -- see suites/helmet.py
+        "metrics_key": "narrativeqa",
+        "tag": "longqa",
+        "context_sizes": STANDARD_CONTEXT_SIZES,
+        "max_gen_toks": _NARRATIVEQA_MAX_GEN_TOKS,
+        "shots": 2,
+        "use_chat_template": True,
+        "judged": True,
     },
     "infbench_choice_eng": {
         "kind": "infbench",
@@ -161,6 +174,10 @@ def _generate_helmet_tasks() -> dict:
                 "limit": base_config.get("limit", _DEFAULT_LIMIT),
                 "tag": base_config["tag"],
             }
+            if base_config.get("judged"):
+                task["judged"] = True
+            if base_config["kind"] == "narrativeqa":
+                task["max_context_tokens"] = size - _LONGQA_PROMPT_RESERVE - max_gen_toks
             if "icl_dataset" in base_config:
                 task["icl_dataset"] = base_config["icl_dataset"]
             if "infbench_subset" in base_config:
