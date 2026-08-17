@@ -34,6 +34,7 @@ from .llm_judge import (
     build_openai_judge_fn,
 )
 from .ngram_copying import NGramCopyingBPBScorer, compute_repeated_ngram_mask
+from .retrieval import NDCGScorer, ndcg_at_k
 from .rouge import RougeLF1Scorer, RougeLRecallScorer
 from .substring import SubstringRecallScorer
 from .tools import (
@@ -69,6 +70,8 @@ __all__ = [
     "MinervaMathScorer",
     "MultipleChoiceScorer",
     "MultiplEScorer",
+    "NDCGScorer",
+    "ndcg_at_k",
     "NGramCopyingBPBScorer",
     "PerplexityScorer",
     "ProcessScorer",
