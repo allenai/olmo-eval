@@ -405,8 +405,14 @@ def _mm_olmo_key_to_hf_key(key: str) -> str:
     (``blocks.N.att_proj``); the HF release nests them (``blocks.N.self_attn.
     att_proj`` / ``blocks.N.mlp.ff_proj``). Everything else (wte, ln_f, the
     whole vision backbone) matches HF naming already.
+
+    The one non-block rename is the untied LM head: mm_olmo stores it as the
+    transformer's own ``ff_out``, which HF calls ``lm_head``. Weight-tied
+    checkpoints have no such tensor.
     """
     parts = key.split(".")
+    if parts == ["model", "transformer", "ff_out", "weight"]:
+        return "lm_head.weight"
     if len(parts) >= 4 and parts[:2] == ["model", "transformer"] and parts[2] == "blocks":
         leaf = parts[4]
         if leaf in ("att_proj", "attn_out", "q_norm", "k_norm"):
@@ -444,11 +450,18 @@ def _load_mm_olmo_state_dict(checkpoint_dir: str, model_cfg: Any) -> dict[str, t
     if "lm_head.weight" not in hf_state_dict:
         # Weight-tied mm_olmo model (`can_predict_extra_tokens=False`): logits use
         # the base-vocab embedding table; the converter zero-pads the extra rows.
+        # Substituting the embeddings for a head the model does *not* tie produces
+        # fluent-looking garbage rather than an error, so say when it happens.
         base_embedding = hf_state_dict.get("model.transformer.wte.embedding")
         if base_embedding is None:
             raise _config_error(
                 checkpoint_dir, "missing both 'lm_head' and 'wte.embedding' tensors"
             )
+        logger.info(
+            "No LM head tensor in %s; treating the checkpoint as weight-tied and using "
+            "the embedding table for the head.",
+            checkpoint_dir,
+        )
         hf_state_dict["lm_head.weight"] = base_embedding
 
     return molmo2_hf_state_dict_to_multimodal_lm(hf_state_dict, model_cfg)
