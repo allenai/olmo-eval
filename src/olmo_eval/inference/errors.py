@@ -6,28 +6,9 @@ from __future__ import annotations
 class TerminalProviderError(RuntimeError):
     """A provider failure after which its worker cannot serve more requests."""
 
-    def __init__(
-        self,
-        provider: str,
-        cause_type: str,
-        detail: str = "",
-    ) -> None:
-        self.provider = provider
-        self.cause_type = cause_type
-        self.detail = detail
 
-        message = f"{provider} provider became unavailable ({cause_type})"
-        if detail:
-            message = f"{message}: {detail}"
-        super().__init__(message)
-
-
-# Keep optional provider imports out of this module. Classification by fully
-# qualified name lets CPU-only installations recognize terminal failures
-# without importing CUDA-only packages such as vLLM.
-_TERMINAL_PROVIDER_ERRORS = {
-    ("vllm.v1.engine.exceptions", "EngineDeadError"): "vLLM",
-}
+# Avoid importing optional GPU-only provider packages just to classify errors.
+_TERMINAL_PROVIDER_ERRORS = {"vllm.v1.engine.exceptions.EngineDeadError"}
 
 
 def classify_terminal_provider_error(exc: BaseException) -> TerminalProviderError | None:
@@ -42,13 +23,9 @@ def classify_terminal_provider_error(exc: BaseException) -> TerminalProviderErro
             return current
 
         error_type = type(current)
-        provider = _TERMINAL_PROVIDER_ERRORS.get((error_type.__module__, error_type.__qualname__))
-        if provider is not None:
-            return TerminalProviderError(
-                provider=provider,
-                cause_type=error_type.__qualname__,
-                detail=str(current).strip(),
-            )
+        error_name = f"{error_type.__module__}.{error_type.__qualname__}"
+        if error_name in _TERMINAL_PROVIDER_ERRORS:
+            return TerminalProviderError(f"{error_name}: {current}")
 
         current = current.__cause__ or current.__context__
 

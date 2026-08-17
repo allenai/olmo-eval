@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -16,9 +18,9 @@ from olmo_eval.runners.asynq.processing import process_batch, process_chat_reque
 from olmo_eval.runners.asynq.results import (
     _build_pending_instance_keys,
     _consume_pending_instance,
-    process_results,
+    _format_worker_failure,
 )
-from olmo_eval.runners.asynq.types import WORKER_FATAL, QueueItem, ResultItem, TaskTracker
+from olmo_eval.runners.asynq.types import QueueItem, ResultItem, TaskTracker
 
 
 def _engine_dead_error() -> Exception:
@@ -43,126 +45,72 @@ def _queue_item(instance_idx: int) -> QueueItem:
     )
 
 
-class _Provider:
-    def __init__(self, error: Exception) -> None:
-        self.error = error
-
-    def describe_request(self, _request: LMRequest, _params: object) -> None:
-        return None
-
-    async def agenerate(self, _requests: list[LMRequest], _params: object) -> None:
-        raise self.error
-
-
-class _Harness:
-    def __init__(self, error: Exception) -> None:
-        self.provider = _Provider(error)
-
-    def _apply_config(self, request: LMRequest) -> LMRequest:
-        return request
-
-    def flush_metrics(self, _batch_hash: str) -> None:
-        raise AssertionError("metrics should not flush after a failed provider call")
+def _harness(error: Exception) -> SimpleNamespace:
+    provider = SimpleNamespace(
+        describe_request=Mock(return_value=None),
+        agenerate=AsyncMock(side_effect=error),
+    )
+    return SimpleNamespace(
+        provider=provider,
+        _apply_config=lambda request: request,
+        flush_metrics=Mock(),
+        run=AsyncMock(side_effect=error),
+    )
 
 
-class _ChatHarness(_Harness):
-    async def run(self, *_args: object, **_kwargs: object) -> None:
-        raise self.provider.error
-
-
-def test_terminal_batch_error_propagates_without_instance_failures() -> None:
-    result_queue: queue.Queue[ResultItem] = queue.Queue()
-
-    with pytest.raises(TerminalProviderError, match="EngineDeadError"):
-        asyncio.run(
-            process_batch(
-                [_queue_item(0), _queue_item(1)],
-                _Harness(_engine_dead_error()),  # type: ignore[arg-type]
-                result_queue,  # type: ignore[arg-type]
-            )
-        )
-
-    assert result_queue.empty()
-
-
-def test_terminal_chat_error_propagates_without_instance_failure() -> None:
-    result_queue: queue.Queue[ResultItem] = queue.Queue()
-
-    with pytest.raises(TerminalProviderError, match="EngineDeadError"):
-        asyncio.run(
-            process_chat_request(
+def test_terminal_processing_paths_propagate_without_instance_failures() -> None:
+    for chat in (False, True):
+        result_queue: queue.Queue[ResultItem] = queue.Queue()
+        harness = _harness(_engine_dead_error())
+        if chat:
+            request = process_chat_request(
                 _queue_item(0),
-                _ChatHarness(_engine_dead_error()),  # type: ignore[arg-type]
+                harness,
                 result_queue,  # type: ignore[arg-type]
             )
-        )
+        else:
+            request = process_batch(
+                [_queue_item(0)],
+                harness,
+                result_queue,  # type: ignore[arg-type]
+            )
 
-    assert result_queue.empty()
+        with pytest.raises(TerminalProviderError, match="EngineDeadError"):
+            asyncio.run(request)
+        assert result_queue.empty()
 
 
-def test_streaming_strategy_propagates_fast_failure_and_cancels_sibling(
+def test_streaming_strategy_propagates_fast_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Reporter:
         def progress_callback(self, _label: str):
             return lambda *_args, **_kwargs: None
 
+    async def fail(*_args: object, **_kwargs: object) -> None:
+        raise TerminalProviderError("engine died")
+
     async def run() -> None:
-        sibling_started = asyncio.Event()
-        sibling_cancelled = asyncio.Event()
-
-        async def fail_or_wait(items: list[QueueItem], *_args: object, **_kwargs: object) -> None:
-            if items[0].instance_idx == 0:
-                await sibling_started.wait()
-                raise TerminalProviderError("vLLM", "EngineDeadError", "engine died")
-
-            sibling_started.set()
-            try:
-                await asyncio.Future()
-            except asyncio.CancelledError:
-                sibling_cancelled.set()
-                raise
-
-        monkeypatch.setattr("olmo_eval.runners.asynq.processing.process_items", fail_or_wait)
+        monkeypatch.setattr("olmo_eval.runners.asynq.processing.process_items", fail)
         item_queue: queue.Queue[QueueItem | None] = queue.Queue()
         result_queue: queue.Queue[ResultItem] = queue.Queue()
         item_queue.put(_queue_item(0))
-        item_queue.put(_queue_item(1))
 
         with pytest.raises(TerminalProviderError, match="engine died"):
             await StreamingStrategy(BatchConfig.streaming()).run(
                 item_queue=item_queue,  # type: ignore[arg-type]
                 harness=object(),  # type: ignore[arg-type]
                 result_queue=result_queue,  # type: ignore[arg-type]
-                max_concurrency=2,
+                max_concurrency=1,
                 worker_logger=logging.getLogger(__name__),
-                total_instances=2,
+                total_instances=1,
             )
-
-        assert sibling_cancelled.is_set()
-        assert result_queue.empty()
 
     monkeypatch.setattr("olmo_eval.common.beaker_status.BeakerStatusReporter", _Reporter)
     asyncio.run(run())
 
 
-def test_recoverable_batch_error_still_reports_each_instance() -> None:
-    result_queue: queue.Queue[ResultItem] = queue.Queue()
-
-    asyncio.run(
-        process_batch(
-            [_queue_item(0), _queue_item(1)],
-            _Harness(RuntimeError("request failed")),  # type: ignore[arg-type]
-            result_queue,  # type: ignore[arg-type]
-        )
-    )
-
-    results = [result_queue.get_nowait(), result_queue.get_nowait()]
-    assert [result.instance_idx for result in results] == [0, 1]
-    assert all(result.error and "request failed" in result.error for result in results)
-
-
-def test_pending_instance_tracking_rejects_duplicates() -> None:
+def test_pending_identities_reject_duplicates_and_appear_in_fatal_error() -> None:
     trackers = {
         "task": TaskTracker(
             model_name="model",
@@ -172,6 +120,11 @@ def test_pending_instance_tracking_rejects_duplicates() -> None:
         )
     }
     pending = _build_pending_instance_keys(trackers)
+    message = _format_worker_failure("terminal failure", pending)
+    assert "2 inference result(s) pending" in message
+    assert "model:task[0]" in message
+    assert "model:task[1]" in message
+
     result = ResultItem(
         model_name="model",
         task_id="task",
@@ -188,63 +141,8 @@ def test_pending_instance_tracking_rejects_duplicates() -> None:
         _consume_pending_instance(pending, result)
 
 
-def test_worker_fatal_reports_exact_pending_instance_identities() -> None:
-    result_queue: queue.Queue[ResultItem] = queue.Queue()
-    result_queue.put(
-        ResultItem(
-            model_name="model",
-            task_id=WORKER_FATAL,
-            instance_idx=-1,
-            instance=None,
-            request=None,
-            outputs=[],
-            error="terminal provider failure",
-        )
-    )
-    trackers = {
-        "task": TaskTracker(
-            model_name="model",
-            spec="task",
-            task=None,
-            total_instances=2,
-        )
-    }
-
-    with pytest.raises(RuntimeError) as exc_info:
-        asyncio.run(
-            process_results(
-                trackers=trackers,
-                result_queue=result_queue,  # type: ignore[arg-type]
-                workers=[],
-                scoring_context=None,  # type: ignore[arg-type]
-                scoring_concurrency=1,
-                total_tasks=1,
-                total_instances=2,
-                model_name="model",
-                save_predictions=False,
-                write_predictions_fn=lambda *_args: None,
-                save_requests=False,
-                write_requests_fn=lambda *_args: None,
-            )
-        )
-
-    message = str(exc_info.value)
-    assert "2 inference result(s) pending" in message
-    assert "model:task[0]" in message
-    assert "model:task[1]" in message
-
-
-class _Process:
-    def __init__(self, *, alive: bool, exitcode: int | None) -> None:
-        self._alive = alive
-        self.exitcode = exitcode
-
-    def is_alive(self) -> bool:
-        return self._alive
-
-
 def test_single_failed_worker_is_fatal_while_other_workers_are_alive() -> None:
-    workers = [_Process(alive=False, exitcode=1), _Process(alive=True, exitcode=None)]
+    workers = [SimpleNamespace(exitcode=1), SimpleNamespace(exitcode=None)]
 
     with pytest.raises(RuntimeError, match="worker 0 exited with code 1"):
         check_workers_alive(

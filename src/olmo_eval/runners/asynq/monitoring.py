@@ -72,18 +72,9 @@ def check_workers_alive(
     except queue.Empty:
         pass  # Queue empty, continue
 
-    # A single failed worker can strand its in-flight instances even while the
-    # remaining workers exit successfully, so do not wait for every worker to die.
-    failed_workers = [
-        (index, worker.exitcode)
-        for index, worker in enumerate(workers)
-        if not worker.is_alive() and worker.exitcode not in (None, 0)
-    ]
-    if failed_workers:
-        failures = ", ".join(
-            f"worker {index} exited with code {code}" for index, code in failed_workers
-        )
-        raise RuntimeError(f"Inference worker failed unexpectedly: {failures}")
+    for index, worker in enumerate(workers):
+        if worker.exitcode not in (None, 0):
+            raise RuntimeError(f"Inference worker {index} exited with code {worker.exitcode}")
 
 
 def wait_for_workers_ready(

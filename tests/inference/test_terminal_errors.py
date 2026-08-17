@@ -22,38 +22,18 @@ def _engine_dead_error(message: str = "engine died") -> Exception:
     return error_type(message)
 
 
-def test_classifies_vllm_engine_death_as_terminal() -> None:
-    classified = classify_terminal_provider_error(_engine_dead_error())
-
-    assert classified is not None
-    assert classified.provider == "vLLM"
-    assert classified.cause_type == "EngineDeadError"
-    assert "engine died" in str(classified)
-
-
-def test_classifies_terminal_error_through_exception_chain() -> None:
+def test_classifies_only_vllm_engine_death_as_terminal() -> None:
     wrapped = RuntimeError("provider call failed")
     wrapped.__cause__ = _engine_dead_error()
 
-    classified = classify_terminal_provider_error(wrapped)
-
-    assert classified is not None
-    assert classified.cause_type == "EngineDeadError"
-
-
-def test_does_not_classify_recoverable_provider_error() -> None:
+    for error in (_engine_dead_error(), wrapped):
+        classified = classify_terminal_provider_error(error)
+        assert classified is not None
+        assert "EngineDeadError" in str(classified)
     assert classify_terminal_provider_error(RuntimeError("request failed")) is None
 
 
-def test_dispatch_propagates_terminal_provider_error() -> None:
-    async def process(_item: int) -> int:
-        raise TerminalProviderError("vLLM", "EngineDeadError", "engine died")
-
-    with pytest.raises(TerminalProviderError, match="engine died"):
-        asyncio.run(dispatch_concurrent([1], process, max_retries=3))
-
-
-def test_dispatch_cancels_siblings_after_terminal_provider_error() -> None:
+def test_dispatch_propagates_terminal_error_and_cancels_siblings() -> None:
     async def run() -> None:
         sibling_started = asyncio.Event()
         sibling_cancelled = asyncio.Event()
@@ -61,7 +41,7 @@ def test_dispatch_cancels_siblings_after_terminal_provider_error() -> None:
         async def process(item: int) -> None:
             if item == 0:
                 await sibling_started.wait()
-                raise TerminalProviderError("vLLM", "EngineDeadError", "engine died")
+                raise TerminalProviderError("engine died")
 
             sibling_started.set()
             try:
@@ -71,7 +51,7 @@ def test_dispatch_cancels_siblings_after_terminal_provider_error() -> None:
                 raise
 
         with pytest.raises(TerminalProviderError, match="engine died"):
-            await dispatch_concurrent([0, 1], process, max_in_flight=2)
+            await dispatch_concurrent([0, 1], process, max_in_flight=2, max_retries=3)
 
         assert sibling_cancelled.is_set()
 

@@ -43,6 +43,7 @@ class StreamingStrategy(BatchingStrategy):
         concurrency = max_concurrency or 64
         semaphore = asyncio.Semaphore(concurrency)
         in_flight: set[asyncio.Task[None]] = set()
+        failure: BaseException | None = None
 
         worker_instances = math.ceil(total_instances / num_workers)
         progress = ProgressLogger(
@@ -62,27 +63,13 @@ class StreamingStrategy(BatchingStrategy):
                 progress.update(1)
                 report_progress(progress.count, progress.total)
 
-        def raise_completed_task_errors() -> None:
-            """Remove completed tasks and propagate the first failure.
-
-            Retrieve every completed task's outcome before raising so concurrent
-            failures cannot turn into unhandled task exceptions.
-            """
-            done = {task for task in in_flight if task.done()}
-            in_flight.difference_update(done)
-
-            first_error: BaseException | None = None
-            for task in done:
-                if task.cancelled():
-                    continue
-                try:
-                    task.result()
-                except BaseException as error:
-                    if first_error is None:
-                        first_error = error
-
-            if first_error is not None:
-                raise first_error
+        def task_done(task: asyncio.Task[None]) -> None:
+            nonlocal failure
+            in_flight.discard(task)
+            if not task.cancelled():
+                error = task.exception()
+                if failure is None:
+                    failure = error
 
         async def get_item() -> QueueItem | None:
             """Get next item from queue asynchronously."""
@@ -91,7 +78,8 @@ class StreamingStrategy(BatchingStrategy):
                 try:
                     return await loop.run_in_executor(None, lambda: item_queue.get(timeout=0.1))
                 except queue.Empty:
-                    raise_completed_task_errors()
+                    if failure is not None:
+                        raise failure from None
                     if not in_flight:
                         try:
                             return await loop.run_in_executor(
@@ -103,27 +91,28 @@ class StreamingStrategy(BatchingStrategy):
 
         try:
             while True:
-                raise_completed_task_errors()
+                if failure is not None:
+                    raise failure
                 item = await get_item()
-                raise_completed_task_errors()
+                if failure is not None:
+                    raise failure
 
                 if item is None:
                     break
 
-                in_flight.add(asyncio.create_task(process_single(item)))
+                task = asyncio.create_task(process_single(item))
+                in_flight.add(task)
+                task.add_done_callback(task_done)
 
             if in_flight:
                 await asyncio.gather(*in_flight)
+            if failure is not None:
+                raise failure
         finally:
-            # Stop and drain all sibling requests when any streamed request is
-            # terminal. Keeping the tasks tracked until their outcomes are
-            # retrieved prevents fast failures from disappearing.
-            remaining = tuple(in_flight)
-            for task in remaining:
-                if not task.done():
-                    task.cancel()
-            if remaining:
-                await asyncio.gather(*remaining, return_exceptions=True)
+            for task in in_flight:
+                task.cancel()
+            if in_flight:
+                await asyncio.gather(*in_flight, return_exceptions=True)
 
             progress.close()
             report_progress(progress.count, progress.total, force=True)

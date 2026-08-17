@@ -140,11 +140,6 @@ async def process_chat_request(
 
         terminal_error = classify_terminal_provider_error(e)
         if terminal_error is not None:
-            log.critical(
-                "Terminal provider error on CHAT instance %s: %s",
-                item.instance_idx,
-                terminal_error,
-            )
             raise terminal_error from e
 
         error_detail = _format_error_detail(e)
@@ -230,11 +225,6 @@ async def process_batch(
     except Exception as e:
         terminal_error = classify_terminal_provider_error(e)
         if terminal_error is not None:
-            log.critical(
-                "Terminal provider error for batch of %s item(s): %s",
-                len(items),
-                terminal_error,
-            )
             raise terminal_error from e
 
         # Batch failed - report error for all items
@@ -331,7 +321,6 @@ async def process_items(
                     on_progress=on_progress,
                 )
             finally:
-                # Preserve the actual completed count on terminal failure.
                 progress.close()
         else:
             await dispatch_concurrent(

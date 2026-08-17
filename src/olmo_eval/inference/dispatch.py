@@ -73,52 +73,47 @@ class ContinuousBatchDispatcher[T, R]:
         # Track in-flight tasks: task -> (index, item, attempt)
         in_flight: dict[asyncio.Task, tuple[int, T, int]] = {}
 
-        try:
-            while pending_idx < len(pending) or in_flight:
-                # Top up in-flight set to target
-                while len(in_flight) < self.max_in_flight and pending_idx < len(pending):
-                    idx, item, attempt = pending[pending_idx]
-                    pending_idx += 1
+        while pending_idx < len(pending) or in_flight:
+            # Top up in-flight set to target
+            while len(in_flight) < self.max_in_flight and pending_idx < len(pending):
+                idx, item, attempt = pending[pending_idx]
+                pending_idx += 1
 
-                    task = asyncio.create_task(self._safe_process(item))
-                    in_flight[task] = (idx, item, attempt)
+                task = asyncio.create_task(self._safe_process(item))
+                in_flight[task] = (idx, item, attempt)
 
-                if not in_flight:
-                    break
+            if not in_flight:
+                break
 
-                # Wait for any one to complete
-                done, _ = await asyncio.wait(in_flight.keys(), return_when=asyncio.FIRST_COMPLETED)
+            # Wait for any one to complete
+            done, _ = await asyncio.wait(in_flight.keys(), return_when=asyncio.FIRST_COMPLETED)
 
-                for task in done:
-                    idx, item, attempt = in_flight.pop(task)
+            for task in done:
+                idx, item, attempt = in_flight.pop(task)
+                try:
                     result, error = task.result()
+                except TerminalProviderError:
+                    for sibling in in_flight:
+                        sibling.cancel()
+                    await asyncio.gather(*in_flight, return_exceptions=True)
+                    raise
 
-                    if error is not None and attempt < self.max_retries:
-                        # Retry: add back to pending
-                        pending.append((idx, item, attempt + 1))
-                        self._stats.retried += 1
-                    else:
-                        # Record result
-                        results[idx] = result
-                        self._stats.completed += 1
-                        if error is not None:
-                            self._stats.failed += 1
+                if error is not None and attempt < self.max_retries:
+                    # Retry: add back to pending
+                    pending.append((idx, item, attempt + 1))
+                    self._stats.retried += 1
+                else:
+                    # Record result
+                    results[idx] = result
+                    self._stats.completed += 1
+                    if error is not None:
+                        self._stats.failed += 1
 
-                        # Callbacks
-                        if self.on_result is not None:
-                            self.on_result(idx, result, error)
-                        if self.on_progress is not None:
-                            self.on_progress(self._stats.completed, total)
-        finally:
-            # A terminal provider failure (or caller cancellation) must not leave
-            # sibling requests running in the background. Retrieve every outcome
-            # as well, so no task exception is lost or reported as unhandled.
-            remaining = tuple(in_flight)
-            for task in remaining:
-                if not task.done():
-                    task.cancel()
-            if remaining:
-                await asyncio.gather(*remaining, return_exceptions=True)
+                    # Callbacks
+                    if self.on_result is not None:
+                        self.on_result(idx, result, error)
+                    if self.on_progress is not None:
+                        self.on_progress(self._stats.completed, total)
 
         return results
 
@@ -128,8 +123,6 @@ class ContinuousBatchDispatcher[T, R]:
             result = await self.process_fn(item)
             return (result, None)
         except TerminalProviderError:
-            # A dead provider cannot safely process retries or additional work.
-            # Propagate to the inference worker so it emits WORKER_FATAL and exits.
             raise
         except Exception as e:
             logger.warning("dispatch: process_fn raised %s: %s", type(e).__name__, e)

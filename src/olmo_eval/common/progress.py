@@ -94,7 +94,7 @@ class ProgressLogger:
         """Format progress without rounding an incomplete run to 100%."""
         if self.total <= 0 or self.count >= self.total:
             return "100%"
-        return f"{self.count / self.total * 100:.2f}%"
+        return f"{min(self.count / self.total * 100, 99.99):.2f}%"
 
     def close(self) -> None:
         """Log final progress summary."""

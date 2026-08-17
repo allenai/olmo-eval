@@ -54,23 +54,17 @@ def _consume_pending_instance(pending_instances: set[InstanceKey], result_item: 
     pending_instances.remove(key)
 
 
-def _format_pending_instances(pending_instances: set[InstanceKey], limit: int = 10) -> str:
-    """Format a bounded, deterministic preview of unresolved instances."""
+def _format_worker_failure(error: object, pending_instances: set[InstanceKey]) -> str:
+    """Combine a fatal worker error with unresolved-instance accounting."""
     ordered = sorted(pending_instances)
     preview = ", ".join(
-        f"{model_name}:{spec}[{instance_idx}]" for model_name, spec, instance_idx in ordered[:limit]
+        f"{model_name}:{spec}[{instance_idx}]" for model_name, spec, instance_idx in ordered[:10]
     )
-    if len(ordered) > limit:
-        preview = f"{preview}, ... and {len(ordered) - limit} more"
-    return preview
-
-
-def _format_worker_failure(error: object, pending_instances: set[InstanceKey]) -> str:
-    """Combine a fatal worker error with exact unresolved-instance accounting."""
-    pending_preview = _format_pending_instances(pending_instances)
+    if len(ordered) > 10:
+        preview += f", ... and {len(ordered) - 10} more"
     return (
         f"Worker process crashed with {len(pending_instances)} inference result(s) "
-        f"pending ({pending_preview}): {error}"
+        f"pending ({preview}): {error}"
     )
 
 
