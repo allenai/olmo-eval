@@ -323,13 +323,16 @@ async def process_items(
             def on_progress(done: int, total: int) -> None:
                 progress.update(1)
 
-            await dispatch_concurrent(
-                chat_items,
-                process,
-                max_in_flight=max_concurrency or len(chat_items),
-                on_progress=on_progress,
-            )
-            progress.close()
+            try:
+                await dispatch_concurrent(
+                    chat_items,
+                    process,
+                    max_in_flight=max_concurrency or len(chat_items),
+                    on_progress=on_progress,
+                )
+            finally:
+                # Preserve the actual completed count on terminal failure.
+                progress.close()
         else:
             await dispatch_concurrent(
                 chat_items,

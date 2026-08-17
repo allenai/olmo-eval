@@ -51,3 +51,28 @@ def test_dispatch_propagates_terminal_provider_error() -> None:
 
     with pytest.raises(TerminalProviderError, match="engine died"):
         asyncio.run(dispatch_concurrent([1], process, max_retries=3))
+
+
+def test_dispatch_cancels_siblings_after_terminal_provider_error() -> None:
+    async def run() -> None:
+        sibling_started = asyncio.Event()
+        sibling_cancelled = asyncio.Event()
+
+        async def process(item: int) -> None:
+            if item == 0:
+                await sibling_started.wait()
+                raise TerminalProviderError("vLLM", "EngineDeadError", "engine died")
+
+            sibling_started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                sibling_cancelled.set()
+                raise
+
+        with pytest.raises(TerminalProviderError, match="engine died"):
+            await dispatch_concurrent([0, 1], process, max_in_flight=2)
+
+        assert sibling_cancelled.is_set()
+
+    asyncio.run(run())

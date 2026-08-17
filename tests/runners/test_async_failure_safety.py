@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import queue
 
 import pytest
 
 from olmo_eval.common.types import Instance, LMRequest, RequestType
 from olmo_eval.inference.errors import TerminalProviderError
+from olmo_eval.runners.asynq.batching import BatchConfig, StreamingStrategy
 from olmo_eval.runners.asynq.monitoring import check_workers_alive
 from olmo_eval.runners.asynq.processing import process_batch, process_chat_request
 from olmo_eval.runners.asynq.results import (
@@ -96,6 +98,52 @@ def test_terminal_chat_error_propagates_without_instance_failure() -> None:
         )
 
     assert result_queue.empty()
+
+
+def test_streaming_strategy_propagates_fast_failure_and_cancels_sibling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Reporter:
+        def progress_callback(self, _label: str):
+            return lambda *_args, **_kwargs: None
+
+    async def run() -> None:
+        sibling_started = asyncio.Event()
+        sibling_cancelled = asyncio.Event()
+
+        async def fail_or_wait(items: list[QueueItem], *_args: object, **_kwargs: object) -> None:
+            if items[0].instance_idx == 0:
+                await sibling_started.wait()
+                raise TerminalProviderError("vLLM", "EngineDeadError", "engine died")
+
+            sibling_started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                sibling_cancelled.set()
+                raise
+
+        monkeypatch.setattr("olmo_eval.runners.asynq.processing.process_items", fail_or_wait)
+        item_queue: queue.Queue[QueueItem | None] = queue.Queue()
+        result_queue: queue.Queue[ResultItem] = queue.Queue()
+        item_queue.put(_queue_item(0))
+        item_queue.put(_queue_item(1))
+
+        with pytest.raises(TerminalProviderError, match="engine died"):
+            await StreamingStrategy(BatchConfig.streaming()).run(
+                item_queue=item_queue,  # type: ignore[arg-type]
+                harness=object(),  # type: ignore[arg-type]
+                result_queue=result_queue,  # type: ignore[arg-type]
+                max_concurrency=2,
+                worker_logger=logging.getLogger(__name__),
+                total_instances=2,
+            )
+
+        assert sibling_cancelled.is_set()
+        assert result_queue.empty()
+
+    monkeypatch.setattr("olmo_eval.common.beaker_status.BeakerStatusReporter", _Reporter)
+    asyncio.run(run())
 
 
 def test_recoverable_batch_error_still_reports_each_instance() -> None:
