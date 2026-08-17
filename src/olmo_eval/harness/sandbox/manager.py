@@ -8,15 +8,29 @@ import concurrent.futures
 import contextlib
 import time
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 from olmo_eval.common.execution.environment import ExecutionResult
 from olmo_eval.common.logging import configure_worker_logging
 
 from .config import Capability, SandboxConfig, SandboxMode
+from .errors import SandboxInfrastructureError
 from .executor import SandboxExecutor
+
+_MAX_SANDBOX_START_WORKERS = 16
+_ResultT = TypeVar("_ResultT")
+
+
+def _sandbox_start_worker_count(executor_count: int) -> int:
+    """Return the bounded number of concurrent sandbox startup workers."""
+    return min(executor_count, _MAX_SANDBOX_START_WORKERS)
+
+
+class _NoSandboxAvailableError(ValueError):
+    """No healthy executor can satisfy a lease request."""
 
 
 @dataclass
@@ -47,6 +61,48 @@ class ExecutorBinding:
 
     async def __aexit__(self, *args: object) -> None:
         await self.release()
+
+
+@dataclass(frozen=True)
+class CapabilityExecutionEnvironment:
+    """Execution environment that routes each operation to a capability pool."""
+
+    manager: SandboxManager
+    capabilities: frozenset[str]
+
+    @property
+    def is_running(self) -> bool:
+        return self.manager.has_executor(self.capabilities)
+
+    async def execute(self, command: str, timeout: float | None = None) -> str:
+        return await self.manager.execute(
+            command,
+            timeout,
+            capabilities=self.capabilities,
+            failover_on_quarantine=True,
+        )
+
+    async def execute_command(self, command: str, timeout: float | None = None) -> ExecutionResult:
+        return await self.manager.execute_command(
+            command,
+            timeout,
+            capabilities=self.capabilities,
+            failover_on_quarantine=True,
+        )
+
+    async def execute_code(
+        self,
+        code: str,
+        language: str = "python",
+        timeout: float | None = None,
+    ) -> ExecutionResult:
+        return await self.manager.execute_code(
+            code,
+            language,
+            timeout,
+            capabilities=self.capabilities,
+            failover_on_quarantine=True,
+        )
 
 
 class SandboxManager:
@@ -82,9 +138,10 @@ class SandboxManager:
         self._executors: list[SandboxExecutor] = []
         self._round_robin_indices: dict[frozenset[str], int] = {}
         self._execution_semaphores: dict[frozenset[str], asyncio.Semaphore] = {}
+        self._active_operations: dict[int, int] = {}
+        self._capacity_condition = asyncio.Condition()
         self._bindings: dict[str, ExecutorBinding] = {}
         self._bound_executors: set[int] = set()
-        self._binding_lock: asyncio.Lock = asyncio.Lock()
         self._binding_counter: int = 0
         self._modal_app_name: str | None = None
 
@@ -125,7 +182,11 @@ class SandboxManager:
         # Start all executors in thread pool to avoid blocking event loop
         # swe-rex's DockerDeployment.start() has blocking subprocess calls
         start_time = time.time()
-        self._logger.info(f"Starting {len(self._executors)} sandbox executors...")
+        start_workers = _sandbox_start_worker_count(len(self._executors))
+        self._logger.info(
+            f"Starting {len(self._executors)} sandbox executors "
+            f"with up to {start_workers} concurrent starts..."
+        )
 
         def start_in_thread(executor: SandboxExecutor) -> None:
             """Run executor.start() in a dedicated thread with its own event loop."""
@@ -137,7 +198,7 @@ class SandboxManager:
                 loop.close()
 
         loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self._executors)) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=start_workers) as pool:
             futures = [loop.run_in_executor(pool, start_in_thread, e) for e in self._executors]
             results = await asyncio.gather(*futures, return_exceptions=True)
 
@@ -156,6 +217,8 @@ class SandboxManager:
             else:
                 config_successes[config_idx].append(executor)
 
+        startup_error: RuntimeError | None = None
+
         # Check minimum requirements per config
         for config_idx, config in enumerate(self._configs):
             if (
@@ -173,11 +236,12 @@ class SandboxManager:
             failed_count = len(config_failures[config_idx])
 
             if started_count < min_required:
-                raise RuntimeError(
+                startup_error = RuntimeError(
                     f"Sandbox config {config_idx} ({config.image}): "
                     f"only {started_count}/{min_required} required instances started "
                     f"({failed_count} failed)"
                 )
+                break
 
             if failed_count > 0:
                 self._logger.warning(
@@ -186,8 +250,18 @@ class SandboxManager:
                     f"({failed_count} failed, min_required={min_required})"
                 )
 
+        if startup_error is not None:
+            await self.stop()
+            raise startup_error
+
+        failed_executors = [
+            executor for failures in config_failures.values() for executor, _ in failures
+        ]
+        await self._stop_executors(failed_executors)
+
         # Keep only successfully started executors
         self._executors = [e for successes in config_successes.values() for e in successes]
+        self._active_operations = {id(e): 0 for e in self._executors}
 
         # Build per-capability execution semaphores from running executors
         cap_counts: dict[frozenset[str], int] = {}
@@ -214,19 +288,31 @@ class SandboxManager:
 
     async def stop(self) -> None:
         """Stop all sandbox executors."""
-        async with self._binding_lock:
+        async with self._capacity_condition:
             for binding in self._bindings.values():
                 binding._released = True
             self._bindings.clear()
             self._bound_executors.clear()
+            self._capacity_condition.notify_all()
 
-        await asyncio.gather(*[e.stop() for e in self._executors])
+        await self._stop_executors(self._executors)
         self._executors.clear()
         self._round_robin_indices.clear()
+        self._active_operations.clear()
         self._logger.info("All sandboxes stopped")
 
         with contextlib.suppress(Exception):
             atexit.unregister(self._atexit_cleanup)
+
+    async def _stop_executors(self, executors: Sequence[SandboxExecutor]) -> None:
+        """Best-effort stop every executor without abandoning later cleanups."""
+        results = await asyncio.gather(
+            *(executor.stop() for executor in executors),
+            return_exceptions=True,
+        )
+        for executor, result in zip(executors, results, strict=True):
+            if isinstance(result, BaseException):
+                self._logger.warning(f"Executor {executor.name} failed to stop: {result}")
 
     def _atexit_cleanup(self) -> None:
         """Synchronous cleanup for atexit. Runs stop() if executors are still active."""
@@ -255,11 +341,15 @@ class SandboxManager:
         matching = [
             (i, e)
             for i, e in enumerate(self._executors)
-            if required_capabilities <= e.config.capabilities and i not in self._bound_executors
+            if (
+                required_capabilities <= e.config.capabilities
+                and i not in self._bound_executors
+                and e.is_running
+            )
         ]
 
         if not matching:
-            available = [e.config.capabilities for e in self._executors]
+            available = [e.config.capabilities for e in self._executors if e.is_running]
             raise ValueError(
                 f"No sandbox supports capabilities {required_capabilities}. Available: {available}"
             )
@@ -271,6 +361,82 @@ class SandboxManager:
         self._round_robin_indices[key] = idx + 1
 
         return matching[selected_idx][1]
+
+    def has_executor(self, required_capabilities: frozenset[str]) -> bool:
+        """Return whether a healthy, unbound executor supports the capabilities."""
+        return any(
+            required_capabilities <= executor.config.capabilities
+            and idx not in self._bound_executors
+            and executor.is_running
+            for idx, executor in enumerate(self._executors)
+        )
+
+    def for_capabilities(
+        self, required_capabilities: frozenset[str]
+    ) -> CapabilityExecutionEnvironment:
+        """Return an environment that leases capacity for every operation."""
+        return CapabilityExecutionEnvironment(self, required_capabilities)
+
+    @asynccontextmanager
+    async def lease_executor(
+        self,
+        required_capabilities: frozenset[str],
+        *,
+        excluded: frozenset[int] = frozenset(),
+    ) -> AsyncIterator[SandboxExecutor]:
+        """Lease one capacity slot on the least-loaded compatible executor."""
+        async with self._capacity_condition:
+            while True:
+                compatible = [
+                    (idx, executor)
+                    for idx, executor in enumerate(self._executors)
+                    if required_capabilities <= executor.config.capabilities
+                    and idx not in self._bound_executors
+                    and id(executor) not in excluded
+                    and executor.is_running
+                ]
+                if not compatible:
+                    available = [
+                        executor.config.capabilities
+                        for executor in self._executors
+                        if executor.is_running
+                    ]
+                    raise _NoSandboxAvailableError(
+                        f"No sandbox supports capabilities {required_capabilities}. "
+                        f"Available: {available}"
+                    )
+
+                candidates = [
+                    (idx, executor)
+                    for idx, executor in compatible
+                    if self._active_operations.get(id(executor), 0)
+                    < executor.config.max_concurrency
+                ]
+                if candidates:
+                    key = required_capabilities
+                    start = self._round_robin_indices.get(key, 0) % len(candidates)
+                    ordered = candidates[start:] + candidates[:start]
+                    _, selected = min(
+                        ordered,
+                        key=lambda item: self._active_operations.get(id(item[1]), 0),
+                    )
+                    self._round_robin_indices[key] = start + 1
+                    executor_id = id(selected)
+                    self._active_operations[executor_id] = (
+                        self._active_operations.get(executor_id, 0) + 1
+                    )
+                    break
+
+                await self._capacity_condition.wait()
+
+        try:
+            yield selected
+        finally:
+            async with self._capacity_condition:
+                executor_id = id(selected)
+                active = self._active_operations.get(executor_id, 0)
+                self._active_operations[executor_id] = max(0, active - 1)
+                self._capacity_condition.notify_all()
 
     def get_execution_semaphore(
         self, required_capabilities: frozenset[str]
@@ -290,6 +456,8 @@ class SandboxManager:
         command: str,
         timeout: float | None = None,
         capabilities: frozenset[str] | None = None,
+        *,
+        failover_on_quarantine: bool = False,
     ) -> str:
         """Execute a command on a sandbox.
 
@@ -301,14 +469,20 @@ class SandboxManager:
         Returns:
             The command output.
         """
-        executor = self.get_executor(capabilities or Capability.DEFAULT)
-        return await executor.execute(command, timeout)
+        required = capabilities or Capability.DEFAULT
+        return await self._execute_with_lease(
+            required,
+            lambda executor: executor.execute(command, timeout),
+            failover_on_quarantine=failover_on_quarantine,
+        )
 
     async def execute_command(
         self,
         command: str,
         timeout: float | None = None,
         capabilities: frozenset[str] | None = None,
+        *,
+        failover_on_quarantine: bool = False,
     ) -> ExecutionResult:
         """Execute a command and return structured result.
 
@@ -320,8 +494,12 @@ class SandboxManager:
         Returns:
             ExecutionResult with success status, output, and exit code.
         """
-        executor = self.get_executor(capabilities or Capability.DEFAULT)
-        return await executor.execute_command(command, timeout)
+        required = capabilities or Capability.DEFAULT
+        return await self._execute_with_lease(
+            required,
+            lambda executor: executor.execute_command(command, timeout),
+            failover_on_quarantine=failover_on_quarantine,
+        )
 
     async def execute_code(
         self,
@@ -329,6 +507,8 @@ class SandboxManager:
         language: str = "python",
         timeout: float | None = None,
         capabilities: frozenset[str] | None = None,
+        *,
+        failover_on_quarantine: bool = False,
     ) -> ExecutionResult:
         """Execute code in the specified language.
 
@@ -344,8 +524,47 @@ class SandboxManager:
         Returns:
             ExecutionResult with success status and output.
         """
-        executor = self.get_executor(capabilities or Capability.DEFAULT)
-        return await executor.execute_code(code, language, timeout)
+        required = capabilities or Capability.DEFAULT
+        return await self._execute_with_lease(
+            required,
+            lambda executor: executor.execute_code(code, language, timeout),
+            failover_on_quarantine=failover_on_quarantine,
+        )
+
+    async def _execute_with_lease(
+        self,
+        required_capabilities: frozenset[str],
+        operation: Callable[[SandboxExecutor], Awaitable[_ResultT]],
+        *,
+        failover_on_quarantine: bool,
+    ) -> _ResultT:
+        """Execute with strict per-executor capacity and optional one-hop failover."""
+        excluded: frozenset[int] = frozenset()
+        last_infrastructure_error: Exception | None = None
+        while True:
+            try:
+                async with self.lease_executor(
+                    required_capabilities,
+                    excluded=excluded,
+                ) as executor:
+                    try:
+                        return await operation(executor)
+                    except Exception as exc:
+                        if not failover_on_quarantine or executor.is_running:
+                            raise
+                        last_infrastructure_error = exc
+                        excluded = excluded | {id(executor)}
+                        self._logger.warning(
+                            f"Retrying operation on a different sandbox after "
+                            f"an infrastructure failure from {executor.name}: {exc}"
+                        )
+            except _NoSandboxAvailableError:
+                if last_infrastructure_error is None:
+                    raise
+                raise SandboxInfrastructureError(
+                    f"No healthy sandbox remained for {sorted(required_capabilities)} "
+                    f"after infrastructure failures: {last_infrastructure_error}"
+                ) from last_infrastructure_error
 
     async def acquire_binding(
         self,
@@ -353,11 +572,16 @@ class SandboxManager:
     ) -> ExecutorBinding:
         """Acquire exclusive binding to an executor for session execution."""
         required = capabilities or frozenset()
-        async with self._binding_lock:
+        async with self._capacity_condition:
             available = [
                 (i, e)
                 for i, e in enumerate(self._executors)
-                if required <= e.config.capabilities and i not in self._bound_executors
+                if (
+                    required <= e.config.capabilities
+                    and i not in self._bound_executors
+                    and e.is_running
+                    and self._active_operations.get(id(e), 0) == 0
+                )
             ]
             if not available:
                 raise ValueError(f"No available executor for {required}")
@@ -375,7 +599,7 @@ class SandboxManager:
             return binding
 
     async def _release_binding(self, binding: ExecutorBinding) -> None:
-        async with self._binding_lock:
+        async with self._capacity_condition:
             if binding.id not in self._bindings:
                 return
             for idx, e in enumerate(self._executors):
@@ -383,6 +607,7 @@ class SandboxManager:
                     self._bound_executors.discard(idx)
                     break
             del self._bindings[binding.id]
+            self._capacity_condition.notify_all()
 
     @asynccontextmanager
     async def binding(
@@ -399,7 +624,7 @@ class SandboxManager:
     @property
     def is_running(self) -> bool:
         """Check if any executors are running."""
-        return len(self._executors) > 0 and all(e.is_running for e in self._executors)
+        return any(e.is_running for e in self._executors)
 
     @property
     def executor_count(self) -> int:

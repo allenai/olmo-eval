@@ -845,9 +845,19 @@ class SubsetAccuracyMetric(Metric):
     """
 
     # defaults to all responses
-    # expected format is subset_name::subset_value ie functional_category::copyright
-    name: str = "any::any"
+    # expected format is subset_name__subset_value ie functional_category__copyright
+    name: str = "any__any"
     scorer: type[Scorer] | Scorer = SafetyScorer
+
+    def compute_instance(self, response: Response) -> float | None:
+        subset, cat = self.name.split("__")
+        if subset != "any" and response.instance.metadata.get(subset) != cat:
+            return None
+        score = response.scores.get(self.scorer().name)
+        return float(score) if score is not None else None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
@@ -855,14 +865,42 @@ class SubsetAccuracyMetric(Metric):
             return 0.0
         scorer_name = self.scorer().name
 
-        if self.name == "any::any":
+        if self.name == "any__any":
             total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
             return total / len(responses)
 
-        subset, cat = self.name.split("::")
+        subset, cat = self.name.split("__")
         subset_responses = []
         for r in responses:
             if r.instance.metadata[subset] == cat:
                 subset_responses.append(r.scores.get(scorer_name, 0.0))
 
         return sum(subset_responses) / len(subset_responses) if subset_responses else -1
+
+
+@dataclass(frozen=True, slots=True)
+class SafetyErrorMetric(Metric):
+    """
+    Counts the number of parsing errors from LLM-as-a-judge
+    Designed for the metadata format from the safety evals
+    """
+
+    scorer: type[Scorer] | Scorer = SafetyScorer
+    name: str = "parsing_error"
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        """Compute aggregate metric from scored responses."""
+        if not responses:
+            return 0.0
+
+        total = sum(int(r.instance.metadata.get("is_parsing_error", False)) for r in responses)
+
+        return total
+
+    def compute_instance(self, response: Response) -> float | None:
+        """Compute the per-instance value"""
+
+        return float(response.instance.metadata.get("is_parsing_error", False))
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False

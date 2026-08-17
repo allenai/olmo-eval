@@ -43,6 +43,13 @@ def _format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
     message = str(exc).strip()
     if message:
         error["message"] = message
+    try:
+        from olmo_eval.harness.sandbox import SandboxInfrastructureError
+
+        if isinstance(exc, SandboxInfrastructureError):
+            error["infrastructure"] = "true"
+    except ImportError:
+        pass
     return error
 
 
@@ -623,7 +630,13 @@ class Task(ABC):
 
         # Route to task-specific sandbox if sandbox_env is configured
         sandbox_cap = self.config.sandbox_env.capability if self.config.sandbox_env else None
-        if sandbox_cap and execution_env is not None and hasattr(execution_env, "get_executor"):
+        if execution_env is not None and hasattr(execution_env, "for_capabilities"):
+            from olmo_eval.harness.sandbox.config import Capability
+
+            task_executor = execution_env.for_capabilities(  # ty: ignore[call-non-callable]
+                sandbox_cap or Capability.DEFAULT
+            )
+        elif sandbox_cap and execution_env is not None and hasattr(execution_env, "get_executor"):
             task_executor = execution_env.get_executor(sandbox_cap)  # ty: ignore[call-non-callable]
         else:
             task_executor = execution_env
