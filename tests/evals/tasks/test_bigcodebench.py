@@ -7,11 +7,20 @@ import pytest
 from olmo_eval.common.execution.environment import ExecutionResult
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.evals.extract import sanitize_code
 from olmo_eval.evals.tasks.bigcodebench import (
     BigCodeBench,
     BigCodeBenchScorer,
     _build_bcb_execution_script,
 )
+
+
+def test_sanitize_code_uses_compatible_tree_sitter_grammar() -> None:
+    code = "import math\n\ndef task_func(x):\n    return math.sin(x)\n"
+
+    assert sanitize_code(code, entrypoint="task_func") == (
+        "import math\ndef task_func(x):\n    return math.sin(x)"
+    )
 
 
 class StubExecutionEnv:
