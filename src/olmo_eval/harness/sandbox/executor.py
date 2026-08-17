@@ -473,10 +473,7 @@ class SandboxExecutor:
                 timeout=effective_timeout,
             )
             response = await self._run_with_transport_retries(
-                lambda: asyncio.wait_for(
-                    self._runtime.execute(runtime_command),
-                    timeout=effective_timeout + 1.0,
-                ),
+                lambda: self._runtime.execute(runtime_command),
                 operation="command execution",
             )
         except Exception as e:
@@ -783,7 +780,7 @@ class SandboxExecutor:
                 exit_code=process.returncode or 0,
             )
 
-        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
+        from swerex.runtime.abstract import Command
 
         response = await asyncio.wait_for(
             self._runtime.execute(Command(command=["bash", "-c", command], timeout=timeout)),
