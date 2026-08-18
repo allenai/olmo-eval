@@ -31,18 +31,18 @@ class StrongReject(SafetyBase):
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
-        if not doc.get("subsample"):
+        if not doc["subsample"]:
             return None
 
         return Instance(
-            question=doc.get("jailbroken_prompt"),
+            question=doc["jailbroken_prompt"],
             gold_answer="response_harmfulness=no",  # used for openai judge only
             metadata={
-                "id": doc.get("id"),
+                "id": doc["id"],
                 "index": index,
-                "jailbreak": doc.get("jailbreak"),
-                "category": doc.get("category"),
-                "forbidden_prompt": doc.get("forbidden_prompt"),
+                "jailbreak": doc["jailbreak"],
+                "category": doc["category"],
+                "forbidden_prompt": doc["forbidden_prompt"],
             },
         )
 
