@@ -1062,7 +1062,6 @@ class VLLMServerProvider(InferenceProvider):
             # which can collide when different token IDs decode to the same string.
             # prompt_logprobs preserves integer token IDs through JSON serialization
             # (as string representations of ints), avoiding this collision.
-            print(full_tokens)
             resp = await http_client.post(
                 f"{self.base_url}/completions",
                 json={
