@@ -150,6 +150,40 @@ class HuggingFaceProvider(InferenceProvider):
 
         return kwargs
 
+    def _scored_log_probs(self, sequence: torch.Tensor, num_scored: int) -> torch.Tensor:
+        """Log-probs from the positions that predict the trailing scored tokens.
+
+        Only the logits for those positions are materialized when the model supports
+        limiting head computation, so scoring a long prompt does not allocate a
+        vocabulary-sized distribution for every token in the sequence.
+
+        Args:
+            sequence: Single-row batch of token ids ending with the tokens to score.
+            num_scored: Number of trailing tokens in `sequence` to score.
+
+        Returns:
+            Tensor of shape (num_scored, vocab_size); row j predicts trailing token j.
+        """
+        import torch
+
+        # One extra position: token j is predicted by the position before it.
+        keep = num_scored + 1
+        if sequence.shape[1] < keep:
+            raise ValueError(
+                f"Cannot score {num_scored} trailing token(s) in a sequence of length "
+                f"{sequence.shape[1]}: the first scored token has no preceding position."
+            )
+
+        with torch.no_grad():
+            try:
+                logits = self.model(sequence, logits_to_keep=keep).logits
+            except TypeError:
+                logits = self.model(sequence).logits
+
+        # Slice from the end so this is correct both when the model honored the
+        # request and when it returned logits for the whole sequence.
+        return torch.log_softmax(logits[0, -keep:-1, :], dim=-1)
+
     def _truncate_at_stop(
         self, tokens: torch.Tensor, stop_sequences: tuple[str, ...] | None
     ) -> tuple[torch.Tensor, str]:
@@ -208,13 +242,11 @@ class HuggingFaceProvider(InferenceProvider):
                 # encoder-decoder logprobs would need a decoder-side forward pass
                 if len(gen_ids) > 0 and not self.is_encoder_decoder:
                     seq = torch.cat([encoded["input_ids"][0], gen_ids]).unsqueeze(0)
-                    with torch.no_grad():
-                        logits = self.model(seq).logits
-                    log_probs = torch.log_softmax(logits, dim=-1)[0]
+                    log_probs = self._scored_log_probs(seq, len(gen_ids))
 
                     logprob_entries: list[LogProbEntry] = []
                     for i, tok in enumerate(gen_ids):
-                        lp = log_probs[prompt_len + i - 1, tok].item()
+                        lp = log_probs[i, tok].item()
                         token_str = self.tokenizer.decode(tok, skip_special_tokens=False)
                         logprob_entries.append(
                             {
@@ -291,17 +323,13 @@ class HuggingFaceProvider(InferenceProvider):
                 # Build full sequence as tensor
                 full_ids = context_enc + continuation_enc
                 full_enc = torch.tensor([full_ids], device=self.device)
-                ctx_len = len(context_enc)
 
-                with torch.no_grad():
-                    logits = self.model(full_enc).logits
-
-                log_probs = torch.log_softmax(logits, dim=-1)[0]
+                log_probs = self._scored_log_probs(full_enc, len(continuation_enc))
 
                 logprob_entries: list[LogProbEntry] = []
                 total = 0.0
                 for j, tok in enumerate(continuation_enc):
-                    lp = log_probs[ctx_len + j - 1, tok].item()
+                    lp = log_probs[j, tok].item()
                     token_str = self.tokenizer.decode(tok, skip_special_tokens=False)
                     logprob_entries.append(
                         {
