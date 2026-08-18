@@ -9,13 +9,7 @@ import httpx
 
 from olmo_eval.common.beaker_status import BeakerStatusReporter
 from olmo_eval.common.logging import get_logger
-from olmo_eval.common.types import (
-    LMOutput,
-    LMRequest,
-    LogProbEntry,
-    RequestType,
-    SamplingParams,
-)
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
