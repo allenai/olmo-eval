@@ -1015,9 +1015,10 @@ class VLLMServerProvider(InferenceProvider):
         # Prefer local tokenizer for exact boundary matching with inline vLLM
         # try:
         tokenizer = self._get_tokenizer(require_local=True)
-        print(tokenizer)
+        print(tokenizer.add_bos_token, tokenizer.bos_token_id)
         # except (ImportError, Exception):
         #     tokenizer = self._get_tokenizer(require_local=False)
+        print(self._add_bos_token)
         if self._add_bos_token is not None:
             tokenizer = TokenizerBosOverride(tokenizer, self._add_bos_token)
         params = self._default_sampling_params(params)
