@@ -1013,10 +1013,11 @@ class VLLMServerProvider(InferenceProvider):
         RemoteTokenizer if transformers is not available.
         """
         # Prefer local tokenizer for exact boundary matching with inline vLLM
-        try:
-            tokenizer = self._get_tokenizer(require_local=True)
-        except (ImportError, Exception):
-            tokenizer = self._get_tokenizer(require_local=False)
+        # try:
+        tokenizer = self._get_tokenizer(require_local=True)
+        print(tokenizer)
+        # except (ImportError, Exception):
+        #     tokenizer = self._get_tokenizer(require_local=False)
         if self._add_bos_token is not None:
             tokenizer = TokenizerBosOverride(tokenizer, self._add_bos_token)
         params = self._default_sampling_params(params)
