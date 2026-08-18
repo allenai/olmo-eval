@@ -19,6 +19,7 @@ from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.tasks.common.pointing_base import (
     ModelPromptPointingTask,
     PointingTask,
+    StylePrefixMixin,
     pointing_metrics,
     rebase_data_path,
     torch_datasets_dir,
@@ -72,14 +73,14 @@ def _build_instances(question_for: Callable[[str, int], str]) -> Iterator[Instan
 
 
 @register("pixmo_points_eval")
-class PixmoPointsEvalTask(PointingTask):
+class PixmoPointsEvalTask(StylePrefixMixin, PointingTask):
     sampling_params = SamplingParams(temperature=0.0, max_tokens=512)
     metrics = _METRICS
     primary_metric = _METRICS[2]  # f1
     split = Split.TEST
 
     def _build_instances(self) -> Iterator[Instance]:
-        return _build_instances(lambda label, _idx: _format_query(label))
+        return _build_instances(lambda label, _idx: self.apply_family_prefix(_format_query(label)))
 
 
 @register("pixmo_points_eval_mp")

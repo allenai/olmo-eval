@@ -84,6 +84,8 @@ _STYLE_PREFIX_STYLES = ("style_and_length", "style_and_length_v2")
 
 #: The formatter's style name for these tasks, used as the system prefix.
 POINTING_STYLE = "pointing"
+#: The formatter's style name for the counting benchmarks (PixMo-Count, CountBenchQA).
+POINT_COUNT_STYLE = "point_count"
 
 
 def pointing_rng(index: int) -> np.random.RandomState:
@@ -93,16 +95,31 @@ def pointing_rng(index: int) -> np.random.RandomState:
     return np.random.RandomState((EVAL_DATA_SEED * _SEED_MULTIPLIER + index) % (2**32 - 1))
 
 
-def system_prefix(system_prompt: str) -> str:
-    """Prefix that ``system_prompt`` puts in front of a pointing question."""
+def system_prefix(system_prompt: str, style: str = POINTING_STYLE) -> str:
+    """Prefix that ``system_prompt`` puts in front of a question of ``style``.
+
+    mm_olmo's ``DataFormatter`` prefixes ``"<style>:"`` for the pointing/counting style
+    family under ``style_and_length``/``_v2`` and adds nothing under ``demo_or_style_v*``
+    (``olmo/data/data_formatter.py``). It keys off the *style*, not off whether the
+    benchmark supplied a ready-made question, so the pre-built-question benchmarks need the
+    prefix just as much as the ``_mp`` ones.
+    """
     if system_prompt in _NO_PREFIX_STYLES:
         return ""
     if system_prompt in _STYLE_PREFIX_STYLES:
-        return f"{POINTING_STYLE}:"
+        return f"{style}:"
     raise ValueError(
-        f"Unsupported system_prompt {system_prompt!r} for pointing; "
+        f"Unsupported system_prompt {system_prompt!r} for {style}; "
         f"expected one of {_NO_PREFIX_STYLES + _STYLE_PREFIX_STYLES}"
     )
+
+
+def apply_style_prefix(question: str, system_prompt: str, style: str) -> str:
+    """Return ``question`` with the family's ``"<style>:"`` prefix, if the family adds one."""
+    prefix = system_prefix(system_prompt, style)
+    if not prefix:
+        return question
+    return f"{prefix} {question}" if question else prefix
 
 
 def build_pointing_prompt(
