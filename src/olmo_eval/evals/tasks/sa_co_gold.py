@@ -20,6 +20,7 @@ from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.tasks.common.pointing_base import (
     ModelPromptPointingTask,
     PointingTask,
+    StylePrefixMixin,
     pointing_metrics,
     presence_metrics,
     rebase_data_path,
@@ -78,14 +79,17 @@ def _subset_instances(filename: str, question_for: Callable[[str, int], str]) ->
 
 
 @register("sa_co_gold_subset")
-class SaCoGoldSubsetTask(PointingTask):
+class SaCoGoldSubsetTask(StylePrefixMixin, PointingTask):
     sampling_params = SamplingParams(temperature=0.0, max_tokens=1024)
     metrics = _METRICS
     primary_metric = _METRICS[2]  # weighted f1
     split = Split.TEST
 
     def _build_instances(self) -> Iterator[Instance]:
-        return _subset_instances("molmo-subset-v1.json", lambda text, _idx: _format_query(text))
+        return _subset_instances(
+            "molmo-subset-v1.json",
+            lambda text, _idx: self.apply_family_prefix(_format_query(text)),
+        )
 
 
 @register("sa_co_gold_subset_mp")
