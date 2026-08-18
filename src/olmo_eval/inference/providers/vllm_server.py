@@ -1055,42 +1055,32 @@ class VLLMServerProvider(InferenceProvider):
         try:
             tokenizer = self._get_tokenizer(require_local=True)
         except (ImportError, Exception):
-            print("ACCESSED REMOTE TOKENIZER")
             tokenizer = self._get_tokenizer(require_local=False)
         if self._add_bos_token is not None:
-            print("ADDED BOS OVERRIDE")
-        tokenizer = TokenizerBosOverride(tokenizer, True)
+            tokenizer = TokenizerBosOverride(tokenizer, self._add_bos_toke)
         params = self._default_sampling_params(params)
-        print("PARAMS", params)
 
         # Get the context/prompt text
         context = request.prompt
-        # print("CONTEXT", context)
         if request.messages:
-            print("SENT MESSAGES")
             context = request.messages[0].get("content", "") if request.messages else ""
 
         http_client = self._get_raw_http_client()
 
         outputs = []
         cont_prompts = request.continuation_prompts
-        # print("CONTINUATION prompts", cont_prompts)
         for i, continuation in enumerate(request.continuations or ()):
             # Use per-continuation prompt when available (e.g. Trinh & Le partial eval)
             ctx = cont_prompts[i] if cont_prompts else context
-            # print("CTX", ctx)
             # Use shared utility for proper tokenization (handles BOS, trailing spaces)
             context_enc, continuation_enc = encode_context_and_continuation(
                 tokenizer, ctx, continuation
             )
-            print("CONTEXT ENCODING", context_enc)
-            print("CONTINUATION_ENCODING", continuation_enc)
 
             # RemoteTokenizer doesn't have BOS/EOS token IDs, so for empty contexts
             # encode_context_and_continuation returns empty context_enc.
             # In this case, encode with add_special_tokens=True to get BOS from server.
             if not context_enc and context == "":
-                print("NOT CONTEXT_ENC AND CONTEXT")
                 context_enc = tokenizer.encode("", add_special_tokens=True)
 
             # Left-truncate to max_length - 1 to match inline vLLM provider behavior.
@@ -1098,27 +1088,20 @@ class VLLMServerProvider(InferenceProvider):
             # the context is left-truncated while preserving the continuation tokens.
             # Use per-request max_length if set (e.g., from task config), else provider default.
             max_len = request.max_length or self.max_length
-            print("MAX_LEN", max_len)
             full_tokens = context_enc + continuation_enc
-            print("FULL TPKENS", full_tokens)
             if len(full_tokens) > max_len - 1:
-                print("TRUNCATING")
                 full_tokens = full_tokens[-(max_len - 1) :]
-                print("TRUNCATED FULL TOKENS", full_tokens)
                 overflow = len(context_enc) + len(continuation_enc) - (max_len - 1)
-                print("OVERFLOW", overflow)
                 context_len = max(0, len(context_enc) - overflow)
-                print("CONTEXT_LEN", context_len)
             else:
-                print("NO TRUNCATION")
                 context_len = len(context_enc)
-                print("CONTEXT_LEN", context_len)
 
             # Use raw HTTP to get integer-keyed prompt_logprobs from vLLM.
             # The OpenAI SDK's top_logprobs uses string keys (decoded tokens),
             # which can collide when different token IDs decode to the same string.
             # prompt_logprobs preserves integer token IDs through JSON serialization
             # (as string representations of ints), avoiding this collision.
+            print(full_tokens)
             resp = await http_client.post(
                 f"{self.base_url}/completions",
                 json={
@@ -1132,7 +1115,6 @@ class VLLMServerProvider(InferenceProvider):
             )
             resp.raise_for_status()
             data = resp.json()
-            # print("DATA", data)
 
             # Extract prompt_logprobs: list of dict[str(token_id), {logprob, ...}]
             choice = data["choices"][0]
