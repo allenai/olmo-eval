@@ -58,6 +58,9 @@ MOLMO2_POINTING_MP_TASKS = (
     "sa_co_gold_point_4k_mp",
 )
 
+# `sa_co_gold_point_mp` (the unsampled 166,766-example gold set) is registered but kept out
+# of the suite: it is ~6x the 4k variant and measures the same thing.
+
 make_suite(
     "molmo2_pointing_mp",
     MOLMO2_POINTING_MP_TASKS,
