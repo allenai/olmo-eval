@@ -15,7 +15,6 @@ from olmo_eval.common.types import (
     LogProbEntry,
     RequestType,
     SamplingParams,
-    TopLogProb,
 )
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
@@ -173,31 +172,6 @@ def _completion_top_logprob_values(top_logprobs: Any) -> list[float]:
         if (logprob := _completion_logprob_value(candidate)) is not None:
             values.append(logprob)
     return values
-
-
-def _completion_top_logprob_entries(top_logprobs: Any) -> list[TopLogProb]:
-    """Extract the top-k alternatives for one generated token, keeping their token strings."""
-    if isinstance(top_logprobs, dict):
-        candidates: Any = top_logprobs.items()
-    elif isinstance(top_logprobs, (list, tuple)):
-        candidates = top_logprobs
-    else:
-        return []
-
-    entries: list[TopLogProb] = []
-    for candidate in candidates:
-        # Completion payloads map token -> logprob; chat payloads carry the token inline.
-        if isinstance(candidate, tuple):
-            token, candidate = candidate
-        elif isinstance(candidate, dict):
-            token = candidate.get("token")
-        else:
-            token = getattr(candidate, "token", None)
-
-        logprob = _completion_logprob_value(candidate)
-        if token is not None and logprob is not None:
-            entries.append({"token": token, "logprob": logprob})
-    return entries
 
 
 def _completion_is_greedy(
@@ -729,14 +703,9 @@ class VLLMServerProvider(InferenceProvider):
     ) -> list[LogProbEntry] | None:
         """Convert completion logprob payload into standard entries and metadata."""
         logprob_entries: list[LogProbEntry] = []
-        tops = top_logprobs or []
-        for index, (token, logprob) in enumerate(zip(tokens, token_logprobs, strict=False)):
-            if logprob is None:
-                continue
-            entry: LogProbEntry = {"token": token, "logprob": logprob}
-            if index < len(tops) and (alternatives := _completion_top_logprob_entries(tops[index])):
-                entry["top_logprobs"] = alternatives
-            logprob_entries.append(entry)
+        for token, logprob in zip(tokens, token_logprobs, strict=False):
+            if logprob is not None:
+                logprob_entries.append({"token": token, "logprob": logprob})
 
         if logprob_entries:
             sum_logits = sum(entry["logprob"] for entry in logprob_entries)
@@ -822,8 +791,6 @@ class VLLMServerProvider(InferenceProvider):
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
-        if params.logprobs is not None:
-            kwargs["logprobs"] = params.logprobs
         if params.top_p is not None:
             kwargs["top_p"] = params.top_p
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
@@ -1057,7 +1024,7 @@ class VLLMServerProvider(InferenceProvider):
         except (ImportError, Exception):
             tokenizer = self._get_tokenizer(require_local=False)
         if self._add_bos_token is not None:
-            tokenizer = TokenizerBosOverride(tokenizer, self._add_bos_toke)
+            tokenizer = TokenizerBosOverride(tokenizer, self._add_bos_token)
         params = self._default_sampling_params(params)
 
         # Get the context/prompt text
