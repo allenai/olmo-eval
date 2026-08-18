@@ -29,9 +29,10 @@ its ``attemped`` typo. The paper typesets one example as math, so the exact
 characters behind ``6.69 ~ 6.7`` are unrecoverable; the rendered form is used.
 
 The paper judges with GPT-5 at high reasoning effort. The deliberate project
-default is ``gpt-5.5:high``; set ``OLMO_EVAL_JUDGE=gpt-5:high`` to reproduce the
-published numbers, or a cheaper spec such as ``gpt-5-mini`` for iteration. Judge
-strictness moves these scores, so cross-model comparisons need one judge spec.
+default is the dated ``gpt-5.5-2026-04-23:high`` snapshot; set
+``OLMO_EVAL_JUDGE=gpt-5:high`` to reproduce the published numbers, or a cheaper
+spec such as ``gpt-5-mini`` for iteration. The resolved judge configuration is
+serialized with the task because judge strictness moves these scores.
 
 The paper averages Olympiad over 20 independent trials and Research over 30. The
 ``:paper`` variants request that many samples per problem, and per-instance
@@ -62,8 +63,15 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import OutputScoreAggregation, Task, register, register_variant
+from olmo_eval.evals.tasks.common import (
+    OutputScoreAggregation,
+    Task,
+    TaskConfig,
+    register,
+    register_variant,
+)
 from olmo_eval.evals.tasks.common.base import _format_scoring_error, _store_output_score
+from olmo_eval.inference.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +79,8 @@ FRONTIERSCIENCE_REPO = "openai/frontierscience"
 # Pinned so a Hub update cannot silently change the gold set mid-comparison.
 FRONTIERSCIENCE_REVISION = "25ed67db7da8f4591484e764008ff585544f5a30"
 
-FRONTIERSCIENCE_DEFAULT_JUDGE_SPEC = "gpt-5.5:high"
+FRONTIERSCIENCE_DEFAULT_JUDGE_MODEL = "gpt-5.5-2026-04-23"
+FRONTIERSCIENCE_DEFAULT_JUDGE_REASONING_EFFORT = "high"
 FRONTIERSCIENCE_JUDGE_ATTEMPTS = 3
 FRONTIERSCIENCE_DEFAULT_SCORING_CONCURRENCY = 8
 
@@ -180,10 +189,22 @@ def parse_research_points(raw: str) -> float | None:
     return min(max(points, 0.0), FRONTIERSCIENCE_RUBRIC_TOTAL)
 
 
-def build_frontierscience_judge_fn(*, scorer_name: str, max_tokens: int) -> JudgeFn:
-    """Build the judge from ``$OLMO_EVAL_JUDGE`` or the task-local default."""
-    spec = os.getenv("OLMO_EVAL_JUDGE", FRONTIERSCIENCE_DEFAULT_JUDGE_SPEC)
+def _parse_judge_spec(spec: str) -> tuple[str, str | None]:
+    """Split ``model[:reasoning_effort]`` into serialized config values."""
     model, separator, effort = spec.partition(":")
+    if not model:
+        raise ValueError("OLMO_EVAL_JUDGE must name a judge model")
+    return model, effort if separator and effort else None
+
+
+def build_frontierscience_judge_fn(
+    *,
+    scorer_name: str,
+    model: str,
+    reasoning_effort: str | None,
+    max_tokens: int,
+) -> JudgeFn:
+    """Build a judge from the task's serialized judge configuration."""
     return build_openai_judge_fn(
         model=model,
         temperature=0.0,
@@ -191,7 +212,7 @@ def build_frontierscience_judge_fn(*, scorer_name: str, max_tokens: int) -> Judg
         # line; that call is retried and then scored 0.0.
         max_tokens=max_tokens,
         scorer_name=scorer_name,
-        reasoning_effort=(effort if separator else None),
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -221,10 +242,13 @@ async def judge_with_retries(
     prompt: str,
     parse: Callable[[str], float | None],
 ) -> tuple[float | None, str]:
-    """Call the judge until its verdict parses, returning the value and last reply."""
+    """Retry transient API failures within each parse attempt."""
     raw = ""
     for attempt in range(FRONTIERSCIENCE_JUDGE_ATTEMPTS):
-        raw = await judge_fn(prompt)
+        raw = await retry_with_backoff(
+            lambda: judge_fn(prompt),
+            context="frontierscience judge",
+        )
         value = parse(raw)
         if value is not None:
             return value, raw
@@ -321,7 +345,21 @@ class _FrontierScience(Task, ABC):
 
     #: Response score keys this track populates, primary first.
     score_keys: tuple[str, ...] = ()
-    judge_max_tokens: int = 8192
+    judge_model = FRONTIERSCIENCE_DEFAULT_JUDGE_MODEL
+    judge_reasoning_effort = FRONTIERSCIENCE_DEFAULT_JUDGE_REASONING_EFFORT
+    judge_max_tokens = 8192
+
+    def __init__(self, config: TaskConfig) -> None:
+        # Preserve the project-wide environment override, but resolve it before
+        # hashing/artifact creation rather than consulting it during scoring.
+        if spec := os.getenv("OLMO_EVAL_JUDGE"):
+            model, reasoning_effort = _parse_judge_spec(spec)
+            config = replace(
+                config,
+                judge_model=model,
+                judge_reasoning_effort=reasoning_effort,
+            )
+        super().__init__(config)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -372,9 +410,13 @@ class _FrontierScience(Task, ABC):
         """
         judge_fn = getattr(self, "_judge_fn", None)
         if judge_fn is None:
+            if self.config.judge_model is None or self.config.judge_max_tokens is None:
+                raise ValueError("FrontierScience requires a complete judge configuration")
             judge_fn = build_frontierscience_judge_fn(
                 scorer_name=type(self).__name__,
-                max_tokens=self.judge_max_tokens,
+                model=self.config.judge_model,
+                reasoning_effort=self.config.judge_reasoning_effort,
+                max_tokens=self.config.judge_max_tokens,
             )
             self._judge_fn = judge_fn
         return judge_fn
@@ -461,9 +503,8 @@ class _FrontierScience(Task, ABC):
                     raise scores
                 judge_errors.append(scores)
                 failed_by_response[response_index] += 1
-                # Record through the standard scorer-error channel: it is the only
-                # output metadata the prediction builder persists, so an omitted trial
-                # stays auditable after the run.
+                # Record through the standard scorer-error channel so an omitted
+                # trial stays auditable after the run.
                 _store_output_score(
                     responses[response_index].outputs[output_index],
                     scorer_name=FRONTIERSCIENCE_SCORER_NAME,
@@ -522,10 +563,21 @@ class _FrontierScience(Task, ABC):
         scores: dict[str, float],
         raw_judge_response: str,
         parse_error: bool,
+        parsed_result: dict[str, float | None],
     ) -> None:
         """Persist per-output judge details and score channels."""
-        output.metadata["frontierscience_raw_judge_response"] = raw_judge_response
         output.metadata["frontierscience_judge_parse_error"] = parse_error
+        judge_result: dict[str, Any] = {
+            "scorer": FRONTIERSCIENCE_SCORER_NAME,
+            **parsed_result,
+            "parse_error": parse_error,
+        }
+        # Successful research replies can contain a long rubric walkthrough. The
+        # parsed fields are sufficient to audit those; retain raw text only when
+        # parsing failed and the response itself is needed for diagnosis.
+        if parse_error:
+            judge_result["raw_judge_response"] = raw_judge_response
+        output.metadata["judge_result"] = judge_result
         for key, value in scores.items():
             output.metadata[f"score:{key}"] = value
         _store_output_score(
@@ -572,7 +624,13 @@ class FrontierScienceOlympiad(_FrontierScience):
         )
         verdict, raw = await judge_with_retries(judge_fn, prompt, parse_olympiad_verdict)
         scores = {"accuracy": 0.0 if verdict is None else verdict}
-        self._record(output, scores=scores, raw_judge_response=raw, parse_error=verdict is None)
+        self._record(
+            output,
+            scores=scores,
+            raw_judge_response=raw,
+            parse_error=verdict is None,
+            parsed_result={"parsed_outcome": verdict},
+        )
         return scores
 
 
@@ -620,8 +678,13 @@ class FrontierScienceResearch(_FrontierScience):
             "success_rate": 1.0 if earned >= self.success_threshold else 0.0,
             "rubric_score": earned / FRONTIERSCIENCE_RUBRIC_TOTAL,
         }
-        output.metadata["frontierscience_rubric_points"] = earned
-        self._record(output, scores=scores, raw_judge_response=raw, parse_error=points is None)
+        self._record(
+            output,
+            scores=scores,
+            raw_judge_response=raw,
+            parse_error=points is None,
+            parsed_result={"rubric_points": points},
+        )
         return scores
 
 

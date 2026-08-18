@@ -173,6 +173,12 @@ class TaskConfig:
     #: beaker launcher mounts each as the user-scoped secret ``{user}_{NAME}``.
     required_secrets: tuple[str, ...] = ()
 
+    # LLM-as-judge configuration. These stay optional so adding them does not
+    # perturb hashes for tasks that do not use a judge.
+    judge_model: str | None = None
+    judge_reasoning_effort: str | None = None
+    judge_max_tokens: int | None = None
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):
@@ -267,7 +273,7 @@ class TaskConfig:
                 return pm.to_dict()
             return str(pm)
 
-        return {
+        serialized = {
             "name": self.name,
             "data_source": serialize_data_source(self.data_source),
             "fewshot_source": serialize_data_source(self.fewshot_source),
@@ -285,6 +291,22 @@ class TaskConfig:
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
             "dependencies": self.dependencies,
         }
+        if any(
+            value is not None
+            for value in (
+                self.judge_model,
+                self.judge_reasoning_effort,
+                self.judge_max_tokens,
+            )
+        ):
+            serialized.update(
+                {
+                    "judge_model": self.judge_model,
+                    "judge_reasoning_effort": self.judge_reasoning_effort,
+                    "judge_max_tokens": self.judge_max_tokens,
+                }
+            )
+        return serialized
 
     def get_primary_metric(self) -> Metric | None:
         """Get the effective primary metric for this task.

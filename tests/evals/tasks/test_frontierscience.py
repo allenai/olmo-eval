@@ -13,6 +13,7 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, R
 from olmo_eval.evals.tasks import frontierscience
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, get_task, task_exists
 from olmo_eval.evals.tasks.frontierscience import (
+    FRONTIERSCIENCE_DEFAULT_JUDGE_MODEL,
     FRONTIERSCIENCE_OLYMPIAD_JUDGE_PROMPT,
     FRONTIERSCIENCE_RESEARCH_JUDGE_PROMPT,
     extract_final_answer,
@@ -20,6 +21,8 @@ from olmo_eval.evals.tasks.frontierscience import (
     parse_research_points,
     strip_reasoning,
 )
+from olmo_eval.runners.io.builders import build_predictions
+from olmo_eval.runners.processing.utils import compute_task_hash
 
 OLYMPIAD_INSTRUCTION = (
     "Think step by step and solve the problem below. At the end of your response, write your "
@@ -29,6 +32,18 @@ OLYMPIAD_INSTRUCTION = (
 #: Captured before ``_no_backoff_sleep`` replaces ``asyncio.sleep`` module-wide, so
 #: concurrency tests can still yield to the event loop for real.
 _real_sleep = asyncio.sleep
+
+
+class RateLimitError(Exception):
+    pass
+
+
+class APITimeoutError(Exception):
+    pass
+
+
+class ServerError(Exception):
+    status_code = 503
 
 
 @pytest.fixture
@@ -131,6 +146,24 @@ class TestRegistration:
     def test_both_tracks_declare_the_judge_api_key(self, olympiad, research):
         assert olympiad.config.required_secrets == ("OPENAI_API_KEY",)
         assert research.config.required_secrets == ("OPENAI_API_KEY",)
+
+    def test_judge_configuration_is_serialized(self, olympiad, research):
+        olympiad_config = olympiad.config.to_dict()
+        research_config = research.config.to_dict()
+
+        assert olympiad_config["judge_model"] == FRONTIERSCIENCE_DEFAULT_JUDGE_MODEL
+        assert olympiad_config["judge_reasoning_effort"] == "high"
+        assert olympiad_config["judge_max_tokens"] == 8192
+        assert research_config["judge_max_tokens"] == 32768
+
+    def test_judge_configuration_changes_the_task_hash(self, monkeypatch):
+        monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
+        first = get_task("frontierscience_olympiad", config_overrides={"judge_model": "judge-a"})
+        second = get_task("frontierscience_olympiad", config_overrides={"judge_model": "judge-b"})
+
+        assert compute_task_hash(first.config.to_dict()) != compute_task_hash(
+            second.config.to_dict()
+        )
 
 
 class TestProcessDoc:
@@ -296,6 +329,12 @@ class TestOlympiadScoring:
         assert response.outputs[0].metadata["score:accuracy"] == 1.0
         assert response.outputs[0].metadata["score:frontierscience_judge"] == 1.0
         assert response.outputs[0].metadata["frontierscience_judge_parse_error"] is False
+        saved = build_predictions([response])[0]["model_output"][0]["judge_result"]
+        assert saved == {
+            "scorer": "frontierscience_judge",
+            "parsed_outcome": 1.0,
+            "parse_error": False,
+        }
 
     @pytest.mark.anyio
     async def test_subject_metrics_average_only_their_own_slice(self, olympiad, monkeypatch):
@@ -336,6 +375,10 @@ class TestOlympiadScoring:
         assert response.scores["accuracy"] == 0.0
         assert response.outputs[0].metadata["frontierscience_judge_parse_error"] is True
         assert "no parseable verdict for 1/1 output(s)" in caplog.text
+        saved = build_predictions([response])[0]["model_output"][0]["judge_result"]
+        assert saved["parsed_outcome"] is None
+        assert saved["parse_error"] is True
+        assert saved["raw_judge_response"] == "nope"
 
     @pytest.mark.anyio
     async def test_warns_when_the_provider_returned_no_output(self, olympiad, monkeypatch, caplog):
@@ -387,6 +430,59 @@ class TestOlympiadScoring:
         assert response.outputs[0].metadata["frontierscience_judge_parse_error"] is False
 
     @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "error",
+        [
+            RateLimitError("429: try again"),
+            APITimeoutError("request timed out"),
+            ServerError("service unavailable"),
+        ],
+    )
+    async def test_retries_a_transient_api_error(self, olympiad, monkeypatch, error):
+        response = _response(olympiad)
+        calls = 0
+
+        async def judge(_prompt: str, **_kwargs) -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise error
+            return "VERDICT: CORRECT"
+
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        await olympiad.score_responses([response])
+
+        assert calls == 2
+        assert response.scores["accuracy"] == 1.0
+
+    @pytest.mark.anyio
+    async def test_transient_error_does_not_consume_a_parse_attempt(self, olympiad, monkeypatch):
+        response = _response(olympiad)
+        replies: list[str | Exception] = [
+            RateLimitError("429: try again"),
+            "garbage",
+            "still garbage",
+            "VERDICT: CORRECT",
+        ]
+        calls = 0
+
+        async def judge(_prompt: str, **_kwargs) -> str:
+            nonlocal calls
+            reply = replies[calls]
+            calls += 1
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+
+        await olympiad.score_responses([response])
+
+        assert calls == 4
+        assert response.scores["accuracy"] == 1.0
+
+    @pytest.mark.anyio
     async def test_multiple_trials_average_rather_than_take_the_best(self, olympiad, monkeypatch):
         response = _response(olympiad)
         response.outputs = [
@@ -422,7 +518,9 @@ class TestResearchScoring:
         assert "The attempted answer: A full derivation." in calls[0]
         assert response.scores["success_rate"] == 1.0
         assert response.scores["rubric_score"] == 0.75
-        assert response.outputs[0].metadata["frontierscience_rubric_points"] == 7.5
+        saved = build_predictions([response])[0]["model_output"][0]["judge_result"]
+        assert saved["rubric_points"] == 7.5
+        assert saved["parse_error"] is False
 
     @pytest.mark.anyio
     @pytest.mark.parametrize(
@@ -592,16 +690,20 @@ class TestRunnerShapedScoring:
 
     @pytest.mark.anyio
     async def test_one_failed_judge_call_keeps_the_other_samples(self, olympiad, monkeypatch):
-        """A rate limit on one trial must not discard the whole instance."""
+        """A non-retryable failure on one trial must not discard the whole instance."""
         response = _response(olympiad)
         response.outputs = [LMOutput(text=f"FINAL ANSWER {i}") for i in range(3)]
-        replies = iter(["VERDICT: CORRECT", "boom", "VERDICT: CORRECT"])
+        failed_calls = 0
 
-        async def judge(_prompt: str, **_kwargs) -> str:
-            reply = next(replies)
-            if reply == "boom":
-                raise RuntimeError("rate limit exceeded")
-            return reply
+        class BadRequestError(Exception):
+            pass
+
+        async def judge(prompt: str, **_kwargs) -> str:
+            nonlocal failed_calls
+            if "The attempted answer: 1" in prompt:
+                failed_calls += 1
+                raise BadRequestError("invalid request")
+            return "VERDICT: CORRECT"
 
         monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
 
@@ -609,10 +711,11 @@ class TestRunnerShapedScoring:
 
         # Mean over the two samples that were judged, not 1/3.
         assert response.scores["accuracy"] == 1.0
-        # Recorded through the one output-metadata channel the prediction builder keeps.
+        assert failed_calls == 1
+        # Recorded through the standard persisted scoring-error channel.
         errors = response.outputs[1].metadata["scoring_errors"]["frontierscience_judge"]
         assert errors["phase"] == "judge"
-        assert "rate limit exceeded" in errors["message"]
+        assert "invalid request" in errors["message"]
 
     @pytest.mark.anyio
     async def test_total_judge_failure_raises_and_the_runner_scores_it_zero(
@@ -622,14 +725,18 @@ class TestRunnerShapedScoring:
         from olmo_eval.runners.asynq.results import _record_scoring_failure
 
         response = _response(olympiad)
+        calls = 0
 
         async def judge(_prompt: str, **_kwargs) -> str:
+            nonlocal calls
+            calls += 1
             raise RuntimeError("rate limit exceeded")
 
         monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
 
         with pytest.raises(RuntimeError, match="failed for every sample"):
             await olympiad.score_responses([response])
+        assert calls == 4
 
         # The runner catches, annotates, and keeps the response, so the instance lands
         # in the metric as 0.0 rather than being dropped from the denominator.
@@ -656,15 +763,7 @@ class TestComputeMetrics:
         assert computed["rubric_score"] == {"frontierscience_judge": 0.8}
 
 
-@pytest.mark.parametrize(
-    ("env_spec", "expected_model", "expected_effort"),
-    [
-        (None, "gpt-5.5", "high"),
-        ("judge-override", "judge-override", None),
-        ("gpt-5:high", "gpt-5", "high"),
-    ],
-)
-def test_judge_spec_resolution(monkeypatch, env_spec, expected_model, expected_effort):
+def test_judge_builder_uses_serialized_config(monkeypatch):
     captured = {}
 
     async def sentinel(_prompt):
@@ -674,22 +773,47 @@ def test_judge_spec_resolution(monkeypatch, env_spec, expected_model, expected_e
         captured.update(kwargs)
         return sentinel
 
-    if env_spec is None:
-        monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
-    else:
-        monkeypatch.setenv("OLMO_EVAL_JUDGE", env_spec)
+    monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
     monkeypatch.setattr(frontierscience, "build_openai_judge_fn", fake_builder)
+    task = get_task(
+        "frontierscience_olympiad",
+        config_overrides={
+            "judge_model": "serialized-judge",
+            "judge_reasoning_effort": "medium",
+            "judge_max_tokens": 1234,
+        },
+    )
+    assert isinstance(task, frontierscience.FrontierScienceOlympiad)
 
-    built = frontierscience.build_frontierscience_judge_fn(scorer_name="Track", max_tokens=1234)
+    built = task._get_judge_fn()
 
     assert built is sentinel
     assert captured == {
-        "model": expected_model,
+        "model": "serialized-judge",
         "temperature": 0.0,
         "max_tokens": 1234,
-        "scorer_name": "Track",
-        "reasoning_effort": expected_effort,
+        "scorer_name": "FrontierScienceOlympiad",
+        "reasoning_effort": "medium",
     }
+
+
+@pytest.mark.parametrize(
+    ("env_spec", "expected_model", "expected_effort"),
+    [
+        ("judge-override", "judge-override", None),
+        ("gpt-5:high", "gpt-5", "high"),
+    ],
+)
+def test_environment_judge_override_is_resolved_into_config(
+    monkeypatch, env_spec, expected_model, expected_effort
+):
+    monkeypatch.setenv("OLMO_EVAL_JUDGE", env_spec)
+
+    config = get_task("frontierscience_olympiad").config.to_dict()
+
+    assert config["judge_model"] == expected_model
+    assert config["judge_reasoning_effort"] == expected_effort
+    assert config["judge_max_tokens"] == 8192
 
 
 def test_metric_subject_slice_stays_out_of_pairwise_scorer_fallback():
