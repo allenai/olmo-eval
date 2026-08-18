@@ -31,7 +31,7 @@ dependencies = [
     "sympy>=1.12",
     "textual-plot>=0.10.1",
     "tree-sitter>=0.24.0",
-    "tree-sitter-python>=0.23.0,<0.26.0",
+    "tree-sitter-python>=0.23.0,<0.25.0",
     "ifbench @ git+https://github.com/allenai/IFBench.git@finbarr/clean-install",
     # syllapy (transitive via ifbench) imports pkg_resources, which setuptools>=81 removes.
     "setuptools<81",
@@ -143,8 +143,8 @@ dev = [
     "ruff>=0.14.0",
     "ty==0.0.39",
     "pre-commit>=4.0.0",
-    # Unit tests import analysis helpers directly, so dev installs need these extras too.
-    "olmo-eval[storage,beaker,hf,analysis]",
+    # Unit tests import optional helpers directly, so dev installs need these extras too.
+    "olmo-eval[storage,beaker,hf,analysis,sandbox]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
     "parameterized>=0.9.0",
@@ -244,6 +244,8 @@ allowed-unresolved-imports = [
     "instructions_registry.**",
     "instructions.**",
     "crawl4ai.**",
+    "modal.**",
+    "swerex.**",
 ]
 
 [tool.gantry]

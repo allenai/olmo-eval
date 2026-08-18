@@ -11,6 +11,7 @@ from olmo_eval.common.execution import ProcessScoringPoolConfig
 from olmo_eval.harness import clear_registry, register_tool
 from olmo_eval.harness.config import HarnessConfig, harness_config
 from olmo_eval.harness.sandbox import SandboxConfig, SandboxMode
+from olmo_eval.harness.sandbox.config import DEFAULT_DEPLOYMENT_TIMEOUT
 from olmo_eval.harness.tools import tool
 
 
@@ -168,6 +169,26 @@ class TestHarnessConfig:
         )
 
         assert config.resolved_min_instances == 1
+
+    def test_sandbox_config_deployment_timeout_round_trip(self):
+        """Modal deployment lifetime is configurable independently of request timeouts."""
+        config = SandboxConfig(
+            image="python:3.12",
+            mode=SandboxMode.MODAL,
+            runtime_timeout=120.0,
+            deployment_timeout=14_400.0,
+        )
+
+        restored = SandboxConfig.from_dict(config.to_dict())
+
+        assert restored.runtime_timeout == 120.0
+        assert restored.deployment_timeout == 14_400.0
+
+    def test_sandbox_config_default_deployment_timeout_exceeds_one_hour(self):
+        config = SandboxConfig(image="python:3.12", mode=SandboxMode.MODAL)
+
+        assert config.deployment_timeout == DEFAULT_DEPLOYMENT_TIMEOUT
+        assert config.deployment_timeout > 3600.0
 
     def test_config_immutable(self):
         """Test that HarnessConfig is frozen (immutable)."""

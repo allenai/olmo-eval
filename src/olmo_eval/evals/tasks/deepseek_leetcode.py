@@ -8,7 +8,7 @@ Dataset: davidheineman/deepseek-leetcode
 
 import re
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.metrics import PassAtKMetric
@@ -110,3 +110,17 @@ register_variant(
     fewshot_seed=1234,
     primary_metric=PassAtKMetric(k=1, scorer=CodeExecutionScorer),
 )
+
+
+@register("deepseek_leetcode:olmo3base:v2")
+class DeepSeekLeetCodeOlmo3BaseV2(DeepSeekLeetCode):
+    """OLMo3 preset without invalid, unanswered few-shot examples."""
+
+    # The public dataset has prompts and tests but no reference solutions, so
+    # valid answered few-shot examples cannot be constructed from it.
+    num_fewshot = 0
+    primary_metric = PassAtKMetric(k=1, scorer=CodeExecutionScorer)
+    sampling_params = replace(
+        DeepSeekLeetCode.sampling_params,
+        truncate_prompt_tokens=2048,
+    )
