@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from olmo_eval.common.pointing_prompts import POINT_COUNT_STYLE
 from olmo_eval.common.scorers.image_qa import PointCountScorer
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register
@@ -22,13 +23,15 @@ from olmo_eval.evals.tasks.common.image_qa_base import (
     point_count_metrics,
     torch_datasets_dir,
 )
+from olmo_eval.evals.tasks.common.pointing_base import StylePrefixMixin
 
 _SCORER = PointCountScorer()
 _METRICS = point_count_metrics(_SCORER)
 
 
 @register("countbench_qa")
-class CountBenchQaTask(ImageQATask):
+class CountBenchQaTask(StylePrefixMixin, ImageQATask):
+    style = POINT_COUNT_STYLE
     sampling_params = SamplingParams(temperature=0.0, max_tokens=192)
     metrics = _METRICS
     primary_metric = _METRICS[0]  # correct
@@ -44,7 +47,7 @@ class CountBenchQaTask(ImageQATask):
         for idx in range(len(ds_nodecode)):
             ex = ds_nodecode[idx]
             yield Instance(
-                question=str(ex["question"]),
+                question=self.apply_family_prefix(str(ex["question"])),
                 gold_answer=str(ex["count"]),
                 metadata={
                     "count": ex["count"],

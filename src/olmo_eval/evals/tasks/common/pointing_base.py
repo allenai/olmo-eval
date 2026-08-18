@@ -20,12 +20,17 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from olmo_eval.common.metrics.base import Metric
-from olmo_eval.common.pointing_prompts import build_pointing_prompt
+from olmo_eval.common.pointing_prompts import (
+    POINTING_STYLE,
+    apply_style_prefix,
+    build_pointing_prompt,
+)
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, Response
-from olmo_eval.evals.tasks.common.base import Task
+from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 
 # Generic (not image-QA-specific) data/image utilities.
 from olmo_eval.evals.tasks.common.image_qa_base import (
@@ -76,6 +81,35 @@ class PointingTask(Task):
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
             images=(image,) if image is not None else None,
+        )
+
+
+class StylePrefixMixin:
+    """Applies the checkpoint's ``"<style>:"`` prompt prefix to a pre-built question.
+
+    For benchmarks that supply their own question, the prompt still has to follow the
+    checkpoint: mm_olmo's ``DataFormatter`` keys the prefix off the example's *style*, so a
+    ``style_and_length``/``_v2`` checkpoint saw ``"pointing: <q>"`` / ``"point_count: <q>"``
+    in training while a ``demo_or_style_v*`` one saw the bare question. Set
+    ``-o system_prompt_style=style_and_length_v2`` for a pretrain checkpoint; the default
+    matches the instruction-tuned models, as in :class:`ModelPromptPointingTask`.
+
+    Subclasses set :data:`style` to the mm_olmo style name for the benchmark.
+    """
+
+    #: mm_olmo style name for this benchmark's examples ("pointing" / "point_count").
+    style: str = POINTING_STYLE
+    default_system_prompt_style = "demo_or_style_v2"
+
+    if TYPE_CHECKING:  # supplied by the Task this is mixed into
+        config: TaskConfig
+
+    def apply_family_prefix(self, question: str) -> str:
+        """Return ``question`` prefixed for the checkpoint's prompt family."""
+        return apply_style_prefix(
+            question,
+            self.config.system_prompt_style or self.default_system_prompt_style,
+            self.style,
         )
 
 
