@@ -1065,7 +1065,7 @@ class VLLMServerProvider(InferenceProvider):
 
         # Get the context/prompt text
         context = request.prompt
-        print("CONTEXT", context)
+        # print("CONTEXT", context)
         if request.messages:
             print("SENT MESSAGES")
             context = request.messages[0].get("content", "") if request.messages else ""
@@ -1074,11 +1074,11 @@ class VLLMServerProvider(InferenceProvider):
 
         outputs = []
         cont_prompts = request.continuation_prompts
-        print("CONTINUATION prompts", cont_prompts)
+        # print("CONTINUATION prompts", cont_prompts)
         for i, continuation in enumerate(request.continuations or ()):
             # Use per-continuation prompt when available (e.g. Trinh & Le partial eval)
             ctx = cont_prompts[i] if cont_prompts else context
-            print("CTX", ctx)
+            # print("CTX", ctx)
             # Use shared utility for proper tokenization (handles BOS, trailing spaces)
             context_enc, continuation_enc = encode_context_and_continuation(
                 tokenizer, ctx, continuation
@@ -1132,7 +1132,7 @@ class VLLMServerProvider(InferenceProvider):
             )
             resp.raise_for_status()
             data = resp.json()
-            print("DATA", data)
+            # print("DATA", data)
 
             # Extract prompt_logprobs: list of dict[str(token_id), {logprob, ...}]
             choice = data["choices"][0]
