@@ -1059,7 +1059,7 @@ class VLLMServerProvider(InferenceProvider):
             tokenizer = self._get_tokenizer(require_local=False)
         if self._add_bos_token is not None:
             print("ADDED BOS OVERRIDE")
-        tokenizer = TokenizerBosOverride(tokenizer, self._add_bos_token)
+        tokenizer = TokenizerBosOverride(tokenizer, True)
         params = self._default_sampling_params(params)
         print("PARAMS", params)
 
