@@ -8,6 +8,7 @@ import contextlib
 import json
 import logging
 import os
+import random
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -24,7 +25,7 @@ from .errors import SandboxTransportError
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-_TRANSPORT_RETRIES = 1
+_TRANSPORT_RETRIES = 3
 _TRANSPORT_RETRY_INITIAL_DELAY = 0.25
 _HEALTH_CHECK_RETRIES = 3
 _HEALTH_CHECK_RETRY_INITIAL_DELAY = 0.5
@@ -32,8 +33,9 @@ _HEALTH_CHECK_TIMEOUT = 5.0
 
 
 def _exponential_backoff(initial_delay: float, retry: int) -> float:
-    """Return an exponential backoff delay for a one-indexed retry."""
-    return initial_delay * (2 ** (retry - 1))
+    """Return an exponential backoff delay with additive jitter."""
+    base_delay = initial_delay * (2 ** (retry - 1))
+    return base_delay + random.uniform(0.0, base_delay)
 
 
 def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
@@ -956,11 +958,6 @@ class SandboxExecutor:
                     last_health_error = str(exc) or repr(exc)
 
                 if alive:
-                    self._log(
-                        logging.WARNING,
-                        "Sandbox remained healthy after transport retries were exhausted; "
-                        "keeping it in rotation",
-                    )
                     return
 
                 if attempt < max_attempts:
