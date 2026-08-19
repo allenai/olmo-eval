@@ -1,7 +1,7 @@
 """Scoring for n-gram copying: bits per byte restricted to repeated-span positions."""
 
 import math
-from collections.abc import Sequence
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass, field
 
 from olmo_eval.common.types import Instance, LMOutput
@@ -9,7 +9,7 @@ from olmo_eval.common.types import Instance, LMOutput
 from .base import Scorer
 
 
-def compute_repeated_ngram_mask(tokens: Sequence[str], k: int) -> list[bool]:
+def compute_repeated_ngram_mask(tokens: Sequence[Hashable], k: int) -> list[bool]:
     """Flag positions whose preceding k-gram already occurred earlier in the sequence.
 
     Position i is flagged when tokens[i-k+1:i+1] is equal to some earlier k-gram
@@ -22,7 +22,7 @@ def compute_repeated_ngram_mask(tokens: Sequence[str], k: int) -> list[bool]:
         raise ValueError(f"k must be >= 1, got {k}")
 
     mask = [False] * len(tokens)
-    seen: set[tuple[str, ...]] = set()
+    seen: set[tuple[Hashable, ...]] = set()
     for i in range(len(tokens)):
         if i >= k - 1:
             ngram = tuple(tokens[i - k + 1 : i + 1])
@@ -54,7 +54,12 @@ class NGramCopyingBPBScorer(Scorer):
         if not output.logprobs:
             return None
 
-        tokens = [entry["token"] for entry in output.logprobs]
+        # Prefer token IDs as the repeat identity: distinct tokens whose decoded
+        # strings collide (e.g. multi-byte UTF-8 fragments that all render as the
+        # replacement character) must not count as repeats of each other.
+        tokens: list[Hashable] = [
+            entry.get("token_id", entry["token"]) for entry in output.logprobs
+        ]
         mask = compute_repeated_ngram_mask(tokens, self.k)
         if not any(mask):
             return None
@@ -65,6 +70,11 @@ class NGramCopyingBPBScorer(Scorer):
             if not matched:
                 continue
             total_logprob += entry.get("logprob", 0.0)
+            # Byte counts derive from the decoded token string (providers fill
+            # "bytes" the same way), so a token that decodes to the replacement
+            # character contributes its 3-byte encoding rather than the raw
+            # token's true byte length. Exact counts would need tokenizer-level
+            # raw bytes; the error is limited to repeats containing such tokens.
             token_bytes = entry.get("bytes")
             total_bytes += (
                 len(token_bytes) if token_bytes is not None else len(entry["token"].encode("utf-8"))

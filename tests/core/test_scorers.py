@@ -5,6 +5,7 @@ import pytest
 from olmo_eval.common.scorers import (
     ExactMatchScorer,
     MultipleChoiceScorer,
+    NGramCopyingBPBScorer,
     compute_repeated_ngram_mask,
 )
 from olmo_eval.common.types import Instance, LMOutput
@@ -324,3 +325,49 @@ class TestComputeRepeatedNgramMask:
         for k in range(1, len(tokens) + 1):
             expected = [score >= k for score in scores]
             assert compute_repeated_ngram_mask(tokens, k) == expected
+
+
+class TestNGramCopyingBPBScorer:
+    """Tests for NGramCopyingBPBScorer repeat identity."""
+
+    def test_colliding_token_strings_with_distinct_ids_are_not_repeats(self):
+        """Distinct tokens whose decoded strings collide (e.g. multi-byte UTF-8
+        fragments that all render as the replacement character) must not count
+        as repeats of each other when token IDs are available."""
+        scorer = NGramCopyingBPBScorer(k=1)
+        output = LMOutput(
+            text="",
+            logprobs=[
+                {"token": "�", "logprob": -1.0, "token_id": 10},
+                {"token": "�", "logprob": -1.0, "token_id": 11},
+            ],
+        )
+
+        assert scorer.masked_totals(output) is None
+
+    def test_repeated_token_ids_are_repeats(self):
+        """The same token ID appearing again counts as a repeat, regardless of
+        what its decoded string looks like."""
+        scorer = NGramCopyingBPBScorer(k=1)
+        output = LMOutput(
+            text="",
+            logprobs=[
+                {"token": "�", "logprob": -1.0, "token_id": 10},
+                {"token": "�", "logprob": -2.0, "token_id": 10},
+            ],
+        )
+
+        assert scorer.masked_totals(output) == (-2.0, len("�".encode()))
+
+    def test_falls_back_to_token_strings_without_ids(self):
+        """Entries lacking token_id fall back to string identity."""
+        scorer = NGramCopyingBPBScorer(k=1)
+        output = LMOutput(
+            text="",
+            logprobs=[
+                {"token": "a", "logprob": -1.0},
+                {"token": "a", "logprob": -2.0},
+            ],
+        )
+
+        assert scorer.masked_totals(output) == (-2.0, 1)
