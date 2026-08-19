@@ -361,7 +361,7 @@ def assemble_external_eval_job(
     extras: list[str] = collect_install_extras(
         store=store,
         sandbox=True,
-        provider_extras=get_provider_extras(model, default_kind="vllm_server"),
+        provider_extras=get_provider_extras(model, default_kind=provider_kind or "vllm_server"),
     )
     for scaffold_name in scaffold_names:
         for extra in collect_install_extras(scaffold_name=scaffold_name):
