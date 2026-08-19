@@ -180,13 +180,12 @@ def _load_gold_examples(sample: int | None) -> list[dict]:
     return examples
 
 
-@register("sa_co_gold_point_4k_mp")
-class SaCoGoldPoint4kMpTask(ModelPromptPointingTask):
-    """``sa_co_gold_point_4k_mp:test`` — 4096 examples per subset over the full gold test set.
+class SaCoGoldPointMpBase(ModelPromptPointingTask):
+    """The gold test set scored as pointing, with mm_olmo's ``_mp`` prompt.
 
     Unlike the prepared subsets this carries no per-example weight (so the primaries are
     plain means) and is dominated by absent phrases, which is what ``is_absent_acc`` and
-    ``is_present_acc`` measure.
+    ``is_present_acc`` measure. Subclasses set how many examples to draw per subset.
     """
 
     sampling_params = SamplingParams(temperature=0.0, max_tokens=2048)
@@ -194,8 +193,8 @@ class SaCoGoldPoint4kMpTask(ModelPromptPointingTask):
     primary_metric = _POINT_METRICS[2]  # f1
     split = Split.TEST
 
-    #: mm_olmo's ``sample`` for this variant, applied per subset.
-    sample_per_subset = 4096
+    #: mm_olmo's ``sample``, applied per subset; ``None`` keeps every example.
+    sample_per_subset: int | None = None
 
     def _build_instances(self) -> Iterator[Instance]:
         for idx, ex in enumerate(_load_gold_examples(self.sample_per_subset)):
@@ -215,3 +214,17 @@ class SaCoGoldPoint4kMpTask(ModelPromptPointingTask):
                     "label": ex["text_input"],
                 },
             )
+
+
+@register("sa_co_gold_point_4k_mp")
+class SaCoGoldPoint4kMpTask(SaCoGoldPointMpBase):
+    """``sa_co_gold_point_4k_mp:test`` — 4096 examples per subset (28,672 in total)."""
+
+    sample_per_subset = 4096
+
+
+@register("sa_co_gold_point_mp")
+class SaCoGoldPointMpTask(SaCoGoldPointMpBase):
+    """``sa_co_gold_point_mp:test`` — every example in the gold test set, unsampled."""
+
+    sample_per_subset = None
