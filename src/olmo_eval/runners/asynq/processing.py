@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+import traceback
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
@@ -219,7 +220,8 @@ async def process_batch(
     except Exception as e:
         # Batch failed - report error for all items
         error_detail = _format_error_detail(e)
-        log.error(f"Batch error ({len(items)} items): {error_detail}")
+        full_tb = traceback.format_exc()
+        log.error(f"Batch error ({len(items)} items): {error_detail}\n{full_tb}")
 
         for item, prepared_request, request_trace in zip(
             items, prepared_requests, request_traces, strict=True
