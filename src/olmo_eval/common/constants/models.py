@@ -95,6 +95,12 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             api_base="https://api.openai.com/v1",
             required_secrets=("OPENAI_API_KEY",),
         ),
+        "gpt-5.6-sol": ProviderConfig(
+            kind=ProviderKind.LITELLM,
+            model="gpt-5.6-sol",
+            api_base="https://api.openai.com/v1",
+            required_secrets=("OPENAI_API_KEY",),
+        ),
         "gpt-4o-mini": ProviderConfig(
             kind=ProviderKind.LITELLM,
             model="openai/gpt-4o-mini",
