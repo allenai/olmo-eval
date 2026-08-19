@@ -62,3 +62,28 @@ def patch_openai_agents_for_vllm() -> None:
 
     Converter.tool_to_openai = _patched_tool_to_openai
     Converter._vllm_patched = True
+
+
+def patch_openai_agents_for_litellm_usage() -> None:
+    """Give InputTokensDetails.cache_write_tokens a default, for litellm compatibility.
+
+    openai>=2.8's InputTokensDetails made `cache_write_tokens` a required field
+    (added for prompt-caching support), but openai-agents 0.7.0's own usage
+    normalization (agents/usage.py) still constructs it as
+    InputTokensDetails(cached_tokens=0), predating that change. litellm's usage
+    translation hits this path (it never sets cache_write_tokens either), so
+    every openai_agents-scaffolded run through a litellm provider fails with
+    "1 validation error for InputTokensDetails: cache_write_tokens Field required".
+
+    Call this once before creating any agents that will talk through litellm.
+    Safe to call multiple times (idempotent); a no-op once either package
+    upgrades to fix the skew upstream (checked via the field's own default).
+    """
+    from openai.types.responses.response_usage import InputTokensDetails
+
+    field = InputTokensDetails.model_fields["cache_write_tokens"]
+    if not field.is_required():
+        return
+
+    field.default = 0
+    InputTokensDetails.model_rebuild(force=True)

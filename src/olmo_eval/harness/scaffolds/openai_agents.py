@@ -170,12 +170,16 @@ class OpenAIAgentsScaffold(Scaffold):
             set_tracing_disabled,
         )
 
-        from olmo_eval.inference.utils import patch_openai_agents_for_vllm
+        from olmo_eval.inference.utils import (
+            patch_openai_agents_for_litellm_usage,
+            patch_openai_agents_for_vllm,
+        )
 
         # Disable trace export to OpenAI's backend (we don't have OPENAI_API_KEY set)
         set_tracing_disabled(True)
 
         patch_openai_agents_for_vllm()
+        patch_openai_agents_for_litellm_usage()
 
         # Create model using provider's OpenAI client
         client = provider.get_openai_client()
