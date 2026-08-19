@@ -329,8 +329,16 @@ class OlmoCoreVLMProvider(InferenceProvider):
         """
         import torch.nn.functional as F
 
+        from olmo_core.nn.embedding import SplitVocabEmbedding
+
         lm = self.model.lm
-        h = F.embedding(token_ids, lm.embeddings.weight, padding_idx=lm.embeddings.padding_idx)
+        emb = lm.embeddings
+        # `SplitVocabEmbedding` (Molmo2's `n_extra_vocab` image-special tokens)
+        # keeps the extra rows in a *separate* `extra_weight` parameter; using
+        # `.weight` alone only covers the base vocab and raises an out-of-bounds
+        # CUDA gather for any id >= base vocab_size (e.g. <im_patch>, <im_col>).
+        emb_weight = emb.full_weight() if isinstance(emb, SplitVocabEmbedding) else emb.weight
+        h = F.embedding(token_ids, emb_weight, padding_idx=emb.padding_idx)
         if lm.embed_scale is not None:
             h = h * lm.embed_scale
         if lm.embedding_norm is not None:
