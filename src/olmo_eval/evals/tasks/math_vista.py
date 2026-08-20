@@ -36,6 +36,9 @@ class MathVistaTask(ImageQATask):
     sampling_params = SamplingParams(temperature=0.0, max_tokens=32)
     metrics = (_GPT_METRIC,)
     primary_metric = _GPT_METRIC
+    #: The default answer extraction calls OpenAI; without the client every
+    #: instance scores zero instead of failing the run. `offline` needs no key.
+    dependencies = ["pillow", "openai"]
     split = Split.VALIDATION  # maps to the HF "testmini" split
 
     def _build_instances(self) -> Iterator[Instance]:

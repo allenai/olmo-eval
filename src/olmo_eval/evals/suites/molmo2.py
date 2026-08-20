@@ -17,6 +17,8 @@ MOLMO2_IMAGE_QA_TASKS = (
     "countbench_qa",
     "pixmo_count",
     "ai2d",
+    "charxiv_descriptive",
+    "charxiv_reasoning",
 )
 
 make_suite(
@@ -46,4 +48,38 @@ make_suite(
     MOLMO2_POINTING_TASKS,
     aggregation=AggregationStrategy.AVERAGE,
     description="Molmo2's image-pointing benchmarks (primary metric is f1, 0-1).",
+)
+
+# The mm_olmo `_mp` variants: same scoring, but the prompt is built from a bare label by
+# the model's own formatter, so it follows the checkpoint (see `pointing_prompts`).
+MOLMO2_POINTING_MP_TASKS = (
+    "pixmo_points_eval_mp",
+    "sa_co_gold_subset_mp",
+    "sa_co_gold_point_4k_mp",
+)
+
+# `sa_co_gold_point_mp` (the unsampled 166,766-example gold set) is registered but kept out
+# of the suite: it is ~6x the 4k variant and measures the same thing.
+
+make_suite(
+    "molmo2_pointing_mp",
+    MOLMO2_POINTING_MP_TASKS,
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Molmo2's image-pointing benchmarks with mm_olmo's model-prompt (_mp) inputs.",
+)
+
+# Multi-image benchmarks — a separate family again: each instance carries a list
+# of images, scored by the mm_olmo MuirBenchEval-family protocol (option-letter
+# accuracy). Matches mm_olmo eval_molmo2.py's MULTI_IMAGE_TASKS.
+MOLMO2_MULTI_IMAGE_TASKS = (
+    "muir_bench",
+    "mmiu",
+    "blink",
+)
+
+make_suite(
+    "molmo2_multiimage",
+    MOLMO2_MULTI_IMAGE_TASKS,
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Molmo2's multi-image benchmarks (primary metrics are accuracy, 0-1).",
 )

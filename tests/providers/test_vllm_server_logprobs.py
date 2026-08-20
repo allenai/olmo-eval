@@ -85,6 +85,21 @@ class TestVLLMServerProviderLogprobs:
         resp.usage = None
         return resp
 
+    def _make_chat_response(self, text="test reply"):
+        """Build a chat completion response matching the OpenAI client shape."""
+        message = MagicMock()
+        message.content = text
+        message.tool_calls = None
+
+        choice = MagicMock()
+        choice.message = message
+        choice.logprobs = None
+
+        resp = MagicMock()
+        resp.choices = [choice]
+        resp.usage = None
+        return resp
+
     @pytest.mark.anyio
     async def test_generate_completion_sets_add_special_tokens_false(self, provider):
         """Completion payloads should disable server-side special token insertion."""
@@ -98,6 +113,56 @@ class TestVLLMServerProviderLogprobs:
 
         call_kwargs = client.completions.create.call_args.kwargs
         assert call_kwargs["extra_body"]["add_special_tokens"] is False
+
+    @pytest.mark.anyio
+    async def test_generate_completion_omits_max_tokens_when_none(self, provider):
+        """max_tokens=None means uncapped: omit the field rather than sending null."""
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        await provider._generate_completion(client, request, SamplingParams(max_tokens=None))
+
+        assert "max_tokens" not in client.completions.create.call_args.kwargs
+
+    @pytest.mark.anyio
+    async def test_generate_completion_includes_max_tokens_when_set(self, provider):
+        """An explicit max_tokens is still forwarded to the completion payload."""
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        await provider._generate_completion(client, request, SamplingParams(max_tokens=64))
+
+        assert client.completions.create.call_args.kwargs["max_tokens"] == 64
+
+    @pytest.mark.anyio
+    async def test_generate_chat_omits_max_tokens_when_none(self, provider):
+        """max_tokens=None means uncapped: omit the field rather than sending null."""
+        provider.chat_template_kwargs = None
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
+
+        request = LMRequest(
+            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+        )
+        await provider._generate_chat(client, request, SamplingParams(max_tokens=None))
+
+        assert "max_tokens" not in client.chat.completions.create.call_args.kwargs
+
+    @pytest.mark.anyio
+    async def test_generate_chat_includes_max_tokens_when_set(self, provider):
+        """An explicit max_tokens is still forwarded to the chat payload."""
+        provider.chat_template_kwargs = None
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
+
+        request = LMRequest(
+            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+        )
+        await provider._generate_chat(client, request, SamplingParams(max_tokens=128))
+
+        assert client.chat.completions.create.call_args.kwargs["max_tokens"] == 128
 
     def test_describe_request_includes_chat_template_kwargs(self):
         """Chat traces should preserve template kwargs in generation metadata."""

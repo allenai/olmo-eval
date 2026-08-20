@@ -8,6 +8,7 @@ from typing import Any
 
 from rich.console import Console
 
+from olmo_eval.evals.suites import get_suite, suite_exists
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 
 console = Console()
@@ -334,14 +335,31 @@ class RunConfigBuilder:
         Returns:
             RunConfig with parsed and validated settings.
         """
-        # Build task specs and overrides from CLI -o flags
+        # Build task specs and overrides from CLI -o flags. Suite-level overrides
+        # are propagated to each constituent task spec.
         task_specs: list[str] = list(self.task)
-        task_overrides: dict[str, dict[str, Any]] = {}
+        resolved_cli_overrides: dict[str, list[str]] = {}
         for task_spec, cli_overrides in self.cli_task_overrides.items():
-            if cli_overrides:
-                override_dict: dict[str, Any] = {}
-                _apply_dotlist_overrides(override_dict, cli_overrides)
-                task_overrides[task_spec] = override_dict
+            if not cli_overrides:
+                continue
+            if "@" in task_spec:
+                base_spec, priority = task_spec.rsplit("@", 1)
+                priority_suffix = f"@{priority}"
+            else:
+                base_spec = task_spec
+                priority_suffix = ""
+            if suite_exists(base_spec):
+                for child_spec in get_suite(base_spec).expand():
+                    key = f"{child_spec}{priority_suffix}"
+                    resolved_cli_overrides.setdefault(key, []).extend(cli_overrides)
+            else:
+                resolved_cli_overrides.setdefault(task_spec, []).extend(cli_overrides)
+
+        task_overrides: dict[str, dict[str, Any]] = {}
+        for task_spec, cli_overrides in resolved_cli_overrides.items():
+            override_dict: dict[str, Any] = {}
+            _apply_dotlist_overrides(override_dict, cli_overrides)
+            task_overrides[task_spec] = override_dict
 
         # Resolve harness configuration with provider config built in
         harness_config = self._resolve_harness_config(self.model)

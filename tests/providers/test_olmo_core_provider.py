@@ -336,6 +336,23 @@ def test_generate_uses_olmes_batch_contract(
     assert module.free_calls == 1
 
 
+def test_generate_uncapped_fills_context(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    provider, module, _ = fake_provider
+    provider.max_length = 32
+
+    provider.generate(
+        [LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt")],
+        SamplingParams(max_tokens=None),
+    )
+
+    call = module.generate_calls[0]
+    # The 2-token prompt isn't truncated, and generation fills the rest of the budget.
+    assert call["input_ids"].tolist() == [[10, 11]]
+    assert call["max_length"] == 32
+
+
 def test_generate_left_truncates_to_leave_completion_room(
     fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
 ) -> None:
@@ -484,3 +501,42 @@ def test_logprobs_clears_generation_cache_before_forward(
     assert cache_states == [False]
     assert module.cache_allocated is False
     assert module.free_calls == 1
+
+
+class TestMmOlmoKeyRemap:
+    """mm_olmo trainer tensor names -> released-Molmo2 HF names."""
+
+    def test_untied_lm_head_becomes_hf_lm_head(self) -> None:
+        """The transformer's own ``ff_out`` is the LM head, not an MLP output.
+
+        Leaving it unrenamed makes the loader fall back to the weight-tied path and
+        substitute the embedding table for a head the model does not tie, which
+        produces fluent garbage instead of an error.
+        """
+        from olmo_eval.inference.providers.olmo_core_vlm_utils import _mm_olmo_key_to_hf_key
+
+        assert _mm_olmo_key_to_hf_key("model.transformer.ff_out.weight") == "lm_head.weight"
+
+    def test_block_ff_out_still_nests_under_mlp(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm_utils import _mm_olmo_key_to_hf_key
+
+        assert (
+            _mm_olmo_key_to_hf_key("model.transformer.blocks.3.ff_out.weight")
+            == "model.transformer.blocks.3.mlp.ff_out.weight"
+        )
+
+    @pytest.mark.parametrize(
+        ("key", "expected"),
+        [
+            ("model.transformer.wte.embedding", "model.transformer.wte.embedding"),
+            ("model.transformer.ln_f.weight", "model.transformer.ln_f.weight"),
+            (
+                "model.transformer.blocks.0.att_proj.weight",
+                "model.transformer.blocks.0.self_attn.att_proj.weight",
+            ),
+        ],
+    )
+    def test_other_keys(self, key: str, expected: str) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm_utils import _mm_olmo_key_to_hf_key
+
+        assert _mm_olmo_key_to_hf_key(key) == expected

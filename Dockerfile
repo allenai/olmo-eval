@@ -50,7 +50,7 @@ RUN uv sync --frozen --active --no-default-groups --no-install-project
 RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) \
     && uv pip install --no-cache-dir \
         --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/cu${CUDA_SHORT}/ \
-        torch==${TORCH_VERSION}
+        torch==${TORCH_VERSION} torchvision torchaudio
 
 # ============================================================================
 # Stage 2: Runtime — minimal image with venv + lockfile

@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.inference.gpu_planner import resolve_visible_devices
 from olmo_eval.runners.asynq.types import (
     WORKER_FATAL,
     ResultItem,
@@ -63,7 +64,7 @@ def inference_worker(
 
     try:
         if gpu_ids:
-            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
+            os.environ["CUDA_VISIBLE_DEVICES"] = resolve_visible_devices(gpu_ids)
 
         provider_kind = str(provider_config.kind)
         tokenizer = provider_config.tokenizer

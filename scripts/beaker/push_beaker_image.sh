@@ -140,10 +140,18 @@ fi
 
 # Step 1: Upload as temporary image (or reuse existing from partial run)
 echo "Step 1/3: Uploading image as temporary..."
-TMP_IMAGE_ID=$(beaker image get "${TMP_IMAGE_REF}" --format json 2>/dev/null | jq -r '.[0].id' || echo "")
+TMP_IMAGE_JSON=$(beaker image get "${TMP_IMAGE_REF}" --format json 2>/dev/null || echo "")
+TMP_IMAGE_ID=$(echo "$TMP_IMAGE_JSON" | jq -r '.[0].id // empty' 2>/dev/null || echo "")
+TMP_IMAGE_COMMITTED=$(echo "$TMP_IMAGE_JSON" | jq -r '.[0].committed // empty' 2>/dev/null || echo "")
 if [[ -n "$TMP_IMAGE_ID" && "$FORCE" == "true" ]]; then
     echo "  Deleting existing temporary image (--force): ${TMP_IMAGE_ID}"
-    beaker image delete "${TMP_IMAGE_ID}" --yes
+    beaker image delete "${TMP_IMAGE_ID}"
+    TMP_IMAGE_ID=""
+elif [[ -n "$TMP_IMAGE_ID" && ( -z "$TMP_IMAGE_COMMITTED" || "$TMP_IMAGE_COMMITTED" == "0001-01-01T00:00:00Z" ) ]]; then
+    # An uncommitted image means a previous upload was interrupted mid-push;
+    # reusing it would promote a partial image.
+    echo "  Existing temporary image is incomplete (upload never committed); deleting: ${TMP_IMAGE_ID}"
+    beaker image delete "${TMP_IMAGE_ID}"
     TMP_IMAGE_ID=""
 fi
 if [[ -n "$TMP_IMAGE_ID" ]]; then
@@ -171,8 +179,13 @@ fi
 
 # Step 2: Archive existing image (if it exists)
 echo "Step 2/3: Archiving existing image..."
-EXISTING_IMAGE_ID=$(beaker image get "${IMAGE_REF}" --format json 2>/dev/null | jq -r '.[0].id' || echo "")
-if [[ -n "$EXISTING_IMAGE_ID" ]]; then
+EXISTING_IMAGE_JSON=$(beaker image get "${IMAGE_REF}" --format json 2>/dev/null || echo "")
+EXISTING_IMAGE_ID=$(echo "$EXISTING_IMAGE_JSON" | jq -r '.[0].id // empty' 2>/dev/null || echo "")
+EXISTING_IMAGE_COMMITTED=$(echo "$EXISTING_IMAGE_JSON" | jq -r '.[0].committed // empty' 2>/dev/null || echo "")
+if [[ -n "$EXISTING_IMAGE_ID" && ( -z "$EXISTING_IMAGE_COMMITTED" || "$EXISTING_IMAGE_COMMITTED" == "0001-01-01T00:00:00Z" ) ]]; then
+    echo "  Existing image is incomplete (upload never committed); deleting instead of archiving: ${EXISTING_IMAGE_ID}"
+    beaker image delete "${EXISTING_IMAGE_ID}"
+elif [[ -n "$EXISTING_IMAGE_ID" ]]; then
     beaker image rename "${EXISTING_IMAGE_ID}" "${ARCHIVE_IMAGE}"
     echo "  Archived to: ${ARCHIVE_IMAGE}"
 else

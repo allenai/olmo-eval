@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from contextvars import ContextVar
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
@@ -14,6 +15,7 @@ from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.result import HarnessResult
 from olmo_eval.harness.scaffolds import Scaffold, register_scaffold
 from olmo_eval.harness.tools import Tool
+from olmo_eval.harness.tools.search import search_date_cutoff
 from olmo_eval.inference.base import InferenceProvider
 
 if TYPE_CHECKING:
@@ -22,6 +24,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _current_binding: ContextVar[ExecutorBinding | None] = ContextVar("_current_binding", default=None)
+FORCED_FINAL_ANSWER_INSTRUCTION = (
+    "You have reached the maximum number of steps. Based on the information gathered so far, "
+    "provide your final answer now. Do not call any tools."
+)
 
 
 @register_scaffold("openai_agents")
@@ -321,7 +327,8 @@ class OpenAIAgentsScaffold(Scaffold):
             trace_name = f"Agent: {config.name}" if config.name else "Agent run"
 
         # Run agent within trace context for observability
-        with trace(trace_name, metadata=trace_metadata):
+        date_cutoff = (trace_metadata or {}).get("date_cutoff")
+        with search_date_cutoff(date_cutoff), trace(trace_name, metadata=trace_metadata):
             try:
                 run_kwargs: dict[str, Any] = {
                     "starting_agent": agent,
@@ -335,11 +342,38 @@ class OpenAIAgentsScaffold(Scaffold):
             except Exception as e:
                 # Handle MaxTurnsExceeded - return a result with the error instead of raising
                 if type(e).__name__ == "MaxTurnsExceeded":
+                    partial_result = getattr(e, "run_data", None)
+                    trajectory = self._convert_trajectory(partial_result)
+                    try:
+                        final_text = await self._force_final_answer(
+                            Runner=Runner,
+                            agent=agent,
+                            partial_result=partial_result,
+                            original_input=input_text,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Forced final answer after max_turns failed; using fallback result",
+                            exc_info=True,
+                        )
+                        return HarnessResult(
+                            trajectory=AgentTrajectory(turns=()),
+                            final_output=LMOutput(text="[Max turns exceeded]"),
+                            max_turns_reached=True,
+                            error=f"Max turns ({max_turns}) exceeded",
+                        )
+
+                    return HarnessResult(
+                        trajectory=trajectory,
+                        final_output=LMOutput(text=final_text),
+                        max_turns_reached=True,
+                        error=None,
+                    )
+                if type(e).__name__ == "ModelBehaviorError":
                     return HarnessResult(
                         trajectory=AgentTrajectory(turns=()),
-                        final_output=LMOutput(text="[Max turns exceeded]"),
-                        max_turns_reached=True,
-                        error=f"Max turns ({max_turns}) exceeded",
+                        final_output=LMOutput(text=f"[Tool error: {e}]"),
+                        error=str(e),
                     )
 
                 # Log full traceback for debugging connection issues
@@ -366,6 +400,66 @@ class OpenAIAgentsScaffold(Scaffold):
             error="Max turns exceeded" if max_turns_reached else None,
         )
 
+    async def _force_final_answer(
+        self,
+        *,
+        Runner: Any,
+        agent: Any,
+        partial_result: Any,
+        original_input: str,
+    ) -> str:
+        """Run one no-tool model call to produce a final answer after max_turns."""
+        final_input = self._build_forced_final_input(partial_result, original_input)
+        model_settings = replace(agent.model_settings, tool_choice="none")
+        final_agent = replace(
+            agent,
+            tools=[],
+            handoffs=[],
+            mcp_servers=[],
+            model_settings=model_settings,
+        )
+        final_result = await Runner.run(
+            starting_agent=final_agent,
+            input=final_input,
+            max_turns=1,
+        )
+        final_text = getattr(final_result, "final_output", "")
+        return str(final_text or "")
+
+    def _build_forced_final_input(
+        self,
+        partial_result: Any,
+        original_input: str,
+    ) -> list[Any]:
+        """Build model input from the partial run plus a final-answer instruction."""
+        input_list: list[Any] = []
+
+        if partial_result is not None and hasattr(partial_result, "to_input_list"):
+            try:
+                input_list = list(partial_result.to_input_list())
+            except Exception:
+                input_list = []
+
+        if not input_list and partial_result is not None:
+            original = getattr(partial_result, "input", original_input)
+            if isinstance(original, list):
+                input_list.extend(original)
+            elif original:
+                input_list.append({"role": "user", "content": str(original)})
+
+            for item in getattr(partial_result, "new_items", None) or []:
+                if hasattr(item, "to_input_item"):
+                    try:
+                        input_list.append(item.to_input_item())
+                    except Exception:
+                        continue
+
+        if not input_list and original_input:
+            input_list.append({"role": "user", "content": original_input})
+
+        input_list.append({"role": "user", "content": FORCED_FINAL_ANSWER_INSTRUCTION})
+        return input_list
+
     def _convert_trajectory(self, result: Any) -> AgentTrajectory:
         """Convert agents SDK result to AgentTrajectory.
 
@@ -376,6 +470,8 @@ class OpenAIAgentsScaffold(Scaffold):
             AgentTrajectory with converted turns.
         """
         turns: list[AgentTurn] = []
+        if result is None:
+            return AgentTrajectory(turns=tuple(turns))
 
         # Get items from new_items (primary source in agents SDK)
         items = getattr(result, "new_items", None) or []
@@ -426,7 +522,15 @@ class OpenAIAgentsScaffold(Scaffold):
                 # Extract tool_call_id from raw_item
                 tool_call_id = ""
                 if raw is not None:
-                    tool_call_id = getattr(raw, "call_id", "") or getattr(raw, "id", "") or ""
+                    if isinstance(raw, dict):
+                        tool_call_id = (
+                            raw.get("call_id", "")
+                            or raw.get("tool_call_id", "")
+                            or raw.get("id", "")
+                            or ""
+                        )
+                    else:
+                        tool_call_id = getattr(raw, "call_id", "") or getattr(raw, "id", "") or ""
                 content = str(output) if output is not None else ""
                 tool_result = ToolResult(
                     tool_call_id=tool_call_id,

@@ -20,11 +20,17 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from olmo_eval.common.metrics.base import Metric
+from olmo_eval.common.pointing_prompts import (
+    POINTING_STYLE,
+    apply_style_prefix,
+    build_pointing_prompt,
+)
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, Response
-from olmo_eval.evals.tasks.common.base import Task
+from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 
 # Generic (not image-QA-specific) data/image utilities.
 from olmo_eval.evals.tasks.common.image_qa_base import (
@@ -34,10 +40,12 @@ from olmo_eval.evals.tasks.common.image_qa_base import (
 )
 
 __all__ = [
+    "ModelPromptPointingTask",
     "PointingMetric",
     "PointingTask",
     "load_instance_image",
     "pointing_metrics",
+    "presence_metrics",
     "rebase_data_path",
     "torch_datasets_dir",
 ]
@@ -45,6 +53,12 @@ __all__ = [
 
 class PointingTask(Task):
     """Base class for the image-pointing benchmark tasks."""
+
+    #: Image decoding builds the instances; the scorer decodes COCO-RLE masks with
+    #: pycocotools and matches points to them with scipy. All three are needed
+    #: whichever provider runs the task, and a missing scorer dependency scores
+    #: every instance zero rather than failing the run.
+    dependencies = ["pillow", "pycocotools", "scipy"]
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -67,6 +81,57 @@ class PointingTask(Task):
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
             images=(image,) if image is not None else None,
+        )
+
+
+class StylePrefixMixin:
+    """Applies the checkpoint's ``"<style>:"`` prompt prefix to a pre-built question.
+
+    For benchmarks that supply their own question, the prompt still has to follow the
+    checkpoint: mm_olmo's ``DataFormatter`` keys the prefix off the example's *style*, so a
+    ``style_and_length``/``_v2`` checkpoint saw ``"pointing: <q>"`` / ``"point_count: <q>"``
+    in training while a ``demo_or_style_v*`` one saw the bare question. Set
+    ``-o system_prompt_style=style_and_length_v2`` for a pretrain checkpoint; the default
+    matches the instruction-tuned models, as in :class:`ModelPromptPointingTask`.
+
+    Subclasses set :data:`style` to the mm_olmo style name for the benchmark.
+    """
+
+    #: mm_olmo style name for this benchmark's examples ("pointing" / "point_count").
+    style: str = POINTING_STYLE
+    default_system_prompt_style = "demo_or_style_v2"
+
+    if TYPE_CHECKING:  # supplied by the Task this is mixed into
+        config: TaskConfig
+
+    def apply_family_prefix(self, question: str) -> str:
+        """Return ``question`` prefixed for the checkpoint's prompt family."""
+        return apply_style_prefix(
+            question,
+            self.config.system_prompt_style or self.default_system_prompt_style,
+            self.style,
+        )
+
+
+class ModelPromptPointingTask(PointingTask):
+    """Pointing task whose prompt the model's own formatter builds from a bare label.
+
+    These are mm_olmo's ``_mp`` variants. The prompt form follows the checkpoint
+    rather than the benchmark, so both settings are overridable per run
+    (``-o prompt_templates=none -o system_prompt_style=style_and_length_v2`` for a
+    pretrain checkpoint); the class defaults match the instruction-tuned models.
+    """
+
+    default_prompt_templates = "uber_model_v2"
+    default_system_prompt_style = "demo_or_style_v2"
+
+    def format_query(self, label: str, index: int) -> str:
+        """Render the prompt for ``label`` at build-order position ``index``."""
+        return build_pointing_prompt(
+            label,
+            index,
+            prompt_templates=self.config.prompt_templates or self.default_prompt_templates,
+            system_prompt=self.config.system_prompt_style or self.default_system_prompt_style,
         )
 
 
@@ -144,3 +209,45 @@ def pointing_metrics(
             for kind in _KINDS
         )
     return tuple(metrics)
+
+
+@dataclass(frozen=True)
+class PresenceMetric(Metric):
+    """Abstention accuracy over the examples where the phrase is wholly absent or present.
+
+    ``is_absent_acc`` is the fraction of examples with no ground truth for any annotator
+    where the model pointed at nothing; ``is_present_acc`` the fraction of examples with
+    ground truth from every annotator where it pointed at something. Examples where the
+    annotators disagree about presence count toward neither, as in mm_olmo's
+    ``SACoGoldPointEvaluator``.
+    """
+
+    name: str  # type: ignore[misc]
+    scorer: Scorer  # type: ignore[misc]
+    #: ``"no_gt"`` selects the absent examples, ``"has_gt"`` the present ones.
+    gt_field: str = "no_gt"
+    #: Whether pointing at something is the correct behavior for those examples.
+    expect_prediction: bool = False
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        num = 0
+        den = 0
+        for result in _pointing_results(responses):
+            if not result.get(self.gt_field):
+                continue
+            den += 1
+            if bool(result.get("made_prediction")) is self.expect_prediction:
+                num += 1
+        return num / den if den else 0.0
+
+
+def presence_metrics(scorer: Scorer) -> tuple[Metric, ...]:
+    """The ``is_absent_acc`` / ``is_present_acc`` pair for one shared scorer."""
+    return (
+        PresenceMetric(
+            name="is_absent_acc", scorer=scorer, gt_field="no_gt", expect_prediction=False
+        ),
+        PresenceMetric(
+            name="is_present_acc", scorer=scorer, gt_field="has_gt", expect_prediction=True
+        ),
+    )

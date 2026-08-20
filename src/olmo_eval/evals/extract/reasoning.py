@@ -4,7 +4,7 @@ import re
 
 
 # Based on oe-eval implementation; returns thinking trace if no answer is found
-def extract_think_answer(text: str) -> str:
+def extract_think_answer(text: str) -> str | None:
     # Deepseek-R1 style reasoning/answer extraction, assuming pattern is
     # <think>REASONING</think><answer>ANSWER</answer> with some flexibility
     # (mostly split on </think>, then remove other tags)
@@ -15,7 +15,7 @@ def extract_think_answer(text: str) -> str:
 
 
 # Based on the same extraction logic; returns an empty string if no answer is found
-def extract_think_answer_only(text: str) -> str:
+def extract_think_answer_only(text: str) -> str | None:
     # Deepseek-R1 style reasoning/answer extraction, assuming pattern is
     # <think>REASONING</think><answer>ANSWER</answer> with some flexibility
     # (mostly split on </think>, then remove other tags)

@@ -94,5 +94,10 @@ class PointingScorer(Scorer):
             "f1": f1,
             "count": count,
             "weight": float(meta.get("weight", 1.0)),
+            # Abstention accounting: whether the phrase is absent for every annotator,
+            # present for every annotator, and whether the model pointed at anything.
+            "no_gt": all(len(masks) == 0 for masks in annotator_masks),
+            "has_gt": all(len(masks) > 0 for masks in annotator_masks),
+            "made_prediction": len(points) > 0,
         }
         return f1

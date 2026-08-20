@@ -6,6 +6,7 @@ import asyncio
 import gc
 import logging
 from contextlib import suppress
+from dataclasses import replace
 from typing import TYPE_CHECKING, Literal, cast
 
 import olmo_eval.inference.providers.olmo_core_utils as core_utils
@@ -415,6 +416,28 @@ class OlmoCoreProvider(InferenceProvider):
             stops.append(eos)
         return tuple(stops)
 
+    def _resolve_max_tokens(
+        self,
+        params: SamplingParams,
+        prompt_token_ids: list[list[int]],
+    ) -> SamplingParams:
+        """Resolve an uncapped (``max_tokens=None``) request to a concrete budget.
+
+        "Uncapped" means generate to the model's context limit, so reserve the
+        room left after the longest prompt. Downstream length validation and
+        truncation then operate on a concrete int.
+        """
+        if params.max_tokens is not None:
+            return params
+        longest_prompt = max((len(ids) for ids in prompt_token_ids), default=0)
+        budget = self.max_length - longest_prompt
+        if budget <= 0:
+            raise ValueError(
+                f"OlmoCoreProvider cannot generate uncapped: longest prompt "
+                f"({longest_prompt}) leaves no room within max_length ({self.max_length})."
+            )
+        return replace(params, max_tokens=budget)
+
     def _validate_generation_lengths(
         self,
         prompt_token_ids: list[list[int]],
@@ -513,6 +536,11 @@ class OlmoCoreProvider(InferenceProvider):
             return []
 
         params = self._default_sampling_params(sampling_params)
+        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
+            logger.warning(
+                "truncate_prompt_tokens or truncation_side has been set in the params, "
+                "but is not supported for the OlmoCoreProvider and will not be used."
+            )
         results: list[list[LMOutput]] = []
         try:
             for chunk in self._iter_chunks(requests):
@@ -534,11 +562,10 @@ class OlmoCoreProvider(InferenceProvider):
             for i, prompt in enumerate(prompt_strs):
                 logger.info(f"Prompt {i}:\n{prompt}")
 
+        encoded_prompts = [self._encode_prompt(prompt) for prompt in prompt_strs]
+        params = self._resolve_max_tokens(params, encoded_prompts)
         generation_kwargs = self._build_generation_kwargs(params)
-        prompt_token_ids = self._left_truncate_prompts_for_generation(
-            [self._encode_prompt(prompt) for prompt in prompt_strs],
-            params,
-        )
+        prompt_token_ids = self._left_truncate_prompts_for_generation(encoded_prompts, params)
         self._validate_generation_lengths(prompt_token_ids, params)
         expanded_token_ids = [
             token_ids for token_ids in prompt_token_ids for _ in range(params.num_samples)
@@ -613,7 +640,14 @@ class OlmoCoreProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
+        params = self._default_sampling_params(sampling_params)
+        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
+            logger.warning(
+                "truncate_prompt_tokens or truncation_side has been set in the params, "
+                "but is not supported for the OlmoCoreProvider and will not be used."
+            )
         del sampling_params
+        del params
         if not requests:
             return []
 

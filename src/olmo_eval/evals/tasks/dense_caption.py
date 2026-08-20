@@ -187,9 +187,41 @@ class DenseCaptionEval(Task):
     sampling_params = SamplingParams(temperature=0.0, max_tokens=448)
     metrics = _DEFAULT_METRICS
     primary_metric = _AVG_METRIC
-    # None => reproduce mm_olmo's per-example seeded `long_caption` template (the released
-    # Molmo2-4B behavior). Set to a fixed string on a subclass to force one prompt.
+    #: Image decoding builds the instances; the GPT judge needs an OpenAI client.
+    #: A missing scorer dependency scores every instance zero rather than failing.
+    dependencies = ["pillow", "openai"]
+    # None => decide from the checkpoint's prompt family (see `_question`). Set to a fixed
+    # string on a subclass to force one prompt regardless of family.
     caption_prompt: str | None = None
+    #: Prompt family assumed when the run does not say. Matches the instruction-tuned
+    #: checkpoints, mirroring `ModelPromptPointingTask`'s defaults.
+    default_system_prompt_style = "demo_or_style_v2"
+    #: mm_olmo `DataFormatter.default_inference_len`; the length bucket used at inference by
+    #: the `style_and_length*` families.
+    default_inference_len = 65
+
+    def _question(self, idx: int) -> str:
+        """The caption prompt for example ``idx``, following the checkpoint's family.
+
+        The prompt has to follow the checkpoint rather than the task, exactly as for the
+        `_mp` pointing tasks: a captioner-family checkpoint (mm_olmo `train_captioner.py`,
+        `system_prompt="style_and_length_v2"`, which includes OLMo-core's
+        `Molmo2-Stage1.py` runs with `style_length_conditioning=True`) was trained with a
+        `"<style> <bucket>:"` prefix on every caption, and mm_olmo re-applies it at
+        inference via `default_inference_len` (`olmo/data/data_formatter.py`). Handing such
+        a checkpoint a natural-language instruction instead measures it out of distribution:
+        on a 4B stage-1 run it cost 7.1 recall points (38.18 -> 45.28) and made 3.4% of
+        answers come back as `<points .../>` markup rather than prose.
+
+        So `-o system_prompt_style=style_and_length_v2` selects the captioner prompt here,
+        the same override that selects it for the pointing tasks.
+        """
+        if self.caption_prompt is not None:
+            return self.caption_prompt
+        style = self.config.system_prompt_style or self.default_system_prompt_style
+        if style in ("style_and_length", "style_and_length_v2"):
+            return f"long_caption {self.default_inference_len}:"
+        return dense_caption_question(idx)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -238,11 +270,7 @@ class DenseCaptionEval(Task):
                     mturk_data = json.load(f2)
                 mturk_statements: str = mturk_data["canonical_statements"]
 
-                question = (
-                    self.caption_prompt
-                    if self.caption_prompt is not None
-                    else dense_caption_question(idx)
-                )
+                question = self._question(idx)
                 yield Instance(
                     question=question,
                     gold_answer=None,
