@@ -427,3 +427,41 @@ def test_helmet_suite_structure():
     with pytest.raises(KeyError):
         get_suite("helmet_all__2097152")
     assert len(get_suite("helmet_recall__2097152").expanded_tasks) == 4
+
+
+# ---------------------------------------------------------------------------
+# config serialization (regression: judge_fn closure crashed results
+# aggregation after all instances were already scored)
+
+
+def test_every_helmet_task_config_is_json_serializable():
+    """`compute_task_hash` json.dumps's each task's config at aggregation time.
+
+    The judged tasks' scorers carry a `judge_fn` closure, which leaked into
+    the serialized config via dataclasses.asdict and crashed a full demo run
+    at 100% scored. Instantiating a task touches no data, so this sweeps all
+    registered helmet tasks cheaply.
+    """
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    for task_name in HELMET_TASKS:
+        task = get_task(f"helmet_{task_name}", {"limit": 1, "seed": 42})
+        config = task.config.to_dict()
+        serialized = json.dumps(config, sort_keys=True)
+        assert serialized == json.dumps(config, sort_keys=True)
+
+
+def test_judge_scorer_to_dict_is_stable_and_serializable():
+    from olmo_eval.common.scorers.helmet_judge import (
+        HelmetLongQAJudgeScorer,
+        HelmetSummJudgeScorer,
+    )
+
+    for scorer in (HelmetLongQAJudgeScorer(), HelmetSummJudgeScorer(is_book=True)):
+        data = scorer.to_dict()
+        # a live closure must never appear in the serialized form
+        assert data["judge_fn"] == "<configured>"
+        assert json.dumps(data, sort_keys=True)
+    # two independent constructions carry distinct closures but must
+    # serialize identically, or task hashes would differ run to run
+    assert HelmetLongQAJudgeScorer().to_dict() == HelmetLongQAJudgeScorer().to_dict()

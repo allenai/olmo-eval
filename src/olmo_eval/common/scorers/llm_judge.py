@@ -236,6 +236,23 @@ class LLMJudgeScorer(ContextScorer):
         if self.provider_name is not None:
             object.__setattr__(self, "judge_fn", None)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize for task hashing and results storage.
+
+        Overrides the base to keep `judge_fn` out of the dict: it is a live
+        closure, which json.dumps rejects -- a judge-fn-configured scorer
+        otherwise crashes results aggregation *after* every instance has been
+        scored (and paid for). Its repr also embeds a memory address, so even
+        a serializable form would make task hashes differ run to run. A stable
+        marker records whether a judge_fn was configured; there is no
+        deserialization path that would need the function back.
+        """
+        from dataclasses import asdict
+
+        data = {"type": self.__class__.__name__, **asdict(self)}
+        data["judge_fn"] = "<configured>" if self.judge_fn is not None else None
+        return data
+
     @abstractmethod
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
         """Format the prompt to send to the judge model.
