@@ -10,10 +10,10 @@ Three deliberate differences from `suites/ruler.py`:
 1. `helmet_all__*` aggregates the *category* suites rather than flat-averaging
    every task, matching how the HELMET paper reports an overall number. A flat
    average would let a category's task count set its weight -- ICL contributes
-   five tasks and recall one, so recall would be worth a sixth of ICL.
+   five tasks and rerank one, so rerank would be worth a fifth of ICL.
 
 2. `helmet_all__*` is only registered where more than one category exists at
-   that length. Above 128k only `json_kv` extends, so a combined suite there
+   that length. Above 128k only recall extends, so a combined suite there
    would be a rename of `helmet_recall__*` whose composition silently differs
    from the same suite at shorter lengths -- exactly the thing that turns a
    length sweep into a misleading trend line. Use `helmet_recall__*` for the
@@ -24,24 +24,42 @@ Three deliberate differences from `suites/ruler.py`:
    the execution-oriented split in `suites/science.py`, `helmet_all__*` is the
    umbrella that includes them and `helmet_nojudge__*` is the subset that runs
    without one.
+
+HELMET's recall category is `json_kv` plus three RULER synthetic tasks
+(`niah_mk_2`, `niah_mk_3`, `niah_mv`). Those three are implemented in the
+`ruler_plus` task family, which covers the same 4k-2m sweep, so the recall
+suites pull them in by their `ruler_plus_*` names rather than duplicating
+them under a `helmet_` prefix.
 """
 
 from olmo_eval.data.helmet_tasks import CONTEXT_SIZES, HELMET_TASKS
+from olmo_eval.data.ruler_plus_tasks import RULER_PLUS_TASKS
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, register
 
 # Task categories (tags), in the order HELMET reports them
 CATEGORIES = ["recall", "rag", "rerank", "longqa", "summ", "icl", "cite"]
 
+# RULER tasks HELMET includes in its recall category, taken from the
+# extended-context ruler_plus family; none of them use an LLM judge
+_RULER_RECALL_TASKS = ("niah_mk_2", "niah_mk_3", "niah_mv")
+
 
 def _tasks_for(category: str, size: int, judged: bool | None = None) -> list[str]:
     """Task names in a category at a size, optionally filtered by judge use."""
-    return [
+    tasks = [
         f"helmet_{name}"
         for name, config in HELMET_TASKS.items()
         if config["tag"] == category
         and name.endswith(f"__{size}")
         and (judged is None or bool(config.get("judged")) == judged)
     ]
+    if category == "recall" and judged is not True:
+        tasks += [
+            f"ruler_plus_{task}__{size}"
+            for task in _RULER_RECALL_TASKS
+            if f"{task}__{size}" in RULER_PLUS_TASKS
+        ]
+    return tasks
 
 
 for size in CONTEXT_SIZES:
