@@ -406,8 +406,15 @@ def test_helmet_suite_structure():
     import olmo_eval.evals.suites.helmet  # noqa: F401 - triggers registration
     from olmo_eval.evals.suites.registry import get_suite
 
-    assert len(get_suite("helmet_all__4096").expanded_tasks) == 20
+    assert len(get_suite("helmet_all__4096").expanded_tasks) == 23
     assert len(get_suite("helmet_cite__4096").expanded_tasks) == 4
+    # recall follows HELMET: json_kv plus three RULER synthetics (from ruler_plus)
+    assert set(get_suite("helmet_recall__4096").expanded_tasks) == {
+        "helmet_json_kv__4096",
+        "ruler_plus_niah_mk_2__4096",
+        "ruler_plus_niah_mk_3__4096",
+        "ruler_plus_niah_mv__4096",
+    }
     # nojudge excludes exactly the three judged tasks
     all_tasks = set(get_suite("helmet_all__4096").expanded_tasks)
     nojudge = set(get_suite("helmet_nojudge__4096").expanded_tasks)
@@ -419,7 +426,7 @@ def test_helmet_suite_structure():
     # above 128k only recall extends; a combined suite there would mislead
     with pytest.raises(KeyError):
         get_suite("helmet_all__2097152")
-    assert len(get_suite("helmet_recall__2097152").expanded_tasks) == 1
+    assert len(get_suite("helmet_recall__2097152").expanded_tasks) == 4
 
 
 # ---------------------------------------------------------------------------
