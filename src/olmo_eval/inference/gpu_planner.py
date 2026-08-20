@@ -2,11 +2,42 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from olmo_eval.inference.providers.config import ProviderConfig
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_visible_devices(gpu_ids: list[int]) -> str:
+    """Map planner-relative GPU indices to a physical CUDA_VISIBLE_DEVICES string.
+
+    The planner allocates indices relative to the process's visible GPU set
+    (range(torch.cuda.device_count())). If the process already has a
+    CUDA_VISIBLE_DEVICES mask, those relative indices must be composed through it
+    so a worker does not clobber an outer mask; otherwise they are physical already.
+    """
+    outer = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if not outer:
+        return ",".join(str(g) for g in gpu_ids)
+
+    outer_ids = [tok.strip() for tok in outer.split(",") if tok.strip()]
+    resolved: list[str] = []
+    for gpu_id in gpu_ids:
+        if 0 <= gpu_id < len(outer_ids):
+            resolved.append(outer_ids[gpu_id])
+        else:
+            logger.warning(
+                "GPU index %s outside CUDA_VISIBLE_DEVICES mask %r; using raw index",
+                gpu_id,
+                outer,
+            )
+            resolved.append(str(gpu_id))
+    return ",".join(resolved)
 
 
 @dataclass(frozen=True)

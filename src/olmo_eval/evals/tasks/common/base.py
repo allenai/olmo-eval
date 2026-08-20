@@ -161,6 +161,16 @@ class TaskConfig:
     #: Scheduler-only weight hint for shared sandbox allocation.
     sandbox_allocation_weight: float = 1.0
 
+    #: Env-var names this task needs at runtime (e.g. an LLM-judge API key). The
+    #: beaker launcher mounts each as the user-scoped secret ``{user}_{NAME}``.
+    required_secrets: tuple[str, ...] = ()
+
+    #: How a task that builds its prompt from a bare label should render it. The
+    #: pointing tasks read this; it follows the checkpoint, since instruction-tuned
+    #: and pretrain models were trained on different prompt forms.
+    prompt_templates: str | None = None
+    system_prompt_style: str | None = None
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):

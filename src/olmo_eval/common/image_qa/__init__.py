@@ -27,6 +27,10 @@ from olmo_eval.common.image_qa.mmmu_parsing import (
     parse_multi_choice_response,
     parse_open_response,
 )
+from olmo_eval.common.image_qa.multi_image_mc import (
+    multi_image_mc_score,
+    strip_multi_image_response,
+)
 from olmo_eval.common.image_qa.prompt_templates import (
     EVAL_LOADER_SEED,
     LONG_CAPTION_TEMPLATES,
@@ -67,6 +71,7 @@ __all__ = [
     "math_vista_score_from_extraction",
     "math_vista_score_offline",
     "mmmu_score",
+    "multi_image_mc_score",
     "normalize_extracted_answer",
     "parse_count",
     "parse_multi_choice_response",
@@ -78,5 +83,6 @@ __all__ = [
     "relaxed_correctness",
     "scifi_relaxed_correctness",
     "select_mc_option",
+    "strip_multi_image_response",
     "vqa_score",
 ]

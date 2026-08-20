@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from olmo_eval.common.image_qa import pixmo_count_question
+from olmo_eval.common.pointing_prompts import POINT_COUNT_STYLE
 from olmo_eval.common.scorers.image_qa import PointCountScorer
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register, register_variant
@@ -27,13 +28,15 @@ from olmo_eval.evals.tasks.common.image_qa_base import (
     rebase_data_path,
     torch_datasets_dir,
 )
+from olmo_eval.evals.tasks.common.pointing_base import StylePrefixMixin
 
 _SCORER = PointCountScorer()
 _METRICS = point_count_metrics(_SCORER)
 
 
 @register("pixmo_count")
-class PixmoCountTask(ImageQATask):
+class PixmoCountTask(StylePrefixMixin, ImageQATask):
+    style = POINT_COUNT_STYLE
     sampling_params = SamplingParams(temperature=0.0, max_tokens=192)
     metrics = _METRICS
     primary_metric = _METRICS[0]  # correct
@@ -49,7 +52,7 @@ class PixmoCountTask(ImageQATask):
         for idx in range(len(ds)):
             ex = ds[idx]
             yield Instance(
-                question=pixmo_count_question(ex["label"], idx),
+                question=self.apply_family_prefix(pixmo_count_question(ex["label"], idx)),
                 gold_answer=str(ex["count"]),
                 metadata={
                     "count": ex["count"],

@@ -11,13 +11,15 @@ frequency buckets keyed on the GT instance count.
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from olmo_eval.common.scorers.pointing import PointingScorer
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.tasks.common.pointing_base import (
+    ModelPromptPointingTask,
     PointingTask,
+    StylePrefixMixin,
     pointing_metrics,
     rebase_data_path,
     torch_datasets_dir,
@@ -40,37 +42,55 @@ def _format_query(label: str) -> str:
     return f"Point to {text}."
 
 
+def _build_instances(question_for: Callable[[str, int], str]) -> Iterator[Instance]:
+    """Yield the v3 arrow examples in dataset order, prompted by ``question_for``."""
+    import datasets
+
+    ds = datasets.load_from_disk(
+        str(torch_datasets_dir() / "pixmo_datasets" / "pixmo_points_eval_v3")
+    )
+    for idx in range(len(ds)):
+        ex = ds[idx]
+        label = str(ex["label"])
+        rles = ex["segmentation_rles"]
+        image_size = None
+        if rles:
+            size = rles[0]["size"]
+            if isinstance(size, str):
+                size = ast.literal_eval(size)
+            image_size = (int(size[1]), int(size[0]))  # (width, height)
+        yield Instance(
+            question=question_for(label, idx),
+            gold_answer=None,
+            metadata={
+                "pointing_annotators": [rles],  # single annotator
+                "image_size": image_size,
+                "image_path": rebase_data_path(str(ex["image"])),
+                "example_id": ex["example_id"],
+                "label": label,
+            },
+        )
+
+
 @register("pixmo_points_eval")
-class PixmoPointsEvalTask(PointingTask):
+class PixmoPointsEvalTask(StylePrefixMixin, PointingTask):
     sampling_params = SamplingParams(temperature=0.0, max_tokens=512)
     metrics = _METRICS
     primary_metric = _METRICS[2]  # f1
     split = Split.TEST
 
     def _build_instances(self) -> Iterator[Instance]:
-        import datasets
+        return _build_instances(lambda label, _idx: self.apply_family_prefix(_format_query(label)))
 
-        ds = datasets.load_from_disk(
-            str(torch_datasets_dir() / "pixmo_datasets" / "pixmo_points_eval_v3")
-        )
-        for idx in range(len(ds)):
-            ex = ds[idx]
-            label = str(ex["label"])
-            rles = ex["segmentation_rles"]
-            image_size = None
-            if rles:
-                size = rles[0]["size"]
-                if isinstance(size, str):
-                    size = ast.literal_eval(size)
-                image_size = (int(size[1]), int(size[0]))  # (width, height)
-            yield Instance(
-                question=_format_query(label),
-                gold_answer=None,
-                metadata={
-                    "pointing_annotators": [rles],  # single annotator
-                    "image_size": image_size,
-                    "image_path": rebase_data_path(str(ex["image"])),
-                    "example_id": ex["example_id"],
-                    "label": label,
-                },
-            )
+
+@register("pixmo_points_eval_mp")
+class PixmoPointsEvalMpTask(ModelPromptPointingTask):
+    """``pixmo_point_eval_v3_mp:test`` — same data, prompt built by the model formatter."""
+
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=512)
+    metrics = _METRICS
+    primary_metric = _METRICS[2]  # f1
+    split = Split.TEST
+
+    def _build_instances(self) -> Iterator[Instance]:
+        return _build_instances(self.format_query)

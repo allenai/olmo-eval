@@ -96,6 +96,7 @@ async def process_chat_request(
         "task_id": item.task_id,
         "instance_idx": item.instance_idx,
         "instance_id": item.instance.metadata.get("id", str(item.instance_idx)),
+        "date_cutoff": item.instance.metadata.get("retrieval_date_cutoff"),
     }
     prepared_request = harness._apply_config(item.request)
     request_trace = harness.provider.describe_request(prepared_request, item.sampling_params)
