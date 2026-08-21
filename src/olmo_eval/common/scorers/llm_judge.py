@@ -774,8 +774,6 @@ class SafetyScorer(LLMJudgeScorer):
         try:
             self._validate_provider(context)
             prompt = self.format_judge_prompt(instance, output, context=context)
-            print(prompt)
-
             if self.provider_name is not None:
                 if self.judge_format == "wildguard":
                     response = await self._score_with_provider(
