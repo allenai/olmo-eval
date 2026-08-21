@@ -13,7 +13,7 @@ olmo-eval beaker launch  \
     --harness default   \
     -o 'metrics.collect_gpu=true'   \
     -m allenai/Olmo-3-7B-Instruct   \
-    -t "bbq_mcq@high" \
+    -t "bbq:mcq@high" \
     -w "ai2/WORKSPACE"   \
     -B "ai2/BUDGET"   \
     --cluster h100
@@ -24,7 +24,7 @@ olmo-eval beaker launch  \
     -o 'metrics.collect_gpu=true'   \
     -o scoring_concurrency=4   \
     -m allenai/Olmo-3-1025-7B   \
-    -t "bbq_base@high" \
+    -t "bbq:base@high" \
     -w "ai2/WORKSPACE"   \
     -B "ai2/BUDGET"   \
     --cluster h100

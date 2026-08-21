@@ -4,6 +4,8 @@ TrustLLM_JailbreakTrigger Safety Evaluation Task
 This module implements the TrustLLM_JailbreakTrigger evaluation task
 as previously implemented in allenai/safety-eval
 
+It is not part of the full safety suite
+
 Paper: https://arxiv.org/abs/2401.05561
 
 Example commands to run:

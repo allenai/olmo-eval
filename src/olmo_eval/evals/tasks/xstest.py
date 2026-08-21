@@ -25,6 +25,7 @@ olmo-eval beaker launch  \
 For an instruct model:
 olmo-eval beaker launch  \
     --harness default   \
+    -o 'metrics.collect_gpu=true'   \
     -o auxiliary_providers.wg_judge.kind=vllm_server \
     -o auxiliary_providers.wg_judge.model=allenai/wildguard \
     -o scoring_concurrency=4   \
