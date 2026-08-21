@@ -6,9 +6,28 @@ as previously implemented in allenai/safety-eval
 
 Paper: https://arxiv.org/abs/2403.03218
 
-Usage:
+Example commands to run:
 
-    olmo-eval run -m llama3.1-8b -t wmdp:mcq
+For a posttrained model:
+olmo-eval beaker launch  \
+    --harness default   \
+    -o 'metrics.collect_gpu=true'   \
+    -m allenai/Olmo-3-7B-Instruct   \
+    -t "wmdp:mcq@high" \
+    -w "ai2/WORKSPACE"   \
+    -B "ai2/BUDGET"   \
+    --cluster h100
+
+For a base model:
+olmo-eval beaker launch  \
+    --harness default   \
+    -o 'metrics.collect_gpu=true'   \
+    -o scoring_concurrency=4   \
+    -m allenai/Olmo-3-1025-7B   \
+    -t "wmdp:base@high" \
+    -w "ai2/WORKSPACE"   \
+    -B "ai2/BUDGET"   \
+    --cluster h100
 """
 
 import logging

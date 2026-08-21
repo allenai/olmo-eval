@@ -6,9 +6,72 @@ as previously implemented in allenai/safety-eval
 
 Paper: https://arxiv.org/abs/2402.10260
 
-Usage:
 
-    olmo-eval run -m llama3.1-8b -t strongreject:sr_judge
+For a reasoning model:
+olmo-eval beaker launch  \
+    --harness default   \
+    -o provider.kwargs.tensor_parallel_size=2   \
+    -o 'metrics.collect_gpu=true'   \
+    -o auxiliary_providers.sr_judge.kind=vllm_server   \
+    -o auxiliary_providers.sr_judge.model=google/gemma-2b   \
+    -o auxiliary_providers.sr_judge.tokenizer=qylu4156/strongreject-15k-v1   \
+    -o auxiliary_providers.sr_judge.kwargs.enable_lora=true   \
+    -o auxiliary_providers.sr_judge.kwargs.lora_modules=\
+    [strongreject=qylu4156/strongreject-15k-v1] \
+    -o auxiliary_providers.sr_judge.kwargs.gpu_memory_utilization=0.2  \
+    -o scoring_concurrency=4   \
+    -m allenai/Olmo-3-7B-Think   \
+    -t "strongreject:sr_judge_thinking@high" \
+    -w "ai2/WORKSPACE"   \
+    -B "ai2/BUDGET"   \
+    --cluster h100
+
+For an instruct model:
+olmo-eval beaker launch  \
+    --harness default   \
+    -o 'metrics.collect_gpu=true'   \
+    -o auxiliary_providers.sr_judge.kind=vllm_server   \
+    -o auxiliary_providers.sr_judge.model=google/gemma-2b   \
+    -o auxiliary_providers.sr_judge.tokenizer=qylu4156/strongreject-15k-v1   \
+    -o auxiliary_providers.sr_judge.kwargs.enable_lora=true   \
+    -o auxiliary_providers.sr_judge.kwargs.lora_modules=\
+    [strongreject=qylu4156/strongreject-15k-v1] \
+    -o auxiliary_providers.sr_judge.kwargs.gpu_memory_utilization=0.2  \
+    -o scoring_concurrency=4   \
+    -m allenai/Olmo-3-7B-Instruct   \
+    -t "strongreject:sr_judge@high" \
+    -w "ai2/WORKSPACE"   \
+    -B "ai2/BUDGET"   \
+    --cluster h100
+
+For a base model:
+olmo-eval beaker launch  \
+    --harness default   \
+    -o 'metrics.collect_gpu=true'   \
+    -o auxiliary_providers.sr_judge.kind=vllm_server   \
+    -o auxiliary_providers.sr_judge.model=google/gemma-2b   \
+    -o auxiliary_providers.sr_judge.tokenizer=qylu4156/strongreject-15k-v1   \
+    -o auxiliary_providers.sr_judge.kwargs.enable_lora=true   \
+    -o auxiliary_providers.sr_judge.kwargs.lora_modules=\
+    [strongreject=qylu4156/strongreject-15k-v1] \
+    -o auxiliary_providers.sr_judge.kwargs.gpu_memory_utilization=0.2  \
+    -o scoring_concurrency=4   \
+    -m allenai/Olmo-3-1025-7B   \
+    -t "strongreject:base@high" \
+    -w "ai2/WORKSPACE"   \
+    -B "ai2/BUDGET"   \
+    --cluster h100
+
+On the OpenAI harness:
+olmo-eval beaker launch  \
+    --harness default   \
+    -o 'metrics.collect_gpu=true'   \
+    -o scoring_concurrency=4   \
+    -m allenai/Olmo-3-7B-Instruct   \
+    -t "strongreject:openai_judge@high" \
+    -w "ai2/WORKSPACE"   \
+    -B "ai2/BUDGET"   \
+    --cluster h100
 """
 
 import logging
