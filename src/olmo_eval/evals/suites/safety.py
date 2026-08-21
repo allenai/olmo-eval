@@ -80,7 +80,7 @@ olmo-eval beaker launch  \
 
 from olmo_eval.evals.suites.registry import AggregationStrategy, make_suite
 
-SAFETY_TASKS = ["do_anything_now", "harmbench", "wildguardtest", "wildjailbreakxstest"]
+SAFETY_TASKS = ["do_anything_now", "harmbench", "wildguardtest", "wildjailbreak", "xstest"]
 
 MCQ_TASKS = ["wmdp", "bbq"]
 
