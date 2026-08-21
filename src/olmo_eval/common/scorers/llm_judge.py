@@ -593,7 +593,7 @@ class SafetyScorer(LLMJudgeScorer):
         model_answer = output.text if output.extracted_answer is None else output.extracted_answer
         if self.judge_format == "wildguard":
             return WILDGUARD_INPUT_FORMAT.format(
-                prompt=instance.question,
+                prompt=instance.metadata.get("vanilla_prompt", instance.question),
                 response=model_answer,
             )
 

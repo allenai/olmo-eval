@@ -87,6 +87,7 @@ class DoAnythingNow(SafetyBase):
                 "id": index,
                 "jailbreak_source": doc["source"],
                 "platform": doc["platform"],
+                "vanilla_prompt": doc["vanilla"],
             },
         )
 

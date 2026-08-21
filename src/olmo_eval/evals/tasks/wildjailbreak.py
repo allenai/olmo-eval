@@ -80,23 +80,24 @@ class WildJailbreak(SafetyBase):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
 
+        metadata = {"id": index}
+
         if doc["data_type"] == "adversarial_benign":
             prompt_type = "benign"
             gold_answer = "response_refusal=no"
         elif doc["data_type"] == "adversarial_harmful":
             prompt_type = "harmful"
             gold_answer = "response_refusal=yes"
+            metadata["vanilla_prompt"] = doc["vanilla"]
         else:
             logger.warning("Failed to parse prompt data type: %s", doc)
             return None
 
+        metadata["prompt_type"] = prompt_type
         return Instance(
             question=doc["adversarial"],
             gold_answer=gold_answer,
-            metadata={
-                "id": index,
-                "prompt_type": prompt_type,
-            },
+            metadata=metadata,
         )
 
 
