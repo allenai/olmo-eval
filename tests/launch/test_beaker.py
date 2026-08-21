@@ -41,6 +41,15 @@ class TestResolveClustors:
         assert "ai2/saturn" in clusters
         assert "ai2/ceres" in clusters
 
+    def test_resolve_olmoe3_80g_alias(self):
+        """OLMoE3 evals can target every compatible 80GB cluster."""
+        assert set(resolve_clusters("olmoe3-80g")) == {
+            "ai2/jupiter",
+            "ai2/saturn",
+            "ai2/ceres",
+            "ai2/titan",
+        }
+
     def test_resolve_full_name(self):
         """Test that full cluster names pass through."""
         clusters = resolve_clusters("ai2/jupiter")

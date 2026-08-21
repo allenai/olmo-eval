@@ -85,6 +85,15 @@ BEAKER_KNOWN_CLUSTERS: dict[str, list[str]] = {
         "ai2/saturn",
         "ai2/ceres",
     ],
+    # OLMoE3 evals use the CUDA 12.8 runtime and can also run on Titan B200s.
+    # Keep this separate from the established generic ``80g`` alias so adding
+    # Titan does not silently retarget unrelated evaluation workloads.
+    "olmoe3-80g": [
+        "ai2/jupiter",
+        "ai2/saturn",
+        "ai2/ceres",
+        "ai2/titan",
+    ],
 }
 """Mapping of cluster group aliases to their constituent Beaker clusters."""
 
