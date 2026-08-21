@@ -858,10 +858,13 @@ class BeakerLauncher:
                 steps.append(f"export {key}={value}")
 
         runtime_torch_version = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_VERSION")
+        runtime_torchvision_version = (env_exports or {}).get(
+            "OLMO_EVAL_RUNTIME_TORCHVISION_VERSION"
+        )
         runtime_torch_index_url = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_INDEX_URL")
 
-        def runtime_torch_spec() -> str:
-            spec = f"torch=={runtime_torch_version}"
+        def runtime_pytorch_spec(package: str, version: str) -> str:
+            spec = f"{package}=={version}"
             if runtime_torch_index_url:
                 spec = f"{spec} --index-url {runtime_torch_index_url}"
             return spec
@@ -884,11 +887,23 @@ class BeakerLauncher:
         # replacement Torch/CUDA package set. In isolated vLLM mode, the
         # overridden packages are symlinked into /opt/vllm-venv below.
         if runtime_torch_version:
-            steps.append(build_install_command(runtime_torch_spec(), force_reinstall=True))
+            steps.append(
+                build_install_command(
+                    runtime_pytorch_spec("torch", runtime_torch_version),
+                    force_reinstall=True,
+                )
+            )
+        if runtime_torchvision_version:
+            steps.append(
+                build_install_command(
+                    runtime_pytorch_spec("torchvision", runtime_torchvision_version),
+                    force_reinstall=True,
+                )
+            )
 
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
-        steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
+        steps.append(f"uv pip freeze -q | grep -E '^(torch|torchvision|nvidia-)' > {constraints}")
 
         # Install vLLM in isolated venv when requested (for server mode)
         if use_isolated_vllm_venv:
@@ -990,6 +1005,7 @@ class BeakerLauncher:
         install_env_keys = (
             "UV_CACHE_DIR",
             "OLMO_EVAL_RUNTIME_TORCH_VERSION",
+            "OLMO_EVAL_RUNTIME_TORCHVISION_VERSION",
             "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
         )
         for key in install_env_keys:

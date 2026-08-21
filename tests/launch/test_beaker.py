@@ -692,6 +692,38 @@ class TestBuildCommandWithTaskPackages:
         assert "flash-attn" not in install_cmd
         assert "--no-build-isolation-package" not in install_cmd
 
+    def test_runtime_pytorch_stack_is_replaced_before_constraints(self):
+        """Torch and torchvision overrides must be installed as a compatible pair."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=["vllm", "clients"],
+            env_exports={
+                "OLMO_EVAL_RUNTIME_TORCH_VERSION": "2.10.0+cu128",
+                "OLMO_EVAL_RUNTIME_TORCHVISION_VERSION": "0.25.0+cu128",
+                "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL": (
+                    "https://download.pytorch.org/whl/cu128"
+                ),
+            },
+            provider_packages=["vllm==0.19.1"],
+        )
+
+        torch_install = (
+            "uv pip install --refresh-package torch --reinstall-package torch "
+            "--index-url https://download.pytorch.org/whl/cu128 'torch==2.10.0+cu128'"
+        )
+        torchvision_install = (
+            "uv pip install --refresh-package torchvision --reinstall-package torchvision "
+            "--index-url https://download.pytorch.org/whl/cu128 'torchvision==0.25.0+cu128'"
+        )
+        freeze = "uv pip freeze -q | grep -E '^(torch|torchvision|nvidia-)'"
+        assert torch_install in install_cmd
+        assert torchvision_install in install_cmd
+        assert freeze in install_cmd
+        assert install_cmd.index(torch_install) < install_cmd.index(torchvision_install)
+        assert install_cmd.index(torchvision_install) < install_cmd.index(freeze)
+
 
 class TestNormalizeProviderPackage:
     """Tests for normalize_provider_package function."""
