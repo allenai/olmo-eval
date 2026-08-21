@@ -861,6 +861,9 @@ class BeakerLauncher:
         runtime_torchvision_version = (env_exports or {}).get(
             "OLMO_EVAL_RUNTIME_TORCHVISION_VERSION"
         )
+        runtime_torchaudio_version = (env_exports or {}).get(
+            "OLMO_EVAL_RUNTIME_TORCHAUDIO_VERSION"
+        )
         runtime_torch_index_url = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_INDEX_URL")
 
         def runtime_pytorch_spec(package: str, version: str) -> str:
@@ -900,10 +903,19 @@ class BeakerLauncher:
                     force_reinstall=True,
                 )
             )
+        if runtime_torchaudio_version:
+            steps.append(
+                build_install_command(
+                    runtime_pytorch_spec("torchaudio", runtime_torchaudio_version),
+                    force_reinstall=True,
+                )
+            )
 
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
-        steps.append(f"uv pip freeze -q | grep -E '^(torch|torchvision|nvidia-)' > {constraints}")
+        steps.append(
+            f"uv pip freeze -q | grep -E '^(torch|torchvision|torchaudio|nvidia-)' > {constraints}"
+        )
 
         # Install vLLM in isolated venv when requested (for server mode)
         if use_isolated_vllm_venv:
@@ -1006,6 +1018,7 @@ class BeakerLauncher:
             "UV_CACHE_DIR",
             "OLMO_EVAL_RUNTIME_TORCH_VERSION",
             "OLMO_EVAL_RUNTIME_TORCHVISION_VERSION",
+            "OLMO_EVAL_RUNTIME_TORCHAUDIO_VERSION",
             "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
         )
         for key in install_env_keys:

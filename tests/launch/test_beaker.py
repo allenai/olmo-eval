@@ -702,6 +702,7 @@ class TestBuildCommandWithTaskPackages:
             env_exports={
                 "OLMO_EVAL_RUNTIME_TORCH_VERSION": "2.10.0+cu128",
                 "OLMO_EVAL_RUNTIME_TORCHVISION_VERSION": "0.25.0+cu128",
+                "OLMO_EVAL_RUNTIME_TORCHAUDIO_VERSION": "2.10.0+cu128",
                 "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL": (
                     "https://download.pytorch.org/whl/cu128"
                 ),
@@ -717,12 +718,18 @@ class TestBuildCommandWithTaskPackages:
             "uv pip install --refresh-package torchvision --reinstall-package torchvision "
             "--index-url https://download.pytorch.org/whl/cu128 'torchvision==0.25.0+cu128'"
         )
-        freeze = "uv pip freeze -q | grep -E '^(torch|torchvision|nvidia-)'"
+        torchaudio_install = (
+            "uv pip install --refresh-package torchaudio --reinstall-package torchaudio "
+            "--index-url https://download.pytorch.org/whl/cu128 'torchaudio==2.10.0+cu128'"
+        )
+        freeze = "uv pip freeze -q | grep -E '^(torch|torchvision|torchaudio|nvidia-)'"
         assert torch_install in install_cmd
         assert torchvision_install in install_cmd
+        assert torchaudio_install in install_cmd
         assert freeze in install_cmd
         assert install_cmd.index(torch_install) < install_cmd.index(torchvision_install)
-        assert install_cmd.index(torchvision_install) < install_cmd.index(freeze)
+        assert install_cmd.index(torchvision_install) < install_cmd.index(torchaudio_install)
+        assert install_cmd.index(torchaudio_install) < install_cmd.index(freeze)
 
 
 class TestNormalizeProviderPackage:
