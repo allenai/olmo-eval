@@ -84,8 +84,9 @@ SAFETY_TASKS = [
     "do_anything_now",
     "harmbench",
     "wildguardtest",
-    "wildjailbreak",
+    # "wildjailbreak"
     "xstest",
+    "trustllm_jailbreaktrigger",
 ]
 
 MCQ_TASKS = ["wmdp", "bbq"]
@@ -106,7 +107,7 @@ make_suite(
     (
         *(f"{task}:wg_judge" for task in SAFETY_TASKS),
         *(f"{task}:mcq" for task in MCQ_TASKS),
-        "strongreject:sr_judge",
+        # "strongreject:sr_judge",
     ),
     aggregation=AggregationStrategy.AVERAGE,
     description="Safety evals for posttrained instruct models with a wildguard judge",
