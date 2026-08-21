@@ -80,7 +80,7 @@ class WildJailbreak(SafetyBase):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
 
-        metadata = {"id": index}
+        metadata: dict[str, Any] = {"id": index}
 
         if doc["data_type"] == "adversarial_benign":
             prompt_type = "benign"
