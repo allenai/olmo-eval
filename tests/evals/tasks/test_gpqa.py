@@ -329,3 +329,70 @@ class TestFormatRequest:
         assert request.request_type == RequestType.LOGLIKELIHOOD
         assert request.continuations is not None
         assert len(request.continuations) == 4
+
+
+class TestCoTVariant:
+    """Tests for the 0-shot CoT tasks (post-training regime)."""
+
+    _DOC = {
+        "Question": "What is the effect?",
+        "Correct Answer": "it doubles",
+        "Incorrect Answer 1": "it halves",
+        "Incorrect Answer 2": "nothing",
+        "Incorrect Answer 3": "it triples",
+        "Subdomain": "Physics",
+    }
+
+    @pytest.fixture
+    def task(self):
+        return get_task("gpqa_main:cot")
+
+    @pytest.mark.parametrize("subset", _ALL_TASKS)
+    def test_registered(self, subset):
+        task = get_task(f"{subset}:cot")
+        assert task.request_type == RequestType.CHAT
+        assert task.config.sampling_params.temperature == 0.6
+        assert task.config.sampling_params.top_p == 0.95
+        primary = task.config.get_primary_metric()
+        assert primary is not None and primary.name == "exact_match"
+
+    def test_process_doc_inlines_choices(self, task):
+        instance = task.process_doc(dict(self._DOC), index=0)
+        assert instance is not None
+        assert instance.question.startswith("Question: What is the effect?\nChoices:\n")
+        for choice in ("it doubles", "it halves", "nothing", "it triples"):
+            assert f") {choice}\n" in instance.question
+        assert "put your final answer within \\boxed{}" in instance.question
+        gold_idx = ord(instance.gold_answer) - ord("A")
+        assert instance.choices[gold_idx] == "it doubles"
+
+    def test_shuffle_is_deterministic_per_index(self, task):
+        first = task.process_doc(dict(self._DOC), index=0)
+        again = task.process_doc(dict(self._DOC), index=0)
+        other = task.process_doc(dict(self._DOC), index=1)
+        assert first.choices == again.choices
+        assert first.gold_answer == again.gold_answer
+        # Not a guarantee for every index pair, but these two differ.
+        assert first.choices != other.choices
+
+    def test_single_user_message(self, task):
+        instance = task.process_doc(dict(self._DOC), index=0)
+        request = task.format_request(instance)
+        assert request.request_type == RequestType.CHAT
+        assert len(request.messages) == 1
+        assert request.messages[0]["role"] == "user"
+
+    def test_scorer_requested_format(self, task):
+        from olmo_eval.evals.tasks.gpqa import GPQACoTExactMatchScorer
+
+        scorer = GPQACoTExactMatchScorer()
+        instance = Instance(question="q", gold_answer="B", metadata={})
+        assert scorer.score(instance, LMOutput(text="Therefore, the answer is (B)")) == 1.0
+        assert scorer.score(instance, LMOutput(text="\\boxed{B}")) == 1.0
+        assert scorer.score(instance, LMOutput(text="So the answer is B.")) == 1.0
+        assert scorer.score(instance, LMOutput(text="Therefore, the answer is (C)")) == 0.0
+        assert scorer.score(instance, LMOutput(text="")) == 0.0
+
+    def test_extract_answer_strips_parens(self, task):
+        output = LMOutput(text="Reasoning. Therefore, the answer is (D)")
+        assert task.extract_answer(output) == "D"
