@@ -84,6 +84,7 @@ class IFEvalScorer(Scorer):
 
         strict_results: list[bool] = []
         loose_results: list[bool] = []
+        errors: dict[str, str] = {}
 
         if instruction_ids:
             from ifbench import instructions_registry
@@ -91,18 +92,31 @@ class IFEvalScorer(Scorer):
             registry = instructions_registry.INSTRUCTION_DICT
             loose_variants = _loose_response_variants(response)
             for inst_id, inst_kwargs in zip(instruction_ids, kwargs_list, strict=True):
-                instruction = _build_instruction(registry[inst_id], inst_id, inst_kwargs, prompt)
-                strict_results.append(_check_one(instruction, response))
-                loose_results.append(
-                    any(_check_one(instruction, variant) for variant in loose_variants)
-                )
+                # An instruction that cannot be built or checked (e.g. dataset
+                # kwargs the verifier does not accept) scores as not followed,
+                # matching the reference implementation, rather than failing
+                # the whole response.
+                try:
+                    instruction = _build_instruction(
+                        registry[inst_id], inst_id, inst_kwargs, prompt
+                    )
+                    strict = _check_one(instruction, response)
+                    loose = any(_check_one(instruction, variant) for variant in loose_variants)
+                except Exception as exc:
+                    strict = loose = False
+                    errors[inst_id] = f"{type(exc).__name__}: {exc}"
+                strict_results.append(strict)
+                loose_results.append(loose)
 
         if output.metadata is None:
             output.metadata = {}
-        output.metadata["ifeval"] = {
+        result: dict[str, Any] = {
             "strict": strict_results,
             "loose": loose_results,
         }
+        if errors:
+            result["errors"] = errors
+        output.metadata["ifeval"] = result
 
         if not loose_results:
             return 0.0

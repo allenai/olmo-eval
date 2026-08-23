@@ -161,6 +161,27 @@ class TestIFEvalScorer(unittest.TestCase):
         self.assertEqual(result["strict"], [False])
         self.assertEqual(result["loose"], [True])
 
+    def test_unbuildable_instruction_scores_false(self) -> None:
+        """Dataset kwargs the verifier does not accept must not fail the response.
+
+        ``VGraf/ifeval_mt`` carries one row whose kwargs use ``keyword`` where
+        ``length_constraints:nth_paragraph_first_word`` expects ``first_word``;
+        the instruction scores as not followed, matching the reference
+        implementation.
+        """
+        instance = _make_instance(
+            "Write 3 paragraphs; paragraph 2 starts with a given word.",
+            ["length_constraints:nth_paragraph_first_word"],
+            [{"keyword": "schedule", "num_paragraphs": 3}],
+        )
+        output = LMOutput(text="one\n\ntwo\n\nthree")
+        score = IFEvalScorer().score(instance, output)
+        self.assertEqual(score, 0.0)
+        result = output.metadata["ifeval"]
+        self.assertEqual(result["strict"], [False])
+        self.assertEqual(result["loose"], [False])
+        self.assertIn("length_constraints:nth_paragraph_first_word", result["errors"])
+
     def test_loose_never_stricter_than_strict_with_random_kwargs(self) -> None:
         """``count:word_count_range`` draws random min/max words when unset.
 
