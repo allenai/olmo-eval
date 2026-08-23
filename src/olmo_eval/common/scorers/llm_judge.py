@@ -359,6 +359,7 @@ class LLMJudgeScorer(ContextScorer):
                 messages=({"role": "user", "content": prompt},),
             )
         results = await provider.agenerate([request], sampling_params)
+        print(results)
         return results[0][0].text if results and results[0] else ""
 
     async def _choice_logprobs_with_provider(
@@ -787,8 +788,6 @@ class SafetyScorer(LLMJudgeScorer):
             prompt = self.format_judge_prompt(instance, output, context=context)
             if self.provider_name is not None:
                 if self.judge_format == "wildguard":
-                    # The response is already capped in format_judge_prompt, so the
-                    # assembled prompt is not truncated server-side.
                     response = await self._score_with_provider(
                         prompt,
                         context,
@@ -797,8 +796,6 @@ class SafetyScorer(LLMJudgeScorer):
                         request_type=self.judge_request_type,
                     )
                 elif self.judge_format == "strongreject":
-                    # The verdict is a distribution over the 1-5 grade tokens rather than
-                    # generated text, so score those tokens as continuations directly.
                     response = ""
                     raw = await self._choice_logprobs_with_provider(
                         prompt, context, STRONGREJECT_CONTINUATIONS

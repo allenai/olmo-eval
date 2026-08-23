@@ -834,6 +834,7 @@ class VLLMServerProvider(InferenceProvider):
             extra_body["truncation_side"] = truncation_side
         if self._completion_use_prompt_token_ids:
             http_client = self._get_raw_http_client()
+            print(self._get_completion_prompt_payload(request.prompt))
             response = await http_client.post(
                 f"{self.base_url}/completions",
                 json={
