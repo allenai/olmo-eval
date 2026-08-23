@@ -108,8 +108,10 @@ class Omega500(Task):
         AccuracyMetric(name="exact_match_flex", scorer=_FLEX),
     )
     primary_metric = AccuracyMetric(name="exact_match_flex", scorer=_FLEX)
+    # max_tokens=None generates to the model's context limit, matching the
+    # reference regime's effective behavior on any context size.
     sampling_params = SamplingParams(
-        max_tokens=131072,
+        max_tokens=None,
         temperature=0.6,
         top_p=0.95,
     )
