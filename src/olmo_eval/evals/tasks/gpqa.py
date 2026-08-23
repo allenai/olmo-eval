@@ -254,8 +254,10 @@ _COT_ANSWER_REGEXES = (r"\(?([A-D])\)?",)
 
 _COT_SHUFFLING_SEED = 111
 
+# max_tokens=None generates to the model's context limit, matching the
+# reference regime's effective behavior on any context size.
 _COT_SAMPLING = SamplingParams(
-    max_tokens=131072,
+    max_tokens=None,
     temperature=0.6,
     top_p=0.95,
 )
