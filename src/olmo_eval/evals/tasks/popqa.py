@@ -118,13 +118,14 @@ class PopQA(Task):
 
 
 # Chat variant for instruct and reasoning models. Drops stop sequences and
-# raises the token budget so chain-of-thought reasoning is not truncated.
+# lifts the token cap (None = generate to the model's context limit) so
+# chain-of-thought reasoning is not truncated on any context size.
 register_variant(
     "popqa",
     "chat",
     formatter=ChatFormatter(),
     sampling_params=SamplingParams(
-        max_tokens=131072,
+        max_tokens=None,
         temperature=0.6,
         top_p=0.95,
     ),
