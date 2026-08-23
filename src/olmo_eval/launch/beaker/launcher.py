@@ -888,7 +888,13 @@ class BeakerLauncher:
 
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
-        steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
+        # Constrain only torch itself and NVIDIA CUDA packages. Companion
+        # packages (torchvision/torchaudio) must stay replaceable so provider
+        # releases can swap them, and nvidia-cutlass-dsl pins break installs.
+        steps.append(
+            f"uv pip freeze -q | grep -E '^(torch(==| @ )|nvidia-)' "
+            f"| grep -vE '^nvidia-cutlass-dsl' > {constraints}"
+        )
 
         # Install vLLM in isolated venv when requested (for server mode)
         if use_isolated_vllm_venv:
