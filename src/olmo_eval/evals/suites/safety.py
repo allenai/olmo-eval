@@ -15,8 +15,10 @@ olmo-eval beaker launch  \
     -o auxiliary_providers.sr_judge.kwargs.lora_modules=\
     [strongreject=qylu4156/strongreject-15k-v1] \
     -o auxiliary_providers.sr_judge.kwargs.gpu_memory_utilization=0.2  \
+    -o auxiliary_providers.sr_judge.kwargs.add_bos_token=true \
     -o auxiliary_providers.wg_judge.kind=vllm_server \
     -o auxiliary_providers.wg_judge.model=allenai/wildguard \
+    -o auxiliary_providers.wg_judge.kwargs.add_bos_token=true \
     -o scoring_concurrency=4   \
     -m allenai/Olmo-3-7B-Think   \
     -t "safety_thinking@high" \
@@ -35,8 +37,10 @@ olmo-eval beaker launch  \
     -o auxiliary_providers.sr_judge.kwargs.lora_modules=\
     [strongreject=qylu4156/strongreject-15k-v1] \
     -o auxiliary_providers.sr_judge.kwargs.gpu_memory_utilization=0.2  \
+    -o auxiliary_providers.sr_judge.kwargs.add_bos_token=true \
     -o auxiliary_providers.wg_judge.kind=vllm_server \
     -o auxiliary_providers.wg_judge.model=allenai/wildguard \
+    -o auxiliary_providers.wg_judge.kwargs.add_bos_token=true \
     -o scoring_concurrency=4   \
     -m allenai/Olmo-3-7B-Instruct   \
     -t "safety_instruct@high" \
@@ -55,8 +59,10 @@ olmo-eval beaker launch  \
     -o auxiliary_providers.sr_judge.kwargs.lora_modules=\
     [strongreject=qylu4156/strongreject-15k-v1] \
     -o auxiliary_providers.sr_judge.kwargs.gpu_memory_utilization=0.2  \
+    -o auxiliary_providers.sr_judge.kwargs.add_bos_token=true \
     -o auxiliary_providers.wg_judge.kind=vllm_server \
     -o auxiliary_providers.wg_judge.model=allenai/wildguard \
+    -o auxiliary_providers.wg_judge.kwargs.add_bos_token=true \
     -o scoring_concurrency=4   \
     -m allenai/Olmo-3-1025-7B   \
     -t "safety_base@high" \

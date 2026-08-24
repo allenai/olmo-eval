@@ -700,34 +700,12 @@ class VLLMServerProvider(InferenceProvider):
             stop_sequences.append(eos_stop)
         return stop_sequences or None
 
-    def _completion_tokenizer(self) -> Any:
-        """Tokenizer for completion payloads, preferring a local one.
-
-        Falls back to the server's tokenizer when no local one can be loaded. The
-        remote tokenizer also honors ``add_special_tokens``, so BOS handling is
-        unchanged, but the fallback is reported because local token IDs are the
-        reason this path exists.
-        """
-        if not self._local_tokenizer_failed:
-            try:
-                return self._get_tokenizer(require_local=True)
-            except Exception as e:
-                self._local_tokenizer_failed = True
-                logger.warning(
-                    "Local tokenizer unavailable for %s (%s: %s); tokenizing completion "
-                    "prompts on the server instead.",
-                    self._tokenizer_path,
-                    type(e).__name__,
-                    e,
-                )
-        return self._get_tokenizer(require_local=False)
-
     def _get_completion_prompt_payload(self, prompt: str) -> str | list[int]:
         """Build completion prompt payload, optionally using local token IDs for parity."""
         if not self._completion_use_prompt_token_ids:
             return prompt
 
-        tokenizer = self._completion_tokenizer()
+        tokenizer = self._get_tokenizer(require_local=True)
         return tokenizer.encode(prompt, add_special_tokens=bool(self._add_bos_token))
 
     def _get_prompt_truncation(
@@ -857,7 +835,6 @@ class VLLMServerProvider(InferenceProvider):
             extra_body["truncation_side"] = truncation_side
         if self._completion_use_prompt_token_ids:
             http_client = self._get_raw_http_client()
-            print(self._get_completion_prompt_payload(request.prompt))
             response = await http_client.post(
                 f"{self.base_url}/completions",
                 json={
