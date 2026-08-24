@@ -31,11 +31,14 @@ and abstract.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from olmo_eval.harness.tools.search import normalize_arxiv_id
+
+logger = logging.getLogger(__name__)
 
 # Mirrors of the patterns in lit-agents' shared/deepscholar.py. The two link
 # patterns capture the whitespace introducing the citation so that a citation
@@ -46,7 +49,11 @@ _ARXIV_URL_RE = re.compile(
 )
 _MARKDOWN_LINK_RE = re.compile(r"([ \t]*)\[([^\]]*)\]\((https?://[^)\s]+)\)")
 _SUPERSCRIPT_LINK_RE = re.compile(r"([ \t]*)\[<sup>\[([1-9][0-9]*)\]</sup>\]\((https?://[^)\s]+)\)")
-_BRACKET_RE = re.compile(r"\[([^\[\]]+)\]")
+# Deviation from lit-agents' bracket pattern: the negative lookahead. The
+# link pass runs first and its output is `[Title](url)`, whose `[Title]` this
+# pattern would otherwise match -- and, since titles are aliases, resolve --
+# rewriting it to `[Title](url)(url)`.
+_BRACKET_RE = re.compile(r"\[([^\[\]]+)\](?!\()")
 # A bracket holding only numbers, not followed by "(" so a rendered link label
 # can never match. Captures the space that introduces it.
 _LEFTOVER_NUMBER_RE = re.compile(
@@ -56,7 +63,31 @@ _LEFTOVER_NUMBER_RE = re.compile(
 _NUMERIC_LABEL_RE = re.compile(r"\d{1,3}(?:[ \t]*[,;][ \t]*\d{1,3})*")
 _ORPHANED_SPACE_RE = re.compile(r"[ \t]+([.,;:)])")
 _REPEATED_SPACE_RE = re.compile(r"[ \t]{2,}")
-_REFERENCE_HEADING_RE = re.compile(r"(?im)^\s{0,3}(?:#{1,6}\s*)?references\s*:?\s*$")
+# lit-agents' _strip_references matches "references" alone (case-insensitive,
+# optional heading markup, optional colon). Deliberate deviation: models also
+# title this section Bibliography, Works Cited or Sources, and a tail left
+# standing is worse than a tail wrongly stripped -- its numbered entries are
+# read as prose and every "[1]" in them becomes a fabricated inline citation.
+# A strip under any heading but "references" is logged, so the deviation shows
+# up in a run rather than only in this comment.
+_REFERENCE_HEADING_RE = re.compile(
+    r"(?im)^\s{0,3}(?:#{1,6}\s*)?(references|bibliography|works\s+cited|sources)\s*:?\s*$"
+)
+_CANONICAL_REFERENCE_HEADING = "references"
+
+# Citation shapes neither this module nor lit-agents' render_intro resolves.
+# Counted rather than ignored: an answer full of them scores zero for a reason
+# worth seeing, and silence would make that look like a model that cited nothing.
+_UNRESOLVED_FORM_RES = (
+    re.compile(r"(?i)<sup>.*?</sup>"),
+    re.compile(r"[\u00b9\u00b2\u00b3\u2070\u2074-\u2079]+"),
+    re.compile(r"\[\^[^\]]{1,32}\]"),
+    re.compile(r"\[[^\]\d]{2,60},\s*(?:19|20)\d{2}[a-z]?\]"),
+)
+# "[1-3]" and "[1--3]" mean three citations; lit-agents never sees one because
+# its graphs emit a citation per paper.
+_NUMERIC_RANGE_RE = re.compile(r"^(\d{1,3})\s*[-\u2010-\u2015]\s*(\d{1,3})$")
+_MAX_RANGE_SPAN = 50
 
 # One entry of the numbered reference list the prompt asks for: "[3] ..." or
 # "3. ..." or "3) ...".
@@ -113,7 +144,27 @@ def arxiv_ids_in_text(text: str) -> list[str]:
 def strip_references(report: str) -> str:
     """Drop the reference list; the scorer reads citations from the prose only."""
     match = _REFERENCE_HEADING_RE.search(report)
-    return report[: match.start()].rstrip() if match else report.rstrip()
+    if match is None:
+        return report.rstrip()
+    heading = match.group(1).strip().casefold()
+    if heading != _CANONICAL_REFERENCE_HEADING:
+        logger.warning(
+            "Stripped a reference tail under the heading %r; lit-agents strips "
+            "only 'References', so this answer is treated differently there.",
+            match.group(1).strip(),
+        )
+    return report[: match.start()].rstrip()
+
+
+def unresolved_citation_forms(body: str) -> int:
+    """Count citation-shaped fragments no pass here can turn into a link.
+
+    Superscripts, footnote markers and author-year brackets are real citation
+    styles that neither this module nor render_intro resolves. They are reported
+    so an answer that cited diligently in an unsupported style is distinguishable
+    from one that did not cite at all.
+    """
+    return sum(len(pattern.findall(body)) for pattern in _UNRESOLVED_FORM_RES)
 
 
 def reference_list(report: str) -> dict[str, str]:
@@ -188,6 +239,31 @@ def resolve_numbering(
         if source is not None:
             resolved[number] = source
     return resolved
+
+
+def _citation_tokens(content: str) -> list[str]:
+    """Split a bracket's contents into the citation markers it stands for.
+
+    Expands "1-3" into 1, 2, 3 and drops the caret of a "^1" footnote marker, so
+    both resolve through the same numbering as a plain "[1]". A range wider than
+    _MAX_RANGE_SPAN is left alone: at that width it is far likelier to be a page
+    range or a year span than a citation.
+    """
+    tokens: list[str] = []
+    for raw in re.split(r"[\s,;]+", content):
+        token = raw.strip().lstrip("^")
+        if not token:
+            continue
+        span = _NUMERIC_RANGE_RE.match(token)
+        if span is None:
+            tokens.append(token)
+            continue
+        first, last = int(span.group(1)), int(span.group(2))
+        if first > last or last - first > _MAX_RANGE_SPAN:
+            tokens.append(token)
+            continue
+        tokens.extend(str(number) for number in range(first, last + 1))
+    return tokens
 
 
 def _markdown_citation(source: Mapping[str, Any]) -> str:
@@ -276,7 +352,7 @@ def rewrite_intro(
         direct = alias_map.get(_normalize_alias(content))
         if direct is not None:
             return _markdown_citation(direct)
-        tokens = [token for token in re.split(r"[\s,;]+", content) if token]
+        tokens = _citation_tokens(content)
         resolved = [alias_map.get(_normalize_alias(token)) for token in tokens]
         if tokens and all(source is not None for source in resolved):
             seen: dict[str, Mapping[str, Any]] = {}

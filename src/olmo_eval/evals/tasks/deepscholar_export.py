@@ -38,9 +38,11 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import sys
 import tempfile
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Any, cast
 
@@ -80,23 +82,42 @@ GENERATION_MANIFEST_NAME = "generation_manifest.json"
 # agent, searching and writing its own numbered reference list -- is
 # single_agent_1's, so that is the name the manifests carry by default.
 DEFAULT_SYSTEM = "single_agent_1"
+# Dropping a row can drop a citation, which can drop another row. Three
+# passes is far past what any real answer needs; the fourth means a bug.
+_MAX_EXPORT_PASSES = 4
 
 S2_BATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/batch"
 S2_BATCH_FIELDS = "title,abstract,publicationDate"
 S2_BATCH_MAX_IDS = 500
 
 
-def read_predictions(path: str | Path) -> Iterator[dict[str, Any]]:
-    """Yield the prediction rows of a JSONL file, skipping blank lines."""
+def read_predictions(path: str | Path) -> list[dict[str, Any]]:
+    """Read every prediction row, refusing the file if any line is unreadable.
+
+    A malformed line used to be skipped with a warning, which silently shrank
+    both the export and the manifests built from it: a truncated run produced a
+    folder that looked complete and scored as though it were. Naming the lines
+    and stopping is the only honest option, because nothing here can tell a
+    half-written line from a query that legitimately produced nothing.
+    """
+    rows: list[dict[str, Any]] = []
+    malformed: list[int] = []
     with Path(path).open(encoding="utf-8") as stream:
         for line_number, line in enumerate(stream, start=1):
             text = line.strip()
             if not text:
                 continue
             try:
-                yield json.loads(text)
+                rows.append(json.loads(text))
             except json.JSONDecodeError:
-                logger.warning("Skipping unparseable prediction on line %d", line_number)
+                malformed.append(line_number)
+    if malformed:
+        raise ValueError(
+            f"{path} has unreadable prediction rows on line(s) "
+            f"{', '.join(str(number) for number in malformed)}; refusing to export a "
+            "partial run. Re-run the task or remove the truncated rows deliberately."
+        )
+    return rows
 
 
 def answer_text(prediction: Mapping[str, Any]) -> str:
@@ -197,15 +218,37 @@ def fetch_full_abstracts(
     return fetched
 
 
+def _row_precedes_cutoff(published: str, precision: str, cutoff: date) -> bool:
+    """The contract's own date test, mirroring lit-agents' _validate_source_rows.
+
+    Month precision compares months, day precision compares days, and any other
+    precision is invalid rather than assumed. Strictly before, in both cases.
+    """
+    parsed = _parse_iso_date(published)
+    if parsed is None:
+        return False
+    if precision == "month":
+        return (parsed.year, parsed.month) < (cutoff.year, cutoff.month)
+    if precision == "day":
+        return parsed < cutoff
+    return False
+
+
 def build_paper_rows(
     sources: Sequence[Mapping[str, str]],
     fetched: Mapping[str, Mapping[str, str]] | None = None,
+    cutoff: date | None = None,
 ) -> list[dict[str, str]]:
     """Build paper.csv rows for the cited sources, dropping any that cannot stand.
 
     A row needs a non-empty title and snippet and a resolvable date, because
     those are exactly the conditions the contract checks; shipping a row that
     fails them turns a scoreable query into a rejected one.
+
+    ``cutoff`` is the strict half of the two-layer design: retrieval admits a
+    paper on the month its arXiv ID encodes, and the batch re-fetch can then
+    return a real publication date that turns out to fall on or after the query's
+    cutoff. Such a paper was never citable, and only this test catches it.
     """
     fetched = fetched or {}
     rows: list[dict[str, str]] = []
@@ -231,6 +274,15 @@ def build_paper_rows(
         if not title.strip() or not snippet.strip():
             logger.warning("Dropping source %s: it has no title or no abstract", arxiv_id)
             continue
+        if cutoff is not None and not _row_precedes_cutoff(published, precision, cutoff):
+            logger.warning(
+                "Dropping source %s: %s (%s precision) does not precede the cutoff %s",
+                arxiv_id,
+                published,
+                precision,
+                cutoff.isoformat(),
+            )
+            continue
 
         rows.append(
             {
@@ -246,6 +298,50 @@ def build_paper_rows(
             }
         )
     return rows
+
+
+def resolve_export(
+    answer: str,
+    sources: Sequence[Mapping[str, str]],
+    fetched: Mapping[str, Mapping[str, str]],
+    cutoff: date | None,
+) -> tuple[str, list[Mapping[str, str]], list[dict[str, str]]]:
+    """Rewrite the answer and build its rows until the two agree.
+
+    A cited source can still fail at export -- no title, no abstract, a date the
+    re-fetch moved on or after the cutoff -- and dropping its row while leaving
+    its link standing in intro.md leaves the folder contradicting itself: the
+    contract checks that every cited ID has a row, and the parser would render a
+    citation whose title and snippet are empty. So the rewrite is re-run with the
+    failed source withheld, which is what render_intro does with a source it
+    rejects, and the citation comes out of the prose along with the row.
+
+    Returns empty results when nothing survives, which is a query to record as
+    unscoreable rather than an error: an answer citing only papers that fail the
+    contract has genuinely produced nothing this benchmark can score.
+    """
+    allowed = list(sources)
+    for _ in range(_MAX_EXPORT_PASSES):
+        intro, cited = rewrite_intro(answer, allowed)
+        if not cited:
+            return "", [], []
+        rows = build_paper_rows(cited, fetched, cutoff)
+        kept = {row["id"] for row in rows}
+        cited_ids = {normalize_arxiv_id(str(source.get("arxiv_id") or "")) for source in cited}
+        if kept == cited_ids:
+            return intro, cited, rows
+        allowed = [
+            source
+            for source in allowed
+            if normalize_arxiv_id(str(source.get("arxiv_id") or "")) in kept
+        ]
+        if not allowed:
+            return "", [], []
+    logger.warning(
+        "Export did not settle after %d passes; treating the query as unscoreable",
+        _MAX_EXPORT_PASSES,
+    )
+    return "", [], []
 
 
 def _resolve_row_date(
@@ -366,6 +462,30 @@ def write_query_folder(
         os.replace(temporary, target)
 
 
+def _prepare_output_root(root: Path, *, force: bool) -> None:
+    """Refuse to write into an export that is already there.
+
+    Numeric query folders from an earlier run survive a new run that happens not
+    to export the same queries, and preflight compares the folders on disk
+    against summary.json -- so a stale folder fails the whole export with an
+    error naming the run that is not at fault.
+    """
+    if not root.exists():
+        root.mkdir(parents=True, exist_ok=True)
+        return
+    existing = sorted(child.name for child in root.iterdir() if not child.name.startswith("."))
+    if not existing:
+        return
+    if not force:
+        shown = ", ".join(existing[:5]) + (", ..." if len(existing) > 5 else "")
+        raise FileExistsError(
+            f"Output directory {root} already holds {shown}. Exporting into it would "
+            "mix two runs; pass --force to replace its contents, or choose a new directory."
+        )
+    shutil.rmtree(root)
+    root.mkdir(parents=True, exist_ok=True)
+
+
 def export_predictions(
     predictions_path: str | Path,
     output_dir: str | Path,
@@ -374,10 +494,11 @@ def export_predictions(
     dataset_path: str | Path | None = None,
     fetch_abstracts: bool = True,
     client: httpx.Client | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Export every prediction, returning the summary it also writes to disk."""
     root = Path(output_dir)
-    root.mkdir(parents=True, exist_ok=True)
+    _prepare_output_root(root, force=force)
     records = load_query_records(dataset_path)
 
     prepared = []
@@ -394,23 +515,25 @@ def export_predictions(
             AgentTrajectory.from_dict(raw_trajectory) if isinstance(raw_trajectory, dict) else None
         )
         sources = sources_from_trajectory(trajectory)
-        intro, cited = rewrite_intro(answer, sources)
-        prepared.append((identifier, answer, sources, intro, cited))
+        # A first pass only to learn which abstracts are worth re-fetching; the
+        # binding pass runs below, once the fetched dates can be validated.
+        _, provisional = rewrite_intro(answer, sources)
+        prepared.append((identifier, answer, sources, provisional))
 
     fetched: dict[str, dict[str, str]] = {}
     if fetch_abstracts:
         wanted = list(
             dict.fromkeys(
                 normalize_arxiv_id(str(source.get("arxiv_id") or ""))
-                for _, _, _, _, cited in prepared
-                for source in cited
+                for _, _, _, provisional in prepared
+                for source in provisional
             )
         )
         fetched = fetch_full_abstracts([w for w in wanted if w], client=client)
 
     summary: list[dict[str, Any]] = []
     exported: list[int] = []
-    for identifier, answer, sources, intro, cited in prepared:
+    for identifier, answer, sources, _ in prepared:
         record = records[identifier]
         if not answer.strip():
             summary.append(
@@ -424,7 +547,9 @@ def export_predictions(
                 }
             )
             continue
-        rows = build_paper_rows(cited, fetched)
+
+        cutoff = _parse_iso_date(record["cutoff_date"])
+        intro, cited, rows = resolve_export(answer, sources, fetched, cutoff)
         if not rows:
             summary.append(
                 {
@@ -432,15 +557,11 @@ def export_predictions(
                     "arxiv_id": record["arxiv_id"],
                     "status": "no_eligible_source",
                     "reason": (
-                        "no citation in the answer resolved to a retrieved arXiv source"
-                        if not cited
-                        else "every cited source lacked a title, an abstract or a date"
+                        "no citation in the answer resolved to a retrieved arXiv source that "
+                        "satisfies the export contract"
                     ),
                     "sources_considered": len(sources),
-                    "source_rejections": {
-                        "unresolved_citations": len(sources) - len(cited),
-                        "unexportable_rows": len(cited) - len(rows),
-                    },
+                    "source_rejections": {"unexportable_after_validation": len(sources)},
                 }
             )
             continue
@@ -524,6 +645,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Skip the Semantic Scholar lookup and use the truncated tool snippets",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace the contents of a non-empty output directory",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -532,6 +658,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output,
         system=args.system,
         fetch_abstracts=not args.no_fetch_abstracts,
+        force=args.force,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0 if summary["exported_count"] else 1
