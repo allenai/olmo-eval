@@ -11,6 +11,7 @@ from .base import (
     LogprobPerCharMCAccuracyMetric,
     LogprobPerTokenMCAccuracyMetric,
     LogprobUncondMCAccuracyMetric,
+    MacroSubsetAccuracyMetric,
     MeanPerplexityMetric,
     Metric,
     PassAtKMetric,
@@ -52,4 +53,5 @@ __all__ = [
     "ToolAccuracyMetric",
     "SubsetAccuracyMetric",
     "SafetyErrorMetric",
+    "MacroSubsetAccuracyMetric",
 ]

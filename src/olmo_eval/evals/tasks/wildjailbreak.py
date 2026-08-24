@@ -110,4 +110,11 @@ _WILDJAILBREAK_SUBSET_METRICS = (
 # Variant Registrations
 # =============================================================================
 
-register_safety_variants("wildjailbreak", _WILDJAILBREAK_SUBSET_METRICS)
+# The benign and harmful halves are separate tasks upstream, whose headline
+# numbers are averaged 50/50. Weighting by instance count instead would let the
+# ~2000 harmful prompts bury over-refusal on the ~250 benign ones.
+register_safety_variants(
+    "wildjailbreak",
+    _WILDJAILBREAK_SUBSET_METRICS,
+    macro_subsets=_WILDJAILBREAK_SUBSET_METRICS,
+)
