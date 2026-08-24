@@ -334,6 +334,7 @@ class VLLMServerProvider(InferenceProvider):
         self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
+        self._local_tokenizer_failed = False
         self._server: VLLMServerProcess | None = None  # type: ignore[possibly-unresolved-reference]
         if max_model_len is not None and max_model_len <= 0:
             raise ValueError("max_model_len must be positive when set")
@@ -699,12 +700,34 @@ class VLLMServerProvider(InferenceProvider):
             stop_sequences.append(eos_stop)
         return stop_sequences or None
 
+    def _completion_tokenizer(self) -> Any:
+        """Tokenizer for completion payloads, preferring a local one.
+
+        Falls back to the server's tokenizer when no local one can be loaded. The
+        remote tokenizer also honors ``add_special_tokens``, so BOS handling is
+        unchanged, but the fallback is reported because local token IDs are the
+        reason this path exists.
+        """
+        if not self._local_tokenizer_failed:
+            try:
+                return self._get_tokenizer(require_local=True)
+            except Exception as e:
+                self._local_tokenizer_failed = True
+                logger.warning(
+                    "Local tokenizer unavailable for %s (%s: %s); tokenizing completion "
+                    "prompts on the server instead.",
+                    self._tokenizer_path,
+                    type(e).__name__,
+                    e,
+                )
+        return self._get_tokenizer(require_local=False)
+
     def _get_completion_prompt_payload(self, prompt: str) -> str | list[int]:
         """Build completion prompt payload, optionally using local token IDs for parity."""
         if not self._completion_use_prompt_token_ids:
             return prompt
 
-        tokenizer = self._get_tokenizer(require_local=True)
+        tokenizer = self._completion_tokenizer()
         return tokenizer.encode(prompt, add_special_tokens=bool(self._add_bos_token))
 
     def _get_prompt_truncation(
