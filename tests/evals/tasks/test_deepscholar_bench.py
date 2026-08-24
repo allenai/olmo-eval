@@ -1,9 +1,11 @@
 """Tests for the DeepScholar-Bench task and its export adapter.
 
 The prompt is pinned against a golden copy of lit-agents'
-``shared/deepscholar.py::QUERY_TEMPLATE``: the whole point of this task is to be
-comparable with the systems prompted that way, and a reworded prompt would
-break that silently rather than loudly.
+``shared/deepscholar.py::QUERY_TEMPLATE``: the point of this task is to be
+comparable with the systems prompted that way, and a reworded prompt would break
+that silently. The export is pinned against the real upstream parser, copied in
+under ``fixtures/deepscholar_c95413b``, because an imitation would only prove
+itself self-consistent.
 """
 
 import csv
@@ -19,6 +21,7 @@ from olmo_eval.evals.tasks.deepscholar_bench import (
     DEEPSCHOLAR_COMMIT,
     DEEPSCHOLAR_QUERY_TEMPLATE,
     SEARCH_TOOL_NAME,
+    download_deepscholar_dataset,
     parse_arxiv_tool_results,
     sources_from_trajectory,
 )
@@ -26,8 +29,13 @@ from olmo_eval.evals.tasks.deepscholar_export import (
     PAPER_CSV_FIELDS,
     build_paper_rows,
     export_predictions,
+    query_id,
 )
-from olmo_eval.harness.tools.search import _format_arxiv_result
+from olmo_eval.harness.tools.search import _classify_arxiv_hit, _format_arxiv_result
+from tests.evals.tasks.fixtures.deepscholar_c95413b.eval.parsers import (
+    DeepScholarBaseParser,
+    ParserType,
+)
 
 # Golden copy of lit-agents' shared/deepscholar.py::QUERY_TEMPLATE.
 GOLDEN_QUERY_TEMPLATE = """Your task is to write a Related Works section for an academic paper given the paper's abstract. Your response should provide the Related Works section and references. Only include references from arXiv that are published before {cutoff_date}. Mention them in a separate, numbered reference list at the end and use the reference numbers to provide in-line citations in the Related Works section for all claims referring to a source (e.g., description of source [3]. Further details [6][7][8][9][10].) Each in-line citation must consist of a single reference number within a pair of brackets. Do not use any other citation format. Do not exceed 600 words for the related works section. Here is the paper abstract: {abstract}"""
@@ -37,7 +45,22 @@ CSV_ROW = {
     "title": "TaxAgent: How Large Language Model Designs Fiscal Policy",
     "abstract": "  Economic inequality is a global challenge.  ",
     "published_date": "2025-06-03T13:06:19+00:00",
+    "arxiv_link": "http://arxiv.org/abs/2506.02838v1",
 }
+
+# The shape the prompt actually mandates: numbered inline citations plus a
+# numbered reference list, and not one markdown link anywhere.
+NUMBERED_ANSWER = """## Related Works
+
+Early systems retrieved passages [1]. Later work scaled the index [2], and
+recent agents ground each claim [3]. Several combine the two [2][3].
+
+## References
+
+[1] A. Author. First Retrieval System. arXiv:2401.00001
+[2] B. Author. Scaling The Index. arXiv:2401.00002
+[3] C. Author. Grounding Each Claim. arXiv:2401.00003
+"""
 
 
 @pytest.fixture(autouse=True)
@@ -48,15 +71,6 @@ def _setup_registry():
 @pytest.fixture
 def task():
     return get_task("deepscholar_bench")
-
-
-def _tool_output(*papers: dict) -> str:
-    """Render results the way the search tool does, so the parser is tested
-    against the real formatter rather than a hand-written imitation."""
-    return "\n\n---\n\n".join(
-        _format_arxiv_result(paper, paper.get("externalIds", {}).get("ArXiv", ""))
-        for paper in papers
-    )
 
 
 def _paper(
@@ -78,18 +92,42 @@ def _paper(
     return paper
 
 
-def _trajectory(*result_contents: str) -> AgentTrajectory:
+def _tool_output(*papers: dict) -> str:
+    """Render results the way the search tool does, so the parser is tested
+    against the real formatter rather than a hand-written imitation."""
+    rendered = []
+    for paper in papers:
+        hit, reason = _classify_arxiv_hit(paper, None)
+        assert hit is not None, f"fixture paper is not citable: {reason}"
+        rendered.append(_format_arxiv_result(paper, hit))
+    return "\n\n---\n\n".join(rendered)
+
+
+def _trajectory(*result_contents: str, tool_name: str = SEARCH_TOOL_NAME) -> AgentTrajectory:
     turns = []
     for index, content in enumerate(result_contents):
         call = ToolCall(
             id=f"c{index}",
-            function=Function(name=SEARCH_TOOL_NAME, arguments='{"query": "q"}'),
+            function=Function(name=tool_name, arguments='{"query": "q"}'),
         )
         turns.append(AgentTurn.assistant(tool_calls=[call]))
         turns.append(
             AgentTurn.tool(results=[ToolResult(tool_call_id=f"c{index}", content=content)])
         )
     return AgentTrajectory(turns=tuple(turns))
+
+
+def _dataset_csv(tmp_path, *indices: int):
+    """A dataset CSV whose rows sit at the given positions."""
+    path = tmp_path / "papers.csv"
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(CSV_ROW))
+        writer.writeheader()
+        for position in range(max(indices) + 1):
+            row = dict(CSV_ROW)
+            row["arxiv_id"] = f"2506.0{position:04d}"
+            writer.writerow(row)
+    return path
 
 
 class TestRegistration:
@@ -99,7 +137,7 @@ class TestRegistration:
     def test_metrics(self, task):
         assert {m.name for m in task.config.metrics} == {
             "exportable_rate",
-            "arxiv_citation_rate",
+            "citation_resolution_rate",
         }
         assert task.config.get_primary_metric().name == "exportable_rate"
 
@@ -146,9 +184,24 @@ class TestProcessDoc:
         assert task.process_doc(row, index=0) is None
 
     def test_unparseable_cutoff_is_dropped(self, task):
-        row = dict(CSV_ROW, published_date="not a date")
+        assert task.process_doc(dict(CSV_ROW, published_date="not a date"), index=0) is None
 
-        assert task.process_doc(row, index=0) is None
+
+class TestDataset:
+    def test_the_pinned_dataset_yields_63_queries(self, task):
+        # Reads the cached CSV; the download only happens on a cold cache.
+        download_deepscholar_dataset()
+        instances = list(task.instances)
+
+        assert len(instances) == 63
+        assert [item.metadata["id"] for item in instances] == [str(i) for i in range(63)]
+
+    def test_positional_ids_do_not_renumber_when_a_row_is_dropped(self, task):
+        rows = [dict(CSV_ROW), dict(CSV_ROW, abstract=""), dict(CSV_ROW)]
+
+        kept = [task.process_doc(row, index=index) for index, row in enumerate(rows)]
+
+        assert [item.metadata["id"] for item in kept if item is not None] == ["0", "2"]
 
 
 class TestResultParsing:
@@ -160,7 +213,6 @@ class TestResultParsing:
         assert [item["arxiv_id"] for item in parsed] == ["2401.00001", "2401.00002"]
         assert parsed[0]["title"] == "First"
         assert parsed[0]["abstract"] == "An abstract."
-        assert parsed[0]["url"] == "https://arxiv.org/abs/2401.00001"
         # No S2 date, so the ID's month is all the tool could claim.
         assert parsed[0]["published_date"] == "2024-01-01"
         assert parsed[0]["date_precision"] == "month"
@@ -179,11 +231,13 @@ class TestResultParsing:
         assert parse_arxiv_tool_results(content)[0]["abstract"] == "Line one.\nLine two."
 
     def test_context_only_results_are_skipped(self):
-        content = _format_arxiv_result({"title": "Journal", "abstract": "x"}, "")
+        content = _format_arxiv_result({"title": "Journal", "abstract": "x"}, None)
 
         assert parse_arxiv_tool_results(content) == []
 
-    def test_trajectory_sources_are_deduplicated_first_mention_winning(self):
+
+class TestTrajectorySources:
+    def test_deduplicated_first_mention_winning(self):
         trajectory = _trajectory(
             _tool_output(_paper("First", "2401.00001")),
             _tool_output(_paper("First again", "2401.00001"), _paper("Second", "2401.00002")),
@@ -197,6 +251,35 @@ class TestResultParsing:
     def test_no_trajectory_yields_no_sources(self):
         assert sources_from_trajectory(None) == []
 
+    def test_only_the_search_tools_results_are_read(self):
+        # Another tool naming an arXiv ID was never shown to the agent as a
+        # citable search result, so it must not become citable.
+        trajectory = _trajectory(
+            _tool_output(_paper("Fetched", "2401.00009")), tool_name="browse_webpage"
+        )
+
+        assert sources_from_trajectory(trajectory) == []
+
+    @pytest.mark.parametrize(
+        "abstract",
+        [
+            "Contains the block separator\n\n---\n\nmid-abstract.",
+            "A continuation line that starts URL: https://example.com/x",
+            "A continuation that starts Abstract: again, and arXiv: 9999.99999 too.",
+        ],
+    )
+    def test_adversarial_abstracts_still_yield_the_id(self, abstract):
+        # The ID is read from its own line, so a block the field parser cannot
+        # make sense of still contributes the one field the export needs.
+        trajectory = _trajectory(_tool_output(_paper("Tricky", "2401.00007", abstract=abstract)))
+
+        assert [item["arxiv_id"] for item in sources_from_trajectory(trajectory)] == ["2401.00007"]
+
+    def test_a_newline_in_a_title_still_yields_the_id(self):
+        trajectory = _trajectory(_tool_output(_paper("Broken\nTitle", "2401.00008")))
+
+        assert [item["arxiv_id"] for item in sources_from_trajectory(trajectory)] == ["2401.00008"]
+
 
 class TestScoring:
     def _response(self, answer: str, trajectory: AgentTrajectory | None) -> Response:
@@ -209,32 +292,58 @@ class TestScoring:
         )
 
     @pytest.mark.anyio
-    async def test_exportable_response_scores_one(self, task):
-        response = self._response(
-            "Related work [Paper](https://arxiv.org/abs/2401.00001).",
-            _trajectory(_tool_output(_paper("First", "2401.00001"))),
+    async def test_a_prompt_compliant_answer_is_exportable(self, task):
+        # No markdown link anywhere in the answer: it scores 1.0 because the
+        # bridge resolves its numbered citations, not because a URL is present.
+        trajectory = _trajectory(
+            _tool_output(
+                _paper("First Retrieval System", "2401.00001"),
+                _paper("Scaling The Index", "2401.00002"),
+                _paper("Grounding Each Claim", "2401.00003"),
+            )
         )
+        assert "](http" not in NUMBERED_ANSWER
 
-        (scored,) = await task.score_responses([response])
+        (scored,) = await task.score_responses([self._response(NUMBERED_ANSWER, trajectory)])
 
         assert scored.scores["exportable_rate"] == 1.0
-        assert scored.scores["arxiv_citation_rate"] == 1.0
-        assert scored.outputs[0].metadata["deepscholar_num_searches"] == 1
+        assert scored.scores["citation_resolution_rate"] == 1.0
+        assert scored.outputs[0].metadata["score:exportable_rate"] == 1.0
+
+    @pytest.mark.anyio
+    async def test_citing_only_unretrieved_papers_is_not_exportable(self, task):
+        trajectory = _trajectory(_tool_output(_paper("Unrelated", "2401.09999")))
+
+        (scored,) = await task.score_responses([self._response(NUMBERED_ANSWER, trajectory)])
+
+        assert scored.scores["exportable_rate"] == 0.0
+        assert scored.scores["citation_resolution_rate"] == 0.0
+
+    @pytest.mark.anyio
+    async def test_a_bare_url_in_prose_is_not_a_citation(self, task):
+        # The old metric counted any arxiv.org URL anywhere in the text; the
+        # parser counts only markdown links, so this must score zero.
+        answer = "See https://arxiv.org/abs/2401.00001 for details."
+        trajectory = _trajectory(_tool_output(_paper("First", "2401.00001")))
+
+        (scored,) = await task.score_responses([self._response(answer, trajectory)])
+
+        assert scored.scores["exportable_rate"] == 0.0
 
     @pytest.mark.anyio
     async def test_response_without_a_trajectory_is_not_exportable(self, task):
-        (scored,) = await task.score_responses([self._response("Some text.", None)])
+        (scored,) = await task.score_responses([self._response(NUMBERED_ANSWER, None)])
 
         assert scored.scores["exportable_rate"] == 0.0
-        assert scored.scores["arxiv_citation_rate"] == 0.0
 
 
 class TestExportAdapter:
-    def _prediction(self, native_id: str = "7", answer: str = "Related work.") -> dict:
+    def _prediction(self, native_id: str = "7", answer: str = NUMBERED_ANSWER) -> dict:
         trajectory = _trajectory(
             _tool_output(
-                _paper("First", "2401.00001", published="2024-01-15"),
-                _paper("Second", "cs/0501001"),
+                _paper("First Retrieval System", "2401.00001", published="2024-01-15"),
+                _paper("Scaling The Index", "2401.00002"),
+                _paper("Grounding Each Claim", "cs/0501001"),
             )
         )
         return {
@@ -253,100 +362,223 @@ class TestExportAdapter:
         )
         return path
 
+    def _export(self, tmp_path, *predictions: dict, **kwargs):
+        return export_predictions(
+            self._write(tmp_path, *predictions),
+            tmp_path / "export",
+            dataset_path=_dataset_csv(tmp_path, 7),
+            fetch_abstracts=False,
+            **kwargs,
+        )
+
     def test_writes_one_folder_per_query(self, tmp_path):
-        predictions = self._write(tmp_path, self._prediction())
-        output = tmp_path / "export"
+        summary = self._export(tmp_path, self._prediction())
 
-        summary = export_predictions(predictions, output)
-
-        assert summary["exported_ids"] == ["7"]
-        assert sorted(p.name for p in (output / "7").iterdir()) == [
+        assert summary["exported_ids"] == [7]
+        assert sorted(p.name for p in (tmp_path / "export" / "7").iterdir()) == [
+            "export_manifest.json",
             "final_report.md",
             "intro.md",
             "paper.csv",
         ]
 
-    def test_intro_and_final_report_are_the_answer(self, tmp_path):
-        predictions = self._write(tmp_path, self._prediction(answer="The section."))
-        output = tmp_path / "export"
+    def test_intro_is_the_rewritten_answer_and_final_report_matches(self, tmp_path):
+        self._export(tmp_path, self._prediction())
+        folder = tmp_path / "export" / "7"
 
-        export_predictions(predictions, output)
+        intro = (folder / "intro.md").read_text(encoding="utf-8")
 
-        intro = (output / "7" / "intro.md").read_text(encoding="utf-8")
-        assert intro == "The section."
-        assert (output / "7" / "final_report.md").read_text(encoding="utf-8") == intro
+        # The raw answer has no markdown link; the exported intro must, or the
+        # upstream parser finds no documents at all.
+        assert "[First Retrieval System](https://arxiv.org/abs/2401.00001)" in intro
+        assert "## References" not in intro
+        assert intro != NUMBERED_ANSWER
+        assert (folder / "final_report.md").read_text(encoding="utf-8") == intro
 
-    def test_paper_csv_columns_and_rows(self, tmp_path):
-        predictions = self._write(tmp_path, self._prediction())
-        output = tmp_path / "export"
+    def test_the_real_upstream_parser_finds_documents(self, tmp_path):
+        self._export(tmp_path, self._prediction())
+        folder = tmp_path / "export" / "7"
 
-        export_predictions(predictions, output)
-
-        with (output / "7" / "paper.csv").open(newline="", encoding="utf-8") as stream:
-            reader = csv.DictReader(stream)
-            assert reader.fieldnames == list(PAPER_CSV_FIELDS)
-            rows = list(reader)
-
-        assert [row["id"] for row in rows] == ["2401.00001", "cs/0501001"]
-        assert rows[0]["title"] == "First"
-        assert rows[0]["snippet"] == "An abstract."
-        # S2 dated the first source, so the day survives into the CSV.
-        assert rows[0]["published_date"] == "2024-01-15"
-        assert rows[0]["date_precision"] == "day"
-        assert rows[0]["paper_id"] == "2401.00001"
-        # The second was undated, so only its ID's month can be claimed.
-        assert rows[1]["published_date"] == "2005-01-01"
-        assert rows[1]["date_precision"] == "month"
-
-    def test_predictions_without_sources_are_skipped(self, tmp_path):
-        prediction = self._prediction()
-        prediction["trajectory"] = AgentTrajectory().to_dict()
-        predictions = self._write(tmp_path, prediction)
-        output = tmp_path / "export"
-
-        summary = export_predictions(predictions, output)
-
-        assert summary["exported_count"] == 0
-        assert summary["skipped"] == [{"idx": "7", "reason": "no arXiv sources in trajectory"}]
-        assert not (output / "7").exists()
-
-    def test_predictions_without_an_answer_are_skipped(self, tmp_path):
-        prediction = self._prediction(answer="   ")
-        predictions = self._write(tmp_path, prediction)
-
-        summary = export_predictions(predictions, tmp_path / "export")
-
-        assert summary["skipped"] == [{"idx": "7", "reason": "no answer text"}]
-
-    def test_undatable_sources_are_dropped(self):
-        rows = build_paper_rows(
-            [
-                {"arxiv_id": "2401.00001", "title": "Datable", "abstract": "a"},
-                {"arxiv_id": "not-an-id", "title": "Undatable", "abstract": "b"},
-            ]
+        parser = DeepScholarBaseParser(
+            str(folder),
+            {
+                "mode": ParserType.DEEPSCHOLAR_BASE,
+                "file_id": "7",
+                "s_map_groundtruth": {
+                    "title": "T",
+                    "abstract": "A",
+                    "arxiv_link": "https://arxiv.org/abs/2506.02838",
+                    "related_works_section": "",
+                    "arxiv_id": "2506.02838",
+                },
+            },
         )
 
-        assert [row["id"] for row in rows] == ["2401.00001"]
+        assert parser.docs, "the pinned parser found no documents in the export"
+        assert all(doc["title"].strip() for doc in parser.docs)
+        assert all(doc["sent"].strip() for doc in parser.docs)
+        # Every citation the parser renumbered points at a row it resolved.
+        assert "[1]" in parser.clean_text
+
+    def test_paper_csv_holds_only_the_cited_sources(self, tmp_path):
+        prediction = self._prediction()
+        # A retrieved paper the answer never cites must not appear.
+        trajectory = AgentTrajectory.from_dict(prediction["trajectory"])
+        extra = _tool_output(_paper("Never Cited", "2401.05555"))
+        prediction["trajectory"] = _trajectory(
+            *[r.content for r in trajectory.tool_result_sequence], extra
+        ).to_dict()
+
+        self._export(tmp_path, prediction)
+
+        rows = self._rows(tmp_path / "export" / "7" / "paper.csv")
+        assert "2401.05555" not in {row["id"] for row in rows}
+        assert {row["id"] for row in rows} == {"2401.00001", "2401.00002", "cs/0501001"}
+
+    def test_paper_csv_columns_and_dates(self, tmp_path):
+        self._export(tmp_path, self._prediction())
+
+        rows = self._rows(tmp_path / "export" / "7" / "paper.csv")
+        by_id = {row["id"]: row for row in rows}
+
+        assert list(by_id["2401.00001"]) == list(PAPER_CSV_FIELDS)
+        # S2 dated the first source, so the day survives into the CSV.
+        assert by_id["2401.00001"]["published_date"] == "2024-01-15"
+        assert by_id["2401.00001"]["date_precision"] == "day"
+        # The others were undated, so only their ID's month can be claimed.
+        assert by_id["2401.00002"]["published_date"] == "2024-01-01"
+        assert by_id["cs/0501001"]["date_precision"] == "month"
+
+    def test_export_manifest_checksums_every_scored_file(self, tmp_path):
+        import hashlib
+
+        self._export(tmp_path, self._prediction())
+        folder = tmp_path / "export" / "7"
+
+        manifest = json.loads((folder / "export_manifest.json").read_text(encoding="utf-8"))
+
+        assert set(manifest) == {
+            "schema_version",
+            "system",
+            "idx",
+            "query_fingerprint",
+            "num_papers",
+            "files",
+        }
+        assert manifest["idx"] == 7
+        assert manifest["num_papers"] == 3
+        for name, checksum in manifest["files"].items():
+            assert checksum == hashlib.sha256((folder / name).read_bytes()).hexdigest()
+
+    def test_summary_and_generation_manifest_are_written(self, tmp_path):
+        self._export(tmp_path, self._prediction())
+        root = tmp_path / "export"
+
+        summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+        generation = json.loads((root / "generation_manifest.json").read_text(encoding="utf-8"))
+
+        assert summary == [
+            {"idx": 7, "arxiv_id": "2506.00007", "status": "success", "num_papers": 3}
+        ]
+        assert generation["system"] == "single_agent_1"
+        assert [item["idx"] for item in generation["queries"]] == [7]
+
+    def test_an_answer_citing_nothing_retrieved_is_recorded_not_written(self, tmp_path):
+        answer = "Body [1].\n\nReferences\n[1] Someone. Never Retrieved. arXiv:2999.99999\n"
+
+        summary = self._export(tmp_path, self._prediction(answer=answer))
+
+        assert summary["exported_count"] == 0
+        assert summary["skipped"][0]["status"] == "no_eligible_source"
+        assert not (tmp_path / "export" / "7").exists()
+
+    def test_an_answer_whose_only_url_is_bare_prose_is_not_exported(self, tmp_path):
+        # The parser reads markdown links only, so this answer would yield no
+        # documents; writing a folder for it would manufacture a scoreable query.
+        answer = "See https://arxiv.org/abs/2401.00001 for details."
+
+        summary = self._export(tmp_path, self._prediction(answer=answer))
+
+        assert summary["exported_count"] == 0
+        assert summary["skipped"][0]["status"] == "no_eligible_source"
+
+    def test_predictions_without_an_answer_are_recorded_as_no_answer(self, tmp_path):
+        summary = self._export(tmp_path, self._prediction(answer="   "))
+
+        assert summary["skipped"][0]["status"] == "no_answer"
+
+    @pytest.mark.parametrize("native_id", [None, "abc", ""])
+    def test_a_prediction_without_a_positional_id_fails_loudly(self, native_id):
+        # doc_id is a within-run counter, so falling back to it would score one
+        # paper's answer against another paper's ground truth.
+        prediction = {"doc_id": 3}
+        if native_id is not None:
+            prediction["native_id"] = native_id
+
+        with pytest.raises(ValueError, match="positional native_id"):
+            query_id(prediction)
+
+    @staticmethod
+    def _rows(path):
+        with path.open(newline="", encoding="utf-8") as stream:
+            return list(csv.DictReader(stream))
+
+
+class TestPaperRows:
+    SOURCE = {
+        "arxiv_id": "2401.00001",
+        "title": "Truncated Title",
+        "abstract": "A truncated preview...",
+        "published_date": "2024-01-01",
+        "date_precision": "month",
+    }
+
+    def test_snippet_is_the_full_refetched_abstract(self):
+        full = "A full abstract. " * 60
+        fetched = {"2401.00001": {"title": "Full Title", "abstract": full}}
+
+        (row,) = build_paper_rows([self.SOURCE], fetched)
+
+        assert row["snippet"] == full.strip()
+        assert len(row["snippet"]) > 500
+        assert row["title"] == "Full Title"
+        assert row["snippet_source"] == "s2_batch"
+
+    def test_a_failed_lookup_falls_back_to_the_preview_and_says_so(self):
+        (row,) = build_paper_rows([self.SOURCE], {})
+
+        assert row["snippet"] == "A truncated preview..."
+        assert row["snippet_source"] == "tool_output"
+
+    def test_a_refetched_publication_date_wins(self):
+        fetched = {
+            "2401.00001": {
+                "title": "T",
+                "abstract": "A",
+                "published_date": "2024-01-22",
+            }
+        }
+
+        (row,) = build_paper_rows([self.SOURCE], fetched)
+
+        assert row["published_date"] == "2024-01-22"
+        assert row["date_precision"] == "day"
+
+    def test_undatable_sources_are_dropped(self):
+        rows = build_paper_rows([dict(self.SOURCE, arxiv_id="not-an-id", published_date="")], {})
+
+        assert rows == []
+
+    @pytest.mark.parametrize("field", ["title", "abstract"])
+    def test_sources_without_a_title_or_snippet_are_dropped(self, field):
+        # These rows fail the contract's own validation, so shipping them turns
+        # a scoreable query into a rejected one.
+        assert build_paper_rows([dict(self.SOURCE, **{field: "  "})], {}) == []
 
     def test_sources_without_a_published_line_fall_back_to_the_id_month(self):
-        # Predictions saved before the tool rendered a Published line.
-        (row,) = build_paper_rows([{"arxiv_id": "2401.00001", "title": "Legacy", "abstract": "a"}])
+        source = {"arxiv_id": "2401.00001", "title": "T", "abstract": "A"}
+
+        (row,) = build_paper_rows([source], {})
 
         assert row["published_date"] == "2024-01-01"
         assert row["date_precision"] == "month"
-
-    def test_a_parsed_day_is_written_unchanged(self):
-        (row,) = build_paper_rows(
-            [
-                {
-                    "arxiv_id": "2401.00001",
-                    "title": "Dated",
-                    "abstract": "a",
-                    "published_date": "2024-01-15",
-                    "date_precision": "day",
-                }
-            ]
-        )
-
-        assert row["published_date"] == "2024-01-15"
-        assert row["date_precision"] == "day"
