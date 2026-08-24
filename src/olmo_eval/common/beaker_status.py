@@ -37,12 +37,20 @@ class BeakerStatusReporter:
         self._git_suffix = _git_suffix()
         self._workload: BeakerWorkload | None = None
         self._last_update: float = float("-inf")
+        # Being inside a Beaker job and having a Beaker client configured are
+        # different conditions: a workstation with `beaker` set up passes
+        # Beaker.from_env() and then dies on the missing workload id. The
+        # workload id is the fact that decides, so it is checked first.
+        workload_id = os.environ.get("BEAKER_WORKLOAD_ID")
+        if workload_id is None:
+            self._client = None
+            return
         try:
             self._client: Beaker | None = Beaker.from_env()
         except BeakerConfigurationError:
             self._client = None
             return
-        self._workload = self._client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+        self._workload = self._client.workload.get(workload_id)
 
     def update(self, message: str, force: bool = False) -> None:
         """Push a status message to the Beaker workload description.
