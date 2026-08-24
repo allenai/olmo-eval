@@ -186,6 +186,12 @@ class HarnessPresets:
         added to it: which search tools an agent holds changes what it retrieves,
         so sharing a preset would move litsearch and SAGE numbers that were
         measured against Semantic Scholar search.
+
+        No secret is declared, so this runs keyless against the public Semantic
+        Scholar API at its shared ~1 request/second. `required_secrets` is a
+        hard launch gate with no optional form, and declaring one here would
+        make a keyless run impossible; mount a key per run instead with
+        `--secret-env <user>_S2_API_KEY:S2_API_KEY`.
         """
         from .tools.search import arxiv_paper_search
 

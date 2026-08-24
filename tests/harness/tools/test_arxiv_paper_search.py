@@ -106,11 +106,35 @@ async def test_arxiv_hits_are_rendered_with_id_and_abs_url(monkeypatch) -> None:
     assert "**Preprint**" in result
     assert "Authors: A. Author" in result
     assert "Year: 2020" in result
+    # S2 reported no date, so only the month the ID encodes can be claimed.
+    assert "Published: 2024-01 (month precision)" in result
     assert "Abstract: Abstract of Preprint." in result
     # The version suffix is stripped, and the abs URL is what the benchmark's
     # citation parser credits.
     assert "arXiv: 2401.01234" in result
     assert "URL: https://arxiv.org/abs/2401.01234" in result
+
+
+@pytest.mark.anyio
+async def test_a_dated_hit_is_published_to_the_day(monkeypatch) -> None:
+    _stub_search(monkeypatch, [_paper("Dated", arxiv="2401.01234", published="2024-01-15")])
+
+    result = await search.arxiv_paper_search(query="q")
+
+    # A day S2 knows must not be downgraded to a month: the benchmark contract
+    # rejects a month-precise source dated inside the cutoff's own month.
+    assert "Published: 2024-01-15" in result
+    assert "month precision" not in result
+
+
+@pytest.mark.anyio
+async def test_a_hit_with_no_date_anywhere_shows_none(monkeypatch) -> None:
+    _stub_search(monkeypatch, [_paper("Undatable", arxiv="not-an-id")])
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert "**Undatable**" in result
+    assert "Published:" not in result
 
 
 @pytest.mark.anyio
