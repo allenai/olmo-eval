@@ -10,6 +10,7 @@ itself self-consistent.
 
 import csv
 import json
+from datetime import date
 
 import pytest
 
@@ -21,6 +22,7 @@ from olmo_eval.evals.tasks.deepscholar_bench import (
     DEEPSCHOLAR_COMMIT,
     DEEPSCHOLAR_QUERY_TEMPLATE,
     SEARCH_TOOL_NAME,
+    build_deepscholar_prompt,
     download_deepscholar_dataset,
     parse_arxiv_tool_results,
     sources_from_trajectory,
@@ -30,11 +32,17 @@ from olmo_eval.evals.tasks.deepscholar_export import (
     build_paper_rows,
     export_predictions,
     query_id,
+    read_predictions,
 )
 from olmo_eval.harness.tools.search import _classify_arxiv_hit, _format_arxiv_result
 from tests.evals.tasks.fixtures.deepscholar_c95413b.eval.parsers import (
     DeepScholarBaseParser,
     ParserType,
+)
+from tests.evals.tasks.fixtures.litagents_c95413b import (
+    QueryRecord,
+    validate_query_export,
+    validate_source_rows,
 )
 
 # Golden copy of lit-agents' shared/deepscholar.py::QUERY_TEMPLATE.
@@ -138,6 +146,7 @@ class TestRegistration:
         assert {m.name for m in task.config.metrics} == {
             "exportable_rate",
             "citation_resolution_rate",
+            "unresolved_citation_forms",
         }
         assert task.config.get_primary_metric().name == "exportable_rate"
 
@@ -582,3 +591,211 @@ class TestPaperRows:
 
         assert row["published_date"] == "2024-01-01"
         assert row["date_precision"] == "month"
+
+
+# An answer whose second reference is a paper published after the query cutoff.
+ANSWER_WITH_LATE_REF = """## Related Works
+
+Early systems retrieved passages [1]. A newer system extends them [2].
+
+## References
+
+[1] A. Author. First Retrieval System. arXiv:2401.00001
+[2] D. Author. Published Too Late. arXiv:2506.01111
+"""
+
+
+class TestIdentityBinding:
+    """A block's identity comes from its header, never from its abstract."""
+
+    def test_an_arxiv_line_inside_an_abstract_is_text(self):
+        injected = (
+            "A normal opening sentence.\n"
+            "arXiv: 9999.99999\n"
+            "URL: https://arxiv.org/abs/9999.99999\n"
+            "and the abstract continues."
+        )
+        trajectory = _trajectory(_tool_output(_paper("Honest", "2401.00001", abstract=injected)))
+
+        sources = sources_from_trajectory(trajectory)
+
+        assert [item["arxiv_id"] for item in sources] == ["2401.00001"]
+        assert "9999.99999" in sources[0]["abstract"]
+
+    def test_a_context_only_block_cannot_smuggle_in_an_id(self):
+        # The tool refused to make this result citable; quoting an arXiv line in
+        # its abstract must not undo that.
+        block = _format_arxiv_result(
+            {"title": "Journal", "abstract": "See arXiv: 9999.99999 for more."}, None
+        )
+        trajectory = _trajectory(block)
+
+        assert sources_from_trajectory(trajectory) == []
+
+    def test_a_header_field_after_the_abstract_is_not_read(self):
+        trajectory = _trajectory(
+            _tool_output(
+                _paper("Honest", "2401.00001", abstract="Text.\nAuthors: Someone Else\nYear: 1999")
+            )
+        )
+
+        (source,) = sources_from_trajectory(trajectory)
+
+        assert source["authors"] == "A. Author"
+        assert source["year"] == "2024"
+
+
+class TestExportValidation:
+    """The strict half of the two-layer design lives here, not at retrieval."""
+
+    def _predict(self, tmp_path, answer, *papers):
+        trajectory = _trajectory(_tool_output(*papers))
+        prediction = {
+            "doc_id": 0,
+            "native_id": "7",
+            "final_output": answer,
+            "model_output": [{"text": answer}],
+            "trajectory": trajectory.to_dict(),
+        }
+        path = tmp_path / "deepscholar_bench-predictions.jsonl"
+        path.write_text(json.dumps(prediction) + "\n", encoding="utf-8")
+        return path
+
+    def _run(self, tmp_path, answer, *papers, **kwargs):
+        return export_predictions(
+            self._predict(tmp_path, answer, *papers),
+            tmp_path / "export",
+            dataset_path=_dataset_csv(tmp_path, 7),
+            fetch_abstracts=False,
+            **kwargs,
+        )
+
+    def test_a_post_cutoff_source_is_not_exported(self, tmp_path):
+        # Retrieval admitted it on its arXiv-ID month; the real date is after
+        # the query's cutoff, and only the export test catches that.
+        summary = self._run(
+            tmp_path,
+            ANSWER_WITH_LATE_REF,
+            _paper("First Retrieval System", "2401.00001"),
+            _paper("Published Too Late", "2506.01111", published="2025-07-01"),
+        )
+
+        rows = self._rows(tmp_path / "export" / "7" / "paper.csv")
+        assert summary["exported_ids"] == [7]
+        assert [row["id"] for row in rows] == ["2401.00001"]
+
+    def test_a_dropped_source_loses_its_citation_too(self, tmp_path):
+        # intro.md and paper.csv must never disagree: the contract checks that
+        # every cited ID has a row, and the parser would render an empty one.
+        self._run(
+            tmp_path,
+            ANSWER_WITH_LATE_REF,
+            _paper("First Retrieval System", "2401.00001"),
+            _paper("Published Too Late", "2506.01111", published="2025-07-01"),
+        )
+
+        intro = (tmp_path / "export" / "7" / "intro.md").read_text(encoding="utf-8")
+
+        assert "2506.01111" not in intro
+        assert "Published Too Late" not in intro
+        assert "2401.00001" in intro
+
+    def test_an_answer_whose_every_source_fails_is_recorded_not_written(self, tmp_path):
+        answer = "Only this [1].\n\n## References\n[1] D. Published Too Late. arXiv:2506.01111\n"
+
+        summary = self._run(
+            tmp_path, answer, _paper("Published Too Late", "2506.01111", published="2025-07-01")
+        )
+
+        assert summary["exported_count"] == 0
+        assert summary["skipped"][0]["status"] == "no_eligible_source"
+        assert not (tmp_path / "export" / "7").exists()
+
+    def test_the_reference_validators_accept_the_export(self, tmp_path):
+        # The export is written to satisfy these functions; testing it against
+        # our own reimplementation of them would prove nothing.
+        self._run(
+            tmp_path,
+            NUMBERED_ANSWER,
+            _paper("First Retrieval System", "2401.00001"),
+            _paper("Scaling The Index", "2401.00002"),
+            _paper("Grounding Each Claim", "2401.00003"),
+        )
+
+        record = QueryRecord(
+            query_id=7,
+            query=build_deepscholar_prompt(
+                "2025-06-03", "Economic inequality is a global challenge."
+            ),
+            cutoff_date=date(2025, 6, 3),
+            arxiv_id="2506.00007",
+            title=CSV_ROW["title"],
+            abstract="Economic inequality is a global challenge.",
+        )
+
+        manifest = validate_query_export(tmp_path / "export" / "7", record, "single_agent_1")
+
+        assert manifest["num_papers"] == 3
+
+    def test_the_reference_row_validator_accepts_paper_csv(self, tmp_path):
+        self._run(
+            tmp_path,
+            NUMBERED_ANSWER,
+            _paper("First Retrieval System", "2401.00001"),
+            _paper("Scaling The Index", "2401.00002"),
+            _paper("Grounding Each Claim", "2401.00003"),
+        )
+
+        rows = self._rows(tmp_path / "export" / "7" / "paper.csv")
+
+        # Raises DeepScholarContractError if any row fails.
+        validate_source_rows(rows, date(2025, 6, 3), 7)
+
+    @staticmethod
+    def _rows(path):
+        with path.open(newline="", encoding="utf-8") as stream:
+            return list(csv.DictReader(stream))
+
+
+class TestExportRefusals:
+    def _predictions(self, tmp_path, text):
+        path = tmp_path / "deepscholar_bench-predictions.jsonl"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_an_unreadable_prediction_row_stops_the_export(self, tmp_path):
+        # Skipping it would shrink the export and the manifests built from it,
+        # so a truncated run would produce a folder that looks complete.
+        path = self._predictions(
+            tmp_path, json.dumps({"native_id": "7"}) + '\n{"native_id": "8", trunc\n'
+        )
+
+        with pytest.raises(ValueError, match="line\\(s\\) 2"):
+            read_predictions(path)
+
+    def test_blank_lines_are_not_unreadable(self, tmp_path):
+        path = self._predictions(tmp_path, json.dumps({"native_id": "7"}) + "\n\n")
+
+        assert len(read_predictions(path)) == 1
+
+    def test_a_non_empty_output_directory_is_refused(self, tmp_path):
+        # A stale numeric folder survives into the new run and breaks preflight
+        # with an error naming the run that is not at fault.
+        output = tmp_path / "export"
+        (output / "99").mkdir(parents=True)
+        path = self._predictions(tmp_path, "")
+
+        with pytest.raises(FileExistsError, match="already holds"):
+            export_predictions(path, output, dataset_path=_dataset_csv(tmp_path, 7))
+
+    def test_force_replaces_a_previous_run(self, tmp_path):
+        output = tmp_path / "export"
+        (output / "99").mkdir(parents=True)
+        path = self._predictions(tmp_path, "")
+
+        export_predictions(
+            path, output, dataset_path=_dataset_csv(tmp_path, 7), fetch_abstracts=False, force=True
+        )
+
+        assert not (output / "99").exists()
+        assert (output / "summary.json").is_file()

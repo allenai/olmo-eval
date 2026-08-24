@@ -160,9 +160,10 @@ vllm = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# Verbatim vendored copy of the pinned DeepScholar-Bench scorer; it is a
-# fixture precisely because it is not ours to restyle.
-extend-exclude = ["tests/evals/tasks/fixtures/deepscholar_c95413b"]
+# Verbatim vendored copies of the pinned DeepScholar-Bench scorer and of
+# lit-agents' export-contract validators; they are fixtures precisely
+# because they are not ours to restyle.
+extend-exclude = ["tests/evals/tasks/fixtures"]
 
 [tool.ruff.lint]
 select = [

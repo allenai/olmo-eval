@@ -21,7 +21,7 @@ class _ResponseStub:
 
     def __init__(
         self,
-        data: dict[str, Any],
+        data: Any,
         status_code: int = 200,
         headers: dict[str, str] | None = None,
     ) -> None:
@@ -59,25 +59,50 @@ def _paper(
     return paper
 
 
+BAD_JSON = "<body that is not json>"
+BAD_SHAPE = "<a list where an object belongs>"
+
+
 def _stub_pages(
     monkeypatch,
-    *pages: list[dict[str, Any]],
+    *pages,
     error_after: int | None = None,
+    headers_out: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Answer successive S2 searches with ``pages``; returns the params of each.
 
-    ``error_after`` makes every request past that many succeed-then-fail, which
-    is how a page failing mid-pagination is exercised without a live API.
+    A page may be a row list, or one of the BAD_* sentinels standing for a
+    response body S2 should never send but sometimes does. ``error_after`` makes
+    every request past that many fail at the transport, which is how a page
+    failing mid-pagination is exercised without a live API.
     """
     calls: list[dict[str, Any]] = []
     remaining = list(pages)
 
+    class _BadJson:
+        status_code = 200
+        text = ""
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> Any:
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
     class ClientStub:
-        async def get(self, url: str, *, params: dict, headers: dict) -> _ResponseStub:
+        async def get(self, url: str, *, params: dict, headers: dict) -> Any:
             calls.append(dict(params))
+            if headers_out is not None:
+                headers_out.append(dict(headers))
             if error_after is not None and len(calls) > error_after:
                 raise httpx.ConnectError("stubbed transport failure")
-            return _ResponseStub({"data": remaining.pop(0) if remaining else []})
+            page = remaining.pop(0) if remaining else []
+            if page is BAD_JSON:
+                return _BadJson()
+            if page is BAD_SHAPE:
+                return _ResponseStub(["not", "an", "object"])
+            return _ResponseStub({"data": page})
 
     async def no_rate_gate() -> None:
         pass
@@ -279,10 +304,23 @@ async def test_hits_missing_a_title_or_abstract_are_rejected(monkeypatch, field,
 
 
 @pytest.mark.anyio
-async def test_a_malformed_publication_date_is_rejected_not_downgraded(monkeypatch) -> None:
-    # Falling back to the ID's month here would admit the paper on the strength
-    # of a date nothing could read -- and 2405 precedes the cutoff, so it would.
+async def test_a_malformed_publication_date_falls_back_to_the_id_month(monkeypatch) -> None:
+    # Mirrors RetrievalPolicy.admits, whose date parser returns None for a date
+    # it cannot read just as it does for one that is absent, and falls back to
+    # the arXiv ID's month in both cases. Retrieval is the lenient layer; the
+    # strict cutoff test that decides what is scored runs at export.
     _stub_search(monkeypatch, [_paper("Garbled", arxiv="2405.00001", published="not a date")])
+
+    with search.search_date_cutoff("2024-06-01"):
+        result = await search.arxiv_paper_search(query="q")
+
+    assert "**Garbled**" in result
+    assert "Published: 2024-05 (month precision)" in result
+
+
+@pytest.mark.anyio
+async def test_a_malformed_date_whose_id_month_is_too_late_is_still_rejected(monkeypatch) -> None:
+    _stub_search(monkeypatch, [_paper("Garbled", arxiv="2406.00001", published="not a date")])
 
     with search.search_date_cutoff("2024-06-01"):
         result = await search.arxiv_paper_search(query="q")
@@ -440,3 +478,99 @@ async def test_rate_limited_requests_are_retried_after_the_servers_delay(monkeyp
     # Retry-After wins over the exponential schedule, clamped to the module's
     # ceiling: a server asking for longer than _MAX_BACKOFF_S is under-waited.
     assert slept == [min(30.0, search._MAX_BACKOFF_S)]
+
+
+@pytest.mark.anyio
+async def test_identity_fields_precede_the_abstract(monkeypatch) -> None:
+    # The abstract is the one field a paper controls the text of, so every
+    # identifying field is rendered before it can start.
+    _stub_search(monkeypatch, [_paper("Ordered", arxiv="2401.00001", published="2024-01-05")])
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert result.index("arXiv: 2401.00001") < result.index("Abstract:")
+    assert result.index("URL: ") < result.index("Abstract:")
+    assert result.index("Published: ") < result.index("Abstract:")
+
+
+@pytest.mark.anyio
+async def test_a_paper_repeated_across_pages_counts_once(monkeypatch) -> None:
+    # S2 can return the same paper on more than one page; counting it twice
+    # would fill the caller's budget with one paper.
+    monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "3")
+    duplicate = _paper("Repeated", arxiv="2401.00001")
+    calls = _stub_pages(
+        monkeypatch,
+        _filler(99) + [duplicate],
+        _filler(98) + [_paper("Repeated again", arxiv="2401.00001v2"), duplicate],
+        _filler(99) + [_paper("Distinct", arxiv="2401.00002")],
+    )
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert len(calls) == 3
+    assert result.count("arXiv: 2401.00001") == 1
+    assert "**Repeated again**" not in result
+    assert "**Distinct**" in result
+
+
+@pytest.mark.anyio
+async def test_each_page_rotates_through_the_configured_keys(monkeypatch) -> None:
+    # The rate gate spaces requests for the key set as a whole, so a multi-page
+    # search holding one key would hammer it at the interval meant for three.
+    monkeypatch.setenv("S2_API_KEY", "key-a,key-b,key-c")
+    monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "99")
+    headers: list[dict[str, str]] = []
+    _stub_pages(
+        monkeypatch,
+        *[_filler(99) + [_paper(f"One {n}", arxiv=f"2401.0000{n}")] for n in range(3)],
+        headers_out=headers,
+    )
+
+    await search.arxiv_paper_search(query="q")
+
+    assert len(headers) == 3
+    assert len({header["x-api-key"] for header in headers}) == 3
+
+
+@pytest.mark.anyio
+async def test_a_late_page_of_unreadable_json_keeps_earlier_results(monkeypatch) -> None:
+    monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "10")
+    _stub_pages(monkeypatch, _filler(99) + [_paper("Survivor", arxiv="2401.00001")], BAD_JSON)
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert "**Survivor**" in result
+    assert not result.startswith("Error")
+
+
+@pytest.mark.anyio
+async def test_a_late_page_of_unexpected_shape_keeps_earlier_results(monkeypatch) -> None:
+    monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "10")
+    _stub_pages(monkeypatch, _filler(99) + [_paper("Survivor", arxiv="2401.00001")], BAD_SHAPE)
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert "**Survivor**" in result
+    assert not result.startswith("Error")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("payload", [BAD_JSON, BAD_SHAPE])
+async def test_a_first_page_of_garbage_is_reported(monkeypatch, payload) -> None:
+    _stub_pages(monkeypatch, payload)
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert result.startswith("Error searching arXiv papers")
+
+
+@pytest.mark.anyio
+async def test_an_empty_data_array_is_not_an_error(monkeypatch) -> None:
+    # An empty page is a legitimate answer and must stay distinguishable from a
+    # response this code could not read.
+    _stub_pages(monkeypatch, [])
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert result == "No arXiv papers found for query."
