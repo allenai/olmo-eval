@@ -370,11 +370,21 @@ async def semantic_scholar_search(query: str) -> str:
 
 
 # DeepScholar-Bench only credits sources that carry arXiv provenance and were
-# published strictly before a query's cutoff. The constants below mirror
-# lit-agents' shared/retrieval_policy.py so the tool's admission test is the
-# benchmark exporter's admission test.
-_ARXIV_OVERFETCH_MULTIPLIER = 5
-_S2_MAX_SEARCH_LIMIT = 100  # S2 caps `limit` on /paper/search at 100
+# published strictly before a query's cutoff. The admission test below mirrors
+# lit-agents' shared/retrieval_policy.py so the tool's test is the benchmark
+# exporter's test.
+#
+# S2's search endpoint cannot select on external IDs, and over 200 real recorded
+# queries only 19.4% of returned rows carried one. Widening a single page is not
+# enough at that density: 77 of those queries yielded fewer than ten arXiv
+# candidates and 11 were emptied by the filter alone, having had rows to filter.
+# So the tool pages instead. Three pages of 100 expects around 58 arXiv rows,
+# comfortably past the ten a caller asks for by default, and offset 200 + limit
+# 100 stays inside S2's offset+limit cap of 1000.
+_ARXIV_PAGE_SIZE = 100  # S2 caps `limit` on /paper/search at 100
+_ARXIV_PAGE_BUDGET = 3
+_S2_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+_ARXIV_SEARCH_FIELDS = "title,abstract,url,year,publicationDate,authors,corpusId,externalIds"
 # Hits with no arXiv ID cannot be cited; a couple are worth showing as
 # background, a page of them would crowd out the citable results.
 _ARXIV_CONTEXT_ONLY_LIMIT = 2
@@ -541,13 +551,57 @@ def _arxiv_search_limit() -> int:
         return 10
 
 
-def _arxiv_request_limit(wanted: int) -> int:
-    """Page size to request so client-side filtering can still fill ``wanted``.
+async def _arxiv_search_page(
+    client: httpx.AsyncClient,
+    *,
+    query: str,
+    offset: int,
+    cutoff: date | None,
+    headers: dict,
+) -> tuple[list[dict] | None, str]:
+    """Fetch one page of hits, or None and the error to report.
 
-    arXiv provenance has no server-side form on S2's search endpoint, so the
-    page is widened by the overfetch multiplier and trimmed after filtering.
+    Every page goes through the shared S2 rate gate, so paging costs throughput
+    rather than spending budget the other tools are also drawing on.
     """
-    return max(1, min(_S2_MAX_SEARCH_LIMIT, wanted * _ARXIV_OVERFETCH_MULTIPLIER))
+    params = {
+        "query": query,
+        "offset": offset,
+        "limit": _ARXIV_PAGE_SIZE,
+        "fields": _ARXIV_SEARCH_FIELDS,
+    }
+    if cutoff is not None:
+        # publicationDateOrYear ranges are inclusive, so stop one day short of
+        # the cutoff to match the exporter's strict "before the cutoff" test.
+        params["publicationDateOrYear"] = f":{(cutoff - timedelta(days=1)).isoformat()}"
+
+    try:
+        resp = await _get_with_backoff(
+            client,
+            _S2_SEARCH_URL,
+            params=params,
+            headers=headers,
+            rate_gate=_s2_rate_gate,
+        )
+        if resp.status_code != 200:
+            logger.error(
+                f"arXiv paper search API error (after retries): status={resp.status_code}, "
+                f"query={query!r}, offset={offset}, response={resp.text[:500]}"
+            )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            f"arXiv paper search HTTP error: status={e.response.status_code}, "
+            f"query={query!r}, offset={offset}, response={e.response.text[:500]}"
+        )
+        return None, f"Error searching arXiv papers: HTTP {e.response.status_code}"
+    except httpx.RequestError as e:
+        logger.error(f"arXiv paper search request error: {e}, query={query!r}, offset={offset}")
+        return None, f"Error searching arXiv papers: {e}"
+
+    rows = data.get("data")
+    return (rows if isinstance(rows, list) else []), ""
 
 
 def _format_arxiv_result(paper: dict, hit: _ArxivHit | None) -> str:
@@ -595,7 +649,12 @@ def _format_arxiv_result(paper: dict, hit: _ArxivHit | None) -> str:
     name="arxiv_paper_search",
     description=(
         "Search arXiv papers by keyword. Returns each paper's title, authors, year, "
-        "abstract, arXiv ID and arxiv.org URL."
+        "publication date, abstract, arXiv ID and arxiv.org URL.\n"
+        "This is a scholarly keyword index, not a web search engine. Do not use "
+        "site: filters, quoted phrases for exact-phrase matching, minus signs to "
+        "exclude terms, or boolean operators such as AND and OR: they are treated "
+        "as ordinary words and usually cause the search to return nothing. Pass "
+        "plain keywords, most discriminating terms first."
     ),
 )
 async def arxiv_paper_search(query: str) -> str:
@@ -604,9 +663,16 @@ async def arxiv_paper_search(query: str) -> str:
     Shares the Semantic Scholar endpoint, API keys, rate gate and backoff with
     :func:`semantic_scholar_search`; only the admission test differs. S2's
     search endpoint cannot select on external IDs, so provenance is decided
-    client-side on ``externalIds.ArXiv`` and the requested page is widened to
-    compensate. S2's relevance order is preserved: filtering skips hits, it
-    never reorders them.
+    client-side and, because only about a fifth of returned rows carry one, the
+    tool pages until it has the results the caller asked for or spends
+    ``_ARXIV_PAGE_BUDGET``. Pages are consumed in order and results appended, so
+    S2's relevance order survives paging; filtering skips hits and truncation
+    happens after it.
+
+    The query is sent exactly as the model wrote it. Web-search operators are
+    known to return nothing here, and the tool description says so, but silently
+    rewriting a query would hide what the model actually asked and make the
+    failure unattributable.
 
     The invariant every rendered arxiv.org URL carries, enforced by
     :func:`_classify_arxiv_hit`: arXiv provenance, a non-empty title and
@@ -635,56 +701,43 @@ async def arxiv_paper_search(query: str) -> str:
 
     wanted = _arxiv_search_limit()
     cutoff = _parse_cutoff_date(_search_date_cutoff.get())
-    params = {
-        "query": sanitized_query,
-        "limit": _arxiv_request_limit(wanted),
-        "fields": "title,abstract,url,year,publicationDate,authors,corpusId,externalIds",
-    }
-    if cutoff is not None:
-        # publicationDateOrYear ranges are inclusive, so stop one day short of
-        # the cutoff to match the exporter's strict "before the cutoff" test.
-        params["publicationDateOrYear"] = f":{(cutoff - timedelta(days=1)).isoformat()}"
-
     client = _get_http_client()
-    try:
-        resp = await _get_with_backoff(
-            client,
-            "https://api.semanticscholar.org/graph/v1/paper/search",
-            params=params,
-            headers=headers,
-            rate_gate=_s2_rate_gate,
-        )
-        if resp.status_code != 200:
-            logger.error(
-                f"arXiv paper search API error (after retries): status={resp.status_code}, "
-                f"query={sanitized_query!r}, response={resp.text[:500]}"
-            )
-        resp.raise_for_status()
-        data = resp.json()
-    except httpx.HTTPStatusError as e:
-        logger.error(
-            f"arXiv paper search HTTP error: status={e.response.status_code}, "
-            f"query={sanitized_query!r}, response={e.response.text[:500]}"
-        )
-        return f"Error searching arXiv papers: HTTP {e.response.status_code}"
-    except httpx.RequestError as e:
-        logger.error(f"arXiv paper search request error: {e}, query={sanitized_query!r}")
-        return f"Error searching arXiv papers: {e}"
 
     citable: list[str] = []
     context_only: list[str] = []
     rejections: dict[str, int] = {}
-    for paper in data.get("data", []):
-        if len(citable) >= wanted and len(context_only) >= _ARXIV_CONTEXT_ONLY_LIMIT:
+    for page in range(_ARXIV_PAGE_BUDGET):
+        rows, error = await _arxiv_search_page(
+            client,
+            query=sanitized_query,
+            offset=page * _ARXIV_PAGE_SIZE,
+            cutoff=cutoff,
+            headers=headers,
+        )
+        if rows is None:
+            # A later page failing still leaves the earlier pages worth
+            # returning; only an immediate failure has nothing to report.
+            if page == 0:
+                return error
+            logger.warning("arXiv paper search stopped after page %d: %s", page, error)
             break
-        hit, reason = _classify_arxiv_hit(paper, cutoff)
-        if hit is not None:
-            if len(citable) < wanted:
-                citable.append(_format_arxiv_result(paper, hit))
-            continue
-        rejections[reason] = rejections.get(reason, 0) + 1
-        if len(context_only) < _ARXIV_CONTEXT_ONLY_LIMIT and _arxiv_context_only(paper, cutoff):
-            context_only.append(_format_arxiv_result(paper, None))
+
+        for paper in rows:
+            if len(citable) >= wanted and len(context_only) >= _ARXIV_CONTEXT_ONLY_LIMIT:
+                break
+            hit, reason = _classify_arxiv_hit(paper, cutoff)
+            if hit is not None:
+                if len(citable) < wanted:
+                    citable.append(_format_arxiv_result(paper, hit))
+                continue
+            rejections[reason] = rejections.get(reason, 0) + 1
+            if len(context_only) < _ARXIV_CONTEXT_ONLY_LIMIT and _arxiv_context_only(paper, cutoff):
+                context_only.append(_format_arxiv_result(paper, None))
+
+        if len(citable) >= wanted:
+            break
+        if len(rows) < _ARXIV_PAGE_SIZE:
+            break  # S2 has no further hits for this query
 
     if not citable and not context_only:
         breakdown = ", ".join(f"{count} {reason}" for reason, count in sorted(rejections.items()))
