@@ -2,6 +2,7 @@
 
 This module provides search tools that can be used with the Harness:
 - semantic_scholar_search: Search academic papers via Semantic Scholar API
+- arxiv_paper_search: Search arXiv papers via Semantic Scholar, filtered to arXiv
 - serper_web_search: Search the web via Serper/Google API
 - serper_fetch_page: Fetch and extract webpage content
 - crawl4ai_browse: Fetch and extract webpage content via crawl4ai
@@ -22,7 +23,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import date
+from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit
 
 import httpx
@@ -365,6 +366,258 @@ async def semantic_scholar_search(query: str) -> str:
         results.append(result)
 
     return "\n\n---\n\n".join(results)
+
+
+# DeepScholar-Bench only credits sources that carry arXiv provenance and were
+# published strictly before a query's cutoff. The constants below mirror
+# lit-agents' shared/retrieval_policy.py so the tool's admission test is the
+# benchmark exporter's admission test.
+_ARXIV_OVERFETCH_MULTIPLIER = 5
+_S2_MAX_SEARCH_LIMIT = 100  # S2 caps `limit` on /paper/search at 100
+# Hits with no arXiv ID cannot be cited; a couple are worth showing as
+# background, a page of them would crowd out the citable results.
+_ARXIV_CONTEXT_ONLY_LIMIT = 2
+_ARXIV_ABSTRACT_LIMIT = 500
+
+_ARXIV_URL_RE = re.compile(
+    r"https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/([^)\s?#]+)",
+    re.IGNORECASE,
+)
+_ARXIV_MODERN_ID_RE = re.compile(r"^(\d{2})(\d{2})\.\d{4,5}$")
+_ARXIV_LEGACY_ID_RE = re.compile(r"^[a-z-]+/(\d{2})(\d{2})\d{3}$", re.IGNORECASE)
+
+
+def normalize_arxiv_id(value: str) -> str:
+    """Strip the prefix, extension, and version suffix from an arXiv ID."""
+    normalized = value.strip()
+    normalized = re.sub(r"(?i)^arxiv:", "", normalized)
+    normalized = re.sub(r"(?i)\.pdf$", "", normalized)
+    return re.sub(r"v[1-9][0-9]*$", "", normalized)
+
+
+def _arxiv_id_from_url(url: str) -> str:
+    """Return the arXiv ID embedded in an arXiv abs/pdf URL, or ""."""
+    match = _ARXIV_URL_RE.search(url)
+    return normalize_arxiv_id(match.group(1)) if match else ""
+
+
+def _arxiv_id_from_paper(paper: dict) -> str:
+    """Return the arXiv ID of an S2 search hit, or "" when it has none.
+
+    External IDs rather than the `venue` field: an arXiv preprint loses the
+    "arXiv.org" venue once it appears at a conference, while its arXiv external
+    ID stays. The key comparison is case-insensitive because S2 spells the key
+    "ArXiv".
+    """
+    external_ids = paper.get("externalIds") or {}
+    if isinstance(external_ids, dict):
+        for key, value in external_ids.items():
+            if str(key).casefold() == "arxiv" and value is not None:
+                arxiv_id = normalize_arxiv_id(str(value))
+                if arxiv_id:
+                    return arxiv_id
+    return _arxiv_id_from_url(str(paper.get("url") or ""))
+
+
+def date_from_arxiv_id(arxiv_id: str) -> date | None:
+    """Return the month an arXiv ID encodes, or None when it encodes none."""
+    match = _ARXIV_MODERN_ID_RE.match(arxiv_id) or _ARXIV_LEGACY_ID_RE.match(arxiv_id)
+    if match is None:
+        return None
+    year_value, month_value = (int(value) for value in match.groups())
+    year = 1900 + year_value if year_value >= 91 else 2000 + year_value
+    try:
+        return date(year, month_value, 1)
+    except ValueError:
+        return None
+
+
+def _publication_date(paper: dict) -> date | None:
+    """Parse an S2 hit's publicationDate, or None when it reports none."""
+    raw = paper.get("publicationDate")
+    if not raw:
+        return None
+    text = str(raw).strip()
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
+
+
+def _parse_cutoff_date(raw: str | None) -> date | None:
+    """Parse the active search cutoff into a date, or None when unset."""
+    cutoff = _parse_cutoff(raw)
+    return None if cutoff is None else date.fromisoformat(cutoff[2])
+
+
+def _arxiv_admits(paper: dict, cutoff: date | None, *, require_arxiv: bool) -> bool:
+    """Return whether a hit is one DeepScholar-Bench's exporter would also keep.
+
+    arXiv provenance, then a publication date strictly before the cutoff,
+    falling back to the month encoded in the arXiv ID when S2 reports no date.
+    Holding the tool to the exporter's test is what keeps it from inviting the
+    model to cite a source the scorer will later discard. A hit S2 cannot date
+    and whose ID encodes no date is dropped, because the exporter has no other
+    evidence either.
+    """
+    arxiv_id = _arxiv_id_from_paper(paper)
+    if require_arxiv and not arxiv_id:
+        return False
+    if cutoff is None:
+        return True
+    published = _publication_date(paper)
+    if published is not None:
+        return published < cutoff
+    fallback = date_from_arxiv_id(arxiv_id) if arxiv_id else None
+    if fallback is None:
+        return False
+    return (fallback.year, fallback.month) < (cutoff.year, cutoff.month)
+
+
+def _arxiv_search_limit() -> int:
+    """Results per arXiv search, overridable via ARXIV_SEARCH_LIMIT (default 10).
+
+    Ten is the page lit-agents' DeepScholar retriever keeps per query.
+    """
+    try:
+        return max(1, int(os.getenv("ARXIV_SEARCH_LIMIT", "10")))
+    except ValueError:
+        return 10
+
+
+def _arxiv_request_limit(wanted: int) -> int:
+    """Page size to request so client-side filtering can still fill ``wanted``.
+
+    arXiv provenance has no server-side form on S2's search endpoint, so the
+    page is widened by the overfetch multiplier and trimmed after filtering.
+    """
+    return max(1, min(_S2_MAX_SEARCH_LIMIT, wanted * _ARXIV_OVERFETCH_MULTIPLIER))
+
+
+def _format_arxiv_result(paper: dict, arxiv_id: str) -> str:
+    """Render one hit; an empty ``arxiv_id`` marks it as uncitable context."""
+    title = paper.get("title") or "Unknown"
+    authors = paper.get("authors") or []
+    author_names = ", ".join(a.get("name", "") for a in authors[:3])
+    if len(authors) > 3:
+        author_names += " et al."
+    abstract = paper.get("abstract") or ""
+    if len(abstract) > _ARXIV_ABSTRACT_LIMIT:
+        abstract = abstract[:_ARXIV_ABSTRACT_LIMIT] + "..."
+
+    if arxiv_id:
+        lines = [f"**{title}**"]
+    else:
+        lines = [f"**{title}** [context only: no arXiv ID, not citable]"]
+    if author_names:
+        lines.append(f"Authors: {author_names}")
+    year = paper.get("year")
+    if year:
+        lines.append(f"Year: {year}")
+    if abstract:
+        lines.append(f"Abstract: {abstract}")
+    if arxiv_id:
+        lines.append(f"arXiv: {arxiv_id}")
+        lines.append(f"URL: https://arxiv.org/abs/{arxiv_id}")
+    return "\n".join(lines)
+
+
+@registered_tool(
+    name="arxiv_paper_search",
+    description=(
+        "Search arXiv papers by keyword. Returns each paper's title, authors, year, "
+        "abstract, arXiv ID and arxiv.org URL."
+    ),
+)
+async def arxiv_paper_search(query: str) -> str:
+    """Search arXiv papers, backed by Semantic Scholar and filtered to arXiv.
+
+    Shares the Semantic Scholar endpoint, API keys, rate gate and backoff with
+    :func:`semantic_scholar_search`; only the admission test differs. S2's
+    search endpoint cannot select on external IDs, so provenance is decided
+    client-side on ``externalIds.ArXiv`` and the requested page is widened to
+    compensate. Every result rendered with an arxiv.org URL is one
+    DeepScholar-Bench's exporter would also keep -- arXiv provenance, published
+    strictly before the active :func:`search_date_cutoff` -- so the model is
+    never invited to cite a source the scorer would discard. S2's relevance
+    order is preserved: filtering skips hits, it never reorders them.
+
+    Args:
+        query: Search query for arXiv papers.
+
+    Returns:
+        Formatted results carrying title, authors, year, abstract snippet, arXiv
+        ID and arxiv.org URL. A few hits with no arXiv ID follow, marked as
+        context the answer cannot cite.
+    """
+    api_keys = _api_keys_from_env("S2_API_KEY")
+    headers = {}
+    if api_keys:
+        headers["x-api-key"] = _select_api_key(api_keys)
+
+    sanitized_query = query.strip()
+    if not sanitized_query:
+        return "Error: Empty search query."
+
+    wanted = _arxiv_search_limit()
+    cutoff = _parse_cutoff_date(_search_date_cutoff.get())
+    params = {
+        "query": sanitized_query,
+        "limit": _arxiv_request_limit(wanted),
+        "fields": "title,abstract,url,year,publicationDate,authors,corpusId,externalIds",
+    }
+    if cutoff is not None:
+        # publicationDateOrYear ranges are inclusive, so stop one day short of
+        # the cutoff to match the exporter's strict "before the cutoff" test.
+        params["publicationDateOrYear"] = f":{(cutoff - timedelta(days=1)).isoformat()}"
+
+    client = _get_http_client()
+    try:
+        resp = await _get_with_backoff(
+            client,
+            "https://api.semanticscholar.org/graph/v1/paper/search",
+            params=params,
+            headers=headers,
+            rate_gate=_s2_rate_gate,
+        )
+        if resp.status_code != 200:
+            logger.error(
+                f"arXiv paper search API error (after retries): status={resp.status_code}, "
+                f"query={sanitized_query!r}, response={resp.text[:500]}"
+            )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            f"arXiv paper search HTTP error: status={e.response.status_code}, "
+            f"query={sanitized_query!r}, response={e.response.text[:500]}"
+        )
+        return f"Error searching arXiv papers: HTTP {e.response.status_code}"
+    except httpx.RequestError as e:
+        logger.error(f"arXiv paper search request error: {e}, query={sanitized_query!r}")
+        return f"Error searching arXiv papers: {e}"
+
+    citable: list[str] = []
+    context_only: list[str] = []
+    for paper in data.get("data", []):
+        if len(citable) >= wanted and len(context_only) >= _ARXIV_CONTEXT_ONLY_LIMIT:
+            break
+        arxiv_id = _arxiv_id_from_paper(paper)
+        if arxiv_id:
+            if len(citable) < wanted and _arxiv_admits(paper, cutoff, require_arxiv=True):
+                citable.append(_format_arxiv_result(paper, arxiv_id))
+        elif len(context_only) < _ARXIV_CONTEXT_ONLY_LIMIT and _arxiv_admits(
+            paper, cutoff, require_arxiv=False
+        ):
+            context_only.append(_format_arxiv_result(paper, ""))
+
+    if not citable and not context_only:
+        return "No arXiv papers found for query."
+
+    return "\n\n---\n\n".join(citable + context_only)
 
 
 @registered_tool(

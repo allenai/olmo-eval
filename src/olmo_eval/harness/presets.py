@@ -178,6 +178,33 @@ class HarnessPresets:
         )
 
     @lazy
+    def arxiv_paper_search_agent(name: str) -> HarnessConfig:
+        """Agentic harness exposing only arXiv-filtered paper search.
+
+        For tasks whose scorer credits arXiv sources alone (e.g.
+        deepscholar_bench). Kept separate from `paper_search_agent` rather than
+        added to it: which search tools an agent holds changes what it retrieves,
+        so sharing a preset would move litsearch and SAGE numbers that were
+        measured against Semantic Scholar search.
+        """
+        from .tools.search import arxiv_paper_search
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            tools=(arxiv_paper_search,),
+            # Writing a related-works section takes more searching than a
+            # single-answer lookup, so this doubles paper_search_agent's turns.
+            max_turns=20,
+            max_concurrency=4,
+            scaffold="openai_agents",
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
     def web_search_agent(name: str) -> HarnessConfig:
         """Agentic harness exposing only web search/fetch tools.
 

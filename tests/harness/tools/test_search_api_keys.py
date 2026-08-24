@@ -213,9 +213,10 @@ def test_key_helpers_are_plain_functions_not_registered_tools() -> None:
     assert isinstance(search._api_keys_from_env("OLMO_EVAL_NO_SUCH_VAR"), list)
 
     # The decorator still binds to the real tool function, not to a helper: the
-    # only Tool objects in the module are the four intended tools.
+    # only Tool objects in the module are the five intended tools.
     assert {name for name, value in vars(search).items() if isinstance(value, Tool)} == {
         "semantic_scholar_search",
+        "arxiv_paper_search",
         "serper_web_search",
         "serper_fetch_page",
         "crawl4ai_browse",
