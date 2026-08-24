@@ -857,14 +857,6 @@ class VLLMServerProvider(InferenceProvider):
 
         if extra_body:
             kwargs["extra_body"] = extra_body
-        tok = self._get_tokenizer(require_local=False)
-        logger.warning(
-            "BOS check: sent=%s with=%s without=%s",
-            extra_body["add_special_tokens"],
-            tok.encode(request.prompt, add_special_tokens=True)[:4],
-            tok.encode(request.prompt, add_special_tokens=False)[:4],
-        )
-        print(extra_body)
         response = await client.completions.create(**kwargs)
         usage = getattr(response, "usage", None)
         return [
