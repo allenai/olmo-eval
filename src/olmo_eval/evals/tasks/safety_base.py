@@ -11,7 +11,12 @@ import logging
 from collections.abc import Iterator
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
-from olmo_eval.common.metrics import AccuracyMetric, SafetyErrorMetric, SubsetAccuracyMetric
+from olmo_eval.common.metrics import (
+    AccuracyMetric,
+    MacroSubsetAccuracyMetric,
+    SafetyErrorMetric,
+    SubsetAccuracyMetric,
+)
 from olmo_eval.common.scorers import SafetyScorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
@@ -75,13 +80,20 @@ class SafetyBase(Task):
         )
 
 
-def safety_metrics(scorer, subsets: tuple[str, ...]):
-    """Build the full metric tuple for a safety judge scorer."""
-    return (
+def safety_metrics(scorer, subsets: tuple[str, ...], macro_subsets: tuple[str, ...] = ()):
+    """Build the full metric tuple for a safety judge scorer.
+
+    ``macro_subsets`` adds an unweighted mean over those subsets, for tasks whose
+    halves must count equally rather than by instance volume.
+    """
+    metrics = (
         AccuracyMetric(scorer=scorer),
         SafetyErrorMetric(scorer=scorer),
         *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in subsets),
     )
+    if macro_subsets:
+        metrics = (*metrics, MacroSubsetAccuracyMetric(subsets=macro_subsets, scorer=scorer))
+    return metrics
 
 
 def make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") -> str:
@@ -95,10 +107,17 @@ def make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") 
 
 
 def register_safety_variants(
-    eval_name: str, subsets: tuple[str, ...], scorer=None, scorer_name=None
+    eval_name: str,
+    subsets: tuple[str, ...],
+    scorer=None,
+    scorer_name=None,
+    macro_subsets: tuple[str, ...] = (),
 ):
     """
     Build the four variants that the base wildguard safety tasks use.
+
+    ``macro_subsets`` makes the primary metric an unweighted mean over those
+    subsets instead of an instance-weighted mean across the whole task.
     """
 
     # Initialize the safety scorer
@@ -112,12 +131,17 @@ def register_safety_variants(
     if scorer_name is None:
         scorer_name = "wg_judge"
 
+    def primary_metric(variant_scorer):
+        if macro_subsets:
+            return MacroSubsetAccuracyMetric(subsets=macro_subsets, scorer=variant_scorer)
+        return AccuracyMetric(scorer=variant_scorer)
+
     # OpenAI judge variant - uses OpenAI API as the judge
     register_variant(
         eval_name,
         "openai_judge",
-        metrics=safety_metrics(SafetyScorer, subsets),
-        primary_metric=AccuracyMetric(scorer=SafetyScorer),
+        metrics=safety_metrics(SafetyScorer, subsets, macro_subsets),
+        primary_metric=primary_metric(SafetyScorer),
         sampling_params=judge_sampling,
         required_secrets=("OPENAI_API_KEY",),
     )
@@ -125,16 +149,16 @@ def register_safety_variants(
     register_variant(
         eval_name,
         scorer_name,
-        metrics=safety_metrics(scorer, subsets),
-        primary_metric=AccuracyMetric(scorer=scorer),
+        metrics=safety_metrics(scorer, subsets, macro_subsets),
+        primary_metric=primary_metric(scorer),
         sampling_params=judge_sampling,
     )
 
     register_variant(
         eval_name,
         f"{scorer_name}_thinking",
-        metrics=safety_metrics(scorer, subsets),
-        primary_metric=AccuracyMetric(scorer=scorer),
+        metrics=safety_metrics(scorer, subsets, macro_subsets),
+        primary_metric=primary_metric(scorer),
         sampling_params=judge_sampling,
         answer_extractor=extract_think_answer_only,
     )
@@ -142,8 +166,8 @@ def register_safety_variants(
     register_variant(
         eval_name,
         "base",
-        metrics=safety_metrics(scorer, subsets),
-        primary_metric=AccuracyMetric(scorer=scorer),
+        metrics=safety_metrics(scorer, subsets, macro_subsets),
+        primary_metric=primary_metric(scorer),
         sampling_params=base_sampling,
         formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
     )
