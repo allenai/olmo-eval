@@ -192,6 +192,13 @@ class HarnessPresets:
         hard launch gate with no optional form, and declaring one here would
         make a keyless run impossible; mount a key per run instead with
         `--secret-env <user>_S2_API_KEY:S2_API_KEY`.
+
+        Reasoning effort is deliberately not pinned here, because backbones that
+        reason well on this preset should keep doing so. Models that refuse
+        function tools alongside a reasoning effort -- gpt-5.6-sol on
+        /v1/chat/completions rejects the combination outright -- need it turned
+        off for the run:
+        `-o scaffold_kwargs.model_settings.reasoning_effort=none`.
         """
         from .tools.search import arxiv_paper_search
 
