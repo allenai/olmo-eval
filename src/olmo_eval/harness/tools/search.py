@@ -483,13 +483,20 @@ def _classify_arxiv_hit(paper: dict, cutoff: date | None) -> tuple[_ArxivHit | N
     reason comes back rather than being logged here so a caller can say which
     condition emptied a result set.
 
-    Two conditions are easy to get wrong. A hit missing a title or an abstract
-    is rejected, not shown: the exporter drops it as missing_metadata, and
-    paper.csv rows with an empty title or snippet fail the contract outright. A
-    publicationDate that is present but unparseable is also rejected rather than
-    falling back to the arXiv ID's month -- that fallback exists for papers
-    Semantic Scholar cannot date at all, and reaching for it here could admit a
-    paper published after the cutoff on the strength of a date nothing read.
+    This is the LENIENT half of a two-layer design, and mirrors
+    ``RetrievalPolicy.admits`` rather than ``_classify_source``. ``admits``
+    reads a publication date through a parser that returns None for a date that
+    is absent AND for one it cannot read, then falls back to the month the arXiv
+    ID encodes in both cases. Retrieval is deliberately permissive: showing a
+    paper costs a line of context, and the strict test that actually decides
+    what gets scored runs at export, where the row is validated against the
+    cutoff again before anything is written.
+
+    The one addition to ``admits`` is the metadata check. A hit with no title or
+    no abstract can only become a paper.csv row with an empty title or snippet,
+    which fails the contract outright, so it is rejected here rather than shown
+    as citable. The one subtraction is that a hit nothing can date is rejected
+    even with no cutoff active, because the export needs a date for every row.
     """
     arxiv_id = _arxiv_id_from_paper(paper)
     if not arxiv_id:
@@ -500,10 +507,8 @@ def _classify_arxiv_hit(paper: dict, cutoff: date | None) -> tuple[_ArxivHit | N
     if not title or not snippet:
         return None, "missing_metadata"
 
-    if paper.get("publicationDate"):
-        published = _publication_date(paper)
-        if published is None:
-            return None, "unparseable_date"
+    published = _publication_date(paper)
+    if published is not None:
         precision = "day"
         if cutoff is not None and published >= cutoff:
             return None, "not_before_cutoff"
@@ -557,13 +562,20 @@ async def _arxiv_search_page(
     query: str,
     offset: int,
     cutoff: date | None,
-    headers: dict,
+    api_keys: Sequence[str],
 ) -> tuple[list[dict] | None, str]:
     """Fetch one page of hits, or None and the error to report.
 
     Every page goes through the shared S2 rate gate, so paging costs throughput
-    rather than spending budget the other tools are also drawing on.
+    rather than spending budget the other tools are also drawing on. The key is
+    selected per page rather than per search: the gate spaces requests for the
+    key set as a whole, so a multi-page search holding one key would put every
+    one of its pages through a single key at the interval meant for all of them.
     """
+    headers = {}
+    if api_keys:
+        headers["x-api-key"] = _select_api_key(api_keys)
+
     params = {
         "query": query,
         "offset": offset,
@@ -599,9 +611,25 @@ async def _arxiv_search_page(
     except httpx.RequestError as e:
         logger.error(f"arXiv paper search request error: {e}, query={query!r}, offset={offset}")
         return None, f"Error searching arXiv papers: {e}"
+    except ValueError as e:
+        # A body that is not JSON. Returned as an error rather than raised so a
+        # late page cannot discard the pages that already succeeded.
+        logger.error(f"arXiv paper search returned unreadable JSON: {e}, offset={offset}")
+        return None, "Error searching arXiv papers: the response was not readable JSON"
 
+    if not isinstance(data, dict):
+        logger.error(f"arXiv paper search returned {type(data).__name__}, not an object")
+        return None, "Error searching arXiv papers: unexpected response shape"
     rows = data.get("data")
-    return (rows if isinstance(rows, list) else []), ""
+    if rows is None:
+        # No "data" key at all is a shape this code cannot read; an empty list is
+        # a legitimate answer and must stay distinguishable from it.
+        logger.error(f"arXiv paper search response has no data array, offset={offset}")
+        return None, "Error searching arXiv papers: unexpected response shape"
+    if not isinstance(rows, list):
+        logger.error(f"arXiv paper search data is {type(rows).__name__}, not a list")
+        return None, "Error searching arXiv papers: unexpected response shape"
+    return rows, ""
 
 
 def _format_arxiv_result(paper: dict, hit: _ArxivHit | None) -> str:
@@ -637,11 +665,15 @@ def _format_arxiv_result(paper: dict, hit: _ArxivHit | None) -> str:
             lines.append(
                 f"Published: {hit.published.year:04d}-{hit.published.month:02d} (month precision)"
             )
-    if abstract:
-        lines.append(f"Abstract: {abstract}")
     if hit is not None:
         lines.append(f"arXiv: {hit.arxiv_id}")
         lines.append(f"URL: https://arxiv.org/abs/{hit.arxiv_id}")
+    # The abstract goes last, after every identifying field. It is the only
+    # free-text field here, and a paper whose abstract happens to contain a line
+    # reading "arXiv: 1234.56789" must not be able to change which paper the
+    # export thinks this result is.
+    if abstract:
+        lines.append(f"Abstract: {abstract}")
     return "\n".join(lines)
 
 
@@ -686,14 +718,12 @@ async def arxiv_paper_search(query: str) -> str:
         query: Search query for arXiv papers.
 
     Returns:
-        Formatted results carrying title, authors, year, publication date,
-        abstract snippet, arXiv ID and arxiv.org URL. A few hits with no arXiv
-        ID follow, marked as context the answer cannot cite.
+        Formatted results carrying title, authors, year, publication date, arXiv
+        ID, arxiv.org URL and then the abstract snippet, in that order: every
+        identifying field precedes the one free-text field. A few hits with no
+        arXiv ID follow, marked as context the answer cannot cite.
     """
     api_keys = _api_keys_from_env("S2_API_KEY")
-    headers = {}
-    if api_keys:
-        headers["x-api-key"] = _select_api_key(api_keys)
 
     sanitized_query = query.strip()
     if not sanitized_query:
@@ -706,13 +736,16 @@ async def arxiv_paper_search(query: str) -> str:
     citable: list[str] = []
     context_only: list[str] = []
     rejections: dict[str, int] = {}
+    # S2 can return the same paper on more than one page. Counting it twice
+    # would fill the caller's budget with one paper repeated.
+    seen_ids: set[str] = set()
     for page in range(_ARXIV_PAGE_BUDGET):
         rows, error = await _arxiv_search_page(
             client,
             query=sanitized_query,
             offset=page * _ARXIV_PAGE_SIZE,
             cutoff=cutoff,
-            headers=headers,
+            api_keys=api_keys,
         )
         if rows is None:
             # A later page failing still leaves the earlier pages worth
@@ -727,7 +760,10 @@ async def arxiv_paper_search(query: str) -> str:
                 break
             hit, reason = _classify_arxiv_hit(paper, cutoff)
             if hit is not None:
+                if hit.arxiv_id in seen_ids:
+                    continue
                 if len(citable) < wanted:
+                    seen_ids.add(hit.arxiv_id)
                     citable.append(_format_arxiv_result(paper, hit))
                 continue
             rejections[reason] = rejections.get(reason, 0) + 1

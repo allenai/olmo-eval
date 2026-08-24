@@ -56,6 +56,8 @@ from olmo_eval.evals.tasks.deepscholar_citations import (
     reference_list,
     resolve_numbering,
     rewrite_intro,
+    strip_references,
+    unresolved_citation_forms,
 )
 from olmo_eval.harness.tools.search import normalize_arxiv_id
 
@@ -81,12 +83,11 @@ DEEPSCHOLAR_QUERY_TEMPLATE = """Your task is to write a Related Works section fo
 _RESULT_SEPARATOR = "\n\n---\n\n"
 # The search tool marks a date it could only resolve to a month.
 _MONTH_PRECISION_SUFFIX = " (month precision)"
-_RESULT_FIELD_RE = re.compile(r"^(Authors|Year|Published|Abstract|arXiv|URL):[ \t]*(.*)$")
-_RESULT_TITLE_RE = re.compile(r"^\*\*(.+?)\*\*(?:\s*\[context only.*\])?$", re.DOTALL)
-# An ID on its own line. Read separately from the block parse so a result whose
-# free-text fields defeat the parser still contributes the one field the export
-# genuinely needs.
-_ARXIV_ID_LINE_RE = re.compile(r"^arXiv:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+# Fields the search tool renders before the abstract. Matched only while still
+# in a block's header: once the abstract starts, every remaining line is text.
+_RESULT_HEADER_FIELD_RE = re.compile(r"^(Authors|Year|Published|arXiv|URL):[ \t]*(.*)$")
+_ABSTRACT_FIELD_PREFIX = "Abstract:"
+_RESULT_TITLE_RE = re.compile(r"^\*\*(.+?)\*\*(?:\s*\[context only.*\])?$")
 
 
 def _first_nonempty(row: Mapping[str, Any], *keys: str) -> str:
@@ -170,31 +171,42 @@ def _parse_published_field(value: str) -> tuple[str, str]:
 def parse_arxiv_tool_results(content: str) -> list[dict[str, str]]:
     """Parse ``arxiv_paper_search`` output back into its per-result fields.
 
-    Best-effort metadata only. The export re-fetches title and abstract from
-    Semantic Scholar, so a block this cannot parse costs a fallback snippet
-    rather than the source itself -- :func:`sources_from_trajectory` takes the
-    arXiv ID from its own line instead of from here. Results marked context only
-    carry no arXiv ID and are skipped, because nothing can cite them.
+    A block's identity comes from its header -- the lines between the title and
+    the abstract -- and from nowhere else. The abstract is the one field a paper
+    controls the text of, so once it starts, every remaining line in the block is
+    read as text even when it is shaped exactly like a field. Without that, a
+    paper whose abstract contains "arXiv: 1234.56789" on its own line would
+    rename itself, and a context-only block quoting one would invent a citable
+    source out of a result the tool explicitly refused to make citable.
+
+    A block with no arXiv ID in its header is not a citable result: that covers
+    the context-only blocks and any prose the tool emitted around them.
     """
     parsed: list[dict[str, str]] = []
     for block in (content or "").split(_RESULT_SEPARATOR):
         lines = block.strip().splitlines()
         if not lines:
             continue
-        title_match = _RESULT_TITLE_RE.match(lines[0].strip())
-        if title_match is None:
-            continue
 
-        fields: dict[str, str] = {"title": title_match.group(1).strip()}
-        current: str | None = None
+        title_match = _RESULT_TITLE_RE.match(lines[0].strip())
+        # A title the renderer mangled still leaves a readable header, and the
+        # export re-fetches titles anyway, so this does not reject the block.
+        fields: dict[str, str] = {
+            "title": title_match.group(1).strip() if title_match else lines[0].strip("* ").strip()
+        }
+        abstract_lines: list[str] = []
+        in_abstract = False
         for line in lines[1:]:
-            field_match = _RESULT_FIELD_RE.match(line)
+            if in_abstract:
+                abstract_lines.append(line)
+                continue
+            if line.startswith(_ABSTRACT_FIELD_PREFIX):
+                in_abstract = True
+                abstract_lines.append(line[len(_ABSTRACT_FIELD_PREFIX) :].strip())
+                continue
+            field_match = _RESULT_HEADER_FIELD_RE.match(line)
             if field_match is not None:
-                current = field_match.group(1).lower()
-                fields[current] = field_match.group(2)
-            elif current is not None:
-                # An abstract can wrap across lines; keep it whole.
-                fields[current] = f"{fields[current]}\n{line}"
+                fields[field_match.group(1).lower()] = field_match.group(2)
 
         arxiv_id = normalize_arxiv_id(fields.get("arxiv", "").strip())
         if not arxiv_id:
@@ -208,7 +220,7 @@ def parse_arxiv_tool_results(content: str) -> list[dict[str, str]]:
                 "year": fields.get("year", "").strip(),
                 "published_date": published_date,
                 "date_precision": date_precision,
-                "abstract": fields.get("abstract", "").strip(),
+                "abstract": "\n".join(abstract_lines).strip(),
                 "url": fields.get("url", "").strip() or f"https://arxiv.org/abs/{arxiv_id}",
             }
         )
@@ -221,7 +233,8 @@ def sources_from_trajectory(trajectory: Any) -> list[dict[str, str]]:
     Only results of ``SEARCH_TOOL_NAME`` calls are read. Another tool's output
     can mention an arXiv ID without the agent ever having been shown that paper
     as a citable result, and crediting it would let a citation resolve against a
-    source the search never returned.
+    source the search never returned. Within those results, identity comes from
+    each block's header; see :func:`parse_arxiv_tool_results`.
     """
     if trajectory is None:
         return []
@@ -232,12 +245,8 @@ def sources_from_trajectory(trajectory: Any) -> list[dict[str, str]]:
     for result in trajectory.tool_result_sequence:
         if result.tool_call_id not in search_call_ids:
             continue
-        content = result.content or ""
-        parsed = {item["arxiv_id"]: item for item in parse_arxiv_tool_results(content)}
-        for match in _ARXIV_ID_LINE_RE.finditer(content):
-            arxiv_id = normalize_arxiv_id(match.group(1))
-            if arxiv_id:
-                by_id.setdefault(arxiv_id, parsed.get(arxiv_id) or {"arxiv_id": arxiv_id})
+        for source in parse_arxiv_tool_results(result.content or ""):
+            by_id.setdefault(source["arxiv_id"], source)
     return list(by_id.values())
 
 
@@ -251,6 +260,11 @@ def score_answer(answer: str, sources: Sequence[Mapping[str, str]]) -> dict[str,
     published that resolved to a retrieved source -- the diagnostic that
     separates "the model cited nothing" from "the model cited papers it never
     retrieved" from "the bridge failed".
+
+    ``unresolved_citation_forms`` counts citation shapes no pass can turn into a
+    link -- superscripts, footnote markers, author-year brackets. An answer that
+    cited carefully in a style this bridge does not read scores zero on the other
+    two, and without this it would look identical to one that never cited.
     """
     _, cited = rewrite_intro(answer, list(sources))
     published_refs = reference_list(answer)
@@ -260,6 +274,7 @@ def score_answer(answer: str, sources: Sequence[Mapping[str, str]]) -> dict[str,
         "citation_resolution_rate": (
             len(resolved) / len(published_refs) if published_refs else 0.0
         ),
+        "unresolved_citation_forms": float(unresolved_citation_forms(strip_references(answer))),
     }
 
 
@@ -312,8 +327,24 @@ class CitationResolutionRateMetric(_DeepScholarMetricBase):
     name: str = "citation_resolution_rate"
 
 
+@dataclass(frozen=True)
+class UnresolvedCitationFormsMetric(_DeepScholarMetricBase):
+    """Mean count per answer of citation shapes the bridge cannot read.
+
+    A count, not a rate. Non-zero means answers are citing in a style -- footnote
+    markers, superscripts, author-year -- that scores zero here for a reason that
+    has nothing to do with the papers they found.
+    """
+
+    name: str = "unresolved_citation_forms"
+
+
 EXPORTABLE_RATE_METRIC = ExportableRateMetric()
-DEEPSCHOLAR_METRICS = (EXPORTABLE_RATE_METRIC, CitationResolutionRateMetric())
+DEEPSCHOLAR_METRICS = (
+    EXPORTABLE_RATE_METRIC,
+    CitationResolutionRateMetric(),
+    UnresolvedCitationFormsMetric(),
+)
 
 
 @register("deepscholar_bench")

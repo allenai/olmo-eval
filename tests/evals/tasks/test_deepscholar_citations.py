@@ -14,6 +14,7 @@ from olmo_eval.evals.tasks.deepscholar_citations import (
     resolve_numbering,
     rewrite_intro,
     strip_references,
+    unresolved_citation_forms,
 )
 
 SOURCES = [
@@ -164,3 +165,127 @@ class TestRewriteIntro:
 
     def test_no_sources_yields_nothing(self):
         assert rewrite_intro(NUMBERED_ANSWER, []) == ("", [])
+
+
+class TestAlternateReferenceHeadings:
+    """lit-agents strips only "References"; models write three other things."""
+
+    @pytest.mark.parametrize(
+        "heading",
+        ["References", "## Bibliography", "Works Cited", "### SOURCES", "references:"],
+    )
+    def test_the_tail_is_stripped(self, heading):
+        report = (
+            f"Grounded work [1].\n\n{heading}\n"
+            "[1] A. Author. Agentic Citation Grounding. arXiv:2401.00003\n"
+        )
+
+        intro, cited = rewrite_intro(report, SOURCES)
+
+        assert "A. Author" not in intro
+        assert [source["arxiv_id"] for source in cited] == ["2401.00003"]
+
+    def test_an_unstripped_bibliography_would_fabricate_citations(self):
+        # The failure this guards: entries left in the prose have their own
+        # "[1]" markers, and every one becomes an inline citation.
+        report = (
+            "Body with no citations at all.\n\n## Bibliography\n"
+            "[1] A. Author. Agentic Citation Grounding. arXiv:2401.00003\n"
+        )
+
+        intro, cited = rewrite_intro(report, SOURCES)
+
+        assert cited == []
+        assert intro == ""
+
+    def test_a_non_reference_heading_is_logged(self, caplog):
+        report = (
+            "Body [1].\n\n## Bibliography\n[1] A. Agentic Citation Grounding. arXiv:2401.00003\n"
+        )
+
+        with caplog.at_level("WARNING"):
+            strip_references(report)
+
+        assert "Bibliography" in caplog.text
+
+    def test_the_canonical_heading_is_not_logged(self, caplog):
+        with caplog.at_level("WARNING"):
+            strip_references(NUMBERED_ANSWER)
+
+        assert caplog.text == ""
+
+
+class TestExistingLinksAreNotReprocessed:
+    def test_a_rendered_link_is_not_wrapped_again(self):
+        # The link pass emits "[Title](url)"; the bracket pass would match its
+        # "[Title]" -- titles are aliases -- and produce "[Title](url)(url)".
+        report = "See [Agentic Citation Grounding](https://arxiv.org/abs/2401.00003) here."
+
+        intro, _ = rewrite_intro(report, SOURCES)
+
+        assert intro.strip() == (
+            "See [Agentic Citation Grounding](https://arxiv.org/abs/2401.00003) here."
+        )
+        assert ")(" not in intro
+
+    def test_a_title_written_as_a_bare_bracket_still_resolves(self):
+        report = "See [Agentic Citation Grounding] here."
+
+        intro, _ = rewrite_intro(report, SOURCES)
+
+        assert f"[Agentic Citation Grounding]({abs_url('2401.00003')})" in intro
+        assert ")(" not in intro
+
+
+class TestCitationForms:
+    def test_numeric_ranges_expand(self):
+        report = "Several systems [1-3] agree.\n\n## References\n" + (
+            "[1] A. First Retrieval System. arXiv:2401.00001\n"
+            "[2] B. Scaling. arXiv:2401.00002\n"
+            "[3] C. Grounding. arXiv:2401.00003\n"
+        )
+
+        intro, cited = rewrite_intro(report, SOURCES)
+
+        assert {source["arxiv_id"] for source in cited} == {
+            "2401.00001",
+            "2401.00002",
+            "2401.00003",
+        }
+        assert "[1-3]" not in intro
+
+    def test_a_reversed_range_is_left_alone(self):
+        # At that width it is a page range, not a citation, and expanding it
+        # would invent 300 citation markers out of one bracket.
+        report = "Pages [300-1] here [1].\n\n## References\n[1] A. Grounding. arXiv:2401.00003\n"
+
+        intro, cited = rewrite_intro(report, SOURCES)
+
+        assert [source["arxiv_id"] for source in cited] == ["2401.00003"]
+        assert "[300-1]" in intro
+
+    def test_footnote_markers_resolve_like_plain_numbers(self):
+        report = "Grounded [^1].\n\n## References\n[1] A. Grounding. arXiv:2401.00003\n"
+
+        intro, cited = rewrite_intro(report, SOURCES)
+
+        assert [source["arxiv_id"] for source in cited] == ["2401.00003"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "Superscript citation<sup>1</sup> here.",
+            "Unicode superscript\u00b9 here.",
+            "Author-year style [Smith, 2023] here.",
+            "A footnote the list never defined [^7] here.",
+        ],
+    )
+    def test_unhandled_forms_are_counted_not_ignored(self, body):
+        # An answer that cited carefully in a style this bridge cannot read
+        # scores zero, and without this count it looks like one that never cited.
+        assert unresolved_citation_forms(body) >= 1
+
+    def test_a_clean_intro_counts_zero(self):
+        intro, _ = rewrite_intro(NUMBERED_ANSWER, SOURCES)
+
+        assert unresolved_citation_forms(intro) == 0
