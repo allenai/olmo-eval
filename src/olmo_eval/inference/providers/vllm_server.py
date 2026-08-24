@@ -334,7 +334,6 @@ class VLLMServerProvider(InferenceProvider):
         self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
-        self._local_tokenizer_failed = False
         self._server: VLLMServerProcess | None = None  # type: ignore[possibly-unresolved-reference]
         if max_model_len is not None and max_model_len <= 0:
             raise ValueError("max_model_len must be positive when set")
@@ -817,7 +816,7 @@ class VLLMServerProvider(InferenceProvider):
         # rather than sending null, which some OpenAI-compatible servers reject.
         if params.max_tokens is not None:
             kwargs["max_tokens"] = params.max_tokens
-        extra_body: dict[str, Any] = {"add_special_tokens": False}
+        extra_body: dict[str, Any] = {"add_special_tokens": bool(self._add_bos_token)}
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
