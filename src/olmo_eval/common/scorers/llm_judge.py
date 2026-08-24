@@ -359,7 +359,6 @@ class LLMJudgeScorer(ContextScorer):
                 messages=({"role": "user", "content": prompt},),
             )
         results = await provider.agenerate([request], sampling_params)
-        print(results)
         return results[0][0].text if results and results[0] else ""
 
     async def _choice_logprobs_with_provider(
