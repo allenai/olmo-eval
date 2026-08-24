@@ -159,6 +159,9 @@ vllm = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Vendored ctc-suite format/spec code is kept byte-faithful to its upstream (golden-fixture
+# tested there); it is excluded rather than restyled.
+extend-exclude = ["src/olmo_eval/evals/tasks/ctc_suite/_vendor"]
 
 [tool.ruff.lint]
 select = [
