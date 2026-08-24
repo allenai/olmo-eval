@@ -23,6 +23,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -453,28 +454,80 @@ def _parse_cutoff_date(raw: str | None) -> date | None:
     return None if cutoff is None else date.fromisoformat(cutoff[2])
 
 
-def _arxiv_admits(paper: dict, cutoff: date | None, *, require_arxiv: bool) -> bool:
-    """Return whether a hit is one DeepScholar-Bench's exporter would also keep.
+@dataclass(frozen=True)
+class _ArxivHit:
+    """One search hit in the form DeepScholar-Bench's exporter would keep it."""
 
-    arXiv provenance, then a publication date strictly before the cutoff,
-    falling back to the month encoded in the arXiv ID when S2 reports no date.
-    Holding the tool to the exporter's test is what keeps it from inviting the
-    model to cite a source the scorer will later discard. A hit S2 cannot date
-    and whose ID encodes no date is dropped, because the exporter has no other
-    evidence either.
+    arxiv_id: str
+    title: str
+    snippet: str
+    published: date
+    precision: str
+
+
+def _classify_arxiv_hit(paper: dict, cutoff: date | None) -> tuple[_ArxivHit | None, str]:
+    """Return the citable form of a hit, or None and the reason it is not.
+
+    Mirrors lit-agents' shared/deepscholar.py::_classify_source, so a hit this
+    tool renders as citable is a hit the benchmark's exporter would keep. The
+    reason comes back rather than being logged here so a caller can say which
+    condition emptied a result set.
+
+    Two conditions are easy to get wrong. A hit missing a title or an abstract
+    is rejected, not shown: the exporter drops it as missing_metadata, and
+    paper.csv rows with an empty title or snippet fail the contract outright. A
+    publicationDate that is present but unparseable is also rejected rather than
+    falling back to the arXiv ID's month -- that fallback exists for papers
+    Semantic Scholar cannot date at all, and reaching for it here could admit a
+    paper published after the cutoff on the strength of a date nothing read.
     """
     arxiv_id = _arxiv_id_from_paper(paper)
-    if require_arxiv and not arxiv_id:
+    if not arxiv_id:
+        return None, "no_arxiv_provenance"
+
+    title = str(paper.get("title") or "").strip()
+    snippet = str(paper.get("abstract") or "").strip()
+    if not title or not snippet:
+        return None, "missing_metadata"
+
+    if paper.get("publicationDate"):
+        published = _publication_date(paper)
+        if published is None:
+            return None, "unparseable_date"
+        precision = "day"
+        if cutoff is not None and published >= cutoff:
+            return None, "not_before_cutoff"
+    else:
+        published = date_from_arxiv_id(arxiv_id)
+        precision = "month"
+        if published is None:
+            return None, "undated"
+        if cutoff is not None and (published.year, published.month) >= (
+            cutoff.year,
+            cutoff.month,
+        ):
+            return None, "not_before_cutoff"
+
+    return _ArxivHit(arxiv_id, title, snippet, published, precision), "eligible"
+
+
+def _arxiv_context_only(paper: dict, cutoff: date | None) -> bool:
+    """Whether a hit with no arXiv ID is still worth showing as background.
+
+    It has to be readable -- a title and an abstract -- and, under an active
+    cutoff, dated before it. The arXiv-ID month fallback has nothing to fall
+    back to here, which is the point: nothing can cite this hit anyway.
+    """
+    if _arxiv_id_from_paper(paper):
+        return False
+    if not str(paper.get("title") or "").strip():
+        return False
+    if not str(paper.get("abstract") or "").strip():
         return False
     if cutoff is None:
         return True
     published = _publication_date(paper)
-    if published is not None:
-        return published < cutoff
-    fallback = date_from_arxiv_id(arxiv_id) if arxiv_id else None
-    if fallback is None:
-        return False
-    return (fallback.year, fallback.month) < (cutoff.year, cutoff.month)
+    return published is not None and published < cutoff
 
 
 def _arxiv_search_limit() -> int:
@@ -497,37 +550,24 @@ def _arxiv_request_limit(wanted: int) -> int:
     return max(1, min(_S2_MAX_SEARCH_LIMIT, wanted * _ARXIV_OVERFETCH_MULTIPLIER))
 
 
-def _arxiv_published(paper: dict, arxiv_id: str) -> tuple[date, str] | None:
-    """The date to show for a hit and whether it is day- or month-precise.
+def _format_arxiv_result(paper: dict, hit: _ArxivHit | None) -> str:
+    """Render one hit; ``hit is None`` marks it as uncitable context.
 
-    Semantic Scholar reports a day; an arXiv ID encodes only a month. The
-    export path writes ``date_precision`` straight from this distinction, and
-    the benchmark contract rejects a month-precise source dated inside the
-    cutoff's own month -- so a day that is known must never be reported as a
-    month, or the source is discarded for want of information the search
-    already had.
+    The abstract is truncated to keep the agent's context affordable. That makes
+    this snippet a preview rather than the abstract, which is why the export
+    re-fetches full text from Semantic Scholar instead of reusing what was
+    rendered here -- paper.csv's snippet column is scored.
     """
-    published = _publication_date(paper)
-    if published is not None:
-        return published, "day"
-    fallback = date_from_arxiv_id(arxiv_id) if arxiv_id else None
-    if fallback is not None:
-        return fallback, "month"
-    return None
-
-
-def _format_arxiv_result(paper: dict, arxiv_id: str) -> str:
-    """Render one hit; an empty ``arxiv_id`` marks it as uncitable context."""
-    title = paper.get("title") or "Unknown"
+    title = (hit.title if hit is not None else str(paper.get("title") or "")) or "Unknown"
     authors = paper.get("authors") or []
     author_names = ", ".join(a.get("name", "") for a in authors[:3])
     if len(authors) > 3:
         author_names += " et al."
-    abstract = paper.get("abstract") or ""
+    abstract = hit.snippet if hit is not None else str(paper.get("abstract") or "")
     if len(abstract) > _ARXIV_ABSTRACT_LIMIT:
         abstract = abstract[:_ARXIV_ABSTRACT_LIMIT] + "..."
 
-    if arxiv_id:
+    if hit is not None:
         lines = [f"**{title}**"]
     else:
         lines = [f"**{title}** [context only: no arXiv ID, not citable]"]
@@ -536,18 +576,18 @@ def _format_arxiv_result(paper: dict, arxiv_id: str) -> str:
     year = paper.get("year")
     if year:
         lines.append(f"Year: {year}")
-    published = _arxiv_published(paper, arxiv_id)
-    if published is not None:
-        value, precision = published
-        if precision == "day":
-            lines.append(f"Published: {value.isoformat()}")
+    if hit is not None:
+        if hit.precision == "day":
+            lines.append(f"Published: {hit.published.isoformat()}")
         else:
-            lines.append(f"Published: {value.year:04d}-{value.month:02d} (month precision)")
+            lines.append(
+                f"Published: {hit.published.year:04d}-{hit.published.month:02d} (month precision)"
+            )
     if abstract:
         lines.append(f"Abstract: {abstract}")
-    if arxiv_id:
-        lines.append(f"arXiv: {arxiv_id}")
-        lines.append(f"URL: https://arxiv.org/abs/{arxiv_id}")
+    if hit is not None:
+        lines.append(f"arXiv: {hit.arxiv_id}")
+        lines.append(f"URL: https://arxiv.org/abs/{hit.arxiv_id}")
     return "\n".join(lines)
 
 
@@ -565,11 +605,16 @@ async def arxiv_paper_search(query: str) -> str:
     :func:`semantic_scholar_search`; only the admission test differs. S2's
     search endpoint cannot select on external IDs, so provenance is decided
     client-side on ``externalIds.ArXiv`` and the requested page is widened to
-    compensate. Every result rendered with an arxiv.org URL is one
-    DeepScholar-Bench's exporter would also keep -- arXiv provenance, published
-    strictly before the active :func:`search_date_cutoff` -- so the model is
-    never invited to cite a source the scorer would discard. S2's relevance
-    order is preserved: filtering skips hits, it never reorders them.
+    compensate. S2's relevance order is preserved: filtering skips hits, it
+    never reorders them.
+
+    The invariant every rendered arxiv.org URL carries, enforced by
+    :func:`_classify_arxiv_hit`: arXiv provenance, a non-empty title and
+    abstract, and a publication date strictly before the active
+    :func:`search_date_cutoff` -- day-precise when Semantic Scholar supplies
+    one, otherwise the month the arXiv ID encodes. That is
+    DeepScholar-Bench's own admission test, so the model is never invited to
+    cite a source the scorer would discard.
 
     Args:
         query: Search query for arXiv papers.
@@ -628,19 +673,26 @@ async def arxiv_paper_search(query: str) -> str:
 
     citable: list[str] = []
     context_only: list[str] = []
+    rejections: dict[str, int] = {}
     for paper in data.get("data", []):
         if len(citable) >= wanted and len(context_only) >= _ARXIV_CONTEXT_ONLY_LIMIT:
             break
-        arxiv_id = _arxiv_id_from_paper(paper)
-        if arxiv_id:
-            if len(citable) < wanted and _arxiv_admits(paper, cutoff, require_arxiv=True):
-                citable.append(_format_arxiv_result(paper, arxiv_id))
-        elif len(context_only) < _ARXIV_CONTEXT_ONLY_LIMIT and _arxiv_admits(
-            paper, cutoff, require_arxiv=False
-        ):
-            context_only.append(_format_arxiv_result(paper, ""))
+        hit, reason = _classify_arxiv_hit(paper, cutoff)
+        if hit is not None:
+            if len(citable) < wanted:
+                citable.append(_format_arxiv_result(paper, hit))
+            continue
+        rejections[reason] = rejections.get(reason, 0) + 1
+        if len(context_only) < _ARXIV_CONTEXT_ONLY_LIMIT and _arxiv_context_only(paper, cutoff):
+            context_only.append(_format_arxiv_result(paper, None))
 
     if not citable and not context_only:
+        breakdown = ", ".join(f"{count} {reason}" for reason, count in sorted(rejections.items()))
+        logger.info(
+            "arXiv paper search kept nothing for %r: %s",
+            sanitized_query,
+            breakdown or "no hits returned",
+        )
         return "No arXiv papers found for query."
 
     return "\n\n---\n\n".join(citable + context_only)

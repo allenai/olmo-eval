@@ -10,14 +10,15 @@ The generation prompt is VERBATIM the one lit-agents runs
 character makes the two systems' outputs incomparable, so the template is
 pinned by a golden-string test.
 
-Scoring here is a placeholder. DeepScholar-Bench's published metrics (nugget
-coverage, citation precision, reference coverage) are a second pass run outside
-this repo: :mod:`olmo_eval.evals.tasks.deepscholar_export` converts saved
-predictions into the per-query ``{intro.md, final_report.md, paper.csv}``
-folders the upstream scorer reads. The metric computed here reports only
-whether a response is exportable at all -- it has answer text and at least one
-arXiv source in its trajectory -- so a run that produced nothing is visible
-without this task pretending to measure quality.
+Scoring here is a placeholder. DeepScholar-Bench's published metrics run as a
+second pass outside this repo, on the per-query folders
+:mod:`olmo_eval.evals.tasks.deepscholar_export` writes. What this task computes
+is whether that second pass will find anything at all: the prompt mandates
+numbered citations while the upstream parser only credits markdown links to
+arxiv.org/abs, so :mod:`olmo_eval.evals.tasks.deepscholar_citations` has to
+bridge the two, and ``exportable_rate`` runs that same bridge and counts the
+answers it succeeds on. A run whose citations never resolve is therefore
+visible here rather than only after external scoring returns zeros.
 
 Requirements: this task only produces signal under a tool-providing agentic
 harness exposing ``arxiv_paper_search`` (the ``arxiv_paper_search_agent``
@@ -51,6 +52,11 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.evals.tasks.deepscholar_citations import (
+    reference_list,
+    resolve_numbering,
+    rewrite_intro,
+)
 from olmo_eval.harness.tools.search import normalize_arxiv_id
 
 logger = logging.getLogger(__name__)
@@ -76,7 +82,11 @@ _RESULT_SEPARATOR = "\n\n---\n\n"
 # The search tool marks a date it could only resolve to a month.
 _MONTH_PRECISION_SUFFIX = " (month precision)"
 _RESULT_FIELD_RE = re.compile(r"^(Authors|Year|Published|Abstract|arXiv|URL):[ \t]*(.*)$")
-_RESULT_TITLE_RE = re.compile(r"^\*\*(.+?)\*\*(?:\s*\[context only.*\])?$")
+_RESULT_TITLE_RE = re.compile(r"^\*\*(.+?)\*\*(?:\s*\[context only.*\])?$", re.DOTALL)
+# An ID on its own line. Read separately from the block parse so a result whose
+# free-text fields defeat the parser still contributes the one field the export
+# genuinely needs.
+_ARXIV_ID_LINE_RE = re.compile(r"^arXiv:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 
 
 def _first_nonempty(row: Mapping[str, Any], *keys: str) -> str:
@@ -160,10 +170,11 @@ def _parse_published_field(value: str) -> tuple[str, str]:
 def parse_arxiv_tool_results(content: str) -> list[dict[str, str]]:
     """Parse ``arxiv_paper_search`` output back into its per-result fields.
 
-    The rendered tool output is the only record of what the agent was shown, so
-    the export path reads it rather than re-querying Semantic Scholar; the same
-    query months later would not return the same page. Results marked context
-    only carry no arXiv ID and are skipped, because nothing can cite them.
+    Best-effort metadata only. The export re-fetches title and abstract from
+    Semantic Scholar, so a block this cannot parse costs a fallback snippet
+    rather than the source itself -- :func:`sources_from_trajectory` takes the
+    arXiv ID from its own line instead of from here. Results marked context only
+    carry no arXiv ID and are skipped, because nothing can cite them.
     """
     parsed: list[dict[str, str]] = []
     for block in (content or "").split(_RESULT_SEPARATOR):
@@ -185,7 +196,7 @@ def parse_arxiv_tool_results(content: str) -> list[dict[str, str]]:
                 # An abstract can wrap across lines; keep it whole.
                 fields[current] = f"{fields[current]}\n{line}"
 
-        arxiv_id = normalize_arxiv_id(fields.get("arxiv", ""))
+        arxiv_id = normalize_arxiv_id(fields.get("arxiv", "").strip())
         if not arxiv_id:
             continue
         published_date, date_precision = _parse_published_field(fields.get("published", ""))
@@ -205,22 +216,65 @@ def parse_arxiv_tool_results(content: str) -> list[dict[str, str]]:
 
 
 def sources_from_trajectory(trajectory: Any) -> list[dict[str, str]]:
-    """Collect every arXiv source the search tool showed, first mention winning."""
+    """Collect every arXiv source the search tool showed, first mention winning.
+
+    Only results of ``SEARCH_TOOL_NAME`` calls are read. Another tool's output
+    can mention an arXiv ID without the agent ever having been shown that paper
+    as a citable result, and crediting it would let a citation resolve against a
+    source the search never returned.
+    """
     if trajectory is None:
         return []
+    search_call_ids = {
+        call.id for call in trajectory.tool_call_sequence if call.function.name == SEARCH_TOOL_NAME
+    }
     by_id: dict[str, dict[str, str]] = {}
     for result in trajectory.tool_result_sequence:
-        for source in parse_arxiv_tool_results(result.content or ""):
-            by_id.setdefault(source["arxiv_id"], source)
+        if result.tool_call_id not in search_call_ids:
+            continue
+        content = result.content or ""
+        parsed = {item["arxiv_id"]: item for item in parse_arxiv_tool_results(content)}
+        for match in _ARXIV_ID_LINE_RE.finditer(content):
+            arxiv_id = normalize_arxiv_id(match.group(1))
+            if arxiv_id:
+                by_id.setdefault(arxiv_id, parsed.get(arxiv_id) or {"arxiv_id": arxiv_id})
     return list(by_id.values())
+
+
+def score_answer(answer: str, sources: Sequence[Mapping[str, str]]) -> dict[str, float]:
+    """Run the citation bridge over one answer and report what it achieved.
+
+    ``exportable_rate`` is whether the rewritten intro holds at least one
+    resolvable arxiv.org citation, which is exactly the condition under which
+    the upstream parser returns any documents for this query.
+    ``citation_resolution_rate`` is the share of the reference list the answer
+    published that resolved to a retrieved source -- the diagnostic that
+    separates "the model cited nothing" from "the model cited papers it never
+    retrieved" from "the bridge failed".
+    """
+    _, cited = rewrite_intro(answer, list(sources))
+    published_refs = reference_list(answer)
+    resolved = resolve_numbering(answer, list(sources))
+    return {
+        "exportable_rate": 1.0 if cited else 0.0,
+        "citation_resolution_rate": (
+            len(resolved) / len(published_refs) if published_refs else 0.0
+        ),
+    }
 
 
 @dataclass(frozen=True)
 class DeepScholarBenchScorer(Scorer):
-    """Placeholder scorer; DeepScholar-Bench scores are an external second pass."""
+    """Interface stub; both metrics read values ``score_responses`` precomputes.
+
+    ``Task.score_responses`` is overridden here, so the scorer pipeline never
+    runs and this method is never called. It reads the same key
+    ``score_responses`` writes so that if it ever is called it cannot report a
+    silent zero.
+    """
 
     name: str = "deepscholar_bench"
-    score_key: str = "exportable_rate"
+    score_key: str = "score:exportable_rate"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         return (output.metadata or {}).get(self.score_key, 0.0)
@@ -239,35 +293,27 @@ class _DeepScholarMetricBase(Metric, ABC):
 
 @dataclass(frozen=True)
 class ExportableRateMetric(_DeepScholarMetricBase):
-    """Fraction of responses that can be scored externally at all.
+    """Fraction of answers the external scoring pass will find citations in.
 
-    Not a quality measure: it is 1.0 for any response holding answer text and at
-    least one retrieved arXiv source, which is exactly the condition
-    ``deepscholar_export`` needs to write a query folder. Its job is to make a
-    run that generated nothing impossible to mistake for a run that scored zero.
+    Not a quality measure. It is 1.0 when the citation bridge turns the answer
+    into an intro holding at least one resolvable arxiv.org link, which is the
+    condition for the upstream parser to return any documents at all. Its job is
+    to make a run whose citations never resolve impossible to mistake for a run
+    that was scored and did badly.
     """
 
     name: str = "exportable_rate"
 
 
 @dataclass(frozen=True)
-class ArxivCitationRateMetric(_DeepScholarMetricBase):
-    """Fraction of responses whose answer cites at least one arxiv.org URL.
+class CitationResolutionRateMetric(_DeepScholarMetricBase):
+    """Share of each answer's published reference list that named a retrieved paper."""
 
-    The benchmark's citation parser credits arxiv.org URLs alone, so an answer
-    without one scores zero downstream however good its prose is.
-    """
-
-    name: str = "arxiv_citation_rate"
+    name: str = "citation_resolution_rate"
 
 
 EXPORTABLE_RATE_METRIC = ExportableRateMetric()
-DEEPSCHOLAR_METRICS = (EXPORTABLE_RATE_METRIC, ArxivCitationRateMetric())
-
-_ANSWER_ARXIV_URL_RE = re.compile(
-    r"https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/([^)\s?#\]]+)",
-    re.IGNORECASE,
-)
+DEEPSCHOLAR_METRICS = (EXPORTABLE_RATE_METRIC, CitationResolutionRateMetric())
 
 
 @register("deepscholar_bench")
@@ -338,34 +384,26 @@ class DeepScholarBench(Task):
         responses: Sequence[Response],
         context: Any = None,
     ) -> Sequence[Response]:
-        """Record export readiness and stash the sources the export pass needs."""
+        """Run the citation bridge over each answer and record what it achieved."""
         missing_trajectory = 0
         for response in responses:
             if response.trajectory is None:
                 missing_trajectory += 1
             sources = sources_from_trajectory(response.trajectory)
             answer = response.outputs[0].text if response.outputs else ""
-            cited = {
-                normalize_arxiv_id(match.group(1))
-                for match in _ANSWER_ARXIV_URL_RE.finditer(answer or "")
-            }
-
-            response.scores.update(
-                {
-                    "exportable_rate": 1.0 if (answer.strip() and sources) else 0.0,
-                    "arxiv_citation_rate": 1.0 if cited else 0.0,
-                }
-            )
+            scores = score_answer(answer, sources)
+            response.scores.update(scores)
 
             if response.outputs:
                 meta = response.outputs[0].metadata
                 meta["deepscholar_source_arxiv_ids"] = [s["arxiv_id"] for s in sources]
-                meta["deepscholar_cited_arxiv_ids"] = sorted(cited)
                 meta["deepscholar_num_searches"] = (
                     len(response.trajectory.tool_calls_by_name(SEARCH_TOOL_NAME))
                     if response.trajectory is not None
                     else 0
                 )
+                for name, value in scores.items():
+                    meta[f"score:{name}"] = value
 
         if missing_trajectory:
             logger.warning(
