@@ -36,15 +36,16 @@ class _ResponseStub:
 
 
 def _paper(
-    title: str,
+    title: str | None,
     *,
     arxiv: str | None = None,
     published: str | None = None,
     year: int | None = 2020,
+    abstract: str | None = "",
 ) -> dict[str, Any]:
     paper: dict[str, Any] = {
         "title": title,
-        "abstract": f"Abstract of {title}.",
+        "abstract": f"Abstract of {title}." if abstract == "" else abstract,
         "year": year,
         "url": "",
         "authors": [{"name": "A. Author"}],
@@ -128,13 +129,56 @@ async def test_a_dated_hit_is_published_to_the_day(monkeypatch) -> None:
 
 
 @pytest.mark.anyio
-async def test_a_hit_with_no_date_anywhere_shows_none(monkeypatch) -> None:
+async def test_a_hit_nothing_can_date_is_rejected(monkeypatch) -> None:
+    # lit-agents' _classify_source calls this "undated" and drops it; the
+    # exporter has no other evidence either.
     _stub_search(monkeypatch, [_paper("Undatable", arxiv="not-an-id")])
 
     result = await search.arxiv_paper_search(query="q")
 
-    assert "**Undatable**" in result
-    assert "Published:" not in result
+    assert result == "No arXiv papers found for query."
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("title", None), ("title", "   "), ("abstract", None), ("abstract", "  ")],
+)
+async def test_hits_missing_a_title_or_abstract_are_rejected(monkeypatch, field, value) -> None:
+    # paper.csv rows with an empty title or snippet fail the contract, so a hit
+    # that would produce one is never offered as citable.
+    kwargs = {"arxiv": "2401.01234", "published": "2024-01-15"}
+    if field == "abstract":
+        kwargs["abstract"] = value
+        paper = _paper("Titled", **kwargs)
+    else:
+        paper = _paper(value, **kwargs)
+    _stub_search(monkeypatch, [paper])
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert result == "No arXiv papers found for query."
+
+
+@pytest.mark.anyio
+async def test_a_malformed_publication_date_is_rejected_not_downgraded(monkeypatch) -> None:
+    # Falling back to the ID's month here would admit the paper on the strength
+    # of a date nothing could read -- and 2405 precedes the cutoff, so it would.
+    _stub_search(monkeypatch, [_paper("Garbled", arxiv="2405.00001", published="not a date")])
+
+    with search.search_date_cutoff("2024-06-01"):
+        result = await search.arxiv_paper_search(query="q")
+
+    assert result == "No arXiv papers found for query."
+
+
+@pytest.mark.anyio
+async def test_context_only_hits_need_a_title_and_an_abstract(monkeypatch) -> None:
+    _stub_search(monkeypatch, [_paper("Untitled", abstract=None), _paper(None)])
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert result == "No arXiv papers found for query."
 
 
 @pytest.mark.anyio

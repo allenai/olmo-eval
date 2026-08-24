@@ -158,6 +158,9 @@ vllm = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Verbatim vendored copy of the pinned DeepScholar-Bench scorer; it is a
+# fixture precisely because it is not ours to restyle.
+extend-exclude = ["tests/evals/tasks/fixtures/deepscholar_c95413b"]
 
 [tool.ruff.lint]
 select = [
