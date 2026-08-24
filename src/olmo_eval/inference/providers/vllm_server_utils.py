@@ -237,7 +237,9 @@ def _get_olmo3_tool_template_path() -> str:
 
 
 # Kwargs that are used for deployment/setup, not vLLM server CLI arguments
-_NON_VLLM_KWARGS = frozenset({"patch_olmo3_tool_parser", "add_bos_token"})
+_NON_VLLM_KWARGS = frozenset(
+    {"patch_olmo3_tool_parser", "add_bos_token", "completion_use_prompt_token_ids"}
+)
 
 
 def _apply_olmo3_tool_parser_patch() -> None:
