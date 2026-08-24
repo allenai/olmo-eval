@@ -61,6 +61,8 @@ def _paper(
 
 BAD_JSON = "<body that is not json>"
 BAD_SHAPE = "<a list where an object belongs>"
+BAD_DATA = "<a data field that is not a list>"
+NO_RESULTS = "<S2's real no-results body: total and offset, no data>"
 
 
 def _stub_pages(
@@ -102,6 +104,10 @@ def _stub_pages(
                 return _BadJson()
             if page is BAD_SHAPE:
                 return _ResponseStub(["not", "an", "object"])
+            if page is BAD_DATA:
+                return _ResponseStub({"total": 1, "data": "not a list"})
+            if page is NO_RESULTS:
+                return _ResponseStub({"total": 0, "offset": 0})
             return _ResponseStub({"data": page})
 
     async def no_rate_gate() -> None:
@@ -574,3 +580,26 @@ async def test_an_empty_data_array_is_not_an_error(monkeypatch) -> None:
     result = await search.arxiv_paper_search(query="q")
 
     assert result == "No arXiv papers found for query."
+
+
+@pytest.mark.anyio
+async def test_s2s_no_results_body_is_not_an_error(monkeypatch) -> None:
+    # Verified against the live endpoint: a query matching nothing comes back as
+    # {"total": 0, "offset": 0} with no data array. Calling that malformed would
+    # tell the model its search broke when it merely found nothing.
+    calls = _stub_pages(monkeypatch, NO_RESULTS)
+
+    result = await search.arxiv_paper_search(query="zzzqqq nonexistent xyzzy")
+
+    assert result == "No arXiv papers found for query."
+    # And it is a complete page, so there is no next one to ask for.
+    assert len(calls) == 1
+
+
+@pytest.mark.anyio
+async def test_a_data_field_that_is_not_a_list_is_still_an_error(monkeypatch) -> None:
+    _stub_pages(monkeypatch, BAD_DATA)
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert result.startswith("Error searching arXiv papers")

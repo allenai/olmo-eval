@@ -622,10 +622,15 @@ async def _arxiv_search_page(
         return None, "Error searching arXiv papers: unexpected response shape"
     rows = data.get("data")
     if rows is None:
-        # No "data" key at all is a shape this code cannot read; an empty list is
-        # a legitimate answer and must stay distinguishable from it.
-        logger.error(f"arXiv paper search response has no data array, offset={offset}")
-        return None, "Error searching arXiv papers: unexpected response shape"
+        # Semantic Scholar answers a query that matches nothing with
+        # {"total": 0, "offset": 0} and no data array at all -- verified against
+        # the live endpoint. Reading that as a malformed response would tell the
+        # model its search errored when it merely found nothing, which are very
+        # different things to an agent deciding what to do next.
+        logger.debug(
+            f"arXiv paper search returned no data array (keys: {sorted(data)}), offset={offset}"
+        )
+        return [], ""
     if not isinstance(rows, list):
         logger.error(f"arXiv paper search data is {type(rows).__name__}, not a list")
         return None, "Error searching arXiv papers: unexpected response shape"
