@@ -497,6 +497,25 @@ def _arxiv_request_limit(wanted: int) -> int:
     return max(1, min(_S2_MAX_SEARCH_LIMIT, wanted * _ARXIV_OVERFETCH_MULTIPLIER))
 
 
+def _arxiv_published(paper: dict, arxiv_id: str) -> tuple[date, str] | None:
+    """The date to show for a hit and whether it is day- or month-precise.
+
+    Semantic Scholar reports a day; an arXiv ID encodes only a month. The
+    export path writes ``date_precision`` straight from this distinction, and
+    the benchmark contract rejects a month-precise source dated inside the
+    cutoff's own month -- so a day that is known must never be reported as a
+    month, or the source is discarded for want of information the search
+    already had.
+    """
+    published = _publication_date(paper)
+    if published is not None:
+        return published, "day"
+    fallback = date_from_arxiv_id(arxiv_id) if arxiv_id else None
+    if fallback is not None:
+        return fallback, "month"
+    return None
+
+
 def _format_arxiv_result(paper: dict, arxiv_id: str) -> str:
     """Render one hit; an empty ``arxiv_id`` marks it as uncitable context."""
     title = paper.get("title") or "Unknown"
@@ -517,6 +536,13 @@ def _format_arxiv_result(paper: dict, arxiv_id: str) -> str:
     year = paper.get("year")
     if year:
         lines.append(f"Year: {year}")
+    published = _arxiv_published(paper, arxiv_id)
+    if published is not None:
+        value, precision = published
+        if precision == "day":
+            lines.append(f"Published: {value.isoformat()}")
+        else:
+            lines.append(f"Published: {value.year:04d}-{value.month:02d} (month precision)")
     if abstract:
         lines.append(f"Abstract: {abstract}")
     if arxiv_id:
@@ -549,9 +575,9 @@ async def arxiv_paper_search(query: str) -> str:
         query: Search query for arXiv papers.
 
     Returns:
-        Formatted results carrying title, authors, year, abstract snippet, arXiv
-        ID and arxiv.org URL. A few hits with no arXiv ID follow, marked as
-        context the answer cannot cite.
+        Formatted results carrying title, authors, year, publication date,
+        abstract snippet, arXiv ID and arxiv.org URL. A few hits with no arXiv
+        ID follow, marked as context the answer cannot cite.
     """
     api_keys = _api_keys_from_env("S2_API_KEY")
     headers = {}
