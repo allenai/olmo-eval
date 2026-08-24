@@ -180,6 +180,9 @@ select = [
 "src/olmo_eval/common/scorers/citation.py" = ["E501"]
 # Verbatim bilingual prompt templates from DeepResearch Bench
 "src/olmo_eval/evals/tasks/deepresearch_bench.py" = ["E501"]
+# Verbatim prompt template from DeepScholar-Bench, and its golden copy
+"src/olmo_eval/evals/tasks/deepscholar_bench.py" = ["E501"]
+"tests/evals/tasks/test_deepscholar_bench.py" = ["E501"]
 # Verbatim prompt templates and gold snippets from scicode-bench reference implementation
 "src/olmo_eval/evals/external/benchmarks/scicode/prompts.py" = ["E501"]
 # Embedded fewshot data with long string literals
