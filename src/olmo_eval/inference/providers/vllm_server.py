@@ -864,6 +864,7 @@ class VLLMServerProvider(InferenceProvider):
             tok.encode(request.prompt, add_special_tokens=True)[:4],
             tok.encode(request.prompt, add_special_tokens=False)[:4],
         )
+        print(extra_body)
         response = await client.completions.create(**kwargs)
         usage = getattr(response, "usage", None)
         return [
