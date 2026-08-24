@@ -10,6 +10,7 @@ touches the live API.
 import types
 from typing import Any
 
+import httpx
 import pytest
 
 from olmo_eval.harness.tools import search
@@ -58,44 +59,161 @@ def _paper(
     return paper
 
 
-def _stub_search(monkeypatch, papers: list[dict[str, Any]]) -> dict[str, Any]:
-    """Answer any S2 search with ``papers``; returns the captured query params."""
-    captured: dict[str, Any] = {}
+def _stub_pages(
+    monkeypatch,
+    *pages: list[dict[str, Any]],
+    error_after: int | None = None,
+) -> list[dict[str, Any]]:
+    """Answer successive S2 searches with ``pages``; returns the params of each.
+
+    ``error_after`` makes every request past that many succeed-then-fail, which
+    is how a page failing mid-pagination is exercised without a live API.
+    """
+    calls: list[dict[str, Any]] = []
+    remaining = list(pages)
 
     class ClientStub:
         async def get(self, url: str, *, params: dict, headers: dict) -> _ResponseStub:
-            captured.update(params)
-            return _ResponseStub({"data": papers})
+            calls.append(dict(params))
+            if error_after is not None and len(calls) > error_after:
+                raise httpx.ConnectError("stubbed transport failure")
+            return _ResponseStub({"data": remaining.pop(0) if remaining else []})
 
     async def no_rate_gate() -> None:
         pass
 
     monkeypatch.setattr(search, "_get_http_client", lambda: ClientStub())
     monkeypatch.setattr(search, "_s2_rate_gate", no_rate_gate)
-    return captured
+    return calls
+
+
+def _stub_search(monkeypatch, papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Answer one S2 search with ``papers``; returns the params of each request."""
+    return _stub_pages(monkeypatch, papers)
+
+
+def _filler(count: int) -> list[dict[str, Any]]:
+    """Rows with no arXiv ID -- about four fifths of what S2 really returns."""
+    return [_paper(f"Journal {index}") for index in range(count)]
+
+
+def _no_backoff_sleep(monkeypatch) -> None:
+    """Skip the retry waits so a failure test does not sleep through backoff."""
+
+    async def record_sleep(seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr(search, "asyncio", types.SimpleNamespace(sleep=record_sleep))
 
 
 @pytest.mark.anyio
-async def test_requests_external_ids_and_widens_the_page(monkeypatch) -> None:
+async def test_requests_external_ids_and_a_full_first_page(monkeypatch) -> None:
     monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "10")
-    captured = _stub_search(monkeypatch, [])
+    calls = _stub_search(monkeypatch, [])
 
     await search.arxiv_paper_search(query="retrieval augmented generation")
 
-    assert "externalIds" in captured["fields"]
-    assert captured["limit"] == 10 * search._ARXIV_OVERFETCH_MULTIPLIER
+    assert "externalIds" in calls[0]["fields"]
+    assert calls[0]["limit"] == search._ARXIV_PAGE_SIZE
+    assert calls[0]["offset"] == 0
     # arXiv provenance is decided on external IDs; the venue is not stable.
-    assert "venue" not in captured
+    assert "venue" not in calls[0]
 
 
 @pytest.mark.anyio
-async def test_page_widening_is_capped_at_the_s2_maximum(monkeypatch) -> None:
-    monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "50")
-    captured = _stub_search(monkeypatch, [])
+async def test_pagination_continues_until_the_wanted_count_is_reached(monkeypatch) -> None:
+    # Only about a fifth of S2 rows carry an arXiv ID, so a sparse first page is
+    # the normal case rather than the exception.
+    monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "3")
+    calls = _stub_pages(
+        monkeypatch,
+        _filler(99) + [_paper("First", arxiv="2401.00001")],
+        _filler(98) + [_paper("Second", arxiv="2401.00002"), _paper("Third", arxiv="2401.00003")],
+    )
 
-    await search.arxiv_paper_search(query="q")
+    result = await search.arxiv_paper_search(query="q")
 
-    assert captured["limit"] == search._S2_MAX_SEARCH_LIMIT
+    assert [call["offset"] for call in calls] == [0, search._ARXIV_PAGE_SIZE]
+    assert "**First**" in result
+    assert "**Third**" in result
+    # Relevance order survives paging: page one's hit precedes page two's.
+    assert result.index("**First**") < result.index("**Second**") < result.index("**Third**")
+
+
+@pytest.mark.anyio
+async def test_pagination_stops_at_the_page_budget_without_erroring(monkeypatch) -> None:
+    monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "10")
+    calls = _stub_pages(
+        monkeypatch,
+        *[_filler(99) + [_paper(f"Sparse {n}", arxiv=f"2401.0000{n}")] for n in range(5)],
+    )
+
+    result = await search.arxiv_paper_search(query="q")
+
+    # Three pages, then stop: returning fewer than wanted is a result, not an error.
+    assert [call["offset"] for call in calls] == [0, 100, 200]
+    assert result.count("URL: https://arxiv.org/abs/") == 3
+    assert not result.startswith("Error")
+
+
+@pytest.mark.anyio
+async def test_pagination_stops_when_s2_runs_out_of_hits(monkeypatch) -> None:
+    monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "10")
+    calls = _stub_pages(monkeypatch, _filler(4) + [_paper("Only", arxiv="2401.00001")])
+
+    result = await search.arxiv_paper_search(query="q")
+
+    # A short page means there is no next one; asking for it would waste the gate.
+    assert len(calls) == 1
+    assert "**Only**" in result
+
+
+@pytest.mark.anyio
+async def test_a_page_failing_late_keeps_the_earlier_pages_results(monkeypatch) -> None:
+    monkeypatch.setenv("ARXIV_SEARCH_LIMIT", "10")
+    _no_backoff_sleep(monkeypatch)
+    _stub_pages(
+        monkeypatch,
+        _filler(99) + [_paper("Survivor", arxiv="2401.00001")],
+        error_after=1,
+    )
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert "**Survivor**" in result
+    assert not result.startswith("Error")
+
+
+@pytest.mark.anyio
+async def test_a_first_page_failure_is_reported(monkeypatch) -> None:
+    _no_backoff_sleep(monkeypatch)
+    _stub_pages(monkeypatch, error_after=0)
+
+    result = await search.arxiv_paper_search(query="q")
+
+    assert result.startswith("Error searching arXiv papers")
+
+
+def test_the_description_tells_the_model_what_the_backend_is() -> None:
+    # 8 of the 12 operator-bearing queries in a 200-query sample returned zero
+    # rows: the model was treating this as a web search engine.
+    description = search.arxiv_paper_search.description
+
+    assert "not a web search engine" in description
+    assert "site:" in description
+    assert "boolean" in description.casefold()
+
+
+@pytest.mark.anyio
+async def test_web_search_operators_are_passed_through_unmodified(monkeypatch) -> None:
+    # The description is the fix. Rewriting the query in code would hide what
+    # the model actually asked and make the empty result unattributable.
+    calls = _stub_pages(monkeypatch, [])
+    query = 'site:arxiv.org "retrieval augmented generation" -survey'
+
+    await search.arxiv_paper_search(query=query)
+
+    assert calls[0]["query"] == query
 
 
 @pytest.mark.anyio
@@ -220,13 +338,13 @@ async def test_relevance_order_is_preserved_and_truncated_after_filtering(monkey
 
 @pytest.mark.anyio
 async def test_cutoff_is_pushed_one_day_short_server_side(monkeypatch) -> None:
-    captured = _stub_search(monkeypatch, [])
+    calls = _stub_search(monkeypatch, [])
 
     with search.search_date_cutoff("2024-06-01 13:06:19+00:00"):
         await search.arxiv_paper_search(query="q")
 
     # The exporter's test is strictly-before and S2's range is inclusive.
-    assert captured["publicationDateOrYear"] == ":2024-05-31"
+    assert calls[0]["publicationDateOrYear"] == ":2024-05-31"
 
 
 @pytest.mark.anyio
