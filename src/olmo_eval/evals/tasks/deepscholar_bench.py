@@ -73,7 +73,9 @@ DEEPSCHOLAR_QUERY_TEMPLATE = """Your task is to write a Related Works section fo
 
 # The blocks and labels arxiv_paper_search renders (see harness/tools/search.py).
 _RESULT_SEPARATOR = "\n\n---\n\n"
-_RESULT_FIELD_RE = re.compile(r"^(Authors|Year|Abstract|arXiv|URL):[ \t]*(.*)$")
+# The search tool marks a date it could only resolve to a month.
+_MONTH_PRECISION_SUFFIX = " (month precision)"
+_RESULT_FIELD_RE = re.compile(r"^(Authors|Year|Published|Abstract|arXiv|URL):[ \t]*(.*)$")
 _RESULT_TITLE_RE = re.compile(r"^\*\*(.+?)\*\*(?:\s*\[context only.*\])?$")
 
 
@@ -138,6 +140,23 @@ def build_deepscholar_prompt(cutoff_date: str, abstract: str) -> str:
     return DEEPSCHOLAR_QUERY_TEMPLATE.format(cutoff_date=cutoff_date, abstract=abstract)
 
 
+def _parse_published_field(value: str) -> tuple[str, str]:
+    """Split a rendered ``Published`` line into an ISO date and its precision.
+
+    Returns ``("", "")`` for anything unparseable, which sends the caller to the
+    arXiv-ID fallback rather than writing a date the contract would reject.
+    """
+    text = value.strip()
+    if not text:
+        return "", ""
+    if text.endswith(_MONTH_PRECISION_SUFFIX):
+        month = text[: -len(_MONTH_PRECISION_SUFFIX)].strip()
+        parsed = _parse_iso_date(f"{month}-01")
+        return ("", "") if parsed is None else (parsed.isoformat(), "month")
+    parsed = _parse_iso_date(text)
+    return ("", "") if parsed is None else (parsed.isoformat(), "day")
+
+
 def parse_arxiv_tool_results(content: str) -> list[dict[str, str]]:
     """Parse ``arxiv_paper_search`` output back into its per-result fields.
 
@@ -169,12 +188,15 @@ def parse_arxiv_tool_results(content: str) -> list[dict[str, str]]:
         arxiv_id = normalize_arxiv_id(fields.get("arxiv", ""))
         if not arxiv_id:
             continue
+        published_date, date_precision = _parse_published_field(fields.get("published", ""))
         parsed.append(
             {
                 "arxiv_id": arxiv_id,
                 "title": fields["title"],
                 "authors": fields.get("authors", "").strip(),
                 "year": fields.get("year", "").strip(),
+                "published_date": published_date,
+                "date_precision": date_precision,
                 "abstract": fields.get("abstract", "").strip(),
                 "url": fields.get("url", "").strip() or f"https://arxiv.org/abs/{arxiv_id}",
             }

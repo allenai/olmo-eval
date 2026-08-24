@@ -59,14 +59,23 @@ def _tool_output(*papers: dict) -> str:
     )
 
 
-def _paper(title: str, arxiv_id: str, *, abstract: str = "An abstract.") -> dict:
-    return {
+def _paper(
+    title: str,
+    arxiv_id: str,
+    *,
+    abstract: str = "An abstract.",
+    published: str | None = None,
+) -> dict:
+    paper = {
         "title": title,
         "abstract": abstract,
         "year": 2024,
         "authors": [{"name": "A. Author"}],
         "externalIds": {"ArXiv": arxiv_id},
     }
+    if published is not None:
+        paper["publicationDate"] = published
+    return paper
 
 
 def _trajectory(*result_contents: str) -> AgentTrajectory:
@@ -152,6 +161,17 @@ class TestResultParsing:
         assert parsed[0]["title"] == "First"
         assert parsed[0]["abstract"] == "An abstract."
         assert parsed[0]["url"] == "https://arxiv.org/abs/2401.00001"
+        # No S2 date, so the ID's month is all the tool could claim.
+        assert parsed[0]["published_date"] == "2024-01-01"
+        assert parsed[0]["date_precision"] == "month"
+
+    def test_a_day_precise_date_round_trips(self):
+        content = _tool_output(_paper("Dated", "2401.00001", published="2024-01-15"))
+
+        (parsed,) = parse_arxiv_tool_results(content)
+
+        assert parsed["published_date"] == "2024-01-15"
+        assert parsed["date_precision"] == "day"
 
     def test_multiline_abstracts_survive(self):
         content = _tool_output(_paper("Wrapped", "2401.00003", abstract="Line one.\nLine two."))
@@ -212,7 +232,10 @@ class TestScoring:
 class TestExportAdapter:
     def _prediction(self, native_id: str = "7", answer: str = "Related work.") -> dict:
         trajectory = _trajectory(
-            _tool_output(_paper("First", "2401.00001"), _paper("Second", "cs/0501001"))
+            _tool_output(
+                _paper("First", "2401.00001", published="2024-01-15"),
+                _paper("Second", "cs/0501001"),
+            )
         )
         return {
             "doc_id": 0,
@@ -267,11 +290,13 @@ class TestExportAdapter:
         assert [row["id"] for row in rows] == ["2401.00001", "cs/0501001"]
         assert rows[0]["title"] == "First"
         assert rows[0]["snippet"] == "An abstract."
-        # The rendered tool output carries a month, not a day.
-        assert rows[0]["published_date"] == "2024-01-01"
-        assert rows[0]["date_precision"] == "month"
+        # S2 dated the first source, so the day survives into the CSV.
+        assert rows[0]["published_date"] == "2024-01-15"
+        assert rows[0]["date_precision"] == "day"
         assert rows[0]["paper_id"] == "2401.00001"
+        # The second was undated, so only its ID's month can be claimed.
         assert rows[1]["published_date"] == "2005-01-01"
+        assert rows[1]["date_precision"] == "month"
 
     def test_predictions_without_sources_are_skipped(self, tmp_path):
         prediction = self._prediction()
@@ -302,3 +327,26 @@ class TestExportAdapter:
         )
 
         assert [row["id"] for row in rows] == ["2401.00001"]
+
+    def test_sources_without_a_published_line_fall_back_to_the_id_month(self):
+        # Predictions saved before the tool rendered a Published line.
+        (row,) = build_paper_rows([{"arxiv_id": "2401.00001", "title": "Legacy", "abstract": "a"}])
+
+        assert row["published_date"] == "2024-01-01"
+        assert row["date_precision"] == "month"
+
+    def test_a_parsed_day_is_written_unchanged(self):
+        (row,) = build_paper_rows(
+            [
+                {
+                    "arxiv_id": "2401.00001",
+                    "title": "Dated",
+                    "abstract": "a",
+                    "published_date": "2024-01-15",
+                    "date_precision": "day",
+                }
+            ]
+        )
+
+        assert row["published_date"] == "2024-01-15"
+        assert row["date_precision"] == "day"

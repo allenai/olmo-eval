@@ -10,10 +10,11 @@ matching what lit-agents' exporter writes. ``paper.csv`` holds every arXiv
 source the search tool showed the agent -- not only the cited ones -- because
 the contract the scorer checks is that cited IDs are a subset of the CSV.
 
-Publication dates come from the arXiv ID, which encodes only a month, so every
-row is written with ``date_precision: month``. That is the same fallback
-lit-agents uses when Semantic Scholar reports no date, and it is what the
-rendered tool output can support: the tool shows a year, not a day.
+Publication dates come from the ``Published`` line the search tool renders: day
+precision when Semantic Scholar dated the paper, month precision when only the
+arXiv ID could. The distinction matters because the contract rejects a
+month-precise source dated inside the cutoff's own month, so reporting a known
+day as a month would silently discard citable work.
 
 Usage:
     python -m olmo_eval.evals.tasks.deepscholar_export \\
@@ -82,26 +83,33 @@ def query_id(prediction: Mapping[str, Any]) -> str:
 
 
 def build_paper_rows(sources: Sequence[Mapping[str, str]]) -> list[dict[str, str]]:
-    """Build paper.csv rows, dropping sources whose ID encodes no date.
+    """Build paper.csv rows, dropping sources nothing can date.
 
-    A row the upstream contract cannot date is one it would reject, so dropping
-    it here keeps the export self-consistent rather than shipping a row that
-    fails validation later.
+    Dates come from the search tool's Published line, falling back to the month
+    the arXiv ID encodes. A row the upstream contract cannot date is one it
+    would reject, so dropping it here keeps the export self-consistent rather
+    than shipping a row that fails validation later.
     """
     rows: list[dict[str, str]] = []
     for source in sources:
         arxiv_id = source["arxiv_id"]
-        published = date_from_arxiv_id(arxiv_id)
-        if published is None:
-            logger.warning("Dropping source %s: its arXiv ID encodes no date", arxiv_id)
-            continue
+        published = source.get("published_date", "")
+        precision = source.get("date_precision", "")
+        if not published or not precision:
+            # Predictions saved before the tool rendered a Published line still
+            # carry the month their arXiv ID encodes.
+            fallback = date_from_arxiv_id(arxiv_id)
+            if fallback is None:
+                logger.warning("Dropping source %s: it has no resolvable date", arxiv_id)
+                continue
+            published, precision = fallback.isoformat(), "month"
         rows.append(
             {
                 "id": arxiv_id,
                 "title": source.get("title", ""),
                 "snippet": source.get("abstract", ""),
-                "published_date": published.isoformat(),
-                "date_precision": "month",
+                "published_date": published,
+                "date_precision": precision,
                 # The rendered tool output carries no Semantic Scholar paper ID,
                 # and the arXiv ID is already the unique key for a source here.
                 "paper_id": arxiv_id,
