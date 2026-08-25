@@ -6,6 +6,7 @@ absent task.
 """
 
 from olmo_eval.evals.vision.benchmarks import ai2d as _ai2d  # noqa: F401
+from olmo_eval.evals.vision.benchmarks import blink as _blink  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import chart_qa as _chart_qa  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import charxiv as _charxiv  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import countbench_qa as _countbench_qa  # noqa: F401
@@ -13,8 +14,10 @@ from olmo_eval.evals.vision.benchmarks import dense_caption as _dense_caption  #
 from olmo_eval.evals.vision.benchmarks import doc_qa as _doc_qa  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import info_qa as _info_qa  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import math_vista as _math_vista  # noqa: F401
+from olmo_eval.evals.vision.benchmarks import mmiu as _mmiu  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import mmmu as _mmmu  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import mmmu_pro as _mmmu_pro  # noqa: F401
+from olmo_eval.evals.vision.benchmarks import muir_bench as _muir_bench  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import pixmo_count as _pixmo_count  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import pixmo_points_eval as _pixmo_points_eval  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import real_world_qa as _real_world_qa  # noqa: F401
