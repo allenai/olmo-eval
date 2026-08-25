@@ -154,3 +154,19 @@ class TestLazyImageRequests:
         # no-image requests pass through untouched
         bare = LMRequest(request_type=RequestType.CHAT, prompt="q")
         assert _result_request(bare) is bare
+
+
+class TestLazyMultiImageRequests:
+    def test_list_entries_flatten_and_cap(self, tmp_path):
+        PIL_Image = pytest.importorskip("PIL.Image")
+        from olmo_eval.evals.vision.data.images import capped_image_list
+
+        paths = []
+        for i in range(3):
+            path = tmp_path / f"{i}.png"
+            PIL_Image.new("RGB", (2 + i, 2)).save(path)
+            paths.append(str(path))
+        entry = capped_image_list(paths, max_images=2)
+        resolved = resolve_images((entry,))
+        assert resolved is not None
+        assert [img.size for img in resolved] == [(2, 2), (3, 2)]
