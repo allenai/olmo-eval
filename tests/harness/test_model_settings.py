@@ -143,3 +143,55 @@ class TestOverridePath:
         preset_doc = HarnessPresets.__dict__["arxiv_paper_search_agent"]._factory.__doc__ or ""
 
         assert "scaffold_kwargs.model_settings.reasoning_effort=none" in preset_doc + docstring
+
+
+class TestToDictIsolation:
+    """to_dict must not hand out the config's own mutable scaffold_kwargs.
+
+    The override path writes into the dict to_dict returns, and presets are
+    cached for the life of the process, so an alias let one launch's overrides
+    survive into every later config built from the same preset. Stated here
+    against a plain config rather than a preset: the bug belongs to
+    HarnessConfig, and a preset only decides whether anyone notices.
+    """
+
+    def _config(self) -> HarnessConfig:
+        return HarnessConfig(
+            name="test",
+            scaffold="openai_agents",
+            scaffold_kwargs={"model_settings": {"temperature": 0.0}},
+        )
+
+    def test_mutating_the_returned_dict_leaves_the_config_alone(self):
+        config = self._config()
+
+        serialized = config.to_dict()
+        serialized["scaffold_kwargs"]["model_settings"]["temperature"] = 1.0
+
+        assert config.scaffold_kwargs["model_settings"]["temperature"] == 0.0
+
+    def test_an_override_does_not_mutate_the_config_it_was_applied_to(self):
+        # The path an operator actually takes: -o writes leaves into the dict
+        # to_dict handed back, which used to be the config's own.
+        from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+
+        config = self._config()
+
+        applied = _apply_harness_overrides(
+            config, ["scaffold_kwargs.model_settings.reasoning_effort=none"]
+        )
+
+        assert applied.scaffold_kwargs["model_settings"]["reasoning_effort"] == "none"
+        assert "reasoning_effort" not in config.scaffold_kwargs["model_settings"]
+
+    def test_two_overrides_of_one_config_do_not_accumulate(self):
+        # The symptom that would reach a run: a second launch inheriting the
+        # first's settings.
+        from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+
+        config = self._config()
+
+        _apply_harness_overrides(config, ["scaffold_kwargs.model_settings.reasoning_effort=none"])
+        second = _apply_harness_overrides(config, ["scaffold_kwargs.model_settings.top_p=0.9"])
+
+        assert "reasoning_effort" not in second.scaffold_kwargs["model_settings"]
