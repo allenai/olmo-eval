@@ -51,7 +51,10 @@ _PREFIX_REGEXES = (
 _ANSWER_REGEXES = (r"[\s\S]*?\\boxed\{(.*?)\}[\s\S]*?", r"(.*)\.?")
 _FORMAT_CORRECT_CUTOFF = 0.4
 
-# Mathy delimiters stripped when they surround the whole answer text.
+# Mathy delimiters stripped before extraction. Ported verbatim from the
+# reference implementation, whose substitution is unanchored and per-line:
+# on each line the outermost left/right pair is dropped wherever it
+# appears, not only when it surrounds the whole answer.
 _DELIMITERS_TO_STRIP = (
     ("$", "$"),
     ("\\(", "\\)"),
