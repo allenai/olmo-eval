@@ -13,30 +13,12 @@ from olmo_eval.runners.asynq.types import WORKER_FATAL
 logger = get_logger(__name__)
 
 
-_DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
-
-
-def _provider_init_timeout_seconds() -> float:
-    """Seconds to wait for a worker's provider to come up.
-
-    Large checkpoints read over shared storage can take many minutes to load, and
-    concurrent runs against the same weights are slower still, so
-    ``OLMO_EVAL_PROVIDER_INIT_TIMEOUT`` raises the ceiling without a code change.
-    """
-    raw = os.environ.get("OLMO_EVAL_PROVIDER_INIT_TIMEOUT")
-    if raw:
-        try:
-            return float(raw)
-        except ValueError:
-            logger.warning(
-                "Ignoring non-numeric OLMO_EVAL_PROVIDER_INIT_TIMEOUT=%r; using %s seconds.",
-                raw,
-                _DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS,
-            )
-    return _DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS
-
-
-DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = _provider_init_timeout_seconds()
+#: How long to wait for a worker's provider to come up. Large checkpoints read over
+#: shared storage can take most of the default 900s, and concurrent runs against the
+#: same weights take longer, so the env var raises the ceiling without a code change.
+DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = float(
+    os.environ.get("OLMO_EVAL_PROVIDER_INIT_TIMEOUT") or 900.0
+)
 
 
 def terminate_workers(
