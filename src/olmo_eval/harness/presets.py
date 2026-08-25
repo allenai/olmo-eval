@@ -234,6 +234,25 @@ class HarnessPresets:
         /v1/chat/completions rejects the combination outright -- need it turned
         off for the run:
         `-o scaffold_kwargs.model_settings.reasoning_effort=none`.
+
+        Thinking mode is pinned off rather than inherited. Today's backbones
+        happen to default it off, so this is no behaviour change for them, but
+        the default belongs to each model's chat template: a future backbone
+        shipping it on would run in thinking mode unannounced, and with no
+        reasoning parser configured on this preset its <think> block would land
+        in final_output and be scored as the answer. lit-agents pinned the same
+        thing for the same reason (shared/server.py's
+        --default-chat-template-kwargs enable_thinking:false).
+
+        The pin rides on model_settings.extra_body, not on the provider's own
+        chat_template_kwargs, because this preset's scaffold is openai_agents:
+        it builds an OpenAIChatCompletionsModel over the provider's client and
+        never calls VLLMServerProvider's generate path, so a provider-level
+        chat_template_kwargs would be a knob that silently does nothing. The
+        agents SDK forwards ModelSettings.extra_body into the request body,
+        which is where vLLM reads chat_template_kwargs from. Dotted -o
+        overrides set one leaf at a time, so overriding reasoning_effort above
+        leaves this pin standing.
         """
         from .tools.search import arxiv_paper_search
 
@@ -245,6 +264,11 @@ class HarnessPresets:
             ),
             tools=(arxiv_paper_search,),
             system_prompt=ARXIV_PAPER_SEARCH_SYSTEM_PROMPT,
+            scaffold_kwargs={
+                "model_settings": {
+                    "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+                },
+            },
             # Writing a related-works section takes more searching than a
             # single-answer lookup, so this doubles paper_search_agent's turns.
             max_turns=20,

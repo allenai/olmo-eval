@@ -114,7 +114,7 @@ class TestOverridePath:
     def test_nested_override_reaches_scaffold_kwargs(self):
         config = self._apply(["scaffold_kwargs.model_settings.reasoning_effort=none"])
 
-        assert config.scaffold_kwargs["model_settings"] == {"reasoning_effort": "none"}
+        assert config.scaffold_kwargs["model_settings"]["reasoning_effort"] == "none"
 
     def test_the_literal_none_stays_a_string(self):
         # "none" is a valid reasoning effort; coercing it to Python None would
@@ -131,10 +131,12 @@ class TestOverridePath:
         assert settings.reasoning.effort == "none"
 
     def test_the_preset_does_not_pin_reasoning_itself(self):
-        # Other backbones on this preset must keep their reasoning.
+        # Other backbones on this preset must keep their reasoning. The preset
+        # does configure model_settings -- for the chat-template pin below --
+        # so this asks the narrower question it always meant to ask.
         preset = get_harness_preset("arxiv_paper_search_agent")
 
-        assert "model_settings" not in preset.scaffold_kwargs
+        assert "reasoning_effort" not in preset.scaffold_kwargs.get("model_settings", {})
 
     def test_the_preset_documents_the_flag(self):
         docstring = get_harness_preset.__doc__ or ""
@@ -195,3 +197,65 @@ class TestToDictIsolation:
         second = _apply_harness_overrides(config, ["scaffold_kwargs.model_settings.top_p=0.9"])
 
         assert "reasoning_effort" not in second.scaffold_kwargs["model_settings"]
+
+
+class TestThinkingPin:
+    """Thinking mode is pinned off on arxiv_paper_search_agent, not inherited.
+
+    Every current backbone's chat template happens to default it off, so this
+    buys nothing today and everything the day one does not: this preset
+    configures no reasoning parser, so a <think> block would arrive inside
+    message content and be scored as the answer. lit-agents pinned the same
+    thing on its own server (--default-chat-template-kwargs enable_thinking:false).
+    """
+
+    EXPECTED = {"chat_template_kwargs": {"enable_thinking": False}}
+
+    def test_the_preset_pins_thinking_off(self):
+        preset = get_harness_preset("arxiv_paper_search_agent")
+
+        settings = build_model_settings(preset.scaffold_kwargs["model_settings"])
+
+        assert settings.extra_body == self.EXPECTED
+
+    def test_the_pin_reaches_the_agent(self):
+        preset = get_harness_preset("arxiv_paper_search_agent")
+
+        agent = _agent_for(preset.scaffold_kwargs)
+
+        assert agent.model_settings.extra_body == self.EXPECTED
+
+    def test_the_pin_rides_extra_body_rather_than_the_provider(self):
+        # This preset's scaffold is openai_agents, which builds its own
+        # OpenAIChatCompletionsModel over the provider's client and never calls
+        # VLLMServerProvider's generate path. A chat_template_kwargs set on the
+        # provider would therefore never reach the wire -- exactly the knob that
+        # silently does nothing this module exists to prevent.
+        preset = get_harness_preset("arxiv_paper_search_agent")
+
+        assert preset.scaffold == "openai_agents"
+        assert "chat_template_kwargs" not in preset.provider.kwargs
+
+    def test_the_pin_survives_a_reasoning_effort_override(self):
+        # Dotted -o overrides set one leaf at a time; turning reasoning off for a
+        # backbone that refuses tools alongside it must not take the pin with it.
+        from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+
+        config = _apply_harness_overrides(
+            get_harness_preset("arxiv_paper_search_agent"),
+            ["scaffold_kwargs.model_settings.reasoning_effort=none"],
+        )
+
+        settings = build_model_settings(config.scaffold_kwargs["model_settings"])
+
+        assert settings.extra_body == self.EXPECTED
+        assert settings.reasoning.effort == "none"
+
+    def test_the_pin_survives_serialization(self):
+        # Beaker jobs rebuild the harness config from its dict form; a pin that
+        # did not round-trip would hold locally and vanish on the cluster.
+        preset = get_harness_preset("arxiv_paper_search_agent")
+
+        rebuilt = HarnessConfig.from_dict(preset.to_dict())
+
+        assert rebuilt.scaffold_kwargs["model_settings"]["extra_body"] == self.EXPECTED
