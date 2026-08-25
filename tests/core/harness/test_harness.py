@@ -117,6 +117,35 @@ class TestHarness:
 
         assert transformed.system_prompt == "You are a helpful assistant."
 
+    def test_harness_apply_config_preserves_images(self, mock_provider_config):
+        """_apply_config must carry LMRequest.images through to the provider."""
+        config = HarnessConfig(name="with_images", provider=mock_provider_config)
+        harness = Harness(config)
+
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": "Describe this image."},),
+            images=("fake-image",),
+        )
+
+        transformed = harness._apply_config(request)
+
+        assert transformed.images == ("fake-image",)
+
+    def test_harness_apply_config_images_default_none(self, mock_provider_config):
+        """Text requests (no images) stay images=None through _apply_config."""
+        config = HarnessConfig(name="no_images", provider=mock_provider_config)
+        harness = Harness(config)
+
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": "Hello"},),
+        )
+
+        transformed = harness._apply_config(request)
+
+        assert transformed.images is None
+
     def test_harness_inject_system_prompt(self, mock_provider_config):
         """Test system prompt injection into messages."""
         config = HarnessConfig(
