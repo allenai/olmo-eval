@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import olmo_eval.inference.providers.olmo_core_utils as core_utils
 from olmo_eval.common.debug import is_debug_requests
+from olmo_eval.common.images import resolve_images
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.providers.olmo_core_vlm import cache, checkpoint, preprocessing
@@ -326,7 +327,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
         :returns: ``(token_ids, images, pooled_patches_idx)`` where the tensors
             are ``None`` for text-only requests.
         """
-        images = tuple(request.images or ())
+        images = resolve_images(request.images) or ()
         image_tensor = pooling_tensor = None
         token_sequences: list[list[int]] = []
         if images:
