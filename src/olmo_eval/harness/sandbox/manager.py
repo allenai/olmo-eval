@@ -20,7 +20,12 @@ from .config import Capability, SandboxConfig, SandboxMode
 from .errors import SandboxInfrastructureError
 from .executor import SandboxExecutor
 
-_MAX_SANDBOX_START_WORKERS = 16
+# Modal currently limits this service account to five sandbox creations per
+# second. A larger burst makes otherwise healthy code evals nondeterministically
+# miss their minimum pool size, especially when multiple Beaker jobs start at
+# once. This only bounds pool startup; scoring still uses the full configured
+# sandbox concurrency after the pool is ready.
+_MAX_SANDBOX_START_WORKERS = 4
 _ResultT = TypeVar("_ResultT")
 
 
