@@ -15,6 +15,10 @@ from olmo_eval.evals.vision.scoring.math_vista_offline import (
     normalize_extracted_answer,
     safe_equal,
 )
+from olmo_eval.evals.vision.scoring.multi_image import (
+    multi_image_mc_score,
+    strip_multi_image_response,
+)
 from olmo_eval.evals.vision.scoring.multiple_choice import (
     eval_multi_choice,
     eval_open,
@@ -43,6 +47,8 @@ from olmo_eval.evals.vision.scoring.vqa_normalization import (
 )
 
 __all__ = [
+    "multi_image_mc_score",
+    "strip_multi_image_response",
     "DEMO_PROMPT",
     "EVAL_LOADER_SEED",
     "LONG_CAPTION_TEMPLATES",
