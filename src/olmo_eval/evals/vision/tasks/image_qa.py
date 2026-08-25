@@ -1,4 +1,4 @@
-"""The image-QA task base and the counting metric family."""
+"""The image-QA task base and its metric families."""
 
 from __future__ import annotations
 
