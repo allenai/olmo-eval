@@ -148,4 +148,18 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             dtype="float32",
             kwargs={"multimodal": True, "max_crops": 24, "autocast_dtype": "bfloat16"},
         ),
+        "molmo2-8b": ProviderConfig(
+            kind=ProviderKind.HF,
+            model="allenai/Molmo2-8B",
+            trust_remote_code=True,
+            dtype="float32",
+            kwargs={"multimodal": True, "max_crops": 24, "autocast_dtype": "bfloat16"},
+        ),
+        "molmo2-o-7b": ProviderConfig(
+            kind=ProviderKind.HF,
+            model="allenai/Molmo2-O-7B",
+            trust_remote_code=True,
+            dtype="float32",
+            kwargs={"multimodal": True, "max_crops": 24, "autocast_dtype": "bfloat16"},
+        ),
     }
