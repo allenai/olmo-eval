@@ -1079,6 +1079,73 @@ class TestDetectGpuRequirement:
         # 2 instances × 1 TP (main) + 0 (external server) = 2 GPUs
         assert gpus == 2
 
+    def test_local_auxiliary_counted_with_api_backed_main_provider(self):
+        """Local auxiliary instances require GPUs even when the main provider does not."""
+        loader = LaunchConfigLoader(config_path=None, cli_args={})
+
+        gpus = loader._detect_gpu_requirement(
+            model_spec="gpt-4o",
+            harness_name="dr_tulu",
+            harness_overrides=[
+                "auxiliary_providers.judge.kind=vllm_server",
+                "auxiliary_providers.judge.model=Qwen/Qwen3-8B",
+                "auxiliary_providers.judge.num_instances=3",
+            ],
+        )
+
+        assert gpus == 3
+
+    def test_rejects_gpu_count_below_main_and_auxiliary_requirements(self):
+        """An explicit allocation must fit every local provider instance."""
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "model": ("Qwen/Qwen3-8B",),
+                "task": ("olmobase:code",),
+                "cluster": "h100",
+                "workspace": "ai2/test-workspace",
+                "budget": "ai2/test-budget",
+                "gpus": 4,
+                "harness": "dr_tulu",
+                "harness_overrides": [
+                    "provider.num_instances=2",
+                    "auxiliary_providers.judge.kind=vllm_server",
+                    "auxiliary_providers.judge.model=Qwen/Qwen3-8B",
+                    "auxiliary_providers.judge.num_instances=3",
+                ],
+            },
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            loader.load()
+
+        assert exc_info.value.code == 1
+
+    def test_auto_sets_gpu_count_to_main_and_auxiliary_requirements(self):
+        """The default allocation grows to fit all local provider instances."""
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "model": ("Qwen/Qwen3-8B",),
+                "task": ("olmobase:code",),
+                "cluster": "h100",
+                "workspace": "ai2/test-workspace",
+                "budget": "ai2/test-budget",
+                "gpus": None,
+                "harness": "dr_tulu",
+                "harness_overrides": [
+                    "provider.num_instances=2",
+                    "auxiliary_providers.judge.kind=vllm_server",
+                    "auxiliary_providers.judge.model=Qwen/Qwen3-8B",
+                    "auxiliary_providers.judge.num_instances=3",
+                ],
+            },
+        )
+
+        config = loader.load()
+
+        assert config.gpus == 5
+
 
 class TestLaunchConfigLoaderExperimentNames:
     """Tests for auto-generated Beaker experiment names."""
@@ -1092,7 +1159,7 @@ class TestLaunchConfigLoaderExperimentNames:
                 "cluster": "h100",
                 "workspace": "ai2/test-workspace",
                 "budget": "ai2/test-budget",
-                "gpus": 0,
+                "gpus": 1,
             },
         )
 
@@ -1109,7 +1176,7 @@ class TestLaunchConfigLoaderExperimentNames:
                 "cluster": "h100",
                 "workspace": "ai2/test-workspace",
                 "budget": "ai2/test-budget",
-                "gpus": 0,
+                "gpus": 1,
             },
         )
 
