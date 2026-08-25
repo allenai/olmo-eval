@@ -217,6 +217,8 @@ select = [
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
 # Verbatim prompt template from the oe-eval/ZeroEval reference implementation
 "src/olmo_eval/evals/tasks/zebralogic.py" = ["E501", "W291"]
+# Verbatim prompt templates vendored from the mm_olmo reference implementation
+"src/olmo_eval/evals/vision/scoring/prompt_templates.py" = ["E501"]
 [tool.ruff.format]
 docstring-code-format = true
 
