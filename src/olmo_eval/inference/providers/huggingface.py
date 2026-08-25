@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.common.images import resolve_images
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import (
     LMOutput,
@@ -455,14 +456,16 @@ class HuggingFaceProvider(InferenceProvider):
 
         return tokens, "".join(decoded_parts)
 
-    def _build_chat_messages(self, request: LMRequest) -> list[dict[str, Any]]:
+    def _build_chat_messages(
+        self, request: LMRequest, images: tuple[Any, ...] | None
+    ) -> list[dict[str, Any]]:
         """Build processor chat messages, injecting images into the user turn.
 
         Mirrors the released Molmo2 HF eval: a single user turn whose content is
         the image(s) followed by the question text. A system message (if present)
         is preserved as a text-only turn; images attach to the first user turn.
         """
-        image_parts = [{"type": "image", "image": img} for img in (request.images or ())]
+        image_parts = [{"type": "image", "image": img} for img in (images or ())]
         messages = request.messages or ({"role": "user", "content": request.prompt},)
 
         chat: list[dict[str, Any]] = []
@@ -506,9 +509,10 @@ class HuggingFaceProvider(InferenceProvider):
 
         results = []
         for request in requests:
-            chat = self._build_chat_messages(request)
+            images = resolve_images(request.images)
+            chat = self._build_chat_messages(request, images)
             pil_images = []
-            for img in request.images or ():
+            for img in images or ():
                 if hasattr(img, "mode") and img.mode != "RGB":
                     img = img.convert("RGB")
                 pil_images.append(img)
