@@ -9,10 +9,12 @@ paper.
 import pytest
 
 from olmo_eval.evals.tasks.deepscholar_citations import (
+    FINAL_REPORT_MARKER,
     abs_url,
     reference_list,
     resolve_numbering,
     rewrite_intro,
+    split_final_report,
     strip_references,
     unresolved_citation_forms,
 )
@@ -289,3 +291,107 @@ class TestCitationForms:
         intro, _ = rewrite_intro(NUMBERED_ANSWER, SOURCES)
 
         assert unresolved_citation_forms(intro) == 0
+
+
+class TestSplitFinalReport:
+    """The delimiter contract: deliberate above the line, deliver below it.
+
+    The preset's system prompt buys the scorer a clean report out of an answer
+    the model is otherwise free to think out loud in. These pin both directions
+    of that bargain -- what counts as the line, and what does not.
+    """
+
+    REPORT = (
+        "## Related Works\n\nEarly systems retrieved passages [1].\n\n"
+        "## References\n\n[1] A. Author. First Retrieval System. arXiv:2401.00001\n"
+    )
+    DELIBERATION = "Let me search for retrieval papers first, then scaling work.\n"
+
+    def test_the_marker_drops_the_deliberation_above_it(self):
+        body, found = split_final_report(
+            self.DELIBERATION + "\n" + FINAL_REPORT_MARKER + "\n\n" + self.REPORT
+        )
+
+        assert found is True
+        assert body == self.REPORT
+        assert "Let me search" not in body
+        # The marker line is a delimiter, not content; leaving it in would put a
+        # row of "=" at the top of every scored intro.
+        assert "FINAL REPORT" not in body
+
+    def test_an_answer_without_the_marker_survives_whole(self):
+        # The fallback is today's behaviour exactly: non-compliance is measured,
+        # never punished by throwing the answer away.
+        body, found = split_final_report(self.DELIBERATION + self.REPORT)
+
+        assert found is False
+        assert body == self.DELIBERATION + self.REPORT
+
+    def test_the_last_marker_wins(self):
+        answer = (
+            FINAL_REPORT_MARKER
+            + "\nA draft I abandoned.\n\nOn reflection that was wrong.\n\n"
+            + FINAL_REPORT_MARKER
+            + "\n"
+            + self.REPORT
+        )
+
+        body, found = split_final_report(answer)
+
+        assert found is True
+        assert body == self.REPORT
+        assert "abandoned" not in body
+
+    def test_the_sentinel_named_inside_a_sentence_is_not_a_marker(self):
+        # A model explaining the instruction back to itself must not thereby
+        # throw its own report away.
+        answer = "I will write " + FINAL_REPORT_MARKER + " when I am ready.\n\n" + self.REPORT
+
+        body, found = split_final_report(answer)
+
+        assert found is False
+        assert body == answer
+
+    def test_trailing_prose_on_the_marker_line_is_not_a_marker(self):
+        answer = FINAL_REPORT_MARKER + " starts here\n" + self.REPORT
+
+        _, found = split_final_report(answer)
+
+        assert found is False
+
+    def test_a_marker_with_nothing_above_it_is_a_no_op(self):
+        body, found = split_final_report(FINAL_REPORT_MARKER + "\n" + self.REPORT)
+
+        assert found is True
+        assert body == self.REPORT
+
+    def test_a_padded_rule_still_means_the_marker(self):
+        body, found = split_final_report(
+            self.DELIBERATION + "\n===== FINAL REPORT =====\n" + self.REPORT
+        )
+
+        assert found is True
+        assert body == self.REPORT
+
+    def test_an_indented_marker_line_still_splits(self):
+        body, found = split_final_report(
+            self.DELIBERATION + "\n   " + FINAL_REPORT_MARKER + "   \n" + self.REPORT
+        )
+
+        assert found is True
+        assert body == self.REPORT
+
+    def test_the_reference_list_under_the_marker_is_the_one_that_is_read(self):
+        # The point of the split: a numbered list drafted while deliberating
+        # must not be mistaken for the reference list the answer published.
+        answer = (
+            "Draft list:\n\n## References\n\n[1] Something I later dropped.\n\n"
+            + FINAL_REPORT_MARKER
+            + "\n"
+            + self.REPORT
+        )
+
+        body, found = split_final_report(answer)
+
+        assert found is True
+        assert reference_list(body) == {"1": "A. Author. First Retrieval System. arXiv:2401.00001"}
