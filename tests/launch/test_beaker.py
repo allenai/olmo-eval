@@ -744,11 +744,12 @@ class TestBuildCommandWithTaskPackages:
             "uv pip install --refresh-package torchaudio --reinstall-package torchaudio "
             "--index-url https://download.pytorch.org/whl/cu128 'torchaudio==2.10.0+cu128'"
         )
-        freeze = "uv pip freeze -q | grep -E '^(torch|torchvision|torchaudio|nvidia-)'"
+        freeze = "uv pip freeze -q | grep -E '^(torch(==| @ )|nvidia-)'"
         assert torch_install in install_cmd
         assert torchvision_install in install_cmd
         assert torchaudio_install in install_cmd
         assert freeze in install_cmd
+        assert "grep -vE '^nvidia-cutlass-dsl'" in install_cmd
         assert install_cmd.index(torch_install) < install_cmd.index(torchvision_install)
         assert install_cmd.index(torchvision_install) < install_cmd.index(torchaudio_install)
         assert install_cmd.index(torchaudio_install) < install_cmd.index(freeze)
