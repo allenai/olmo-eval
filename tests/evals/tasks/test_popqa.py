@@ -59,6 +59,24 @@ class TestPopQATask(unittest.TestCase):
         self.assertIn(" A: ", examples[0])
         self.assertTrue(request.prompt.endswith("Q: What is X? A:"))
 
+    def _task_with_fewshot(self, num_fewshot: int):
+        """``get_task`` hands back a shared config, so restore it afterwards."""
+        task = get_task("popqa")
+        original = task.config.num_fewshot
+        self.addCleanup(setattr, task.config, "num_fewshot", original)
+        task.config.num_fewshot = num_fewshot
+        return task
+
+    def test_zero_shot_override_drops_all_examples(self) -> None:
+        """A zero-shot override must not fall back to the full fixed set."""
+        task = self._task_with_fewshot(0)
+        self.assertEqual(task._build_fewshot(), [])
+        request = task.format_request(_make_instance(["answer"]))
+        self.assertEqual(request.prompt, "Q: What is X? A:")
+
+    def test_fewshot_truncates_to_requested_count(self) -> None:
+        self.assertEqual(len(self._task_with_fewshot(3)._build_fewshot()), 3)
+
     def test_chat_fewshot_in_single_message(self) -> None:
         task = get_task("popqa:chat")
         request = task.format_request(_make_instance(["answer"]))

@@ -91,6 +91,9 @@ class PopQA(Task):
         )
 
     def _build_fewshot(self) -> list[Instance]:
+        num_fewshot = self.config.num_fewshot or 0
+        if num_fewshot <= 0:
+            return []
         instances = [
             Instance(
                 question=_format_query(str(doc["question"])),
@@ -99,9 +102,7 @@ class PopQA(Task):
             )
             for index, doc in enumerate(POPQA_FIXED_FEWSHOT)
         ]
-        if self.config.num_fewshot and self.config.num_fewshot < len(instances):
-            instances = instances[: self.config.num_fewshot]
-        return instances
+        return instances[:num_fewshot]
 
     def format_request(self, instance: Instance) -> LMRequest:
         parts = [f"{ex.question} {ex.gold_answer}" for ex in self.get_fewshot()]
