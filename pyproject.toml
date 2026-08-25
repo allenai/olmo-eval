@@ -62,11 +62,6 @@ vllm = [
 ]
 litellm = [
     "litellm~=1.80.11",
-    # openai-agents 0.7.0 breaks against openai>=2.54 (InputTokensDetails gained
-    # cache_write_tokens); the pin lived only in the `clients` extra, which Beaker
-    # launches never install, so containers resolved 2.54 and every agent call
-    # failed while local venvs kept working. Pin it where the runtime installs it.
-    "openai~=2.21.0",
 ]
 agents = [
     "openai-agents~=0.7.0",
