@@ -6,6 +6,7 @@ import asyncio
 import atexit
 import concurrent.futures
 import contextlib
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
@@ -20,18 +21,17 @@ from .config import Capability, SandboxConfig, SandboxMode
 from .errors import SandboxInfrastructureError
 from .executor import SandboxExecutor
 
-# Modal currently limits this service account to five sandbox creations per
-# second. A larger burst makes otherwise healthy code evals nondeterministically
-# miss their minimum pool size, especially when multiple Beaker jobs start at
-# once. This only bounds pool startup; scoring still uses the full configured
-# sandbox concurrency after the pool is ready.
-_MAX_SANDBOX_START_WORKERS = 4
+_MAX_SANDBOX_START_WORKERS = 16
+_SANDBOX_START_WORKERS_ENV = "OLMO_EVAL_SANDBOX_START_WORKERS"
 _ResultT = TypeVar("_ResultT")
 
 
 def _sandbox_start_worker_count(executor_count: int) -> int:
     """Return the bounded number of concurrent sandbox startup workers."""
-    return min(executor_count, _MAX_SANDBOX_START_WORKERS)
+    max_workers = int(os.environ.get(_SANDBOX_START_WORKERS_ENV, _MAX_SANDBOX_START_WORKERS))
+    if max_workers < 1:
+        raise ValueError(f"{_SANDBOX_START_WORKERS_ENV} must be at least 1")
+    return min(executor_count, max_workers)
 
 
 class _NoSandboxAvailableError(ValueError):

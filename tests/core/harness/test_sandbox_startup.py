@@ -8,6 +8,22 @@ import pytest
 
 from olmo_eval.harness.sandbox import SandboxConfig, SandboxManager, SandboxMode
 from olmo_eval.harness.sandbox.executor import SandboxExecutor
+from olmo_eval.harness.sandbox.manager import _sandbox_start_worker_count
+
+
+def test_sandbox_start_worker_count_can_be_bounded_by_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OLMO_EVAL_SANDBOX_START_WORKERS", "1")
+    assert _sandbox_start_worker_count(128) == 1
+
+
+def test_sandbox_start_worker_count_rejects_nonpositive_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OLMO_EVAL_SANDBOX_START_WORKERS", "0")
+    with pytest.raises(ValueError, match="must be at least 1"):
+        _sandbox_start_worker_count(128)
 
 
 @pytest.mark.anyio
