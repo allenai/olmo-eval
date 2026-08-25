@@ -92,21 +92,27 @@ class IFEvalScorer(Scorer):
             registry = instructions_registry.INSTRUCTION_DICT
             loose_variants = _loose_response_variants(response)
             for inst_id, inst_kwargs in zip(instruction_ids, kwargs_list, strict=True):
-                # An instruction that cannot be built or checked (e.g. dataset
-                # kwargs the verifier does not accept) scores as not followed,
-                # matching the reference implementation, rather than failing
-                # the whole response.
+                # An instruction the dataset describes incorrectly — an
+                # unrecognized id, or kwargs the verifier does not accept —
+                # scores as not followed, matching the reference
+                # implementation, rather than failing the whole response.
+                # Failures raised while checking a successfully built
+                # instruction are not model behavior (missing NLTK corpora on
+                # an offline worker, say), so they propagate instead of being
+                # recorded as instructions the response did not follow.
                 try:
                     instruction = _build_instruction(
                         registry[inst_id], inst_id, inst_kwargs, prompt
                     )
-                    strict = _check_one(instruction, response)
-                    loose = any(_check_one(instruction, variant) for variant in loose_variants)
-                except Exception as exc:
-                    strict = loose = False
+                except (TypeError, KeyError) as exc:
                     errors[inst_id] = f"{type(exc).__name__}: {exc}"
-                strict_results.append(strict)
-                loose_results.append(loose)
+                    strict_results.append(False)
+                    loose_results.append(False)
+                    continue
+                strict_results.append(_check_one(instruction, response))
+                loose_results.append(
+                    any(_check_one(instruction, variant) for variant in loose_variants)
+                )
 
         if output.metadata is None:
             output.metadata = {}

@@ -182,6 +182,40 @@ class TestIFEvalScorer(unittest.TestCase):
         self.assertEqual(result["loose"], [False])
         self.assertIn("length_constraints:nth_paragraph_first_word", result["errors"])
 
+    def test_unknown_instruction_id_scores_false(self) -> None:
+        """An id absent from the verifier registry is a dataset problem too."""
+        instance = _make_instance("Do something.", ["nonexistent:instruction"], [{}])
+        output = LMOutput(text="anything")
+        self.assertEqual(IFEvalScorer().score(instance, output), 0.0)
+        result = output.metadata["ifeval"]
+        self.assertEqual(result["strict"], [False])
+        self.assertIn("nonexistent:instruction", result["errors"])
+
+    def test_check_time_failure_propagates(self) -> None:
+        """A verifier that builds but fails while checking is not a model error.
+
+        Missing NLTK corpora on an offline worker raise ``LookupError`` from
+        ``check_following``. Scoring that as an unfollowed instruction would
+        silently depress metrics, so it must surface instead.
+        """
+        from ifbench import instructions_registry
+
+        instruction_id = "words:start_verb"
+        registry = instructions_registry.INSTRUCTION_DICT
+        original = registry[instruction_id]
+
+        class _FailsWhileChecking(original):  # type: ignore[misc, valid-type]
+            def check_following(self, value: str) -> bool:
+                raise LookupError("Resource punkt_tab not found.")
+
+        registry[instruction_id] = _FailsWhileChecking
+        try:
+            instance = _make_instance("Start with a verb.", [instruction_id], [{}])
+            with self.assertRaises(LookupError):
+                IFEvalScorer().score(instance, LMOutput(text="Run the script."))
+        finally:
+            registry[instruction_id] = original
+
     def test_loose_never_stricter_than_strict_with_random_kwargs(self) -> None:
         """``count:word_count_range`` draws random min/max words when unset.
 
