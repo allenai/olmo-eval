@@ -5,7 +5,15 @@ The upstream scorer reads one directory per query holding ``intro.md``,
 run's ``*-predictions.jsonl``, so generation and scoring stay separate passes
 and a scoring change never requires re-running the model.
 
-``intro.md`` is NOT the raw answer. The benchmark prompt mandates numbered
+``intro.md`` is NOT the raw answer, and it is not even the whole answer. The
+preset's system prompt lets the model deliberate before it delivers, provided
+the deliverable begins at a marker line, so
+:func:`olmo_eval.evals.tasks.deepscholar_citations.split_final_report` drops
+everything above that line first; an answer carrying no marker is kept whole,
+and ``marker_compliance_rate`` in the returned summary records how often that
+fallback was needed.
+
+What remains is still rewritten. The benchmark prompt mandates numbered
 inline citations, while ``DeepScholarBaseParser`` credits only markdown links to
 arxiv.org/abs and returns no documents for a query without one, so the answer's
 citations are rewritten by
@@ -57,7 +65,7 @@ from olmo_eval.evals.tasks.deepscholar_bench import (
     download_deepscholar_dataset,
     sources_from_trajectory,
 )
-from olmo_eval.evals.tasks.deepscholar_citations import rewrite_intro
+from olmo_eval.evals.tasks.deepscholar_citations import rewrite_intro, split_final_report
 from olmo_eval.harness.tools.search import date_from_arxiv_id, normalize_arxiv_id
 
 logger = logging.getLogger(__name__)
@@ -509,7 +517,10 @@ def export_predictions(
                 f"Prediction {identifier} is not a query in the pinned dataset at "
                 f"{DEEPSCHOLAR_COMMIT}"
             )
-        answer = answer_text(prediction)
+        # The delimiter contract is applied before anything reads the answer,
+        # so the reference list parsed below is the one under the marker and
+        # not a numbered list the model happened to draft while deliberating.
+        answer, marker_found = split_final_report(answer_text(prediction))
         raw_trajectory = prediction.get("trajectory")
         trajectory = (
             AgentTrajectory.from_dict(raw_trajectory) if isinstance(raw_trajectory, dict) else None
@@ -518,14 +529,14 @@ def export_predictions(
         # A first pass only to learn which abstracts are worth re-fetching; the
         # binding pass runs below, once the fetched dates can be validated.
         _, provisional = rewrite_intro(answer, sources)
-        prepared.append((identifier, answer, sources, provisional))
+        prepared.append((identifier, answer, sources, provisional, marker_found))
 
     fetched: dict[str, dict[str, str]] = {}
     if fetch_abstracts:
         wanted = list(
             dict.fromkeys(
                 normalize_arxiv_id(str(source.get("arxiv_id") or ""))
-                for _, _, _, provisional in prepared
+                for _, _, _, provisional, _ in prepared
                 for source in provisional
             )
         )
@@ -533,17 +544,32 @@ def export_predictions(
 
     summary: list[dict[str, Any]] = []
     exported: list[int] = []
-    for identifier, answer, sources, _ in prepared:
+    answers_with_text = 0
+    markers_found = 0
+    for identifier, answer, sources, _, marker_found in prepared:
         record = records[identifier]
+        # A query that generated nothing can neither honour the delimiter
+        # contract nor break it, so it stays out of the rate's denominator. A
+        # marker followed by nothing did generate text and counts as compliant:
+        # the instruction was followed and the report was not written, and
+        # those are different failures.
+        if answer.strip() or marker_found:
+            answers_with_text += 1
+            markers_found += int(marker_found)
         if not answer.strip():
             summary.append(
                 {
                     "idx": identifier,
                     "arxiv_id": record["arxiv_id"],
                     "status": "no_answer",
-                    "reason": "the run produced no answer text",
+                    "reason": (
+                        "the answer's final-report marker was followed by no text"
+                        if marker_found
+                        else "the run produced no answer text"
+                    ),
                     "termination_reason": "empty_response",
                     "papers_retrieved": len(sources),
+                    "marker_found": marker_found,
                 }
             )
             continue
@@ -562,6 +588,7 @@ def export_predictions(
                     ),
                     "sources_considered": len(sources),
                     "source_rejections": {"unexportable_after_validation": len(sources)},
+                    "marker_found": marker_found,
                 }
             )
             continue
@@ -581,6 +608,7 @@ def export_predictions(
                 "arxiv_id": record["arxiv_id"],
                 "status": "success",
                 "num_papers": len(rows),
+                "marker_found": marker_found,
             }
         )
 
@@ -612,6 +640,16 @@ def export_predictions(
         "skipped": [item for item in summary if item["status"] != "success"],
         "skipped_count": sum(1 for item in summary if item["status"] != "success"),
         "snippet_fallback_rows": fallback_rows,
+        # Bookkeeping, not a score. The delimiter contract is measured and
+        # never enforced: an answer that skips the marker still exports, and
+        # this is how that shows up instead of being invisible. The per-query
+        # flags in summary.json make the rate recomputable from disk, which is
+        # where it has to live -- lit-agents' preflight rejects any extra key
+        # in export_manifest.json, so the per-query manifests keep its exact
+        # shape.
+        "answers_with_text": answers_with_text,
+        "markers_found": markers_found,
+        "marker_compliance_rate": (markers_found / answers_with_text if answers_with_text else 0.0),
     }
 
 
