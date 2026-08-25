@@ -53,3 +53,54 @@ def load_instance_image(instance: Instance):
 
         return Image.open(path)
     return None
+
+
+def _decode_hf_image_list_cell(dataset: Any, index: int, column: str) -> list:
+    """Decode one list-of-images cell of a no-decode HF dataset (module-level so it
+    is picklable)."""
+    import io
+
+    from PIL import Image
+
+    out = []
+    for rec in dataset[index][column]:
+        if isinstance(rec, dict):
+            if rec.get("bytes"):
+                rec = Image.open(io.BytesIO(rec["bytes"]))
+            elif rec.get("path"):
+                rec = Image.open(rec["path"])
+        out.append(rec)
+    return out
+
+
+def lazy_hf_image_list(dataset, index: int, column: str):
+    """A picklable zero-arg callable that decodes one list-of-images cell.
+
+    ``dataset`` should have ``column`` cast to a sequence of
+    ``datasets.Image(decode=False)`` so building instances never decodes pixels.
+    """
+    return functools.partial(_decode_hf_image_list_cell, dataset, index, column)
+
+
+def load_instance_images(instance: Instance) -> list:
+    """Resolve an instance's image list to PIL images.
+
+    ``instance.metadata["images"]`` may be a zero-arg callable returning the whole
+    list, or a sequence whose items are PIL images, zero-arg callables, or
+    filesystem paths.
+    """
+    images = instance.metadata.get("images")
+    if images is None:
+        return []
+    if callable(images):
+        images = images()
+    resolved = []
+    for image in images:
+        if callable(image):
+            image = image()
+        elif isinstance(image, str):
+            from PIL import Image
+
+            image = Image.open(image)
+        resolved.append(image)
+    return resolved
