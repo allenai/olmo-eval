@@ -34,6 +34,25 @@ serper_fetch_webpage_content before answering. Quote only text copied from
 fetched page content, and do not invent citations."""
 
 
+# The delimiter contract for deepscholar_bench's single arm. The benchmark's
+# user prompt is run verbatim and cannot be edited, and the 9B run showed why
+# something had to give: 45 of 63 answers reached their Related Works section
+# only after a median 9.8k characters of planning, all of which the scorer read
+# as the report. Banning deliberation would cost quality, so this buys the
+# split instead -- think above the line, deliver below it. Kept in sync with
+# deepscholar_citations.split_final_report by a test that reads the marker back
+# out of this string.
+ARXIV_PAPER_SEARCH_SYSTEM_PROMPT = """\
+You may plan and deliberate freely in your reply. When you are ready to deliver,
+write a line containing exactly:
+
+=== FINAL REPORT ===
+
+Everything after that line is your deliverable: only the Related Works section,
+followed by the numbered reference list. Text before the marker is discarded and
+is never evaluated."""
+
+
 # TODO(undfined): Remove reference to beaker
 def _get_logs_dir() -> str:
     """Get the logs directory based on environment."""
@@ -181,6 +200,13 @@ class HarnessPresets:
     def arxiv_paper_search_agent(name: str) -> HarnessConfig:
         """Agentic harness exposing only arXiv-filtered paper search.
 
+        The system prompt carries a delimiter contract: the model may deliberate
+        in its reply, but its deliverable starts at an exact marker line and
+        everything above that line is discarded before scoring. See
+        ARXIV_PAPER_SEARCH_SYSTEM_PROMPT and
+        deepscholar_citations.split_final_report, which reads the marker back
+        out.
+
         For tasks whose scorer credits arXiv sources alone (e.g.
         deepscholar_bench). Kept separate from `paper_search_agent` rather than
         added to it: which search tools an agent holds changes what it retrieves,
@@ -209,6 +235,7 @@ class HarnessPresets:
                 kwargs={"timeout": 120},
             ),
             tools=(arxiv_paper_search,),
+            system_prompt=ARXIV_PAPER_SEARCH_SYSTEM_PROMPT,
             # Writing a related-works section takes more searching than a
             # single-answer lookup, so this doubles paper_search_agent's turns.
             max_turns=20,

@@ -56,6 +56,7 @@ from olmo_eval.evals.tasks.deepscholar_citations import (
     reference_list,
     resolve_numbering,
     rewrite_intro,
+    split_final_report,
     strip_references,
     unresolved_citation_forms,
 )
@@ -261,20 +262,31 @@ def score_answer(answer: str, sources: Sequence[Mapping[str, str]]) -> dict[str,
     separates "the model cited nothing" from "the model cited papers it never
     retrieved" from "the bridge failed".
 
+    ``marker_compliance_rate`` is whether the answer delivered its report under
+    the marker line the preset's system prompt mandates. Bookkeeping, not
+    quality: an answer without the marker is scored on its full text exactly as
+    before, and this only records how often that happened, because the same
+    prompt run on a different backbone can comply at a very different rate.
+
     ``unresolved_citation_forms`` counts citation shapes no pass can turn into a
     link -- superscripts, footnote markers, author-year brackets. An answer that
     cited carefully in a style this bridge does not read scores zero on the other
     two, and without this it would look identical to one that never cited.
     """
-    _, cited = rewrite_intro(answer, list(sources))
-    published_refs = reference_list(answer)
-    resolved = resolve_numbering(answer, list(sources))
+    # Everything below the marker, or the whole answer when there is none --
+    # the same split the export applies, so a number reported during the run
+    # and a number reported after export describe the same text.
+    report, marker_found = split_final_report(answer)
+    _, cited = rewrite_intro(report, list(sources))
+    published_refs = reference_list(report)
+    resolved = resolve_numbering(report, list(sources))
     return {
         "exportable_rate": 1.0 if cited else 0.0,
         "citation_resolution_rate": (
             len(resolved) / len(published_refs) if published_refs else 0.0
         ),
-        "unresolved_citation_forms": float(unresolved_citation_forms(strip_references(answer))),
+        "unresolved_citation_forms": float(unresolved_citation_forms(strip_references(report))),
+        "marker_compliance_rate": 1.0 if marker_found else 0.0,
     }
 
 
@@ -339,11 +351,27 @@ class UnresolvedCitationFormsMetric(_DeepScholarMetricBase):
     name: str = "unresolved_citation_forms"
 
 
+@dataclass(frozen=True)
+class MarkerComplianceRateMetric(_DeepScholarMetricBase):
+    """Share of answers that delivered under the mandated final-report marker.
+
+    Not a quality measure and never a penalty: an answer that skips the marker
+    is scored on its whole text, as every answer was before the contract
+    existed. It is here because compliance is a property of the backbone rather
+    than of the prompt -- one model puts the line where it was asked to and the
+    next buries it in prose -- and scored deliberation looks like a bad report
+    unless this number says otherwise.
+    """
+
+    name: str = "marker_compliance_rate"
+
+
 EXPORTABLE_RATE_METRIC = ExportableRateMetric()
 DEEPSCHOLAR_METRICS = (
     EXPORTABLE_RATE_METRIC,
     CitationResolutionRateMetric(),
     UnresolvedCitationFormsMetric(),
+    MarkerComplianceRateMetric(),
 )
 
 

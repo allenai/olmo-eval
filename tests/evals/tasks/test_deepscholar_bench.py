@@ -27,6 +27,10 @@ from olmo_eval.evals.tasks.deepscholar_bench import (
     parse_arxiv_tool_results,
     sources_from_trajectory,
 )
+from olmo_eval.evals.tasks.deepscholar_citations import (
+    FINAL_REPORT_MARKER,
+    split_final_report,
+)
 from olmo_eval.evals.tasks.deepscholar_export import (
     PAPER_CSV_FIELDS,
     build_paper_rows,
@@ -147,6 +151,7 @@ class TestRegistration:
             "exportable_rate",
             "citation_resolution_rate",
             "unresolved_citation_forms",
+            "marker_compliance_rate",
         }
         assert task.config.get_primary_metric().name == "exportable_rate"
 
@@ -487,7 +492,15 @@ class TestExportAdapter:
         generation = json.loads((root / "generation_manifest.json").read_text(encoding="utf-8"))
 
         assert summary == [
-            {"idx": 7, "arxiv_id": "2506.00007", "status": "success", "num_papers": 3}
+            {
+                "idx": 7,
+                "arxiv_id": "2506.00007",
+                "status": "success",
+                "num_papers": 3,
+                # Every row carries the flag, so the compliance rate stays
+                # recomputable from the export on disk.
+                "marker_found": False,
+            }
         ]
         assert generation["system"] == "single_agent_1"
         assert [item["idx"] for item in generation["queries"]] == [7]
@@ -799,3 +812,187 @@ class TestExportRefusals:
 
         assert not (output / "99").exists()
         assert (output / "summary.json").is_file()
+
+
+class TestFinalReportMarkerExport:
+    """The delimiter contract as the export applies it.
+
+    The 9B run put a median 9.8k characters of planning above its Related Works
+    heading and the scorer read all of it as the report. The preset's system
+    prompt now asks for a marker line instead of banning the planning; these pin
+    what the export does with an answer that honours it and with one that does
+    not.
+    """
+
+    DELIBERATION = "First I will search for retrieval papers, then for scaling.\n"
+
+    def _prediction(self, answer: str, native_id: str = "7") -> dict:
+        trajectory = _trajectory(
+            _tool_output(
+                _paper("First Retrieval System", "2401.00001", published="2024-01-15"),
+                _paper("Scaling The Index", "2401.00002"),
+                _paper("Grounding Each Claim", "cs/0501001"),
+            )
+        )
+        return {
+            "doc_id": 0,
+            "native_id": native_id,
+            "final_output": answer,
+            "model_output": [{"text": answer}],
+            "trajectory": trajectory.to_dict(),
+        }
+
+    def _export(self, tmp_path, answer: str, name: str = "export"):
+        path = tmp_path / (name + "-predictions.jsonl")
+        path.write_text(json.dumps(self._prediction(answer)) + "\n", encoding="utf-8")
+        summary = export_predictions(
+            path,
+            tmp_path / name,
+            dataset_path=_dataset_csv(tmp_path, 7),
+            fetch_abstracts=False,
+        )
+        return summary, tmp_path / name
+
+    def _summary_rows(self, root):
+        return json.loads((root / "summary.json").read_text(encoding="utf-8"))
+
+    def test_the_marker_splits_the_deliberation_out_of_intro_md(self, tmp_path):
+        answer = self.DELIBERATION + "\n" + FINAL_REPORT_MARKER + "\n\n" + NUMBERED_ANSWER
+
+        summary, root = self._export(tmp_path, answer)
+
+        assert summary["exported_ids"] == [7]
+        intro = (root / "7" / "intro.md").read_text(encoding="utf-8")
+        assert "First I will search" not in intro
+        # No residue of the delimiter itself in the scored bytes.
+        assert "FINAL REPORT" not in intro
+        assert "===" not in intro
+        # And the bridge still ran on what was kept.
+        assert "[First Retrieval System](https://arxiv.org/abs/2401.00001)" in intro
+
+    def test_a_compliant_answer_scores_its_marker_compliance(self, tmp_path):
+        answer = self.DELIBERATION + "\n" + FINAL_REPORT_MARKER + "\n\n" + NUMBERED_ANSWER
+
+        summary, root = self._export(tmp_path, answer)
+
+        assert summary["marker_compliance_rate"] == 1.0
+        assert summary["markers_found"] == 1
+        assert summary["answers_with_text"] == 1
+        assert self._summary_rows(root)[0]["marker_found"] is True
+
+    def test_an_answer_without_the_marker_is_kept_whole_and_counted(self, tmp_path):
+        # The fallback must not cost the answer its export -- only its place in
+        # the compliance rate.
+        answer = self.DELIBERATION + NUMBERED_ANSWER
+
+        summary, root = self._export(tmp_path, answer)
+
+        assert summary["exported_ids"] == [7]
+        assert summary["marker_compliance_rate"] == 0.0
+        assert summary["markers_found"] == 0
+        assert self._summary_rows(root)[0]["marker_found"] is False
+        assert "First I will search" in (root / "7" / "intro.md").read_text(encoding="utf-8")
+
+    def test_the_last_marker_wins_in_the_export(self, tmp_path):
+        answer = (
+            FINAL_REPORT_MARKER
+            + "\n## Related Works\n\nAn abandoned draft citing nothing.\n\n"
+            + FINAL_REPORT_MARKER
+            + "\n"
+            + NUMBERED_ANSWER
+        )
+
+        summary, root = self._export(tmp_path, answer)
+
+        intro = (root / "7" / "intro.md").read_text(encoding="utf-8")
+        assert summary["marker_compliance_rate"] == 1.0
+        assert "abandoned draft" not in intro
+        assert "[First Retrieval System](https://arxiv.org/abs/2401.00001)" in intro
+
+    def test_the_sentinel_in_prose_does_not_split_the_export(self, tmp_path):
+        answer = "I will write " + FINAL_REPORT_MARKER + " when ready.\n\n" + NUMBERED_ANSWER
+
+        summary, root = self._export(tmp_path, answer)
+
+        assert summary["marker_compliance_rate"] == 0.0
+        assert "I will write" in (root / "7" / "intro.md").read_text(encoding="utf-8")
+
+    def test_a_marker_with_nothing_above_it_changes_nothing(self, tmp_path):
+        with_marker, marked_root = self._export(
+            tmp_path, FINAL_REPORT_MARKER + "\n" + NUMBERED_ANSWER, name="marked"
+        )
+        without, plain_root = self._export(tmp_path, NUMBERED_ANSWER, name="plain")
+
+        assert with_marker["exported_ids"] == without["exported_ids"] == [7]
+        assert (marked_root / "7" / "intro.md").read_text(encoding="utf-8") == (
+            plain_root / "7" / "intro.md"
+        ).read_text(encoding="utf-8")
+        # Same bytes, different bookkeeping: one followed the instruction.
+        assert with_marker["marker_compliance_rate"] == 1.0
+        assert without["marker_compliance_rate"] == 0.0
+
+    def test_a_reference_list_with_no_prose_is_unscoreable_but_still_flagged(self, tmp_path):
+        # Nothing cites anything once the reference tail is stripped, so there is
+        # no document for the upstream parser to find. That is a real result, not
+        # a marker failure, and the two must stay distinguishable.
+        answer = (
+            self.DELIBERATION
+            + "\n"
+            + FINAL_REPORT_MARKER
+            + "\n\n## References\n\n[1] A. Author. First Retrieval System. arXiv:2401.00001\n"
+        )
+
+        summary, root = self._export(tmp_path, answer)
+
+        assert summary["exported_ids"] == []
+        (row,) = self._summary_rows(root)
+        assert row["status"] == "no_eligible_source"
+        assert row["marker_found"] is True
+        assert summary["marker_compliance_rate"] == 1.0
+
+    def test_a_marker_followed_by_nothing_is_named_for_what_it_is(self, tmp_path):
+        # An empty tail is compliance without a deliverable; reporting it as "the
+        # run produced no answer text" would blame the wrong thing.
+        summary, root = self._export(tmp_path, self.DELIBERATION + FINAL_REPORT_MARKER + "\n")
+
+        (row,) = self._summary_rows(root)
+        assert row["status"] == "no_answer"
+        assert "marker was followed by no text" in row["reason"]
+        assert row["marker_found"] is True
+
+    def test_an_empty_answer_stays_out_of_the_compliance_denominator(self, tmp_path):
+        # A query that generated nothing can neither honour the contract nor
+        # break it; counting it as non-compliant would blame the prompt.
+        summary, root = self._export(tmp_path, "")
+
+        assert summary["answers_with_text"] == 0
+        assert summary["marker_compliance_rate"] == 0.0
+        assert self._summary_rows(root)[0]["reason"] == "the run produced no answer text"
+
+    def test_the_preset_prompt_and_the_export_agree_on_the_marker(self):
+        # The contract lives in two places -- the sentence the model reads and
+        # the regex the export applies -- and a silent drift between them would
+        # discard every report. So the marker is read back out of the prompt and
+        # run through the splitter.
+        from olmo_eval.harness.presets import get_harness_preset
+
+        prompt = get_harness_preset("arxiv_paper_search_agent").system_prompt
+        assert prompt is not None
+        mandated = [line for line in prompt.splitlines() if line.strip().startswith("===")]
+
+        assert mandated == [FINAL_REPORT_MARKER]
+        body, found = split_final_report("Planning.\n" + mandated[0] + "\nThe report.\n")
+        assert found is True
+        assert body == "The report.\n"
+
+    def test_the_preset_prompt_still_states_the_whole_contract(self):
+        # Three parts, all load-bearing: deliberation is allowed, the marker is
+        # exact, and what comes before it is thrown away. Dropping any one of
+        # them changes what the model does.
+        from olmo_eval.harness.presets import get_harness_preset
+
+        prompt = (get_harness_preset("arxiv_paper_search_agent").system_prompt or "").lower()
+
+        assert "deliberate" in prompt
+        assert "exactly" in prompt
+        assert "discarded" in prompt

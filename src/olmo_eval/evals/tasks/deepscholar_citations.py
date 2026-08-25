@@ -75,6 +75,22 @@ _REFERENCE_HEADING_RE = re.compile(
 )
 _CANONICAL_REFERENCE_HEADING = "references"
 
+# The delimiter the arxiv_paper_search_agent preset's system prompt asks for.
+# Deliberation is not banned -- an agent that plans in prose writes a better
+# related-works section, and the benchmark's own user prompt is verbatim and
+# cannot be edited to forbid it -- so the contract is a marker instead: think
+# above the line, deliver below it.
+FINAL_REPORT_MARKER = "=== FINAL REPORT ==="
+# Line-exact by construction. A model that names the sentinel inside a sentence
+# ("I will write === FINAL REPORT === once I have searched") must not split its
+# own answer, so only a whole line can match: MULTILINE anchors with nothing but
+# whitespace either side. The run of '=' is loosened to two-or-more because a
+# model that pads the rule still means the marker.
+_FINAL_REPORT_MARKER_RE = re.compile(
+    r"^\s*={2,}\s*FINAL REPORT\s*={2,}\s*$",
+    re.MULTILINE,
+)
+
 # Citation shapes neither this module nor lit-agents' render_intro resolves.
 # Counted rather than ignored: an answer full of them scores zero for a reason
 # worth seeing, and silence would make that look like a model that cited nothing.
@@ -139,6 +155,29 @@ def arxiv_ids_in_text(text: str) -> list[str]:
     found = [normalize_arxiv_id(match.group(1)) for match in _ARXIV_URL_RE.finditer(text)]
     found.extend(normalize_arxiv_id(match.group(1)) for match in _ARXIV_PROSE_ID_RE.finditer(text))
     return [arxiv_id for arxiv_id in found if arxiv_id]
+
+
+def split_final_report(answer: str) -> tuple[str, bool]:
+    """Return the deliverable half of an answer, and whether a marker chose it.
+
+    The LAST line-exact marker wins. A model that starts its report, thinks
+    better of it and starts again writes the marker twice, and the attempt it
+    stood behind is the last one; taking the first would score the draft it
+    abandoned. Everything above the winning marker is deliberation the
+    benchmark never asked for and is dropped along with the marker line itself,
+    so the retained tail is what the reference-list and citation passes read.
+
+    An answer with no line-exact marker comes back whole, which is exactly what
+    this module did before the contract existed -- a backbone that ignores the
+    instruction is scored no worse than it was. That fallback is deliberate but
+    not silent: the second return value is what ``marker_compliance_rate``
+    counts, so non-compliance surfaces as a number per backbone rather than as
+    unexplained deliberation sitting in the scored text.
+    """
+    matches = list(_FINAL_REPORT_MARKER_RE.finditer(answer))
+    if not matches:
+        return answer, False
+    return answer[matches[-1].end() :].lstrip("\n"), True
 
 
 def strip_references(report: str) -> str:
