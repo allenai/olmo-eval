@@ -202,6 +202,14 @@ select = [
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
 # Verbatim prompt templates vendored from the mm_olmo reference implementation
 "src/olmo_eval/evals/vision/scoring/prompt_templates.py" = ["E501"]
+"src/olmo_eval/evals/vision/scoring/vqa_normalization.py" = ["E501"]
+"src/olmo_eval/evals/vision/scoring/multiple_choice.py" = ["E501"]
+"src/olmo_eval/evals/vision/scoring/math_vista_offline.py" = ["E501"]
+"src/olmo_eval/evals/vision/scoring/mmmu_pro.py" = ["E501"]
+# CharXiv grading prompts are vendored byte-for-byte from the official repo; their trailing
+# whitespace is part of the official prompt bytes and must not be stripped.
+"src/olmo_eval/evals/vision/scoring/charxiv.py" = ["E501", "W291", "W293"]
+"tests/evals/vision/test_image_qa_scorers.py" = ["E501"]
 [tool.ruff.format]
 docstring-code-format = true
 
