@@ -161,6 +161,28 @@ class TestIFEvalScorer(unittest.TestCase):
         self.assertEqual(result["strict"], [False])
         self.assertEqual(result["loose"], [True])
 
+    def test_loose_never_stricter_than_strict_with_random_kwargs(self) -> None:
+        """``count:word_count_range`` draws random min/max words when unset.
+
+        The verifier must be built once and reused across the strict check and
+        all loose variants; rebuilding per check redraws the bounds, letting
+        loose (a superset of strict) score below strict. Flip probability is
+        ~0.04 per trial under rebuild-per-check, hence 200 trials.
+        """
+        response_text = " ".join(["word"] * 250)
+        for _ in range(200):
+            instance = _make_instance(
+                "Write between X and Y words.", ["count:word_count_range"], [{}]
+            )
+            output = LMOutput(text=response_text)
+            IFEvalScorer().score(instance, output)
+            result = output.metadata["ifeval"]
+            if result["strict"][0]:
+                self.assertTrue(
+                    result["loose"][0],
+                    "loose scored False while strict scored True on the same response",
+                )
+
 
 class TestIFEvalMetrics(unittest.TestCase):
     INSTRUCTION_ID = "count:numbers"

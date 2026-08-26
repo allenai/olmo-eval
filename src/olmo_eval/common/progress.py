@@ -84,12 +84,17 @@ class ProgressLogger:
         """Log current progress."""
         elapsed = now - self.start_time
         rate = self.count / elapsed if elapsed > 0 else 0.0
-        pct = (self.count / self.total * 100) if self.total > 0 else 0.0
 
         self.logger.info(
             f"{self._format_desc()} {self.count:>6}/{self.total} "
-            f"({pct:>3.0f}%) at {rate:.1f} items/sec"
+            f"({self._format_percentage():>6}) at {rate:.1f} items/sec"
         )
+
+    def _format_percentage(self) -> str:
+        """Format progress without rounding an incomplete run to 100%."""
+        if self.total <= 0 or self.count >= self.total:
+            return "100%"
+        return f"{min(self.count / self.total * 100, 99.99):.2f}%"
 
     def close(self) -> None:
         """Log final progress summary."""
@@ -98,7 +103,7 @@ class ProgressLogger:
 
         self.logger.info(
             f"{self._format_desc()} {self.count:>6}/{self.total} "
-            f"(100%) in {elapsed:.1f}s ({rate:.1f} items/sec)"
+            f"({self._format_percentage()}) in {elapsed:.1f}s ({rate:.1f} items/sec)"
         )
 
     def __enter__(self) -> ProgressLogger:
