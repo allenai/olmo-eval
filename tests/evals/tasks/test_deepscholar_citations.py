@@ -14,6 +14,7 @@ from olmo_eval.evals.tasks.deepscholar_citations import (
     reference_list,
     resolve_numbering,
     rewrite_intro,
+    select_scored_text,
     split_final_report,
     strip_references,
     unresolved_citation_forms,
@@ -395,3 +396,86 @@ class TestSplitFinalReport:
 
         assert found is True
         assert reference_list(body) == {"1": "A. Author. First Retrieval System. arXiv:2401.00001"}
+
+
+class TestSelectScoredText:
+    """The fuse: the split is kept only where it leaves something scoreable.
+
+    Qwen3.5-9B honoured the marker and put its whole Related Works section above
+    it, leaving a bare numbered list below. Trusting the split there turned an
+    exportable answer into an unscoreable one, so the split now has to earn its
+    keep.
+    """
+
+    PROSE = (
+        "## Related Works\n\nRetrieval augmentation is well studied [1].\n\n"
+        "## References\n\n[1] A. Author. Retrieval Augmented Generation for Science. "
+        "arXiv:2401.00001\n"
+    )
+    # What 9B actually emitted below the line: a numbered list with no heading,
+    # so strip_references never touches it and nothing cites into it.
+    BARE_LIST = (
+        "1. Arora, R. Retrieval Augmented Generation for Science. arXiv:2401.00001\n"
+        "2. Choudhary, A. Scaling Laws for Literature Search. arXiv:2401.00002\n"
+    )
+
+    def test_a_marker_that_keeps_the_report_splits(self):
+        answer = "Planning.\n\n=== FINAL REPORT ===\n\n" + self.PROSE
+
+        text, found, misused = select_scored_text(answer, SOURCES)
+
+        assert (found, misused) == (True, False)
+        assert text == self.PROSE
+
+    def test_a_marker_that_would_throw_the_report_away_falls_back(self):
+        # The whole point: the prose is above the line, only the list is below.
+        answer = self.PROSE + "\n=== FINAL REPORT ===\n\n" + self.BARE_LIST
+
+        text, found, misused = select_scored_text(answer, SOURCES)
+
+        assert (found, misused) == (True, True)
+        assert text == answer
+
+    def test_the_fallback_is_exactly_the_marker_absent_path(self):
+        answer = self.PROSE + "\n=== FINAL REPORT ===\n\n" + self.BARE_LIST
+
+        fused, _, _ = select_scored_text(answer, SOURCES)
+        unmarked, _, _ = select_scored_text(answer.replace("=== FINAL REPORT ===", ""), SOURCES)
+
+        # Same citations survive either way; the marker costs the answer nothing.
+        assert rewrite_intro(fused, SOURCES)[1] == rewrite_intro(unmarked, SOURCES)[1]
+
+    def test_the_split_never_lowers_what_can_be_cited(self):
+        # The losslessness property, stated directly.
+        for answer in (
+            "Planning.\n\n=== FINAL REPORT ===\n\n" + self.PROSE,
+            self.PROSE + "\n=== FINAL REPORT ===\n\n" + self.BARE_LIST,
+            self.PROSE,
+            "=== FINAL REPORT ===\n",
+        ):
+            chosen, _, _ = select_scored_text(answer, SOURCES)
+
+            assert len(rewrite_intro(chosen, SOURCES)[1]) >= len(
+                rewrite_intro(answer, SOURCES)[1]
+            ), answer
+
+    def test_no_marker_is_not_misuse(self):
+        text, found, misused = select_scored_text(self.PROSE, SOURCES)
+
+        assert (found, misused) == (False, False)
+        assert text == self.PROSE
+
+    def test_nothing_scoreable_either_way_is_not_misuse(self):
+        # There is no export to save, so there is nothing to report.
+        answer = "Thinking.\n\n=== FINAL REPORT ===\n\nNo citations here at all.\n"
+
+        text, found, misused = select_scored_text(answer, SOURCES)
+
+        assert (found, misused) == (True, False)
+        assert text == "No citations here at all.\n"
+
+    def test_a_bare_list_is_not_caught_by_the_emptiness_test(self):
+        # Why the fuse tests "resolves no citation" rather than "empty after
+        # strip_references": a numbered list with no References heading is not
+        # stripped, so the emptiness test would never fire on the real failure.
+        assert strip_references(self.BARE_LIST).strip() != ""

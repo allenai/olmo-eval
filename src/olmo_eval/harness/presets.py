@@ -42,15 +42,24 @@ fetched page content, and do not invent citations."""
 # split instead -- think above the line, deliver below it. Kept in sync with
 # deepscholar_citations.split_final_report by a test that reads the marker back
 # out of this string.
+#
+# The wording is emphatic about where the prose goes because the first version
+# was not, and Qwen3.5-9B read it the other way: it wrote the whole Related
+# Works section while deliberating and put only the numbered list below the
+# line, so the split threw its report away. Saying 'your deliverable is what
+# follows' was not enough -- it has to say the section itself must not appear
+# above the marker.
 ARXIV_PAPER_SEARCH_SYSTEM_PROMPT = """\
 You may plan and deliberate freely in your reply. When you are ready to deliver,
 write a line containing exactly:
 
 === FINAL REPORT ===
 
-Everything after that line is your deliverable: only the Related Works section,
-followed by the numbered reference list. Text before the marker is discarded and
-is never evaluated."""
+Your entire report goes after that line, in this order: the complete Related
+Works section first, then the numbered reference list. Do not write any part of
+the Related Works section before the marker, and do not put the reference list
+there on its own. Everything above the marker is discarded and is never
+evaluated, so a report written above it does not count at all."""
 
 
 # TODO(undfined): Remove reference to beaker
