@@ -552,6 +552,8 @@ def test_task_level_error_carries_its_summary() -> None:
     assert result.error == "Task preparation failed: dataset not found"
     assert result.error_summary == "Task preparation failed: dataset not found"
     # Nothing was dispatched, so there is no instance accounting to report.
+    # num_instances counts what was saved, so it cannot exceed what was processed.
+    assert result.num_instances == 0
     assert result.instances_processed == 0
     assert result.instances_failed == 0
     assert result.hard_failure_rate_exceeded is False
@@ -584,6 +586,8 @@ def test_task_completion_line_and_table_agree_on_no_accounting(caplog, capsys) -
         error="Task preparation failed",
     )
     result = asyncio.run(finalize_task(tracker))
+    assert result.num_instances == 0
+    assert result.instances_processed == 0
 
     _report_task_completion("qwen3-8b-27b", result)
     logged = " ".join(record.getMessage() for record in caplog.records)

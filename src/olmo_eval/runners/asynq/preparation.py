@@ -117,7 +117,7 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
         return TaskResult(
             spec=tracker.spec,
             config={},
-            num_instances=tracker.total_instances,
+            num_instances=0,
             metrics={},
             error=tracker.error,
             duration_seconds=duration,
@@ -128,7 +128,7 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
         return TaskResult(
             spec=tracker.spec,
             config={},
-            num_instances=tracker.total_instances,
+            num_instances=0,
             metrics={},
             error="Task preparation failed",
             duration_seconds=duration,
