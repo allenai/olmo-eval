@@ -56,7 +56,7 @@ from olmo_eval.evals.tasks.deepscholar_citations import (
     reference_list,
     resolve_numbering,
     rewrite_intro,
-    split_final_report,
+    select_scored_text,
     strip_references,
     unresolved_citation_forms,
 )
@@ -268,15 +268,22 @@ def score_answer(answer: str, sources: Sequence[Mapping[str, str]]) -> dict[str,
     before, and this only records how often that happened, because the same
     prompt run on a different backbone can comply at a very different rate.
 
+    ``marker_misuse_rate`` is the share that wrote the marker and then put the
+    report above it. Those are scored on their full text rather than on the
+    empty half they nominated, so the number costs nothing -- it exists because
+    a backbone doing this is telling you the prompt is ambiguous to it.
+
     ``unresolved_citation_forms`` counts citation shapes no pass can turn into a
     link -- superscripts, footnote markers, author-year brackets. An answer that
     cited carefully in a style this bridge does not read scores zero on the other
     two, and without this it would look identical to one that never cited.
     """
-    # Everything below the marker, or the whole answer when there is none --
-    # the same split the export applies, so a number reported during the run
-    # and a number reported after export describe the same text.
-    report, marker_found = split_final_report(answer)
+    # Everything below the marker, or the whole answer when there is none, or
+    # the whole answer again when the marker was honoured but the report was
+    # written above it -- the same choice the export makes, so a number
+    # reported during the run and one reported after export describe the same
+    # text.
+    report, marker_found, marker_misused = select_scored_text(answer, list(sources))
     _, cited = rewrite_intro(report, list(sources))
     published_refs = reference_list(report)
     resolved = resolve_numbering(report, list(sources))
@@ -287,6 +294,7 @@ def score_answer(answer: str, sources: Sequence[Mapping[str, str]]) -> dict[str,
         ),
         "unresolved_citation_forms": float(unresolved_citation_forms(strip_references(report))),
         "marker_compliance_rate": 1.0 if marker_found else 0.0,
+        "marker_misuse_rate": 1.0 if marker_misused else 0.0,
     }
 
 
@@ -366,12 +374,27 @@ class MarkerComplianceRateMetric(_DeepScholarMetricBase):
     name: str = "marker_compliance_rate"
 
 
+@dataclass(frozen=True)
+class MarkerMisuseRateMetric(_DeepScholarMetricBase):
+    """Share of answers that wrote the marker and put the report above it.
+
+    Costs the answer nothing -- the export falls back to its full text, which
+    is what it would have been scored on with no marker at all. It is reported
+    because it is the one number that separates a backbone that cannot follow
+    the instruction from a prompt that reads two ways, and the first version of
+    this preset's prompt read two ways to Qwen3.5-9B.
+    """
+
+    name: str = "marker_misuse_rate"
+
+
 EXPORTABLE_RATE_METRIC = ExportableRateMetric()
 DEEPSCHOLAR_METRICS = (
     EXPORTABLE_RATE_METRIC,
     CitationResolutionRateMetric(),
     UnresolvedCitationFormsMetric(),
     MarkerComplianceRateMetric(),
+    MarkerMisuseRateMetric(),
 )
 
 
