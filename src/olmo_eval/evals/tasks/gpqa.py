@@ -22,10 +22,6 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.answer_extraction import (
-    OLMO_3_ANSWER_REGEX_TEMPLATES,
-    extract_answer_with_format,
-)
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg
 from olmo_eval.common.scorers import MultipleChoiceScorer
@@ -40,6 +36,10 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataLoader, DataSource
+from olmo_eval.evals.extract import (
+    OLMO_3_ANSWER_REGEX_TEMPLATES,
+    extract_answer_with_format,
+)
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 log = logging.getLogger(__name__)
