@@ -15,18 +15,18 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.answer_extraction import ExtractedAnswer, extract_answer_with_format
+from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
     LMRequest,
-    RequestType,
     SamplingParams,
     Split,
 )
 from olmo_eval.data import DataSource
+from olmo_eval.evals.extract import ExtractedAnswer, extract_answer_with_format
 from olmo_eval.evals.tasks.common import Task, register
 
 _BOXED_SUFFIX = "\n\nPresent the answer in LaTex format: \\boxed{Your answer}"
@@ -36,6 +36,13 @@ _TEMPLATE_SUFFIX = (
     '\\boxed{answer}." where answer is just the final solution that solves the '
     'problem. E.g., if the answer is 6, conclude with "Therefore, the final '
     'answer is \\boxed{6}."'
+)
+
+# The suffix lives in the formatter (braces escaped for str.format) so
+# register_variant can swap the prompt template; see the rlzero/midtrain
+# regimes upstream, which use different templates and stop sequences.
+_FORMATTER = ChatFormatter(
+    user_template="{question}" + _TEMPLATE_SUFFIX.replace("{", "{{").replace("}", "}}")
 )
 
 _ANSWER_FORMAT_REGEX = r"Therefore, the final answer is \\boxed\{(.*)\}"
@@ -87,11 +94,21 @@ class OmegaExactMatchScorer(Scorer):
     the requested format; the flex form accepts it regardless.
     """
 
-    name: str = "exact_match"
+    name: str = ""
     flex: bool = False
+
+    def __post_init__(self) -> None:
+        # The name keys scorer storage and deduplication, so it is derived
+        # from ``flex`` unless set explicitly — a flex scorer left with the
+        # strict default name would be silently dropped as a duplicate.
+        if not self.name:
+            object.__setattr__(self, "name", "exact_match_flex" if self.flex else "exact_match")
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         answer, format_correct = _extract(output.text or "")
+        # Whether the answer was stated in the requested format, independent
+        # of correctness — distinguishes "wrong" from "badly formatted".
+        output.metadata["answer_format_correct"] = format_correct
         if not self.flex and format_correct < _FORMAT_CORRECT_CUTOFF:
             answer = ""
         gold = str(instance.gold_answer or "")
@@ -99,13 +116,14 @@ class OmegaExactMatchScorer(Scorer):
 
 
 _STRICT = OmegaExactMatchScorer()
-_FLEX = OmegaExactMatchScorer(name="exact_match_flex", flex=True)
+_FLEX = OmegaExactMatchScorer(flex=True)
 
 
 @register("omega_500")
 class Omega500(Task):
-    data_source = DataSource(path="saumyamalik/omega-500", split="train")
+    data_source = DataSource(path="saumyamalik/omega-500")
     split = Split.TRAIN
+    formatter = _FORMATTER
     metrics = (
         AccuracyMetric(name="exact_match", scorer=_STRICT),
         AccuracyMetric(name="exact_match_flex", scorer=_FLEX),
@@ -120,17 +138,13 @@ class Omega500(Task):
     )
 
     @property
-    def request_type(self) -> RequestType:
-        return RequestType.CHAT
-
-    @property
     def instances(self) -> Iterator[Instance]:
         yield from self._load_instances_cached()
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         question = str(doc["messages"][0]["content"]).replace(_BOXED_SUFFIX, "")
         return Instance(
-            question=question + _TEMPLATE_SUFFIX,
+            question=question,
             gold_answer=str(doc["ground_truth"]),
             metadata={
                 "id": doc.get("index", index),
@@ -139,10 +153,8 @@ class Omega500(Task):
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
-        return LMRequest(
-            request_type=RequestType.CHAT,
-            messages=({"role": "user", "content": instance.question},),
-        )
+        assert self.config.formatter is not None
+        return self.config.formatter.format(instance, self.get_fewshot())
 
     def extract_answer(self, output: LMOutput) -> str:
         return _extract(output.text or "").answer

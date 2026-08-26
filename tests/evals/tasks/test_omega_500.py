@@ -43,17 +43,21 @@ class TestOmega500Task(unittest.TestCase):
         instance = task.process_doc(doc, index=0)
         assert instance is not None
         self.assertEqual(instance.gold_answer, "42")
-        self.assertTrue(instance.question.startswith("Solve for x.\n\nShow your work"))
-        self.assertNotIn("Present the answer in LaTex format", instance.question)
-        self.assertIn(
-            'conclude with "Therefore, the final answer is \\boxed{answer}."',
-            instance.question,
-        )
+        # The dataset's own boxed suffix is stripped; the CoT suffix is
+        # applied by the formatter, not stored on the instance.
+        self.assertEqual(instance.question, "Solve for x.")
 
         request = task.format_request(instance)
         self.assertEqual(request.request_type, RequestType.CHAT)
         self.assertEqual(len(request.messages), 1)
         self.assertEqual(request.messages[0]["role"], "user")
+        content = request.messages[0]["content"]
+        self.assertTrue(content.startswith("Solve for x.\n\nShow your work"))
+        self.assertNotIn("Present the answer in LaTex format", content)
+        self.assertIn(
+            'conclude with "Therefore, the final answer is \\boxed{answer}."',
+            content,
+        )
 
 
 class TestOmegaScorers(unittest.TestCase):
@@ -98,6 +102,21 @@ class TestOmegaScorers(unittest.TestCase):
 
     def test_empty_response(self) -> None:
         self.assertEqual(self._scores("42", ""), (0.0, 0.0))
+
+    def test_format_correct_recorded_in_metadata(self) -> None:
+        output = LMOutput(text="Therefore, the final answer is \\boxed{42}.")
+        _STRICT.score(_make_instance("42"), output)
+        self.assertEqual(output.metadata["answer_format_correct"], 1.0)
+        output2 = LMOutput(text="So we get \\boxed{42} somewhere")
+        _STRICT.score(_make_instance("42"), output2)
+        self.assertEqual(output2.metadata["answer_format_correct"], 0.2)
+
+    def test_flex_scorer_name_derived(self) -> None:
+        """flex=True with no explicit name must not collide with strict."""
+        from olmo_eval.evals.tasks.omega_500 import OmegaExactMatchScorer
+
+        self.assertEqual(OmegaExactMatchScorer(flex=True).name, "exact_match_flex")
+        self.assertEqual(OmegaExactMatchScorer().name, "exact_match")
 
 
 if __name__ == "__main__":

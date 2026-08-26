@@ -21,6 +21,10 @@ class ExtractedAnswer(NamedTuple):
     format_correct: float
 
 
+# The full parameter set mirrors the reference implementation's
+# ``extract_answer`` contract. ``answer_regexes_templates`` is used by the
+# GPQA and MMLU chain-of-thought tasks; the ``use_last_*`` flags have no
+# caller yet but keep the cascade's selection semantics explicit.
 def extract_answer_with_format(
     continuation: str,
     *,
