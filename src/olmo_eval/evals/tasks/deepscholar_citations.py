@@ -426,3 +426,49 @@ def rewrite_intro(
     if not exported:
         return "", []
     return body + "\n", exported
+
+
+def select_scored_text(
+    report: str,
+    sources: Sequence[Mapping[str, Any]],
+) -> tuple[str, bool, bool]:
+    """Choose the text to score, and say whether the marker chose it.
+
+    Returns ``(text, marker_found, marker_misused)``.
+
+    :func:`split_final_report` decides where the deliverable starts; this decides
+    whether trusting it would cost the answer its export. A model can honour the
+    marker and still misplace the report -- Qwen3.5-9B wrote its whole Related
+    Works section while deliberating and put only the numbered list below the
+    line -- and the split would then hand the scorer a reference list with
+    nothing citing into it, turning an exportable answer into an unscoreable one.
+
+    So the split is applied only when it keeps something scoreable. If the tail
+    resolves no citation but the full answer does, the full answer is kept: the
+    marker-absent path exactly, which makes the split lossless by construction --
+    it can never lower ``exportable_rate`` relative to not splitting at all.
+    ``marker_misused`` counts those saves, and is deliberately distinct from
+    ``marker_compliance_rate``: the instruction was followed, the report was put
+    in the wrong place, and a run needs to tell those apart to know whether the
+    prompt or the backbone is at fault.
+
+    Note the test is "resolves no citation", not "is empty after
+    :func:`strip_references`". A bare numbered list carrying no ``References``
+    heading is not stripped, so it survives as prose and the emptiness test never
+    fires -- which is exactly the shape both real 9B failures took.
+    """
+    tail, marker_found = split_final_report(report)
+    if not marker_found:
+        return report, False, False
+
+    _, cited_from_tail = rewrite_intro(tail, sources)
+    if cited_from_tail:
+        return tail, True, False
+
+    _, cited_from_full = rewrite_intro(report, sources)
+    if cited_from_full:
+        return report, True, True
+
+    # Nothing is scoreable either way, so there is nothing to save; keep the
+    # tail, which is at least the text the model nominated.
+    return tail, True, False

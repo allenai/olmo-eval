@@ -65,7 +65,7 @@ from olmo_eval.evals.tasks.deepscholar_bench import (
     download_deepscholar_dataset,
     sources_from_trajectory,
 )
-from olmo_eval.evals.tasks.deepscholar_citations import rewrite_intro, split_final_report
+from olmo_eval.evals.tasks.deepscholar_citations import rewrite_intro, select_scored_text
 from olmo_eval.harness.tools.search import date_from_arxiv_id, normalize_arxiv_id
 
 logger = logging.getLogger(__name__)
@@ -517,26 +517,28 @@ def export_predictions(
                 f"Prediction {identifier} is not a query in the pinned dataset at "
                 f"{DEEPSCHOLAR_COMMIT}"
             )
-        # The delimiter contract is applied before anything reads the answer,
-        # so the reference list parsed below is the one under the marker and
-        # not a numbered list the model happened to draft while deliberating.
-        answer, marker_found = split_final_report(answer_text(prediction))
         raw_trajectory = prediction.get("trajectory")
         trajectory = (
             AgentTrajectory.from_dict(raw_trajectory) if isinstance(raw_trajectory, dict) else None
         )
         sources = sources_from_trajectory(trajectory)
+        # The delimiter contract is applied before anything reads the answer,
+        # so the reference list parsed below is the one under the marker and
+        # not a numbered list the model happened to draft while deliberating.
+        # The sources are needed first: the split is kept only where it leaves
+        # something citable, so it can never cost a query its export.
+        answer, marker_found, marker_misused = select_scored_text(answer_text(prediction), sources)
         # A first pass only to learn which abstracts are worth re-fetching; the
         # binding pass runs below, once the fetched dates can be validated.
         _, provisional = rewrite_intro(answer, sources)
-        prepared.append((identifier, answer, sources, provisional, marker_found))
+        prepared.append((identifier, answer, sources, provisional, marker_found, marker_misused))
 
     fetched: dict[str, dict[str, str]] = {}
     if fetch_abstracts:
         wanted = list(
             dict.fromkeys(
                 normalize_arxiv_id(str(source.get("arxiv_id") or ""))
-                for _, _, _, provisional, _ in prepared
+                for _, _, _, provisional, _, _ in prepared
                 for source in provisional
             )
         )
@@ -546,7 +548,8 @@ def export_predictions(
     exported: list[int] = []
     answers_with_text = 0
     markers_found = 0
-    for identifier, answer, sources, _, marker_found in prepared:
+    markers_misused = 0
+    for identifier, answer, sources, _, marker_found, marker_misused in prepared:
         record = records[identifier]
         # A query that generated nothing can neither honour the delimiter
         # contract nor break it, so it stays out of the rate's denominator. A
@@ -556,6 +559,7 @@ def export_predictions(
         if answer.strip() or marker_found:
             answers_with_text += 1
             markers_found += int(marker_found)
+            markers_misused += int(marker_misused)
         if not answer.strip():
             summary.append(
                 {
@@ -570,6 +574,7 @@ def export_predictions(
                     "termination_reason": "empty_response",
                     "papers_retrieved": len(sources),
                     "marker_found": marker_found,
+                    "marker_misused": marker_misused,
                 }
             )
             continue
@@ -589,6 +594,7 @@ def export_predictions(
                     "sources_considered": len(sources),
                     "source_rejections": {"unexportable_after_validation": len(sources)},
                     "marker_found": marker_found,
+                    "marker_misused": marker_misused,
                 }
             )
             continue
@@ -609,6 +615,7 @@ def export_predictions(
                 "status": "success",
                 "num_papers": len(rows),
                 "marker_found": marker_found,
+                "marker_misused": marker_misused,
             }
         )
 
@@ -650,6 +657,11 @@ def export_predictions(
         "answers_with_text": answers_with_text,
         "markers_found": markers_found,
         "marker_compliance_rate": (markers_found / answers_with_text if answers_with_text else 0.0),
+        # Answers that wrote the marker and then put the report above it. The
+        # fuse kept their full text, so this costs nothing and is not a
+        # penalty; it rises when the prompt reads two ways to a backbone.
+        "markers_misused": markers_misused,
+        "marker_misuse_rate": (markers_misused / answers_with_text if answers_with_text else 0.0),
     }
 
 

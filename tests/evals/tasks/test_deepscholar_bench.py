@@ -152,6 +152,7 @@ class TestRegistration:
             "citation_resolution_rate",
             "unresolved_citation_forms",
             "marker_compliance_rate",
+            "marker_misuse_rate",
         }
         assert task.config.get_primary_metric().name == "exportable_rate"
 
@@ -500,6 +501,7 @@ class TestExportAdapter:
                 # Every row carries the flag, so the compliance rate stays
                 # recomputable from the export on disk.
                 "marker_found": False,
+                "marker_misused": False,
             }
         ]
         assert generation["system"] == "single_agent_1"
@@ -996,3 +998,148 @@ class TestFinalReportMarkerExport:
         assert "deliberate" in prompt
         assert "exactly" in prompt
         assert "discarded" in prompt
+
+
+class TestMarkerMisuseFuse:
+    """A marker honoured but misplaced must not cost the query its export.
+
+    Qwen3.5-9B wrote its Related Works section above the line and only the
+    numbered list below it. On the first smoke that took query idx=1 from
+    exportable to unscoreable, which is an instrument regression rather than a
+    model one, so the export now falls back to the full text and records why.
+    """
+
+    def _prediction(self, answer: str, native_id: str = "7") -> dict:
+        trajectory = _trajectory(
+            _tool_output(
+                _paper("First Retrieval System", "2401.00001", published="2024-01-15"),
+                _paper("Scaling The Index", "2401.00002"),
+                _paper("Grounding Each Claim", "cs/0501001"),
+            )
+        )
+        return {
+            "doc_id": 0,
+            "native_id": native_id,
+            "final_output": answer,
+            "model_output": [{"text": answer}],
+            "trajectory": trajectory.to_dict(),
+        }
+
+    def _export(self, tmp_path, answer: str, name: str = "export"):
+        path = tmp_path / (name + "-predictions.jsonl")
+        path.write_text(json.dumps(self._prediction(answer)) + "\n", encoding="utf-8")
+        summary = export_predictions(
+            path,
+            tmp_path / name,
+            dataset_path=_dataset_csv(tmp_path, 7),
+            fetch_abstracts=False,
+        )
+        return summary, tmp_path / name
+
+    # The 9B shape: report above the marker, bare numbered list below it.
+    def _misused(self) -> str:
+        return (
+            NUMBERED_ANSWER
+            + "\n=== FINAL REPORT ===\n\n"
+            + "1. A. Author. First Retrieval System. arXiv:2401.00001\n"
+            + "2. B. Author. Scaling The Index. arXiv:2401.00002\n"
+        )
+
+    def test_a_misplaced_report_still_exports(self, tmp_path):
+        summary, root = self._export(tmp_path, self._misused())
+
+        assert summary["exported_ids"] == [7]
+        intro = (root / "7" / "intro.md").read_text(encoding="utf-8")
+        assert "[First Retrieval System](https://arxiv.org/abs/2401.00001)" in intro
+
+    def test_the_misuse_is_counted_without_costing_compliance(self, tmp_path):
+        summary, root = self._export(tmp_path, self._misused())
+
+        # The instruction WAS followed -- the marker is there.
+        assert summary["marker_compliance_rate"] == 1.0
+        # And it was followed wrongly, which is a different fact.
+        assert summary["marker_misuse_rate"] == 1.0
+        assert summary["markers_misused"] == 1
+        row = json.loads((root / "summary.json").read_text(encoding="utf-8"))[0]
+        assert row["marker_found"] is True
+        assert row["marker_misused"] is True
+
+    def test_the_fuse_matches_the_no_marker_export_byte_for_byte(self, tmp_path):
+        # "Falls back to the full text" has to mean exactly the marker-absent
+        # path, or the fuse is its own third behaviour.
+        fused, fused_root = self._export(tmp_path, self._misused(), name="fused")
+        plain, plain_root = self._export(tmp_path, NUMBERED_ANSWER, name="plain")
+
+        assert fused["exported_ids"] == plain["exported_ids"] == [7]
+        assert (fused_root / "7" / "paper.csv").read_text(encoding="utf-8") == (
+            plain_root / "7" / "paper.csv"
+        ).read_text(encoding="utf-8")
+
+    def test_a_well_placed_report_is_not_misuse(self, tmp_path):
+        answer = "Planning first.\n\n=== FINAL REPORT ===\n\n" + NUMBERED_ANSWER
+
+        summary, _ = self._export(tmp_path, answer)
+
+        assert summary["marker_compliance_rate"] == 1.0
+        assert summary["marker_misuse_rate"] == 0.0
+        assert summary["exported_ids"] == [7]
+
+    def test_splitting_never_exports_less_than_not_splitting(self, tmp_path):
+        # The gate the researcher set, as a unit test.
+        for index, answer in enumerate(
+            (
+                "Planning.\n\n=== FINAL REPORT ===\n\n" + NUMBERED_ANSWER,
+                self._misused(),
+                NUMBERED_ANSWER,
+            )
+        ):
+            split, _ = self._export(tmp_path, answer, name=f"split-{index}")
+            stripped, _ = self._export(
+                tmp_path,
+                answer.replace("=== FINAL REPORT ===", ""),
+                name=f"nosplit-{index}",
+            )
+
+            assert split["exported_count"] >= stripped["exported_count"], answer
+
+
+class TestHardenedContractWording:
+    """The prompt has to say where the prose goes, not only where it ends up."""
+
+    def _prompt(self) -> str:
+        from olmo_eval.harness.presets import get_harness_preset
+
+        prompt = get_harness_preset("arxiv_paper_search_agent").system_prompt
+        assert prompt is not None
+        return prompt
+
+    def _flat(self) -> str:
+        """The prompt as one lowercase line; it wraps, the sentences do not."""
+        return " ".join(self._prompt().lower().split())
+
+    def test_the_three_original_elements_survive(self):
+        prompt = self._prompt().lower()
+
+        assert "deliberate" in prompt
+        assert "exactly" in prompt
+        assert "discarded" in prompt
+
+    def test_it_forbids_writing_the_section_above_the_line(self):
+        # The exact ambiguity 9B took the other way.
+        prompt = self._flat()
+
+        assert "do not write any part of the related works section before the marker" in prompt
+
+    def test_it_puts_the_whole_report_after_the_marker(self):
+        prompt = self._flat()
+
+        assert "entire report goes after that line" in prompt
+        assert "reference list" in prompt
+
+    def test_the_marker_still_round_trips_through_the_splitter(self):
+        mandated = [line for line in self._prompt().splitlines() if line.strip().startswith("===")]
+
+        assert mandated == [FINAL_REPORT_MARKER]
+        body, found = split_final_report("Planning.\n" + mandated[0] + "\nThe report.\n")
+        assert found is True
+        assert body == "The report.\n"
