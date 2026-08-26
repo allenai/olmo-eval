@@ -193,6 +193,7 @@ class LogProbEntry(TypedDict):
 
     token: str
     logprob: float
+    token_id: NotRequired[int]
     bytes: NotRequired[list[int]]
     top_logprobs: NotRequired[list[TopLogProb]]
 
