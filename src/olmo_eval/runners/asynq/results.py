@@ -19,7 +19,8 @@ from olmo_eval.runners.asynq.types import (
     ResultItem,
     TaskTracker,
 )
-from olmo_eval.runners.common.types import TaskResult
+from olmo_eval.runners.common.constants import HardFailureRateExceeded
+from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE, TaskResult
 from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
 from olmo_eval.runners.processing.utils import compute_task_hash
 
@@ -119,6 +120,7 @@ async def process_results(
     write_predictions_fn: Any,
     save_requests: bool,
     write_requests_fn: Any,
+    max_hard_failure_rate: float = DEFAULT_MAX_HARD_FAILURE_RATE,
 ) -> dict[str, TaskResult]:
     """Process results from workers with inline async scoring.
 
@@ -136,6 +138,8 @@ async def process_results(
         model_name: Model name for reporting.
         save_predictions: Whether to save predictions.
         write_predictions_fn: Function to write predictions.
+        max_hard_failure_rate: Fraction of a task's instances allowed to hard-fail
+            before the task is marked failed.
 
     Returns:
         Dict mapping task spec to TaskResult.
@@ -183,6 +187,7 @@ async def process_results(
                 failed_instances=tracker.failed_instances,
                 total_instances=tracker.total_instances,
                 duration_seconds=time.time() - tracker.start_time,
+                max_hard_failure_rate=max_hard_failure_rate,
             )
             results[spec] = task_result
             tasks_complete += 1
@@ -238,7 +243,7 @@ async def process_results(
     # Pre-add error tasks to results (these don't need scoring)
     for spec, tracker in trackers.items():
         if tracker.error:
-            task_result = await finalize_task(tracker)
+            task_result = await finalize_task(tracker, max_hard_failure_rate)
             results[spec] = task_result
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
@@ -360,15 +365,23 @@ async def process_results(
     return results
 
 
+def _format_instance_accounting(result: TaskResult) -> str:
+    """Render saved-vs-processed instance counts for the task summary line."""
+    processed = result.instances_processed or result.num_instances
+    accounting = f"{result.num_instances}/{processed} instances saved"
+    if result.instances_failed:
+        accounting += f", {result.instances_failed} hard-failed"
+    return accounting
+
+
 def _report_task_completion(model_name: str, result: TaskResult) -> None:
     """Report when a task completes."""
     label = f"{model_name}:{result.spec}"
+    accounting = _format_instance_accounting(result)
     if result.error:
-        logger.error(f"\u2717 {label} (ERROR: {result.error})")
+        logger.error(f"\u2717 {label} ({accounting}) (ERROR: {result.error})")
     else:
-        logger.info(
-            f"\u2713 {label} ({result.num_instances} instances, {result.duration_seconds:.1f}s)"
-        )
+        logger.info(f"\u2713 {label} ({accounting}, {result.duration_seconds:.1f}s)")
 
 
 def aggregate_results(
@@ -436,6 +449,14 @@ def aggregate_results(
                         "score": primary[1],
                     }
 
+        # Saved-vs-processed accounting is recorded for every task, including the
+        # ones that errored, so a partial run cannot look complete downstream.
+        task_data["instances_saved"] = task_result.num_instances
+        task_data["instances_processed"] = task_result.instances_processed
+        task_data["instances_failed"] = task_result.instances_failed
+        if task_result.error_summary:
+            task_data["error_summary"] = task_result.error_summary
+
         task_data["config"] = task_result.config
         task_data["task_hash"] = (
             compute_task_hash(task_result.config) if task_result.config else None
@@ -448,3 +469,27 @@ def aggregate_results(
         results_dict["suites"] = suite_aggs
 
     return results_dict
+
+
+def check_hard_failure_gate(results: dict[str, TaskResult]) -> None:
+    """Fail the run when any task exceeded its hard-failure-rate budget.
+
+    Call this only after results have been written, so the failing run still leaves
+    metrics.json and predictions behind for diagnosis.
+
+    Args:
+        results: Dict mapping task spec to TaskResult.
+
+    Raises:
+        HardFailureRateExceeded: If at least one task tripped the gate.
+    """
+    tripped = sorted(
+        (result for result in results.values() if result.hard_failure_rate_exceeded),
+        key=lambda result: result.spec,
+    )
+    if not tripped:
+        return
+    details = "; ".join(f"{result.spec}: {result.error}" for result in tripped)
+    raise HardFailureRateExceeded(
+        f"{len(tripped)} task(s) exceeded the hard failure rate threshold: {details}"
+    )

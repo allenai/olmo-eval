@@ -10,8 +10,8 @@ from typing import Any
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import Response, SamplingParams
 from olmo_eval.evals.tasks.common import Task, get_task
-from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
-from olmo_eval.runners.common.types import TaskResult
+from olmo_eval.runners.asynq.types import QueueItem, TaskTracker, summarize_failed_instances
+from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE, TaskResult
 from olmo_eval.runners.io.builders import build_predictions, build_requests_from_responses
 from olmo_eval.runners.processing.utils import get_metric_metadata
 
@@ -93,11 +93,16 @@ def build_requests_from_items(items: list[QueueItem], task_name: str) -> list[di
     return build_requests(instances, requests, task_name, sampling_params)
 
 
-async def finalize_task(tracker: TaskTracker) -> TaskResult:
+async def finalize_task(
+    tracker: TaskTracker,
+    max_hard_failure_rate: float = DEFAULT_MAX_HARD_FAILURE_RATE,
+) -> TaskResult:
     """Finalize a task tracker into a TaskResult.
 
     Args:
         tracker: Completed TaskTracker
+        max_hard_failure_rate: Fraction of instances allowed to hard-fail before the
+            task is marked failed.
 
     Returns:
         TaskResult with metrics and predictions
@@ -105,6 +110,7 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
     import time
 
     duration = time.time() - tracker.start_time
+    instances_failed = len(tracker.failed_instances)
 
     # Task-level error (e.g., prep failed) - no results possible
     if tracker.error:
@@ -115,6 +121,9 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
             metrics={},
             error=tracker.error,
             duration_seconds=duration,
+            error_summary=tracker.error,
+            instances_processed=tracker.total_instances,
+            instances_failed=instances_failed,
         )
 
     if tracker.task is None:
@@ -125,19 +134,35 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
             metrics={},
             error="Task preparation failed",
             duration_seconds=duration,
+            error_summary="Task preparation failed",
+            instances_processed=tracker.total_instances,
+            instances_failed=instances_failed,
         )
+
+    error_summary = summarize_failed_instances(tracker.failed_instances)
 
     # Check if we have any successful responses
     if not tracker.responses:
         # All instances failed
-        error_summary = tracker.get_error_summary() or "All instances failed"
+        summary = error_summary or "All instances failed"
+        gate_error = hard_failure_gate_error(
+            instances_saved=0,
+            instances_failed=instances_failed,
+            instances_processed=tracker.total_instances,
+            first_error=_first_instance_error(tracker.failed_instances),
+            max_hard_failure_rate=max_hard_failure_rate,
+        )
         return TaskResult(
             spec=tracker.spec,
             config=tracker.task.config.to_dict(),
             num_instances=tracker.total_instances,
             metrics={},
-            error=error_summary,
+            error=gate_error or summary,
             duration_seconds=duration,
+            error_summary=summary,
+            instances_processed=tracker.total_instances,
+            instances_failed=instances_failed,
+            hard_failure_rate_exceeded=gate_error is not None,
         )
 
     # Sort responses by index (only successful ones)
@@ -159,13 +184,20 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
     primary_metric = get_metric_metadata(tracker.task)
 
     # Add warning about failed instances if any
-    error_summary = tracker.get_error_summary()
     if error_summary:
         # Log failed instances but still return partial results
         logger.warning(
             f"Task {tracker.spec} completed with failures: {error_summary}. "
             f"Computed metrics on {len(responses)}/{tracker.total_instances} instances."
         )
+
+    gate_error = hard_failure_gate_error(
+        instances_saved=len(responses),
+        instances_failed=instances_failed,
+        instances_processed=tracker.total_instances,
+        first_error=_first_instance_error(tracker.failed_instances),
+        max_hard_failure_rate=max_hard_failure_rate,
+    )
 
     return TaskResult(
         spec=tracker.spec,
@@ -176,12 +208,11 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
         predictions=predictions,
         requests=requests,
         primary_metric=primary_metric,
-        error=(
-            f"Incomplete: {infrastructure_failures} output score(s) failed due to "
-            "sandbox infrastructure"
-            if infrastructure_failures
-            else None
-        ),
+        error=_combine_errors(gate_error, _infrastructure_error(infrastructure_failures)),
+        error_summary=error_summary,
+        instances_processed=tracker.total_instances,
+        instances_failed=instances_failed,
+        hard_failure_rate_exceeded=gate_error is not None,
     )
 
 
@@ -192,6 +223,7 @@ def compute_task_metrics(
     failed_instances: dict[int, str],
     total_instances: int,
     duration_seconds: float,
+    max_hard_failure_rate: float = DEFAULT_MAX_HARD_FAILURE_RATE,
 ) -> TaskResult:
     """Compute metrics from pre-scored responses.
 
@@ -202,21 +234,35 @@ def compute_task_metrics(
         failed_instances: Dict of instance_idx -> error message for failures.
         total_instances: Total number of instances in the task.
         duration_seconds: Duration of the task.
+        max_hard_failure_rate: Fraction of instances allowed to hard-fail before the
+            task is marked failed.
 
     Returns:
         TaskResult with metrics and predictions.
     """
+    instances_failed = len(failed_instances)
+    error_summary = summarize_failed_instances(failed_instances)
+
     if not scored_responses:
-        error_summary = (
-            f"{len(failed_instances)} instances failed" if failed_instances else "No responses"
+        summary = error_summary or "No responses"
+        gate_error = hard_failure_gate_error(
+            instances_saved=0,
+            instances_failed=instances_failed,
+            instances_processed=total_instances,
+            first_error=_first_instance_error(failed_instances),
+            max_hard_failure_rate=max_hard_failure_rate,
         )
         return TaskResult(
             spec=spec,
             config=task.config.to_dict(),
             num_instances=0,
             metrics={},
-            error=error_summary,
+            error=gate_error or summary,
             duration_seconds=duration_seconds,
+            error_summary=summary,
+            instances_processed=total_instances,
+            instances_failed=instances_failed,
+            hard_failure_rate_exceeded=gate_error is not None,
         )
 
     # Compute metrics from pre-scored responses
@@ -231,18 +277,19 @@ def compute_task_metrics(
     primary_metric = get_metric_metadata(task)
 
     # Add warning about failed instances if any
-    error_summary = None
-    if failed_instances:
-        if len(failed_instances) == 1:
-            idx, err = next(iter(failed_instances.items()))
-            error_summary = f"Instance {idx} failed: {err}"
-        else:
-            first_error = next(iter(failed_instances.values()))
-            error_summary = f"{len(failed_instances)} instances failed (first: {first_error})"
+    if error_summary:
         logger.warning(
             f"Task {spec} completed with failures: {error_summary}. "
             f"Computed metrics on {len(scored_responses)}/{total_instances} instances."
         )
+
+    gate_error = hard_failure_gate_error(
+        instances_saved=len(scored_responses),
+        instances_failed=instances_failed,
+        instances_processed=total_instances,
+        first_error=_first_instance_error(failed_instances),
+        max_hard_failure_rate=max_hard_failure_rate,
+    )
 
     return TaskResult(
         spec=spec,
@@ -253,13 +300,74 @@ def compute_task_metrics(
         predictions=predictions,
         requests=requests,
         primary_metric=primary_metric,
-        error=(
-            f"Incomplete: {infrastructure_failures} output score(s) failed due to "
-            "sandbox infrastructure"
-            if infrastructure_failures
-            else None
-        ),
+        error=_combine_errors(gate_error, _infrastructure_error(infrastructure_failures)),
+        error_summary=error_summary,
+        instances_processed=total_instances,
+        instances_failed=instances_failed,
+        hard_failure_rate_exceeded=gate_error is not None,
     )
+
+
+def hard_failure_gate_error(
+    *,
+    instances_saved: int,
+    instances_failed: int,
+    instances_processed: int,
+    first_error: str | None,
+    max_hard_failure_rate: float,
+) -> str | None:
+    """Describe a breach of the hard-failure-rate budget, if there is one.
+
+    A hard failure is an instance that came back with an error and no outputs at all,
+    so it contributes nothing to the metrics. Soft failures (an error alongside a
+    usable output, e.g. MaxTurnsExceeded with a fallback answer) are scored upstream
+    and never reach this function.
+
+    The comparison is strict: a task sitting exactly on the threshold still passes.
+
+    Args:
+        instances_saved: Instances that were scored and saved.
+        instances_failed: Instances that hard-failed.
+        instances_processed: Instances the runner saw (saved plus hard-failed).
+        first_error: First underlying instance error, quoted if present so the
+            message says why the instances failed and not just how many.
+        max_hard_failure_rate: Maximum tolerated fraction of hard failures.
+
+    Returns:
+        An error string describing the breach, or None when within budget.
+    """
+    if instances_processed <= 0 or instances_failed <= 0:
+        return None
+    rate = instances_failed / instances_processed
+    if rate <= max_hard_failure_rate:
+        return None
+    detail = f" First failure: {first_error}" if first_error else ""
+    return (
+        f"Hard failure rate {rate:.1%} exceeds the maximum of {max_hard_failure_rate:.1%}: "
+        f"saved {instances_saved} of {instances_processed} instances, "
+        f"{instances_failed} hard-failed.{detail}"
+    )
+
+
+def _first_instance_error(failed_instances: dict[int, str]) -> str | None:
+    """The first recorded instance error, used to make gate messages actionable."""
+    return next(iter(failed_instances.values()), None)
+
+
+def _infrastructure_error(infrastructure_failures: int) -> str | None:
+    """Describe output scores lost to sandbox infrastructure, if any."""
+    if not infrastructure_failures:
+        return None
+    return (
+        f"Incomplete: {infrastructure_failures} output score(s) failed due to "
+        "sandbox infrastructure"
+    )
+
+
+def _combine_errors(*errors: str | None) -> str | None:
+    """Join the task-level errors that are set, preserving order."""
+    present = [error for error in errors if error]
+    return " ".join(present) if present else None
 
 
 def _count_infrastructure_scoring_errors(responses: Sequence[Response]) -> int:
@@ -283,4 +391,5 @@ __all__ = [
     "build_requests_from_items",
     "finalize_task",
     "compute_task_metrics",
+    "hard_failure_gate_error",
 ]
