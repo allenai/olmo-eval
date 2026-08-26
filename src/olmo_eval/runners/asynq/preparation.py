@@ -152,6 +152,7 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
     # Score and compute metrics
     scored = await tracker.task.score_responses(responses)
     metrics = tracker.task.compute_metrics(scored)
+    infrastructure_failures = _count_infrastructure_scoring_errors(scored)
 
     # Build predictions
     predictions = build_predictions(scored, metrics=tracker.task.config.metrics)
@@ -181,7 +182,12 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
         predictions=predictions,
         requests=requests,
         primary_metric=primary_metric,
-        # Only set error if ALL instances failed (partial failures are logged as warnings)
+        error=(
+            f"Incomplete: {infrastructure_failures} output score(s) failed due to "
+            "sandbox infrastructure"
+            if infrastructure_failures
+            else None
+        ),
     )
 
 
@@ -221,6 +227,7 @@ def compute_task_metrics(
 
     # Compute metrics from pre-scored responses
     metrics = task.compute_metrics(scored_responses)
+    infrastructure_failures = _count_infrastructure_scoring_errors(scored_responses)
 
     # Build predictions
     predictions = build_predictions(scored_responses, metrics=task.config.metrics)
@@ -252,8 +259,29 @@ def compute_task_metrics(
         predictions=predictions,
         requests=requests,
         primary_metric=primary_metric,
-        # Only set error if ALL instances failed (partial failures are logged as warnings)
+        error=(
+            f"Incomplete: {infrastructure_failures} output score(s) failed due to "
+            "sandbox infrastructure"
+            if infrastructure_failures
+            else None
+        ),
     )
+
+
+def _count_infrastructure_scoring_errors(responses: Sequence[Response]) -> int:
+    """Count output scores that failed specifically because of sandbox infrastructure."""
+    count = 0
+    for response in responses:
+        for output in response.outputs:
+            errors = output.metadata.get("scoring_errors")
+            if not isinstance(errors, dict):
+                continue
+            count += sum(
+                1
+                for error in errors.values()
+                if isinstance(error, dict) and error.get("infrastructure") == "true"
+            )
+    return count
 
 
 __all__ = [

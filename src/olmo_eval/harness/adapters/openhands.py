@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     from openhands.sdk.conversation.state import (  # type: ignore[ty:unresolved-import]
         ConversationState,
     )
-    from swerex.runtime.abstract import AbstractRuntime  # type: ignore[ty:unresolved-import]
+    from swerex.runtime.abstract import AbstractRuntime
 
     from olmo_eval.harness.tools import Tool as HarnessTool
 
@@ -159,7 +159,7 @@ class SandboxTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation])
             if self._session_created:
                 return
 
-            from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+            from swerex.runtime.abstract import (
                 CreateBashSessionRequest,
             )
 
@@ -168,7 +168,7 @@ class SandboxTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation])
 
             # Set initial working directory if specified
             if self._working_dir:
-                from swerex.runtime.abstract import BashAction  # type: ignore[ty:unresolved-import]
+                from swerex.runtime.abstract import BashAction
 
                 await self._runtime.run_in_session(
                     BashAction(
@@ -189,7 +189,7 @@ class SandboxTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation])
                 return
 
             try:
-                from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+                from swerex.runtime.abstract import (
                     CloseBashSessionRequest,
                 )
 
@@ -270,7 +270,7 @@ class SandboxTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation])
         Returns:
             TerminalObservation with command output and exit code.
         """
-        from swerex.runtime.abstract import BashAction  # type: ignore[ty:unresolved-import]
+        from swerex.runtime.abstract import BashAction
 
         # Handle special cases
         if action.command == "C-c":

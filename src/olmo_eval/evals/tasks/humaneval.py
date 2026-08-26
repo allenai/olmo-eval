@@ -1,5 +1,5 @@
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
@@ -211,7 +211,30 @@ register_variant(
     formatter=CompletionFormatter(),
 )
 
-register_variant("codex_humaneval", "olmo3base", num_fewshot=3, fewshot_seed=1234)
+register_variant(
+    "codex_humaneval",
+    "olmo3base",
+    num_fewshot=3,
+    fewshot_seed=1234,
+)
+
+
+@register("codex_humaneval:olmo3base:v2")
+class CodexHumanEvalOlmo3BaseV2(CodexHumanEval):
+    """Codex HumanEval few-shot preset with completion formatting enabled."""
+
+    num_fewshot = 3
+    fewshot_seed = 1234
+    formatter = CompletionFormatter()
+
+
+register_variant(
+    "codex_humaneval:olmo3base:v2",
+    "bpb",
+    formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
+    metrics=(BPBMetricInstanceAvg(),),
+)
+
 
 # Chat variants for instruction-tuned models
 # Use with agent scaffolds: humaneval:chat:pass_at_1
@@ -351,3 +374,13 @@ class HumanEvalOlmo3Base(HumanEval):
             for output in response.outputs:
                 raw = output.text or ""
                 output.extracted_answer = response.instance.metadata["answer_prefix"] + raw
+
+
+register_variant(
+    "humaneval:olmo3base",
+    "v2",
+    sampling_params=replace(
+        HumanEvalOlmo3Base.sampling_params,
+        truncate_prompt_tokens=1536,
+    ),
+)

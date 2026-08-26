@@ -10,6 +10,8 @@ from olmo_eval.common.metrics import (
     BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
+    NGramCopyingBPBMetricByteAvg,
+    SafetyErrorMetric,
 )
 from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
@@ -446,3 +448,183 @@ class TestLogprobPerCharMCAccuracyMetric:
     def test_empty_responses(self):
         metric = LogprobPerCharMCAccuracyMetric()
         assert metric.compute([]) == 0.0
+
+
+class TestSafetyErrorMetric:
+    """Tests for SafetyErrorMetric."""
+
+    def _make_response(
+        self, score: float, is_parsing_error: bool | None, scorer_name: str = "safety_judge"
+    ) -> Response:
+        """Helper to create a response with a score."""
+        if is_parsing_error is not None:
+            return Response(
+                instance=Instance(
+                    question="Q", gold_answer="A", metadata={"is_parsing_error": is_parsing_error}
+                ),
+                request=LMRequest(request_type=RequestType.CHAT, prompt="Q"),
+                outputs=[LMOutput(text="A")],
+                scores={scorer_name: score},
+            )
+        else:
+            return Response(
+                instance=Instance(question="Q", gold_answer="A", metadata={}),
+                request=LMRequest(request_type=RequestType.CHAT, prompt="Q"),
+                outputs=[LMOutput(text="A")],
+                scores={scorer_name: score},
+            )
+
+    def test_error_all_correct_no_errors(self):
+        """Test error metric with all correct answers and no errors."""
+        metric = SafetyErrorMetric()
+        responses = [
+            self._make_response(1.0, False),
+            self._make_response(1.0, False),
+            self._make_response(1.0, False),
+        ]
+        errors = metric.compute(responses)
+
+        assert errors == 0
+
+    def test_error_all_correct_all_errors(self):
+        """Test error metric with all correct answers and all errors."""
+        metric = SafetyErrorMetric()
+        responses = [
+            self._make_response(1.0, True),
+            self._make_response(1.0, True),
+            self._make_response(1.0, True),
+        ]
+        errors = metric.compute(responses)
+
+        assert errors == 3
+
+    def test_error_mixed(self):
+        """Test errors with mixed results."""
+        metric = SafetyErrorMetric()
+        responses = [
+            self._make_response(1.0, True),
+            self._make_response(0.0, True),
+            self._make_response(1.0, False),
+        ]
+        errors = metric.compute(responses)
+
+        assert errors == 2
+
+    def test_errors_empty_responses(self):
+        """Test errors with empty response list."""
+        metric = SafetyErrorMetric()
+        errors = metric.compute([])
+
+        assert errors == 0.0
+
+    def test_error_single_response(self):
+        """Test errors with single response."""
+        metric = SafetyErrorMetric()
+        responses = [self._make_response(0.0, True)]
+        errors = metric.compute(responses)
+
+        assert errors == 1
+
+    def test_error_name(self):
+        """Test metric name."""
+        metric = SafetyErrorMetric()
+        assert metric.name == "parsing_error"
+
+    def test_missing_errors_instance_level(self):
+        """Test management of errors when is_parsing_error is missing."""
+        metric = SafetyErrorMetric()
+        response = self._make_response(1.0, None)
+        errors = metric.compute_instance(response)
+
+        assert errors == 0
+
+    def test_error_instance_level_error(self):
+        """Test management of errors when is_parsing_error is missing."""
+        metric = SafetyErrorMetric()
+        response = self._make_response(1.0, True)
+        errors = metric.compute_instance(response)
+
+        assert errors == 1
+
+    def test_error_instance_level_noerror(self):
+        """Test management of errors when is_parsing_error is missing."""
+        metric = SafetyErrorMetric()
+        response = self._make_response(1.0, False)
+        errors = metric.compute_instance(response)
+
+        assert errors == 0
+
+    def test_missing_errors_summary(self):
+        """Test compute for errors when is_parsing_error is missing."""
+        metric = SafetyErrorMetric()
+        responses = [
+            self._make_response(1.0, False),
+            self._make_response(0.0, False),
+            self._make_response(0.0, None),
+            self._make_response(1.0, None),
+        ]
+        errors = metric.compute(responses)
+
+        assert errors == 0
+
+
+class TestNGramCopyingBPBMetric:
+    """Tests for NGramCopyingBPBMetricByteAvg."""
+
+    def _make_response(self, tokens: list[str], logprobs: list[float]) -> Response:
+        """Build a single-output, teacher-forced (loglikelihood) Response from tokens."""
+        entries = [
+            {"token": tok, "logprob": lp, "bytes": list(tok.encode("utf-8"))}
+            for tok, lp in zip(tokens, logprobs, strict=True)
+        ]
+        text = "".join(tokens)
+        output = LMOutput(text=text, logprobs=entries)
+        return Response(
+            instance=Instance(question="", gold_answer=text),
+            request=LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt=""),
+            outputs=[output],
+        )
+
+    def test_masks_repeated_positions_only(self):
+        """`a b c a b` at k=1: only positions 3,4 ('a','b') are masked in."""
+        metric = NGramCopyingBPBMetricByteAvg(k=1)
+        response = self._make_response(["a", "b", "c", "a", "b"], [-1.0, -1.0, -1.0, -1.0, -1.0])
+
+        # Masked positions 3,4: total_logprob=-2.0, total_bytes=2.
+        expected = 2.0 / (2 * math.log(2))
+        assert metric.compute_instance(response) == pytest.approx(expected)
+        assert metric.compute([response]) == pytest.approx(expected)
+
+    def test_documents_without_repeats_contribute_nothing(self):
+        """A document with zero positions meeting the threshold doesn't shift the pooled value."""
+        metric = NGramCopyingBPBMetricByteAvg(k=1)
+        no_repeats = self._make_response(["p", "q", "r", "s"], [-1.0, -1.0, -1.0, -1.0])
+        with_repeats = self._make_response(
+            ["a", "b", "c", "a", "b"], [-1.0, -1.0, -1.0, -1.0, -1.0]
+        )
+
+        assert metric.compute_instance(no_repeats) is None
+        # Pooling with a zero-copy document should equal pooling without it.
+        expected = 2.0 / (2 * math.log(2))
+        assert metric.compute([no_repeats, with_repeats]) == pytest.approx(expected)
+        assert metric.compute([no_repeats]) == 0.0
+
+    def test_weights_by_masked_byte_count(self):
+        """Pooling weights each document's contribution by its masked byte count.
+
+        Doc A = "a b a": mask (k=1) is [F,F,T]; masked logprob=-2.0, bytes=1.
+        Doc B = "p p p p": mask (k=1) is [F,T,T,T]; masked logprob=-3.0, bytes=3.
+        """
+        metric = NGramCopyingBPBMetricByteAvg(k=1)
+        doc_a = self._make_response(["a", "b", "a"], [-1.0, -1.0, -2.0])
+        doc_b = self._make_response(["p", "p", "p", "p"], [-1.0, -1.0, -1.0, -1.0])
+
+        bpb_a = 2.0 / (1 * math.log(2))
+        bpb_b = 3.0 / (3 * math.log(2))
+        assert metric.compute_instance(doc_a) == pytest.approx(bpb_a)
+        assert metric.compute_instance(doc_b) == pytest.approx(bpb_b)
+
+        # Pools logprobs/bytes across documents before dividing once, rather than
+        # averaging the two per-document values unweighted -- doc B's larger masked
+        # span (3 bytes vs. 1) pulls the pooled result further toward its own bpb.
+        assert metric.compute([doc_a, doc_b]) == pytest.approx(5.0 / (4 * math.log(2)))
