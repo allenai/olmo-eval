@@ -39,13 +39,19 @@ class PopQAContainsScorer(Scorer):
 
     A response is correct if any accepted alias appears in it verbatim,
     lowercased, or capitalized — the matching rule used by the reference
-    implementation.
+    implementation. With ``first_line`` set, only text up to the first
+    newline is searched: models that ramble past their answer invent
+    follow-up Q/A pairs full of plausible entity names, and whole-output
+    containment credits those accidental hits.
     """
 
     name: str = "popqa_contains"
+    first_line: bool = False
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         response = output.text or ""
+        if self.first_line:
+            response = response.split("\n")[0]
         aliases = instance.metadata.get("aliases") or []
         if not aliases and instance.gold_answer:
             aliases = [instance.gold_answer]
@@ -56,11 +62,24 @@ class PopQAContainsScorer(Scorer):
         return 0.0
 
 
+_FIRST_LINE = PopQAContainsScorer(name="popqa_contains_first_line", first_line=True)
+_CONTAINMENT = PopQAContainsScorer()
+
+# First-line containment is the primary metric: it is robust to ramble-rate
+# differences between models, where whole-output containment awards verbose
+# models free credit. Whole-output containment is what the reference
+# implementation computes, so it stays reported for cross-harness and
+# historical comparison.
+_FIRST_LINE_ACCURACY = AccuracyMetric(name="exact_match_first_line", scorer=_FIRST_LINE)
+_CONTAINMENT_ACCURACY = AccuracyMetric(name="exact_match_containment", scorer=_CONTAINMENT)
+
+
 @register("popqa")
 class PopQA(Task):
     data_source = DataSource(path="akariasai/PopQA", split="test")
     split = Split.TEST
-    metrics = (AccuracyMetric(scorer=PopQAContainsScorer),)
+    metrics = (_FIRST_LINE_ACCURACY, _CONTAINMENT_ACCURACY)
+    primary_metric = _FIRST_LINE_ACCURACY
     num_fewshot = 15
     sampling_params = SamplingParams(
         max_tokens=15,
