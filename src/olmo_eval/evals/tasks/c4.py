@@ -3,7 +3,12 @@
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import CorpusPerplexityMetric
+from olmo_eval.common.metrics import (
+    NGRAM_COPYING_K_VALUES,
+    CorpusPerplexityMetric,
+    Metric,
+    NGramCopyingBPBMetricByteAvg,
+)
 from olmo_eval.common.types import (
     Instance,
     LMRequest,
@@ -121,4 +126,41 @@ register_variant(
     "c4_100k",
     "ppl",
     metrics=(CorpusPerplexityMetric(),),
+)
+
+
+def _ngram_copying_metrics() -> tuple[Metric, ...]:
+    """Build the corpus-level n-gram-copying BPB metric for every threshold."""
+    return tuple(NGramCopyingBPBMetricByteAvg(k=k) for k in NGRAM_COPYING_K_VALUES)
+
+
+register_variant(
+    "c4",
+    "ngram_copying_bpb",
+    metrics=_ngram_copying_metrics(),
+    primary_metric=NGramCopyingBPBMetricByteAvg(k=5),
+)
+
+
+register_variant(
+    "c4_1k",
+    "ngram_copying_bpb",
+    metrics=_ngram_copying_metrics(),
+    primary_metric=NGramCopyingBPBMetricByteAvg(k=5),
+)
+
+
+register_variant(
+    "c4_10k",
+    "ngram_copying_bpb",
+    metrics=_ngram_copying_metrics(),
+    primary_metric=NGramCopyingBPBMetricByteAvg(k=5),
+)
+
+
+register_variant(
+    "c4_100k",
+    "ngram_copying_bpb",
+    metrics=_ngram_copying_metrics(),
+    primary_metric=NGramCopyingBPBMetricByteAvg(k=5),
 )
