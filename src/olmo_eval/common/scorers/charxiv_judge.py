@@ -53,7 +53,9 @@ def _cache_key(model: str, prompt: str) -> str:
 
 def _get_client(model: str):
     if model not in _ASYNC_CLIENTS:
-        api_key = os.getenv("OPENAI_API_KEY")
+        # .strip(): see the note in dense_caption_judge -- a trailing newline in the key
+        # makes an illegal Authorization header, surfacing as a bogus "Connection error".
+        api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
         if not api_key:
             raise ValueError("OPENAI_API_KEY is required for CharXiv grading on a cache miss.")
         try:
