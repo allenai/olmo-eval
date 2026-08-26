@@ -17,10 +17,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.answer_extraction import (
-    OLMO_3_ANSWER_REGEX_TEMPLATES,
-    extract_answer_with_format,
-)
 from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import (
@@ -32,6 +28,10 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
+from olmo_eval.evals.extract import (
+    OLMO_3_ANSWER_REGEX_TEMPLATES,
+    extract_answer_with_format,
+)
 from olmo_eval.evals.tasks.common import Task, register
 from olmo_eval.evals.tasks.mmlu import DEFAULT_MMLU_PATH, MMLU_SUBJECTS
 
