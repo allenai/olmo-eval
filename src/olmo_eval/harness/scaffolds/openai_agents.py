@@ -29,6 +29,45 @@ FORCED_FINAL_ANSWER_INSTRUCTION = (
     "provide your final answer now. Do not call any tools."
 )
 
+# Chat template defaults applied to self-hosted requests unless configured otherwise.
+# Thinking is pinned off because no agentic preset configures a vLLM reasoning parser,
+# so a template that defaults thinking on would leak <think> blocks into scored output.
+DEFAULT_CHAT_TEMPLATE_KWARGS: dict[str, Any] = {"enable_thinking": False}
+
+# Sentinel distinguishing "provider does not support chat_template_kwargs" from
+# "provider supports it but has none configured".
+_UNSUPPORTED: Any = object()
+
+
+def _resolve_chat_template_kwargs(provider: InferenceProvider) -> dict[str, Any] | None:
+    """Resolve the ``chat_template_kwargs`` request field for a provider.
+
+    ``chat_template_kwargs`` is a vLLM extension to the OpenAI chat completions
+    body. Managed APIs reject unrecognized body fields with a 400, so it may only
+    be sent to self-hosted OpenAI-compatible servers. Providers in that family
+    expose a ``chat_template_kwargs`` attribute; every other provider opts out
+    simply by not having one.
+
+    Defaults only fill gaps, so an explicitly configured value always wins. The
+    result is always a fresh dict, so the provider's own configuration can never
+    be mutated through it.
+
+    Args:
+        provider: The inference provider backing the agent.
+
+    Returns:
+        The kwargs to send in the request body, or None if the provider does not
+        support the field.
+    """
+    configured = getattr(provider, "chat_template_kwargs", _UNSUPPORTED)
+    if configured is _UNSUPPORTED:
+        return None
+
+    resolved: dict[str, Any] = dict(DEFAULT_CHAT_TEMPLATE_KWARGS)
+    if configured:
+        resolved.update(configured)
+    return resolved
+
 
 @register_scaffold("openai_agents")
 class OpenAIAgentsScaffold(Scaffold):
@@ -165,6 +204,7 @@ class OpenAIAgentsScaffold(Scaffold):
         """
         from agents import (  # type: ignore[ty:unresolved-import]
             Agent,
+            ModelSettings,
             OpenAIChatCompletionsModel,
             function_tool,
             set_tracing_disabled,
@@ -192,11 +232,22 @@ class OpenAIAgentsScaffold(Scaffold):
 
         agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
 
+        # This scaffold drives the OpenAI client directly instead of the provider's
+        # generate path, so the request body built here is the only place a
+        # chat_template_kwargs setting can actually reach the server.
+        agent_kwargs: dict[str, Any] = {}
+        chat_template_kwargs = _resolve_chat_template_kwargs(provider)
+        if chat_template_kwargs is not None:
+            agent_kwargs["model_settings"] = ModelSettings(
+                extra_body={"chat_template_kwargs": chat_template_kwargs}
+            )
+
         agent = Agent(
             name=self.name,
             instructions=config.system_prompt or "",
             model=model,
             tools=agent_tools,
+            **agent_kwargs,
         )
 
         return agent

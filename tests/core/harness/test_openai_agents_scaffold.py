@@ -2,12 +2,14 @@
 
 import contextlib
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from olmo_eval.common.types import LMRequest, RequestType
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.scaffolds.openai_agents import (
+    DEFAULT_CHAT_TEMPLATE_KWARGS,
     FORCED_FINAL_ANSWER_INSTRUCTION,
     OpenAIAgentsScaffold,
 )
@@ -201,3 +203,141 @@ class TestOpenAIAgentsMaxTurns:
         assert result.trajectory.total_tool_calls == 1
         assert result.trajectory.tool_result_sequence[0].content == "Normal tool result"
         assert len(run_calls) == 1
+
+
+def _stub_openai_client():
+    return SimpleNamespace(base_url="http://localhost:8000/v1")
+
+
+def _self_hosted_provider(chat_template_kwargs=None, client=None):
+    """Provider shaped like VLLMServerProvider: exposes ``chat_template_kwargs``."""
+    openai_client = client if client is not None else _stub_openai_client()
+    return SimpleNamespace(
+        model_name="test-model",
+        chat_template_kwargs=chat_template_kwargs,
+        get_openai_client=lambda: openai_client,
+    )
+
+
+def _managed_api_provider():
+    """Provider shaped like an OpenAI-compatible managed API: no such attribute."""
+    openai_client = SimpleNamespace(base_url="https://api.openai.com/v1")
+    return SimpleNamespace(
+        model_name="gpt-4o",
+        get_openai_client=lambda: openai_client,
+    )
+
+
+def _build_agent(provider):
+    return OpenAIAgentsScaffold()._create_agent(provider, HarnessConfig(name="test"))
+
+
+def _sent_chat_template_kwargs(agent):
+    extra_body = agent.model_settings.extra_body
+    return None if not extra_body else extra_body.get("chat_template_kwargs")
+
+
+class _CapturingChatCompletions:
+    def __init__(self):
+        self.create_kwargs: dict[str, Any] | None = None
+
+    async def create(self, **kwargs):
+        from openai.types.chat import ChatCompletion, ChatCompletionMessage
+        from openai.types.chat.chat_completion import Choice
+
+        self.create_kwargs = kwargs
+        return ChatCompletion(
+            id="chatcmpl-test",
+            created=0,
+            model="test-model",
+            object="chat.completion",
+            choices=[
+                Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="done"),
+                )
+            ],
+        )
+
+
+class _CapturingClient:
+    """Minimal AsyncOpenAI stand-in that records the request body the SDK builds."""
+
+    def __init__(self):
+        self.base_url = "http://localhost:8000/v1"
+        self.completions = _CapturingChatCompletions()
+        self.chat = SimpleNamespace(completions=self.completions)
+
+
+class TestChatTemplateKwargs:
+    def test_self_hosted_provider_disables_thinking_by_default(self):
+        agent = _build_agent(_self_hosted_provider())
+
+        assert _sent_chat_template_kwargs(agent) == {"enable_thinking": False}
+
+    def test_explicit_enable_thinking_wins_over_the_default(self):
+        agent = _build_agent(_self_hosted_provider({"enable_thinking": True}))
+
+        assert _sent_chat_template_kwargs(agent) == {"enable_thinking": True}
+
+    def test_other_configured_kwargs_are_kept_alongside_the_default(self):
+        agent = _build_agent(_self_hosted_provider({"custom_flag": "on"}))
+
+        assert _sent_chat_template_kwargs(agent) == {
+            "enable_thinking": False,
+            "custom_flag": "on",
+        }
+
+    def test_managed_api_provider_gets_no_chat_template_kwargs(self):
+        agent = _build_agent(_managed_api_provider())
+
+        assert agent.model_settings.extra_body is None
+
+    def test_metrics_wrapped_provider_still_gets_the_default(self):
+        from olmo_eval.inference.metrics.core.collector import InstrumentedProvider
+
+        agent = _build_agent(InstrumentedProvider(_self_hosted_provider()))
+
+        assert _sent_chat_template_kwargs(agent) == {"enable_thinking": False}
+
+    def test_default_never_leaks_into_provider_or_module_state(self):
+        configured: dict[str, Any] = {}
+        provider = _self_hosted_provider(configured)
+
+        first = _sent_chat_template_kwargs(_build_agent(provider))
+        assert first == {"enable_thinking": False}
+
+        # Mutating what we sent must not reach the provider config, the module
+        # default, or any later agent built from the same provider.
+        assert first is not configured
+        assert first is not DEFAULT_CHAT_TEMPLATE_KWARGS
+        first["enable_thinking"] = True
+        first["injected"] = "leak"
+
+        assert configured == {}
+        assert provider.chat_template_kwargs == {}
+        assert DEFAULT_CHAT_TEMPLATE_KWARGS == {"enable_thinking": False}
+        assert _sent_chat_template_kwargs(_build_agent(provider)) == {"enable_thinking": False}
+
+    @pytest.mark.anyio
+    async def test_default_reaches_the_chat_completions_request_body(self):
+        from agents import ModelTracing
+
+        client = _CapturingClient()
+        agent = _build_agent(_self_hosted_provider(client=client))
+
+        await agent.model.get_response(
+            system_instructions=None,
+            input="hello",
+            model_settings=agent.model_settings,
+            tools=[],
+            output_schema=None,
+            handoffs=[],
+            tracing=ModelTracing.DISABLED,
+        )
+
+        assert client.completions.create_kwargs is not None
+        assert client.completions.create_kwargs["extra_body"] == {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
