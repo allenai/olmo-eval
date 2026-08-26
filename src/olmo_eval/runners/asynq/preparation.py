@@ -93,16 +93,16 @@ def build_requests_from_items(items: list[QueueItem], task_name: str) -> list[di
     return build_requests(instances, requests, task_name, sampling_params)
 
 
-async def finalize_task(
-    tracker: TaskTracker,
-    max_hard_failure_rate: float = DEFAULT_MAX_HARD_FAILURE_RATE,
-) -> TaskResult:
+async def finalize_task(tracker: TaskTracker) -> TaskResult:
     """Finalize a task tracker into a TaskResult.
+
+    Only the task-level error path is exercised by the async runner, which calls
+    this for trackers that failed before any instance ran; every task that
+    actually dispatched instances goes through compute_task_metrics instead. The
+    hard-failure gate therefore lives in compute_task_metrics and not here.
 
     Args:
         tracker: Completed TaskTracker
-        max_hard_failure_rate: Fraction of instances allowed to hard-fail before the
-            task is marked failed.
 
     Returns:
         TaskResult with metrics and predictions
@@ -110,9 +110,9 @@ async def finalize_task(
     import time
 
     duration = time.time() - tracker.start_time
-    instances_failed = len(tracker.failed_instances)
 
-    # Task-level error (e.g., prep failed) - no results possible
+    # Task-level error (e.g., prep failed) - no results possible. Instance
+    # accounting stays at zero: nothing was dispatched, so nothing was processed.
     if tracker.error:
         return TaskResult(
             spec=tracker.spec,
@@ -122,8 +122,6 @@ async def finalize_task(
             error=tracker.error,
             duration_seconds=duration,
             error_summary=tracker.error,
-            instances_processed=tracker.total_instances,
-            instances_failed=instances_failed,
         )
 
     if tracker.task is None:
@@ -135,8 +133,6 @@ async def finalize_task(
             error="Task preparation failed",
             duration_seconds=duration,
             error_summary="Task preparation failed",
-            instances_processed=tracker.total_instances,
-            instances_failed=instances_failed,
         )
 
     error_summary = summarize_failed_instances(tracker.failed_instances)
@@ -145,24 +141,14 @@ async def finalize_task(
     if not tracker.responses:
         # All instances failed
         summary = error_summary or "All instances failed"
-        gate_error = hard_failure_gate_error(
-            instances_saved=0,
-            instances_failed=instances_failed,
-            instances_processed=tracker.total_instances,
-            first_error=_first_instance_error(tracker.failed_instances),
-            max_hard_failure_rate=max_hard_failure_rate,
-        )
         return TaskResult(
             spec=tracker.spec,
             config=tracker.task.config.to_dict(),
             num_instances=tracker.total_instances,
             metrics={},
-            error=gate_error or summary,
+            error=summary,
             duration_seconds=duration,
             error_summary=summary,
-            instances_processed=tracker.total_instances,
-            instances_failed=instances_failed,
-            hard_failure_rate_exceeded=gate_error is not None,
         )
 
     # Sort responses by index (only successful ones)
@@ -191,14 +177,6 @@ async def finalize_task(
             f"Computed metrics on {len(responses)}/{tracker.total_instances} instances."
         )
 
-    gate_error = hard_failure_gate_error(
-        instances_saved=len(responses),
-        instances_failed=instances_failed,
-        instances_processed=tracker.total_instances,
-        first_error=_first_instance_error(tracker.failed_instances),
-        max_hard_failure_rate=max_hard_failure_rate,
-    )
-
     return TaskResult(
         spec=tracker.spec,
         config=task_config.to_dict(),
@@ -208,11 +186,10 @@ async def finalize_task(
         predictions=predictions,
         requests=requests,
         primary_metric=primary_metric,
-        error=_combine_errors(gate_error, _infrastructure_error(infrastructure_failures)),
+        error=_infrastructure_error(infrastructure_failures),
         error_summary=error_summary,
         instances_processed=tracker.total_instances,
-        instances_failed=instances_failed,
-        hard_failure_rate_exceeded=gate_error is not None,
+        instances_failed=len(tracker.failed_instances),
     )
 
 

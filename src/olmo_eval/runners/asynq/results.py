@@ -32,6 +32,17 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
+def is_hard_failure(result_item: ResultItem) -> bool:
+    """Whether an instance result contributes nothing to the metrics.
+
+    A hard failure carries an error and no outputs at all. A soft failure (an
+    error alongside a usable output, e.g. MaxTurnsExceeded with a fallback
+    answer) still gets scored, so it is not a hard failure.
+    """
+    return bool(result_item.error) and not result_item.outputs
+
+
 InstanceKey = tuple[str, str, int]
 
 
@@ -243,7 +254,7 @@ async def process_results(
     # Pre-add error tasks to results (these don't need scoring)
     for spec, tracker in trackers.items():
         if tracker.error:
-            task_result = await finalize_task(tracker, max_hard_failure_rate)
+            task_result = await finalize_task(tracker)
             results[spec] = task_result
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
@@ -300,14 +311,15 @@ async def process_results(
             if tracker.error:
                 continue
 
-            # Check for hard failures (no outputs at all)
-            # Soft failures (error with outputs, like MaxTurnsExceeded) should still be scored
-            if result_item.error and not result_item.outputs:
+            if is_hard_failure(result_item):
+                # is_hard_failure() guarantees an error is set; the `or ""` is for
+                # the type checker, which cannot see that through the predicate.
+                instance_error = result_item.error or ""
                 logger.warning(
-                    f"Instance {result_item.instance_idx} failed for {result_item.task_id}: "
-                    f"{result_item.error}"
+                    f"Instance {result_item.instance_idx} failed for "
+                    f"{result_item.task_id}: {instance_error}"
                 )
-                tracker.add_failure(result_item.instance_idx, result_item.error)
+                tracker.add_failure(result_item.instance_idx, instance_error)
                 scoring_progress.update(1)
                 check_task_completion(result_item.task_id)
                 continue
@@ -366,9 +378,14 @@ async def process_results(
 
 
 def _format_instance_accounting(result: TaskResult) -> str:
-    """Render saved-vs-processed instance counts for the task summary line."""
-    processed = result.instances_processed or result.num_instances
-    accounting = f"{result.num_instances}/{processed} instances saved"
+    """Render saved-vs-processed instance counts for the task summary line.
+
+    Matches the summary table: a task that never processed an instance (a
+    task-level failure) reports "-" rather than an invented count.
+    """
+    if not result.instances_processed:
+        return "instances: -"
+    accounting = f"{result.num_instances}/{result.instances_processed} instances saved"
     if result.instances_failed:
         accounting += f", {result.instances_failed} hard-failed"
     return accounting
@@ -427,12 +444,16 @@ def aggregate_results(
     for spec, task_result in results.items():
         task_data: dict[str, Any] = {}
 
+        # Instance counts describe what happened, not whether it was published, so
+        # they are recorded for failed tasks too. Metrics are not: a score computed
+        # on a subset must not read as the task's score.
+        task_data["num_instances"] = task_result.num_instances
+
         if task_result.error:
             task_data["error"] = task_result.error
             results_dict["errors"].append({"task": spec, "error": task_result.error})
         else:
             task_data["metrics"] = task_result.metrics
-            task_data["num_instances"] = task_result.num_instances
             task_data["duration_seconds"] = task_result.duration_seconds
             task_data["primary_metric"] = task_result.primary_metric
             if task_result.predictions:

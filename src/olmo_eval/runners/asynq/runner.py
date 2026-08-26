@@ -33,7 +33,7 @@ from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
 from olmo_eval.runners.common.models import S3Config
-from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE
+from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE, TaskResult
 from olmo_eval.runners.processing.utils import generate_experiment_id
 from olmo_eval.storage import StorageBackend
 
@@ -887,15 +887,13 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Aggregate and save results
             results_dict = self._aggregate_results(results, expanded_tasks)
-            final_results = self._finalize_and_save(
+            return self._finalize_and_gate(
+                results,
                 results_dict,
                 experiment_id=experiment_id,
                 experiment_duration_seconds=experiment_duration_seconds,
                 provider_init_seconds=provider_init_seconds,
             )
-            # Everything is on disk; only now fail the run if a task blew its budget.
-            check_hard_failure_gate(results)
-            return final_results
         finally:
             terminate_workers(workers)
             if sandbox_manager is not None:
@@ -1118,6 +1116,29 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             attention_backend=self.attention_backend,
             harness_config=self.harness_config,
         )
+
+    def _finalize_and_gate(
+        self,
+        results: dict[str, TaskResult],
+        results_dict: dict[str, Any],
+        experiment_id: str,
+        experiment_duration_seconds: float | None = None,
+        provider_init_seconds: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        """Write the results, then fail the run if a task blew its budget.
+
+        The order is the point: a run that trips the gate must still leave its
+        metrics.json and predictions on disk to be diagnosed from, so the gate is
+        checked only after _finalize_and_save has returned.
+        """
+        final_results = self._finalize_and_save(
+            results_dict,
+            experiment_id=experiment_id,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
+        )
+        check_hard_failure_gate(results)
+        return final_results
 
     def _finalize_and_save(
         self,

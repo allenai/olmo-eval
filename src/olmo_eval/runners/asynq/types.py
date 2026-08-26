@@ -81,12 +81,6 @@ class TaskTracker:
         self.failed_instances[idx] = error
         return self.is_complete()
 
-    def get_error_summary(self) -> str | None:
-        """Get summary of failures, if any."""
-        if self.error:
-            return self.error
-        return summarize_failed_instances(self.failed_instances)
-
 
 @dataclass
 class ResultItem:
