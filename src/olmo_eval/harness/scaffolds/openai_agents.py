@@ -52,6 +52,10 @@ def _resolve_chat_template_kwargs(provider: InferenceProvider) -> dict[str, Any]
     result is always a fresh dict, so the provider's own configuration can never
     be mutated through it.
 
+    This runs once per agent creation, and agents are cached per config and
+    provider, so applying a default is logged at INFO while the outcomes that
+    change nothing stay at DEBUG.
+
     Args:
         provider: The inference provider backing the agent.
 
@@ -61,11 +65,26 @@ def _resolve_chat_template_kwargs(provider: InferenceProvider) -> dict[str, Any]
     """
     configured = getattr(provider, "chat_template_kwargs", _UNSUPPORTED)
     if configured is _UNSUPPORTED:
+        logger.debug(
+            f"{type(provider).__name__} does not accept chat_template_kwargs; "
+            "omitting it from the request body"
+        )
         return None
 
+    explicit: dict[str, Any] = configured or {}
     resolved: dict[str, Any] = dict(DEFAULT_CHAT_TEMPLATE_KWARGS)
-    if configured:
-        resolved.update(configured)
+    resolved.update(explicit)
+
+    defaulted = {k: v for k, v in DEFAULT_CHAT_TEMPLATE_KWARGS.items() if k not in explicit}
+    if defaulted:
+        # Only spell out the full payload when the provider configured other keys too.
+        detail = "" if resolved == defaulted else f"; sending {resolved}"
+        logger.info(f"Defaulted chat_template_kwargs {defaulted} for {provider.model_name}{detail}")
+    else:
+        logger.debug(
+            f"Using explicitly configured chat_template_kwargs for "
+            f"{provider.model_name}: {resolved}"
+        )
     return resolved
 
 

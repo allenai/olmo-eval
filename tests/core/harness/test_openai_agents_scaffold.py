@@ -1,6 +1,7 @@
 """Tests for the OpenAI Agents scaffold (requires the optional agents deps)."""
 
 import contextlib
+import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -228,8 +229,15 @@ def _managed_api_provider():
     )
 
 
+_SCAFFOLD_LOGGER = "olmo_eval.harness.scaffolds.openai_agents"
+
+
 def _build_agent(provider):
     return OpenAIAgentsScaffold()._create_agent(provider, HarnessConfig(name="test"))
+
+
+def _scaffold_records(caplog):
+    return [record for record in caplog.records if record.name == _SCAFFOLD_LOGGER]
 
 
 def _sent_chat_template_kwargs(agent):
@@ -319,6 +327,23 @@ class TestChatTemplateKwargs:
         assert provider.chat_template_kwargs == {}
         assert DEFAULT_CHAT_TEMPLATE_KWARGS == {"enable_thinking": False}
         assert _sent_chat_template_kwargs(_build_agent(provider)) == {"enable_thinking": False}
+
+    def test_applying_the_default_is_logged_at_info(self, caplog):
+        with caplog.at_level(logging.DEBUG, logger=_SCAFFOLD_LOGGER):
+            _build_agent(_self_hosted_provider())
+
+        info = [r.message for r in _scaffold_records(caplog) if r.levelno == logging.INFO]
+        assert len(info) == 1
+        assert "Defaulted chat_template_kwargs" in info[0]
+        assert "enable_thinking" in info[0]
+
+    def test_explicit_config_is_not_logged_at_info(self, caplog):
+        with caplog.at_level(logging.DEBUG, logger=_SCAFFOLD_LOGGER):
+            _build_agent(_self_hosted_provider({"enable_thinking": True}))
+
+        records = _scaffold_records(caplog)
+        assert not [r for r in records if r.levelno >= logging.INFO]
+        assert any("explicitly configured chat_template_kwargs" in r.message for r in records)
 
     @pytest.mark.anyio
     async def test_default_reaches_the_chat_completions_request_body(self):
