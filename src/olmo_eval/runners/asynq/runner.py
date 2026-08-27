@@ -24,11 +24,16 @@ from olmo_eval.runners.asynq.monitoring import (
     wait_for_workers_ready,
 )
 from olmo_eval.runners.asynq.preparation import prepare_task_items
-from olmo_eval.runners.asynq.results import aggregate_results, process_results
+from olmo_eval.runners.asynq.results import (
+    aggregate_results,
+    check_hard_failure_gate,
+    process_results,
+)
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
 from olmo_eval.runners.common.models import S3Config
+from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE, TaskResult
 from olmo_eval.runners.processing.utils import generate_experiment_id
 from olmo_eval.storage import StorageBackend
 
@@ -882,7 +887,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Aggregate and save results
             results_dict = self._aggregate_results(results, expanded_tasks)
-            return self._finalize_and_save(
+            return self._finalize_and_gate(
+                results,
                 results_dict,
                 experiment_id=experiment_id,
                 experiment_duration_seconds=experiment_duration_seconds,
@@ -1063,6 +1069,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Replace harness config with updated metrics
         self.harness_config = self.harness_config.with_metrics(updated_metrics)
 
+    @property
+    def max_hard_failure_rate(self) -> float:
+        """Fraction of a task's instances allowed to hard-fail before it is failed."""
+        configured = self.harness_config.max_hard_failure_rate
+        return DEFAULT_MAX_HARD_FAILURE_RATE if configured is None else configured
+
     async def _process_results(
         self,
         trackers: dict[str, TaskTracker],
@@ -1087,6 +1099,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             write_predictions_fn=self._write_predictions,
             save_requests=self.save_requests,
             write_requests_fn=self._write_requests,
+            max_hard_failure_rate=self.max_hard_failure_rate,
         )
 
     def _aggregate_results(
@@ -1103,6 +1116,29 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             attention_backend=self.attention_backend,
             harness_config=self.harness_config,
         )
+
+    def _finalize_and_gate(
+        self,
+        results: dict[str, TaskResult],
+        results_dict: dict[str, Any],
+        experiment_id: str,
+        experiment_duration_seconds: float | None = None,
+        provider_init_seconds: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        """Write the results, then fail the run if a task blew its budget.
+
+        The order is the point: a run that trips the gate must still leave its
+        metrics.json and predictions on disk to be diagnosed from, so the gate is
+        checked only after _finalize_and_save has returned.
+        """
+        final_results = self._finalize_and_save(
+            results_dict,
+            experiment_id=experiment_id,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
+        )
+        check_hard_failure_gate(results)
+        return final_results
 
     def _finalize_and_save(
         self,
