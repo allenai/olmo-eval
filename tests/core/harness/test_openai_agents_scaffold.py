@@ -492,3 +492,207 @@ class TestOpenAIAgentsToolCorrection:
 
         assert "web_lookup" not in caplog.text
         assert "unknown tool" not in caplog.text
+
+
+def _chat_message(*, content=None, tool_calls=None):
+    from openai.types.chat import ChatCompletionMessage
+
+    return ChatCompletionMessage(role="assistant", content=content, tool_calls=tool_calls)
+
+
+def _chat_tool_call(call_id: str, name: str, arguments: str = "{}"):
+    from openai.types.chat import ChatCompletionMessageFunctionToolCall
+    from openai.types.chat.chat_completion_message_function_tool_call import Function
+
+    return ChatCompletionMessageFunctionToolCall(
+        id=call_id,
+        type="function",
+        function=Function(name=name, arguments=arguments),
+    )
+
+
+def _chat_completion(message):
+    from openai.types.chat import ChatCompletion
+    from openai.types.chat.chat_completion import Choice
+
+    finish_reason = "tool_calls" if message.tool_calls else "stop"
+    return ChatCompletion(
+        id="chatcmpl-test",
+        choices=[Choice(finish_reason=finish_reason, index=0, message=message)],
+        created=0,
+        model="test-model",
+        object="chat.completion",
+    )
+
+
+def _calls_tool(name: str, arguments: str = "{}"):
+    return _chat_message(tool_calls=[_chat_tool_call(f"call_{name}", name, arguments)])
+
+
+class _ScriptedClient:
+    """A real AsyncOpenAI whose completions are scripted, recording what the model was sent."""
+
+    def __init__(self, script):
+        from openai import AsyncOpenAI
+
+        self.client = AsyncOpenAI(api_key="test", base_url="http://example.com/v1")
+        self.script = list(script)
+        self.sent_messages = []
+        self.sent_tool_names = []
+
+        async def create(**kwargs):
+            self.sent_messages.append(kwargs.get("messages"))
+            tools = kwargs.get("tools") or []
+            self.sent_tool_names.append(
+                [t.get("function", {}).get("name") for t in tools if isinstance(t, dict)]
+            )
+            message = self.script.pop(0) if self.script else _chat_message(content="fallback")
+            return _chat_completion(message)
+
+        self.client.chat.completions.create = create  # type: ignore[method-assign]
+
+    def tool_results_seen(self):
+        """Every tool result the model was handed, read off the last request's history."""
+        results = []
+        for message in (self.sent_messages[-1] if self.sent_messages else []) or []:
+            if isinstance(message, dict) and message.get("role") == "tool":
+                results.append(str(message.get("content", "")))
+        return results
+
+
+def _search_config(**kwargs):
+    async def search(query: str) -> str:
+        return f"results for {query}"
+
+    return HarnessConfig(
+        name="test",
+        tools=(Tool.from_function(search, name="search", description="Search for information."),),
+        **kwargs,
+    )
+
+
+async def _run_scaffold(scripted, config, *, scaffold=None, agent=None):
+    class ProviderStub:
+        model_name = "test-model"
+
+        def get_openai_client(self):
+            return scripted.client
+
+    scaffold = scaffold or OpenAIAgentsScaffold()
+    if agent is not None:
+        scaffold._get_or_create_agent = (  # type: ignore[method-assign]
+            lambda provider, config, sandbox_manager=None: agent
+        )
+    return await scaffold.run(
+        provider=ProviderStub(),
+        config=config,
+        request=_agent_request(),
+        enable_compaction=False,
+    )
+
+
+class TestUnknownToolCallEndToEnd:
+    """Drive the real SDK dispatch path, not a stubbed Runner.
+
+    These exercise agents' actual tool dispatch, which is where an unknown tool name used to abort
+    the run and replace the answer with an error string.
+    """
+
+    @pytest.mark.anyio
+    async def test_unknown_tool_call_recovers_and_answer_survives(self):
+        scripted = _ScriptedClient(
+            [
+                _calls_tool("thought", '{"text":"let me think"}'),
+                _calls_tool("search", '{"query":"olmo"}'),
+                _chat_message(content="The answer survived."),
+            ]
+        )
+
+        result = await _run_scaffold(scripted, _search_config(max_turns=6))
+
+        assert result.final_output.text == "The answer survived."
+        assert result.error is None
+        assert result.max_turns_reached is False
+
+        tool_results = scripted.tool_results_seen()
+        assert any("thought" in r and "does not exist" in r for r in tool_results)
+        assert any("Available tools: search" in r for r in tool_results)
+        assert "results for olmo" in tool_results
+
+        # The fallback tool must never be advertised to the model.
+        for advertised in scripted.sent_tool_names:
+            assert TOOL_NOT_FOUND_TOOL_NAME not in advertised
+            assert "search" in advertised
+
+        assert result.trajectory.total_tool_calls == 2
+
+    @pytest.mark.anyio
+    async def test_unknown_tool_call_without_the_fix_destroys_the_answer(self):
+        """The failure this change exists to prevent, pinned against the SDK's own behavior."""
+        from agents import Agent, OpenAIChatCompletionsModel
+
+        scripted = _ScriptedClient(
+            [
+                _calls_tool("thought", '{"text":"let me think"}'),
+                _chat_message(content="Never reached."),
+            ]
+        )
+        # An agent built without the correcting model or the fallback tool.
+        plain_agent = Agent(
+            name="openai_agents",
+            instructions="",
+            model=OpenAIChatCompletionsModel(openai_client=scripted.client, model="test-model"),
+            tools=[],
+        )
+
+        result = await _run_scaffold(scripted, _search_config(max_turns=6), agent=plain_agent)
+
+        assert result.final_output.text == (
+            "[Tool error: Tool thought not found in agent openai_agents]"
+        )
+        assert result.error == "Tool thought not found in agent openai_agents"
+
+    @pytest.mark.anyio
+    async def test_repeated_unknown_tool_calls_still_finish(self):
+        scripted = _ScriptedClient(
+            [
+                _calls_tool("thought"),
+                _calls_tool("thought"),
+                _calls_tool("ponder"),
+                _chat_message(content="Answer after three bad calls."),
+            ]
+        )
+
+        result = await _run_scaffold(scripted, _search_config(max_turns=8))
+
+        assert result.final_output.text == "Answer after three bad calls."
+        assert result.error is None
+        tool_results = scripted.tool_results_seen()
+        assert len([r for r in tool_results if "does not exist" in r]) == 3
+        assert any("ponder" in r for r in tool_results)
+
+    @pytest.mark.anyio
+    async def test_unknown_tool_calls_consume_the_turn_budget(self):
+        """Endless unknown calls must hit the existing max-turns path, not spin forever."""
+        scripted = _ScriptedClient([_calls_tool("thought") for _ in range(10)])
+
+        result = await _run_scaffold(scripted, _search_config(max_turns=3))
+
+        assert result.max_turns_reached is True
+        assert len(scripted.sent_messages) <= 10
+
+    @pytest.mark.anyio
+    async def test_normal_run_is_unaffected(self):
+        scripted = _ScriptedClient(
+            [
+                _calls_tool("search", '{"query":"olmo"}'),
+                _chat_message(content="Normal answer."),
+            ]
+        )
+
+        result = await _run_scaffold(scripted, _search_config(max_turns=6))
+
+        assert result.final_output.text == "Normal answer."
+        assert result.error is None
+        assert scripted.tool_results_seen() == ["results for olmo"]
+        assert result.trajectory.total_tool_calls == 1
