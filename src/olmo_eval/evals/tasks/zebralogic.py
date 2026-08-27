@@ -17,7 +17,6 @@ from olmo_eval.common.types import (
     Instance,
     LMOutput,
     LMRequest,
-    RequestType,
     Response,
     SamplingParams,
 )
@@ -316,11 +315,9 @@ class ZebraLogic(Task):
             },
         )
 
-    @property
-    def request_type(self) -> RequestType:
-        return RequestType.COMPLETION
-
     def format_request(self, instance: Instance) -> LMRequest:
+        if self.config.formatter is not None:
+            return self.config.formatter.format(instance, self.get_fewshot())
         return LMRequest(
             request_type=self.request_type,
             prompt=instance.question,
