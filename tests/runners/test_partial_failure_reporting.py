@@ -320,7 +320,7 @@ def test_total_failure_marks_task_failed_and_fails_the_run() -> None:
 
     assert result.hard_failure_rate_exceeded is True
     assert result.error is not None
-    assert "Hard failure rate" in result.error
+    assert "No instances were saved" in result.error
     assert result.error_summary is not None
     assert "63 instances failed" in result.error_summary
     assert result.num_instances == 0
@@ -418,6 +418,30 @@ def test_threshold_can_be_raised_to_tolerate_failures() -> None:
     assert result.error_summary is not None
     assert result.instances_failed == 47
     assert result.instances_processed == 63
+    check_hard_failure_gate({SPEC: result})
+
+
+def test_all_failed_task_fails_even_at_the_maximum_threshold() -> None:
+    """The opt-out tolerates partial failure, not a task that produced nothing."""
+    result = _synthetic_result(total=63, failures=63, max_hard_failure_rate=1.0)
+
+    assert result.num_instances == 0
+    assert result.hard_failure_rate_exceeded is True
+    assert result.error is not None
+    assert "No instances were saved" in result.error
+    assert "any hard failure rate budget" in result.error
+    with pytest.raises(HardFailureRateExceeded):
+        check_hard_failure_gate({SPEC: result})
+
+
+def test_partial_failure_stays_quiet_at_the_maximum_threshold() -> None:
+    """One survivor is still a result, so 1.0 tolerates it."""
+    result = _synthetic_result(total=63, failures=62, max_hard_failure_rate=1.0)
+
+    assert result.num_instances == 1
+    assert result.hard_failure_rate_exceeded is False
+    assert result.error is None
+    assert result.error_summary is not None
     check_hard_failure_gate({SPEC: result})
 
 
@@ -653,6 +677,9 @@ def test_stored_task_row_explains_a_gated_task() -> None:
     assert row.instances_processed == 63
     assert row.instances_failed == 47
     assert row.error_summary is not None
+    # Both halves survive: the classification first, then the instance detail.
+    assert row.error_summary.startswith("Hard failure rate")
+    assert " | " in row.error_summary
     assert "47 instances failed" in row.error_summary
 
 
