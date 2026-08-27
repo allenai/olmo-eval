@@ -153,6 +153,7 @@ class TestRegistration:
             "unresolved_citation_forms",
             "marker_compliance_rate",
             "marker_misuse_rate",
+            "split_coverage_rate",
         }
         assert task.config.get_primary_metric().name == "exportable_rate"
 
@@ -502,6 +503,7 @@ class TestExportAdapter:
                 # recomputable from the export on disk.
                 "marker_found": False,
                 "marker_misused": False,
+                "split_tier": "heading",
             }
         ]
         assert generation["system"] == "single_agent_1"
@@ -882,18 +884,19 @@ class TestFinalReportMarkerExport:
         assert summary["answers_with_text"] == 1
         assert self._summary_rows(root)[0]["marker_found"] is True
 
-    def test_an_answer_without_the_marker_is_kept_whole_and_counted(self, tmp_path):
-        # The fallback must not cost the answer its export -- only its place in
-        # the compliance rate.
+    def test_an_answer_without_the_marker_falls_through_to_the_heading(self, tmp_path):
+        # Non-compliance still costs the answer nothing, and since v3 it no
+        # longer costs it a clean intro either: the heading tier trims the
+        # deliberation the marker would have trimmed.
         answer = self.DELIBERATION + NUMBERED_ANSWER
 
         summary, root = self._export(tmp_path, answer)
 
         assert summary["exported_ids"] == [7]
         assert summary["marker_compliance_rate"] == 0.0
-        assert summary["markers_found"] == 0
         assert self._summary_rows(root)[0]["marker_found"] is False
-        assert "First I will search" in (root / "7" / "intro.md").read_text(encoding="utf-8")
+        assert self._summary_rows(root)[0]["split_tier"] == "heading"
+        assert "First I will search" not in (root / "7" / "intro.md").read_text(encoding="utf-8")
 
     def test_the_last_marker_wins_in_the_export(self, tmp_path):
         answer = (
@@ -911,13 +914,17 @@ class TestFinalReportMarkerExport:
         assert "abandoned draft" not in intro
         assert "[First Retrieval System](https://arxiv.org/abs/2401.00001)" in intro
 
-    def test_the_sentinel_in_prose_does_not_split_the_export(self, tmp_path):
+    def test_the_sentinel_in_prose_does_not_count_as_compliance(self, tmp_path):
+        # The sentinel tier still refuses a mid-sentence mention. The heading tier
+        # then does the trimming, which is a different tier reporting a different
+        # fact -- compliance stays 0.
         answer = "I will write " + FINAL_REPORT_MARKER + " when ready.\n\n" + NUMBERED_ANSWER
 
         summary, root = self._export(tmp_path, answer)
 
         assert summary["marker_compliance_rate"] == 0.0
-        assert "I will write" in (root / "7" / "intro.md").read_text(encoding="utf-8")
+        assert self._summary_rows(root)[0]["split_tier"] == "heading"
+        assert "I will write" not in (root / "7" / "intro.md").read_text(encoding="utf-8")
 
     def test_a_marker_with_nothing_above_it_changes_nothing(self, tmp_path):
         with_marker, marked_root = self._export(
@@ -1143,3 +1150,51 @@ class TestHardenedContractWording:
         body, found = split_final_report("Planning.\n" + mandated[0] + "\nThe report.\n")
         assert found is True
         assert body == "The report.\n"
+
+
+class TestSplitTierBookkeeping:
+    """The export reports which rule recovered each report."""
+
+    def _prediction(self, answer: str) -> dict:
+        trajectory = _trajectory(
+            _tool_output(
+                _paper("First Retrieval System", "2401.00001", published="2024-01-15"),
+                _paper("Scaling The Index", "2401.00002"),
+                _paper("Grounding Each Claim", "cs/0501001"),
+            )
+        )
+        return {
+            "doc_id": 0,
+            "native_id": "7",
+            "final_output": answer,
+            "model_output": [{"text": answer}],
+            "trajectory": trajectory.to_dict(),
+        }
+
+    def _export(self, tmp_path, answer: str, name: str = "export"):
+        path = tmp_path / (name + "-predictions.jsonl")
+        path.write_text(json.dumps(self._prediction(answer)) + "\n", encoding="utf-8")
+        summary = export_predictions(
+            path,
+            tmp_path / name,
+            dataset_path=_dataset_csv(tmp_path, 7),
+            fetch_abstracts=False,
+        )
+        return summary, tmp_path / name
+
+    def test_the_sentinel_tier_is_reported(self, tmp_path):
+        answer = "Planning.\n\n" + FINAL_REPORT_MARKER + "\n\n" + NUMBERED_ANSWER
+
+        summary, root = self._export(tmp_path, answer)
+
+        assert summary["split_tier_counts"]["sentinel"] == 1
+        assert summary["split_coverage_rate"] == 1.0
+        rows = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+        assert rows[0]["split_tier"] == "sentinel"
+
+    def test_an_unrecoverable_answer_is_reported_as_none(self, tmp_path):
+        # No marker, no heading, no citation-bearing paragraph.
+        summary, _ = self._export(tmp_path, "I could not find anything useful.\n")
+
+        assert summary["split_tier_counts"]["none"] == 1
+        assert summary["split_coverage_rate"] == 0.0
