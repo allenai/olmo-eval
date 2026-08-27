@@ -321,8 +321,8 @@ class TestSplitFinalReport:
         assert "FINAL REPORT" not in body
 
     def test_an_answer_without_the_marker_survives_whole(self):
-        # The fallback is today's behaviour exactly: non-compliance is measured,
-        # never punished by throwing the answer away.
+        # split_final_report itself is still sentinel-only; the heading tier
+        # lives above it in select_scored_text, not inside it.
         body, found = split_final_report(self.DELIBERATION + self.REPORT)
 
         assert found is False
@@ -422,7 +422,7 @@ class TestSelectScoredText:
     def test_a_marker_that_keeps_the_report_splits(self):
         answer = "Planning.\n\n=== FINAL REPORT ===\n\n" + self.PROSE
 
-        text, found, misused = select_scored_text(answer, SOURCES)
+        text, tier, found, misused = select_scored_text(answer, SOURCES)
 
         assert (found, misused) == (True, False)
         assert text == self.PROSE
@@ -431,7 +431,7 @@ class TestSelectScoredText:
         # The whole point: the prose is above the line, only the list is below.
         answer = self.PROSE + "\n=== FINAL REPORT ===\n\n" + self.BARE_LIST
 
-        text, found, misused = select_scored_text(answer, SOURCES)
+        text, tier, found, misused = select_scored_text(answer, SOURCES)
 
         assert (found, misused) == (True, True)
         assert text == answer
@@ -439,8 +439,8 @@ class TestSelectScoredText:
     def test_the_fallback_is_exactly_the_marker_absent_path(self):
         answer = self.PROSE + "\n=== FINAL REPORT ===\n\n" + self.BARE_LIST
 
-        fused, _, _ = select_scored_text(answer, SOURCES)
-        unmarked, _, _ = select_scored_text(answer.replace("=== FINAL REPORT ===", ""), SOURCES)
+        fused, _, _, _ = select_scored_text(answer, SOURCES)
+        unmarked, _, _, _ = select_scored_text(answer.replace("=== FINAL REPORT ===", ""), SOURCES)
 
         # Same citations survive either way; the marker costs the answer nothing.
         assert rewrite_intro(fused, SOURCES)[1] == rewrite_intro(unmarked, SOURCES)[1]
@@ -453,14 +453,14 @@ class TestSelectScoredText:
             self.PROSE,
             "=== FINAL REPORT ===\n",
         ):
-            chosen, _, _ = select_scored_text(answer, SOURCES)
+            chosen, _, _, _ = select_scored_text(answer, SOURCES)
 
             assert len(rewrite_intro(chosen, SOURCES)[1]) >= len(
                 rewrite_intro(answer, SOURCES)[1]
             ), answer
 
     def test_no_marker_is_not_misuse(self):
-        text, found, misused = select_scored_text(self.PROSE, SOURCES)
+        text, tier, found, misused = select_scored_text(self.PROSE, SOURCES)
 
         assert (found, misused) == (False, False)
         assert text == self.PROSE
@@ -469,7 +469,7 @@ class TestSelectScoredText:
         # There is no export to save, so there is nothing to report.
         answer = "Thinking.\n\n=== FINAL REPORT ===\n\nNo citations here at all.\n"
 
-        text, found, misused = select_scored_text(answer, SOURCES)
+        text, tier, found, misused = select_scored_text(answer, SOURCES)
 
         assert (found, misused) == (True, False)
         assert text == "No citations here at all.\n"
@@ -479,3 +479,114 @@ class TestSelectScoredText:
         # strip_references": a numbered list with no References heading is not
         # stripped, so the emptiness test would never fire on the real failure.
         assert strip_references(self.BARE_LIST).strip() != ""
+
+
+class TestTierStack:
+    """The three tiers, and the corpora findings that chose their rules.
+
+    Fixtures here are the shapes actually seen in the W0020 study across 223
+    archived answers, not invented ones.
+    """
+
+    REPORT = (
+        "## Related Works\n\nRetrieval augmentation is well studied [1].\n\n"
+        "## References\n\n[1] A. Author. Retrieval Augmented Generation for Science. "
+        "arXiv:2401.00001\n"
+    )
+
+    def test_a_heading_recovers_a_report_with_no_marker(self):
+        answer = "Let me plan my search strategy first.\n\n" + self.REPORT
+
+        text, tier, found, misused = select_scored_text(answer, SOURCES)
+
+        assert tier == "heading"
+        assert (found, misused) == (False, False)
+        assert "Let me plan" not in text
+        assert text.startswith("## Related Works")
+
+    def test_the_first_heading_wins_not_the_last(self):
+        # The U0009 finding, and the reason this rule differs from the sentinel's.
+        # 27B writes a real report and then a late skeleton draft; last-wins picked
+        # the skeleton, whose tail resolves nothing, and burned the split.
+        skeleton = (
+            "\n\nRelated Works\n...\n\nReferences\n1. ...\n\n"
+            "Need maybe reference list not counted? fine. Let's final.\n"
+        )
+        answer = "Planning.\n\n" + self.REPORT + skeleton
+
+        text, tier, _, _ = select_scored_text(answer, SOURCES)
+
+        assert tier == "heading"
+        assert text.startswith("## Related Works")
+        assert "Let's final" in text, "first-wins keeps everything after the real heading"
+        assert "Planning." not in text
+
+    def test_the_prose_tier_catches_an_answer_with_no_heading_at_all(self):
+        answer = (
+            "I will search for retrieval papers and then summarise them.\n\n"
+            "Retrieval augmentation is a well studied approach to grounding "
+            "generation in documents, and a substantial literature has grown around "
+            "it over the past several years covering indexing, ranking and "
+            "attribution of individual claims to their sources [1].\n\n"
+            "## References\n\n[1] A. Author. Retrieval Augmented Generation for "
+            "Science. arXiv:2401.00001\n"
+        )
+
+        text, tier, _, _ = select_scored_text(answer, SOURCES)
+
+        assert tier == "prose"
+        assert "I will search for retrieval papers" not in text
+        assert text.startswith("Retrieval augmentation is a well studied")
+
+    def test_a_short_citation_bearing_line_is_not_a_report_opening(self):
+        # MIN_PROSE_WORDS: a fragment carrying a bracket is not the section.
+        answer = (
+            "Found [1].\n\n"
+            "## References\n\n[1] A. Author. Retrieval Augmented Generation for "
+            "Science. arXiv:2401.00001\n"
+        )
+
+        _, tier, _, _ = select_scored_text(answer, SOURCES)
+
+        assert tier == "none"
+
+    def test_every_tier_is_fused_so_nothing_is_ever_lost(self):
+        # The query-24 shape: report above, bare numbered list below the marker.
+        bare_list = (
+            "1. A. Author. Retrieval Augmented Generation for Science. arXiv:2401.00001\n"
+            "2. B. Author. Scaling Laws for Literature Search. arXiv:2401.00002\n"
+        )
+        answer = self.REPORT + "\n=== FINAL REPORT ===\n\n" + bare_list
+
+        text, _, found, misused = select_scored_text(answer, SOURCES)
+
+        assert (found, misused) == (True, True)
+        _, cited_chosen = rewrite_intro(text, SOURCES)
+        _, cited_full = rewrite_intro(answer, SOURCES)
+        assert len(cited_chosen) >= len(cited_full)
+
+    def test_the_stack_never_exports_less_than_keeping_everything(self):
+        # The losslessness invariant, over every shape above.
+        bare_list = "1. A. Author. Retrieval Augmented Generation. arXiv:2401.00001\n"
+        for answer in (
+            "Planning.\n\n=== FINAL REPORT ===\n\n" + self.REPORT,
+            "Planning.\n\n" + self.REPORT,
+            self.REPORT + "\n=== FINAL REPORT ===\n\n" + bare_list,
+            "Nothing citable at all here.\n\nStill nothing.\n",
+            self.REPORT,
+        ):
+            chosen, _, _, _ = select_scored_text(answer, SOURCES)
+
+            assert len(rewrite_intro(chosen, SOURCES)[1]) >= len(
+                rewrite_intro(answer, SOURCES)[1]
+            ), answer
+
+    def test_a_heading_inside_the_reference_tail_is_not_a_split_point(self):
+        answer = (
+            "Planning without citations.\n\n## References\n\n"
+            "[1] A. Author. Related Works. arXiv:2401.00001\n"
+        )
+
+        _, tier, _, _ = select_scored_text(answer, SOURCES)
+
+        assert tier == "none"
