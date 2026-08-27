@@ -34,6 +34,17 @@ serper_fetch_webpage_content before answering. Quote only text copied from
 fetched page content, and do not invent citations."""
 
 
+# Qwen3.5-9B skips the search tool outright on some queries -- it answers the
+# related-works prompt from memory in a single turn, calling nothing, and every
+# such query is unexportable because nothing it cites was ever retrieved. The
+# preset carried no system prompt at all, so the agent had nothing telling it to
+# search first. This is that instruction and nothing else.
+ARXIV_PAPER_SEARCH_SYSTEM_PROMPT = (
+    "Search for relevant papers with the tool before writing. "
+    "Base every citation on sources returned by your searches, never on memory."
+)
+
+
 # TODO(undfined): Remove reference to beaker
 def _get_logs_dir() -> str:
     """Get the logs directory based on environment."""
@@ -209,6 +220,7 @@ class HarnessPresets:
                 kwargs={"timeout": 120},
             ),
             tools=(arxiv_paper_search,),
+            system_prompt=ARXIV_PAPER_SEARCH_SYSTEM_PROMPT,
             # Writing a related-works section takes more searching than a
             # single-answer lookup, so this doubles paper_search_agent's turns.
             max_turns=20,
