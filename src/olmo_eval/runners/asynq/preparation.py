@@ -300,7 +300,11 @@ def hard_failure_gate_error(
     usable output, e.g. MaxTurnsExceeded with a fallback answer) are scored upstream
     and never reach this function.
 
-    The comparison is strict: a task sitting exactly on the threshold still passes.
+    Two separate conditions fail a task. A task that saved no instances at all
+    produced no metrics, and there is no budget at which that is a result worth
+    publishing, so it fails even when the threshold has been opened all the way up
+    to 1.0. Otherwise the hard-failure rate is compared against the budget, and
+    that comparison is strict: a task sitting exactly on the threshold passes.
 
     Args:
         instances_saved: Instances that were scored and saved.
@@ -313,12 +317,23 @@ def hard_failure_gate_error(
     Returns:
         An error string describing the breach, or None when within budget.
     """
-    if instances_processed <= 0 or instances_failed <= 0:
+    if instances_processed <= 0:
+        return None
+
+    detail = f" First failure: {first_error}" if first_error else ""
+
+    if instances_saved <= 0:
+        return (
+            f"No instances were saved out of {instances_processed}: the task produced "
+            f"no metrics ({instances_failed} hard-failed), which fails at any hard "
+            f"failure rate budget.{detail}"
+        )
+
+    if instances_failed <= 0:
         return None
     rate = instances_failed / instances_processed
     if rate <= max_hard_failure_rate:
         return None
-    detail = f" First failure: {first_error}" if first_error else ""
     return (
         f"Hard failure rate {rate:.1%} exceeds the maximum of {max_hard_failure_rate:.1%}: "
         f"saved {instances_saved} of {instances_processed} instances, "

@@ -13,6 +13,8 @@ REQUESTS_SUFFIX = "-requests.jsonl"
 # A hard failure is an instance that came back with an error and no outputs at all, so it
 # contributes nothing to the metrics. Soft failures (an error alongside a usable output,
 # e.g. MaxTurnsExceeded with a fallback answer) are still scored and do not count here.
+# Independently of this budget, a task that saves zero instances always fails: it
+# produced no metrics, so there is nothing to publish at any rate.
 DEFAULT_MAX_HARD_FAILURE_RATE = 0.05
 
 
