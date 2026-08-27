@@ -2884,18 +2884,6 @@ wheels = [
 ]
 
 [[package]]
-name = "griffe"
-version = "1.15.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0d/0c/3a471b6e31951dce2360477420d0a8d1e00dea6cf33b70f3e8c3ab6e28e1/griffe-1.15.0.tar.gz", hash = "sha256:7726e3afd6f298fbc3696e67958803e7ac843c1cfe59734b6251a40cdbfb5eea", size = 424112, upload-time = "2025-11-10T15:03:15.52Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/83/3b1d03d36f224edded98e9affd0467630fc09d766c0e56fb1498cbb04a9b/griffe-1.15.0-py3-none-any.whl", hash = "sha256:6f6762661949411031f5fcda9593f586e6ce8340f0ba88921a0f2ef7a81eb9a3", size = 150705, upload-time = "2025-11-10T15:03:13.549Z" },
-]
-
-[[package]]
 name = "griffelib"
 version = "2.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -4093,7 +4081,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "openai", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-litellm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-litellm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "tiktoken" },
@@ -5159,7 +5147,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.10.2.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fa/41/e79269ce215c857c935fd86bcfe91a451a584dfc27f1e068f568b9ad1ab7/nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:c9132cc3f8958447b4910a1720036d9eff5928cc3179b0a51fb6d167c6cc87d8", size = 705026878, upload-time = "2025-06-06T21:52:51.348Z" },
@@ -5188,7 +5176,7 @@ name = "nvidia-cufft-cu12"
 version = "11.3.3.83"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12" },
+    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/60/bc/7771846d3a0272026c416fbb7e5f4c1f146d6d80704534d0b187dd6f4800/nvidia_cufft_cu12-11.3.3.83-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:848ef7224d6305cdb2a4df928759dca7b1201874787083b6e7550dd6765ce69a", size = 193109211, upload-time = "2025-03-07T01:44:56.873Z" },
@@ -5220,9 +5208,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.3.90"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12" },
-    { name = "nvidia-cusparse-cu12" },
-    { name = "nvidia-nvjitlink-cu12" },
+    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "nvidia-cusparse-cu12", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/32/f7cd6ce8a7690544d084ea21c26e910a97e077c9b7f07bf5de623ee19981/nvidia_cusolver_cu12-11.7.3.90-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:db9ed69dbef9715071232caa9b69c52ac7de3a95773c2db65bdba85916e4e5c0", size = 267229841, upload-time = "2025-03-07T01:46:54.356Z" },
@@ -5235,7 +5223,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.8.93"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12" },
+    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bc/f7/cd777c4109681367721b00a106f491e0d0d15cfa1fd59672ce580ce42a97/nvidia_cusparse_cu12-12.5.8.93-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:9b6c161cb130be1a07a27ea6923df8141f3c295852f4b260c65f18f3e0a091dc", size = 288117129, upload-time = "2025-03-07T01:47:40.407Z" },
@@ -5389,7 +5377,7 @@ beaker = [
     { name = "beaker-py" },
 ]
 clients = [
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" } },
 ]
 crawl4ai = [
     { name = "crawl4ai" },
@@ -5402,7 +5390,6 @@ hf = [
 ]
 litellm = [
     { name = "litellm" },
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" } },
 ]
 olmo-core = [
     { name = "ai2-olmo-core", extra = ["torchao", "transformers"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-litellm' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
@@ -5472,9 +5459,8 @@ requires-dist = [
     { name = "nvidia-ml-py", marker = "sys_platform != 'darwin' and extra == 'gpu'", specifier = ">=12.560" },
     { name = "olmo-eval", extras = ["s3", "postgres"], marker = "extra == 'storage'" },
     { name = "omegaconf", specifier = ">=2.4.0.dev10,<2.5.0" },
-    { name = "openai", marker = "extra == 'clients'", specifier = "~=2.21.0" },
-    { name = "openai", marker = "extra == 'litellm'", specifier = "~=2.21.0" },
-    { name = "openai-agents", marker = "extra == 'agents'", specifier = "~=0.7.0" },
+    { name = "openai", marker = "extra == 'clients'", specifier = ">=2.45,<3" },
+    { name = "openai-agents", marker = "extra == 'agents'", specifier = "~=0.20.0" },
     { name = "opencv-python-headless", marker = "sys_platform != 'darwin' and extra == 'vllm'", specifier = "==4.13.0.92" },
     { name = "openhands-ai", marker = "extra == 'openhands'", specifier = "~=1.4.0" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
@@ -5554,7 +5540,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "2.21.0"
+version = "2.54.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -5577,27 +5563,27 @@ dependencies = [
     { name = "tqdm", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-litellm' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "typing-extensions", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-litellm' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/92/e5/3d197a0947a166649f566706d7a4c8f7fe38f1fa7b24c9bcffe4c7591d44/openai-2.21.0.tar.gz", hash = "sha256:81b48ce4b8bbb2cc3af02047ceb19561f7b1dc0d4e52d1de7f02abfd15aa59b7", size = 644374, upload-time = "2026-02-14T00:12:01.577Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/50/9a/8c75e8c8a5b407a0586faeb2afac91674ff955c191ecc1d6d3b6669f6788/openai-2.54.0.tar.gz", hash = "sha256:e3e6f8bc1ba30ddf381ace1a14340eed381cb984a1a59bd0f34b5be3b5d49cfa", size = 1100285, upload-time = "2026-08-11T18:46:59.035Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cc/56/0a89092a453bb2c676d66abee44f863e742b2110d4dbb1dbcca3f7e5fc33/openai-2.21.0-py3-none-any.whl", hash = "sha256:0bc1c775e5b1536c294eded39ee08f8407656537ccc71b1004104fe1602e267c", size = 1103065, upload-time = "2026-02-14T00:11:59.603Z" },
+    { url = "https://files.pythonhosted.org/packages/64/a8/bb76c7356de8ad57f59d5ff993d434df0607f07f08bcc9c9a5c275e399c0/openai-2.54.0-py3-none-any.whl", hash = "sha256:89089789197ccdb87f173a03145ed1598d00795220c93e96cf712b1cbf5e5f2b", size = 1660351, upload-time = "2026-08-11T18:46:56.684Z" },
 ]
 
 [[package]]
 name = "openai-agents"
-version = "0.7.0"
+version = "0.20.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "griffe" },
+    { name = "griffelib" },
     { name = "mcp" },
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" } },
     { name = "pydantic" },
     { name = "requests" },
-    { name = "types-requests" },
     { name = "typing-extensions" },
+    { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f8/a2/63a5ff78d89fa0861fe461a7b91d2123315115dcbf2c3fdab051b99185e5/openai_agents-0.7.0.tar.gz", hash = "sha256:5a283e02ee0d7c0d869421de9918691711bf19d1b1dc4d2840548335f2d24de6", size = 2169530, upload-time = "2026-01-23T00:06:35.746Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/57/18/1204bde976436ad85498b759d5297843ebd2e0a214f729eb2dc4423cdfc7/openai_agents-0.20.0.tar.gz", hash = "sha256:a6b37954877868ac233876a27dab1e2a461c53ecbd5fcf6e19e2d276d3e848cd", size = 6146452, upload-time = "2026-08-11T03:12:49.556Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/92/9cbbdd604f858056d4e4f105a1b99779128bae61b6a3681db0f035ef73b4/openai_agents-0.7.0-py3-none-any.whl", hash = "sha256:4446935a65d3bb1c2c1cd0546b1bc286ced9dde0adba947ab390b2e74802aa49", size = 288537, upload-time = "2026-01-23T00:06:33.78Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/8b/18528f00cb1a5d0b8e00f457f7dc88e7b17439bc520861aae2b638b88710/openai_agents-0.20.0-py3-none-any.whl", hash = "sha256:aaff662b802fa90762ad539e131b9ea387e12e3664b87bc75157ad1b3fc88850", size = 1064338, upload-time = "2026-08-11T03:12:47.615Z" },
 ]
 
 [[package]]
@@ -12415,18 +12401,6 @@ wheels = [
 ]
 
 [[package]]
-name = "types-requests"
-version = "2.33.0.20260408"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/69/6a/749dc53a54a3f35842c1f8197b3ca6b54af6d7458a1bfc75f6629b6da666/types_requests-2.33.0.20260408.tar.gz", hash = "sha256:95b9a86376807a216b2fb412b47617b202091c3ea7c078f47cc358d5528ccb7b", size = 23882, upload-time = "2026-04-08T04:34:49.33Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/90/b8/78fd6c037de4788c040fdd323b3369804400351b7827473920f6c1d03c10/types_requests-2.33.0.20260408-py3-none-any.whl", hash = "sha256:81f31d5ea4acb39f03be7bc8bed569ba6d5a9c5d97e89f45ac43d819b68ca50f", size = 20739, upload-time = "2026-04-08T04:34:48.325Z" },
-]
-
-[[package]]
 name = "types-toml"
 version = "0.10.8.20260408"
 source = { registry = "https://pypi.org/simple" }
@@ -12496,7 +12470,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "openai", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-litellm' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-litellm' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "tiktoken" },
@@ -12685,7 +12659,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" } },
     { name = "nvidia-cudnn-frontend" },
     { name = "nvidia-cutlass-dsl" },
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" } },
     { name = "openai-harmony" },
     { name = "opencv-python-headless" },
     { name = "opentelemetry-api" },
