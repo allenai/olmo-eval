@@ -34,22 +34,28 @@ serper_fetch_webpage_content before answering. Quote only text copied from
 fetched page content, and do not invent citations."""
 
 
-# The delimiter contract for deepscholar_bench's single arm. The benchmark's
-# user prompt is run verbatim and cannot be edited, and the 9B run showed why
-# something had to give: 45 of 63 answers reached their Related Works section
-# only after a median 9.8k characters of planning, all of which the scorer read
-# as the report. Banning deliberation would cost quality, so this buys the
-# split instead -- think above the line, deliver below it. Kept in sync with
-# deepscholar_citations.split_final_report by a test that reads the marker back
-# out of this string.
+# The v3 instrument's whole prompt-side contract, in one string, because the two
+# halves fix two different failures and the agent reads them as one instruction.
 #
-# The wording is emphatic about where the prose goes because the first version
-# was not, and Qwen3.5-9B read it the other way: it wrote the whole Related
-# Works section while deliberating and put only the numbered list below the
-# line, so the split threw its report away. Saying 'your deliverable is what
-# follows' was not enough -- it has to say the section itself must not appear
-# above the marker.
+# The first sentence is the search nudge, measured in W0018: Qwen3.5-9B otherwise
+# skips the tool outright on some queries, answering from memory in a single turn,
+# and every such query is unexportable because nothing it cites was ever
+# retrieved. That sentence took 9B's tool-skips from 6/63 to 0/63 and is
+# reproduced here verbatim -- it is a pre-registered string, not prose to edit.
+#
+# The rest is the delimiter contract. The benchmark's user prompt is run verbatim
+# and cannot be edited, and 9B reached its Related Works section only after a
+# median 9.8k characters of planning, all of which the scorer read as the report.
+# Banning deliberation would cost quality, so this buys the split instead: think
+# above the line, deliver below it. The wording is emphatic about where the prose
+# goes because the first version was not, and 9B read it the other way -- writing
+# the whole section while deliberating and leaving only the numbered list below
+# the line. Kept in sync with deepscholar_citations by a test that reads the
+# marker back out of this string.
 ARXIV_PAPER_SEARCH_SYSTEM_PROMPT = """\
+Search for relevant papers with the tool before writing. Base every citation on \
+sources returned by your searches, never on memory.
+
 You may plan and deliberate freely in your reply. When you are ready to deliver,
 write a line containing exactly:
 
