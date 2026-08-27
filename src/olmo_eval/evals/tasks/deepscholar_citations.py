@@ -75,6 +75,14 @@ _REFERENCE_HEADING_RE = re.compile(
 )
 _CANONICAL_REFERENCE_HEADING = "references"
 
+# Which rule supplied the scored text. Reported per query so a run can say
+# how it recovered its reports, not merely that it did.
+SPLIT_TIER_SENTINEL = "sentinel"
+SPLIT_TIER_HEADING = "heading"
+SPLIT_TIER_PROSE = "prose"
+SPLIT_TIER_NONE = "none"
+SPLIT_TIERS = (SPLIT_TIER_SENTINEL, SPLIT_TIER_HEADING, SPLIT_TIER_PROSE, SPLIT_TIER_NONE)
+
 # The delimiter the arxiv_paper_search_agent preset's system prompt asks for.
 # Deliberation is not banned -- an agent that plans in prose writes a better
 # related-works section, and the benchmark's own user prompt is verbatim and
@@ -428,13 +436,113 @@ def rewrite_intro(
     return body + "\n", exported
 
 
+# The model's own Related Works heading, in the four shapes the archived runs
+# actually produced: markdown hashes, bold, a numbered section, or a bare line.
+# This is the fallback that does the real work -- a marker is only present on 55%
+# of 9B answers, while a heading is present on 60-95% depending on the backbone.
+_RELATED_WORKS_TITLE = r"related[ \t]+works?(?:[ \t]+(?:and|/)[ \t]+background)?"
+_HEADING_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE | re.MULTILINE)
+    for pattern in (
+        r"^[ \t]{0,3}#{1,6}[ \t]*" + _RELATED_WORKS_TITLE + r"[ \t]*:?[ \t]*$",
+        r"^[ \t]{0,3}\*\*[ \t]*" + _RELATED_WORKS_TITLE + r"[ \t]*\*\*[ \t]*:?[ \t]*$",
+        r"^[ \t]{0,3}\d{1,2}[.)]?[ \t]+" + _RELATED_WORKS_TITLE + r"[ \t]*:?[ \t]*$",
+        r"^[ \t]{0,3}" + _RELATED_WORKS_TITLE + r"[ \t]*:?[ \t]*$",
+    )
+)
+# A line that opens a numbered reference entry, and the share of such lines above
+# which a paragraph is a reference list rather than prose.
+_REFERENCE_ENTRY_LINE_RE = re.compile(r"^[ \t]{0,3}(?:\[\d{1,3}\]|\d{1,3}[.)])[ \t]+")
+_REFERENCE_BLOCK_RATIO = 0.5
+_INLINE_NUMERIC_CITATION_RE = re.compile(r"\[[ \t]*\d{1,3}(?:[ \t]*[-,;][ \t]*\d{1,3})*[ \t]*\]")
+_ARXIV_MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\([^)]*arxiv\.org/abs[^)]*\)", re.IGNORECASE)
+# Below this a paragraph is too short to be the opening of a related-works
+# section; it is a caption, a fragment, or a note to self.
+_MIN_PROSE_WORDS = 30
+
+
+def _reference_heading_start(report: str) -> int | None:
+    match = _REFERENCE_HEADING_RE.search(report)
+    return match.start() if match else None
+
+
+def heading_split(report: str) -> str | None:
+    """Everything from the model's FIRST Related Works heading, or None.
+
+    First rather than last, which is the opposite of the sentinel's rule and was
+    settled by measurement (U0009) rather than by analogy. Last-wins loses to a
+    late skeleton draft -- 27B writes `Related Works ... References 1. ... Need
+    maybe reference list not counted? fine.` near the end of some answers, and
+    that outranks the real report written earlier. First-wins never lands after
+    the sentinel on any answer where both exist, so it cannot cut into a report.
+
+    The heading is retained, not stripped: it is part of the report and is clean
+    markdown for the organisation judge.
+    """
+    limit = _reference_heading_start(report)
+    starts = sorted(
+        match.start()
+        for pattern in _HEADING_PATTERNS
+        for match in pattern.finditer(report)
+        if limit is None or match.start() < limit
+    )
+    return report[starts[0] :] if starts else None
+
+
+def _is_reference_block(block: str) -> bool:
+    lines = [line for line in block.splitlines() if line.strip()]
+    if not lines:
+        return False
+    entries = sum(1 for line in lines if _REFERENCE_ENTRY_LINE_RE.match(line))
+    return entries / len(lines) >= _REFERENCE_BLOCK_RATIO
+
+
+def prose_split(report: str) -> str | None:
+    """Everything from the first citation-bearing prose paragraph, or None.
+
+    The last resort, for an answer that marks its report neither with the
+    sentinel nor with a heading. It only ever drops LEADING paragraphs, so it
+    cannot damage a reference list or truncate a report that began earlier; its
+    worst case is trimming too little, which the measurements confirm is how it
+    fails.
+    """
+    limit = _reference_heading_start(report)
+    position = 0
+    for separator in re.finditer(r"\n[ \t]*\n", report):
+        block = report[position : separator.start()]
+        if limit is not None and position >= limit:
+            return None
+        if _qualifies_as_report_opening(block):
+            return report[position:]
+        position = separator.end()
+    if (limit is None or position < limit) and _qualifies_as_report_opening(report[position:]):
+        return report[position:]
+    return None
+
+
+def _qualifies_as_report_opening(block: str) -> bool:
+    if _is_reference_block(block):
+        return False
+    if len(block.split()) < _MIN_PROSE_WORDS:
+        return False
+    return bool(_INLINE_NUMERIC_CITATION_RE.search(block) or _ARXIV_MARKDOWN_LINK_RE.search(block))
+
+
 def select_scored_text(
     report: str,
     sources: Sequence[Mapping[str, Any]],
-) -> tuple[str, bool, bool]:
-    """Choose the text to score, and say whether the marker chose it.
+) -> tuple[str, str, bool, bool]:
+    """Choose the text to score, and say which rule chose it.
 
-    Returns ``(text, marker_found, marker_misused)``.
+    Returns ``(text, split_tier, marker_found, marker_misused)`` where
+    ``split_tier`` is one of ``sentinel``, ``heading``, ``prose`` or ``none``.
+
+    Three rules are tried in descending order of how explicitly the model marked
+    its report: the sentinel it was asked to write, its own Related Works
+    heading, then the first citation-bearing paragraph. Each candidate must pass
+    the same fuse before it is accepted, so a tier that would cost the answer its
+    citations is skipped rather than trusted, and ``none`` means every rule was
+    refused and the full text was kept.
 
     :func:`split_final_report` decides where the deliverable starts; this decides
     whether trusting it would cost the answer its export. A model can honour the
@@ -457,18 +565,40 @@ def select_scored_text(
     heading is not stripped, so it survives as prose and the emptiness test never
     fires -- which is exactly the shape both real 9B failures took.
     """
-    tail, marker_found = split_final_report(report)
-    if not marker_found:
-        return report, False, False
-
-    _, cited_from_tail = rewrite_intro(tail, sources)
-    if cited_from_tail:
-        return tail, True, False
-
+    sources = list(sources)
     _, cited_from_full = rewrite_intro(report, sources)
-    if cited_from_full:
-        return report, True, True
+    full_is_scoreable = bool(cited_from_full)
 
-    # Nothing is scoreable either way, so there is nothing to save; keep the
-    # tail, which is at least the text the model nominated.
-    return tail, True, False
+    sentinel_tail, marker_found = split_final_report(report)
+    marker_misused = False
+    if marker_found:
+        _, cited_from_sentinel = rewrite_intro(sentinel_tail, sources)
+        # The marker was written and the report was not put under it. Recorded
+        # whatever any later tier manages to recover, because it measures the
+        # prompt being misread, not the outcome.
+        marker_misused = not cited_from_sentinel and full_is_scoreable
+
+    candidates: list[tuple[str, str]] = []
+    if marker_found:
+        candidates.append((SPLIT_TIER_SENTINEL, sentinel_tail))
+    heading_tail = heading_split(report)
+    if heading_tail is not None:
+        candidates.append((SPLIT_TIER_HEADING, heading_tail))
+    prose_tail = prose_split(report)
+    if prose_tail is not None:
+        candidates.append((SPLIT_TIER_PROSE, prose_tail))
+
+    for tier, tail in candidates:
+        _, cited = rewrite_intro(tail, sources)
+        if cited:
+            return tail, tier, marker_found, marker_misused
+
+    if full_is_scoreable:
+        # Every tier would have cost the answer its citations, so keep all of it.
+        return report, SPLIT_TIER_NONE, marker_found, marker_misused
+    if candidates:
+        # Nothing is scoreable anywhere; prefer the most specific candidate,
+        # which is at least the text the model nominated.
+        tier, tail = candidates[0]
+        return tail, tier, marker_found, marker_misused
+    return report, SPLIT_TIER_NONE, marker_found, marker_misused

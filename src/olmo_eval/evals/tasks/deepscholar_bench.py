@@ -53,6 +53,7 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.evals.tasks.common import Task, register
 from olmo_eval.evals.tasks.deepscholar_citations import (
+    SPLIT_TIER_NONE,
     reference_list,
     resolve_numbering,
     rewrite_intro,
@@ -283,7 +284,7 @@ def score_answer(answer: str, sources: Sequence[Mapping[str, str]]) -> dict[str,
     # written above it -- the same choice the export makes, so a number
     # reported during the run and one reported after export describe the same
     # text.
-    report, marker_found, marker_misused = select_scored_text(answer, list(sources))
+    report, split_tier, marker_found, marker_misused = select_scored_text(answer, list(sources))
     _, cited = rewrite_intro(report, list(sources))
     published_refs = reference_list(report)
     resolved = resolve_numbering(report, list(sources))
@@ -295,6 +296,7 @@ def score_answer(answer: str, sources: Sequence[Mapping[str, str]]) -> dict[str,
         "unresolved_citation_forms": float(unresolved_citation_forms(strip_references(report))),
         "marker_compliance_rate": 1.0 if marker_found else 0.0,
         "marker_misuse_rate": 1.0 if marker_misused else 0.0,
+        "split_coverage_rate": 0.0 if split_tier == SPLIT_TIER_NONE else 1.0,
     }
 
 
@@ -388,6 +390,19 @@ class MarkerMisuseRateMetric(_DeepScholarMetricBase):
     name: str = "marker_misuse_rate"
 
 
+@dataclass(frozen=True)
+class SplitCoverageRateMetric(_DeepScholarMetricBase):
+    """Share of answers whose report some tier located.
+
+    Not quality either. It is 0 for an answer the splitter had to keep whole,
+    which is the case where the scored text still carries the model's
+    planning. A run with high exportable_rate and low coverage is being
+    judged largely on deliberation.
+    """
+
+    name: str = "split_coverage_rate"
+
+
 EXPORTABLE_RATE_METRIC = ExportableRateMetric()
 DEEPSCHOLAR_METRICS = (
     EXPORTABLE_RATE_METRIC,
@@ -395,6 +410,7 @@ DEEPSCHOLAR_METRICS = (
     UnresolvedCitationFormsMetric(),
     MarkerComplianceRateMetric(),
     MarkerMisuseRateMetric(),
+    SplitCoverageRateMetric(),
 )
 
 

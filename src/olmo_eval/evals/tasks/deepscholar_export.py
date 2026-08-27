@@ -65,7 +65,11 @@ from olmo_eval.evals.tasks.deepscholar_bench import (
     download_deepscholar_dataset,
     sources_from_trajectory,
 )
-from olmo_eval.evals.tasks.deepscholar_citations import rewrite_intro, select_scored_text
+from olmo_eval.evals.tasks.deepscholar_citations import (
+    SPLIT_TIERS,
+    rewrite_intro,
+    select_scored_text,
+)
 from olmo_eval.harness.tools.search import date_from_arxiv_id, normalize_arxiv_id
 
 logger = logging.getLogger(__name__)
@@ -527,18 +531,22 @@ def export_predictions(
         # not a numbered list the model happened to draft while deliberating.
         # The sources are needed first: the split is kept only where it leaves
         # something citable, so it can never cost a query its export.
-        answer, marker_found, marker_misused = select_scored_text(answer_text(prediction), sources)
+        answer, split_tier, marker_found, marker_misused = select_scored_text(
+            answer_text(prediction), sources
+        )
         # A first pass only to learn which abstracts are worth re-fetching; the
         # binding pass runs below, once the fetched dates can be validated.
         _, provisional = rewrite_intro(answer, sources)
-        prepared.append((identifier, answer, sources, provisional, marker_found, marker_misused))
+        prepared.append(
+            (identifier, answer, sources, provisional, marker_found, marker_misused, split_tier)
+        )
 
     fetched: dict[str, dict[str, str]] = {}
     if fetch_abstracts:
         wanted = list(
             dict.fromkeys(
                 normalize_arxiv_id(str(source.get("arxiv_id") or ""))
-                for _, _, _, provisional, _, _ in prepared
+                for _, _, _, provisional, _, _, _ in prepared
                 for source in provisional
             )
         )
@@ -549,7 +557,9 @@ def export_predictions(
     answers_with_text = 0
     markers_found = 0
     markers_misused = 0
-    for identifier, answer, sources, _, marker_found, marker_misused in prepared:
+    split_tier_counts = dict.fromkeys(SPLIT_TIERS, 0)
+    for identifier, answer, sources, _, marker_found, marker_misused, split_tier in prepared:
+        split_tier_counts[split_tier] += 1
         record = records[identifier]
         # A query that generated nothing can neither honour the delimiter
         # contract nor break it, so it stays out of the rate's denominator. A
@@ -575,6 +585,7 @@ def export_predictions(
                     "papers_retrieved": len(sources),
                     "marker_found": marker_found,
                     "marker_misused": marker_misused,
+                    "split_tier": split_tier,
                 }
             )
             continue
@@ -595,6 +606,7 @@ def export_predictions(
                     "source_rejections": {"unexportable_after_validation": len(sources)},
                     "marker_found": marker_found,
                     "marker_misused": marker_misused,
+                    "split_tier": split_tier,
                 }
             )
             continue
@@ -616,6 +628,7 @@ def export_predictions(
                 "num_papers": len(rows),
                 "marker_found": marker_found,
                 "marker_misused": marker_misused,
+                "split_tier": split_tier,
             }
         )
 
@@ -662,6 +675,13 @@ def export_predictions(
         # penalty; it rises when the prompt reads two ways to a backbone.
         "markers_misused": markers_misused,
         "marker_misuse_rate": (markers_misused / answers_with_text if answers_with_text else 0.0),
+        # Which rule recovered each report. 'none' is the keep-all fallback,
+        # so a run whose reports are mostly 'none' is one the splitter could
+        # not help and whose scored text is still mostly deliberation.
+        "split_tier_counts": split_tier_counts,
+        "split_coverage_rate": (
+            (len(prepared) - split_tier_counts["none"]) / len(prepared) if prepared else 0.0
+        ),
     }
 
 
