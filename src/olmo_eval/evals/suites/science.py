@@ -296,6 +296,16 @@ SCIENCE_NOJUDGE_BASE_PC = make_suite(
 # Running just this block costs a twelfth as much, which is what makes it affordable to run the
 # three scorings side by side.
 
+_MINERVA_MATH_SUBSETS = (
+    "algebra",
+    "counting_and_probability",
+    "geometry",
+    "intermediate_algebra",
+    "number_theory",
+    "prealgebra",
+    "precalculus",
+)
+
 _GPQA_ALL_SUBJECT = _GPQA_BIOLOGY_TASKS + _GPQA_CHEMISTRY_TASKS + _GPQA_PHYSICS_TASKS
 
 SCIENCE_EXPERT_BASE = make_suite(
@@ -318,6 +328,32 @@ SCIENCE_EXPERT_BPB = make_suite(
     aggregation=AggregationStrategy.DISPLAY_ONLY,
     description="Bits per byte on the GPQA and LAB-Bench leaves. Lower is better; "
     "not comparable to the accuracy suites.",
+)
+
+# The same trick applied to mathematics, which science:nojudge scores generatively in every
+# variant -- science:nojudge:base swaps GPQA and LAB-Bench to likelihood and leaves science:math
+# untouched. That leaves no way to tell a real gain from a formatting one: a model that can derive
+# the answer but does not emit it in the extractable form scores zero, so an arm that teaches
+# answer emission looks identical to an arm that teaches mathematics.
+#
+# This block scores bits per byte of the GOLD SOLUTION TEXT instead, via minerva_math's
+# MinervaMathBPBTask -- LOGLIKELIHOOD over the reference derivation, no generation, no extraction.
+# Lower is better, so DISPLAY_ONLY, and it does not aggregate with the accuracy suites.
+#
+# COVERS 8 OF science:math's 12 LEAVES. gsm8k, gsm_symbolic, aime_2024 and aime_2025 have no :bpb
+# variant registered, so they stay generative-only. The two AIME leaves carry no signal at this
+# scale (every arm scores 0.0000); gsm8k does, and its absence is the real gap here.
+
+SCIENCE_MATH_BPB = make_suite(
+    "science:math:bpb",
+    (
+        *(f"minerva_math_{_s}:bpb" for _s in _MINERVA_MATH_SUBSETS),
+        "math500:bpb",
+    ),
+    aggregation=AggregationStrategy.DISPLAY_ONLY,
+    description="Bits per byte on the Minerva MATH and MATH-500 gold solutions. Format-immune: "
+    "no generation and no answer extraction, so it separates a real mathematics gain from a "
+    "learned answer-emission convention. Lower is better; not comparable to the accuracy suites.",
 )
 
 # Literature-grounding probe, scorable on a base checkpoint.
