@@ -660,6 +660,126 @@ See the [Harness](#harness) section above for full documentation on:
 - Defining tools with the `@tool` decorator
 - Programmatic usage
 
+## Multimodal Evaluation
+
+olmo-eval evaluates vision-language models on image benchmarks. Tasks attach images
+to `LMRequest.images` and the provider decides how to render them, so the task
+definition is the same regardless of which multimodal provider runs it.
+
+Four families of image tasks are built in:
+
+| Family | Suite | Tasks |
+| --- | --- | --- |
+| Image-QA | `molmo2_imageqa` | `chart_qa`, `vqa2`, `doc_qa`, `info_qa`, `text_vqa`, `real_world_qa`, `mmmu`, `mmmu_pro`, `math_vista`, `countbench_qa`, `pixmo_count`, `ai2d` |
+| Dense caption | `molmo2_imageqa_caption` | the image-QA tasks plus `dense_caption` |
+| Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
+| Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
+
+Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
+`dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
+and computes no cross-task average. Pointing tasks score point-in-mask
+precision/recall/f1 by maximum bipartite matching rather than VQA-style answers,
+which is why they are a separate suite. Multi-image tasks attach a *list* of images
+per instance (capped at 20, matching the mm_olmo eval config) and score multiple
+choice answers by MMMU-style option-letter parsing; besides the primary `all`
+accuracy each task reports per-category breakdowns (MuirBench's 12 task types,
+BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
+
+### Setup
+
+The multimodal providers live behind the `hf` extra:
+
+```bash
+# HuggingFace multimodal path
+uv sync --extra hf
+
+# Also evaluate OLMo-core MultimodalLM checkpoints
+uv sync --extra hf --extra olmo_core
+```
+
+Image data is read from a **read-only** tree — loaders raise rather than build
+caches, so the data must already be staged:
+
+```bash
+export MOLMO_DATA_DIR=/weka/oe-training-default/mm-olmo  # this is the default
+```
+
+Images live under `$MOLMO_DATA_DIR/torch_datasets/`. Manifests that recorded
+absolute paths on another machine are re-anchored under the current root
+automatically.
+
+Two tasks call the OpenAI API and need `OPENAI_API_KEY`:
+
+- `math_vista` defaults to the official `gpt-4-0613` answer extraction. Use the
+  `math_vista:offline` variant for an API-free heuristic instead.
+- `dense_caption` runs a `gpt-4o` recall+consistency judge. Judge responses are
+  cached, so the key is only needed on a cache miss.
+
+### Running
+
+```bash
+# Released HuggingFace checkpoint, full image-QA suite
+uv run olmo-eval run -m molmo2-4b -t molmo2_imageqa
+
+# A single benchmark
+uv run olmo-eval run -m molmo2-4b -t mmmu_pro
+
+# Pointing benchmarks
+uv run olmo-eval run -m molmo2-4b -t molmo2_pointing
+
+# Multi-image benchmarks
+uv run olmo-eval run -m molmo2-4b -t molmo2_multiimage
+
+# Inspect the suite without loading a model
+uv run olmo-eval suite inspect molmo2_imageqa
+```
+
+The `molmo2-4b` preset runs `allenai/Molmo2-4B` with `dtype=float32`,
+`autocast_dtype=bfloat16` and `max_crops=24`, matching the reference evaluation
+numerics.
+
+### Providers
+
+**`huggingface`** handles image-text-to-text models via `AutoProcessor` and
+`AutoModelForImageTextToText`. Pass `multimodal=True` in the provider kwargs (the
+`molmo2-4b` preset does this for you). It also loads consolidated OLMo-core
+exports directly, converting weights in-memory to the released layout and
+borrowing the config and processor from a reference repo — set `reference_model`
+if the export does not record a `model_id`.
+
+**`olmo_core_vlm`** runs OLMo-core `MultimodalLM` checkpoints in three on-disk
+formats: raw trainer saves (`config.json` + `model_and_optim/`), consolidated
+safetensors exports, and mm_olmo trainer checkpoints, which are config-translated
+and key-remapped at load time. It drives its own decode loop because OLMo-core's
+vision branch has no multimodal generation module.
+
+`provider.kind=olmo_core` detects multimodal checkpoints and dispatches to it
+automatically; `olmo_core_vlm` forces it:
+
+```bash
+uv run olmo-eval run \
+    --harness default -o provider.kind=olmo_core \
+    -m /weka/path/to/multimodal-checkpoint \
+    -t molmo2_imageqa
+```
+
+`-o` must follow `--harness` or `-t`, so the provider override needs an explicit
+`--harness default` ahead of it.
+
+### Adding a multimodal task
+
+Image-QA tasks subclass `ImageQATask` (`evals/vision/tasks/single_image.py`),
+which resolves images from `instance.metadata["image_path"]` or
+`instance.metadata["image"]` (a PIL image or a zero-arg callable returning one —
+use `load_instance_image` from `evals/vision/data/images.py` for either form) and anchors data reads under
+`$MOLMO_DATA_DIR`. Pointing tasks subclass `PointingTask`
+(`evals/vision/tasks/pointing.py`). Multi-image tasks subclass
+`MultiImageQATask` (`evals/tasks/common/multi_image_base.py`), which resolves
+`instance.metadata["images"]` — a callable returning the image list, or a sequence
+of PIL images / zero-arg callables / file paths — and sends them all on one
+request. Registration and variants work exactly as described in
+[Adding New Tasks](#adding-new-tasks).
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.
