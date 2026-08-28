@@ -322,13 +322,16 @@ def _ensure_mm_olmo_unpickle_shim() -> None:
     """
     import importlib.util
 
-    try:
-        if importlib.util.find_spec("olmo.train.remote_filesystem") is not None:
-            return
-    except (ImportError, ModuleNotFoundError):
-        pass
-    if "olmo.train.remote_filesystem" in sys.modules:
+    module_name = "olmo.train.remote_filesystem"
+    # The shim itself registers with ``__spec__ = None``, which makes ``find_spec``
+    # raise ValueError on the next call — so consult ``sys.modules`` first.
+    if module_name in sys.modules:
         return
+    try:
+        if importlib.util.find_spec(module_name) is not None:
+            return
+    except (ImportError, ModuleNotFoundError, ValueError):
+        pass
 
     from dataclasses import dataclass as _dataclass
 
