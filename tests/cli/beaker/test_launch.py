@@ -296,17 +296,25 @@ class TestHarnessOverridesProviderDependencies:
             "git+https://github.com/allenai/OLMo-core.git@feature-branch"
         ]
 
-    def test_olmo_core_provider_package_accepts_version_shorthand(self):
+    @pytest.mark.parametrize("provider_kind", ["olmo_core", "olmo_core_vlm"])
+    def test_olmo_core_provider_package_accepts_version_shorthand(self, provider_kind):
         """Version-only OLMo-core package overrides should target ai2-olmo-core."""
         from olmo_eval.cli.beaker.job_assembler import normalize_provider_package_for_kind
 
         assert (
-            normalize_provider_package_for_kind("olmo_core", "2.3.0")
+            normalize_provider_package_for_kind(provider_kind, "2.3.0")
             == "ai2-olmo-core[torchao,transformers]==2.3.0"
         )
         assert (
-            normalize_provider_package_for_kind("olmo_core", ">=2.3,<2.4")
+            normalize_provider_package_for_kind(provider_kind, ">=2.3,<2.4")
             == "ai2-olmo-core[torchao,transformers]>=2.3,<2.4"
+        )
+        assert (
+            normalize_provider_package_for_kind(
+                provider_kind, "https://github.com/allenai/OLMo-core.git@feature-branch"
+            )
+            == "ai2-olmo-core[torchao,transformers] @ "
+            "git+https://github.com/allenai/OLMo-core.git@feature-branch"
         )
 
     def test_apply_harness_overrides_with_global_sandbox_override(self):
