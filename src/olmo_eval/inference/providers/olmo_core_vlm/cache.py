@@ -15,6 +15,55 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def build_decode_attention_mask(
+    *,
+    seq_len: int,
+    pos: int,
+    total: int,
+    device: Any,
+    or_mask: Any = None,
+    and_mask: Any = None,
+    cache_leftpad: Any = None,
+) -> Any:
+    """The boolean SDPA mask for one cached decode forward, or ``None`` for plain causal.
+
+    ``seq_len`` query rows sit at absolute positions ``pos .. pos+seq_len-1`` over
+    ``total`` cached keys. Causality is expressed against absolute positions;
+    ``or_mask`` re-opens key columns (bidirectional image tokens), ``and_mask``
+    closes them, and both are left-padded to the key axis when they only cover the
+    current step. With left padding, real queries never see pad-slot keys while
+    pad-slot queries keep their causal rows so no softmax row is fully masked.
+    """
+    import torch
+
+    has_leftpad = cache_leftpad is not None
+    if seq_len <= 1 and or_mask is None and and_mask is None and not has_leftpad:
+        return None
+
+    base = torch.ones(seq_len, total, device=device, dtype=torch.bool).tril(diagonal=pos)
+
+    def _align_keys(mask: Any, pad_value: bool) -> Any:
+        mask = mask.to(device=device, dtype=torch.bool)
+        missing = total - mask.shape[-1]
+        if missing > 0:
+            pad = torch.full((*mask.shape[:-1], missing), pad_value, device=device)
+            mask = torch.cat([pad, mask], dim=-1)
+        return mask
+
+    if or_mask is not None:
+        base = base | _align_keys(or_mask, False)
+    if and_mask is not None:
+        base = base & _align_keys(and_mask, True)
+    if has_leftpad:
+        leftpad = cache_leftpad.to(device=device, dtype=torch.long)
+        key_ok = torch.arange(total, device=device) >= leftpad[:, None]
+        q_abs = pos + torch.arange(seq_len, device=device)
+        pad_query = q_abs[None, :] < leftpad[:, None]
+        base = base & (key_ok[:, None, None, :] | pad_query[:, None, :, None])
+    return base
+
+
 _CACHED_BACKEND_CLS: type | None = None
 
 
@@ -131,33 +180,15 @@ def _cached_torch_backend_class() -> type:
             v_full = v_cache[:, :total].to(q.dtype)
 
             has_leftpad = getattr(kv_cache_manager, "_has_leftpad", False)
-            attn_mask: torch.Tensor | None = None
-            if seq_len > 1 or or_mask is not None or and_mask is not None or has_leftpad:
-                base = torch.ones(seq_len, total, device=q.device, dtype=torch.bool).tril(
-                    diagonal=pos
-                )
-
-                def _align_keys(mask: torch.Tensor, pad_value: bool) -> torch.Tensor:
-                    mask = mask.to(device=q.device, dtype=torch.bool)
-                    missing = total - mask.shape[-1]
-                    if missing > 0:
-                        pad = torch.full((*mask.shape[:-1], missing), pad_value, device=q.device)
-                        mask = torch.cat([pad, mask], dim=-1)
-                    return mask
-
-                if or_mask is not None:
-                    base = base | _align_keys(or_mask, False)
-                if and_mask is not None:
-                    base = base & _align_keys(and_mask, True)
-                if has_leftpad:
-                    leftpad = kv_cache_manager.cache_leftpad.to(device=q.device, dtype=torch.long)
-                    # Real queries never see pad-slot keys; pad-slot queries keep
-                    # their causal rows so no softmax row is fully masked.
-                    key_ok = torch.arange(total, device=q.device) >= leftpad[:, None]
-                    q_abs = pos + torch.arange(seq_len, device=q.device)
-                    pad_query = q_abs[None, :] < leftpad[:, None]
-                    base = base & (key_ok[:, None, None, :] | pad_query[:, None, :, None])
-                attn_mask = base
+            attn_mask = build_decode_attention_mask(
+                seq_len=seq_len,
+                pos=pos,
+                total=total,
+                device=q.device,
+                or_mask=or_mask,
+                and_mask=and_mask,
+                cache_leftpad=kv_cache_manager.cache_leftpad if has_leftpad else None,
+            )
 
             n_rep = self.n_heads // self.n_kv_heads
             k_full = _repeat_kv(k_full, n_rep)
