@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -540,3 +541,189 @@ class TestMmOlmoKeyRemap:
         from olmo_eval.inference.providers.olmo_core_vlm.checkpoint import _mm_olmo_key_to_hf_key
 
         assert _mm_olmo_key_to_hf_key(key) == expected
+
+
+class TestMmOlmoUnpickleShim:
+    """The shim registers a module with ``__spec__ = None``; repeat calls must not crash."""
+
+    def _clear(self) -> None:
+        for name in ("olmo.train.remote_filesystem", "olmo.train", "olmo"):
+            sys.modules.pop(name, None)
+
+    def test_shim_survives_repeat_calls(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm.checkpoint import (
+            _ensure_mm_olmo_unpickle_shim,
+        )
+
+        self._clear()
+        try:
+            _ensure_mm_olmo_unpickle_shim()
+            first = sys.modules["olmo.train.remote_filesystem"]
+            _ensure_mm_olmo_unpickle_shim()  # crashed with ValueError before the fix
+            assert sys.modules["olmo.train.remote_filesystem"] is first
+            assert hasattr(first, "_StorageInfo")
+        finally:
+            self._clear()
+
+
+class TestBuildDecodeAttentionMask:
+    """Direct coverage for the cached-decode SDPA mask (the correctness-critical path)."""
+
+    @pytest.fixture(autouse=True)
+    def _torch(self):
+        self.torch = pytest.importorskip("torch")
+
+    def _build(self, **kwargs):
+        from olmo_eval.inference.providers.olmo_core_vlm.cache import (
+            build_decode_attention_mask,
+        )
+
+        return build_decode_attention_mask(device="cpu", **kwargs)
+
+    def test_causal_prefill(self) -> None:
+        mask = self._build(seq_len=4, pos=0, total=4)
+        expected = self.torch.ones(4, 4, dtype=self.torch.bool).tril()
+        assert self.torch.equal(mask, expected)
+
+    def test_plain_decode_step_needs_no_mask(self) -> None:
+        assert self._build(seq_len=1, pos=3, total=4) is None
+
+    def test_or_mask_reopens_image_block(self) -> None:
+        # bidirectional block over keys 1..2: every query may see them
+        or_mask = self.torch.zeros(4, 4, dtype=self.torch.bool)
+        or_mask[:, 1:3] = True
+        mask = self._build(seq_len=4, pos=0, total=4, or_mask=or_mask)
+        assert bool(mask[0, 2])  # non-causal position opened by or_mask
+        assert not bool(mask[0, 3])  # untouched future key stays closed
+
+    def test_or_mask_is_left_padded_to_cached_keys(self) -> None:
+        # a decode-step or_mask covering only the current key must not shift onto
+        # the cached prefix
+        or_mask = self.torch.ones(1, 1, dtype=self.torch.bool)
+        mask = self._build(seq_len=1, pos=3, total=4, or_mask=or_mask)
+        expected = self.torch.tensor([[True, True, True, True]])
+        assert self.torch.equal(mask, expected)
+
+    def test_left_padding_hides_pad_keys_from_real_queries(self) -> None:
+        leftpad = self.torch.tensor([2])
+        mask = self._build(seq_len=4, pos=0, total=4, cache_leftpad=leftpad)
+        assert mask.shape == (1, 1, 4, 4)
+        row = mask[0, 0]
+        # real query (abs pos 2) sees no pad keys but keeps its causal window
+        assert row[2].tolist() == [False, False, True, False]
+        # pad-slot query (abs pos 0) keeps its causal row so softmax has support
+        assert row[0].tolist() == [True, False, False, False]
+
+
+class TestVLMEmbedSplitVocab:
+    """The split base/extra lookup must equal a lookup over the concatenated table."""
+
+    @pytest.fixture(autouse=True)
+    def _torch(self):
+        self.torch = pytest.importorskip("torch")
+
+    def _provider(self, extra: bool):
+        from olmo_eval.inference.providers.olmo_core_vlm.provider import OlmoCoreVLMProvider
+
+        torch = self.torch
+        gen = torch.Generator().manual_seed(0)
+        weight = torch.randn(10, 4, generator=gen)
+        emb = SimpleNamespace(weight=weight, padding_idx=None)
+        if extra:
+            emb.extra_weight = torch.randn(3, 4, generator=gen)
+        provider = OlmoCoreVLMProvider.__new__(OlmoCoreVLMProvider)
+        provider.model = SimpleNamespace(
+            lm=SimpleNamespace(embeddings=emb, embed_scale=None, embedding_norm=None)
+        )
+        return provider, emb
+
+    def test_matches_concatenated_lookup(self) -> None:
+        import torch.nn.functional as F
+
+        provider, emb = self._provider(extra=True)
+        ids = self.torch.tensor([[0, 9, 10, 12, 3, 11]])
+        expected = F.embedding(ids, self.torch.cat([emb.weight, emb.extra_weight], dim=0))
+        assert self.torch.allclose(provider._embed(ids), expected)
+
+    def test_base_only_table(self) -> None:
+        import torch.nn.functional as F
+
+        provider, emb = self._provider(extra=False)
+        ids = self.torch.tensor([[1, 2, 3]])
+        assert self.torch.allclose(provider._embed(ids), F.embedding(ids, emb.weight))
+
+
+class _FakeVLMLm:
+    """Callable LM returning zero logits; embeddings sized for FakeTokenizer's vocab."""
+
+    def __init__(self, torch, vocab_size: int = 32) -> None:
+        self._torch = torch
+        self.embeddings = SimpleNamespace(weight=torch.zeros(vocab_size, 4), padding_idx=None)
+        self.embed_scale = None
+        self.embedding_norm = None
+        self.vocab_size = vocab_size
+
+    def __call__(self, ids, input_embeddings=None):
+        batch, seq = ids.shape
+        return self._torch.zeros(batch, seq, self.vocab_size)
+
+
+class TestVLMLogprobsBoundaries:
+    """Continuation boundary handling mirrors OlmoCoreProvider."""
+
+    @pytest.fixture(autouse=True)
+    def _torch(self):
+        self.torch = pytest.importorskip("torch")
+
+    def _provider(self, max_length: int = 8):
+        import threading
+
+        from olmo_eval.inference.providers.olmo_core_vlm.provider import OlmoCoreVLMProvider
+
+        provider = OlmoCoreVLMProvider.__new__(OlmoCoreVLMProvider)
+        tokenizer = FakeTokenizer()
+        # joined context+continuation form, so the continuation splits to [8, 9]
+        tokenizer.vocab["PromptSTOP"] = [10, 11, 8, 9]
+        provider.tokenizer = tokenizer
+        provider.max_length = max_length
+        provider.device = self.torch.device("cpu")
+        provider.autocast_dtype = None
+        provider._model_lock = threading.Lock()
+        provider.model = SimpleNamespace(lm=_FakeVLMLm(self.torch))
+        return provider
+
+    def _request(self, continuation: str, max_length: int | None = None) -> LMRequest:
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt="Prompt",
+            continuations=(continuation,),
+            max_length=max_length,
+        )
+
+    def test_empty_continuation_scores_zero(self) -> None:
+        [[output]] = self._provider().logprobs([self._request("")])
+        assert output.logprobs == []
+        assert output.metadata["total_logprob"] == 0.0
+        assert output.metadata["num_tokens"] == 0
+        assert output.metadata["is_greedy"] is True
+
+    def test_continuation_at_limit_scores(self) -> None:
+        # "STOP" encodes to 2 tokens; a limit of exactly 2 must work
+        [[output]] = self._provider(max_length=2).logprobs([self._request("STOP")])
+        assert output.metadata["num_tokens"] == 2
+        assert len(output.logprobs) == 2
+
+    def test_continuation_over_limit_raises(self) -> None:
+        with pytest.raises(ValueError, match="longer than"):
+            self._provider(max_length=1).logprobs([self._request("STOP")])
+
+    def test_request_max_length_overrides_provider(self) -> None:
+        provider = self._provider(max_length=8)
+        with pytest.raises(ValueError, match="longer than"):
+            provider.logprobs([self._request("STOP", max_length=1)])
+        [[output]] = provider.logprobs([self._request("STOP", max_length=2)])
+        assert output.metadata["num_tokens"] == 2
+
+    def test_nonpositive_limit_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_length > 0"):
+            self._provider(max_length=0).logprobs([self._request("!")])

@@ -107,6 +107,7 @@ HARNESS_CONFIG_FIELDS = frozenset(
         "metrics",
         "batching",
         "scorer_startup_timeout",
+        "max_hard_failure_rate",
     }
 )
 
@@ -126,8 +127,6 @@ TASK_CONFIG_FIELDS = frozenset(
         "sampling_params",
         "dependencies",
         "sandbox_allocation_weight",
-        "prompt_templates",
-        "system_prompt_style",
         "priority",  # Special: extracted for job priority, not a real TaskConfig field
     }
 )
