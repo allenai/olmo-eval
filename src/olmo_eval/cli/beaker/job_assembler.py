@@ -130,7 +130,7 @@ def _normalize_olmo_core_package(package: str) -> str:
 
 def normalize_provider_package_for_kind(provider_kind: str | None, package: str) -> str:
     """Normalize a provider package override for the effective provider kind."""
-    if provider_kind == "olmo_core":
+    if provider_kind in {"olmo_core", "olmo_core_vlm"}:
         return _normalize_olmo_core_package(package)
     return package
 
@@ -476,6 +476,7 @@ class JobConfigAssembler:
         provider_extra_override = (
             {
                 "olmo_core": "olmo_core",
+                "olmo_core_vlm": "olmo_core",
                 "vllm": "vllm",
                 "vllm_server": "vllm",
             }.get(provider_kind)

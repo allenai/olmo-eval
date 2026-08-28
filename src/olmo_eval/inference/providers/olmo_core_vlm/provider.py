@@ -203,7 +203,6 @@ class OlmoCoreVLMProvider(InferenceProvider):
         # KV-cached decoding mutates per-block cache state on the shared model,
         # so concurrent agenerate/alogprobs threads must take turns.
         self._model_lock = threading.Lock()
-        self._embedding_weight_cache: torch.Tensor | None = None
 
     @staticmethod
     def _resolve_max_model_len_alias(
@@ -375,35 +374,34 @@ class OlmoCoreVLMProvider(InferenceProvider):
             )
         return contextlib.nullcontext()
 
-    def _embedding_weight(self) -> torch.Tensor:
-        """Token-embedding matrix spanning the extra vocab block when there is one.
-
-        Checkpoints trained with extra vocab keep the image special-token rows in a
-        second ``extra_weight`` parameter, so a lookup against ``weight`` alone would
-        index out of bounds for those IDs. Cached because the weights are frozen for
-        the provider's lifetime and the embedding runs once per decode step.
-        """
-        import torch
-
-        if self._embedding_weight_cache is None:
-            embeddings = self.model.lm.embeddings
-            extra = getattr(embeddings, "extra_weight", None)
-            self._embedding_weight_cache = (
-                embeddings.weight if extra is None else torch.cat([embeddings.weight, extra], dim=0)
-            )
-        return self._embedding_weight_cache
-
     def _embed(self, token_ids: torch.Tensor) -> torch.Tensor:
         """LM token embeddings with the model's configured scale/norm applied.
 
-        Mirrors ``MultimodalLM.forward``'s embedding stage so image features
-        can be spliced in once at prefill and cheap per-token embeddings can be
-        appended during decode.
+        Mirrors ``MultimodalLM.forward``'s embedding stage so image features can be
+        spliced in once at prefill and cheap per-token embeddings can be appended
+        during decode. Checkpoints trained with extra vocab keep the image
+        special-token rows in a second ``extra_weight`` parameter, so those IDs are
+        looked up in their own table rather than materializing a concatenated copy
+        of the full embedding matrix.
         """
+        import torch
         import torch.nn.functional as F
 
         lm = self.model.lm
-        h = F.embedding(token_ids, self._embedding_weight(), padding_idx=lm.embeddings.padding_idx)
+        embeddings = lm.embeddings
+        extra = getattr(embeddings, "extra_weight", None)
+        if extra is None:
+            h = F.embedding(token_ids, embeddings.weight, padding_idx=embeddings.padding_idx)
+        else:
+            base_size = embeddings.weight.shape[0]
+            is_extra = token_ids >= base_size
+            h = F.embedding(
+                torch.where(is_extra, token_ids.new_zeros(()), token_ids),
+                embeddings.weight,
+                padding_idx=embeddings.padding_idx,
+            )
+            if bool(is_extra.any()):
+                h[is_extra] = F.embedding(token_ids[is_extra] - base_size, extra)
         if lm.embed_scale is not None:
             h = h * lm.embed_scale
         if lm.embedding_norm is not None:
@@ -781,6 +779,9 @@ class OlmoCoreVLMProvider(InferenceProvider):
 
         results: list[list[LMOutput]] = []
         for request in requests:
+            max_len = request.max_length or self.max_length
+            if max_len <= 0:
+                raise ValueError("OlmoCoreVLMProvider requires max_length > 0 for logprobs")
             request_outputs: list[LMOutput] = []
             cont_prompts = request.continuation_prompts
             for i, continuation in enumerate(request.continuations or ()):
@@ -790,7 +791,27 @@ class OlmoCoreVLMProvider(InferenceProvider):
                 )
                 if not context_ids:
                     context_ids = [self.tokenizer.eos_token_id]
-                full_ids = (context_ids + continuation_ids)[-(self.max_length + 1) :]
+                if not continuation_ids:
+                    request_outputs.append(
+                        LMOutput(
+                            text=continuation,
+                            logprobs=[],
+                            metadata={
+                                "total_logprob": 0.0,
+                                "sum_logits": 0.0,
+                                "num_tokens": 0,
+                                "num_tokens_all": len(context_ids),
+                                "is_greedy": True,
+                            },
+                        )
+                    )
+                    continue
+                if len(continuation_ids) > max_len:
+                    raise ValueError(
+                        "Continuation is longer than the OLMo-core VLM provider max_length "
+                        f"({len(continuation_ids)} > {max_len})"
+                    )
+                full_ids = (context_ids + continuation_ids)[-(max_len + 1) :]
                 model_input = full_ids[:-1]
                 with self._model_lock, torch.inference_mode(), self._autocast():
                     ids = torch.tensor([model_input], dtype=torch.long, device=self.device)
