@@ -172,6 +172,12 @@ class TaskConfig:
     #: beaker launcher mounts each as the user-scoped secret ``{user}_{NAME}``.
     required_secrets: tuple[str, ...] = ()
 
+    #: How a task that builds its prompt from a bare label should render it. The
+    #: vision tasks read these; they follow the checkpoint, since instruction-tuned
+    #: and pretrain models were trained on different prompt forms.
+    prompt_templates: str | None = None
+    system_prompt_style: str | None = None
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):
@@ -283,6 +289,8 @@ class TaskConfig:
             "max_length": self.max_length,
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
             "dependencies": self.dependencies,
+            "prompt_templates": self.prompt_templates,
+            "system_prompt_style": self.system_prompt_style,
         }
 
     def get_primary_metric(self) -> Metric | None:
