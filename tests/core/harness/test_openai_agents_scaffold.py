@@ -549,6 +549,44 @@ class TestNativeUnknownToolRecovery:
             "Available tools: paper_search. Call one of these exact names."
         )
 
+    @pytest.mark.anyio
+    async def test_the_forced_final_answer_is_told_it_has_no_tools(self, monkeypatch):
+        """The forced final call drops every tool, so it must not name the ones it dropped."""
+        from agents import Agent, Runner
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+        run_calls = []
+
+        async def fake_run(**kwargs):
+            run_calls.append(kwargs)
+            if len(run_calls) == 1:
+                raise _max_turns_exceeded_with_run_data(_FakeRunData(new_items=[]))
+            return SimpleNamespace(final_output="Forced final answer")
+
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+
+        await OpenAIAgentsScaffold().run(
+            provider=SimpleNamespace(),
+            config=HarnessConfig(
+                name="test",
+                max_turns=1,
+                tools=(_named_tool("paper_search"),),
+            ),
+            request=_agent_request(),
+            enable_compaction=False,
+        )
+
+        bad_call = SimpleNamespace(kind="tool_not_found", tool_name="web_search", call_id="c1")
+        loop_config = run_calls[0]["run_config"]
+        final_config = run_calls[1]["run_config"]
+
+        assert "paper_search" in loop_config.tool_error_formatter(bad_call)
+        assert final_config.tool_not_found_behavior == "return_error_to_model"
+        assert final_config.tool_error_formatter(bad_call) == (
+            "Error: tool 'web_search' does not exist. No tools are available."
+        )
+
 
 class TestModelRefusal:
     @pytest.mark.anyio
