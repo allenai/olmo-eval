@@ -141,7 +141,7 @@ def build_model_settings(spec: Mapping[str, Any] | None) -> Any | None:
     if not spec:
         return None
 
-    from agents import ModelSettings
+    from agents import ModelSettings  # type: ignore[ty:unresolved-import]
 
     requested = dict(spec)
     kwargs: dict[str, Any] = {}

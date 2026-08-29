@@ -17,6 +17,8 @@ from olmo_eval.harness.scaffolds.openai_agents import (
     build_model_settings,
 )
 
+pytest.importorskip("agents")
+
 
 class _ProviderStub:
     """Just enough provider for agent construction; makes no network calls."""
