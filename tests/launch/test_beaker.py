@@ -649,10 +649,12 @@ class TestBuildCommandWithTaskPackages:
             "> /tmp/vllm-lock-constraints.txt"
         ) in install_cmd
         assert "-c /tmp/vllm-lock-constraints.txt -e '.[vllm]'" in install_cmd
+        # A git provider package is cloned to a local checkout first, so the
+        # install names that path rather than the URL it came from.
         assert (
             "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package repo --reinstall-package repo "
-            "'repo @ git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
+            "'repo @ /tmp/provider-src-0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check]" not in install_cmd
 
@@ -712,7 +714,7 @@ class TestBuildCommandWithTaskPackages:
         assert (
             "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package vllm --reinstall-package vllm "
-            "'vllm @ git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
+            "'vllm @ /tmp/provider-src-0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check]" not in install_cmd
 
