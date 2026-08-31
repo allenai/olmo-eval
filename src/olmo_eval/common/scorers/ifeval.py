@@ -84,6 +84,7 @@ class IFEvalScorer(Scorer):
 
         strict_results: list[bool] = []
         loose_results: list[bool] = []
+        errors: dict[str, str] = {}
 
         if instruction_ids:
             from ifbench import instructions_registry
@@ -91,7 +92,23 @@ class IFEvalScorer(Scorer):
             registry = instructions_registry.INSTRUCTION_DICT
             loose_variants = _loose_response_variants(response)
             for inst_id, inst_kwargs in zip(instruction_ids, kwargs_list, strict=True):
-                instruction = _build_instruction(registry[inst_id], inst_id, inst_kwargs, prompt)
+                # An instruction the dataset describes incorrectly — an
+                # unrecognized id, or kwargs the verifier does not accept —
+                # scores as not followed, matching the reference
+                # implementation, rather than failing the whole response.
+                # Failures raised while checking a successfully built
+                # instruction are not model behavior (missing NLTK corpora on
+                # an offline worker, say), so they propagate instead of being
+                # recorded as instructions the response did not follow.
+                try:
+                    instruction = _build_instruction(
+                        registry[inst_id], inst_id, inst_kwargs, prompt
+                    )
+                except (TypeError, KeyError) as exc:
+                    errors[inst_id] = f"{type(exc).__name__}: {exc}"
+                    strict_results.append(False)
+                    loose_results.append(False)
+                    continue
                 strict_results.append(_check_one(instruction, response))
                 loose_results.append(
                     any(_check_one(instruction, variant) for variant in loose_variants)
@@ -99,10 +116,13 @@ class IFEvalScorer(Scorer):
 
         if output.metadata is None:
             output.metadata = {}
-        output.metadata["ifeval"] = {
+        result: dict[str, Any] = {
             "strict": strict_results,
             "loose": loose_results,
         }
+        if errors:
+            result["errors"] = errors
+        output.metadata["ifeval"] = result
 
         if not loose_results:
             return 0.0
