@@ -1,7 +1,7 @@
 """Scorer for IFBench / IFEval instruction-following evaluation.
 
 Uses the ``ifbench`` package registry, which covers the original IFEval
-(DEFAULT) verifiers, the OOD verifiers used by ``allenai/IFBench_test2``,
+(DEFAULT) verifiers, the OOD verifiers used by ``allenai/IFBench_test``,
 and the verifiers used by the multi-turn ``VGraf/ifeval_mt`` slices. The
 scorer evaluates a response against per-instance instructions (looked up
 in ``instance.metadata["instruction_id_list"]`` / ``"kwargs"``) and writes
