@@ -7,6 +7,7 @@ import logging
 import shlex
 import tempfile
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -117,16 +118,27 @@ class BFCLV4NonWebExternalEval(SandboxedExternalEval):
 
     @property
     def run_command(self) -> str:
-        return (
-            "bfcl_runner.py run --provider-model MODEL --provider-url URL "
-            "--categories non_live,live,multi_turn,memory"
-        )
+        return "bfcl_runner.py run --provider-model MODEL --provider-url URL --suite non_web"
+
+    @property
+    def _suite(self) -> str:
+        return "non_web"
+
+    def _parse_args(self, args: dict[str, Any]) -> BFCLV4Args:
+        return BFCLV4Args.from_dict(args)
+
+    def _create_sensitive_volumes(self, stack: ExitStack) -> tuple[tuple[str, str], ...]:
+        return ()
+
+    def _extra_run_command_parts(self, bfcl_args: BFCLV4Args) -> list[str]:
+        return ["--encoder-revision", BFCL_ENCODER_REVISION]
 
     def _create_bfcl_sandbox_config(
         self,
         container_runtime: str,
         output_dir: str | None,
         artifact_dir: Path,
+        extra_volumes: tuple[tuple[str, str], ...] = (),
     ) -> Any:
         config = self._create_sandbox_config(container_runtime, output_dir)
         env = dict(config.environment)
@@ -143,10 +155,14 @@ class BFCLV4NonWebExternalEval(SandboxedExternalEval):
         scorer_patch_path = (
             Path(__file__).with_name("patches") / "0001-check-multi-turn-irrelevance.patch"
         )
-        volumes = config.volumes + (
-            (str(runner_path), _RUNNER_CONTAINER_PATH),
-            (str(scorer_patch_path), _SCORER_PATCH_CONTAINER_PATH),
-            (str(artifact_dir), _ARTIFACT_CONTAINER_PATH),
+        volumes = (
+            config.volumes
+            + (
+                (str(runner_path), _RUNNER_CONTAINER_PATH),
+                (str(scorer_patch_path), _SCORER_PATCH_CONTAINER_PATH),
+                (str(artifact_dir), _ARTIFACT_CONTAINER_PATH),
+            )
+            + extra_volumes
         )
         return replace(
             config,
@@ -183,12 +199,13 @@ class BFCLV4NonWebExternalEval(SandboxedExternalEval):
             str(bfcl_args.temperature),
             "--num-threads",
             str(bfcl_args.num_threads),
-            "--encoder-revision",
-            BFCL_ENCODER_REVISION,
+            "--suite",
+            self._suite,
             "--bfcl-commit",
             BFCL_COMMIT,
             "--scorer-patch-sha256",
             BFCL_SCORER_PATCH_SHA256,
+            *self._extra_run_command_parts(bfcl_args),
         ]
         return " ".join(shlex.quote(part) for part in parts)
 
@@ -203,7 +220,7 @@ class BFCLV4NonWebExternalEval(SandboxedExternalEval):
         all_output: list[str] = []
 
         try:
-            bfcl_args = BFCLV4Args.from_dict(args)
+            bfcl_args = self._parse_args(args)
         except (TypeError, ValueError) as error:
             return self._error_result(str(error), start_time)
 
@@ -230,59 +247,63 @@ class BFCLV4NonWebExternalEval(SandboxedExternalEval):
             temporary_dir = tempfile.TemporaryDirectory(prefix=f"{self.name}_")
             artifact_dir = Path(temporary_dir.name)
 
-        sandbox_config = self._create_bfcl_sandbox_config(
-            container_runtime, output_dir, artifact_dir
-        )
-
         result: ExternalEvalResult
         try:
-            async with SandboxExecutor(sandbox_config, name=self.name) as executor:
-                if setup_error := await self._run_setup(executor, all_output, start_time):
-                    return setup_error
-
-                sandbox_url = self._get_provider_url_for_sandbox(provider_url)
-                if is_local and not await self._check_provider_health(executor, sandbox_url):
-                    return self._error_result(
-                        f"Provider not reachable at {sandbox_url}",
-                        start_time,
-                        "\n".join(all_output),
-                    )
-
-                run_command = self._build_run_command(model_name, sandbox_url, bfcl_args)
-                logger.info(f"[{self.name}] Running BFCL v4 non-web suite")
-                run_result = await executor.execute_command(
-                    run_command,
-                    timeout=self.timeout_seconds,
-                    stream=True,
-                    log_prefix=self.name,
+            with ExitStack() as stack:
+                extra_volumes = self._create_sensitive_volumes(stack)
+                sandbox_config = self._create_bfcl_sandbox_config(
+                    container_runtime,
+                    output_dir,
+                    artifact_dir,
+                    extra_volumes=extra_volumes,
                 )
-                all_output.append(f"$ {run_command}\n{run_result.output}")
+                async with SandboxExecutor(sandbox_config, name=self.name) as executor:
+                    if setup_error := await self._run_setup(executor, all_output, start_time):
+                        return setup_error
 
-                summary_path = artifact_dir / "summary.json"
-                if not run_result.success:
-                    return self._error_result(
-                        f"BFCL runner exited with code {run_result.exit_code}",
-                        start_time,
-                        "\n".join(all_output),
-                    )
-                if not summary_path.is_file():
-                    return self._error_result(
-                        "BFCL runner completed without summary.json",
-                        start_time,
-                        "\n".join(all_output),
-                    )
+                    sandbox_url = self._get_provider_url_for_sandbox(provider_url)
+                    if is_local and not await self._check_provider_health(executor, sandbox_url):
+                        return self._error_result(
+                            f"Provider not reachable at {sandbox_url}",
+                            start_time,
+                            "\n".join(all_output),
+                        )
 
-                summary = json.loads(summary_path.read_text())
-                result = ExternalEvalResult(
-                    name=self.name,
-                    metrics=summary["metrics"],
-                    metadata={
-                        **summary["metadata"],
-                        "artifacts_dir": str(artifact_dir) if output_dir else None,
-                    },
-                    predictions=summary.get("predictions"),
-                    raw_output="\n".join(all_output),
-                )
+                    run_command = self._build_run_command(model_name, sandbox_url, bfcl_args)
+                    logger.info(f"[{self.name}] Running BFCL v4 {self._suite} suite")
+                    run_result = await executor.execute_command(
+                        run_command,
+                        timeout=self.timeout_seconds,
+                        stream=True,
+                        log_prefix=self.name,
+                    )
+                    all_output.append(f"$ {run_command}\n{run_result.output}")
+
+                    summary_path = artifact_dir / "summary.json"
+                    if not run_result.success:
+                        return self._error_result(
+                            f"BFCL runner exited with code {run_result.exit_code}",
+                            start_time,
+                            "\n".join(all_output),
+                        )
+                    if not summary_path.is_file():
+                        return self._error_result(
+                            "BFCL runner completed without summary.json",
+                            start_time,
+                            "\n".join(all_output),
+                        )
+
+                    summary = json.loads(summary_path.read_text())
+                    result = ExternalEvalResult(
+                        name=self.name,
+                        metrics=summary["metrics"],
+                        metadata={
+                            **summary["metadata"],
+                            "artifacts_dir": str(artifact_dir) if output_dir else None,
+                        },
+                        predictions=summary.get("predictions"),
+                        raw_output="\n".join(all_output),
+                    )
         except Exception as error:
             logger.exception(f"[{self.name}] Execution failed")
             return self._error_result(str(error), start_time, "\n".join(all_output))

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
+import threading
+import time
 from collections import Counter, defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,10 +18,15 @@ from typing import Any
 BFCL_REGISTRY_NAME = "olmo-eval-provider-FC"
 BFCL_DISPLAY_NAME = "OLMo Eval Provider (FC)"
 NON_WEB_COLLECTIONS = ("non_live", "live", "multi_turn", "memory")
-EXPECTED_RESULT_FILES = 23
-EXPECTED_SCORE_FILES = 20
-EXPECTED_RESULT_ROWS = 5_017
-EXPECTED_COVERED_WEIGHT = 0.8
+WEB_COLLECTIONS = ("web_search",)
+NON_WEB_EXPECTED_RESULT_FILES = 23
+NON_WEB_EXPECTED_SCORE_FILES = 20
+NON_WEB_EXPECTED_RESULT_ROWS = 5_017
+NON_WEB_EXPECTED_COVERED_WEIGHT = 0.8
+WEB_EXPECTED_RESULT_FILES = 2
+WEB_EXPECTED_SCORE_FILES = 2
+WEB_EXPECTED_RESULT_ROWS = 200
+WEB_EXPECTED_COVERED_WEIGHT = 0.2
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -150,7 +159,7 @@ def _weighted(scores: dict[str, dict[str, float | int]], categories: tuple[str, 
     )
 
 
-def _compute_metrics(scores: dict[str, dict[str, float | int]]) -> dict[str, float]:
+def _compute_non_web_metrics(scores: dict[str, dict[str, float | int]]) -> dict[str, float]:
     simple = _unweighted(scores, ("simple_python", "simple_java", "simple_javascript"))
     non_live = (
         simple
@@ -185,6 +194,16 @@ def _compute_metrics(scores: dict[str, dict[str, float | int]]) -> dict[str, flo
     }
 
 
+def _compute_web_metrics(scores: dict[str, dict[str, float | int]]) -> dict[str, float]:
+    web_search = _unweighted(scores, ("web_search_base", "web_search_no_snippet"))
+    return {
+        "web_weighted_contribution": 0.2 * web_search,
+        "web_search_accuracy": web_search,
+        "web_search_base_accuracy": float(scores["web_search_base"]["accuracy"]),
+        "web_search_no_snippet_accuracy": float(scores["web_search_no_snippet"]["accuracy"]),
+    }
+
+
 def _register_model(provider_model: str) -> None:
     from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING, ModelConfig
     from bfcl_eval.model_handler.api_inference.openai_completion import (
@@ -203,7 +222,13 @@ def _register_model(provider_model: str) -> None:
     )
 
 
-def _build_expected_inventories() -> tuple[dict[Path, set[str]], dict[Path, set[str]]]:
+def _build_expected_inventories(
+    collections: tuple[str, ...],
+    *,
+    expected_result_files: int,
+    expected_score_files: int,
+    expected_result_rows: int,
+) -> tuple[dict[Path, set[str]], dict[Path, set[str]]]:
     from bfcl_eval.constants.category_mapping import TEST_COLLECTION_MAPPING
     from bfcl_eval.utils import (
         extract_test_category_from_id,
@@ -215,7 +240,7 @@ def _build_expected_inventories() -> tuple[dict[Path, set[str]], dict[Path, set[
 
     result_inventory: dict[Path, set[str]] = defaultdict(set)
     score_inventory: dict[Path, set[str]] = {}
-    for collection in NON_WEB_COLLECTIONS:
+    for collection in collections:
         for category in TEST_COLLECTION_MAPPING[collection]:
             entries = load_dataset_entry(category)
             for entry in entries:
@@ -235,12 +260,12 @@ def _build_expected_inventories() -> tuple[dict[Path, set[str]], dict[Path, set[
             )
             score_inventory[score_path] = {entry["id"] for entry in scoring_entries}
 
-    if len(result_inventory) != EXPECTED_RESULT_FILES:
+    if len(result_inventory) != expected_result_files:
         raise ValueError(f"Pinned BFCL checkout produced {len(result_inventory)} result files")
-    if len(score_inventory) != EXPECTED_SCORE_FILES:
+    if len(score_inventory) != expected_score_files:
         raise ValueError(f"Pinned BFCL checkout produced {len(score_inventory)} score files")
     expected_rows = sum(len(ids) for ids in result_inventory.values())
-    if expected_rows != EXPECTED_RESULT_ROWS:
+    if expected_rows != expected_result_rows:
         raise ValueError(f"Pinned BFCL checkout produced {expected_rows} expected rows")
     return dict(result_inventory), score_inventory
 
@@ -271,12 +296,179 @@ def _prepare_encoder(cache_dir: Path, repository: str, revision: str) -> None:
     SentenceTransformer("all-MiniLM-L6-v2", device="cpu", local_files_only=True)
 
 
+def _read_serpapi_secret(path: Path) -> str:
+    secret = path.read_text().strip()
+    if not secret:
+        raise ValueError("The mounted SerpAPI secret file is empty")
+    return secret
+
+
+def _get_serpapi_remaining(api_key: str) -> int:
+    import requests
+
+    try:
+        response = requests.get(
+            "https://serpapi.com/account.json",
+            params={"api_key": api_key},
+            timeout=30,
+        )
+    except requests.RequestException as error:
+        raise RuntimeError(
+            f"SerpAPI account preflight request failed ({type(error).__name__})"
+        ) from None
+    if response.status_code != 200:
+        raise RuntimeError(f"SerpAPI account preflight returned HTTP {response.status_code}")
+    try:
+        payload = response.json()
+    except ValueError:
+        raise RuntimeError("SerpAPI account preflight returned invalid JSON") from None
+    remaining = payload.get("total_searches_left")
+    if not isinstance(remaining, int) or isinstance(remaining, bool) or remaining < 0:
+        raise ValueError("SerpAPI account response has no valid total_searches_left value")
+    return remaining
+
+
+def _classify_serpapi_response(response: Any) -> tuple[str, dict[str, Any]]:
+    if not isinstance(response, dict):
+        return "malformed_response", {"response_type": type(response).__name__}
+
+    # Treat an explicit provider error as authoritative even if the response
+    # also contains stale or partial result data.
+    error = response.get("error")
+    if error is not None:
+        error_text = str(error)
+        status = "rate_limited" if "429" in error_text else "error_payload"
+        return status, {"error_sha256": hashlib.sha256(error_text.encode()).hexdigest()}
+
+    organic_results = response.get("organic_results")
+    if isinstance(organic_results, list):
+        status = "organic_results" if organic_results else "empty_organic_results"
+        return status, {"organic_result_count": len(organic_results)}
+    if "organic_results" in response:
+        return "malformed_organic_results", {"organic_results_type": type(organic_results).__name__}
+
+    search_metadata = response.get("search_metadata")
+    search_information = response.get("search_information")
+    return "missing_organic_results", {
+        "response_keys": sorted(str(key) for key in response),
+        "search_status": (
+            search_metadata.get("status") if isinstance(search_metadata, dict) else None
+        ),
+        "organic_results_state": (
+            search_information.get("organic_results_state")
+            if isinstance(search_information, dict)
+            else None
+        ),
+    }
+
+
+def _install_serpapi_audit(audit_path: Path, web_search: Any | None = None) -> None:
+    if web_search is None:
+        from bfcl_eval.eval_checker.multi_turn_eval.func_source_code import web_search
+
+    original_get_dict = web_search.GoogleSearch.get_dict
+    write_lock = threading.Lock()
+    sequence = 0
+    audit_path.touch(exist_ok=False)
+
+    def audited_get_dict(search: Any) -> Any:
+        nonlocal sequence
+        params = getattr(search, "params_dict", {})
+        query = str(params.get("q", "")) if isinstance(params, dict) else ""
+        event: dict[str, Any] = {
+            "query_sha256": hashlib.sha256(query.encode()).hexdigest(),
+            "started_at": datetime.now(UTC).isoformat(),
+        }
+        started = time.monotonic()
+        try:
+            response = original_get_dict(search)
+        except Exception as error:
+            error_text = str(error)
+            rate_limited = "429" in error_text
+            event.update(
+                {
+                    "status": ("rate_limited_exception" if rate_limited else "exception"),
+                    "error_type": type(error).__name__,
+                    "error_sha256": hashlib.sha256(error_text.encode()).hexdigest(),
+                }
+            )
+            # The SerpAPI client may include its full request URL (and therefore
+            # the API key and raw query) in exception text. Preserve BFCL's 429
+            # retry signal without allowing either secret into captured output.
+            message = "429 from SerpAPI" if rate_limited else "SerpAPI request failed"
+            raise RuntimeError(message) from None
+        else:
+            status, fields = _classify_serpapi_response(response)
+            event.update({"status": status, **fields})
+            return response
+        finally:
+            event["duration_ms"] = round((time.monotonic() - started) * 1_000, 3)
+            with write_lock:
+                sequence += 1
+                event["sequence"] = sequence
+                with audit_path.open("a") as file_handle:
+                    file_handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+    web_search.GoogleSearch.get_dict = audited_get_dict
+
+
+def _validate_serpapi_audit(audit_path: Path) -> dict[str, int]:
+    events = _read_jsonl(audit_path)
+    expected_sequences = list(range(1, len(events) + 1))
+    if [event.get("sequence") for event in events] != expected_sequences:
+        raise ValueError("SerpAPI audit sequence is incomplete or out of order")
+
+    forbidden_fields = {"api_key", "serpapi_api_key", "query", "keywords"}
+    for event in events:
+        if forbidden_fields.intersection(key.lower() for key in event):
+            raise ValueError("SerpAPI audit contains a sensitive field")
+        query_sha256 = event.get("query_sha256")
+        if (
+            not isinstance(query_sha256, str)
+            or len(query_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in query_sha256)
+        ):
+            raise ValueError("SerpAPI audit contains an invalid query hash")
+
+    statuses = Counter(str(event.get("status")) for event in events)
+    terminal_statuses = {
+        "empty_organic_results",
+        "error_payload",
+        "exception",
+        "malformed_organic_results",
+        "malformed_response",
+        "missing_organic_results",
+    }
+    failures = {status: statuses[status] for status in terminal_statuses if statuses[status]}
+    if failures:
+        raise ValueError(f"SerpAPI audit contains terminal failures: {failures}")
+    allowed_statuses = {"organic_results", "rate_limited", "rate_limited_exception"}
+    unexpected = sorted(set(statuses) - allowed_statuses)
+    if unexpected:
+        raise ValueError(f"SerpAPI audit contains unexpected statuses: {unexpected}")
+    return dict(statuses)
+
+
 def _run(args: argparse.Namespace) -> None:
     os.environ["OPENAI_BASE_URL"] = args.provider_url
     os.environ.setdefault("OPENAI_API_KEY", "EMPTY")
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+    collections = NON_WEB_COLLECTIONS if args.suite == "non_web" else WEB_COLLECTIONS
+    if args.suite == "web":
+        serpapi_key = _read_serpapi_secret(args.serpapi_secret_file)
+        os.environ["SERPAPI_API_KEY"] = serpapi_key
+        quota_before = _get_serpapi_remaining(serpapi_key)
+        if quota_before < args.minimum_serpapi_credits:
+            raise ValueError(
+                f"SerpAPI has {quota_before} searches left; "
+                f"{args.minimum_serpapi_credits} are required"
+            )
+    else:
+        serpapi_key = None
+        quota_before = None
 
     _register_model(args.provider_model)
 
@@ -288,11 +480,14 @@ def _run(args: argparse.Namespace) -> None:
     score_dir = output_dir / "score"
     result_dir.mkdir(parents=True, exist_ok=True)
     score_dir.mkdir(parents=True, exist_ok=True)
+    audit_path = output_dir / "serpapi_audit.jsonl"
+    if args.suite == "web":
+        _install_serpapi_audit(audit_path)
 
     generation_main(
         SimpleNamespace(
             model=[BFCL_REGISTRY_NAME],
-            test_category=list(NON_WEB_COLLECTIONS),
+            test_category=list(collections),
             temperature=args.temperature,
             include_input_log=False,
             exclude_state_log=False,
@@ -312,15 +507,45 @@ def _run(args: argparse.Namespace) -> None:
     )
     evaluation_main(
         [BFCL_REGISTRY_NAME],
-        list(NON_WEB_COLLECTIONS),
+        list(collections),
         str(result_dir),
         str(score_dir),
     )
 
-    expected_results, expected_scores = _build_expected_inventories()
+    if args.suite == "non_web":
+        expected_results, expected_scores = _build_expected_inventories(
+            NON_WEB_COLLECTIONS,
+            expected_result_files=NON_WEB_EXPECTED_RESULT_FILES,
+            expected_score_files=NON_WEB_EXPECTED_SCORE_FILES,
+            expected_result_rows=NON_WEB_EXPECTED_RESULT_ROWS,
+        )
+        covered_weight = NON_WEB_EXPECTED_COVERED_WEIGHT
+        excluded_categories = ["web_search_base", "web_search_no_snippet"]
+    else:
+        expected_results, expected_scores = _build_expected_inventories(
+            WEB_COLLECTIONS,
+            expected_result_files=WEB_EXPECTED_RESULT_FILES,
+            expected_score_files=WEB_EXPECTED_SCORE_FILES,
+            expected_result_rows=WEB_EXPECTED_RESULT_ROWS,
+        )
+        covered_weight = WEB_EXPECTED_COVERED_WEIGHT
+        excluded_categories = ["non_live", "live", "multi_turn", "memory"]
+
     row_count = _validate_result_inventory(result_dir, expected_results)
     scores = _validate_score_inventory(score_dir, expected_scores)
-    metrics = _compute_metrics(scores)
+    metrics = (
+        _compute_non_web_metrics(scores)
+        if args.suite == "non_web"
+        else _compute_web_metrics(scores)
+    )
+
+    if args.suite == "web":
+        assert serpapi_key is not None
+        audit_statuses = _validate_serpapi_audit(audit_path)
+        quota_after = _get_serpapi_remaining(serpapi_key)
+    else:
+        audit_statuses = None
+        quota_after = None
 
     summary = {
         "metrics": metrics,
@@ -328,9 +553,10 @@ def _run(args: argparse.Namespace) -> None:
             "benchmark": "BFCL v4",
             "bfcl_commit": args.bfcl_commit,
             "scorer_patch_sha256": args.scorer_patch_sha256,
+            "suite": args.suite,
             "encoder_revision": args.encoder_revision,
-            "covered_weight": EXPECTED_COVERED_WEIGHT,
-            "excluded_categories": ["web_search_base", "web_search_no_snippet"],
+            "covered_weight": covered_weight,
+            "excluded_categories": excluded_categories,
             "result_file_count": len(expected_results),
             "score_file_count": len(expected_scores),
             "num_tasks": row_count,
@@ -340,6 +566,9 @@ def _run(args: argparse.Namespace) -> None:
             # computed from the validated native leaf scores, not that partial
             # aggregate.
             "official_partial_overall_used": False,
+            "serpapi_audit_statuses": audit_statuses,
+            "serpapi_quota_before": quota_before,
+            "serpapi_quota_after": quota_after,
         },
         "predictions": [
             {
@@ -370,7 +599,10 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--provider-url", required=True)
     run.add_argument("--temperature", type=float, required=True)
     run.add_argument("--num-threads", type=int, required=True)
-    run.add_argument("--encoder-revision", required=True)
+    run.add_argument("--suite", choices=("non_web", "web"), required=True)
+    run.add_argument("--encoder-revision")
+    run.add_argument("--serpapi-secret-file", type=Path)
+    run.add_argument("--minimum-serpapi-credits", type=int, default=628)
     run.add_argument("--bfcl-commit", default="6ea57973c7a6097fd7c5915698c54c17c5b1b6c8")
     run.add_argument("--scorer-patch-sha256", required=True)
     return parser
@@ -385,6 +617,12 @@ def main() -> None:
             raise ValueError("temperature must be non-negative")
         if args.num_threads < 1:
             raise ValueError("num_threads must be positive")
+        if args.minimum_serpapi_credits < 0:
+            raise ValueError("minimum-serpapi-credits must be non-negative")
+        if args.suite == "non_web" and not args.encoder_revision:
+            raise ValueError("encoder-revision is required for the non-web suite")
+        if args.suite == "web" and args.serpapi_secret_file is None:
+            raise ValueError("serpapi-secret-file is required for the web suite")
         os.chdir(args.bfcl_root)
         _run(args)
 
