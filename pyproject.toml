@@ -136,6 +136,7 @@ conflicts = [
 
 [tool.setuptools.package-data]
 "olmo_eval.analysis.pairwise_viewer" = ["static/*.css", "static/*.js", "templates/*.html"]
+"olmo_eval.evals.external.benchmarks.bfcl" = ["patches/*.patch"]
 "olmo_eval.evals.tasks" = ["*.jsonl"]
 
 [dependency-groups]
@@ -248,6 +249,9 @@ allowed-unresolved-imports = [
     "crawl4ai.**",
     "modal.**",
     "swerex.**",
+    # Installed only inside the pinned BFCL external-eval sandbox.
+    "bfcl_eval.**",
+    "sentence_transformers.**",
 ]
 
 [tool.gantry]
