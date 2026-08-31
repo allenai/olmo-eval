@@ -37,6 +37,7 @@ class BeakerStatusReporter:
         self._git_suffix = _git_suffix()
         self._workload: BeakerWorkload | None = None
         self._last_update: float = float("-inf")
+        self._accumulators: dict[str, dict[str, float]] = {}
         try:
             self._client: Beaker | None = Beaker.from_env()
         except BeakerConfigurationError:
@@ -84,3 +85,49 @@ class BeakerStatusReporter:
                 logger.exception("BeakerStatusReporter progress callback failed")
 
         return _cb
+
+    def start_accumulator(self, label: str, total: int, units: str = "gen/sec") -> None:
+        """Register a long-lived progress accumulator for ``label``.
+
+        Subsequent calls to ``accumulating_callback(label, ...)`` add to the
+        shared total instead of reporting per-batch counts.
+        """
+        self._accumulators[label] = {
+            "completed": 0,
+            "total": total,
+            "start": time.monotonic(),
+            "units": units,
+        }
+
+    def accumulating_callback(self, label: str, per_item: int = 1) -> Callable[..., None]:
+        """Return a callback that accumulates into the ``label`` accumulator.
+
+        Each call converts the per-batch ``(count, total)`` into a delta of
+        ``per_item`` units per completed item and adds it to the registered
+        total. Reports cumulative progress.
+        """
+        last_count = [0]
+
+        def _cb(count: int, total: int, *, force: bool = False) -> None:
+            if self._client is None or label not in self._accumulators:
+                return
+            try:
+                state = self._accumulators[label]
+                delta = (count - last_count[0]) * per_item
+                last_count[0] = count
+                state["completed"] += delta
+                completed = int(state["completed"])
+                total_units = int(state["total"])
+                elapsed = max(time.monotonic() - state["start"], 1e-9)
+                rate = completed / elapsed
+                pct = (completed / total_units * 100) if total_units > 0 else 0.0
+                units = state["units"]
+                msg = f"{label} {completed}/{total_units} ({pct:.0f}%) at {rate:.4f} {units}"
+                self.update(msg, force=force or completed >= total_units)
+            except Exception:
+                logger.exception("BeakerStatusReporter accumulating callback failed")
+
+        return _cb
+
+    def has_accumulator(self, label: str) -> bool:
+        return label in self._accumulators
