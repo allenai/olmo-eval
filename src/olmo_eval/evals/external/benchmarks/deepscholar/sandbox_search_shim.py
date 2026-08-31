@@ -76,22 +76,30 @@ def map_s2_paper(paper: dict[str, Any], query: str) -> dict[str, Any]:
     }
 
 
-def _within_cutoff(date_str: str, end_date: Any) -> bool:
-    """Keep a paper only if dated strictly before end_date (matches upstream's
-    ``<= end_date - 1 day``). Falls back to a strict year comparison when only a
-    year is available, so same-year-after-cutoff papers don't leak in."""
-    if end_date is None or not date_str:
+def _within_cutoff(paper: dict[str, Any], end_date: Any) -> bool:
+    """Keep papers strictly before end_date, conservatively handling year-only dates."""
+    if end_date is None:
         return True
     from datetime import datetime
 
-    text = str(date_str)
-    try:
-        return datetime.strptime(text[:10], "%Y-%m-%d").date() < end_date.date()
-    except ValueError:
+    publication_date = paper.get("publicationDate")
+    if publication_date:
+        text = str(publication_date)
         try:
-            return int(text[:4]) < end_date.year
+            return datetime.strptime(text[:10], "%Y-%m-%d").date() < end_date.date()
         except ValueError:
-            return True
+            try:
+                return int(text[:4]) < end_date.year
+            except ValueError:
+                return True
+
+    year = paper.get("year")
+    if year:
+        try:
+            return int(year) < end_date.year
+        except (TypeError, ValueError):
+            pass
+    return True
 
 
 def s2_search_rows(
@@ -137,8 +145,7 @@ def s2_search_rows(
                 continue
             resp.raise_for_status()
             data = resp.json().get("data") or []
-            rows = [map_s2_paper(p, query) for p in data]
-            return [r for r in rows if _within_cutoff(r["date"], end_date)]
+            return [map_s2_paper(p, query) for p in data if _within_cutoff(p, end_date)]
         except (requests.RequestException, ValueError) as e:
             if logger:
                 logger.error(f"S2 search failed for {query!r} (attempt {attempt}): {e}")
@@ -189,12 +196,12 @@ def _patch_stage_max_tokens(max_tokens: int) -> None:
     """Raise the default stage-LM token budget.
 
     Upstream ``Configs.initialize_lms`` drops the configured token budget when it
-    builds the filter/search/taxonomize/generation LMs, so they fall back to LOTUS's
-    default (512) and truncate structured outputs (notably the taxonomize
-    ``Categories`` JSON, which then fails to parse). Default a missing ``max_tokens``
-    to the configured budget instead. ``max_tokens`` is a cap, not a target, so this
-    does not lengthen short stage calls; the model-under-test LM and the judge pass
-    ``max_tokens`` explicitly and are unaffected.
+    builds the filter/search/taxonomize LMs, so they fall back to LOTUS's default
+    (512) and truncate structured outputs (notably the taxonomize ``Categories``
+    JSON, which then fails to parse). Default a missing ``max_tokens`` to the
+    configured budget instead. ``max_tokens`` is a cap, not a target, so this does
+    not lengthen short stage calls. The explicitly configured generation LM and the
+    judge pass ``max_tokens`` themselves and are unaffected.
     """
     import importlib
 

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import importlib.util
 import inspect
 import json
@@ -350,6 +351,29 @@ def test_locality_is_decided_from_actual_base_url() -> None:
     assert evaluator._is_local_provider(managed, managed.base_url or "") is True
 
 
+def test_config_preserves_final_generation_token_budget() -> None:
+    evaluator = DeepScholarExternalEval()
+    executor = mock.Mock()
+    executor.execute_command = mock.AsyncMock(return_value=ExecutionResult(success=True))
+
+    asyncio.run(
+        evaluator._write_config(
+            executor,
+            "test-model",
+            "http://host.containers.internal:8000/v1",
+            True,
+            DeepScholarArgs(max_tokens=10000, stage_max_tokens=4096),
+        )
+    )
+
+    command = executor.execute_command.await_args.args[0]
+    encoded = command.split("'", 2)[1]
+    config = json.loads(base64.b64decode(encoded))
+    assert config["lm"]["max_tokens"] == 10000
+    assert config["generation_lm"]["max_tokens"] == 10000
+    assert config["generation_lm"] == config["lm"]
+
+
 def test_s2_mapping_prefers_scorable_arxiv_metadata() -> None:
     row = map_s2_paper(
         {
@@ -394,6 +418,29 @@ def test_s2_search_sends_key_and_recovers_from_rate_limit() -> None:
     assert get.call_args.kwargs["headers"] == {"x-api-key": "secret"}
     assert get.call_args.kwargs["timeout"] == (5, 15)
     success.raise_for_status.assert_called_once_with()
+
+
+def test_s2_search_excludes_same_year_when_only_year_is_known() -> None:
+    response = mock.Mock(status_code=200)
+    response.json.return_value = {
+        "data": [
+            {"title": "Unknown date", "year": 2024},
+            {"title": "Known earlier year", "year": 2023},
+            {"title": "Known earlier date", "publicationDate": "2024-05-31"},
+        ]
+    }
+
+    with mock.patch("requests.get", return_value=response):
+        rows = s2_search_rows(
+            "test query",
+            10,
+            end_date=pd.Timestamp("2024-06-01"),
+            api_key="secret",
+            budget_sec=5,
+        )
+
+    assert [row["title"] for row in rows] == ["Known earlier year", "Known earlier date"]
+    assert rows[0]["date"] == "2023-01-01"
 
 
 def test_generation_runs_once_and_counts_only_scorable_artifacts(tmp_path: Path) -> None:

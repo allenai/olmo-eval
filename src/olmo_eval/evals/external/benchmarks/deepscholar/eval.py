@@ -429,6 +429,11 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         """Write the LOTUS config into the sandbox (JSON is valid YAML)."""
         config = dict(_BASE_CONFIG)
         config["lm"] = self._build_lm_config(model_name, sandbox_url, is_local, ds_args)
+        # The pinned upstream Configs removes max_completion_tokens before cloning
+        # `lm` into its stage LMs. The shim supplies the smaller stage budget to
+        # those clones, so configure generation_lm explicitly to preserve the
+        # user-facing max_tokens setting for the final related-work generation.
+        config["generation_lm"] = dict(config["lm"])
         config["web_corpuses"] = ds_args.web_corpuses
         # Backend selection (see sandbox_search_shim). For "s2" the shim routes the
         # hardwired arXiv search to Semantic Scholar, so disable the extra web pass
