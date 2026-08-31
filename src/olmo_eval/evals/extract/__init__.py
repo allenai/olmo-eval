@@ -1,6 +1,10 @@
 """Answer extraction utilities for tasks."""
 
-from .answer_format import ExtractedAnswer, extract_answer_with_format
+from .answer_format import (
+    OLMO_3_ANSWER_REGEX_TEMPLATES,
+    ExtractedAnswer,
+    extract_answer_with_format,
+)
 from .code import extract_code, extract_code_before_fence, indent_code
 from .math import MathExtractor, extract_math_answer, is_equiv, normalize_final_answer
 from .mcq import extract_mcq_answer
@@ -9,6 +13,7 @@ from .sanitize import sanitize_code
 
 __all__ = [
     "ExtractedAnswer",
+    "OLMO_3_ANSWER_REGEX_TEMPLATES",
     "extract_answer_with_format",
     "extract_code",
     "extract_code_before_fence",
