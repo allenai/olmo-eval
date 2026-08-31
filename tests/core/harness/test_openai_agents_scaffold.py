@@ -13,6 +13,7 @@ from olmo_eval.harness.scaffolds.openai_agents import (
     DEFAULT_CHAT_TEMPLATE_KWARGS,
     FORCED_FINAL_ANSWER_INSTRUCTION,
     OpenAIAgentsScaffold,
+    _make_tool_error_formatter,
 )
 
 pytest.importorskip("agents")
@@ -366,3 +367,207 @@ class TestChatTemplateKwargs:
         assert client.completions.create_kwargs["extra_body"] == {
             "chat_template_kwargs": {"enable_thinking": False}
         }
+
+
+def _named_tool(name: str):
+    from olmo_eval.harness.tools import Tool
+
+    async def _execute(query: str = "") -> str:
+        return "ok"
+
+    return Tool(
+        name=name,
+        description=f"{name} description",
+        execute=_execute,
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
+    )
+
+
+class TestToolErrorFormatter:
+    def test_message_names_the_bad_tool_and_lists_the_valid_ones(self):
+        formatter = _make_tool_error_formatter(["paper_search", "snippet_search"])
+
+        message = formatter(
+            SimpleNamespace(kind="tool_not_found", tool_name="web_search", call_id="c1")
+        )
+
+        assert message == (
+            "Error: tool 'web_search' does not exist. "
+            "Available tools: paper_search, snippet_search. Call one of these exact names."
+        )
+
+    def test_defers_to_sdk_default_for_other_error_kinds(self):
+        formatter = _make_tool_error_formatter(["paper_search"])
+
+        rejected = formatter(
+            SimpleNamespace(kind="approval_rejected", tool_name="paper_search", call_id="c1")
+        )
+
+        assert rejected is None
+
+    def test_handles_an_empty_tool_inventory(self):
+        formatter = _make_tool_error_formatter([])
+
+        message = formatter(
+            SimpleNamespace(kind="tool_not_found", tool_name="web_search", call_id="c1")
+        )
+
+        assert message == "Error: tool 'web_search' does not exist. No tools are available."
+
+
+class TestNativeUnknownToolRecovery:
+    @pytest.mark.anyio
+    async def test_run_opts_into_native_recovery_with_the_real_tool_names(self, monkeypatch):
+        from agents import Agent, Runner
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+        run_calls = []
+
+        async def fake_run(**kwargs):
+            run_calls.append(kwargs)
+            return SimpleNamespace(final_output="done", new_items=[])
+
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+
+        await OpenAIAgentsScaffold().run(
+            provider=SimpleNamespace(),
+            config=HarnessConfig(
+                name="test",
+                max_turns=3,
+                tools=(_named_tool("paper_search"), _named_tool("snippet_search")),
+            ),
+            request=_agent_request(),
+            enable_compaction=False,
+        )
+
+        run_config = run_calls[0]["run_config"]
+        assert run_config.tool_not_found_behavior == "return_error_to_model"
+
+        message = run_config.tool_error_formatter(
+            SimpleNamespace(kind="tool_not_found", tool_name="web_search", call_id="c1")
+        )
+        assert "paper_search" in message
+        assert "snippet_search" in message
+
+    @pytest.mark.anyio
+    async def test_unknown_tool_recovers_against_the_real_sdk_dispatch(self):
+        """Pin the opt-in against the SDK's own dispatch, not a mock of it.
+
+        Scripts a chat-completions endpoint that calls a tool that was never registered,
+        then answers normally, and asserts the SDK fed our message back as a tool result
+        instead of raising ModelBehaviorError.
+        """
+        import json
+
+        import httpx
+        from agents import (
+            Agent,
+            OpenAIChatCompletionsModel,
+            RunConfig,
+            Runner,
+            function_tool,
+        )
+        from openai import AsyncOpenAI
+
+        requests: list[dict] = []
+
+        def completion(message: dict, finish: str) -> dict:
+            return {
+                "id": "chatcmpl-test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test-model",
+                "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(json.loads(request.content.decode()))
+            if len(requests) == 1:
+                return httpx.Response(
+                    200,
+                    json=completion(
+                        {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_bogus",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "web_search",
+                                        "arguments": '{"query":"olmo"}',
+                                    },
+                                }
+                            ],
+                        },
+                        "tool_calls",
+                    ),
+                )
+            return httpx.Response(
+                200, json=completion({"role": "assistant", "content": "recovered"}, "stop")
+            )
+
+        @function_tool(strict_mode=False)
+        async def paper_search(query: str) -> str:
+            """Search papers."""
+            return "results"
+
+        client = AsyncOpenAI(
+            api_key="test-key-not-real",
+            base_url="http://test.invalid/v1",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        agent = Agent(
+            name="test-agent",
+            instructions="Use tools.",
+            model=OpenAIChatCompletionsModel(openai_client=client, model="test-model"),
+            tools=[paper_search],
+        )
+
+        result = await Runner.run(
+            starting_agent=agent,
+            input="find something",
+            max_turns=5,
+            run_config=RunConfig(
+                tool_not_found_behavior="return_error_to_model",
+                tool_error_formatter=_make_tool_error_formatter(["paper_search"]),
+            ),
+        )
+
+        assert result.final_output == "recovered"
+        tool_messages = [m for m in requests[1]["messages"] if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        assert tool_messages[0]["content"] == (
+            "Error: tool 'web_search' does not exist. "
+            "Available tools: paper_search. Call one of these exact names."
+        )
+
+
+class TestModelRefusal:
+    @pytest.mark.anyio
+    async def test_refusal_is_reported_instead_of_taking_down_the_run(self, monkeypatch):
+        from agents import Agent, Runner
+        from agents.exceptions import ModelRefusalError
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+
+        async def fake_run(**kwargs):
+            raise ModelRefusalError("I cannot help with that.")
+
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+
+        result = await OpenAIAgentsScaffold().run(
+            provider=SimpleNamespace(),
+            config=HarnessConfig(name="test", max_turns=3),
+            request=_agent_request(),
+            enable_compaction=False,
+        )
+
+        assert "I cannot help with that." in result.final_output.text
+        assert result.error is not None

@@ -4,13 +4,12 @@ GPQA (Idavidrein/gpqa) is a multiple-choice benchmark with 4-way questions
 across biology, physics, and chemistry. Three quality-tier subsets are available
 (diamond/main/extended) and each question has a fine-grained ``Subdomain`` field.
 
-Tasks (12 total):
-    gpqa_diamond             Full diamond subset (198 questions)
-    gpqa_main                Full main subset (448 questions)
-    gpqa_extended            Full extended subset (546 questions)
+Tasks:
+    gpqa_{subset}            Full subset (diamond/main/extended)
     gpqa_{subset}_{subject}  Filtered by broad subject (biology/chemistry/physics)
 
-Each task supports :mc (logprob-based) and :bpb (bits-per-byte) variants.
+Variants: ``:mc`` (logprob-based), ``:bpb`` (bits-per-byte), and ``:cot``
+(0-shot chain-of-thought, post-training regime) on the full subsets.
 """
 
 from __future__ import annotations
@@ -19,11 +18,13 @@ import logging
 import random
 import re
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg
 from olmo_eval.common.scorers import MultipleChoiceScorer
+from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -34,6 +35,11 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataLoader, DataSource
+from olmo_eval.evals.extract import (
+    OLMO_3_ANSWER_REGEX_TEMPLATES,
+    ExtractedAnswer,
+    extract_answer_with_format,
+)
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 log = logging.getLogger(__name__)
@@ -234,6 +240,118 @@ class GPQATask(Task):
         return None
 
 
+# ---------------------------------------------------------------------------
+# 0-shot CoT task (post-training regime)
+# ---------------------------------------------------------------------------
+
+_COT_FINAL_DESCRIPTION = (
+    "\n\nPlease reason step by step, and put your final answer within \\boxed{}. "
+    "Please only provide the letter of the answer in the box."
+)
+
+_COT_ANSWER_FORMAT_REGEX = r"Therefore, the answer is \(([A-D])\)"
+_COT_ANSWER_REGEXES = (r"\(?([A-D])\)?",)
+
+_COT_SHUFFLING_SEED = 111
+
+# max_tokens=None generates to the model's context limit, matching the
+# reference regime's effective behavior on any context size.
+_COT_SAMPLING = SamplingParams(
+    max_tokens=None,
+    temperature=0.6,
+    top_p=0.95,
+)
+
+
+def _extract_cot_answer(text: str) -> ExtractedAnswer:
+    extracted = extract_answer_with_format(
+        text,
+        answer_format_regex=_COT_ANSWER_FORMAT_REGEX,
+        answer_regexes=_COT_ANSWER_REGEXES,
+        answer_regexes_templates=OLMO_3_ANSWER_REGEX_TEMPLATES,
+    )
+    return extracted._replace(answer=re.sub(r"\(|\)", "", extracted.answer))
+
+
+@dataclass(frozen=True, slots=True)
+class GPQACoTExactMatchScorer(Scorer):
+    """Exact match on the answer letter extracted from a CoT response."""
+
+    name: str = "exact_match"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        answer, format_correct = _extract_cot_answer(output.text or "")
+        # Whether the letter was stated in the requested format, independent
+        # of correctness: a low score means fallback extraction was needed.
+        output.metadata["answer_format_correct"] = format_correct
+        gold = str(instance.gold_answer or "")
+        return 1.0 if answer.upper() == gold.upper() else 0.0
+
+
+_COT_ACCURACY = AccuracyMetric(name="exact_match", scorer=GPQACoTExactMatchScorer)
+
+
+def _cot_preprocess(text: str | None) -> str:
+    """Text normalization used by the reference implementation's CoT regime."""
+    if text is None:
+        return " "
+    text = text.strip()
+    text = text.replace(" [title]", ". ")
+    text = re.sub(r"\[.*?\]", "", text)
+    text = text.replace("  ", " ")
+    return text
+
+
+class GPQACoTTask(GPQATask):
+    """0-shot chain-of-thought GPQA with inline answer choices.
+
+    Prompt construction and choice shuffling match the reference
+    implementation's post-training regime, so results are comparable
+    with oe-eval's ``gpqa:0shot_cot`` numbers.
+    """
+
+    metrics = (_COT_ACCURACY,)
+    primary_metric = _COT_ACCURACY
+    sampling_params = _COT_SAMPLING
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        question = doc.get("Question", "")
+        correct = doc.get("Correct Answer", "")
+        if not question or not correct:
+            return None
+
+        choices = [
+            _cot_preprocess(doc.get("Incorrect Answer 1")),
+            _cot_preprocess(doc.get("Incorrect Answer 2")),
+            _cot_preprocess(doc.get("Incorrect Answer 3")),
+            _cot_preprocess(correct),
+        ]
+        random.Random(_COT_SHUFFLING_SEED + index).shuffle(choices)
+        gold_idx = choices.index(_cot_preprocess(correct))
+        gold_letter = chr(ord("A") + gold_idx)
+
+        choice_labels = ["A", "B", "C", "D"]
+        query = "Question: " + question + "\nChoices:\n"
+        query += "".join(
+            f" ({key}) {choice}\n" for key, choice in zip(choice_labels, choices, strict=True)
+        )
+
+        return Instance(
+            question=query + _COT_FINAL_DESCRIPTION,
+            gold_answer=gold_letter,
+            choices=tuple(choices),
+            metadata={
+                "index": index,
+                "gold_idx": gold_idx,
+                "gold_text": _cot_preprocess(correct),
+                "subdomain": doc.get("Subdomain", ""),
+            },
+        )
+
+    def extract_answer(self, output: LMOutput) -> str | None:
+        return _extract_cot_answer(output.text or "").answer or None
+
+
 _TITLE_MARKER = re.compile(r"\s*\[title\]\s*", re.IGNORECASE)
 _MULTI_SPACE = re.compile(r" {2,}")
 
@@ -271,6 +389,20 @@ for _subset in _SUBSETS:
     register(_subset)(_cls)
     register_variant(_subset, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
     register_variant(_subset, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),))
+
+    # 0-shot CoT (post-training regime): needs its own doc processing, so it is
+    # a separate task class registered under a variant-style name.
+    _cot_cls = type(
+        _subset.title().replace("_", "") + "CoT",
+        (GPQACoTTask,),
+        {
+            "__module__": __name__,
+            "__qualname__": _subset.title().replace("_", "") + "CoT",
+            "data_source": DataSource(path="Idavidrein/gpqa", subset=_subset),
+        },
+    )
+    globals()[_cot_cls.__name__] = _cot_cls
+    register(f"{_subset}:cot")(_cot_cls)
 
     # Subject-filtered tasks
     for _subject in _SUBJECTS:
