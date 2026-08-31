@@ -43,8 +43,7 @@ dependencies = [
     { name = "bettermap" },
     { name = "cached-path" },
     { name = "importlib-resources" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra != 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" } },
     { name = "omegaconf" },
     { name = "packaging" },
     { name = "requests" },
@@ -224,8 +223,8 @@ dependencies = [
     { name = "click" },
     { name = "click-log" },
     { name = "networkx" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "rtree" },
     { name = "scipy" },
     { name = "shapely" },
@@ -611,8 +610,8 @@ dependencies = [
     { name = "petname" },
     { name = "pyyaml" },
     { name = "requests" },
-    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "tomli" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/94/79/b5a94a955fcef4dc614fbc9a40a0d5509268de87cb736bf9b69c0ecca6f0/beaker_gantry-3.7.0.tar.gz", hash = "sha256:4304c406a4d47fcef9b00c623a9b1ced2e00fe67c037f6c8dd75750d9ab6623c", size = 64174, upload-time = "2026-04-08T23:44:25.324Z" }
@@ -782,8 +781,8 @@ name = "bm25s"
 version = "0.3.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7c/ab/39d08d4589dad6f5735a6b03ee083088dc37fba57fa45d4a0749393b9295/bm25s-0.3.9.tar.gz", hash = "sha256:895c679d952b7de8355edb5f3e1a620a1e2f294d1d42b919bf0821cce2e2f597", size = 80528, upload-time = "2026-05-13T23:08:20.952Z" }
 wheels = [
@@ -1384,8 +1383,8 @@ name = "contourpy"
 version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/58/01/1253e6698a07380cd31a736d248a3f2a50a7c88779a1813da27503cadc2a/contourpy-1.3.3.tar.gz", hash = "sha256:083e12155b210502d0bca491432bb04d56dc3432f95a979b429f2848c3dbe880", size = 13466174, upload-time = "2025-07-26T12:03:12.549Z" }
 wheels = [
@@ -1557,12 +1556,12 @@ dependencies = [
     { name = "fake-useragent" },
     { name = "httpx", extra = ["http2"] },
     { name = "humanize" },
-    { name = "lark", version = "1.2.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "lark", version = "1.3.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "lark", version = "1.2.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "lark", version = "1.3.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "lxml" },
     { name = "nltk" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "patchright" },
     { name = "pillow" },
     { name = "playwright" },
@@ -1574,8 +1573,8 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rank-bm25" },
     { name = "requests" },
-    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "shapely" },
     { name = "snowballstemmer" },
     { name = "unclecode-litellm" },
@@ -1650,7 +1649,7 @@ name = "cuda-bindings"
 version = "12.9.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cuda-pathfinder", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-9-olmo-eval-olmo-core') or (sys_platform == 'emscripten' and extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform == 'emscripten' and extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-vllm') or (sys_platform == 'emscripten' and extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform == 'emscripten' and extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-vllm') or (sys_platform == 'emscripten' and extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform == 'emscripten' and extra != 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (sys_platform == 'win32' and extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform == 'win32' and extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-vllm') or (sys_platform == 'win32' and extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform == 'win32' and extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-vllm') or (sys_platform == 'win32' and extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform == 'win32' and extra != 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (extra != 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra != 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra != 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "cuda-pathfinder" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/c2/65bfd79292b8ff18be4dd7f7442cea37bcbc1a228c1886f1dea515c45b67/cuda_bindings-12.9.4-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:694ba35023846625ef471257e6b5a4bc8af690f961d197d77d34b1d1db393f56", size = 11760260, upload-time = "2025-10-21T14:51:40.79Z" },
@@ -1767,11 +1766,11 @@ dependencies = [
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "multiprocess" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "packaging" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "pandas", version = "3.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14' or extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-agents') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-clients') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-olmo-core') or (python_full_version >= '3.14' and extra != 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "pandas", version = "3.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14' or extra == 'extra-9-olmo-eval-openhands'" },
     { name = "pyarrow" },
     { name = "pyyaml" },
     { name = "requests" },
@@ -2095,8 +2094,8 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
     { name = "pydantic" },
-    { name = "starlette", version = "0.52.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "starlette", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "starlette", version = "0.52.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "starlette", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
@@ -2108,14 +2107,14 @@ wheels = [
 [package.optional-dependencies]
 standard = [
     { name = "email-validator" },
-    { name = "fastapi-cli", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "fastapi-cli", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "fastar" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "pydantic-extra-types" },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
-    { name = "uvicorn", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "uvicorn", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 
 [[package]]
@@ -2125,7 +2124,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "rich-toolkit" },
     { name = "typer" },
-    { name = "uvicorn", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "uvicorn", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6e/58/74797ae9e4610cfa0c6b34c8309096d3b20bb29be3b8b5fbf1004d10fa5f/fastapi_cli-0.0.24.tar.gz", hash = "sha256:1afc9c9e21d7ebc8a3ca5e31790cd8d837742be7e4f8b9236e99cb3451f0de00", size = 19043, upload-time = "2026-02-24T10:45:10.476Z" }
 wheels = [
@@ -2135,7 +2134,7 @@ wheels = [
 [package.optional-dependencies]
 standard = [
     { name = "fastapi-cloud-cli" },
-    { name = "uvicorn", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "uvicorn", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 
 [[package]]
@@ -2145,12 +2144,12 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastar" },
     { name = "httpx" },
-    { name = "pydantic", extra = ["email"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "pydantic", extra = ["email"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "rich-toolkit" },
     { name = "rignore" },
     { name = "sentry-sdk" },
     { name = "typer" },
-    { name = "uvicorn", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "uvicorn", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/67/79/66567c39c5fab6dbebf9e40b3a3fcb0e2ec359517c87a67434c76b06e60b/fastapi_cloud_cli-0.17.0.tar.gz", hash = "sha256:2b6c241b63427023bd1e23b3251f23234aba4b05428b245a050e92db1389823c", size = 47276, upload-time = "2026-04-15T13:17:56.402Z" }
 wheels = [
@@ -2879,18 +2878,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/67/82/a87079945a7c15d242cb586ae22e17952132439eaa9c878ec5fbdc61c54d/grep_ast-0.9.0.tar.gz", hash = "sha256:620a242a4493e6721338d1c9a6c234ae651f8774f4924a6dcf90f6865d4b2ee3", size = 14125, upload-time = "2025-05-08T01:08:28.371Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/40/79/29f1373b2ce1eec37c03aefbc17194c2470d8b61ede288e5043231825999/grep_ast-0.9.0-py3-none-any.whl", hash = "sha256:a3973dca99f1abc026a01bbbc70e00a63860c8ff94a56182ff18b089836826d7", size = 13918, upload-time = "2025-05-08T01:08:27.481Z" },
-]
-
-[[package]]
-name = "griffe"
-version = "1.15.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0d/0c/3a471b6e31951dce2360477420d0a8d1e00dea6cf33b70f3e8c3ab6e28e1/griffe-1.15.0.tar.gz", hash = "sha256:7726e3afd6f298fbc3696e67958803e7ac843c1cfe59734b6251a40cdbfb5eea", size = 424112, upload-time = "2025-11-10T15:03:15.52Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/83/3b1d03d36f224edded98e9affd0467630fc09d766c0e56fb1498cbb04a9b/griffe-1.15.0-py3-none-any.whl", hash = "sha256:6f6762661949411031f5fcda9593f586e6ce8340f0ba88921a0f2ef7a81eb9a3", size = 150705, upload-time = "2025-11-10T15:03:13.549Z" },
 ]
 
 [[package]]
@@ -4091,7 +4078,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "openai", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "tiktoken" },
@@ -4311,7 +4298,7 @@ linkify = [
     { name = "linkify-it-py" },
 ]
 plugins = [
-    { name = "mdit-py-plugins", marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "mdit-py-plugins", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 
 [[package]]
@@ -4399,8 +4386,8 @@ dependencies = [
     { name = "cycler" },
     { name = "fonttools" },
     { name = "kiwisolver" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "packaging" },
     { name = "pillow" },
     { name = "pyparsing" },
@@ -4477,12 +4464,12 @@ dependencies = [
     { name = "jsonschema" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pyjwt", extra = ["crypto"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-openhands' or extra == 'extra-9-olmo-eval-vllm'" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "python-multipart" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "sse-starlette" },
-    { name = "starlette", version = "0.52.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "starlette", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-agents' and extra != 'extra-9-olmo-eval-vllm')" },
+    { name = "starlette", version = "0.52.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "starlette", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "typing-extensions" },
     { name = "typing-inspection" },
     { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
@@ -4534,7 +4521,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" } },
     { name = "pillow" },
     { name = "pydantic" },
-    { name = "pydantic-extra-types", extra = ["pycountry"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "pydantic-extra-types", extra = ["pycountry"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "requests" },
     { name = "tiktoken" },
     { name = "typing-extensions" },
@@ -4569,8 +4556,8 @@ dependencies = [
     { name = "click" },
     { name = "grpclib" },
     { name = "protobuf" },
-    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "synchronicity" },
     { name = "toml" },
     { name = "typer" },
@@ -4626,7 +4613,7 @@ version = "1.37.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
-    { name = "pyjwt", extra = ["crypto"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "pyjwt", extra = ["crypto"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "requests" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9a/99/d840198ecf6e8057bbc937f129ae940404485d736cda73253bbff9537f01/msal-1.37.0.tar.gz", hash = "sha256:1b1672a33ee467c1d70b341bb16cafd51bb3c817147a95b93263794b03971bec", size = 182444, upload-time = "2026-05-29T19:49:05.561Z" }
@@ -5359,12 +5346,12 @@ dependencies = [
     { name = "click" },
     { name = "datasets" },
     { name = "ifbench" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "omegaconf" },
     { name = "prometheus-client" },
-    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "setuptools" },
     { name = "sympy" },
     { name = "textual-plot" },
@@ -5387,7 +5374,7 @@ beaker = [
     { name = "beaker-py" },
 ]
 clients = [
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" } },
 ]
 crawl4ai = [
     { name = "crawl4ai" },
@@ -5402,7 +5389,7 @@ litellm = [
     { name = "litellm" },
 ]
 olmo-core = [
-    { name = "ai2-olmo-core", extra = ["torchao", "transformers"], marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "ai2-olmo-core", extra = ["torchao", "transformers"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 openhands = [
     { name = "openhands-ai" },
@@ -5429,7 +5416,7 @@ storage = [
 vllm = [
     { name = "opencv-python-headless", marker = "sys_platform != 'darwin'" },
     { name = "torch-c-dlpack-ext", marker = "sys_platform != 'darwin'" },
-    { name = "vllm", extra = ["runai"], marker = "(sys_platform != 'darwin' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "vllm", extra = ["runai"], marker = "(sys_platform != 'darwin' and extra == 'extra-9-olmo-eval-agents') or (sys_platform != 'darwin' and extra == 'extra-9-olmo-eval-clients') or (sys_platform != 'darwin' and extra == 'extra-9-olmo-eval-olmo-core') or (sys_platform != 'darwin' and extra != 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 
 [package.dev-dependencies]
@@ -5446,7 +5433,7 @@ dev = [
 ]
 vllm = [
     { name = "olmo-eval" },
-    { name = "olmo-eval", extra = ["vllm"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "olmo-eval", extra = ["vllm"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 
 [package.metadata]
@@ -5469,8 +5456,8 @@ requires-dist = [
     { name = "nvidia-ml-py", marker = "sys_platform != 'darwin' and extra == 'gpu'", specifier = ">=12.560" },
     { name = "olmo-eval", extras = ["s3", "postgres"], marker = "extra == 'storage'" },
     { name = "omegaconf", specifier = ">=2.4.0.dev10,<2.5.0" },
-    { name = "openai", marker = "extra == 'clients'", specifier = "~=2.21.0" },
-    { name = "openai-agents", marker = "extra == 'agents'", specifier = "~=0.7.0" },
+    { name = "openai", marker = "extra == 'clients'", specifier = ">=2.45,<3" },
+    { name = "openai-agents", marker = "extra == 'agents'", specifier = "~=0.20.0" },
     { name = "opencv-python-headless", marker = "sys_platform != 'darwin' and extra == 'vllm'", specifier = "==4.13.0.92" },
     { name = "openhands-ai", marker = "extra == 'openhands'", specifier = "~=1.4.0" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
@@ -5550,7 +5537,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "2.21.0"
+version = "2.54.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -5573,27 +5560,27 @@ dependencies = [
     { name = "tqdm", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "typing-extensions", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/92/e5/3d197a0947a166649f566706d7a4c8f7fe38f1fa7b24c9bcffe4c7591d44/openai-2.21.0.tar.gz", hash = "sha256:81b48ce4b8bbb2cc3af02047ceb19561f7b1dc0d4e52d1de7f02abfd15aa59b7", size = 644374, upload-time = "2026-02-14T00:12:01.577Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/50/9a/8c75e8c8a5b407a0586faeb2afac91674ff955c191ecc1d6d3b6669f6788/openai-2.54.0.tar.gz", hash = "sha256:e3e6f8bc1ba30ddf381ace1a14340eed381cb984a1a59bd0f34b5be3b5d49cfa", size = 1100285, upload-time = "2026-08-11T18:46:59.035Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cc/56/0a89092a453bb2c676d66abee44f863e742b2110d4dbb1dbcca3f7e5fc33/openai-2.21.0-py3-none-any.whl", hash = "sha256:0bc1c775e5b1536c294eded39ee08f8407656537ccc71b1004104fe1602e267c", size = 1103065, upload-time = "2026-02-14T00:11:59.603Z" },
+    { url = "https://files.pythonhosted.org/packages/64/a8/bb76c7356de8ad57f59d5ff993d434df0607f07f08bcc9c9a5c275e399c0/openai-2.54.0-py3-none-any.whl", hash = "sha256:89089789197ccdb87f173a03145ed1598d00795220c93e96cf712b1cbf5e5f2b", size = 1660351, upload-time = "2026-08-11T18:46:56.684Z" },
 ]
 
 [[package]]
 name = "openai-agents"
-version = "0.7.0"
+version = "0.20.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "griffe" },
+    { name = "griffelib" },
     { name = "mcp" },
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" } },
     { name = "pydantic" },
     { name = "requests" },
-    { name = "types-requests" },
     { name = "typing-extensions" },
+    { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f8/a2/63a5ff78d89fa0861fe461a7b91d2123315115dcbf2c3fdab051b99185e5/openai_agents-0.7.0.tar.gz", hash = "sha256:5a283e02ee0d7c0d869421de9918691711bf19d1b1dc4d2840548335f2d24de6", size = 2169530, upload-time = "2026-01-23T00:06:35.746Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/57/18/1204bde976436ad85498b759d5297843ebd2e0a214f729eb2dc4423cdfc7/openai_agents-0.20.0.tar.gz", hash = "sha256:a6b37954877868ac233876a27dab1e2a461c53ecbd5fcf6e19e2d276d3e848cd", size = 6146452, upload-time = "2026-08-11T03:12:49.556Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/92/9cbbdd604f858056d4e4f105a1b99779128bae61b6a3681db0f035ef73b4/openai_agents-0.7.0-py3-none-any.whl", hash = "sha256:4446935a65d3bb1c2c1cd0546b1bc286ced9dde0adba947ab390b2e74802aa49", size = 288537, upload-time = "2026-01-23T00:06:33.78Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/8b/18528f00cb1a5d0b8e00f457f7dc88e7b17439bc520861aae2b638b88710/openai_agents-0.20.0-py3-none-any.whl", hash = "sha256:aaff662b802fa90762ad539e131b9ea387e12e3664b87bc75157ad1b3fc88850", size = 1064338, upload-time = "2026-08-11T03:12:47.615Z" },
 ]
 
 [[package]]
@@ -6102,10 +6089,10 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "python-dateutil", marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "pytz", marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "tzdata", marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-agents') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-clients') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-olmo-core') or (python_full_version >= '3.14' and extra != 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "python-dateutil", marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-agents') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-clients') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-olmo-core') or (python_full_version >= '3.14' and extra != 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "pytz", marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-agents') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-clients') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-olmo-core') or (python_full_version >= '3.14' and extra != 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "tzdata", marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-agents') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-clients') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-olmo-core') or (python_full_version >= '3.14' and extra != 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/33/01/d40b85317f86cf08d853a4f495195c73815fdf205eef3993821720274518/pandas-2.3.3.tar.gz", hash = "sha256:e05e1af93b977f7eafa636d043f9f94c7ee3ac81af99c13508215942e64c993b", size = 4495223, upload-time = "2025-09-29T23:34:51.853Z" }
 wheels = [
@@ -6160,10 +6147,10 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
-    { name = "python-dateutil", marker = "python_full_version < '3.14' or extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
-    { name = "tzdata", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version < '3.14' and sys_platform == 'win32') or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (sys_platform == 'emscripten' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform == 'emscripten' and extra != 'extra-9-olmo-eval-vllm') or (sys_platform == 'win32' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform == 'win32' and extra != 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and extra == 'extra-9-olmo-eval-agents') or (python_full_version < '3.14' and extra == 'extra-9-olmo-eval-clients') or (python_full_version < '3.14' and extra == 'extra-9-olmo-eval-olmo-core') or (python_full_version < '3.14' and extra != 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "python-dateutil", marker = "python_full_version < '3.14' or extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "tzdata", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version < '3.14' and sys_platform == 'win32') or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (sys_platform == 'emscripten' and extra == 'extra-9-olmo-eval-openhands') or (sys_platform == 'win32' and extra == 'extra-9-olmo-eval-openhands')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/da/99/b342345300f13440fe9fe385c3c481e2d9a595ee3bab4d3219247ac94e9a/pandas-3.0.2.tar.gz", hash = "sha256:f4753e73e34c8d83221ba58f232433fca2748be8b18dbca02d242ed153945043", size = 4645855, upload-time = "2026-03-31T06:48:30.816Z" }
 wheels = [
@@ -10441,8 +10428,8 @@ name = "rank-bm25"
 version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/fc/0a/f9579384aa017d8b4c15613f86954b92a95a93d641cc849182467cf0bb3b/rank_bm25-0.2.2.tar.gz", hash = "sha256:096ccef76f8188563419aaf384a02f0ea459503fdf77901378d4fd9d87e5e51d", size = 8347, upload-time = "2022-02-16T12:10:52.196Z" }
 wheels = [
@@ -10725,8 +10712,8 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "markdown-it-py", marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "pygments", marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "markdown-it-py", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "pygments", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ab/3a/0316b28d0761c6734d6bc14e770d85506c986c85ffb239e688eeaab2c2bc/rich-13.9.4.tar.gz", hash = "sha256:439594978a49a09530cff7ebc4b5c7103ef57baf48d5ea3184f21d9a2befa098", size = 223149, upload-time = "2024-11-01T16:43:57.873Z" }
 wheels = [
@@ -10749,8 +10736,8 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "markdown-it-py", marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
-    { name = "pygments", marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "markdown-it-py", marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "pygments", marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e9/67/cae617f1351490c25a4b8ac3b8b63a4dda609295d8222bad12242dfdc629/rich-14.3.4.tar.gz", hash = "sha256:817e02727f2b25b40ef56f5aa2217f400c8489f79ca8f46ea2b70dd5e14558a9", size = 230524, upload-time = "2026-04-11T02:57:45.419Z" }
 wheels = [
@@ -10776,8 +10763,7 @@ version = "0.19.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
-    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra != 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" } },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/ba/dae9e3096651042754da419a4042bc1c75e07d615f9b15066d738838e4df/rich_toolkit-0.19.7.tar.gz", hash = "sha256:133c0915872da91d4c25d85342d5ec1dfacc69b63448af1a08a0d4b4f23ef46e", size = 195877, upload-time = "2026-02-24T16:06:20.555Z" }
@@ -11102,8 +11088,8 @@ name = "scipy"
 version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -11190,10 +11176,10 @@ version = "0.13.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "pandas", version = "3.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14' or extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-agents') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-clients') or (python_full_version >= '3.14' and extra == 'extra-9-olmo-eval-olmo-core') or (python_full_version >= '3.14' and extra != 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "pandas", version = "3.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14' or extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/86/59/a451d7420a77ab0b98f7affa3a1d78a313d2f7281a57afb1a34bae8ab412/seaborn-0.13.2.tar.gz", hash = "sha256:93e60a40988f4d65e9f4885df477e2fdaff6b73a9ded434c1ab356dd57eefff7", size = 1457696, upload-time = "2024-01-25T13:21:52.551Z" }
 wheels = [
@@ -11355,8 +11341,8 @@ name = "shapely"
 version = "2.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4d/bc/0989043118a27cccb4e906a46b7565ce36ca7b57f5a18b78f4f1b0f72d9d/shapely-2.1.2.tar.gz", hash = "sha256:2ed4ecb28320a433db18a5bf029986aa8afcfd740745e78847e330d5d94922a9", size = 315489, upload-time = "2025-09-24T13:51:41.432Z" }
 wheels = [
@@ -11556,8 +11542,8 @@ version = "3.3.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
-    { name = "starlette", version = "0.52.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "starlette", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-agents' and extra != 'extra-9-olmo-eval-vllm')" },
+    { name = "starlette", version = "0.52.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "starlette", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/26/8c/f9290339ef6d79badbc010f067cd769d6601ec11a57d78569c683fb4dd87/sse_starlette-3.3.4.tar.gz", hash = "sha256:aaf92fc067af8a5427192895ac028e947b484ac01edbc3caf00e7e7137c7bef1", size = 32427, upload-time = "2026-03-29T09:00:23.307Z" }
 wheels = [
@@ -11616,8 +11602,8 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "anyio", marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "typing-extensions", marker = "(python_full_version < '3.13' and extra == 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "anyio", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.13' and extra == 'extra-9-olmo-eval-agents') or (python_full_version < '3.13' and extra == 'extra-9-olmo-eval-clients') or (python_full_version < '3.13' and extra == 'extra-9-olmo-eval-olmo-core') or (python_full_version < '3.13' and extra != 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c4/68/79977123bb7be889ad680d79a40f339082c1978b5cfcf62c2d8d196873ac/starlette-0.52.1.tar.gz", hash = "sha256:834edd1b0a23167694292e94f597773bc3f89f362be6effee198165a35d62933", size = 2653702, upload-time = "2026-01-18T13:34:11.062Z" }
 wheels = [
@@ -11640,8 +11626,8 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "anyio", marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
-    { name = "typing-extensions", marker = "(python_full_version < '3.13' and extra == 'extra-9-olmo-eval-openhands') or (python_full_version < '3.13' and extra != 'extra-9-olmo-eval-vllm') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "anyio", marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.13' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/81/69/17425771797c36cded50b7fe44e850315d039f28b15901ab44839e70b593/starlette-1.0.0.tar.gz", hash = "sha256:6a4beaf1f81bb472fd19ea9b918b50dc3a77a6f2e190a12954b25e6ed5eea149", size = 2655289, upload-time = "2026-03-22T18:29:46.779Z" }
 wheels = [
@@ -11668,8 +11654,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-multipart" },
     { name = "requests" },
-    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "uvicorn" },
 ]
 
@@ -11769,11 +11755,11 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "markdown-it-py", extra = ["linkify", "plugins"], marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "platformdirs", marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "pygments", marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "typing-extensions", marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "markdown-it-py", extra = ["linkify", "plugins"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "platformdirs", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "pygments", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "typing-extensions", marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a2/30/38b615f7d4b16f6fdd73e4dcd8913e2d880bbb655e68a076e3d91181a7ee/textual-6.2.1.tar.gz", hash = "sha256:4699d8dfae43503b9c417bd2a6fb0da1c89e323fe91c4baa012f9298acaa83e1", size = 1570645, upload-time = "2025-10-01T16:11:24.467Z" }
 wheels = [
@@ -11796,12 +11782,12 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "markdown-it-py", extra = ["linkify"], marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
-    { name = "mdit-py-plugins", marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
-    { name = "platformdirs", marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
-    { name = "pygments", marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
-    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
-    { name = "typing-extensions", marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "markdown-it-py", extra = ["linkify"], marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "mdit-py-plugins", marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "platformdirs", marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "pygments", marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "typing-extensions", marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/19/89/bec5709fb759f9c784bbcb30b2e3497df3f901691d13c2b864dbf6694a17/textual-8.2.4.tar.gz", hash = "sha256:d4e2b2ddd7157191d00b228592b7c739ea080b7d792fd410f23ca75f05ea76c4", size = 1848933, upload-time = "2026-04-19T04:20:45.845Z" }
 wheels = [
@@ -11813,10 +11799,10 @@ name = "textual-hires-canvas"
 version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
-    { name = "textual", version = "6.2.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "textual", version = "8.2.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "textual", version = "6.2.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "textual", version = "8.2.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/20/f0/13f2a30ab7950cc3d5d5a2c893fbe3d40b4d129fd2cd30313260181578c4/textual_hires_canvas-0.14.0.tar.gz", hash = "sha256:0fa512492ddd2cd6c2a970a6beea58f5350f4cf25f40ad14ffd9fa86c6458769", size = 1251440, upload-time = "2026-01-10T22:16:56.708Z" }
 wheels = [
@@ -11828,10 +11814,10 @@ name = "textual-plot"
 version = "0.10.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
-    { name = "textual", version = "6.2.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "textual", version = "8.2.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
+    { name = "textual", version = "6.2.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "textual", version = "8.2.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "textual-hires-canvas" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a0/c2/13f9f747e83cd0b740d1bf310e89a006316cfb5acb4e5a4136c12f96340b/textual_plot-0.10.1.tar.gz", hash = "sha256:503db96d849134293228419324eb15efbadf1f1927a2e0a229b54e7a7e5d5292", size = 2451096, upload-time = "2026-02-01T13:27:43.658Z" }
@@ -12203,8 +12189,8 @@ version = "5.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "regex" },
@@ -12326,8 +12312,8 @@ name = "trimesh"
 version = "4.12.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-vllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/79/37/5cb90f04990260d2caceb6093560c6cefafca1ec522c1e43be01ca658244/trimesh-4.12.2.tar.gz", hash = "sha256:c8ca31571ac00b112e4e160e66a2d4c3491df321f056bd33806be0485d1af9d9", size = 842220, upload-time = "2026-05-01T00:57:43.333Z" }
 wheels = [
@@ -12392,8 +12378,8 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
     { name = "click" },
-    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands' or extra != 'extra-9-olmo-eval-olmo-core'" },
+    { name = "rich", version = "13.9.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "rich", version = "14.3.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
     { name = "shellingham" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/83/b8/9ebb531b6c2d377af08ac6746a5df3425b21853a5d2260876919b58a2a4a/typer-0.24.2.tar.gz", hash = "sha256:ec070dcfca1408e85ee203c6365001e818c3b7fffe686fd07ff2d68095ca0480", size = 119849, upload-time = "2026-04-22T17:45:34.413Z" }
@@ -12408,18 +12394,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/52/68/943c3aeaf14624712a0357c4a67814dba5cea36d194f5c764dad7959a00c/types-certifi-2021.10.8.3.tar.gz", hash = "sha256:72cf7798d165bc0b76e1c10dd1ea3097c7063c42c21d664523b928e88b554a4f", size = 2095, upload-time = "2022-06-09T15:19:05.244Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b5/63/2463d89481e811f007b0e1cd0a91e52e141b47f9de724d20db7b861dcfec/types_certifi-2021.10.8.3-py3-none-any.whl", hash = "sha256:b2d1e325e69f71f7c78e5943d410e650b4707bb0ef32e4ddf3da37f54176e88a", size = 2136, upload-time = "2022-06-09T15:19:03.127Z" },
-]
-
-[[package]]
-name = "types-requests"
-version = "2.33.0.20260408"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/69/6a/749dc53a54a3f35842c1f8197b3ca6b54af6d7458a1bfc75f6629b6da666/types_requests-2.33.0.20260408.tar.gz", hash = "sha256:95b9a86376807a216b2fb412b47617b202091c3ea7c078f47cc358d5528ccb7b", size = 23882, upload-time = "2026-04-08T04:34:49.33Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/90/b8/78fd6c037de4788c040fdd323b3369804400351b7827473920f6c1d03c10/types_requests-2.33.0.20260408-py3-none-any.whl", hash = "sha256:81f31d5ea4acb39f03be7bc8bed569ba6d5a9c5d97e89f45ac43d819b68ca50f", size = 20739, upload-time = "2026-04-08T04:34:48.325Z" },
 ]
 
 [[package]]
@@ -12492,7 +12466,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "openai", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-openhands'" },
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "tiktoken" },
@@ -12663,7 +12637,7 @@ dependencies = [
     { name = "depyf" },
     { name = "diskcache" },
     { name = "einops" },
-    { name = "fastapi", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "fastapi", extra = ["standard"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "filelock" },
     { name = "flashinfer-cubin" },
     { name = "flashinfer-python" },
@@ -12673,7 +12647,7 @@ dependencies = [
     { name = "llguidance", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'ppc64le' or platform_machine == 's390x' or platform_machine == 'x86_64'" },
     { name = "lm-format-enforcer" },
     { name = "mcp" },
-    { name = "mistral-common", extra = ["image"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "mistral-common", extra = ["image"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "model-hosting-container-standards" },
     { name = "msgspec" },
     { name = "ninja" },
@@ -12681,7 +12655,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" } },
     { name = "nvidia-cudnn-frontend" },
     { name = "nvidia-cutlass-dsl" },
-    { name = "openai", version = "2.21.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "openai", version = "2.54.0", source = { registry = "https://pypi.org/simple" } },
     { name = "openai-harmony" },
     { name = "opencv-python-headless" },
     { name = "opentelemetry-api" },
@@ -12727,7 +12701,7 @@ wheels = [
 
 [package.optional-dependencies]
 runai = [
-    { name = "runai-model-streamer", extra = ["azure", "gcs", "s3"], marker = "extra == 'extra-9-olmo-eval-vllm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands')" },
+    { name = "runai-model-streamer", extra = ["azure", "gcs", "s3"], marker = "extra == 'extra-9-olmo-eval-agents' or extra == 'extra-9-olmo-eval-clients' or extra == 'extra-9-olmo-eval-olmo-core' or extra != 'extra-9-olmo-eval-openhands' or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
 ]
 
 [[package]]
