@@ -107,6 +107,7 @@ HARNESS_CONFIG_FIELDS = frozenset(
         "metrics",
         "batching",
         "scorer_startup_timeout",
+        "max_hard_failure_rate",
     }
 )
 

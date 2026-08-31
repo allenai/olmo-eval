@@ -29,6 +29,93 @@ FORCED_FINAL_ANSWER_INSTRUCTION = (
     "provide your final answer now. Do not call any tools."
 )
 
+# Chat template defaults applied to self-hosted requests unless configured otherwise.
+# Thinking is pinned off because no agentic preset configures a vLLM reasoning parser,
+# so a template that defaults thinking on would leak <think> blocks into scored output.
+DEFAULT_CHAT_TEMPLATE_KWARGS: dict[str, Any] = {"enable_thinking": False}
+
+# Sentinel distinguishing "provider does not support chat_template_kwargs" from
+# "provider supports it but has none configured".
+_UNSUPPORTED: Any = object()
+
+
+def _resolve_chat_template_kwargs(provider: InferenceProvider) -> dict[str, Any] | None:
+    """Resolve the ``chat_template_kwargs`` request field for a provider.
+
+    ``chat_template_kwargs`` is a vLLM extension to the OpenAI chat completions
+    body. Managed APIs reject unrecognized body fields with a 400, so it may only
+    be sent to self-hosted OpenAI-compatible servers. Providers in that family
+    expose a ``chat_template_kwargs`` attribute; every other provider opts out
+    simply by not having one.
+
+    Defaults only fill gaps, so an explicitly configured value always wins. The
+    result is always a fresh dict, so the provider's own configuration can never
+    be mutated through it.
+
+    This runs once per agent creation, and agents are cached per config and
+    provider, so applying a default is logged at INFO while the outcomes that
+    change nothing stay at DEBUG.
+
+    Args:
+        provider: The inference provider backing the agent.
+
+    Returns:
+        The kwargs to send in the request body, or None if the provider does not
+        support the field.
+    """
+    configured = getattr(provider, "chat_template_kwargs", _UNSUPPORTED)
+    if configured is _UNSUPPORTED:
+        logger.debug(
+            f"{type(provider).__name__} does not accept chat_template_kwargs; "
+            "omitting it from the request body"
+        )
+        return None
+
+    explicit: dict[str, Any] = configured or {}
+    resolved: dict[str, Any] = dict(DEFAULT_CHAT_TEMPLATE_KWARGS)
+    resolved.update(explicit)
+
+    defaulted = {k: v for k, v in DEFAULT_CHAT_TEMPLATE_KWARGS.items() if k not in explicit}
+    if defaulted:
+        # Only spell out the full payload when the provider configured other keys too.
+        detail = "" if resolved == defaulted else f"; sending {resolved}"
+        logger.info(f"Defaulted chat_template_kwargs {defaulted} for {provider.model_name}{detail}")
+    else:
+        logger.debug(
+            f"Using explicitly configured chat_template_kwargs for "
+            f"{provider.model_name}: {resolved}"
+        )
+    return resolved
+
+
+def _make_tool_error_formatter(valid_tool_names: Sequence[str]) -> Any:
+    """Build a ``RunConfig.tool_error_formatter`` that names the tools the model may call.
+
+    The SDK default for a missing tool is ``Tool 'x' not found.``, which tells the model
+    nothing about what it should have called. Weak models only recover when the error
+    spells out the real names, so the inventory is captured here: ``ToolErrorFormatterArgs``
+    carries the *failed* name but no list of valid ones.
+
+    Args:
+        valid_tool_names: Names the model is actually allowed to call.
+
+    Returns:
+        A formatter suitable for ``RunConfig.tool_error_formatter``.
+    """
+    if valid_tool_names:
+        guidance = f"Available tools: {', '.join(valid_tool_names)}. Call one of these exact names."
+    else:
+        guidance = "No tools are available."
+
+    def format_tool_error(args: Any) -> str | None:
+        # Approval rejections are routed through this same hook; returning None leaves
+        # the SDK default in place for every kind we have nothing better to say about.
+        if args.kind != "tool_not_found":
+            return None
+        return f"Error: tool '{args.tool_name}' does not exist. {guidance}"
+
+    return format_tool_error
+
 
 @register_scaffold("openai_agents")
 class OpenAIAgentsScaffold(Scaffold):
@@ -165,6 +252,7 @@ class OpenAIAgentsScaffold(Scaffold):
         """
         from agents import (  # type: ignore[ty:unresolved-import]
             Agent,
+            ModelSettings,
             OpenAIChatCompletionsModel,
             function_tool,
             set_tracing_disabled,
@@ -192,11 +280,22 @@ class OpenAIAgentsScaffold(Scaffold):
 
         agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
 
+        # This scaffold drives the OpenAI client directly instead of the provider's
+        # generate path, so the request body built here is the only place a
+        # chat_template_kwargs setting can actually reach the server.
+        agent_kwargs: dict[str, Any] = {}
+        chat_template_kwargs = _resolve_chat_template_kwargs(provider)
+        if chat_template_kwargs is not None:
+            agent_kwargs["model_settings"] = ModelSettings(
+                extra_body={"chat_template_kwargs": chat_template_kwargs}
+            )
+
         agent = Agent(
             name=self.name,
             instructions=config.system_prompt or "",
             model=model,
             tools=agent_tools,
+            **agent_kwargs,
         )
 
         return agent
@@ -255,7 +354,12 @@ class OpenAIAgentsScaffold(Scaffold):
         """
         enable_compaction = kwargs.get("enable_compaction", True)
         try:
-            from agents import Runner, trace  # type: ignore[ty:unresolved-import]
+            from agents import RunConfig, Runner, trace  # type: ignore[ty:unresolved-import]
+            from agents.exceptions import (  # type: ignore[ty:unresolved-import]
+                MaxTurnsExceeded,
+                ModelBehaviorError,
+                ModelRefusalError,
+            )
         except ImportError as e:
             raise ImportError(
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
@@ -326,6 +430,17 @@ class OpenAIAgentsScaffold(Scaffold):
         else:
             trace_name = f"Agent: {config.name}" if config.name else "Agent run"
 
+        # An unknown tool name is a recoverable mistake, not a dead run: let the SDK hand the
+        # model an error turn naming the tools it may call instead of aborting the whole
+        # instance with ModelBehaviorError. This covers function tools only -- the SDK has no
+        # equivalent branch for custom/freeform calls.
+        run_config = RunConfig(
+            tool_not_found_behavior="return_error_to_model",
+            tool_error_formatter=_make_tool_error_formatter(
+                [tool.name for tool in config.resolved_tools]
+            ),
+        )
+
         # Run agent within trace context for observability
         date_cutoff = (trace_metadata or {}).get("date_cutoff")
         with search_date_cutoff(date_cutoff), trace(trace_name, metadata=trace_metadata):
@@ -334,48 +449,60 @@ class OpenAIAgentsScaffold(Scaffold):
                     "starting_agent": agent,
                     "input": input_text,
                     "max_turns": max_turns,
+                    "run_config": run_config,
                 }
                 if session is not None:
                     run_kwargs["session"] = session
 
                 result = await Runner.run(**run_kwargs)
-            except Exception as e:
-                # Handle MaxTurnsExceeded - return a result with the error instead of raising
-                if type(e).__name__ == "MaxTurnsExceeded":
-                    partial_result = getattr(e, "run_data", None)
-                    trajectory = self._convert_trajectory(partial_result)
-                    try:
-                        final_text = await self._force_final_answer(
-                            Runner=Runner,
-                            agent=agent,
-                            partial_result=partial_result,
-                            original_input=input_text,
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Forced final answer after max_turns failed; using fallback result",
-                            exc_info=True,
-                        )
-                        return HarnessResult(
-                            trajectory=AgentTrajectory(turns=()),
-                            final_output=LMOutput(text="[Max turns exceeded]"),
-                            max_turns_reached=True,
-                            error=f"Max turns ({max_turns}) exceeded",
-                        )
-
-                    return HarnessResult(
-                        trajectory=trajectory,
-                        final_output=LMOutput(text=final_text),
-                        max_turns_reached=True,
-                        error=None,
+            except MaxTurnsExceeded as e:
+                # Return a result with the error instead of raising
+                partial_result = getattr(e, "run_data", None)
+                trajectory = self._convert_trajectory(partial_result)
+                try:
+                    final_text = await self._force_final_answer(
+                        Runner=Runner,
+                        agent=agent,
+                        partial_result=partial_result,
+                        original_input=input_text,
+                        run_config=run_config,
                     )
-                if type(e).__name__ == "ModelBehaviorError":
+                except Exception:
+                    logger.warning(
+                        "Forced final answer after max_turns failed; using fallback result",
+                        exc_info=True,
+                    )
                     return HarnessResult(
                         trajectory=AgentTrajectory(turns=()),
-                        final_output=LMOutput(text=f"[Tool error: {e}]"),
-                        error=str(e),
+                        final_output=LMOutput(text="[Max turns exceeded]"),
+                        max_turns_reached=True,
+                        error=f"Max turns ({max_turns}) exceeded",
                     )
 
+                return HarnessResult(
+                    trajectory=trajectory,
+                    final_output=LMOutput(text=final_text),
+                    max_turns_reached=True,
+                    error=None,
+                )
+            except ModelBehaviorError as e:
+                # Unknown function tools are handled by run_config above, so this is now a
+                # backstop for the other ways a model can violate the protocol.
+                return HarnessResult(
+                    trajectory=AgentTrajectory(turns=()),
+                    final_output=LMOutput(text=f"[Tool error: {e}]"),
+                    error=str(e),
+                )
+            except ModelRefusalError as e:
+                # A refusal used to arrive as empty final output; the SDK now raises instead.
+                # Record it as a scored instance with an error, rather than letting a refusal
+                # take down the whole run.
+                return HarnessResult(
+                    trajectory=AgentTrajectory(turns=()),
+                    final_output=LMOutput(text=f"[Model refusal: {e}]"),
+                    error=str(e),
+                )
+            except Exception as e:
                 # Log full traceback for debugging connection issues
                 import traceback
 
@@ -407,6 +534,7 @@ class OpenAIAgentsScaffold(Scaffold):
         agent: Any,
         partial_result: Any,
         original_input: str,
+        run_config: Any = None,
     ) -> str:
         """Run one no-tool model call to produce a final answer after max_turns."""
         final_input = self._build_forced_final_input(partial_result, original_input)
@@ -422,6 +550,7 @@ class OpenAIAgentsScaffold(Scaffold):
             starting_agent=final_agent,
             input=final_input,
             max_turns=1,
+            run_config=run_config,
         )
         final_text = getattr(final_result, "final_output", "")
         return str(final_text or "")
