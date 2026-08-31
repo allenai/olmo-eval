@@ -12,6 +12,7 @@ import random
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 import aiohttp
@@ -36,6 +37,15 @@ def _exponential_backoff(initial_delay: float, retry: int) -> float:
     """Return an exponential backoff delay with additive jitter."""
     base_delay = initial_delay * (2 ** (retry - 1))
     return base_delay + random.uniform(0.0, base_delay)
+
+
+@dataclass
+class _ControlCommandResult:
+    """Result from a short command used to control a streaming execution."""
+
+    stdout: str
+    stderr: str
+    exit_code: int
 
 
 def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
@@ -465,7 +475,10 @@ class SandboxExecutor:
                 timeout=effective_timeout,
             )
             response = await self._run_with_transport_retries(
-                lambda: self._runtime.execute(runtime_command),
+                lambda: asyncio.wait_for(
+                    self._runtime.execute(runtime_command),
+                    timeout=effective_timeout + 1.0,
+                ),
                 operation="command execution",
             )
         except Exception as e:
@@ -497,7 +510,11 @@ class SandboxExecutor:
     ) -> ExecutionResult:
         """Execute a command with streaming output to logs.
 
-        Uses background execution to avoid swerex HTTP timeout issues.
+        Uses background execution to avoid swerex HTTP timeout issues. For local
+        Docker/Podman deployments, short control commands bypass the swe-rex HTTP
+        server. Its async ``/execute`` handler calls blocking ``subprocess.run``;
+        if one poll blocks, the single server event loop otherwise stops answering
+        every subsequent poll, kill, and artifact-recovery request.
         """
         from swerex.runtime.abstract import Command
 
@@ -520,7 +537,10 @@ class SandboxExecutor:
             f"chmod +x {script_file}"
         )
         try:
-            await self._runtime.execute(Command(command=["bash", "-c", setup], timeout=30.0))
+            await asyncio.wait_for(
+                self._runtime.execute(Command(command=["bash", "-c", setup], timeout=30.0)),
+                timeout=31.0,
+            )
         except Exception as e:
             return ExecutionResult(False, f"Failed to create script: {e}", -1)
 
@@ -532,7 +552,10 @@ class SandboxExecutor:
             f"echo $! > {pid_file}"
         )
         try:
-            await self._runtime.execute(Command(command=["bash", "-c", start], timeout=10.0))
+            await asyncio.wait_for(
+                self._runtime.execute(Command(command=["bash", "-c", start], timeout=10.0)),
+                timeout=11.0,
+            )
         except Exception as e:
             return ExecutionResult(False, f"Failed to start command: {e}", -1)
 
@@ -557,7 +580,7 @@ class SandboxExecutor:
                     f'[ -n "$pid" ] && kill -KILL -$pid 2>/dev/null; '
                     "true"
                 )
-                await self._runtime.execute(Command(command=["bash", "-c", kill_cmd], timeout=5.0))
+                await self._execute_stream_control(kill_cmd, timeout=5.0)
             except Exception as e:
                 self._log(logging.DEBUG, f"Process group kill (may be already exited): {e}")
 
@@ -565,9 +588,7 @@ class SandboxExecutor:
             """Remove temporary files."""
             try:
                 cleanup_cmd = f"rm -f {output_file} {exit_code_file} {script_file} {pid_file}"
-                await self._runtime.execute(
-                    Command(command=["bash", "-c", cleanup_cmd], timeout=5.0)
-                )
+                await self._execute_stream_control(cleanup_cmd, timeout=5.0)
             except Exception:
                 pass  # Best effort cleanup
 
@@ -595,16 +616,24 @@ class SandboxExecutor:
                     f"echo '---EXIT_CODE---'; "
                     f"cat {exit_code_file} 2>/dev/null"
                 )
-                resp = await self._runtime.execute(
-                    Command(command=["bash", "-c", poll_cmd], timeout=10.0)
-                )
+                resp = await self._execute_stream_control(poll_cmd, timeout=10.0)
                 poll_duration = time.time() - poll_start
+                stdout = resp.stdout or ""
+                if "---EXIT_CODE---" not in stdout:
+                    # A live container always reaches the echo above, even while the
+                    # background command is still running (the final cat then exits 1).
+                    # Container-runtime failures return normally with a nonzero exit
+                    # code, so use the marker to distinguish those from an incomplete
+                    # poll and feed them into the existing consecutive-failure guard.
+                    detail = (resp.stderr or "").strip()
+                    msg = f"poll control command exited {resp.exit_code} before producing marker"
+                    if detail:
+                        msg += f": {detail}"
+                    raise RuntimeError(msg)
                 consecutive_failures = 0  # Reset on success
 
                 if poll_duration > 5.0:
                     self._log(logging.WARNING, f"Poll slow ({poll_duration:.1f}s)")
-
-                stdout = resp.stdout or ""
 
                 # Check if output was truncated
                 if "---TRUNCATED---" in stdout:
@@ -689,17 +718,11 @@ class SandboxExecutor:
 
         try:
             await asyncio.sleep(0.2)
-            resp = await self._runtime.execute(
-                Command(
-                    command=[
-                        "bash",
-                        "-c",
-                        f"cat {output_file} 2>/dev/null; "
-                        f"echo '---EXIT_CODE---'; "
-                        f"cat {exit_code_file} 2>/dev/null",
-                    ],
-                    timeout=30.0,
-                )
+            resp = await self._execute_stream_control(
+                f"cat {output_file} 2>/dev/null; "
+                f"echo '---EXIT_CODE---'; "
+                f"cat {exit_code_file} 2>/dev/null",
+                timeout=30.0,
             )
             parts = (resp.stdout or "").split("---EXIT_CODE---")
             full_output = parts[0] if parts else ""
@@ -728,6 +751,51 @@ class SandboxExecutor:
             full_output = (full_output + "\n[Command timed out]") if full_output else "[Timed out]"
 
         return ExecutionResult(exit_code == 0, full_output, exit_code)
+
+    async def _execute_stream_control(self, command: str, timeout: float) -> _ControlCommandResult:
+        """Run a short streaming-control command with a real client timeout.
+
+        DockerDeployment exposes the container name, so local container modes can
+        invoke the runtime CLI directly. This keeps polling independent of the
+        in-container swe-rex HTTP server and makes a stuck poll individually
+        cancellable. Modal has no local container CLI and keeps using swe-rex.
+        """
+        container_name = getattr(self._deployment, "container_name", None)
+        if self.config.mode == SandboxMode.DOCKER and container_name:
+            process = await asyncio.create_subprocess_exec(
+                self.config.container_runtime,
+                "exec",
+                container_name,
+                "bash",
+                "-c",
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            except TimeoutError:
+                process.kill()
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                raise
+            return _ControlCommandResult(
+                stdout=stdout.decode(errors="backslashreplace"),
+                stderr=stderr.decode(errors="backslashreplace"),
+                exit_code=process.returncode or 0,
+            )
+
+        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
+
+        response = await asyncio.wait_for(
+            self._runtime.execute(Command(command=["bash", "-c", command], timeout=timeout)),
+            timeout=timeout + 1.0,
+        )
+        return _ControlCommandResult(
+            stdout=response.stdout or "",
+            stderr=response.stderr or "",
+            exit_code=response.exit_code,
+        )
 
     async def execute_code(
         self,
