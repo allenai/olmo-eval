@@ -151,14 +151,22 @@ def build_openai_judge_fn(
         messages.append({"role": "user", "content": prompt})
 
         # Retry while adapting to per-model parameter constraints. Each iteration
-        # fixes at most one rejected parameter; unrelated errors re-raise.
+        # fixes at most one rejected parameter; unrelated errors re-raise. The loop
+        # allows one attempt per adjustable parameter plus the successful retry.
         last_error: Exception | None = None
-        for _ in range(3):
+        for _ in range(4):
+            # Judge calls can be concurrent, so decide what was rejected from the
+            # shape this attempt actually sent rather than from the shared state a
+            # racing caller may already have updated.
+            token_param = _token_param
+            send_temperature = _send_temperature
+            send_reasoning_effort = _send_reasoning_effort
+
             kwargs: dict[str, Any] = {"model": model, "messages": messages}
-            kwargs[_token_param] = max_tokens
-            if _send_temperature:
+            kwargs[token_param] = max_tokens
+            if send_temperature:
                 kwargs["temperature"] = temperature
-            if _send_reasoning_effort:
+            if send_reasoning_effort:
                 kwargs["reasoning_effort"] = reasoning_effort
             try:
                 response = await _client[0].chat.completions.create(**kwargs)
@@ -166,17 +174,17 @@ def build_openai_judge_fn(
             except Exception as e:
                 message = str(e).lower()
                 adapted = False
-                if _token_param == "max_tokens" and "max_completion_tokens" in message:
+                if token_param == "max_tokens" and "max_completion_tokens" in message:
                     _token_param = "max_completion_tokens"
                     adapted = True
                 if (
-                    _send_temperature
+                    send_temperature
                     and "temperature" in message
                     and ("unsupported" in message or "does not support" in message)
                 ):
                     _send_temperature = False
                     adapted = True
-                if _send_reasoning_effort and "reasoning_effort" in message:
+                if send_reasoning_effort and "reasoning_effort" in message:
                     _send_reasoning_effort = False
                     adapted = True
                 if not adapted:
