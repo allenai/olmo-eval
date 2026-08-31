@@ -393,6 +393,21 @@ class TestCoTVariant:
         assert scorer.score(instance, LMOutput(text="Therefore, the answer is (C)")) == 0.0
         assert scorer.score(instance, LMOutput(text="")) == 0.0
 
+    def test_format_correct_recorded_in_metadata(self, task):
+        """Format score is a diagnostic, not discarded — mirrors omega_500."""
+        from olmo_eval.evals.tasks.gpqa import GPQACoTExactMatchScorer
+
+        scorer = GPQACoTExactMatchScorer()
+        instance = Instance(question="q", gold_answer="B", metadata={})
+
+        requested = LMOutput(text="Therefore, the answer is (B)")
+        assert scorer.score(instance, requested) == 1.0
+        assert requested.metadata["answer_format_correct"] == 1.0
+
+        fallback = LMOutput(text="I think B is right")
+        scorer.score(instance, fallback)
+        assert fallback.metadata["answer_format_correct"] < 1.0
+
     def test_extract_answer_strips_parens(self, task):
         output = LMOutput(text="Reasoning. Therefore, the answer is (D)")
         assert task.extract_answer(output) == "D"

@@ -4,13 +4,12 @@ GPQA (Idavidrein/gpqa) is a multiple-choice benchmark with 4-way questions
 across biology, physics, and chemistry. Three quality-tier subsets are available
 (diamond/main/extended) and each question has a fine-grained ``Subdomain`` field.
 
-Tasks (12 total):
-    gpqa_diamond             Full diamond subset (198 questions)
-    gpqa_main                Full main subset (448 questions)
-    gpqa_extended            Full extended subset (546 questions)
+Tasks:
+    gpqa_{subset}            Full subset (diamond/main/extended)
     gpqa_{subset}_{subject}  Filtered by broad subject (biology/chemistry/physics)
 
-Each task supports :mc (logprob-based) and :bpb (bits-per-byte) variants.
+Variants: ``:mc`` (logprob-based), ``:bpb`` (bits-per-byte), and ``:cot``
+(0-shot chain-of-thought, post-training regime) on the full subsets.
 """
 
 from __future__ import annotations
@@ -38,6 +37,7 @@ from olmo_eval.common.types import (
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import (
     OLMO_3_ANSWER_REGEX_TEMPLATES,
+    ExtractedAnswer,
     extract_answer_with_format,
 )
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -263,14 +263,14 @@ _COT_SAMPLING = SamplingParams(
 )
 
 
-def _extract_cot_answer(text: str) -> str:
-    answer = extract_answer_with_format(
+def _extract_cot_answer(text: str) -> ExtractedAnswer:
+    extracted = extract_answer_with_format(
         text,
         answer_format_regex=_COT_ANSWER_FORMAT_REGEX,
         answer_regexes=_COT_ANSWER_REGEXES,
         answer_regexes_templates=OLMO_3_ANSWER_REGEX_TEMPLATES,
-    ).answer
-    return re.sub(r"\(|\)", "", answer)
+    )
+    return extracted._replace(answer=re.sub(r"\(|\)", "", extracted.answer))
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,7 +280,10 @@ class GPQACoTExactMatchScorer(Scorer):
     name: str = "exact_match"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        answer = _extract_cot_answer(output.text or "")
+        answer, format_correct = _extract_cot_answer(output.text or "")
+        # Whether the letter was stated in the requested format, independent
+        # of correctness: a low score means fallback extraction was needed.
+        output.metadata["answer_format_correct"] = format_correct
         gold = str(instance.gold_answer or "")
         return 1.0 if answer.upper() == gold.upper() else 0.0
 
@@ -346,7 +349,7 @@ class GPQACoTTask(GPQATask):
         )
 
     def extract_answer(self, output: LMOutput) -> str | None:
-        return _extract_cot_answer(output.text or "") or None
+        return _extract_cot_answer(output.text or "").answer or None
 
 
 _TITLE_MARKER = re.compile(r"\s*\[title\]\s*", re.IGNORECASE)
