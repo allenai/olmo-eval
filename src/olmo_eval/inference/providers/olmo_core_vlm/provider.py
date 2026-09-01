@@ -34,6 +34,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any, cast
 
+import olmo_eval.inference.providers.olmo_core_utils as core_utils
 from olmo_eval.common.debug import is_debug_requests
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
@@ -118,7 +119,9 @@ class OlmoCoreVLMProvider(InferenceProvider):
         import torch
         from transformers import AutoTokenizer
 
-        max_model_len = self._resolve_max_model_len_alias(max_model_len, kwargs)
+        max_model_len = core_utils._resolve_max_model_len_alias(
+            max_model_len, kwargs, provider="OlmoCoreVLMProvider"
+        )
         tensor_parallel_size = kwargs.pop("tensor_parallel_size", None)
         if tensor_parallel_size not in (None, 1):
             raise ValueError(
@@ -203,22 +206,6 @@ class OlmoCoreVLMProvider(InferenceProvider):
         # KV-cached decoding mutates per-block cache state on the shared model,
         # so concurrent agenerate/alogprobs threads must take turns.
         self._model_lock = threading.Lock()
-
-    @staticmethod
-    def _resolve_max_model_len_alias(
-        max_model_len: int | None, kwargs: dict[str, Any]
-    ) -> int | None:
-        max_length = kwargs.pop("max_length", None)
-        if max_length is None:
-            return max_model_len
-        if not isinstance(max_length, int):
-            raise ValueError("OlmoCoreVLMProvider max_length must be an integer when set")
-        if max_model_len is not None and max_model_len != max_length:
-            raise ValueError(
-                "OlmoCoreVLMProvider received both max_model_len and max_length "
-                "with different values"
-            )
-        return max_length
 
     def _resolve_special_token_ids(self, tokenizer_path: str) -> None:
         """Resolve Molmo2 image special-token IDs through the tokenizer."""
@@ -461,9 +448,6 @@ class OlmoCoreVLMProvider(InferenceProvider):
         logits = self.model.lm(ids, input_embeddings=h, or_mask=or_mask, logits_to_keep=1)
         return logits[:, -1, :].float()
 
-    def _select_token(self, logits: torch.Tensor, params: SamplingParams) -> int:
-        return self._select_tokens(logits, params)[0]
-
     def _select_tokens(self, logits: torch.Tensor, params: SamplingParams) -> list[int]:
         """Select one next token per batch row from ``(B, vocab)`` logits."""
         from olmo_core.generate.sampling import select_next_token
@@ -627,7 +611,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
         generated: list[int] = []
         for _ in range(params.max_tokens):
             logits = self._step_logits(ids, h, is_image)
-            next_id = self._select_token(logits, params)
+            next_id = self._select_tokens(logits, params)[0]
             generated.append(next_id)
             if next_id in self.stop_token_ids:
                 break
