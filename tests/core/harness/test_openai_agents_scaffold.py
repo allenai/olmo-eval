@@ -48,6 +48,48 @@ def _tool_turn_items(agent, output: str = "Search result text"):
     ]
 
 
+def _reasoning_item(agent, *summary: str, content: tuple[str, ...] = ()):
+    from agents.items import ReasoningItem
+    from openai.types.responses import ResponseReasoningItem
+    from openai.types.responses.response_reasoning_item import Content, Summary
+
+    raw = ResponseReasoningItem(
+        id="rs_1",
+        type="reasoning",
+        summary=[Summary(text=text, type="summary_text") for text in summary],
+        content=[Content(text=text, type="reasoning_text") for text in content] or None,
+    )
+    return ReasoningItem(agent=agent, raw_item=raw)
+
+
+def _message_item(agent, text: str):
+    from agents.items import MessageOutputItem
+    from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+
+    raw = ResponseOutputMessage(
+        id="msg_1",
+        type="message",
+        role="assistant",
+        status="completed",
+        content=[ResponseOutputText(text=text, type="output_text", annotations=[])],
+    )
+    return MessageOutputItem(agent=agent, raw_item=raw)
+
+
+def _refusal_message_item(agent, refusal: str):
+    from agents.items import MessageOutputItem
+    from openai.types.responses import ResponseOutputMessage, ResponseOutputRefusal
+
+    raw = ResponseOutputMessage(
+        id="msg_1",
+        type="message",
+        role="assistant",
+        status="completed",
+        content=[ResponseOutputRefusal(refusal=refusal, type="refusal")],
+    )
+    return MessageOutputItem(agent=agent, raw_item=raw)
+
+
 class _FakeRunData:
     def __init__(self, *, new_items, final_output=None):
         self.new_items = new_items
@@ -205,6 +247,134 @@ class TestOpenAIAgentsMaxTurns:
         assert result.trajectory.total_tool_calls == 1
         assert result.trajectory.tool_result_sequence[0].content == "Normal tool result"
         assert len(run_calls) == 1
+
+
+class TestReasoningItems:
+    """The SDK emits reasoning as a ReasoningItem ahead of the turn it belongs to."""
+
+    def _convert(self, items):
+        return OpenAIAgentsScaffold()._convert_trajectory(_FakeRunData(new_items=items))
+
+    def test_reasoning_lands_on_the_following_message_turn(self):
+        from agents import Agent
+
+        agent = Agent(name="test-agent")
+        trajectory = self._convert(
+            [_reasoning_item(agent, "Think first."), _message_item(agent, "Final answer.")]
+        )
+
+        assert [turn.role for turn in trajectory.turns] == ["assistant"]
+        turn = trajectory.turns[0]
+        assert turn.content == "Final answer."
+        assert turn.reasoning == "Think first."
+        assert "Think first." not in turn.content
+
+    def test_reasoning_lands_on_the_following_tool_call_turn(self):
+        from agents import Agent
+
+        agent = Agent(name="test-agent")
+        trajectory = self._convert(
+            [_reasoning_item(agent, "Plan the search."), *_tool_turn_items(agent)]
+        )
+
+        assert [turn.role for turn in trajectory.turns] == ["assistant", "tool"]
+        assert trajectory.turns[0].has_tool_calls
+        assert trajectory.turns[0].reasoning == "Plan the search."
+        assert trajectory.turns[1].reasoning is None
+
+    def test_trailing_reasoning_is_kept_on_an_empty_assistant_turn(self):
+        from agents import Agent
+
+        agent = Agent(name="test-agent")
+        trajectory = self._convert(
+            [*_tool_turn_items(agent), _reasoning_item(agent, "Cut off here.")]
+        )
+
+        assert [turn.role for turn in trajectory.turns] == ["assistant", "tool", "assistant"]
+        last = trajectory.turns[-1]
+        assert last.content == ""
+        assert not last.has_tool_calls
+        assert last.reasoning == "Cut off here."
+
+    def test_reasoning_before_a_refusal_stays_on_that_response(self):
+        from agents import Agent
+
+        agent = Agent(name="test-agent")
+        trajectory = self._convert(
+            [
+                _reasoning_item(agent, "Think first."),
+                _refusal_message_item(agent, "I cannot help with that."),
+                _message_item(agent, "Final answer."),
+            ]
+        )
+
+        assert [turn.role for turn in trajectory.turns] == ["assistant", "assistant"]
+        assert trajectory.turns[0].content == ""
+        assert trajectory.turns[0].reasoning == "Think first."
+        assert trajectory.turns[1].content == "Final answer."
+        assert trajectory.turns[1].reasoning is None
+
+    def test_pending_reasoning_is_flushed_before_a_tool_output(self):
+        from agents import Agent
+
+        agent = Agent(name="test-agent")
+        _, tool_output = _tool_turn_items(agent)
+        trajectory = self._convert(
+            [_reasoning_item(agent, "Orphaned."), tool_output, _message_item(agent, "Final.")]
+        )
+
+        assert [turn.role for turn in trajectory.turns] == ["assistant", "tool", "assistant"]
+        assert trajectory.turns[0].content == ""
+        assert trajectory.turns[0].reasoning == "Orphaned."
+        assert trajectory.turns[2].reasoning is None
+
+    def test_content_parts_supersede_the_summary(self):
+        from agents import Agent
+
+        agent = Agent(name="test-agent")
+        item = _reasoning_item(agent, "summary", content=("block one", "block two"))
+        trajectory = self._convert([item, _message_item(agent, "Done.")])
+
+        assert trajectory.turns[0].reasoning == "block one\n\nblock two"
+
+    def test_turns_without_reasoning_serialize_unchanged(self):
+        from agents import Agent
+
+        agent = Agent(name="test-agent")
+        trajectory = self._convert([*_tool_turn_items(agent), _message_item(agent, "Done.")])
+
+        assert len(trajectory.turns) == 3
+        for turn in trajectory.turns:
+            assert turn.reasoning is None
+            assert "reasoning" not in turn.to_dict()
+
+    @pytest.mark.anyio
+    async def test_run_keeps_reasoning_in_the_harness_result(self, monkeypatch):
+        from agents import Agent, Runner
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+        run_result = _FakeRunData(
+            new_items=[_reasoning_item(agent, "Think first."), _message_item(agent, "Final.")],
+            final_output="Final.",
+        )
+
+        async def fake_run(**kwargs):
+            return run_result
+
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+
+        result = await OpenAIAgentsScaffold().run(
+            provider=SimpleNamespace(),
+            config=HarnessConfig(name="test", max_turns=3),
+            request=_agent_request(),
+            enable_compaction=False,
+        )
+
+        assert result.final_output.text == "Final."
+        assert result.trajectory is not None
+        assert result.trajectory.turns[0].reasoning == "Think first."
+        assert result.trajectory.turns[0].content == "Final."
 
 
 def _stub_openai_client():

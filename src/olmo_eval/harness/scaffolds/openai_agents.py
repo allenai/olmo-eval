@@ -88,6 +88,27 @@ def _resolve_chat_template_kwargs(provider: InferenceProvider) -> dict[str, Any]
     return resolved
 
 
+def _reasoning_text(raw: Any) -> str:
+    """Extract the reasoning text carried by an SDK ``ResponseReasoningItem``.
+
+    Chat Completions ``reasoning_content`` arrives as a single ``summary`` part.
+    Providers that return thinking blocks also fill ``content`` with the full
+    text, which then supersedes the summary so nothing is stored twice.
+
+    Args:
+        raw: The ``raw_item`` of a ``ReasoningItem``.
+
+    Returns:
+        The joined reasoning text, or an empty string if the item has none.
+    """
+    for attr in ("content", "summary"):
+        parts = getattr(raw, attr, None) or []
+        texts = [text for part in parts if (text := getattr(part, "text", ""))]
+        if texts:
+            return "\n\n".join(texts)
+    return ""
+
+
 def _make_tool_error_formatter(valid_tool_names: Sequence[str]) -> Any:
     """Build a ``RunConfig.tool_error_formatter`` that names the tools the model may call.
 
@@ -615,10 +636,21 @@ class OpenAIAgentsScaffold(Scaffold):
                     pass
             return AgentTrajectory(turns=tuple(turns))
 
+        # The SDK emits reasoning as its own item ahead of the message or tool call
+        # it belongs to, so hold it until that assistant turn is built.
+        pending_reasoning: str | None = None
+
         for item in items:
             item_class = type(item).__name__
 
-            if item_class == "MessageOutputItem":
+            if item_class == "ReasoningItem":
+                text = _reasoning_text(getattr(item, "raw_item", None))
+                if text:
+                    pending_reasoning = (
+                        f"{pending_reasoning}\n\n{text}" if pending_reasoning else text
+                    )
+
+            elif item_class == "MessageOutputItem":
                 raw = getattr(item, "raw_item", None)
                 content = ""
                 if raw is not None:
@@ -628,7 +660,17 @@ class OpenAIAgentsScaffold(Scaffold):
                             if hasattr(part, "text"):
                                 content += part.text
                 if content:
-                    turns.append(AgentTurn.assistant(content=content))
+                    # One model response yields one reasoning block. When the response has
+                    # text it lands here, and any tool-call turns built from the same
+                    # response carry none.
+                    turns.append(AgentTurn.assistant(content=content, reasoning=pending_reasoning))
+                    pending_reasoning = None
+                elif pending_reasoning:
+                    # A message with no text part (e.g. a refusal) still ends the response
+                    # that produced this reasoning; keep it here so it cannot slide onto a
+                    # later, unrelated turn.
+                    turns.append(AgentTurn.assistant(reasoning=pending_reasoning))
+                    pending_reasoning = None
 
             elif item_class == "ToolCallItem":
                 raw = getattr(item, "raw_item", None)
@@ -643,9 +685,21 @@ class OpenAIAgentsScaffold(Scaffold):
                         arguments=arguments,
                         metadata=raw_dict,
                     )
-                    turns.append(AgentTurn.assistant(content="", tool_calls=[tool_call]))
+                    # Without a text part the block lands on the first tool-call turn of
+                    # the response; the remaining tool-call turns carry none.
+                    turns.append(
+                        AgentTurn.assistant(
+                            content="", tool_calls=[tool_call], reasoning=pending_reasoning
+                        )
+                    )
+                    pending_reasoning = None
 
             elif item_class == "ToolCallOutputItem":
+                if pending_reasoning:
+                    # A tool output means the response that produced this reasoning is
+                    # over (its own items had no branch above); flush rather than carry it.
+                    turns.append(AgentTurn.assistant(reasoning=pending_reasoning))
+                    pending_reasoning = None
                 output = getattr(item, "output", None)
                 raw = getattr(item, "raw_item", None)
                 # Extract tool_call_id from raw_item
@@ -666,6 +720,11 @@ class OpenAIAgentsScaffold(Scaffold):
                     content=content,
                 )
                 turns.append(AgentTurn.tool([tool_result]))
+
+        if pending_reasoning:
+            # No assistant item followed this reasoning (the run stopped after it);
+            # keep it on an otherwise empty assistant turn rather than dropping it.
+            turns.append(AgentTurn.assistant(reasoning=pending_reasoning))
 
         return AgentTrajectory(turns=tuple(turns))
 
