@@ -6,6 +6,7 @@ import logging
 from collections.abc import Sequence
 from contextvars import ContextVar
 from dataclasses import replace
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
@@ -107,6 +108,67 @@ def _reasoning_text(raw: Any) -> str:
         if texts:
             return "\n\n".join(texts)
     return ""
+
+
+def _mirror_vllm_reasoning(message: Any) -> None:
+    """Expose a provider's ``reasoning`` field under the name the SDK converter reads.
+
+    Providers such as vLLM 0.19 return the reasoning parser output as
+    ``message.reasoning``, a field outside the OpenAI schema, while openai-agents 0.20
+    builds a ``ReasoningItem`` only from ``reasoning_content`` or ``thinking_blocks``.
+    Copying the text onto ``reasoning_content`` before conversion keeps the thinking.
+    The copy should be removed once the SDK reads ``reasoning`` itself (openai-agents
+    0.21.1 and later, which require openai 3.x).
+
+    Nothing changes when the server already returned a non-empty ``reasoning_content``
+    or ``thinking_blocks``, or when the message carries no reasoning at all (OpenAI, or
+    vLLM without a reasoning parser). The SDK replays ``reasoning_content`` into later
+    requests only for model names containing ``deepseek``, so a DeepSeek-named model
+    served by vLLM sends the mirrored text back as assistant history; vLLM 0.19.1
+    ignores that key.
+
+    Args:
+        message: The ``ChatCompletionMessage`` of a choice, mutated in place.
+    """
+    if getattr(message, "reasoning_content", None) or getattr(message, "thinking_blocks", None):
+        return
+    reasoning = getattr(message, "reasoning", None)
+    if isinstance(reasoning, str) and reasoning:
+        # ChatCompletionMessage allows extra fields, so this lands in model_extra next
+        # to ``reasoning`` and is picked up by the converter's getattr.
+        message.reasoning_content = reasoning
+
+
+@lru_cache(maxsize=1)
+def _chat_completions_model_class() -> type:
+    """Return the SDK model class the scaffold instantiates, importing the SDK lazily.
+
+    The subclass hooks the point where the raw ``ChatCompletion`` is visible before
+    conversion: ``OpenAIChatCompletionsModel._fetch_response``. The SDK's ``get_response``
+    (the path behind ``Runner.run``) awaits it with ``stream=False`` and hands
+    ``choices[0].message`` to ``Converter.message_to_output_items``. ``stream_response``
+    calls it with ``stream=True`` and receives a ``(Response, AsyncStream)`` pair, which
+    passes through untouched; the SDK's stream handler already reads ``delta.reasoning``
+    on that path. The hook is private SDK surface, so the scaffold tests pin it. The
+    subclass becomes unnecessary with openai-agents 0.21.1 or later, whose converter
+    reads ``reasoning`` itself.
+    """
+    from agents import OpenAIChatCompletionsModel  # type: ignore[ty:unresolved-import]
+    from openai.types.chat import ChatCompletion
+
+    class ReasoningFieldChatCompletionsModel(OpenAIChatCompletionsModel):
+        """Chat Completions model that normalizes the vLLM reasoning field."""
+
+        async def _fetch_response(self, *args: Any, **kwargs: Any) -> Any:
+            completion = await super()._fetch_response(*args, **kwargs)
+            if isinstance(completion, ChatCompletion):
+                for choice in completion.choices:
+                    message = getattr(choice, "message", None)
+                    if message is not None:
+                        _mirror_vllm_reasoning(message)
+            return completion
+
+    return ReasoningFieldChatCompletionsModel
 
 
 def _make_tool_error_formatter(valid_tool_names: Sequence[str]) -> Any:
@@ -274,7 +336,6 @@ class OpenAIAgentsScaffold(Scaffold):
         from agents import (  # type: ignore[ty:unresolved-import]
             Agent,
             ModelSettings,
-            OpenAIChatCompletionsModel,
             function_tool,
             set_tracing_disabled,
         )
@@ -294,7 +355,9 @@ class OpenAIAgentsScaffold(Scaffold):
             f"model={provider.model_name}"
         )
 
-        model = OpenAIChatCompletionsModel(
+        # vLLM returns thinking as ``reasoning``, which the SDK does not convert; the
+        # subclass mirrors it onto ``reasoning_content`` so it reaches the saved trajectory.
+        model = _chat_completions_model_class()(
             openai_client=client,
             model=provider.model_name,
         )
