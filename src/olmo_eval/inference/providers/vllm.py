@@ -109,6 +109,7 @@ class VLLMProvider(InferenceProvider):
         force_download: bool = False,
         max_images: int = 8,
         strip_reasoning: bool = False,
+        chat_template_kwargs: dict[str, Any] | None = None,
         **engine_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -122,6 +123,10 @@ class VLLMProvider(InferenceProvider):
                 will include this identifier.
             force_download: Force-refresh Hugging Face model/tokenizer cache entries
                 before initializing vLLM.
+            chat_template_kwargs: Extra keyword arguments forwarded to the tokenizer's
+                ``apply_chat_template``. Needed for models whose template exposes a mode
+                switch -- e.g. the hybrid Qwen3 releases reason by default and require
+                ``{"enable_thinking": false}`` to be compared against a non-thinking model.
             strip_reasoning: For reasoning models that emit a ``</think>``-terminated
                 trace (e.g. Qwen3-VL-Thinking), keep only the text after the final
                 ``</think>`` as the answer and expose the trace on the output's
@@ -196,6 +201,7 @@ class VLLMProvider(InferenceProvider):
         # limit_mm_per_prompt in engine_kwargs still wins.
         self._max_images = int(max_images)
         self._strip_reasoning = bool(strip_reasoning)
+        self._chat_template_kwargs = dict(chat_template_kwargs or {})
         if self._max_images > 0:
             engine_kwargs.setdefault("limit_mm_per_prompt", {"image": self._max_images})
 
@@ -318,6 +324,7 @@ class VLLMProvider(InferenceProvider):
                 self._image_chat_messages(request),
                 tokenize=False,
                 add_generation_prompt=True,
+                **self._chat_template_kwargs,
             )
             if len(images) > self._max_images:
                 # vLLM raises for the whole `llm.generate` call when any one prompt exceeds
@@ -345,6 +352,7 @@ class VLLMProvider(InferenceProvider):
                 list(request.messages),
                 tokenize=False,
                 add_generation_prompt=True,
+                **self._chat_template_kwargs,
             )
 
         return request.prompt
