@@ -126,6 +126,7 @@ def fake_provider() -> tuple[VLLMProvider, FakeLLM, FakeTokenizer]:
     provider.model_name = "test-model"
     provider.llm = llm
     provider._add_bos_token = None
+    provider._strip_reasoning = False
     provider._build_sampling_params = lambda params: "fake-sampling-params"
     return provider, llm, tokenizer
 
@@ -363,3 +364,62 @@ def test_describe_request_reports_image_count(
     assert trace is not None
     assert trace["input_mode"] == "multi_modal_data"
     assert trace["num_images"] == 2
+
+
+def test_generate_strips_reasoning_when_enabled(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    # Qwen3-VL-Thinking's template prefills "<think>\n", so generation starts inside the
+    # reasoning block. No scorer strips it, and MmmuScorer's clean_prediction splits on the
+    # FIRST "Answer:" -- often one written mid-thought.
+    provider, llm, _ = fake_provider
+    provider._strip_reasoning = True
+    llm.generate = lambda prompts, sampling_params, use_tqdm=False: [
+        SimpleNamespace(
+            outputs=[
+                SimpleNamespace(
+                    text="Maybe Answer: C. Wait, no.\n</think>\n\nAnswer: B", logprobs=None
+                )
+            ]
+        )
+    ]
+    request = LMRequest(request_type=RequestType.CHAT, messages=({"role": "user", "content": "Q"},))
+
+    out = provider.generate([request], SamplingParams(max_tokens=64))[0][0]
+
+    assert out.text == "Answer: B"
+    assert out.metadata["reasoning"] == "Maybe Answer: C. Wait, no."
+
+
+def test_generate_keeps_full_text_when_strip_reasoning_off(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    provider, llm, _ = fake_provider
+    provider._strip_reasoning = False
+    llm.generate = lambda prompts, sampling_params, use_tqdm=False: [
+        SimpleNamespace(outputs=[SimpleNamespace(text="reasoning\n</think>\n\nB", logprobs=None)])
+    ]
+    request = LMRequest(request_type=RequestType.CHAT, messages=({"role": "user", "content": "Q"},))
+
+    out = provider.generate([request], SamplingParams(max_tokens=64))[0][0]
+
+    assert out.text == "reasoning\n</think>\n\nB"
+    assert "reasoning" not in out.metadata
+
+
+def test_unclosed_trace_is_left_alone(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    # A trace truncated by the token cap never emits "</think>". It must pass through
+    # unchanged so the failure stays visible rather than becoming an empty answer.
+    provider, llm, _ = fake_provider
+    provider._strip_reasoning = True
+    llm.generate = lambda prompts, sampling_params, use_tqdm=False: [
+        SimpleNamespace(outputs=[SimpleNamespace(text="thinking and thinking", logprobs=None)])
+    ]
+    request = LMRequest(request_type=RequestType.CHAT, messages=({"role": "user", "content": "Q"},))
+
+    out = provider.generate([request], SamplingParams(max_tokens=64))[0][0]
+
+    assert out.text == "thinking and thinking"
+    assert "reasoning" not in out.metadata

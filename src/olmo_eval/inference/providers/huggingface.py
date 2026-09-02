@@ -15,6 +15,7 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.reasoning import split_reasoning
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 logger = get_logger(__name__)
@@ -130,28 +131,6 @@ def _patch_processor_optional_attribute_kwargs() -> None:
 
     __init__._olmo_eval_optional_attr_patch = True  # ty: ignore[unresolved-attribute]
     ProcessorMixin.__init__ = __init__  # ty: ignore[invalid-assignment]
-
-
-def _split_reasoning(text: str) -> tuple[str, str]:
-    """Split a reasoning model's output into ``(reasoning, answer)`` on ``</think>``.
-
-    Qwen3-VL-Thinking (and Qwen3 generally) prefill ``<think>\\n`` in the generation
-    prompt, so the generated text *begins* inside the reasoning block and closes it
-    with ``</think>`` before the user-facing answer. None of the image-QA scorers
-    strip that block: ``MmmuScorer`` runs ``clean_prediction``, which splits on the
-    *first* ``"Answer:"`` -- frequently one the model wrote mid-thought -- and the
-    CharXiv GPT judge would be handed the whole trace. Splitting on the **last**
-    ``</think>`` restores the answer-only text those scorers expect while keeping the
-    trace available for error analysis.
-
-    Returns ``("", text)`` unchanged when no ``</think>`` is present, so this is a
-    no-op for non-reasoning models.
-    """
-    marker = "</think>"
-    idx = text.rfind(marker)
-    if idx == -1:
-        return "", text
-    return text[:idx].strip(), text[idx + len(marker) :].strip()
 
 
 def _patch_molmo2_generation_cache_position(model: Any) -> None:
@@ -586,7 +565,7 @@ class HuggingFaceProvider(InferenceProvider):
                     "num_tokens_all": num_tokens,
                 }
                 if self.strip_reasoning:
-                    reasoning, answer = _split_reasoning(answer)
+                    reasoning, answer = split_reasoning(answer)
                     if reasoning:
                         meta["reasoning"] = reasoning
                 request_outputs.append(LMOutput(text=answer, logprobs=None, metadata=meta))

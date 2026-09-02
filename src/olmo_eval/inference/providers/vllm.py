@@ -11,6 +11,7 @@ from olmo_eval.common.debug import is_debug_provider, is_debug_requests
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
+from olmo_eval.inference.reasoning import split_reasoning
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ class VLLMProvider(InferenceProvider):
         worker_id: str | None = None,
         force_download: bool = False,
         max_images: int = 8,
+        strip_reasoning: bool = False,
         **engine_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -120,6 +122,10 @@ class VLLMProvider(InferenceProvider):
                 will include this identifier.
             force_download: Force-refresh Hugging Face model/tokenizer cache entries
                 before initializing vLLM.
+            strip_reasoning: For reasoning models that emit a ``</think>``-terminated
+                trace (e.g. Qwen3-VL-Thinking), keep only the text after the final
+                ``</think>`` as the answer and expose the trace on the output's
+                ``metadata["reasoning"]``. No-op when the output has no ``</think>``.
             max_images: Maximum images accepted in a single prompt, forwarded as
                 ``limit_mm_per_prompt={"image": max_images}``. vLLM's own default is 1,
                 which is too low for interleaved-image tasks: MMMU-Pro's standard
@@ -189,6 +195,7 @@ class VLLMProvider(InferenceProvider):
         # Raise the per-prompt image cap (vLLM defaults to 1). setdefault so an explicit
         # limit_mm_per_prompt in engine_kwargs still wins.
         self._max_images = int(max_images)
+        self._strip_reasoning = bool(strip_reasoning)
         if self._max_images > 0:
             engine_kwargs.setdefault("limit_mm_per_prompt", {"image": self._max_images})
 
@@ -389,9 +396,14 @@ class VLLMProvider(InferenceProvider):
                         "num_tokens_all": num_tokens,
                     }
 
+                text = completion.text
+                if self._strip_reasoning:
+                    reasoning, text = split_reasoning(text)
+                    if reasoning:
+                        metadata["reasoning"] = reasoning
                 request_outputs.append(
                     LMOutput(
-                        text=completion.text,
+                        text=text,
                         logprobs=logprobs,
                         metadata=metadata,
                     )
