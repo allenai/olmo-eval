@@ -1,5 +1,7 @@
 """Unit tests for the inline VLLMProvider."""
 
+from __future__ import annotations
+
 import sys
 from types import ModuleType, SimpleNamespace
 
@@ -11,6 +13,38 @@ from olmo_eval.inference.providers.vllm import VLLMProvider
 
 class FakeVllmModule(ModuleType):
     SamplingParams: object
+
+
+def _render_content(content: object) -> str:
+    """Render a chat message's content, mirroring a real vision chat template.
+
+    String content renders as-is (the text-only path). A content *list* renders each part,
+    turning ``{"type": "image"}`` into a ``<image>`` placeholder, so tests can assert the
+    placeholder actually lands in the prompt vLLM receives.
+    """
+    if isinstance(content, str):
+        return content
+    parts = []
+    for part in content:
+        if part.get("type") == "image":
+            parts.append("<image>")
+        else:
+            parts.append(part.get("text", ""))
+    return "".join(parts)
+
+
+class FakeImage:
+    """Minimal stand-in for a PIL image (only ``mode`` and ``convert`` are used)."""
+
+    def __init__(self, name: str, mode: str = "RGB") -> None:
+        self.name = name
+        self.mode = mode
+        self.converted_to: str | None = None
+
+    def convert(self, mode: str) -> FakeImage:
+        converted = FakeImage(self.name, mode)
+        converted.converted_to = mode
+        return converted
 
 
 def test_build_sampling_params_passes_none_max_tokens_through(monkeypatch) -> None:
@@ -44,7 +78,9 @@ class FakeTokenizer:
                 "add_generation_prompt": add_generation_prompt,
             }
         )
-        rendered_messages = "|".join(f"{m['role']}:{m['content']}" for m in messages)
+        rendered_messages = "|".join(
+            f"{m['role']}:{_render_content(m['content'])}" for m in messages
+        )
         return f"<chat>{rendered_messages}<assistant>"
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
@@ -149,3 +185,181 @@ def test_generate_keeps_completion_prompt_unchanged(
 
     assert tokenizer.template_calls == []
     assert llm.generate_calls[0]["prompts"] == ["Complete me"]
+
+
+# ---------------------------------------------------------------------------
+# Image support
+# ---------------------------------------------------------------------------
+
+
+def test_generate_passes_images_as_multi_modal_data(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    # vLLM takes images via {"prompt": ..., "multi_modal_data": {"image": [...]}}, and the
+    # prompt must carry the model's image placeholders for vLLM to expand against them.
+    provider, llm, tokenizer = fake_provider
+    image = FakeImage("chart")
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "What is shown?"},),
+        images=(image,),
+    )
+
+    outputs = provider.generate([request], SamplingParams(max_tokens=8))
+
+    assert outputs[0][0].text == "ok"
+    prompt = llm.generate_calls[0]["prompts"][0]
+    assert isinstance(prompt, dict), "image requests must use vLLM's dict prompt form"
+    assert prompt["multi_modal_data"] == {"image": [image]}
+    # Placeholder precedes the question text, matching the HF/olmo_core_vlm convention.
+    assert prompt["prompt"] == "<chat>user:<image>What is shown?<assistant>"
+
+
+def test_generate_places_one_placeholder_per_image(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    # MMMU-Pro's standard settings interleave up to 7 images; a placeholder count that
+    # disagrees with the image count is exactly the failure that yields plausible-but-wrong
+    # scores rather than an error.
+    provider, llm, _ = fake_provider
+    images = tuple(FakeImage(f"img{i}") for i in range(3))
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "Compare."},),
+        images=images,
+    )
+
+    provider.generate([request], SamplingParams(max_tokens=8))
+
+    prompt = llm.generate_calls[0]["prompts"][0]
+    assert prompt["prompt"].count("<image>") == 3
+    assert prompt["multi_modal_data"]["image"] == list(images)
+
+
+def test_generate_converts_non_rgb_images(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    provider, llm, _ = fake_provider
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "Q"},),
+        images=(FakeImage("grayscale", mode="L"),),
+    )
+
+    provider.generate([request], SamplingParams(max_tokens=8))
+
+    passed = llm.generate_calls[0]["prompts"][0]["multi_modal_data"]["image"][0]
+    assert passed.mode == "RGB"
+    assert passed.converted_to == "RGB"
+
+
+def test_generate_text_only_requests_stay_bare_strings(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    # Regression guard: adding image support must not change the text-only wire format.
+    provider, llm, _ = fake_provider
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "Hello"},),
+    )
+
+    provider.generate([request], SamplingParams(max_tokens=1))
+
+    assert llm.generate_calls[0]["prompts"] == ["<chat>user:Hello<assistant>"]
+
+
+def test_images_with_bos_disabled_raises(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    # add_bos_token=False pre-tokenizes to prompt_token_ids, which cannot carry
+    # multi_modal_data -- the images would be silently dropped.
+    provider, _, _ = fake_provider
+    provider._add_bos_token = False
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "Q"},),
+        images=(FakeImage("x"),),
+    )
+
+    with pytest.raises(ValueError, match="add_bos_token=False is incompatible"):
+        provider.generate([request], SamplingParams(max_tokens=8))
+
+
+def test_logprobs_with_images_raises(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+    monkeypatch,
+) -> None:
+    # The loglikelihood path scores raw token sequences with nowhere to attach images, so
+    # it must refuse rather than score every continuation against text alone.
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.SamplingParams = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+
+    provider, _, _ = fake_provider
+    request = LMRequest(
+        request_type=RequestType.LOGLIKELIHOOD,
+        prompt="Q",
+        continuations=("A", "B"),
+        images=(FakeImage("x"),),
+    )
+
+    with pytest.raises(ValueError, match="does not support images"):
+        provider.logprobs([request], SamplingParams(max_tokens=1))
+
+
+def test_init_raises_per_prompt_image_limit(monkeypatch) -> None:
+    # vLLM's own limit_mm_per_prompt default is 1 image, which silently breaks every
+    # interleaved-image task, so the provider must raise it at engine construction.
+    captured: dict[str, object] = {}
+
+    class RecordingLLM:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.LLM = RecordingLLM
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+
+    VLLMProvider("test-model", max_images=7)
+
+    assert captured["limit_mm_per_prompt"] == {"image": 7}
+
+
+def test_init_respects_explicit_limit_mm_per_prompt(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class RecordingLLM:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.LLM = RecordingLLM
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+
+    VLLMProvider("test-model", limit_mm_per_prompt={"image": 2, "video": 1})
+
+    assert captured["limit_mm_per_prompt"] == {"image": 2, "video": 1}
+
+
+def test_describe_request_reports_image_count(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    # --inspect-request should show that images are on the wire, and that the prompt goes
+    # out as multi_modal_data rather than plain text.
+    provider, _, _ = fake_provider
+    # The shared fixture stubs _build_sampling_params to a string; describe_request reads
+    # attributes off it, so give it a real-shaped object here.
+    provider._build_sampling_params = lambda params: SimpleNamespace(
+        max_tokens=params.max_tokens, temperature=params.temperature, logprobs=1, n=1
+    )
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "Q"},),
+        images=(FakeImage("a"), FakeImage("b")),
+    )
+
+    trace = provider.describe_request(request, SamplingParams(max_tokens=8))
+
+    assert trace is not None
+    assert trace["input_mode"] == "multi_modal_data"
+    assert trace["num_images"] == 2

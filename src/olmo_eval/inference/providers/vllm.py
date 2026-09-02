@@ -106,6 +106,7 @@ class VLLMProvider(InferenceProvider):
         attention_backend: str | None = None,
         worker_id: str | None = None,
         force_download: bool = False,
+        max_images: int = 8,
         **engine_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -119,6 +120,10 @@ class VLLMProvider(InferenceProvider):
                 will include this identifier.
             force_download: Force-refresh Hugging Face model/tokenizer cache entries
                 before initializing vLLM.
+            max_images: Maximum images accepted in a single prompt, forwarded as
+                ``limit_mm_per_prompt={"image": max_images}``. vLLM's own default is 1,
+                which is too low for interleaved-image tasks: MMMU-Pro's standard
+                settings carry up to 7 (``image_1``..``image_7``).
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
         # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_PROVIDER=1, otherwise WARNING
@@ -180,6 +185,12 @@ class VLLMProvider(InferenceProvider):
         # When False, prompts will be pre-tokenized without special tokens and passed as token IDs,
         # matching the old framework's behavior (tokenizer(text, add_special_tokens=False)).
         self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
+
+        # Raise the per-prompt image cap (vLLM defaults to 1). setdefault so an explicit
+        # limit_mm_per_prompt in engine_kwargs still wins.
+        self._max_images = int(max_images)
+        if self._max_images > 0:
+            engine_kwargs.setdefault("limit_mm_per_prompt", {"image": self._max_images})
 
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
 
@@ -243,8 +254,70 @@ class VLLMProvider(InferenceProvider):
 
         return VLLMSamplingParams(**kwargs)
 
-    def _format_prompt(self, request: LMRequest) -> str:
-        """Format an LMRequest into the text prompt expected by inline vLLM."""
+    @staticmethod
+    def _image_chat_messages(request: LMRequest) -> list[dict[str, Any]]:
+        """Build chat messages with image placeholders ahead of the user's text.
+
+        Same convention as ``HuggingFaceProvider._build_chat_messages`` and
+        ``OlmoCoreVlmProvider._chat_text``: one user turn whose content is the image(s)
+        followed by the question, with images attached to the *first* user turn. Keeping
+        all three providers on one convention is what makes their scores comparable.
+        """
+        image_parts: list[dict[str, Any]] = [{"type": "image"} for _ in (request.images or ())]
+        messages = request.messages or ({"role": "user", "content": request.prompt},)
+
+        chat: list[dict[str, Any]] = []
+        attached = False
+        for msg in messages:
+            role = msg.get("role", "user")
+            text = msg.get("content", "") or ""
+            if role == "user" and not attached and image_parts:
+                chat.append(
+                    {"role": role, "content": [*image_parts, {"type": "text", "text": text}]}
+                )
+                attached = True
+            else:
+                chat.append({"role": role, "content": [{"type": "text", "text": text}]})
+        if not attached and image_parts:
+            chat.insert(0, {"role": "user", "content": image_parts})
+        return chat
+
+    def _format_prompt(self, request: LMRequest) -> str | dict[str, Any]:
+        """Format an LMRequest into the prompt expected by inline vLLM.
+
+        Returns a plain string for text-only requests, or vLLM's dict form
+        ``{"prompt": ..., "multi_modal_data": {"image": [...]}}`` when the request carries
+        images. The rendered prompt holds the model's own image placeholder tokens (e.g.
+        Qwen3-VL's ``<|vision_start|><|image_pad|><|vision_end|>``), which vLLM expands
+        against the images internally -- no ``AutoProcessor`` needed here, because the
+        tokenizer-level chat template emits the same placeholders as the processor-level one.
+        """
+        images = tuple(request.images or ())
+        if images:
+            tokenizer = self.llm.get_tokenizer()
+            if not hasattr(tokenizer, "apply_chat_template"):
+                raise ValueError(
+                    "Image requests require a tokenizer with apply_chat_template so the "
+                    "model's image placeholder tokens can be rendered."
+                )
+            if self._add_bos_token is False:
+                # The add_bos_token=False path pre-tokenizes to prompt_token_ids, which
+                # cannot carry multi_modal_data. Failing here beats dropping the images.
+                raise ValueError(
+                    "add_bos_token=False is incompatible with image requests: the "
+                    "pre-tokenized prompt_token_ids path cannot carry multi_modal_data."
+                )
+            text = tokenizer.apply_chat_template(
+                self._image_chat_messages(request),
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            pil_images = [
+                img.convert("RGB") if getattr(img, "mode", "RGB") != "RGB" else img
+                for img in images
+            ]
+            return {"prompt": text, "multi_modal_data": {"image": pil_images}}
+
         if request.request_type == RequestType.CHAT and request.messages:
             tokenizer = self.llm.get_tokenizer()
             if not hasattr(tokenizer, "apply_chat_template"):
@@ -270,23 +343,31 @@ class VLLMProvider(InferenceProvider):
             )
         vllm_params = self._build_sampling_params(params)
 
-        prompt_strs = [self._format_prompt(req) for req in requests]
+        # Image requests come back as {"prompt": ..., "multi_modal_data": ...} dicts;
+        # text-only requests as plain strings.
+        formatted = [self._format_prompt(req) for req in requests]
 
         if is_debug_requests():
-            for i, prompt in enumerate(prompt_strs):
-                logger.info(f"Prompt {i}:\n{prompt}")
+            for i, prompt in enumerate(formatted):
+                if isinstance(prompt, dict):
+                    n_images = len(prompt.get("multi_modal_data", {}).get("image", ()))
+                    logger.info(f"Prompt {i} ({n_images} image(s)):\n{prompt['prompt']}")
+                else:
+                    logger.info(f"Prompt {i}:\n{prompt}")
 
         # When add_bos_token=False, pre-tokenize without special tokens and pass token IDs.
         # This bypasses vLLM's internal tokenization, matching the old framework behavior of
         # calling tokenizer(text, add_special_tokens=False) before passing to vLLM.
+        # _format_prompt already rejects add_bos_token=False + images, so everything here
+        # is a string.
         if self._add_bos_token is False:
             tokenizer = self.llm.get_tokenizer()
             vllm_prompts: list = [
                 {"prompt_token_ids": tokenizer.encode(p, add_special_tokens=False)}
-                for p in prompt_strs
+                for p in formatted
             ]
         else:
-            vllm_prompts = prompt_strs
+            vllm_prompts = formatted
 
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
@@ -357,7 +438,12 @@ class VLLMProvider(InferenceProvider):
         if getattr(vllm_params, "top_k", None) is not None:
             trace["generation_kwargs"]["top_k"] = vllm_params.top_k
         trace["stop_sequences"] = list(params.stop_sequences or ())
-        trace["input_mode"] = "prompt_token_ids" if self._add_bos_token is False else "text"
+        n_images = len(request.images or ())
+        if n_images:
+            trace["input_mode"] = "multi_modal_data"
+            trace["num_images"] = n_images
+        else:
+            trace["input_mode"] = "prompt_token_ids" if self._add_bos_token is False else "text"
         return trace
 
     def logprobs(
@@ -372,6 +458,15 @@ class VLLMProvider(InferenceProvider):
             logger.warning(
                 "truncate_prompt_tokens or truncation_side has been set in the params, "
                 "but is not supported for the VLLMProvider and will not be used."
+            )
+        # This path scores raw token sequences and has nowhere to attach multi_modal_data,
+        # so images would be silently dropped and every continuation scored against text
+        # alone. None of the image tasks (mmmu, mmmu_pro, charxiv_*) use LOGLIKELIHOOD.
+        if any(request.images for request in requests):
+            raise ValueError(
+                "VLLMProvider.logprobs() does not support images. Use generate() for "
+                "multimodal tasks, or the HuggingFace/olmo_core_vlm provider if you need "
+                "image-conditioned loglikelihood scoring."
             )
         vllm_params = VLLMSamplingParams(
             prompt_logprobs=1,
