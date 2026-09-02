@@ -8,7 +8,7 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -184,6 +184,21 @@ class TaskConfig:
                     f"output_score_aggregation must be one of: {valid}; "
                     f"got {self.output_score_aggregation!r}"
                 ) from exc
+
+        # Dotted CLI overrides (`-o sampling_params.max_tokens=64`) arrive as a plain dict.
+        # SamplingParams is frozen and used as a cache key, so an uncoerced dict fails far
+        # from its cause with `unhashable type: 'dict'`. Unknown keys are rejected rather
+        # than silently dropped.
+        if isinstance(self.sampling_params, dict):
+            overrides = dict(self.sampling_params)
+            valid = {f.name for f in fields(SamplingParams)}
+            unknown = set(overrides) - valid
+            if unknown:
+                raise ValueError(
+                    f"unknown sampling_params field(s): {', '.join(sorted(unknown))}; "
+                    f"valid: {', '.join(sorted(valid))}"
+                )
+            self.sampling_params = SamplingParams(**overrides)
 
         try:
             weight = float(self.sandbox_allocation_weight)
