@@ -171,6 +171,16 @@ class TaskConfig:
     prompt_templates: str | None = None
     system_prompt_style: str | None = None
 
+    #: What an image-QA task sends in place of the real image. ``"real"`` is the benchmark
+    #: as published. ``"none"`` drops the image, measuring what the question alone supports.
+    #: ``"caption"`` substitutes a text description from ``caption_source``, so the gap to
+    #: ``"real"`` attributes error to perception rather than knowledge or reasoning.
+    image_mode: str = "real"
+
+    #: JSONL of ``{"example_id": ..., "caption": ...}`` records, required by
+    #: ``image_mode="caption"``.
+    caption_source: str | None = None
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):
