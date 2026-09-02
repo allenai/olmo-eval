@@ -70,12 +70,14 @@ class FakeTokenizer:
         messages: list[dict[str, str]],
         tokenize: bool = False,
         add_generation_prompt: bool = False,
+        **kwargs: object,
     ) -> str:
         self.template_calls.append(
             {
                 "messages": messages,
                 "tokenize": tokenize,
                 "add_generation_prompt": add_generation_prompt,
+                **kwargs,
             }
         )
         rendered_messages = "|".join(
@@ -128,6 +130,7 @@ def fake_provider() -> tuple[VLLMProvider, FakeLLM, FakeTokenizer]:
     provider._add_bos_token = None
     provider._strip_reasoning = False
     provider._max_images = 8
+    provider._chat_template_kwargs = {}
     provider._build_sampling_params = lambda params: "fake-sampling-params"
     return provider, llm, tokenizer
 
@@ -442,3 +445,17 @@ def test_too_many_images_names_the_knob(
 
     with pytest.raises(ValueError, match=r"3 images but max_images=2"):
         provider.generate([request], SamplingParams(max_tokens=8))
+
+
+def test_chat_template_kwargs_are_forwarded(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    # The hybrid Qwen3 releases reason by default; comparing them against a non-thinking
+    # model requires enable_thinking=False to reach the template.
+    provider, _, tokenizer = fake_provider
+    provider._chat_template_kwargs = {"enable_thinking": False}
+    request = LMRequest(request_type=RequestType.CHAT, messages=({"role": "user", "content": "Q"},))
+
+    provider.generate([request], SamplingParams(max_tokens=8))
+
+    assert tokenizer.template_calls[0]["enable_thinking"] is False
