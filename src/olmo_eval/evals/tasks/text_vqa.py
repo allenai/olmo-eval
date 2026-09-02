@@ -13,7 +13,7 @@ from collections.abc import Iterator
 
 from olmo_eval.common.scorers.image_qa import VqaScoreScorer
 from olmo_eval.common.types import Instance, SamplingParams, Split
-from olmo_eval.evals.tasks.common import register
+from olmo_eval.evals.tasks.common import register, register_variant
 from olmo_eval.evals.tasks.common.image_qa_base import (
     ImageQATask,
     MeanScorerMetric,
@@ -49,3 +49,9 @@ class TextVqaTask(ImageQATask):
                     "image_path": str(src_dir / image_subfolder / f"{item['image_id']}.jpg"),
                 },
             )
+
+
+# `:neutral` drops the mm_olmo style tag and asks for a short answer -- the
+# convention published VLM numbers are measured under. Use it for external models;
+# Molmo checkpoints want the default `molmo` style they were trained on.
+register_variant("text_vqa", "neutral", prompt_style="neutral")

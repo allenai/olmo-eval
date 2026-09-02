@@ -181,6 +181,13 @@ class TaskConfig:
     #: ``image_mode="caption"``.
     caption_source: str | None = None
 
+    #: Which prompt convention to send. ``"molmo"`` (default) reproduces mm_olmo's SFT
+    #: format -- a ``vqa2:`` / ``chart_qa:`` style tag and no answer-length instruction --
+    #: which is in-distribution for Molmo checkpoints and gibberish to anything else.
+    #: ``"neutral"`` drops the tag and asks for a short answer, the convention published
+    #: VLM numbers are measured under. Only affects how the question is rendered.
+    prompt_style: str = "molmo"
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):

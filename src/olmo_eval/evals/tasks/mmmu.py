@@ -118,3 +118,4 @@ class MmmuTask(ImageQATask):
 # run time, e.g. `-o caption_source=/path/to/mmmu_captions.jsonl`.
 register_variant("mmmu", "text_only", image_mode="none")
 register_variant("mmmu", "oracle_caption", image_mode="caption")
+register_variant("mmmu", "neutral", prompt_style="neutral")
