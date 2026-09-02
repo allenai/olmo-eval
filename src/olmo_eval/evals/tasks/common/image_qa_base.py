@@ -108,6 +108,69 @@ def load_instance_image(instance: Instance):
     return None
 
 
+IMAGE_MODES = ("real", "none", "caption")
+
+#: Cache of loaded caption files, keyed by path. Instances are formatted one at a time, so
+#: without this the JSONL would be re-read once per instance.
+_CAPTION_CACHE: dict[str, dict[str, str]] = {}
+
+
+def load_captions(path: str) -> dict[str, str]:
+    """Load a ``{"example_id": ..., "caption": ...}`` JSONL into a dict, cached by path."""
+    if path not in _CAPTION_CACHE:
+        import json
+
+        captions: dict[str, str] = {}
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                captions[str(record["example_id"])] = record["caption"]
+        if not captions:
+            raise ValueError(f"Caption source {path!r} is empty")
+        _CAPTION_CACHE[path] = captions
+    return _CAPTION_CACHE[path]
+
+
+def resolve_image_mode(config, instance: Instance) -> tuple[bool, str | None]:
+    """Resolve ``config.image_mode`` for one instance.
+
+    :returns: ``(send_image, caption)``. ``caption`` is non-None only in caption mode, and
+        should be prepended to the question.
+
+    :raises ValueError: on an unknown mode, on caption mode without a ``caption_source``,
+        or when a caption is missing for this instance. Missing captions must fail rather
+        than fall back to text-only: the difference between "described the image" and "saw
+        nothing" is the entire measurement.
+    """
+    mode = getattr(config, "image_mode", "real") or "real"
+    if mode not in IMAGE_MODES:
+        raise ValueError(f"Unknown image_mode {mode!r}; expected one of {', '.join(IMAGE_MODES)}")
+    if mode == "real":
+        return True, None
+    if mode == "none":
+        return False, None
+
+    source = getattr(config, "caption_source", None)
+    if not source:
+        raise ValueError("image_mode='caption' requires caption_source to be set")
+    example_id = str(instance.metadata.get("example_id", ""))
+    captions = load_captions(source)
+    if example_id not in captions:
+        raise ValueError(
+            f"No caption for example_id {example_id!r} in {source}. Regenerate the caption "
+            "file for this task/split rather than running with partial coverage."
+        )
+    return False, captions[example_id]
+
+
+def apply_caption(question: str, caption: str) -> str:
+    """Prepend an oracle caption to a question, standing in for the image."""
+    return f"Figure description:\n{caption}\n\n{question}"
+
+
 class ImageQATask(Task):
     """Base class for the Molmo2 image-QA benchmark tasks."""
 
@@ -130,10 +193,12 @@ class ImageQATask(Task):
         ...
 
     def format_request(self, instance: Instance) -> LMRequest:
-        image = load_instance_image(instance)
+        send_image, caption = resolve_image_mode(self.config, instance)
+        question = apply_caption(instance.question, caption) if caption else instance.question
+        image = load_instance_image(instance) if send_image else None
         return LMRequest(
             request_type=RequestType.CHAT,
-            messages=({"role": "user", "content": instance.question},),
+            messages=({"role": "user", "content": question},),
             images=(image,) if image is not None else None,
         )
 
