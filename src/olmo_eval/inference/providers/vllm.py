@@ -89,6 +89,7 @@ def _convert_logprobs(
             {
                 "token": token_str,
                 "logprob": logprob_val,
+                "token_id": int(token_id),
                 "bytes": list(token_str.encode("utf-8")),
             }
         )
@@ -471,6 +472,7 @@ class VLLMProvider(InferenceProvider):
                         {
                             "token": token_str,
                             "logprob": logprob_val,
+                            "token_id": int(token_id),
                             "bytes": list(token_str.encode("utf-8")),
                         }
                     )

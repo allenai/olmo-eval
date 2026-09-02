@@ -1168,6 +1168,7 @@ class VLLMServerProvider(InferenceProvider):
                     {
                         "token": token_str,
                         "logprob": logprob_val,
+                        "token_id": int(token_id),
                         "bytes": list(token_str.encode("utf-8")),
                     }
                 )

@@ -7,6 +7,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from olmo_eval.inference.errors import TerminalProviderError
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,7 +90,13 @@ class ContinuousBatchDispatcher[T, R]:
 
             for task in done:
                 idx, item, attempt = in_flight.pop(task)
-                result, error = task.result()
+                try:
+                    result, error = task.result()
+                except TerminalProviderError:
+                    for sibling in in_flight:
+                        sibling.cancel()
+                    await asyncio.gather(*in_flight, return_exceptions=True)
+                    raise
 
                 if error is not None and attempt < self.max_retries:
                     # Retry: add back to pending
@@ -114,6 +122,8 @@ class ContinuousBatchDispatcher[T, R]:
         try:
             result = await self.process_fn(item)
             return (result, None)
+        except TerminalProviderError:
+            raise
         except Exception as e:
             logger.warning("dispatch: process_fn raised %s: %s", type(e).__name__, e)
             return (None, e)

@@ -499,6 +499,7 @@ class OlmoCoreProvider(InferenceProvider):
                 {
                     "token": token_str,
                     "logprob": float(logprob),
+                    "token_id": int(token_id),
                     "bytes": list(token_str.encode("utf-8")),
                 }
             )
