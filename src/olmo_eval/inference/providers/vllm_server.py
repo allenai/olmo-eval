@@ -344,11 +344,10 @@ class VLLMServerProvider(InferenceProvider):
         self._enable_lora = enable_lora
         self._lora_modules = lora_modules
         self._request_model_name = model_name
+        if lora_modules and len(lora_modules) > 1:
+            raise ValueError("the vllm server provider can accept only one lora module")
         if enable_lora and lora_modules:
-            if len(lora_modules) > 1:
-                raise ValueError("the vllm server provider can accept only one lora module")
-            else:
-                self._request_model_name = lora_modules[0].split("=", 1)[0]
+            self._request_model_name = lora_modules[0].split("=", 1)[0]
 
         if base_url:
             # Connect to existing server
