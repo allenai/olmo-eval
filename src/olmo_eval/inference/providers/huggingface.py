@@ -509,6 +509,25 @@ class HuggingFaceProvider(InferenceProvider):
             chat.insert(0, {"role": "user", "content": image_parts})
         return chat
 
+    def _format_text_prompt(self, request: LMRequest) -> str:
+        """Render a request to text for the non-multimodal generate path.
+
+        A CHAT request carries its content on ``messages`` and leaves ``prompt`` empty, so
+        reading ``request.prompt`` alone yields "" -- which tokenizes to zero tokens and
+        surfaces as ``cannot reshape tensor of 0 elements`` from inside attention rather
+        than as anything resembling a prompt problem. Apply the chat template instead,
+        matching ``VLLMProvider._format_prompt``.
+        """
+        if request.request_type == RequestType.CHAT and request.messages:
+            if not hasattr(self.tokenizer, "apply_chat_template"):
+                raise ValueError("CHAT requests require a tokenizer with apply_chat_template")
+            return self.tokenizer.apply_chat_template(
+                list(request.messages),
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        return request.prompt
+
     def _generate_multimodal(
         self, requests: list[LMRequest], params: SamplingParams
     ) -> list[list[LMOutput]]:
@@ -570,9 +589,7 @@ class HuggingFaceProvider(InferenceProvider):
                     reasoning, answer = _split_reasoning(answer)
                     if reasoning:
                         meta["reasoning"] = reasoning
-                request_outputs.append(
-                    LMOutput(text=answer, logprobs=None, metadata=meta)
-                )
+                request_outputs.append(LMOutput(text=answer, logprobs=None, metadata=meta))
             results.append(request_outputs)
 
         return results
@@ -596,7 +613,7 @@ class HuggingFaceProvider(InferenceProvider):
 
         results = []
         for request in requests:
-            prompt = request.prompt
+            prompt = self._format_text_prompt(request)
             encoded = self.tokenizer(prompt, return_tensors="pt").to(self.device)
             prompt_len = encoded["input_ids"].shape[1]
             gen_kwargs = self._build_generate_kwargs(params, prompt_len)
