@@ -5,6 +5,11 @@ answer-format regex first, then templated regexes, then prefix regexes
 followed by an answer regex, then bare answer regexes. Each stage yields a
 decreasing format-correctness score, which tasks can use to demote answers
 that were found but not stated in the requested format.
+
+Use this for tasks that must reproduce oe-eval's numbers (GPQA and MMLU
+chain-of-thought). ``mcq.extract_mcq_answer`` is the native extractor for
+olmo-eval's own multiple-choice tasks; the two cascades differ in pattern
+order and are not interchangeable.
 """
 
 from __future__ import annotations

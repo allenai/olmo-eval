@@ -14,14 +14,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.metrics import AccuracyMetric
-from olmo_eval.common.scorers.base import Scorer
+from olmo_eval.common.scorers.base import MultipleChoiceScorer
 from olmo_eval.common.types import (
     Instance,
-    LMOutput,
     LMRequest,
     RequestType,
     SamplingParams,
@@ -67,6 +65,7 @@ def _mcq_query(question: str, choices: list[str]) -> str:
 
 
 def _extract_letter(text: str) -> str:
+    """Answer letter via the shared regex cascade; empty when nothing matches."""
     answer = extract_answer_with_format(
         text,
         answer_regexes=_ANSWER_REGEXES,
@@ -75,19 +74,7 @@ def _extract_letter(text: str) -> str:
     return re.sub(r"\(|\)", "", answer)
 
 
-@dataclass(frozen=True, slots=True)
-class MMLUCoTExactMatchScorer(Scorer):
-    """Case-insensitive exact match on the extracted answer letter."""
-
-    name: str = "exact_match"
-
-    def score(self, instance: Instance, output: LMOutput) -> float:
-        answer = _extract_letter(output.text or "")
-        gold = str(instance.gold_answer or "")
-        return 1.0 if answer.upper() == gold.upper() else 0.0
-
-
-_ACCURACY = AccuracyMetric(name="exact_match", scorer=MMLUCoTExactMatchScorer)
+_ACCURACY = AccuracyMetric(name="exact_match", scorer=MultipleChoiceScorer)
 
 
 class MMLUCoTTask(Task):
@@ -98,6 +85,7 @@ class MMLUCoTTask(Task):
     primary_metric = _ACCURACY
     sampling_params = _COT_SAMPLING
     num_fewshot = 0
+    answer_extractor = _extract_letter
 
     subject: str
 
@@ -134,9 +122,6 @@ class MMLUCoTTask(Task):
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
         )
-
-    def extract_answer(self, output: LMOutput) -> str | None:
-        return _extract_letter(output.text or "") or None
 
 
 for _subject in MMLU_SUBJECTS:
