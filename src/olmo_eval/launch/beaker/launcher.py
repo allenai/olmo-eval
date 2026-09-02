@@ -701,6 +701,30 @@ def describe_code_version(git_ref: str | None = None) -> str:
         return f"unresolved from cwd {cwd} ({exc})"
 
 
+def needs_crawl4ai_browser(extras: list[str], task_packages: list[str] | None) -> bool:
+    """Whether an install pulls in crawl4ai and therefore needs its headless browser.
+
+    crawl4ai drives Chromium through Playwright. The runtime image ships neither
+    the browser nor its shared libraries, so a job that installs crawl4ai (the
+    DeepResearch Bench FACT scorer, the crawl4ai browse presets) imports fine and
+    then fails every fetch unless the browser is provisioned at install time.
+
+    Args:
+        extras: pyproject extras selected for the install.
+        task_packages: Task-specific package specs, if any.
+
+    Returns:
+        True when crawl4ai is among the extras or the task packages.
+    """
+    if "crawl4ai" in extras:
+        return True
+    for package in task_packages or []:
+        pkg_spec, _flags = parse_install_spec(package)
+        if re.match(r"crawl4ai(?![\w-])", pkg_spec.strip(), flags=re.IGNORECASE):
+            return True
+    return False
+
+
 def build_install_command(
     package: str,
     constraints: str | None = None,
@@ -1066,6 +1090,13 @@ class BeakerLauncher:
         if task_packages:
             for pkg in task_packages:
                 steps.append(build_install_command(pkg, constraints))
+
+        # Provision the browser the way crawl4ai-setup does, minus the Patchright
+        # copy that only the undetected mode reads. Uses the main venv: the
+        # scorer and the browse tools run in the main process, never in the
+        # isolated vLLM venv.
+        if needs_crawl4ai_browser(extras, task_packages):
+            steps.append("/opt/venv/bin/python -m playwright install --with-deps chromium")
 
         # Set up database credentials for --store
         if setup_store_secrets:
