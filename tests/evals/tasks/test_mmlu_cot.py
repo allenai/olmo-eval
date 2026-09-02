@@ -84,13 +84,17 @@ def test_skips_malformed_docs(doc: dict) -> None:
         "So the answer is B.",
         "The correct answer is: (B)",
         "the ANSWER is (b)",
+        "<think>Could be A or C... no, D. Hmm.</think>Therefore, the answer is: B",
     ],
 )
 def test_extracts_letter(text: str) -> None:
     assert _score(text) == 1.0
 
 
-@pytest.mark.parametrize("text", ["Therefore, the answer is: C", ""])
+@pytest.mark.parametrize(
+    "text",
+    ["Therefore, the answer is: C", "", "<think>Therefore, the answer is: B</think>"],
+)
 def test_wrong_and_empty(text: str) -> None:
     assert _score(text) == 0.0
 

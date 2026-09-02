@@ -29,6 +29,7 @@ from olmo_eval.data import DataSource
 from olmo_eval.evals.extract import (
     OLMO_3_ANSWER_REGEX_TEMPLATES,
     extract_answer_with_format,
+    extract_think_answer,
 )
 from olmo_eval.evals.tasks.common import Task, register
 from olmo_eval.evals.tasks.mmlu import DEFAULT_MMLU_PATH, MMLU_SUBJECTS
@@ -65,9 +66,14 @@ def _mcq_query(question: str, choices: list[str]) -> str:
 
 
 def _extract_letter(text: str) -> str:
-    """Answer letter via the shared regex cascade; empty when nothing matches."""
+    """Answer letter via the shared regex cascade; empty when nothing matches.
+
+    Reasoning enclosed in ``<think>`` tags is dropped first, as the reference
+    harness does for reasoning models, so letters mentioned while thinking
+    cannot be mistaken for the final answer.
+    """
     answer = extract_answer_with_format(
-        text,
+        extract_think_answer(text) or "",
         answer_regexes=_ANSWER_REGEXES,
         answer_regexes_templates=OLMO_3_ANSWER_REGEX_TEMPLATES,
     ).answer
