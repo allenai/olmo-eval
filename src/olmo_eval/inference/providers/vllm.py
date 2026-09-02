@@ -319,6 +319,18 @@ class VLLMProvider(InferenceProvider):
                 tokenize=False,
                 add_generation_prompt=True,
             )
+            if len(images) > self._max_images:
+                # vLLM raises for the whole `llm.generate` call when any one prompt exceeds
+                # limit_mm_per_prompt, so a single oversized instance fails its entire
+                # chunk -- 2 instances with 35 images cost 128 of MMMU-Pro's 5190. Check
+                # here so the message names the knob instead of vLLM's generic
+                # "At most N image(s) may be provided in one prompt."
+                raise ValueError(
+                    f"Request has {len(images)} images but max_images={self._max_images}. "
+                    f"Raise it via `-o provider.kwargs.max_images=N`; note vLLM profiles "
+                    f"worst-case multimodal memory against this cap, so a large value "
+                    f"reduces the KV cache."
+                )
             pil_images = [
                 img.convert("RGB") if getattr(img, "mode", "RGB") != "RGB" else img
                 for img in images

@@ -127,6 +127,7 @@ def fake_provider() -> tuple[VLLMProvider, FakeLLM, FakeTokenizer]:
     provider.llm = llm
     provider._add_bos_token = None
     provider._strip_reasoning = False
+    provider._max_images = 8
     provider._build_sampling_params = lambda params: "fake-sampling-params"
     return provider, llm, tokenizer
 
@@ -423,3 +424,21 @@ def test_unclosed_trace_is_left_alone(
 
     assert out.text == "thinking and thinking"
     assert "reasoning" not in out.metadata
+
+
+def test_too_many_images_names_the_knob(
+    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
+) -> None:
+    # vLLM fails the entire llm.generate call when one prompt exceeds
+    # limit_mm_per_prompt, so an oversized instance takes its whole chunk with it.
+    # Its own message ("At most N image(s)...") names neither the instance nor the knob.
+    provider, _, _ = fake_provider
+    provider._max_images = 2
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "Q"},),
+        images=tuple(FakeImage(f"i{n}") for n in range(3)),
+    )
+
+    with pytest.raises(ValueError, match=r"3 images but max_images=2"):
+        provider.generate([request], SamplingParams(max_tokens=8))
