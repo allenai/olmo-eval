@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import functools
 import os
+import re
 from abc import abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -106,6 +107,55 @@ def load_instance_image(instance: Instance):
 
         return Image.open(path)
     return None
+
+
+PROMPT_STYLES = ("molmo", "neutral")
+
+#: mm_olmo SFT style tags, prefixed to the question at instance-build time by the
+#: individual tasks (``vqa2.py:92``, ``chart_qa.py:59``, ...). In-distribution for Molmo
+#: checkpoints; meaningless to any other model.
+_STYLE_TAG_RE = re.compile(r"^(?:vqa2|chart_qa|doc_qa|info_qa|text_vqa|ai2_diagram\w*): ")
+
+#: The short-answer instruction published VLM numbers are measured under. Without it a
+#: chat-tuned model answers "There are three bars shown in the chart." and exact-match
+#: scoring against "3" gives zero -- which is what sank VQAv2/ChartQA/TextVQA here.
+SHORT_ANSWER_INSTRUCTION = "\nAnswer the question using a single word or phrase."
+
+#: MMMU embeds ``<image 1>``, ``<image 2>`` ... in the question to mark where each image
+#: belongs. We attach images via the chat template instead, so under the neutral style the
+#: markers are stray tokens that no model was trained to read. (``mmmu_pro`` already
+#: resolves them via ``replace_images_tokens``; ``mmmu`` never did.)
+_IMAGE_MARKER_RE = re.compile(r"\s*<image\s+\d+>\s*")
+
+#: Markers left over from a multiple-choice template; if the question already tells the
+#: model how to answer, do not append a second, conflicting instruction.
+_HAS_ANSWER_INSTRUCTION = (
+    "Only return the correct answer option.",
+    "Please answer directly with only the letter",
+    "Answer with the option letter",
+)
+
+
+def render_question(config, instance: Instance) -> str:
+    """Apply ``config.prompt_style`` to an instance's question.
+
+    ``molmo`` returns it unchanged. ``neutral`` strips the mm_olmo style tag and, for
+    short-answer tasks, appends an explicit brevity instruction. Multiple-choice questions
+    already carry their own answer instruction and are left alone apart from the tag.
+    """
+    style = getattr(config, "prompt_style", "molmo") or "molmo"
+    if style not in PROMPT_STYLES:
+        raise ValueError(f"Unknown prompt_style {style!r}; expected one of {PROMPT_STYLES}")
+    question = instance.question
+    if style == "molmo":
+        return question
+
+    question = _STYLE_TAG_RE.sub("", question)
+    question = _IMAGE_MARKER_RE.sub(" ", question).strip()
+    already_instructed = any(marker in question for marker in _HAS_ANSWER_INSTRUCTION)
+    if not already_instructed:
+        question = question + SHORT_ANSWER_INSTRUCTION
+    return question
 
 
 IMAGE_MODES = ("real", "none", "caption")
@@ -194,7 +244,8 @@ class ImageQATask(Task):
 
     def format_request(self, instance: Instance) -> LMRequest:
         send_image, caption = resolve_image_mode(self.config, instance)
-        question = apply_caption(instance.question, caption) if caption else instance.question
+        question = render_question(self.config, instance)
+        question = apply_caption(question, caption) if caption else question
         image = load_instance_image(instance) if send_image else None
         return LMRequest(
             request_type=RequestType.CHAT,

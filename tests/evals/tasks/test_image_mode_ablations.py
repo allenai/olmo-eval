@@ -202,3 +202,60 @@ def test_mmmu_pro_standard_setting_keeps_images_by_default():
 )
 def test_registered_variants_resolve_to_expected_image_mode(spec: str, expected: str):
     assert get_task(spec).config.image_mode == expected
+
+
+# ---------------------------------------------------------------------------
+# prompt_style: molmo (default) vs neutral
+# ---------------------------------------------------------------------------
+
+
+def _q(text: str):
+    return Instance(question=text, metadata={"image": _tiny_image(), "example_id": "e"})
+
+
+def test_molmo_style_is_the_default_and_changes_nothing():
+    # The style tags are mm_olmo's SFT convention and load-bearing for Molmo checkpoints;
+    # the default must keep sending them.
+    task = _DummyImageQATask(TaskConfig(name="dummy"))
+    assert task.format_request(_q("vqa2: what colour?")).messages[0]["content"] == (
+        "vqa2: what colour?"
+    )
+
+
+def test_neutral_style_strips_the_tag_and_asks_for_a_short_answer():
+    # Without this a chat-tuned model answers "There are three bars shown in the chart."
+    # and exact-match scoring against "3" gives zero.
+    task = _DummyImageQATask(TaskConfig(name="dummy", prompt_style="neutral"))
+    content = task.format_request(_q("chart_qa: how many bars?")).messages[0]["content"]
+    assert content == "how many bars?\nAnswer the question using a single word or phrase."
+
+
+def test_neutral_style_does_not_double_up_answer_instructions():
+    # Multiple-choice questions already say how to answer; a second, conflicting
+    # instruction would be worse than none. AI2D already matches published numbers.
+    task = _DummyImageQATask(TaskConfig(name="dummy", prompt_style="neutral"))
+    mc = "What type of leaf?\nOnly return the correct answer option.\nA. Simple\nB. Rachis"
+    assert task.format_request(_q(mc)).messages[0]["content"] == mc
+
+
+def test_neutral_style_removes_mmmu_image_markers():
+    # MMMU marks image positions with <image N>. Images are attached via the chat template
+    # instead, so the marker is a stray token no model was trained to read.
+    task = _DummyImageQATask(TaskConfig(name="dummy", prompt_style="neutral"))
+    content = task.format_request(_q("<image 1> What is the value?")).messages[0]["content"]
+    assert "<image" not in content
+    assert content.startswith("What is the value?")
+
+
+def test_unknown_prompt_style_raises():
+    task = _DummyImageQATask(TaskConfig(name="dummy", prompt_style="official"))
+    with pytest.raises(ValueError, match="Unknown prompt_style"):
+        task.format_request(_q("vqa2: q"))
+
+
+@pytest.mark.parametrize(
+    "spec", ["vqa2:neutral", "chart_qa:neutral", "doc_qa:neutral", "info_qa:neutral",
+             "text_vqa:neutral", "ai2d:neutral", "real_world_qa:neutral", "mmmu:neutral"]
+)
+def test_neutral_variants_are_registered(spec: str):
+    assert get_task(spec).config.prompt_style == "neutral"
