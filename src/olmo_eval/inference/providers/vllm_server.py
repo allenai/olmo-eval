@@ -311,7 +311,8 @@ class VLLMServerProvider(InferenceProvider):
                 with actual spaces in completion outputs.
             enable_lora: Enable LoRA (Low-Rank Adaptation) support for model loading (server mode).
             lora_modules: List of LoRA module paths to load (format: "module_name=/path/to/lora").
-                Only used if enable_lora is True (server mode).
+                Only used if enable_lora is True (server mode). Raises an error if more than one
+                is passed.
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
@@ -344,7 +345,10 @@ class VLLMServerProvider(InferenceProvider):
         self._lora_modules = lora_modules
         self._request_model_name = model_name
         if enable_lora and lora_modules:
-            self._request_model_name = lora_modules[0].split("=", 1)[0]
+            if len(lora_modules) > 1:
+                raise ValueError("the vllm server provider can accept only one lora module")
+            else:
+                self._request_model_name = lora_modules[0].split("=", 1)[0]
 
         if base_url:
             # Connect to existing server
