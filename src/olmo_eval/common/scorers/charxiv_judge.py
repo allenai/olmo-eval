@@ -5,8 +5,9 @@ and ``src/reasoning_utils.py::get_reasoning_result_gpt``: model ``gpt-4o-2024-05
 ``response_format={"type": "json_object"}``, ``n=1, temperature=0, top_p=1, seed=42``,
 ``max_tokens`` starting at 256 and doubling (cap 1024) when the JSON reply is truncated
 ("Unterminated string"), at most 10 retries, and the official dummy fallback (score ``-1``)
-when grading ultimately fails. Downstream stats count ``-1`` as 0, as in the official
-``get_stats.py``.
+when grading ultimately fails. Retries wait a randomized exponential backoff, which the
+official script omits: without it a transient API condition exhausts every attempt at once.
+Downstream stats count ``-1`` as 0, as in the official ``get_stats.py``.
 
 Successful (validated) grading replies are cached on disk so re-runs are free; the cache dir
 comes from ``CHARXIV_GPT_CACHE_DIR`` or a fresh per-process temp dir (never a shared cache).
@@ -15,10 +16,12 @@ Requires ``OPENAI_API_KEY`` on cache misses.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import os
+import random
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -32,6 +35,8 @@ from olmo_eval.common.types import Instance, LMOutput
 logger = logging.getLogger(__name__)
 
 CHARXIV_JUDGE_MODEL = "gpt-4o-2024-05-13"
+_RETRY_BASE_DELAY = 1.0
+_RETRY_MAX_DELAY = 30.0
 
 _ASYNC_CLIENTS: dict[str, Any] = {}
 _PROCESS_CACHE_DIR: list[str] = []
@@ -64,6 +69,16 @@ def _get_client(model: str):
     return _ASYNC_CLIENTS[model]
 
 
+def _retry_delay(attempt: int) -> float:
+    """Randomized exponential backoff, in seconds, for grading attempt ``attempt``.
+
+    Grading runs many calls at once, so a transient API condition otherwise burns
+    every retry within milliseconds and turns a gradable response into a dummy
+    score that downstream stats count as zero.
+    """
+    return min(_RETRY_MAX_DELAY, _RETRY_BASE_DELAY * 2 ** (attempt - 1)) * (0.5 + random.random())
+
+
 async def _charxiv_chat_json(
     prompt: str,
     *,
@@ -88,6 +103,7 @@ async def _charxiv_chat_json(
     curr_retries = 0
     max_tokens = 256
     content: dict | None = None
+    response: str | None = None
     while curr_retries < max_retries:
         try:
             response = (
@@ -119,8 +135,13 @@ async def _charxiv_chat_json(
                 max_tokens = min(1024, max_tokens * 2)
             else:
                 curr_retries += 1
+                await asyncio.sleep(_retry_delay(curr_retries))
     if content is None:
-        logger.warning("CharXiv grading failed after %d retries", max_retries)
+        logger.warning(
+            "CharXiv grading failed after %d retries; last reply: %.200s",
+            max_retries,
+            response,
+        )
         return dummy
 
     os.makedirs(cache_dir, exist_ok=True)

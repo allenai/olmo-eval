@@ -464,7 +464,41 @@ def _load_mm_olmo_state_dict(checkpoint_dir: str, model_cfg: Any) -> dict[str, t
         )
         hf_state_dict["lm_head.weight"] = base_embedding
 
-    return molmo2_hf_state_dict_to_multimodal_lm(hf_state_dict, model_cfg)
+    state_dict = molmo2_hf_state_dict_to_multimodal_lm(hf_state_dict, model_cfg)
+    _verify_lm_head_is_untied(state_dict, model_cfg, checkpoint_dir)
+    return state_dict
+
+
+def _verify_lm_head_is_untied(
+    state_dict: dict[str, torch.Tensor], model_cfg: Any, checkpoint_dir: str
+) -> None:
+    """Reject a load that gave an untied model the embedding table as its LM head.
+
+    An untied checkpoint keeps its output projection in a separate tensor whose
+    shape matches the embedding table, so a read that returns the wrong one of
+    the pair loads cleanly and leaves every other weight intact. The model then
+    generates from the wrong projection: the output is noise, the score sits at
+    chance, and nothing raises. Compare the two tensors instead, since a trained
+    untied head is never bit-for-bit equal to the embeddings.
+    """
+    import torch
+
+    lm_cfg = getattr(model_cfg, "lm", None)
+    if lm_cfg is None or getattr(lm_cfg, "tie_word_embeddings", False):
+        return
+
+    head = state_dict.get("lm.lm_head.w_out.weight")
+    embeddings = state_dict.get("lm.embeddings.weight")
+    if head is None or embeddings is None or head.shape != embeddings.shape:
+        return
+
+    if torch.equal(head, embeddings):
+        raise _config_error(
+            checkpoint_dir,
+            "the LM head loaded byte-identical to the token embeddings even though the "
+            "model is not weight-tied, which means the checkpoint read returned the wrong "
+            "tensor; retry the load",
+        )
 
 
 def load_checkpoint_weights(
