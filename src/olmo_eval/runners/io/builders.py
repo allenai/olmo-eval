@@ -82,6 +82,10 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 out_data["execution_result"] = meta["execution_result"]
             if "scoring_errors" in meta:
                 out_data["scoring_errors"] = meta["scoring_errors"]
+            # Reasoning-model trace (set by providers with strip_reasoning enabled).
+            # `text` holds the answer only, so the trace would otherwise be discarded.
+            if "reasoning" in meta:
+                out_data["reasoning"] = meta["reasoning"]
 
             model_output.append(out_data)
 

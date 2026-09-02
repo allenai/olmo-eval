@@ -132,6 +132,28 @@ def _patch_processor_optional_attribute_kwargs() -> None:
     ProcessorMixin.__init__ = __init__  # ty: ignore[invalid-assignment]
 
 
+def _split_reasoning(text: str) -> tuple[str, str]:
+    """Split a reasoning model's output into ``(reasoning, answer)`` on ``</think>``.
+
+    Qwen3-VL-Thinking (and Qwen3 generally) prefill ``<think>\\n`` in the generation
+    prompt, so the generated text *begins* inside the reasoning block and closes it
+    with ``</think>`` before the user-facing answer. None of the image-QA scorers
+    strip that block: ``MmmuScorer`` runs ``clean_prediction``, which splits on the
+    *first* ``"Answer:"`` -- frequently one the model wrote mid-thought -- and the
+    CharXiv GPT judge would be handed the whole trace. Splitting on the **last**
+    ``</think>`` restores the answer-only text those scorers expect while keeping the
+    trace available for error analysis.
+
+    Returns ``("", text)`` unchanged when no ``</think>`` is present, so this is a
+    no-op for non-reasoning models.
+    """
+    marker = "</think>"
+    idx = text.rfind(marker)
+    if idx == -1:
+        return "", text
+    return text[:idx].strip(), text[idx + len(marker) :].strip()
+
+
 def _patch_molmo2_generation_cache_position(model: Any) -> None:
     """Make the Molmo2 remote-code generation glue work under transformers >= 5.
 
@@ -251,6 +273,7 @@ class HuggingFaceProvider(InferenceProvider):
         multimodal: bool = False,
         max_crops: int = 24,
         autocast_dtype: str | None = None,
+        strip_reasoning: bool = False,
         **model_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -261,6 +284,10 @@ class HuggingFaceProvider(InferenceProvider):
             multimodal: Load an image-text-to-text model (AutoProcessor +
                 AutoModelForImageTextToText) instead of a text-only causal LM.
             max_crops: Maximum image crops passed to the multimodal processor.
+            strip_reasoning: For reasoning models that emit a ``</think>``-terminated
+                trace (e.g. Qwen3-VL-Thinking), keep only the text after the final
+                ``</think>`` as the answer and expose the trace on the output's
+                ``metadata["reasoning"]``. No-op when the output has no ``</think>``.
             autocast_dtype: If set (e.g. ``"bfloat16"``), run multimodal generation under
                 ``torch.autocast`` with this dtype. Pair with fp32 weights (``dtype="float32"``)
                 to match mm_olmo's ``amp_bf16`` eval numerics (fp32 master weights + bf16
@@ -280,6 +307,7 @@ class HuggingFaceProvider(InferenceProvider):
         self.is_multimodal = bool(multimodal)
         self.max_crops = int(max_crops)
         self.autocast_dtype = autocast_dtype
+        self.strip_reasoning = bool(strip_reasoning)
         self.processor = None
         self.device = _get_device()
         if self.is_multimodal:
@@ -533,12 +561,17 @@ class HuggingFaceProvider(InferenceProvider):
                 gen_ids = output_ids[prompt_len:]
                 gen_ids, generated = self._truncate_at_stop(gen_ids, params.stop_sequences)
                 num_tokens = int(len(gen_ids))
+                answer = generated.strip()
+                meta: dict[str, Any] = {
+                    "num_tokens": num_tokens,
+                    "num_tokens_all": num_tokens,
+                }
+                if self.strip_reasoning:
+                    reasoning, answer = _split_reasoning(answer)
+                    if reasoning:
+                        meta["reasoning"] = reasoning
                 request_outputs.append(
-                    LMOutput(
-                        text=generated.strip(),
-                        logprobs=None,
-                        metadata={"num_tokens": num_tokens, "num_tokens_all": num_tokens},
-                    )
+                    LMOutput(text=answer, logprobs=None, metadata=meta)
                 )
             results.append(request_outputs)
 
