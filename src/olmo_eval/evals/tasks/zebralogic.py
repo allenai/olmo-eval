@@ -256,6 +256,9 @@ class ParsedMetric(Metric):
 class ZebraLogic(Task):
     """ZebraLogic grid puzzle evaluation task."""
 
+    #: When set, keep only docs of this difficulty ("easy" or "hard").
+    _difficulty: str | None = None
+
     data_source = DataSource(
         path="allenai/ZebraLogicBench-private", subset="grid_mode", split="test"
     )
@@ -299,6 +302,8 @@ class ZebraLogic(Task):
             total_cells += len(columns) - 1
 
         difficulty = "easy" if size in EASY_SIZES else "hard"
+        if self._difficulty is not None and difficulty != self._difficulty:
+            return None
 
         return Instance(
             question=prompt_str,
@@ -320,20 +325,36 @@ class ZebraLogic(Task):
         )
 
 
+@register("zebralogic_easy")
+class ZebraLogicEasy(ZebraLogic):
+    """ZebraLogic restricted to easy puzzles (grid sizes 2*2 through 3*3)."""
+
+    _difficulty = "easy"
+
+
+@register("zebralogic_hard")
+class ZebraLogicHard(ZebraLogic):
+    """ZebraLogic restricted to hard puzzles (grid sizes 3*4 through 6*6)."""
+
+    _difficulty = "hard"
+
+
 # ---------------------------------------------------------------------------
 # Variants
 # ---------------------------------------------------------------------------
 
-# Chat variant for instruct and reasoning models.
-# Drops "\n\n" from stop sequences (which would truncate chain-of-thought
-# reasoning) and applies the model's chat template via ChatFormatter.
-register_variant(
-    "zebralogic",
-    "chat",
-    formatter=ChatFormatter(),
-    sampling_params=SamplingParams(
-        max_tokens=16384,
-        temperature=0.0,
-        stop_sequences=("Problem:",),
-    ),
-)
+# Chat variant for instruct and reasoning models. Mirrors oe-eval's
+# `zebralogic::olmo3:adapt` regime: sampled decoding, generation bounded only
+# by the model's context (``max_tokens=None``), and no stop sequences (the
+# chat template supplies end-of-turn).
+for _task_name in ("zebralogic", "zebralogic_easy", "zebralogic_hard"):
+    register_variant(
+        _task_name,
+        "chat",
+        formatter=ChatFormatter(),
+        sampling_params=SamplingParams(
+            max_tokens=None,
+            temperature=0.6,
+            top_p=0.95,
+        ),
+    )
