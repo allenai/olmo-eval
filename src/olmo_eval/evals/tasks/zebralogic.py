@@ -351,15 +351,16 @@ class ZebraLogicHard(ZebraLogic):
 # ---------------------------------------------------------------------------
 
 # Chat variant for instruct and reasoning models. Mirrors oe-eval's
-# `zebralogic::olmo3:adapt` regime: sampled decoding, long generation, and no
-# stop sequences (the chat template supplies end-of-turn).
+# `zebralogic::olmo3:adapt` regime: sampled decoding, generation bounded only
+# by the model's context (``max_tokens=None``), and no stop sequences (the
+# chat template supplies end-of-turn).
 for _task_name in ("zebralogic", "zebralogic_easy", "zebralogic_hard"):
     register_variant(
         _task_name,
         "chat",
         formatter=ChatFormatter(),
         sampling_params=SamplingParams(
-            max_tokens=131072,
+            max_tokens=None,
             temperature=0.6,
             top_p=0.95,
         ),
