@@ -11,7 +11,7 @@ import os
 import random
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -796,6 +796,30 @@ class SandboxExecutor:
             stderr=response.stderr or "",
             exit_code=response.exit_code,
         )
+
+    async def write_files(self, files: Mapping[str, str]) -> None:
+        """Write files into the sandbox filesystem.
+
+        Contents travel in the request body rather than in a command argument,
+        so they are not bounded by the operating system's argument size limit.
+
+        Args:
+            files: Mapping of absolute sandbox path to file content.
+
+        Raises:
+            RuntimeError: If the sandbox is not started.
+        """
+        if self._runtime is None:
+            raise RuntimeError("Sandbox not started. Call start() first or use async context.")
+
+        from swerex.runtime.abstract import WriteFileRequest
+
+        for path, content in files.items():
+            request = WriteFileRequest(path=path, content=content)
+            await self._run_with_transport_retries(
+                lambda request=request: self._runtime.write_file(request),
+                operation="file write",
+            )
 
     async def execute_code(
         self,

@@ -8,7 +8,7 @@ import concurrent.futures
 import contextlib
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TypeVar
@@ -99,6 +99,20 @@ class CapabilityExecutionEnvironment:
         return await self.manager.execute_code(
             code,
             language,
+            timeout,
+            capabilities=self.capabilities,
+            failover_on_quarantine=True,
+        )
+
+    async def execute_with_files(
+        self,
+        command: str,
+        files: Mapping[str, str],
+        timeout: float | None = None,
+    ) -> ExecutionResult:
+        return await self.manager.execute_with_files(
+            command,
+            files,
             timeout,
             capabilities=self.capabilities,
             failover_on_quarantine=True,
@@ -528,6 +542,41 @@ class SandboxManager:
         return await self._execute_with_lease(
             required,
             lambda executor: executor.execute_code(code, language, timeout),
+            failover_on_quarantine=failover_on_quarantine,
+        )
+
+    async def execute_with_files(
+        self,
+        command: str,
+        files: Mapping[str, str],
+        timeout: float | None = None,
+        capabilities: frozenset[str] | None = None,
+        *,
+        failover_on_quarantine: bool = False,
+    ) -> ExecutionResult:
+        """Stage files and run a command against them on one executor.
+
+        Both steps hold the same lease, so the command sees the files that
+        were written for it rather than the contents of another executor.
+
+        Args:
+            command: The command to execute once the files are in place.
+            files: Mapping of absolute sandbox path to file content.
+            timeout: Optional timeout override in seconds.
+            capabilities: Optional required capabilities. If None, uses default.
+
+        Returns:
+            ExecutionResult with success status, output, and exit code.
+        """
+        required = capabilities or Capability.DEFAULT
+
+        async def stage_and_execute(executor: SandboxExecutor) -> ExecutionResult:
+            await executor.write_files(files)
+            return await executor.execute_command(command, timeout)
+
+        return await self._execute_with_lease(
+            required,
+            stage_and_execute,
             failover_on_quarantine=failover_on_quarantine,
         )
 
