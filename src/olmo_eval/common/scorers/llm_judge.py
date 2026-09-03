@@ -93,6 +93,25 @@ Answers: [/INST]
 """
 
 
+def _log_judge_usage(scorer_name: str, model: str, response: Any) -> None:
+    """Log one judge call's token usage so a run's judge spend can be read off its log."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    completion_details = getattr(usage, "completion_tokens_details", None)
+    logger.info(
+        "Judge usage scorer=%s model=%s prompt_tokens=%s completion_tokens=%s "
+        "cached_tokens=%s reasoning_tokens=%s",
+        scorer_name,
+        model,
+        getattr(usage, "prompt_tokens", None),
+        getattr(usage, "completion_tokens", None),
+        getattr(prompt_details, "cached_tokens", None),
+        getattr(completion_details, "reasoning_tokens", None),
+    )
+
+
 def build_openai_judge_fn(
     model: str = "gpt-4o-mini",
     scorer_name: str = "LLMJudgeScorer",
@@ -170,6 +189,7 @@ def build_openai_judge_fn(
                 kwargs["reasoning_effort"] = reasoning_effort
             try:
                 response = await _client[0].chat.completions.create(**kwargs)
+                _log_judge_usage(scorer_name, model, response)
                 return response.choices[0].message.content or ""
             except Exception as e:
                 message = str(e).lower()
