@@ -48,7 +48,11 @@ class HuggingFaceBackend:
 
         kwargs: dict[str, Any] = {}
         if source.data_files is not None:
-            kwargs["data_files"] = source.data_files
+            kwargs["data_files"] = (
+                list(source.data_files)
+                if isinstance(source.data_files, tuple)
+                else source.data_files
+            )
         if source.revision is not None:
             kwargs["revision"] = source.revision
 
@@ -87,21 +91,27 @@ class HuggingFaceBackend:
         from datasets import load_dataset
         from huggingface_hub import HfApi
 
-        api = HfApi(token=token)
-        repo_files = api.list_repo_files(path, repo_type="dataset")
+        declared = kwargs.get("data_files")
+        if declared is not None:
+            # An explicit file list names the split exactly; subset matching
+            # would silently widen it to every data file in the repository.
+            candidates = [declared] if isinstance(declared, str) else list(declared)
+        else:
+            api = HfApi(token=token)
+            repo_files = api.list_repo_files(path, repo_type="dataset")
 
-        # Find data files matching the subset name
-        subset = source.subset or ""
-        candidates = [
-            f
-            for f in repo_files
-            if subset in f and f.rsplit(".", 1)[-1] in ("jsonl", "json", "parquet", "csv")
-        ]
-        if not candidates:
-            raise FileNotFoundError(
-                f"No data files matching subset '{subset}' in {path}. "
-                f"This dataset has a legacy loading script that is no longer supported."
-            )
+            # Find data files matching the subset name
+            subset = source.subset or ""
+            candidates = [
+                f
+                for f in repo_files
+                if subset in f and f.rsplit(".", 1)[-1] in ("jsonl", "json", "parquet", "csv")
+            ]
+            if not candidates:
+                raise FileNotFoundError(
+                    f"No data files matching subset '{subset}' in {path}. "
+                    f"This dataset has a legacy loading script that is no longer supported."
+                )
 
         ext = candidates[0].rsplit(".", 1)[-1]
         module = "json" if ext in ("json", "jsonl") else ext
