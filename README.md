@@ -674,6 +674,7 @@ Four families of image tasks are built in:
 | Dense caption | `molmo2_imageqa_caption` | the image-QA tasks plus `dense_caption` |
 | Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
 | Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
+| Long document | — | `gdp_pdf`, `gdp_pdf_first16` |
 
 Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
 `dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
@@ -684,6 +685,22 @@ per instance (capped at 20, matching the mm_olmo eval config) and score multiple
 choice answers by MMMU-style option-letter parsing; besides the primary `all`
 accuracy each task reports per-category breakdowns (MuirBench's 12 task types,
 BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
+
+`gdp_pdf` is the [GDP.pdf benchmark](https://surgehq.ai/benchmarks/gdp-pdf): 100
+professional documents, each with a question and a hand-written rubric (1,275
+criteria in all). Each rubric criterion is graded by its own judge call that sees
+only the response and that criterion, and the task reports `all_pass` (every
+criterion satisfied — the leaderboard headline), `mean_criteria` (fraction
+satisfied) and `n_unscored` (criteria the judge never returned a verdict for).
+Grading needs `OPENAI_API_KEY`; the judge model comes from `GDP_PDF_JUDGE_MODEL`
+and replies are cached under `GDP_PDF_JUDGE_CACHE_DIR`.
+
+The official harness attaches the PDF itself, so it suits models with native
+document input. Vision-language models take images, so documents are rendered to
+page images here. The documents run 8-192 pages (mean 62), past what a
+short-context model can hold: `gdp_pdf` attaches every page, while
+`gdp_pdf_first16` attaches the first 16 and therefore measures a model on a
+prefix of each document rather than the benchmark as published.
 
 ### Setup
 
