@@ -33,7 +33,6 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.extract import extract_code
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 if TYPE_CHECKING:
@@ -94,6 +93,22 @@ def _test_case_rows(repo: str, files: tuple[str, ...]) -> Any:
         data_files={"train": [f"hf://datasets/{repo}/{name}" for name in files]},
         split="train",
     )
+
+
+def _extract_last_code_block(text: str) -> str | None:
+    """Return the last fenced code block, as the reference implementation does.
+
+    The answer is the last block rather than the first. A reasoning model
+    drafts code while it thinks, so earlier blocks are usually attempts it
+    went on to discard, and its reply may open no ``<think>`` tag to strip
+    because the chat template already supplied one. Text holding fewer than
+    two fence markers has no complete block in it.
+    """
+    lines = (text or "").split("\n")
+    fences = [index for index, line in enumerate(lines) if "```" in line]
+    if len(fences) < 2:
+        return None
+    return "\n".join(lines[fences[-2] + 1 : fences[-1]])
 
 
 def _parse_verdict(output: str) -> dict[str, Any] | None:
@@ -298,7 +313,7 @@ class LiveCodeBench(Task):
         return self.config.formatter.format(instance, self.get_fewshot())
 
     def extract_answer(self, output: LMOutput) -> str | None:
-        return extract_code(output.text)
+        return _extract_last_code_block(output.text)
 
 
 @register("livecodebench_hidden")

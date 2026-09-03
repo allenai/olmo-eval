@@ -105,11 +105,32 @@ def test_tulu_variant_drops_the_reasoning_line() -> None:
     )
 
 
-def test_answer_extraction_ignores_a_reasoning_block() -> None:
+def test_answer_extraction_takes_the_last_code_block() -> None:
+    # A reasoning model drafts code as it thinks; the answer is the last block.
     task = get_task("livecodebench")
-    output = LMOutput(text="<think>plan</think>\n```python\nprint(1)\n```")
+    output = LMOutput(
+        text=(
+            "Let me try:\n```python\nprint(0)  # draft\n```\n"
+            "That is wrong. Actually:\n```python\nprint(1)\n```"
+        )
+    )
 
-    assert task.extract_answer(output) == "print(1)\n"
+    assert task.extract_answer(output) == "print(1)"
+
+
+def test_answer_extraction_survives_an_unopened_think_tag() -> None:
+    # A chat template may supply the opening tag, so the reply closes one it
+    # never opened. Extraction must not depend on seeing a matched pair.
+    task = get_task("livecodebench")
+    output = LMOutput(text="reasoning...</think>\n```python\nprint(1)\n```")
+
+    assert task.extract_answer(output) == "print(1)"
+
+
+def test_answer_extraction_without_a_complete_block_yields_nothing() -> None:
+    task = get_task("livecodebench")
+    assert task.extract_answer(LMOutput(text="no code here at all")) is None
+    assert task.extract_answer(LMOutput(text="```python\nprint(1)")) is None
 
 
 # ---------------------------------------------------------------------------
