@@ -3,8 +3,10 @@
 import asyncio
 import gc
 import logging
+import math
 import types
 import weakref
+from collections import Counter
 
 import pytest
 
@@ -54,6 +56,11 @@ def olympiad():
 @pytest.fixture
 def research():
     return get_task("frontierscience_research")
+
+
+@pytest.fixture
+def olympiad_mc():
+    return get_task("frontierscience_olympiad:mc")
 
 
 def _doc(
@@ -117,6 +124,29 @@ class TestRegistration:
         assert paper_olympiad.config.sampling_params.num_samples == 20
         assert paper_research.config.sampling_params.num_samples == 30
         assert paper_olympiad.config.sampling_params.temperature == 1.0
+
+    def test_verified_mc_task_and_base_variant_are_registered(self):
+        assert task_exists("frontierscience_olympiad:mc")
+        assert task_exists("frontierscience_olympiad:mc:olmo3base")
+
+        task = get_task("frontierscience_olympiad:mc")
+        assert task.config.data_source.path == "frontierscience_olympiad_mc.jsonl"
+        assert task.config.required_secrets == ()
+        assert task.config.get_primary_metric().name == "accuracy"
+        assert {metric.name for metric in task.config.metrics} == {
+            "accuracy",
+            "accuracy_biology",
+            "accuracy_chemistry",
+            "accuracy_physics",
+            "gold_probability",
+            "gold_probability_biology",
+            "gold_probability_chemistry",
+            "gold_probability_physics",
+            "logprob_margin",
+            "logprob_margin_biology",
+            "logprob_margin_chemistry",
+            "logprob_margin_physics",
+        }
 
     def test_trials_average_rather_than_take_the_best_sample(self, olympiad, research):
         assert olympiad.config.output_score_aggregation == OutputScoreAggregation.MEAN
@@ -833,3 +863,69 @@ def test_metric_subject_slice_stays_out_of_pairwise_scorer_fallback():
     assert accuracy.compute([response]) == 1.0
     assert accuracy.compute_instance(response) is None
     assert accuracy.pairwise_display_format() == "percentage"
+
+
+class TestVerifiedMultipleChoice:
+    def test_release_has_expected_rows_subjects_and_balanced_labels(self, olympiad_mc):
+        instances = list(olympiad_mc.instances)
+
+        assert len(instances) == 83
+        assert len({instance.metadata["task_group_id"] for instance in instances}) == 83
+        assert Counter(instance.metadata["subject"] for instance in instances) == {
+            "physics": 40,
+            "chemistry": 34,
+            "biology": 9,
+        }
+        assert Counter(instance.gold_answer for instance in instances) == {
+            "A": 21,
+            "B": 20,
+            "C": 21,
+            "D": 21,
+        }
+        assert max(Counter(instance.gold_answer for instance in instances).values()) / 83 == (
+            21 / 83
+        )
+
+        for instance in instances:
+            assert len(instance.choices or ()) == 4
+            assert instance.gold_answer == chr(ord("A") + instance.metadata["gold_idx"])
+            assert instance.metadata["gold_text"] == instance.choices[instance.metadata["gold_idx"]]
+            assert "Think step by step and solve the problem below" not in instance.question
+
+    def test_prompt_uses_displayed_choices_and_label_continuations(self, olympiad_mc):
+        instance = next(iter(olympiad_mc.instances))
+
+        request = olympiad_mc.format_request(instance)
+
+        assert request.request_type == RequestType.LOGLIKELIHOOD
+        assert request.prompt is not None
+        assert request.prompt.startswith("Problem:\n")
+        assert "\n\nChoices:\nA. " + instance.choices[0] in request.prompt
+        assert "\nB. " + instance.choices[1] in request.prompt
+        assert request.prompt.endswith("\n\nAnswer:")
+        assert request.continuations == (" A", " B", " C", " D")
+
+    def test_metrics_report_accuracy_probability_margin_and_subject_slices(self, olympiad_mc):
+        instance = Instance(
+            question="q",
+            choices=("a", "b", "c", "d"),
+            gold_answer="B",
+            metadata={"gold_idx": 1, "subject": "physics"},
+        )
+        scores = (-2.0, -1.0, -3.0, -4.0)
+        response = Response(
+            instance=instance,
+            request=LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt="q"),
+            outputs=[LMOutput(text="", logprobs=[{"logprob": score}]) for score in scores],
+        )
+        metrics = {metric.name: metric for metric in olympiad_mc.config.metrics}
+
+        assert metrics["accuracy"].compute([response]) == 1.0
+        assert metrics["accuracy_physics"].compute([response]) == 1.0
+        assert metrics["accuracy_biology"].compute([response]) == 0.0
+        expected_probability = math.exp(-1.0) / sum(math.exp(score) for score in scores)
+        assert metrics["gold_probability"].compute([response]) == pytest.approx(
+            expected_probability
+        )
+        assert metrics["logprob_margin"].compute([response]) == 1.0
+        assert metrics["logprob_margin"].pairwise_unit() == "logprob"
