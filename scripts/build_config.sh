@@ -7,19 +7,20 @@
 
 # Supported CUDA versions (full patch versions required by NVIDIA images)
 # Format: "MAJOR.MINOR.PATCH"
+# NOTE: PyTorch 2.12+ dropped the cu128 wheel build entirely, so 12.8.x is no
+# longer listed here. torch 2.13 publishes cu126, cu129, cu130 and cu132.
 SUPPORTED_CUDA_VERSIONS=(
     "12.6.1"
-    "12.8.0"
-    "12.8.1"
     "12.9.1"
     "13.0.2"
+    "13.0.3"
 )
 
 # Default CUDA version
-DEFAULT_CUDA_VERSION="12.8.1"
+DEFAULT_CUDA_VERSION="13.0.3"
 
 # Default PyTorch version
-DEFAULT_TORCH_VERSION="2.10.0"
+DEFAULT_TORCH_VERSION="2.13.0"
 
 # Supported platforms
 SUPPORTED_PLATFORMS=(
