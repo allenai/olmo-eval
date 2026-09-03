@@ -15,6 +15,7 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.reasoning import split_reasoning
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 logger = get_logger(__name__)
@@ -251,6 +252,7 @@ class HuggingFaceProvider(InferenceProvider):
         multimodal: bool = False,
         max_crops: int = 24,
         autocast_dtype: str | None = None,
+        strip_reasoning: bool = False,
         **model_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -261,6 +263,10 @@ class HuggingFaceProvider(InferenceProvider):
             multimodal: Load an image-text-to-text model (AutoProcessor +
                 AutoModelForImageTextToText) instead of a text-only causal LM.
             max_crops: Maximum image crops passed to the multimodal processor.
+            strip_reasoning: For reasoning models that emit a ``</think>``-terminated
+                trace (e.g. Qwen3-VL-Thinking), keep only the text after the final
+                ``</think>`` as the answer and expose the trace on the output's
+                ``metadata["reasoning"]``. No-op when the output has no ``</think>``.
             autocast_dtype: If set (e.g. ``"bfloat16"``), run multimodal generation under
                 ``torch.autocast`` with this dtype. Pair with fp32 weights (``dtype="float32"``)
                 to match mm_olmo's ``amp_bf16`` eval numerics (fp32 master weights + bf16
@@ -280,6 +286,7 @@ class HuggingFaceProvider(InferenceProvider):
         self.is_multimodal = bool(multimodal)
         self.max_crops = int(max_crops)
         self.autocast_dtype = autocast_dtype
+        self.strip_reasoning = bool(strip_reasoning)
         self.processor = None
         self.device = _get_device()
         if self.is_multimodal:
@@ -481,6 +488,25 @@ class HuggingFaceProvider(InferenceProvider):
             chat.insert(0, {"role": "user", "content": image_parts})
         return chat
 
+    def _format_text_prompt(self, request: LMRequest) -> str:
+        """Render a request to text for the non-multimodal generate path.
+
+        A CHAT request carries its content on ``messages`` and leaves ``prompt`` empty, so
+        reading ``request.prompt`` alone yields "" -- which tokenizes to zero tokens and
+        surfaces as ``cannot reshape tensor of 0 elements`` from inside attention rather
+        than as anything resembling a prompt problem. Apply the chat template instead,
+        matching ``VLLMProvider._format_prompt``.
+        """
+        if request.request_type == RequestType.CHAT and request.messages:
+            if not hasattr(self.tokenizer, "apply_chat_template"):
+                raise ValueError("CHAT requests require a tokenizer with apply_chat_template")
+            return self.tokenizer.apply_chat_template(
+                list(request.messages),
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        return request.prompt
+
     def _generate_multimodal(
         self, requests: list[LMRequest], params: SamplingParams
     ) -> list[list[LMOutput]]:
@@ -533,13 +559,16 @@ class HuggingFaceProvider(InferenceProvider):
                 gen_ids = output_ids[prompt_len:]
                 gen_ids, generated = self._truncate_at_stop(gen_ids, params.stop_sequences)
                 num_tokens = int(len(gen_ids))
-                request_outputs.append(
-                    LMOutput(
-                        text=generated.strip(),
-                        logprobs=None,
-                        metadata={"num_tokens": num_tokens, "num_tokens_all": num_tokens},
-                    )
-                )
+                answer = generated.strip()
+                meta: dict[str, Any] = {
+                    "num_tokens": num_tokens,
+                    "num_tokens_all": num_tokens,
+                }
+                if self.strip_reasoning:
+                    reasoning, answer = split_reasoning(answer)
+                    if reasoning:
+                        meta["reasoning"] = reasoning
+                request_outputs.append(LMOutput(text=answer, logprobs=None, metadata=meta))
             results.append(request_outputs)
 
         return results
@@ -563,7 +592,7 @@ class HuggingFaceProvider(InferenceProvider):
 
         results = []
         for request in requests:
-            prompt = request.prompt
+            prompt = self._format_text_prompt(request)
             encoded = self.tokenizer(prompt, return_tensors="pt").to(self.device)
             prompt_len = encoded["input_ids"].shape[1]
             gen_kwargs = self._build_generate_kwargs(params, prompt_len)

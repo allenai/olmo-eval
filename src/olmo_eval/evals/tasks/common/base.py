@@ -8,7 +8,7 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -171,6 +171,23 @@ class TaskConfig:
     prompt_templates: str | None = None
     system_prompt_style: str | None = None
 
+    #: What an image-QA task sends in place of the real image. ``"real"`` is the benchmark
+    #: as published. ``"none"`` drops the image, measuring what the question alone supports.
+    #: ``"caption"`` substitutes a text description from ``caption_source``, so the gap to
+    #: ``"real"`` attributes error to perception rather than knowledge or reasoning.
+    image_mode: str = "real"
+
+    #: JSONL of ``{"example_id": ..., "caption": ...}`` records, required by
+    #: ``image_mode="caption"``.
+    caption_source: str | None = None
+
+    #: Which prompt convention to send. ``"molmo"`` (default) reproduces mm_olmo's SFT
+    #: format -- a ``vqa2:`` / ``chart_qa:`` style tag and no answer-length instruction --
+    #: which is in-distribution for Molmo checkpoints and gibberish to anything else.
+    #: ``"neutral"`` drops the tag and asks for a short answer, the convention published
+    #: VLM numbers are measured under. Only affects how the question is rendered.
+    prompt_style: str = "molmo"
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):
@@ -184,6 +201,21 @@ class TaskConfig:
                     f"output_score_aggregation must be one of: {valid}; "
                     f"got {self.output_score_aggregation!r}"
                 ) from exc
+
+        # Dotted CLI overrides (`-o sampling_params.max_tokens=64`) arrive as a plain dict.
+        # SamplingParams is frozen and used as a cache key, so an uncoerced dict fails far
+        # from its cause with `unhashable type: 'dict'`. Unknown keys are rejected rather
+        # than silently dropped.
+        if isinstance(self.sampling_params, dict):
+            overrides = dict(self.sampling_params)
+            valid = {f.name for f in fields(SamplingParams)}
+            unknown = set(overrides) - valid
+            if unknown:
+                raise ValueError(
+                    f"unknown sampling_params field(s): {', '.join(sorted(unknown))}; "
+                    f"valid: {', '.join(sorted(valid))}"
+                )
+            self.sampling_params = SamplingParams(**overrides)
 
         try:
             weight = float(self.sandbox_allocation_weight)

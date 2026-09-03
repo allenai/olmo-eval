@@ -129,7 +129,9 @@ def build_openai_judge_fn(
         import os
 
         if not _client:
-            api_key = os.getenv("OPENAI_API_KEY")
+            # .strip(): see the note in dense_caption_judge -- a trailing newline in the
+            # key makes an illegal Authorization header, surfacing as "Connection error".
+            api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
             if not api_key:
                 raise ValueError(
                     f"OPENAI_API_KEY environment variable is required for {scorer_name}."

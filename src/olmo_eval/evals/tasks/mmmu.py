@@ -21,8 +21,13 @@ from typing import ClassVar
 from olmo_eval.common.image_qa import format_mc_question
 from olmo_eval.common.scorers.image_qa import MmmuScorer
 from olmo_eval.common.types import Instance, SamplingParams, Split
-from olmo_eval.evals.tasks.common import register
-from olmo_eval.evals.tasks.common.image_qa_base import ImageQATask, MeanScorerMetric, lazy_hf_image
+from olmo_eval.evals.tasks.common import register, register_variant
+from olmo_eval.evals.tasks.common.image_qa_base import (
+    ImageQATask,
+    MeanScorerMetric,
+    extract_cot_answer,
+    lazy_hf_image,
+)
 
 _METRIC = MeanScorerMetric(name="mmmu_score", scorer=MmmuScorer())
 
@@ -109,3 +114,19 @@ class MmmuTask(ImageQATask):
                 gold_answer=ex["answer"],
                 metadata=metadata,
             )
+
+
+# Perception-vs-knowledge ablations. `:text_only` drops the image, giving the score
+# reachable from the question and options alone -- the knowledge floor. `:oracle_caption`
+# swaps the image for a dense text description, so `oracle - real` attributes error to
+# perception and `100 - oracle` to knowledge/reasoning. caption_source must be supplied at
+# run time, e.g. `-o caption_source=/path/to/mmmu_captions.jsonl`.
+register_variant("mmmu", "text_only", image_mode="none")
+register_variant("mmmu", "oracle_caption", image_mode="caption")
+register_variant("mmmu", "neutral", prompt_style="neutral")
+
+# MMMU is a reasoning benchmark; published numbers use chain-of-thought. `:cot` permits
+# reasoning and requires a final "Answer:" line, and pairs it with an extractor that reads
+# the LAST such marker -- the shared clean_prediction takes the first, which on a trace
+# would score a discarded intermediate guess. Needs a large max_tokens (~2048).
+register_variant("mmmu", "cot", prompt_style="cot", answer_extractor=extract_cot_answer)
