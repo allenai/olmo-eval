@@ -21,12 +21,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shlex
 from dataclasses import dataclass, field
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
@@ -347,6 +349,8 @@ class BeakerJobConfig:
         timeout: Job timeout (e.g., "24h", "30m").
         retries: Number of retries on failure.
         beaker_image: Container image to use.
+        git_ref: Commit SHA of this repo to run. When None, gantry uses the
+            HEAD of the git repository rooted at the current working directory.
         description: Optional job description.
         weka_buckets: Weka storage mounts.
         nfs: Whether to mount NFS.
@@ -374,6 +378,7 @@ class BeakerJobConfig:
 
     # Beaker settings
     beaker_image: str = BEAKER_DEFAULT_IMAGE
+    git_ref: str | None = None
     description: str | None = None
 
     # Storage - defaults include common eval buckets
@@ -660,6 +665,42 @@ def is_direct_source_package(package: str) -> bool:
     )
 
 
+def describe_code_version(git_ref: str | None = None) -> str:
+    """Describe the commit gantry will clone for a job, and where it came from.
+
+    Gantry derives the job's code version from the git repository rooted at the
+    launching process's working directory, not from any olmo-eval option, so the
+    same command run from two checkouts of this repo launches two different
+    commits with no other visible difference. This renders that decision so it
+    can be checked before a job starts.
+
+    Args:
+        git_ref: Explicit commit passed through to gantry, if any.
+
+    Returns:
+        A human-readable description; never raises, since this is diagnostics.
+    """
+    import os
+
+    if git_ref is not None:
+        return f"{git_ref} (pinned via git_ref)"
+
+    cwd = os.getcwd()
+    try:
+        from git.repo import Repo
+
+        # The same lookup gantry performs in GitRepoState.from_env().
+        repo = Repo(".")
+        head = str(repo.commit())
+        branch = "detached HEAD" if repo.head.is_detached else repo.active_branch.name
+        # Gantry clones the committed SHA, so uncommitted edits never reach
+        # the job. Say so plainly rather than with a marker that is easy to miss.
+        dirty = " (uncommitted changes are NOT deployed)" if repo.is_dirty() else ""
+        return f"{head} ({branch}){dirty} from cwd {cwd}"
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never block a launch
+        return f"unresolved from cwd {cwd} ({exc})"
+
+
 def build_install_command(
     package: str,
     constraints: str | None = None,
@@ -904,6 +945,12 @@ class BeakerLauncher:
         if use_isolated_vllm_venv:
             vllm_venv = "/opt/vllm-venv"
             steps.append(f"uv venv {vllm_venv}")
+            # flashinfer compiles some kernels on the first forward pass and
+            # shells out to a bare "ninja", resolved through PATH from the
+            # process vLLM runs in. Install it explicitly so the isolated venv
+            # owns a copy instead of relying on a transitive dependency of
+            # whichever vLLM build (or fork) lands here.
+            steps.append(f"uv pip install --python {vllm_venv}/bin/python ninja")
             # Symlink torch and nvidia packages from main venv (already installed)
             steps.append(
                 f"for pkg in /opt/venv/lib/python*/site-packages/torch* "
@@ -954,15 +1001,66 @@ class BeakerLauncher:
 
         # Install provider-specific dependencies
         if provider_packages:
-            for pkg in provider_packages:
-                steps.append(
-                    build_install_command(
-                        provider_package_spec(pkg),
-                        constraints,
-                        venv_path=vllm_venv if use_isolated_vllm_venv else None,
-                        force_reinstall=True,
-                    )
+            for i, pkg in enumerate(provider_packages):
+                github_match = re.search(
+                    r"github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?(?:@([^\s]+))?$",
+                    pkg,
                 )
+                if github_match:
+                    # Clone directly so we control the git invocation and can
+                    # inject GITHUB_TOKEN into the URL without relying on
+                    # git config or credential helpers reaching uv's subprocess.
+                    # GitHub token auth requires user:token format (token as password).
+                    gh_path = github_match.group(1)
+                    revision = github_match.group(2)
+                    repo_name = gh_path.split("/")[-1]
+                    clone_dir = f"/tmp/provider-src-{i}"
+                    steps.append(
+                        f'if [ -n "$GITHUB_TOKEN" ]; then '
+                        f"git clone --quiet --depth=1 "
+                        f'"https://x-access-token:${{GITHUB_TOKEN}}@github.com/{gh_path}" '
+                        f"{clone_dir}; "
+                        f"else "
+                        f"git clone --quiet --depth=1 "
+                        f'"https://github.com/{gh_path}" '
+                        f"{clone_dir}; "
+                        f"fi"
+                    )
+                    if revision:
+                        steps.append(
+                            f"git -C {clone_dir} fetch --quiet --depth=1 origin "
+                            f"{shlex.quote(revision)} && "
+                            f"git -C {clone_dir} checkout --quiet --detach FETCH_HEAD"
+                        )
+                    steps.append(
+                        build_install_command(
+                            provider_package_spec(f"{repo_name} @ {clone_dir}"),
+                            constraints,
+                            venv_path=vllm_venv if use_isolated_vllm_venv else None,
+                            force_reinstall=True,
+                        )
+                    )
+                else:
+                    steps.append(
+                        build_install_command(
+                            provider_package_spec(pkg),
+                            constraints,
+                            venv_path=vllm_venv if use_isolated_vllm_venv else None,
+                            force_reinstall=True,
+                        )
+                    )
+
+        # Prebuilt FlashInfer kernels. The runtime image has no nvcc, so any
+        # kernel FlashInfer decides to JIT at inference time kills the engine
+        # mid-run. Runs last so it reads the flashinfer version that provider
+        # overrides actually left behind.
+        if use_isolated_vllm_venv:
+            script = (
+                "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/install_flashinfer_jit_cache"
+            )
+            # Executed, not sourced: the script sets its own shell options
+            # and must not impose them on the remaining install steps.
+            steps.append(f"bash {script} {vllm_venv}/bin/python")
 
         # Install task-specific dependencies
         if task_packages:
@@ -1035,6 +1133,12 @@ class BeakerLauncher:
         if not any(name == "BEAKER_TOKEN" for name, _ in env_secrets):
             env_secrets.append(("BEAKER_TOKEN", f"{self.beaker.user_name}_BEAKER_TOKEN"))
 
+        # Inject GITHUB_TOKEN so provider package installs can clone private repos.
+        # Gantry only mounts this automatically for private olmo-eval repos; since
+        # olmo-eval is public, we must add it explicitly.
+        if not any(name == "GITHUB_TOKEN" for name, _ in env_secrets):
+            env_secrets.append(("GITHUB_TOKEN", self._default_github_token_secret()))
+
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:
             from olmo_eval.launch.beaker.aws import ensure_aws_secrets
@@ -1069,6 +1173,15 @@ class BeakerLauncher:
         if dry_run:
             self._print_dry_run_config(config, clusters)
 
+        # Gantry resolves the code version from the CURRENT WORKING DIRECTORY
+        # (gantry.git_utils.GitRepoState.from_env -> Repo(".")), not from any
+        # olmo-eval setting. Launching from a second checkout of this repo
+        # therefore silently runs that checkout's HEAD instead of the branch you
+        # think you are on. Report what will actually be cloned.
+        _console.print(
+            f"[bold blue]Code version:[/] {rich_escape(describe_code_version(config.git_ref))}"
+        )
+
         # Launch the experiment (or show spec if dry_run)
         workload = launch_experiment(
             args=config.command,
@@ -1085,6 +1198,7 @@ class BeakerLauncher:
             retries=config.retries,
             budget=config.budget,
             beaker_image=config.beaker_image,
+            ref=config.git_ref,
             weka=weka_mounts if weka_mounts else None,
             gh_token_secret=self._default_github_token_secret(),
             env_vars=env_vars if env_vars else None,

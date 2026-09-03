@@ -573,6 +573,8 @@ def launch(
             if sandbox.required_secrets:
                 all_required_secrets.update(sandbox.required_secrets)
 
+    all_required_secrets = _unsatisfied_required_secrets(all_required_secrets, secret_env_overrides)
+
     # Ensure secrets
     common_secrets, store_secrets, task_secrets = _ensure_secrets(
         launcher, dry_run, launch_config, all_required_secrets
@@ -743,6 +745,12 @@ def _get_task_configs(
         task_configs[task_spec] = task_cfg
 
     return task_configs
+
+
+def _unsatisfied_required_secrets(
+    required_secrets: set[str], secret_env_overrides: dict[str, str]
+) -> set[str]:
+    return required_secrets - set(secret_env_overrides.values())
 
 
 def _ensure_secrets(

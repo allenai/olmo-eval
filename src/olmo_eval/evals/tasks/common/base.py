@@ -173,6 +173,12 @@ class TaskConfig:
     #: beaker launcher mounts each as the user-scoped secret ``{user}_{NAME}``.
     required_secrets: tuple[str, ...] = ()
 
+    #: Tool names the configured harness actually exposes to the agent, empty when
+    #: it exposes none. The runner fills this in from the harness config so a task
+    #: whose prompt names tools can describe what is really callable instead of a
+    #: hardcoded list.
+    harness_tool_names: tuple[str, ...] = ()
+
     # LLM-as-judge configuration. These stay optional so adding them does not
     # perturb hashes for tasks that do not use a judge.
     judge_model: str | None = None
