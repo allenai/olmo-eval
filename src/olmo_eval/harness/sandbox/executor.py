@@ -818,7 +818,10 @@ class SandboxExecutor:
             request = WriteFileRequest(path=path, content=content)
             await self._run_with_transport_retries(
                 lambda request=request: self._runtime.write_file(request),
-                operation="file write",
+                # Naming the path here puts it in the retry logs and in the
+                # error raised once retries are exhausted, so a failure points
+                # at the file rather than at file writing in general.
+                operation=f"file write to {path}",
             )
 
     async def execute_code(
