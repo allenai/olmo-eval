@@ -312,8 +312,13 @@ class StoredTaskResult:
     metrics: dict[str, dict[str, float]]
     task_hash: str
     task_config: dict[str, Any] | None = None
-    num_instances: int | None = None
+    num_instances: int | None = None  # Instances that were scored and saved
     primary_metric: str | None = None  # Format: "metric_name:scorer_name"
+    # Failure accounting, so a failed task is a row that says what happened rather
+    # than a row with empty metrics. instances_processed is saved plus hard-failed.
+    instances_processed: int | None = None
+    instances_failed: int | None = None
+    error_summary: str | None = None
     # Storage references for detailed data
     s3_metrics_key: str | None = None
     s3_predictions_key: str | None = None

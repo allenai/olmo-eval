@@ -111,6 +111,20 @@ class TestTaskConfig:
         )
         assert len(config.metrics) == 1
 
+    def test_serializes_judge_configuration_only_for_judge_tasks(self):
+        plain = TaskConfig(name="plain").to_dict()
+        judged = TaskConfig(
+            name="judged",
+            judge_model="judge-snapshot",
+            judge_reasoning_effort="high",
+            judge_max_tokens=8192,
+        ).to_dict()
+
+        assert "judge_model" not in plain
+        assert judged["judge_model"] == "judge-snapshot"
+        assert judged["judge_reasoning_effort"] == "high"
+        assert judged["judge_max_tokens"] == 8192
+
 
 class TestTask:
     """Tests for Task base class."""

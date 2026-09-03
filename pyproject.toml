@@ -64,7 +64,7 @@ litellm = [
     "litellm~=1.80.11",
 ]
 agents = [
-    "openai-agents~=0.7.0",
+    "openai-agents~=0.20.0",
     "httpx~=0.28.1",
 ]
 analysis = [
@@ -95,7 +95,9 @@ gpu = [
     "nvidia-ml-py>=12.560 ; platform_system != 'Darwin'",
 ]
 clients = [
-    "openai~=2.21.0",
+    # openai-agents pulls openai>=2.45 into the same resolution, so a patch pin here is
+    # unsatisfiable rather than protective. Track the same floor and the 3.x major boundary.
+    "openai>=2.45,<3",
 ]
 storage = [
     "olmo-eval[s3,postgres]",
@@ -191,6 +193,8 @@ select = [
 "src/olmo_eval/evals/tasks/squad.py" = ["E501"]
 # Static fewshot data with long string literals
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
+# Verbatim prompt template from the oe-eval/ZeroEval reference implementation
+"src/olmo_eval/evals/tasks/zebralogic.py" = ["E501", "W291"]
 [tool.ruff.format]
 docstring-code-format = true
 
