@@ -35,7 +35,8 @@ from olmo_eval.common.scorers.helmet_summ_prompts import (
 )
 from olmo_eval.common.types import Instance, LMOutput
 from olmo_eval.data.helmet_icl_loader import _balance_labels
-from olmo_eval.data.helmet_kilt_loader import _load_jsonl, _sampled_rows
+from olmo_eval.data.helmet_kilt_loader import _load_jsonl, _question_key
+from olmo_eval.data.helmet_loader import sample_jsonl_by_key
 from olmo_eval.data.helmet_msmarco_loader import parse_rankings
 from olmo_eval.data.helmet_tasks import HELMET_TASKS, STANDARD_CONTEXT_SIZES
 from olmo_eval.evals.tasks.helmet import (
@@ -339,10 +340,12 @@ def test_sampled_rows_identical_to_full_load(tmp_path):
         return math.log10(r["s_pop"]) < 3.0
 
     for cap in (3, 10, None):
-        assert _sampled_rows(str(path), cap, 42) == old_path(cap)
-        assert _sampled_rows(str(path), cap, 42, keep=popularity) == old_path(cap, keep=popularity)
+        assert sample_jsonl_by_key(str(path), cap, 42, key=_question_key) == old_path(cap)
+        assert sample_jsonl_by_key(
+            str(path), cap, 42, key=_question_key, keep=popularity
+        ) == old_path(cap, keep=popularity)
     # sampling caps questions, not rows: each question carries its 3 depths
-    sampled = _sampled_rows(str(path), 3, 42)
+    sampled = sample_jsonl_by_key(str(path), 3, 42, key=_question_key)
     assert len(sampled) == 9
     assert len({r["question"] for r in sampled}) == 3
 
@@ -356,7 +359,7 @@ def test_helmet_task_inventory():
     for config in HELMET_TASKS.values():
         by_tag[config["tag"]] = by_tag.get(config["tag"], 0) + 1
     assert by_tag == {
-        "recall": 10,  # 4k-2m
+        "recall": 6,
         "rag": 24,
         "rerank": 6,
         "longqa": 18,
@@ -364,7 +367,7 @@ def test_helmet_task_inventory():
         "icl": 30,
         "cite": 24,
     }
-    assert len(HELMET_TASKS) == 124
+    assert len(HELMET_TASKS) == 120
 
 
 def test_helmet_context_budgets_match_helmet():
@@ -416,10 +419,6 @@ def test_helmet_suite_structure():
         "helmet_infbench_sum_eng__4096",
         "helmet_multi_lexsum__4096",
     }
-    # above 128k only recall extends; a combined suite there would mislead
-    with pytest.raises(KeyError):
-        get_suite("helmet_all__2097152")
-    assert len(get_suite("helmet_recall__2097152").expanded_tasks) == 1
 
 
 # ---------------------------------------------------------------------------

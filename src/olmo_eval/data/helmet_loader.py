@@ -1,17 +1,20 @@
 """HELMET-plus data loading utilities.
 
-Loads the ai2-internal long-context extension of HELMET
-(https://github.com/princeton-nlp/HELMET), published as the
-`allenai/helmet-plus` dataset on the Hub. Standard HELMET tops out at 128k
-tokens; helmet-plus extends select synthetic subsets (currently the
-`json_kv` recall task) up to 2m tokens by generating additional
-calibrated-length examples rather than relying on real documents, which
-can't be scaled arbitrarily.
+Loads HELMET (https://github.com/princeton-nlp/HELMET) data from the
+ai2-internal `allenai/helmet-plus` dataset on the Hub, which re-hosts
+HELMET's pre-generated and pre-retrieved files so consumers can fetch them
+per task. The synthetic `json_kv` tiers are regenerated with HELMET's own
+generator, calibrated against the Olmo 3 tokenizer.
+
+Downloads are pinned to a fixed revision of the dataset so that results stay
+reproducible as the dataset grows.
 """
 
 import json
 import logging
 import os
+import random
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -22,6 +25,7 @@ from huggingface_hub.utils import silent_tqdm
 logger = logging.getLogger(__name__)
 
 HELMET_PLUS_REPO_ID = "allenai/helmet-plus"
+HELMET_PLUS_REVISION = "f46550958fafdff9340d4c24c50a98aaccd5d202"
 
 
 def _disable_helmet_progress_bars() -> None:
@@ -43,6 +47,7 @@ def download_helmet_plus_file(filename: str) -> str:
         repo_id=HELMET_PLUS_REPO_ID,
         filename=filename,
         repo_type="dataset",
+        revision=HELMET_PLUS_REVISION,
         tqdm_class=silent_tqdm,
     )
 
@@ -76,6 +81,77 @@ def _load_jsonl(path: str) -> list[dict[str, Any]]:
                 )
             records.append(record)
     return records
+
+
+def sample_jsonl_rows(path: str, max_samples: int | None, seed: int) -> list[dict[str, Any]]:
+    """Load a seeded random sample of rows from a JSONL file without parsing the rest.
+
+    Selection matches permuting the fully loaded file with the same seed and
+    taking the first `max_samples` rows, so results are unchanged from a full
+    load; only the lines that survive are parsed. With no cap the file loads
+    directly.
+    """
+    if max_samples is None:
+        return _load_jsonl(path)
+
+    with open(path, encoding="utf-8") as f:
+        nonblank = [bool(line.strip()) for line in f]
+    positions = [i for i, present in enumerate(nonblank) if present]
+    permutation = np.random.default_rng(seed).permutation(len(positions))
+    chosen = {positions[int(idx)]: rank for rank, idx in enumerate(permutation[:max_samples])}
+
+    rows: list[dict[str, Any] | None] = [None] * len(chosen)
+    with open(path, encoding="utf-8") as f:
+        for line_num, line in enumerate(f):
+            if line_num in chosen:
+                rows[chosen[line_num]] = json.loads(line)
+    return [row for row in rows if row is not None]
+
+
+def sample_jsonl_by_key(
+    path: str,
+    max_samples: int | None,
+    seed: int,
+    key: Callable[[dict[str, Any]], Any],
+    keep: Callable[[dict[str, Any]], bool] | None = None,
+) -> list[dict[str, Any]]:
+    """Load rows grouped by a key, sampling keys without holding the whole file parsed.
+
+    Some HELMET files repeat each question once per gold-passage depth, and
+    the largest tiers are gigabytes of JSONL that expand severalfold when
+    parsed. So: one pass parses rows only long enough to record each line's
+    key (and apply `keep`, an optional row filter), the kept keys are sampled,
+    and a second pass parses only the lines that survive. Selection is
+    identical to sampling after a full load -- same sorted unique key set,
+    same RNG draw -- just without the resident memory. With no cap there is
+    nothing to skip, so the file loads directly.
+    """
+    if max_samples is None:
+        rows = _load_jsonl(path)
+        return [r for r in rows if keep(r)] if keep is not None else rows
+
+    line_keys: list[Any] = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                line_keys.append(None)
+                continue
+            row = json.loads(line)
+            if keep is not None and not keep(row):
+                line_keys.append(None)
+                continue
+            line_keys.append(key(row))
+
+    unique = sorted({k for k in line_keys if k is not None})
+    kept = set(random.Random(seed).sample(unique, min(max_samples, len(unique))))
+
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for line, line_key in zip(f, line_keys, strict=True):
+            if line_key in kept:
+                rows.append(json.loads(line))
+    return rows
 
 
 # Matches HELMET's own load_json_kv prompt, from
@@ -119,11 +195,7 @@ def load_json_kv_dataset(
         ) + ("\n\n" if demos else "")
         return {**example, "demos": demo_text}
 
-    data = [process_example(record) for record in _load_jsonl(data_path)]
-
-    if max_samples is not None:
-        permutation = np.random.default_rng(seed).permutation(len(data))
-        data = [data[int(idx)] for idx in permutation[: min(len(data), max_samples)]]
+    data = [process_example(record) for record in sample_jsonl_rows(data_path, max_samples, seed)]
 
     return {
         "data": data,

@@ -1,7 +1,7 @@
 """HELMET-plus task suites organized by category and context size.
 
 Mirrors the suite structure in `suites/ruler.py`:
-- Per-category suites for each size: helmet_recall__262144, helmet_icl__4096, etc.
+- Per-category suites for each size: helmet_recall__4096, helmet_icl__4096, etc.
 - Combined suites for each size: helmet_all__4096, etc.
 - A judge-free execution split: helmet_nojudge__4096, etc.
 
@@ -13,11 +13,10 @@ Three deliberate differences from `suites/ruler.py`:
    five tasks and recall one, so recall would be worth a sixth of ICL.
 
 2. `helmet_all__*` is only registered where more than one category exists at
-   that length. Above 128k only `json_kv` extends, so a combined suite there
-   would be a rename of `helmet_recall__*` whose composition silently differs
-   from the same suite at shorter lengths -- exactly the thing that turns a
-   length sweep into a misleading trend line. Use `helmet_recall__*` for the
-   extended tiers.
+   that length. Where a single category outruns the others, a combined suite
+   would be a rename of that category's suite whose composition silently
+   differs from the same suite at shorter lengths -- exactly the thing that
+   turns a length sweep into a misleading trend line.
 
 3. Some HELMET tasks are graded by an LLM judge (`narrativeqa` and both
    summarization tasks), so running them needs a judge configured. Following

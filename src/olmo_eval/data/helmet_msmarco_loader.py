@@ -18,7 +18,7 @@ import random
 import re
 from typing import Any
 
-from olmo_eval.data.helmet_loader import download_helmet_plus_file
+from olmo_eval.data.helmet_loader import download_helmet_plus_file, sample_jsonl_by_key
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,10 @@ def _load_jsonl(path: str) -> list[dict[str, Any]]:
     return records
 
 
+def _query_key(row: dict[str, Any]) -> Any:
+    return row["qid"] if "qid" in row else row["query"]
+
+
 def _passage_template(contexts: list[dict[str, Any]]) -> str:
     # the MS MARCO candidates carry no titles, but the template switches on it
     # upstream, so keep both forms
@@ -122,14 +126,10 @@ def load_msmarco_dataset(
 
     entry = manifest[length_name]
     logger.info("Fetching re-ranking data for %s (%s)...", length_name, entry["test_file"])
-    data = _load_jsonl(download_helmet_plus_file(entry["test_file"]))
+    data = sample_jsonl_by_key(
+        download_helmet_plus_file(entry["test_file"]), max_samples, seed, key=_query_key
+    )
     demo_pool = _load_jsonl(download_helmet_plus_file(entry["demo_file"]))
-
-    key = "qid" if data and "qid" in data[0] else "query"
-    if max_samples is not None:
-        keys = sorted({r[key] for r in data})
-        kept = set(random.Random(seed).sample(keys, min(max_samples, len(keys))))
-        data = [r for r in data if r[key] in kept]
 
     # when the demo pool is much larger than the eval set, upstream drops the
     # eval queries from it once rather than per instance

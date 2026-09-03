@@ -1,12 +1,8 @@
-"""HELMET tasks: all seven categories, with recall extended to 2m tokens.
+"""HELMET tasks: all seven categories at HELMET's standard context lengths.
 
-Standard HELMET (https://github.com/princeton-nlp/HELMET) evaluates seven
-task categories at 4k-128k tokens of context: recall, RAG, re-ranking,
-LongQA, summarization, ICL, and citation (ALCE). All seven are registered
-here. The synthetic recall task (`json_kv`) is additionally extended to 2m
-tokens, calibrated against the Olmo 3 tokenizer; the other categories are
-capped at 128k because their length comes from real documents, fixed-depth
-retrieval, or finite demonstration pools.
+HELMET (https://github.com/princeton-nlp/HELMET) evaluates seven task
+categories at 4k-128k tokens of context: recall, RAG, re-ranking, LongQA,
+summarization, ICL, and citation (ALCE). All seven are registered here.
 
 Pre-generated and pre-retrieved data lives on the ai2-internal
 `allenai/helmet-plus` Hub dataset; the remaining tasks pull their sources
@@ -169,10 +165,9 @@ class HelmetJsonKvTask(HelmetTask):
     def _load_dataset(self) -> dict[str, Any]:
         """Load the helmet-plus json_kv data for this task's length tier.
 
-        HELMET-plus data is pre-generated at specific context lengths (e.g.
-        256k, 2m tokens) and published as JSONL files on the Hub, so it's
-        downloaded and cached via huggingface_hub rather than the standard
-        dataset pipeline.
+        HELMET-plus data is pre-generated at specific context lengths and
+        published as JSONL files on the Hub, so it's downloaded and cached via
+        huggingface_hub rather than the standard dataset pipeline.
         """
         return load_json_kv_dataset(
             length_name=self.helmet_config["length_name"],

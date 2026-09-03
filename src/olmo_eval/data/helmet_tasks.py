@@ -2,14 +2,11 @@
 
 Recall (json_kv), RAG (KILT), re-ranking (MS MARCO), LongQA (InfiniteBench,
 NarrativeQA), summarization (InfiniteBench, Multi-LexSum), ICL, and citation
-(ALCE). Only the synthetic recall task extends past standard HELMET's 128k
-ceiling (to 2m, calibrated against the Olmo 3 tokenizer); every other
-category is capped by real documents, fixed retrieval depth, or finite
-demonstration pools.
+(ALCE), at HELMET's standard 4k-128k context lengths.
 
-Length coverage is therefore ragged, and each task declares its own
-`context_sizes`: `json_kv` spans the full 4k-2m range, everything else stops
-at standard HELMET's 128k.
+Each task declares its own `context_sizes` so that tasks whose length is
+bounded by real documents, fixed retrieval depth, or finite demonstration
+pools can stop short of tasks whose context is synthetic.
 
 Tasks are generated programmatically from base configurations, following the
 same pattern as `ruler_tasks.py`.
@@ -24,16 +21,11 @@ LENGTH_NAMES = {
     32768: "32k",
     65536: "64k",
     131072: "128k",
-    262144: "256k",
-    524288: "512k",
-    1048576: "1m",
-    2097152: "2m",
 }
 
-# Standard HELMET lengths, vs. the tiers added by the long-context extension.
+# Standard HELMET lengths.
 STANDARD_CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072]
-EXTENDED_CONTEXT_SIZES = [262144, 524288, 1048576, 2097152]
-CONTEXT_SIZES = STANDARD_CONTEXT_SIZES + EXTENDED_CONTEXT_SIZES
+CONTEXT_SIZES = list(STANDARD_CONTEXT_SIZES)
 
 _DEFAULT_MAX_GEN_TOKS = 100
 _DEFAULT_SHOTS = 2
