@@ -964,6 +964,14 @@ class BeakerLauncher:
             f"uv pip freeze -q | grep -E '^(torch(==| @ )|nvidia-)' "
             f"| grep -vE '^nvidia-cutlass-dsl' > {constraints}"
         )
+        # Hold the Hugging Face stack at the base image's major. xgrammar 0.2.5.post1
+        # (PyPI, 2026-09-03) pins transformers<5, which drags huggingface-hub below 1.0
+        # and removes ``huggingface_hub.utils.silent_tqdm``, imported by the task
+        # registry at startup. Nothing in the vllm extra or the base dependencies
+        # bounds either package, and every install step below reads this file.
+        steps.append(
+            f"printf '%s\\n' 'xgrammar!=0.2.5.post1' 'huggingface-hub>=1' >> {constraints}"
+        )
 
         # Install vLLM in isolated venv when requested (for server mode)
         if use_isolated_vllm_venv:
