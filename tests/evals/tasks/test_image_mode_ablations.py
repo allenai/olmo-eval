@@ -259,3 +259,59 @@ def test_unknown_prompt_style_raises():
 )
 def test_neutral_variants_are_registered(spec: str):
     assert get_task(spec).config.prompt_style == "neutral"
+
+
+# ---------------------------------------------------------------------------
+# prompt_style="cot" (MMMU)
+# ---------------------------------------------------------------------------
+
+
+def test_cot_style_replaces_the_direct_answer_instruction():
+    # Leaving "Only return the correct answer option." in place would contradict the
+    # request to reason.
+    from olmo_eval.evals.tasks.common.image_qa_base import COT_MC_INSTRUCTION
+
+    task = _DummyImageQATask(TaskConfig(name="dummy", prompt_style="cot"))
+    mc = "What is the value?\nOnly return the correct answer option.\nA. 6\nB. 7"
+    content = task.format_request(_q(mc)).messages[0]["content"]
+    assert "Only return the correct answer option." not in content
+    assert content.endswith(COT_MC_INSTRUCTION)
+    assert "A. 6" in content
+
+
+def test_cot_style_uses_the_open_instruction_without_options():
+    from olmo_eval.evals.tasks.common.image_qa_base import COT_OPEN_INSTRUCTION
+
+    task = _DummyImageQATask(TaskConfig(name="dummy", prompt_style="cot"))
+    content = task.format_request(_q("vqa2: Compute the deflection.")).messages[0]["content"]
+    assert content.endswith(COT_OPEN_INSTRUCTION)
+    assert "vqa2:" not in content
+
+
+def test_cot_extractor_takes_the_last_answer_marker():
+    # A reasoning trace routinely writes "Answer:" mid-thought. The shared
+    # clean_prediction does pred.split("Answer:")[1] -- the FIRST -- which would score the
+    # model's discarded first guess.
+    from olmo_eval.evals.tasks.common.image_qa_base import extract_cot_answer
+
+    assert extract_cot_answer("Maybe Answer: C.\nNo wait.\n\nAnswer: B") == "B"
+    assert extract_cot_answer("reasoning\nAnswer: $42.50.") == "$42.50"
+    assert extract_cot_answer("B") == "B"
+
+
+def test_cot_extractor_keeps_an_unanswered_trace_visible():
+    # A trace truncated before it could answer must not collapse to "", which would score
+    # like an empty prediction and hide the truncation.
+    from olmo_eval.evals.tasks.common.image_qa_base import extract_cot_answer
+
+    truncated = "To determine the per unit manufacturing overhead costs when 30,000"
+    assert extract_cot_answer(truncated) == truncated
+    assert extract_cot_answer("") == ""
+
+
+def test_mmmu_cot_variant_is_registered():
+    from olmo_eval.evals.tasks.common.image_qa_base import extract_cot_answer
+
+    cfg = get_task("mmmu:cot").config
+    assert cfg.prompt_style == "cot"
+    assert cfg.answer_extractor is extract_cot_answer

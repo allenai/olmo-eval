@@ -22,7 +22,12 @@ from olmo_eval.common.image_qa import format_mc_question
 from olmo_eval.common.scorers.image_qa import MmmuScorer
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register, register_variant
-from olmo_eval.evals.tasks.common.image_qa_base import ImageQATask, MeanScorerMetric, lazy_hf_image
+from olmo_eval.evals.tasks.common.image_qa_base import (
+    ImageQATask,
+    MeanScorerMetric,
+    extract_cot_answer,
+    lazy_hf_image,
+)
 
 _METRIC = MeanScorerMetric(name="mmmu_score", scorer=MmmuScorer())
 
@@ -119,3 +124,9 @@ class MmmuTask(ImageQATask):
 register_variant("mmmu", "text_only", image_mode="none")
 register_variant("mmmu", "oracle_caption", image_mode="caption")
 register_variant("mmmu", "neutral", prompt_style="neutral")
+
+# MMMU is a reasoning benchmark; published numbers use chain-of-thought. `:cot` permits
+# reasoning and requires a final "Answer:" line, and pairs it with an extractor that reads
+# the LAST such marker -- the shared clean_prediction takes the first, which on a trace
+# would score a discarded intermediate guess. Needs a large max_tokens (~2048).
+register_variant("mmmu", "cot", prompt_style="cot", answer_extractor=extract_cot_answer)
