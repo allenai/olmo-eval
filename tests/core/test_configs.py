@@ -151,3 +151,75 @@ class TestGetProviderConfig:
 
         # llama3.1 doesn't have a preset tokenizer - defaults to None
         assert config.tokenizer is None
+
+
+class TestProviderConfigRoundTrip:
+    """Tests for provider settings surviving a dict round trip.
+
+    CLI overrides reach a provider by round tripping the harness config
+    through a dict, so a setting lost in `from_dict` is lost silently.
+    """
+
+    def test_unknown_key_becomes_a_provider_argument(self):
+        # `with_overrides` reads an unknown name as a provider argument;
+        # the dict path has to agree with it.
+        config = ProviderConfig.from_dict(
+            {"kind": "vllm_server", "model": "org/model", "startup_timeout": 1500}
+        )
+
+        assert config.kwargs == {"startup_timeout": 1500}
+
+    def test_unknown_key_matches_with_overrides(self):
+        from_dict = ProviderConfig.from_dict(
+            {"kind": "vllm_server", "model": "org/model", "startup_timeout": 1500}
+        )
+        with_overrides = ProviderConfig(kind="vllm_server", model="org/model").with_overrides(
+            startup_timeout=1500
+        )
+
+        assert from_dict.kwargs == with_overrides.kwargs
+
+    def test_unknown_key_merges_with_declared_kwargs(self):
+        config = ProviderConfig.from_dict(
+            {
+                "kind": "vllm_server",
+                "model": "org/model",
+                "kwargs": {"gpu_memory_utilization": 0.7},
+                "startup_timeout": 1500,
+            }
+        )
+
+        assert config.kwargs == {"gpu_memory_utilization": 0.7, "startup_timeout": 1500}
+
+    def test_known_fields_still_bind_directly(self):
+        config = ProviderConfig.from_dict(
+            {"kind": "vllm_server", "model": "org/model", "max_model_len": 32768}
+        )
+
+        assert config.max_model_len == 32768
+        assert config.kwargs == {}
+
+    def test_model_name_alias_is_not_a_provider_argument(self):
+        config = ProviderConfig.from_dict({"kind": "vllm_server", "model_name": "org/model"})
+
+        assert config.model == "org/model"
+        assert config.kwargs == {}
+
+    def test_alias_survives_as_a_field(self):
+        original = ProviderConfig(kind="vllm_server", model="org/model", alias="short-name")
+
+        restored = ProviderConfig.from_dict(original.to_dict())
+
+        assert restored.alias == "short-name"
+        assert "alias" not in restored.kwargs
+
+    def test_declared_kwargs_survive(self):
+        original = ProviderConfig(
+            kind="vllm_server",
+            model="org/model",
+            kwargs={"enable_expert_parallel": True, "tool_call_parser": "qwen3_coder"},
+        )
+
+        restored = ProviderConfig.from_dict(original.to_dict())
+
+        assert restored.kwargs == original.kwargs

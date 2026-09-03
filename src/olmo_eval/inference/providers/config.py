@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from olmo_eval.common.repr import hide_unset
@@ -199,6 +199,8 @@ class ProviderConfig:
             d["package"] = self.package
         if self.dependencies:
             d["dependencies"] = list(self.dependencies)
+        if self.alias is not None:
+            d["alias"] = self.alias
         if self.kwargs:
             d["kwargs"] = dict(self.kwargs)
         return d
@@ -222,6 +224,13 @@ class ProviderConfig:
                 f"provider.dependencies must be a list, not a string: {deps!r}. "
                 "Use provider.dependencies=[url1,url2] syntax."
             )
+
+        # A key that names no field is a provider argument, the same reading
+        # with_overrides gives it. Dropping it instead would discard a
+        # caller's setting without saying so.
+        known = {spec.name for spec in fields(cls)} | {"model_name"}
+        kwargs = {**data.get("kwargs", {}), **{k: v for k, v in data.items() if k not in known}}
+
         return cls(
             kind=data.get("kind", ProviderKind.VLLM),
             model=data.get("model", data.get("model_name", "")),
@@ -238,7 +247,8 @@ class ProviderConfig:
             required_secrets=tuple(data.get("required_secrets", [])),
             package=data.get("package"),
             dependencies=tuple(deps),
-            kwargs=data.get("kwargs", {}),
+            alias=data.get("alias"),
+            kwargs=kwargs,
         )
 
     def with_overrides(self, **overrides: Any) -> ProviderConfig:
