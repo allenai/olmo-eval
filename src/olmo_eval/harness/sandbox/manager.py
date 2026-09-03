@@ -562,7 +562,10 @@ class SandboxManager:
         Args:
             command: The command to execute once the files are in place.
             files: Mapping of absolute sandbox path to file content.
-            timeout: Optional timeout override in seconds.
+            timeout: Seconds allowed for each step, applied to every file
+                write and to the command separately rather than to the
+                operation as a whole. Defaults to the executor's command
+                timeout.
             capabilities: Optional required capabilities. If None, uses default.
 
         Returns:
@@ -571,7 +574,7 @@ class SandboxManager:
         required = capabilities or Capability.DEFAULT
 
         async def stage_and_execute(executor: SandboxExecutor) -> ExecutionResult:
-            await executor.write_files(files)
+            await executor.write_files(files, timeout)
             return await executor.execute_command(command, timeout)
 
         return await self._execute_with_lease(
