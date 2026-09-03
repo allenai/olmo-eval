@@ -390,7 +390,7 @@ def test_helmet_task_inventory():
     for config in HELMET_TASKS.values():
         by_tag[config["tag"]] = by_tag.get(config["tag"], 0) + 1
     assert by_tag == {
-        "recall": 24,
+        "recall": 28,  # 24 at 4k-128k, plus json_kv at 256k-2m
         "rag": 24,
         "rerank": 6,
         "longqa": 18,
@@ -398,7 +398,7 @@ def test_helmet_task_inventory():
         "icl": 30,
         "cite": 24,
     }
-    assert len(HELMET_TASKS) == 138
+    assert len(HELMET_TASKS) == 142
 
 
 def test_helmet_context_budgets_match_helmet():
@@ -462,6 +462,10 @@ def test_helmet_suite_structure():
         "helmet_infbench_sum_eng__4096",
         "helmet_multi_lexsum__4096",
     }
+    # above 128k only recall extends; a combined suite there would mislead
+    with pytest.raises(KeyError):
+        get_suite("helmet_all__2097152")
+    assert len(get_suite("helmet_recall__2097152").expanded_tasks) == 1
 
 
 # ---------------------------------------------------------------------------
