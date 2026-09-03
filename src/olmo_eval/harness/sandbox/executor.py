@@ -797,7 +797,7 @@ class SandboxExecutor:
             exit_code=response.exit_code,
         )
 
-    async def write_files(self, files: Mapping[str, str]) -> None:
+    async def write_files(self, files: Mapping[str, str], timeout: float | None = None) -> None:
         """Write files into the sandbox filesystem.
 
         Contents travel in the request body rather than in a command argument,
@@ -805,19 +805,32 @@ class SandboxExecutor:
 
         Args:
             files: Mapping of absolute sandbox path to file content.
+            timeout: Seconds allowed for each file, defaulting to the config's
+                command timeout. A write that exceeds it is retried like any
+                other transport failure, so a file can take up to the retry
+                budget times this value before the write is given up on.
 
         Raises:
             RuntimeError: If the sandbox is not started.
+            SandboxTransportError: If a write still fails after retries.
         """
         if self._runtime is None:
             raise RuntimeError("Sandbox not started. Call start() first or use async context.")
 
         from swerex.runtime.abstract import WriteFileRequest
 
+        effective_timeout = timeout if timeout is not None else self.config.command_timeout
+
         for path, content in files.items():
             request = WriteFileRequest(path=path, content=content)
             await self._run_with_transport_retries(
-                lambda request=request: self._runtime.write_file(request),
+                # The runtime's request carries no timeout of its own, so this
+                # bound is the only thing keeping a stalled upload from waiting
+                # on the HTTP client's default.
+                lambda request=request: asyncio.wait_for(
+                    self._runtime.write_file(request),
+                    timeout=effective_timeout,
+                ),
                 # Naming the path here puts it in the retry logs and in the
                 # error raised once retries are exhausted, so a failure points
                 # at the file rather than at file writing in general.
