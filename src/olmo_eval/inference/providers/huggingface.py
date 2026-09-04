@@ -14,7 +14,7 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.inference.base import InferenceProvider
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation, truncate_token_ids
 
 logger = get_logger(__name__)
 
@@ -105,6 +105,28 @@ class HuggingFaceProvider(InferenceProvider):
                 return value
         return 2048
 
+    def _max_input_tokens(self, params: SamplingParams) -> int:
+        """Resolve the input budget used by ``truncate_prompt_tokens=-1``."""
+        reserved_output = params.max_tokens if params.max_tokens is not None else 1
+        return max(self._context_length() - reserved_output, 1)
+
+    def _prompt_token_ids(self, prompt: str, params: SamplingParams) -> list[int]:
+        token_ids = self.tokenizer.encode(prompt, add_special_tokens=True)
+        return truncate_token_ids(
+            token_ids,
+            params.truncate_prompt_tokens,
+            params.truncation_side,
+            tokenizer=self.tokenizer,
+            max_input_tokens=self._max_input_tokens(params),
+        )
+
+    def _encode_prompt(self, prompt: str, params: SamplingParams) -> dict[str, torch.Tensor]:
+        import torch
+
+        token_ids = self._prompt_token_ids(prompt, params)
+        input_ids = torch.tensor([token_ids], dtype=torch.long, device=self.device)
+        return {"input_ids": input_ids, "attention_mask": torch.ones_like(input_ids)}
+
     def _build_generate_kwargs(self, params: SamplingParams, prompt_len: int = 0) -> dict[str, Any]:
         """Convert SamplingParams to HuggingFace generate kwargs."""
         # Use explicit do_sample flag, overriding temperature-based inference
@@ -157,17 +179,11 @@ class HuggingFaceProvider(InferenceProvider):
         import torch
 
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the HuggingFaceProvider and will not be used."
-            )
-        gen_kwargs = self._build_generate_kwargs(params)
 
         results = []
         for request in requests:
             prompt = request.prompt
-            encoded = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+            encoded = self._encode_prompt(prompt, params)
             prompt_len = encoded["input_ids"].shape[1]
             gen_kwargs = self._build_generate_kwargs(params, prompt_len)
 
@@ -229,15 +245,17 @@ class HuggingFaceProvider(InferenceProvider):
             return None
 
         if request.request_type != RequestType.LOGLIKELIHOOD:
-            # Pass the prompt length so an uncapped (max_tokens=None) trace shows the
-            # same per-prompt max_new_tokens budget that generate() will use.
-            prompt_len = len(self.tokenizer.encode(request.prompt)) if request.prompt else 0
+            prompt_len = len(self._prompt_token_ids(request.prompt, params)) if request.prompt else 0
             trace["provider"] = "HuggingFaceProvider"
             trace["endpoint"] = "transformers.generate"
             trace["generation_kwargs"] = {
                 "max_gen_toks": params.max_tokens,
                 **self._build_generate_kwargs(params, prompt_len),
             }
+            if params.truncate_prompt_tokens is not None:
+                trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+            if params.truncation_side is not None:
+                trace["generation_kwargs"]["truncation_side"] = params.truncation_side
             trace["stop_sequences"] = list(params.stop_sequences or ())
         return trace
 
@@ -249,11 +267,6 @@ class HuggingFaceProvider(InferenceProvider):
         import torch
 
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the HuggingFaceProvider and will not be used."
-            )
         results = []
         for request in requests:
             request_outputs = []
@@ -263,6 +276,14 @@ class HuggingFaceProvider(InferenceProvider):
                 # Use shared utility for BOS handling and trailing space logic
                 context_enc, continuation_enc = encode_context_and_continuation(
                     self.tokenizer, prompt, continuation
+                )
+                max_length = request.max_length or self._context_length()
+                context_enc = truncate_token_ids(
+                    context_enc,
+                    params.truncate_prompt_tokens,
+                    params.truncation_side,
+                    tokenizer=self.tokenizer,
+                    max_input_tokens=max(max_length - len(continuation_enc), 1),
                 )
 
                 # Build full sequence as tensor

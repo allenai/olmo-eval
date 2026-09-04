@@ -11,7 +11,7 @@ from olmo_eval.common.debug import is_debug_provider, is_debug_requests
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation, truncate_token_ids
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +195,26 @@ class VLLMProvider(InferenceProvider):
         """Get the tokenizer for this provider."""
         return self.llm.get_tokenizer()
 
+    def _max_input_tokens(self, params: SamplingParams) -> int:
+        """Resolve the input budget used by ``truncate_prompt_tokens=-1``."""
+        reserved_output = params.max_tokens if params.max_tokens is not None else 1
+        return max(self.max_length - reserved_output, 1)
+
+    def _prompt_token_ids(self, prompt: str, params: SamplingParams) -> list[int]:
+        """Tokenize and apply caller-requested prompt truncation."""
+        tokenizer = self.llm.get_tokenizer()
+        encode_kwargs: dict[str, Any] = {}
+        if self._add_bos_token is not None:
+            encode_kwargs["add_special_tokens"] = self._add_bos_token
+        token_ids = tokenizer.encode(prompt, **encode_kwargs)
+        return truncate_token_ids(
+            token_ids,
+            params.truncate_prompt_tokens,
+            params.truncation_side,
+            tokenizer=tokenizer,
+            max_input_tokens=self._max_input_tokens(params),
+        )
+
     def _encode_pair(self, context: str, continuation: str) -> tuple[list[int], list[int]]:
         """Encode context and continuation separately (robust to non-additive tokenization).
 
@@ -264,11 +284,6 @@ class VLLMProvider(InferenceProvider):
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the VLLMProvider and will not be used."
-            )
         vllm_params = self._build_sampling_params(params)
 
         prompt_strs = [self._format_prompt(req) for req in requests]
@@ -277,12 +292,16 @@ class VLLMProvider(InferenceProvider):
             for i, prompt in enumerate(prompt_strs):
                 logger.info(f"Prompt {i}:\n{prompt}")
 
-        # When add_bos_token=False, pre-tokenize without special tokens and pass token IDs.
-        # This bypasses vLLM's internal tokenization, matching the old framework behavior of
-        # calling tokenizer(text, add_special_tokens=False) before passing to vLLM.
-        if self._add_bos_token is False:
-            tokenizer = self.llm.get_tokenizer()
+        # Prompt truncation requires pre-tokenized inputs so the requested side is applied
+        # deterministically before vLLM sees the request. add_bos_token=False already uses
+        # the same token-ID path for compatibility with the old framework.
+        if params.truncate_prompt_tokens is not None:
             vllm_prompts: list = [
+                {"prompt_token_ids": self._prompt_token_ids(p, params)} for p in prompt_strs
+            ]
+        elif self._add_bos_token is False:
+            tokenizer = self.llm.get_tokenizer()
+            vllm_prompts = [
                 {"prompt_token_ids": tokenizer.encode(p, add_special_tokens=False)}
                 for p in prompt_strs
             ]
@@ -339,6 +358,10 @@ class VLLMProvider(InferenceProvider):
                 "temperature": params.temperature,
                 "prompt_logprobs": 1,
             }
+            if params.truncate_prompt_tokens is not None:
+                trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+            if params.truncation_side is not None:
+                trace["generation_kwargs"]["truncation_side"] = params.truncation_side
             trace["stop_sequences"] = []
             trace["input_mode"] = "prompt_token_ids"
             return trace
@@ -357,8 +380,16 @@ class VLLMProvider(InferenceProvider):
             trace["generation_kwargs"]["top_p"] = vllm_params.top_p
         if getattr(vllm_params, "top_k", None) is not None:
             trace["generation_kwargs"]["top_k"] = vllm_params.top_k
+        if params.truncate_prompt_tokens is not None:
+            trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+        if params.truncation_side is not None:
+            trace["generation_kwargs"]["truncation_side"] = params.truncation_side
         trace["stop_sequences"] = list(params.stop_sequences or ())
-        trace["input_mode"] = "prompt_token_ids" if self._add_bos_token is False else "text"
+        trace["input_mode"] = (
+            "prompt_token_ids"
+            if params.truncate_prompt_tokens is not None or self._add_bos_token is False
+            else "text"
+        )
         return trace
 
     def logprobs(
@@ -369,11 +400,6 @@ class VLLMProvider(InferenceProvider):
         from vllm import SamplingParams as VLLMSamplingParams
 
         params = self._default_sampling_params(sampling_params)
-        if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
-            logger.warning(
-                "truncate_prompt_tokens or truncation_side has been set in the params, "
-                "but is not supported for the VLLMProvider and will not be used."
-            )
         vllm_params = VLLMSamplingParams(
             prompt_logprobs=1,
             max_tokens=1,
@@ -396,6 +422,13 @@ class VLLMProvider(InferenceProvider):
                 prompt = cont_prompts[i] if cont_prompts else request.prompt
                 context_enc, continuation_enc = encode_context_and_continuation(
                     tokenizer, prompt, continuation
+                )
+                context_enc = truncate_token_ids(
+                    context_enc,
+                    params.truncate_prompt_tokens,
+                    params.truncation_side,
+                    tokenizer=tokenizer,
+                    max_input_tokens=max(max_len - len(continuation_enc), 1),
                 )
 
                 # Calculate overflow and left-truncate to max_length - 1

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 
 def get_bos_token_ids(tokenizer: Any, *, fallback_to_eos: bool = True) -> list[int]:
@@ -56,6 +56,69 @@ def get_context_token_ids(
     return tokenizer.encode(context, add_special_tokens=False)
 
 
+def resolve_prompt_truncation_limit(
+    truncate_prompt_tokens: int | None,
+    *,
+    max_input_tokens: int | None = None,
+) -> int | None:
+    """Resolve a prompt-token limit, including vLLM's ``-1`` convention."""
+    if truncate_prompt_tokens is None:
+        return None
+    if truncate_prompt_tokens == -1:
+        if max_input_tokens is None or max_input_tokens <= 0:
+            raise ValueError("truncate_prompt_tokens=-1 requires a positive max_input_tokens")
+        return max_input_tokens
+    if truncate_prompt_tokens <= 0:
+        raise ValueError("truncate_prompt_tokens must be a positive integer, -1, or None")
+    return truncate_prompt_tokens
+
+
+def resolve_truncation_side(
+    truncation_side: Literal["left", "right"] | None,
+    *,
+    tokenizer: Any | None = None,
+    default: Literal["left", "right"] = "right",
+) -> Literal["left", "right"]:
+    """Resolve the requested side, falling back to the tokenizer's default."""
+    if truncation_side is not None:
+        return truncation_side
+    tokenizer_side = getattr(tokenizer, "truncation_side", None)
+    if tokenizer_side in ("left", "right"):
+        return tokenizer_side
+    return default
+
+
+def truncate_token_ids(
+    token_ids: list[int],
+    truncate_prompt_tokens: int | None,
+    truncation_side: Literal["left", "right"] | None = None,
+    *,
+    tokenizer: Any | None = None,
+    max_input_tokens: int | None = None,
+    default_side: Literal["left", "right"] = "right",
+) -> list[int]:
+    """Truncate prompt token IDs using vLLM-compatible side semantics.
+
+    ``left`` removes tokens from the beginning and keeps the last N tokens.
+    ``right`` removes tokens from the end and keeps the first N tokens.
+    """
+    limit = resolve_prompt_truncation_limit(
+        truncate_prompt_tokens,
+        max_input_tokens=max_input_tokens,
+    )
+    if limit is None or len(token_ids) <= limit:
+        return list(token_ids)
+
+    side = resolve_truncation_side(
+        truncation_side,
+        tokenizer=tokenizer,
+        default=default_side,
+    )
+    if side == "left":
+        return list(token_ids[-limit:])
+    return list(token_ids[:limit])
+
+
 def encode_context_and_continuation(
     tokenizer: Any,
     context: str,
@@ -73,7 +136,7 @@ def encode_context_and_continuation(
 
     Args:
         tokenizer: A tokenizer object with encode method.
-        context: The context/prompt string.
+        context: The context string to tokenize.
         continuation: The continuation string to evaluate.
         use_bos_for_empty: If True and context is empty, use BOS token as context.
         fallback_to_eos: If True and BOS is None, use EOS token ID instead.
