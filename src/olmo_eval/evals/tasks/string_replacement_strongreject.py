@@ -16,8 +16,8 @@ olmo-eval beaker launch  \
     -o auxiliary_providers.sr_judge.model=google/gemma-2b   \
     -o auxiliary_providers.sr_judge.tokenizer=qylu4156/strongreject-15k-v1   \
     -o auxiliary_providers.sr_judge.kwargs.enable_lora=true   \
-    -o auxiliary_providers.sr_judge.kwargs.lora_modules=\
-    [strongreject=qylu4156/strongreject-15k-v1] \
+    -o auxiliary_providers.sr_judge.kwargs.lora_modules=[strongreject
+    =qylu4156/strongreject-15k-v1] \
     -o auxiliary_providers.sr_judge.kwargs.gpu_memory_utilization=0.2  \
     -o auxiliary_providers.sr_judge.kwargs.add_bos_token=true \
     -o scoring_concurrency=4   \
@@ -35,8 +35,8 @@ olmo-eval beaker launch  \
     -o auxiliary_providers.sr_judge.model=google/gemma-2b   \
     -o auxiliary_providers.sr_judge.tokenizer=qylu4156/strongreject-15k-v1   \
     -o auxiliary_providers.sr_judge.kwargs.enable_lora=true   \
-    -o auxiliary_providers.sr_judge.kwargs.lora_modules=\
-    [strongreject=qylu4156/strongreject-15k-v1] \
+    -o auxiliary_providers.sr_judge.kwargs.lora_modules=[strongreject
+    =qylu4156/strongreject-15k-v1] \
     -o auxiliary_providers.sr_judge.kwargs.gpu_memory_utilization=0.2  \
     -o auxiliary_providers.sr_judge.kwargs.add_bos_token=true \
     -o scoring_concurrency=4   \
@@ -81,7 +81,7 @@ import logging
 from typing import Any
 
 from olmo_eval.common.scorers import SafetyScorer
-from olmo_eval.common.types import Instance
+from olmo_eval.common.types import Instance, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.tasks.safety_base import SafetyBase, register_safety_variants
@@ -94,6 +94,7 @@ class StrongReject(SafetyBase):
     """strongreject safety evaluation task."""
 
     data_source = DataSource(path="allenai/olmo-eval-strongreject-obf", split="train")
+    split = Split.TRAIN
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
