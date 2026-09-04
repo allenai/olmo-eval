@@ -194,6 +194,61 @@ class TestHarnessOverridesProviderDependencies:
         assert job_config.provider_packages is not None
         assert "https://github.com/user/vllm@custom" in job_config.provider_packages
 
+    def test_default_harness_vllm_server_install_matches_runtime_provider(self):
+        """Default harness should install and run vLLM model presets as vllm_server."""
+        from unittest.mock import patch
+
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+        from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+        from olmo_eval.cli.run.config import RunConfigBuilder
+        from olmo_eval.common.types import ProviderKind
+
+        launch_config = LaunchConfig(
+            name="test",
+            model_specs=["olmo-3-1025-7b"],
+            task_specs=["humaneval"],
+            cluster="h100",
+            workspace="ai2/test",
+            budget="ai2/test",
+            harness="default",
+        )
+        exp = ExperimentPlan(
+            name="test",
+            model_spec="olmo-3-1025-7b",
+            priority="normal",
+            tasks=["humaneval"],
+            original_task_specs=["humaneval"],
+            total_expanded_tasks=1,
+            num_gpus=1,
+        )
+        assembler = JobConfigAssembler(
+            config=launch_config,
+            effective_image="test-image",
+            effective_groups=[],
+            beaker_username="test-user",
+            common_secrets=[],
+            store_secrets=[],
+            task_secrets=[],
+            inject_aws_credentials=False,
+            inject_gcs_credentials=False,
+        )
+
+        with patch("olmo_eval.cli.beaker.job_assembler.cluster_has_weka", return_value=False):
+            job_config = assembler.assemble(exp)
+
+        run_config = RunConfigBuilder(
+            model=exp.model_spec,
+            task=tuple(exp.tasks),
+            output_dir="/tmp/results",
+            harness_preset=launch_config.harness,
+        ).build()
+
+        assert job_config.vllm_isolated_venv is True
+        assert "vllm" in job_config.extras
+        assert "clients" in job_config.extras
+        assert run_config.provider_config.kind == ProviderKind.VLLM_SERVER
+
     def test_olmo_core_provider_package_replaces_olmo_core_extra(self):
         """OLMo-core package overrides should replace the bundled olmo_core extra."""
         from unittest.mock import patch
