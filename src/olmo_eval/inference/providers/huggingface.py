@@ -136,18 +136,30 @@ class HuggingFaceProvider(InferenceProvider):
         self, tokens: torch.Tensor, stop_sequences: tuple[str, ...] | None
     ) -> tuple[torch.Tensor, str]:
         """Truncate generated tokens at first stop sequence."""
+        decoded = self.tokenizer.decode(tokens, skip_special_tokens=True)
         if not stop_sequences:
-            return tokens, self.tokenizer.decode(tokens, skip_special_tokens=True)
+            return tokens, decoded
 
-        decoded_parts: list[str] = []
-        for idx, token in enumerate(tokens):
-            decoded_parts.append(self.tokenizer.decode(token, skip_special_tokens=True))
-            decoded = "".join(decoded_parts)
-            for stop in stop_sequences:
-                if stop in decoded:
-                    return tokens[: idx + 1], decoded.split(stop)[0]
+        stop_matches = [
+            (position, stop)
+            for stop in stop_sequences
+            if (position := decoded.find(stop)) >= 0
+        ]
+        if not stop_matches:
+            return tokens, decoded
 
-        return tokens, "".join(decoded_parts)
+        stop_position, first_stop = min(stop_matches, key=lambda match: match[0])
+
+        # Decode token prefixes rather than individual tokens. Some tokenizers
+        # need surrounding token context to turn byte-level markers into their
+        # actual text representation, so concatenating per-token decodes can
+        # corrupt generated text and miss stop sequences.
+        for idx in range(1, len(tokens) + 1):
+            prefix = self.tokenizer.decode(tokens[:idx], skip_special_tokens=True)
+            if first_stop in prefix:
+                return tokens[:idx], decoded[:stop_position]
+
+        return tokens, decoded[:stop_position]
 
     def generate(
         self,
