@@ -23,7 +23,7 @@ from olmo_eval.evals.tasks.constants.csqa import CSQA_FIXED_FEWSHOT
 
 @register("csqa")
 class CommonsenseQA(Task):
-    data_source = DataSource(path="commonsense_qa", split="validation")
+    data_source = DataSource(path="tau/commonsense_qa", split="validation")
     split = Split.VALIDATION
     metrics = (LogprobMCAccuracyMetric(),)
     num_fewshot = 0
@@ -157,7 +157,7 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_csqa_fixed",
-    data_source=DataSource(path="commonsense_qa", split="validation"),
+    data_source=DataSource(path="tau/commonsense_qa", split="validation"),
     metrics=(LogprobUncondMCAccuracyMetric(),),
 )
 register_variant(
@@ -166,14 +166,14 @@ register_variant(
     formatter=MultipleChoiceFormatter(),
     num_fewshot=5,
     fewshot_source="olmes_csqa_fixed",
-    data_source=DataSource(path="commonsense_qa", split="validation+train"),
+    data_source=DataSource(path="tau/commonsense_qa", split="validation+train"),
     limit=10000,
     seed=1234,
 )
 register_variant(
     "csqa",
     "xlarge",
-    data_source=DataSource(path="commonsense_qa", split="validation+train"),
+    data_source=DataSource(path="tau/commonsense_qa", split="validation+train"),
     num_fewshot=5,
     limit=10000,
     seed=1234,
