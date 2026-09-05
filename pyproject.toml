@@ -51,7 +51,7 @@ crawl4ai = [
     "crawl4ai>=0.8",
 ]
 hf = [
-    "transformers>=5.4.0",
+    "transformers>=5.4.0,<5.13",
 ]
 olmo_core = [
     "ai2-olmo-core[torchao,transformers]==2.4.0",
@@ -62,6 +62,9 @@ vllm = [
     "vllm[runai]==0.19.1 ; platform_system != 'Darwin'",  # runai extras enable S3 model loading
     "opencv-python-headless==4.13.0.92 ; platform_system != 'Darwin'",  # Required to avoid libxcb import error
     "torch-c-dlpack-ext ; platform_system != 'Darwin'",  # Required for TVM tensor allocation in vLLM
+    # transformers 5.13 nests rope_parameters per layer type; vLLM 0.19.1 reads it flat,
+    # so Olmo-3 (mixed sliding/full attention) fails to load with a rope_theta KeyError.
+    "transformers<5.13",
 ]
 litellm = [
     "litellm~=1.80.11",
