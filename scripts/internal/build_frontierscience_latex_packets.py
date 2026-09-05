@@ -248,13 +248,21 @@ BARE_GREEK = {
 # complete expression into one math span.
 REVIEW_GOLD_LATEX: dict[str, str] = {
     "f10254b9-f0a1-407f-8af9-3169e23eee5e": (
-        r"From the stated force, with \(\alpha=k\omega\): "
+        r"Interpret \(\omega>0\) as the angular-speed magnitude, so "
+        r"\(\vec\omega=-\omega\hat y\) fixes the rotation direction. Immediately "
+        r"after release, \(\vec v\simeq-gt\,\hat z\), and therefore "
+        r"\(S(\vec v\times\vec\omega)\simeq-Sg\omega t\,\hat x\); the cylinder "
+        r"must initially move toward negative \(x\). With \(\alpha=k\omega\): "
         r"\(\ddot{x}=\alpha\dot{z}\) and \(\ddot{z}=-\alpha\dot{x}-g\). "
         r"Thus \(x(t)=a(\sin\alpha t-\alpha t)\), "
         r"\(z(t)=a(\cos\alpha t-1)\), and \(a=g/(k^2\omega^2)\). "
-        r"On the initial branch, "
+        r"During the first descent after release, \(0\leq\alpha t\leq\pi\), "
+        r"eliminating \(t\) gives "
         r"\(x(z)=\sqrt{-z(2a+z)}-a\arccos(1+z/a)\). "
-        r"The reference is the opposite sign of this branch."
+        r"This result is negative, consistent with the short-time expansion "
+        r"\(x\simeq-gk\omega t^3/6\). The reference has the opposite sign. If "
+        r"\(\omega<0\), the reference has the correct sign, but that interpretation "
+        r"conflicts with the standard convention that \(\omega\) is a magnitude."
     ),
     "e1b0b588-915d-46ad-990e-ba5aa554053e": (
         r"For an axisymmetric purely azimuthal velocity field "
@@ -414,9 +422,219 @@ REVIEW_REFERENCE_LATEX: dict[str, str] = {
         r"\(76.89\%\) elemental iron (\(\ce{Fe}\)) and \(23.11\%\) iron(III) "
         r"oxide (\(\ce{Fe2O3}\))."
     ),
+    "3d762ba1-3958-453b-b34e-fe24c2822994": (r"\(K_M=K_s^{-1}+J_s[S]^2\)"),
+}
+
+INCORRECT_REVIEW_IDS = frozenset(
+    {
+        "e1b0b588-915d-46ad-990e-ba5aa554053e",
+        "710c1336-0995-4d45-bfea-48ff475f255f",
+        "f9fdb988-7a10-4510-a8ab-d011e663be3f",
+        "84bba88d-2aee-4fcb-baab-4c6eea17b0d8",
+        "3a998a27-4c4b-47c6-bd2c-dd1c9deb3d63",
+        "dcc38501-c38e-4a8e-a069-1a401d6432c0",
+        "bdb3fc5f-9374-4e37-9af9-6036e3e29093",
+        "85b4f862-d881-4a79-8c5d-3e927b486b71",
+        "cc251e69-6a32-4ed7-9315-beee80404866",
+        "fcbd76ad-1b45-4f40-ad9d-d2bc5016f02c",
+    }
+)
+
+REVIEW_ANALYSIS_LATEX: dict[str, str] = {
+    "f10254b9-f0a1-407f-8af9-3169e23eee5e": (
+        r"Interpret \(\omega>0\) as the angular-speed magnitude, so the stated "
+        r"vector \(\vec\omega=-\omega\hat y\) fixes the rotation direction. "
+        r"Immediately after release, \(\vec v\simeq-gt\,\hat z\), and hence"
+        r"\[S(\vec v\times\vec\omega)\simeq-Sg\omega t\,\hat x.\]"
+        r"The cylinder must therefore initially move toward negative \(x\). Let "
+        r"\(\alpha=k\omega>0\) and \(a=g/(k^2\omega^2)\). The equations of motion "
+        r"are \(\ddot{x}=\alpha\dot{z}\) and \(\ddot{z}=-\alpha\dot{x}-g\), "
+        r"with solutions \(x(t)=a(\sin\alpha t-\alpha t)\) and "
+        r"\(z(t)=a(\cos\alpha t-1)\). During the first descent, define"
+        r"\[q=\arccos(1+z/a),\qquad 0\leq q\leq\pi.\]"
+        r"Because \(\sqrt{-z(2a+z)}=a\sin q\), the supplied answer is "
+        r"\(x_{\mathrm{supplied}}=a(q-\sin q)\geq0\), whereas the stated dynamics "
+        r"give \(x=a(\sin q-q)\leq0\). If \(\omega\) is instead treated as a "
+        r"signed scalar, the first-descent result is"
+        r"\[x(z)=\operatorname{sgn}(\omega)\left[\sqrt{-z(2a+z)}"
+        r"-a\arccos(1+z/a)\right].\]"
+        r"For \(\omega<0\), this equals the supplied answer. That interpretation, "
+        r"however, conflicts with the standard convention that \(\omega\) in "
+        r"\(\vec\omega=-\omega\hat y\) is a positive magnitude. The question does "
+        r"not state this convention explicitly. In addition, later portions of the "
+        r"trajectory revisit the same value of \(z\), so \(x\) is not globally a "
+        r"single-valued function of \(z\)."
+    ),
+    "e1b0b588-915d-46ad-990e-ba5aa554053e": (
+        r"For an axisymmetric, purely azimuthal velocity field "
+        r"\(\mathbf{u}=v(r,t)\mathbf{e}_{\theta}\), with \(v=(\Gamma/2\pi)g\), "
+        r"the \(\theta\)-component of the Navier--Stokes equation is"
+        r"\[v_t=\frac{\eta}{\rho}\left(v_{rr}+\frac{v_r}{r}-\frac{v}{r^2}\right).\]"
+        r"Therefore \(g_t=(\eta/\rho)(g_{rr}+g_r/r-g/r^2)\). The supplied answer "
+        r"instead resembles an equation for a circulation-related variable, not for "
+        r"\(g\) as defined. The definition of \(g\) and the stated symmetries are "
+        r"sufficient for a unique reduction."
+    ),
+    "710c1336-0995-4d45-bfea-48ff475f255f": (
+        r"In the sphere's rest frame, \(\vec E'=\vec v\times\vec B=vB_0\hat x\). "
+        r"A dielectric sphere in a uniform field has the exterior scattered field"
+        r"\[\frac{\varepsilon-\varepsilon_0}{\varepsilon+2\varepsilon_0}vB_0a^3"
+        r"\frac{3(\hat r\cdot\hat x)\hat r-\hat x}{r^3}.\]"
+        r"Transforming back to the laboratory frame cancels the uniform field. In the "
+        r"first vector term, the supplied answer uses \(\hat x\) where the dipole "
+        r"field requires \(\hat r\). The result is unique if the surrounding medium "
+        r"is vacuum and \(r>a\)."
+    ),
+    "f9fdb988-7a10-4510-a8ab-d011e663be3f": (
+        r"Under the standard interpretation, the sheet moment density is "
+        r"\(\sigma(\sin kx\,\hat x+\cos kx\,\hat y)\) on \(y=0\). Solving the "
+        r"scalar-potential jump conditions gives \(\vec B=0\) for \(y>0\) and "
+        r"\(\vec B=\mu_0\sigma k e^{ky}(-\sin kx\,\hat x+\cos kx\,\hat y)\) for "
+        r"\(y<0\), assuming \(k>0\). The factor \(e^{-ky}\) in the supplied answer "
+        r"grows as \(y\to-\infty\) and gives "
+        r"\(\nabla\cdot\vec B=-2\mu_0\sigma k^2 e^{-ky}\cos(kx)\neq0\) away from "
+        r"the sheet. The question leaves the infinite-sheet, sign, and handedness "
+        r"conventions implicit, but these conventions do not make the supplied field valid."
+    ),
+    "84bba88d-2aee-4fcb-baab-4c6eea17b0d8": (
+        r"The logarithms in the supplied answer have dimensionful arguments, and the "
+        r"power \(c_1+c_2\) is erroneous. With \(\tau=0\) and constant reservoir "
+        r"heat capacities, energy conservation gives"
+        r"\[T_f=\frac{c_1T_1+c_2T_2}{c_1+c_2},\qquad"
+        r"\Delta S=c_1\ln\!\left(\frac{T_f}{T_1}\right)"
+        r"+c_2\ln\!\left(\frac{T_f}{T_2}\right).\]"
+        r"This result assumes that \(c_1\) and \(c_2\) are constant, as implied by "
+        r"the variables requested in the question."
+    ),
+    "3a998a27-4c4b-47c6-bd2c-dd1c9deb3d63": (
+        r"Under the usual rotating-frame convention, with the rotation appearing "
+        r"counter-clockwise when viewed from above the local hemisphere, the local "
+        r"vertical component is \(\omega\sin\phi\). The Coriolis term "
+        r"\(-2\boldsymbol\omega\times\mathbf v\) deflects a radially moving particle "
+        r"to the right. Because \(\theta\) is measured clockwise, this gives "
+        r"\(+2\omega\sin\phi\,\dot r\), rather than the negative sign in the supplied "
+        r"answer. In addition, a particle constrained only to the rotating sphere "
+        r"experiences tangential centrifugal terms. The question would need to state a "
+        r"local Coriolis-only approximation to exclude them."
+    ),
+    "dcc38501-c38e-4a8e-a069-1a401d6432c0": (
+        r"The supplied answer follows only if the final speed \(4c/5\) is measured in "
+        r"the initial, pre-stage-1 frame. As written, \(\mathcal F\) is comoving with "
+        r"the rocket after stage 1, so stage 2 alone gives rapidity \(\ln 3\), while "
+        r"the total mass ratio of 4 gives a stage-1 rapidity of \(\ln(4/3)\). The "
+        r"angle \(\alpha\) is then unconstrained: there is no positive minimum in "
+        r"\((0,\pi]\), only an infimum of zero. Measuring the final velocity in the "
+        r"initial frame would restore the Lorentz-composition constraint that produces "
+        r"the supplied answer."
+    ),
+    "bdb3fc5f-9374-4e37-9af9-6036e3e29093": (
+        r"Let \(\beta=v/c\). In the conductor's rest frame, "
+        r"\(E'_0=\gamma(1-\beta)E_0\) and \(\omega'=\gamma(1-\beta)\omega\); a "
+        r"stationary perfect conductor has "
+        r"\(K'_y=2E'_0/(\mu_0c)\cos(\omega't')\). On the moving surface \(x=vt\), "
+        r"\(t'=t/\gamma\), and the material sheet current transforms as "
+        r"\(K_y=K'_y/\gamma\). This gives"
+        r"\[\vec K(t)=\frac{2(1-\beta)E_0}{\mu_0c}"
+        r"\cos\!\left[\omega(1-\beta)t\right]\hat{\mathbf y}.\]"
+        r"Even the magnetic-jump convention gives "
+        r"\(2E_0/[\mu_0c(1+\beta)]\cos[\omega(1-\beta)t]\,\hat{\mathbf y}\), so "
+        r"the phase and amplitude in the supplied answer are not correct. For "
+        r"completeness, the question should specify whether it asks for the material "
+        r"surface current or the effective \(\mathbf n\times\mathbf H\) jump current."
+    ),
+    "1dba0086-bca8-4b25-8843-e6e428f9284d": (
+        r"The supplied answer is correct if the Type B scale error is sampled "
+        r"independently for each of the \(N\) readings, which contributes "
+        r"\((a^2/12)/N\) to the variance of the mean. The question instead introduces "
+        r"one random variable \(X_B\) and says that it is added to all results. This "
+        r"naturally describes a common offset, for which the uncertainty is"
+        r"\[\sqrt{\frac{s^2}{N}+\frac{a^2}{12}}.\]"
+        r"The question must specify whether the scale error is common to all "
+        r"measurements or independently resampled for each measurement."
+    ),
+    "2c46387b-36e6-43cb-9e73-dbf1341bfafd": (
+        r"The value \(1.56\) follows if \(O\) is the fixed center of mass and \(P_2\) "
+        r"and \(P_3\) are mirror-symmetric about \(OP\): "
+        r"\(OP=(2/3)PP_2\cos(11.6^\circ)\), which gives \(OP_2\approx92.8L\). "
+        r"These figure-eight choreography assumptions are not stated explicitly, and "
+        r"the geometric data alone do not determine \(OP_2\). Review is needed to "
+        r"decide whether ``eight-shaped orbit'' conventionally supplies the "
+        r"center-of-mass and reflection symmetries required by the supplied answer."
+    ),
+    "85b4f862-d881-4a79-8c5d-3e927b486b71": (
+        r"The titration gives \(0.003750\,\mathrm{mol}\) of iron atoms. Solving"
+        r"\[x+y=0.225\,\mathrm{g},\qquad"
+        r"\frac{x}{55.845}+\frac{2y}{159.687}=0.003750\]"
+        r"gives approximately \(0.17316\,\mathrm{g}\) of \(\ce{Fe}\) and "
+        r"\(0.05184\,\mathrm{g}\) of \(\ce{Fe2O3}\), or \(76.96\%\) and "
+        r"\(23.04\%\), respectively. The supplied percentages do not follow from "
+        r"standard molar masses; the question's data are otherwise sufficient."
+    ),
+    "cc251e69-6a32-4ed7-9315-beee80404866": (
+        r"The supplied aniline is the expected product of a standard Curtius sequence "
+        r"using ethyl chloroformate, \(\ce{Et3N}\), and \(\ce{NaN3}\), followed by "
+        r"hydrolysis. The question instead specifies ethyl 2-chloroacetate consistently "
+        r"by name, InChI, and SMILES. Ethyl 2-chloroacetate cannot form the mixed "
+        r"anhydride or acyl azide required for the Curtius rearrangement; carboxylate "
+        r"alkylation or recovery after hydrolysis is more plausible. The reaction "
+        r"sequence as written therefore does not support the supplied aniline. "
+        r"Replacing ethyl 2-chloroacetate with ethyl chloroformate appears to be the "
+        r"minimal correction."
+    ),
+    "c982b5bc-0fb8-4f12-94fa-f05715209ead": (
+        r"A tempting shortcut is to treat the \(50\,\mathrm{cm^3}\) absorbed by "
+        r"\(\ce{Ca(OH)2}\) as \(\ce{CO2}\) and the difference "
+        r"\(500-440=60\,\mathrm{cm^3}\) as condensed \(\ce{H2O}\). For an acyclic "
+        r"saturated diol, \(\ce{C_{n}H_{2n+2}O2}\), the product ratio is "
+        r"\((n+1)/n\); setting it equal to \(60/50\) gives \(n=5\) and hence the "
+        r"supplied formula \(\ce{C5H12O2}\). Those quantities do not satisfy all of "
+        r"the stated volume data. Combustion changes the hot-gas volume by "
+        r"\((n+1)/2\) fuel volumes, so the initial and final volumes cannot both be "
+        r"\(500\,\mathrm{cm^3}\) for any nonzero amount of diol. For \(n=5\), the "
+        r"product data imply \(10\,\mathrm{cm^3}\) of fuel and an initial total "
+        r"volume of \(470\,\mathrm{cm^3}\), not \(500\,\mathrm{cm^3}\). Comparing "
+        r"gas volumes at \(300^\circ\mathrm C\) and room temperature without "
+        r"additional conditions is also insufficiently specified."
+    ),
+    "b7337452-ab08-43e5-9f3b-419107415280": (
+        r"The ionization-energy jumps after \(I_2\) for \(D\) and \(I_4\) for \(E\) "
+        r"identify group 2 and group 14 behavior, respectively, giving formal highest "
+        r"oxides \(DO\) and \(EO_2\). The numerical values correspond closely to "
+        r"calcium and carbon, for which the supplied formula would be \(\ce{Ca2CO4}\), "
+        r"not an ordinary compound. More generally, the condition \(D{:}E>1\) "
+        r"excludes the common \(1{:}1\) product \(DEO_3\) but does not select "
+        r"\(D_2EO_4\): formulas such as \(D_3EO_5\) and \(D_3E_2O_7\) also satisfy "
+        r"formal charge balance and the stated ratio. Additional structural or "
+        r"stoichiometric information is required."
+    ),
+    "f44b0903-1c29-44a5-9f9b-b6ccdd164e1c": (
+        r"The supplied name appears to intend docosahexaenoic acid "
+        r"(DHA, \(\mathrm{C}_{22}{:}6\)), but ``Decosahexanoic acid'' is not a "
+        r"standard name. Assuming that glucosidase removes one hexose residue, the "
+        r"parent mass is the phosphatidylglycerol mass plus \(\ce{C6H10O5}\). For two "
+        r"identical \(\mathrm{C}_{n}{:}u\) acyl chains, the average parent mass is "
+        r"approximately\[28.054n-4.032u+436.259.\]The stated molar mass of \(1026.5\) "
+        r"gives no integer \(\mathrm{C}_{n}{:}u\) solution. A DHA-containing parent "
+        r"would instead have a mass of approximately \(1028.6\) using exact masses or "
+        r"\(1029.3\) using average masses. The data therefore do not uniquely support DHA."
+    ),
     "3d762ba1-3958-453b-b34e-fe24c2822994": (
-        r"The corresponding \(K_M\) for the system described is "
-        r"\(K_M=K_s^{-1}+J_s[S]^2\) (typeset from the supplied reference)."
+        r"The supplied expression is obtained if both constants are association "
+        r"constants,\[K_s=\frac{[ES]}{[E][S]},\qquad "
+        r"J_s=\frac{[SES]}{[ES][S]}.\]Under those definitions, "
+        r"\(v=k[E]_0[S]/(K_s^{-1}+[S]+J_s[S]^2)\). If \(K_s\) and \(J_s\) are "
+        r"instead dissociation constants, as is also common in enzyme kinetics, the "
+        r"corresponding denominator is \(K_s+[S]+[S]^2/J_s\). The question calls both "
+        r"quantities only ``equilibrium constants'' and does not define either "
+        r"convention, so it does not determine a unique expression."
+    ),
+    "fcbd76ad-1b45-4f40-ad9d-d2bc5016f02c": (
+        r"The viability experiment under amino-acid deprivation is attributed to "
+        r"killed bacteria supplying additional nutrients, including amino acids, "
+        r"through lysosomal recycling. The antioxidant-metabolite and "
+        r"reactive-oxygen-species result is a separate finding, so ``increased "
+        r"antioxidant availability'' conflates two conclusions. The amino-acid rescue "
+        r"described in the question instead points directly to nutrient provision."
     ),
 }
 
@@ -961,66 +1179,99 @@ def write_problematic(
         review_records,
         key=lambda record: (SUBJECTS.index(record["subject"]), hf_index[record["task_group_id"]]),
     )
-    lines = preamble("FrontierScience Olympiad: Questions Requiring External Review")
+    record_ids = {record["task_group_id"] for record in records}
+    if record_ids != set(REVIEW_ANALYSIS_LATEX):
+        raise ValueError("consultant analysis must cover every review item exactly once")
+    if not record_ids > INCORRECT_REVIEW_IDS:
+        raise ValueError("incorrect-review classification contains an unknown item")
+
+    lines = preamble(r"FrontierScience Olympiad\\Questions for External Review")
     lines.extend(
         [
             (
-                "These questions were flagged during distractor curation. The supplied reference "
-                "answers remain unchanged and authoritative in the 100-question evaluation set. "
+                "This document contains 17 questions for independent subject-matter review. For "
+                "each item, the answer supplied with the original dataset is reproduced without "
+                "correction, followed by a preliminary analysis of the issue. The alphanumeric "
+                "identifier and HF item number are retained to make each question easy to trace. "
                 "HF item numbers are zero-based row indices in the pinned Olympiad split."
             ),
             "",
             r"For each question, please determine:",
             r"\begin{enumerate}[leftmargin=2em]",
-            r"\item Is the supplied reference answer correct under the literal question stem?",
+            r"\item Does the question as written determine a unique, scientifically valid answer?",
+            r"\item Is the supplied answer correct?",
             (
-                r"\item If not, what is the correct answer or the smallest stem correction "
-                r"needed?"
+                r"\item If not, what answer or minimal revision would make the item correct and "
+                r"unambiguous?"
             ),
             r"\end{enumerate}",
         ]
     )
+    removed_instructions = 0
     for subject in SUBJECTS:
         subset = [record for record in records if record["subject"] == subject]
         if not subset:
             continue
-        lines.extend([rf"\section{{{subject.title()} ({len(subset)})}}", ""])
-        for record in subset:
-            item_id = record["task_group_id"]
-            lines.extend(
+        lines.extend([r"\clearpage", rf"\section{{{subject.title()}}}", ""])
+        groups = (
+            (
+                "Incorrect supplied answers",
+                [record for record in subset if record["task_group_id"] in INCORRECT_REVIEW_IDS],
+            ),
+            (
+                "Ambiguous or internally inconsistent questions",
                 [
-                    rf"\subsection{{HF item {hf_index[item_id]}}}",
-                    rf"\texttt{{{item_id}}}",
-                    "",
-                    (
-                        r"\textbf{Internal assessment:} "
-                        + render_prose(record["gold_assessment"].replace("_", " "))
-                    ),
-                    "",
-                    r"\subsubsection*{Question}",
-                    render_problem(record["question"], chemical_formulae=subject == "chemistry"),
-                    "",
-                    r"\subsubsection*{Supplied reference answer}",
-                    REVIEW_REFERENCE_LATEX.get(
-                        item_id,
-                        render_choice(
-                            record["supplied_reference_answer"],
-                            chemical_formulae=subject == "chemistry",
+                    record
+                    for record in subset
+                    if record["task_group_id"] not in INCORRECT_REVIEW_IDS
+                ],
+            ),
+        )
+        for heading, group in groups:
+            lines.extend([rf"\subsection{{{heading} ({len(group)})}}", ""])
+            if not group:
+                lines.extend(
+                    [
+                        (
+                            f"No {subject} questions in this review set were classified in this "
+                            "category."
                         ),
-                    ),
-                    "",
-                    r"\subsubsection*{Reason for review}",
-                    REVIEW_GOLD_LATEX.get(item_id, render_prose(record["gold_concern"])),
-                    "",
-                    (
-                        r"\textbf{Stem assessment:} "
-                        + render_prose(record["stem_assessment"].replace("_", " "))
-                    ),
-                    "",
-                    REVIEW_STEM_LATEX.get(item_id, render_prose(record["stem_concern"])),
-                    "",
-                ]
-            )
+                        "",
+                    ]
+                )
+                continue
+            for record in group:
+                item_id = record["task_group_id"]
+                question, substitutions = ANSWER_INSTRUCTION.subn("", record["question"])
+                removed_instructions += substitutions
+                lines.extend(
+                    [
+                        rf"\subsubsection{{HF item {hf_index[item_id]}}}",
+                        rf"\texttt{{{item_id}}}",
+                        "",
+                        r"\paragraph*{Question}",
+                        render_problem(question, chemical_formulae=subject == "chemistry"),
+                        "",
+                        r"\paragraph*{Supplied answer}",
+                        REVIEW_REFERENCE_LATEX.get(
+                            item_id,
+                            render_choice(
+                                record["supplied_reference_answer"],
+                                chemical_formulae=subject == "chemistry",
+                            ),
+                        ),
+                        "",
+                        r"\paragraph*{Preliminary analysis}",
+                        REVIEW_ANALYSIS_LATEX[item_id],
+                        "",
+                    ]
+                )
+
+    if removed_instructions != len(records):
+        raise ValueError(
+            "removed answer-format instruction from "
+            f"{removed_instructions}/{len(records)} review records"
+        )
     lines.append(r"\end{document}")
     output.write_text("\n".join(lines) + "\n")
 
@@ -1111,12 +1362,17 @@ def write_verified(
     output.write_text("\n".join(lines) + "\n")
 
 
-def assert_ascii_and_structure(path: Path, expected_subsections: int) -> None:
+def assert_ascii_and_structure(
+    path: Path,
+    expected_questions: int,
+    *,
+    question_heading: str = r"\subsection{",
+) -> None:
     text = path.read_text()
     non_ascii = sorted(set(char for char in text if ord(char) > 127))
     if non_ascii:
         raise ValueError(f"{path} contains non-ASCII characters: {non_ascii}")
-    if text.count(r"\subsection{") != expected_subsections:
+    if text.count(question_heading) != expected_questions:
         raise ValueError(f"{path} has an unexpected question count")
     if text.count(r"\begin{document}") != 1 or text.count(r"\end{document}") != 1:
         raise ValueError(f"{path} has unbalanced document delimiters")
@@ -1148,7 +1404,11 @@ def main() -> None:
     args.problematic_output.parent.mkdir(parents=True, exist_ok=True)
     write_problematic(args.problematic_output, review_records, hf_index)
     write_verified(args.verified_output, verified_records, hf_index)
-    assert_ascii_and_structure(args.problematic_output, 17)
+    assert_ascii_and_structure(
+        args.problematic_output,
+        17,
+        question_heading=r"\subsubsection{HF item ",
+    )
     assert_ascii_and_structure(args.verified_output, 83)
 
 
