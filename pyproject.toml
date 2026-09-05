@@ -135,6 +135,7 @@ conflicts = [
 [tool.setuptools.package-data]
 "olmo_eval.analysis.pairwise_viewer" = ["static/*.css", "static/*.js", "templates/*.html"]
 "olmo_eval.evals.tasks" = ["*.jsonl"]
+"olmo_eval.evals.external.benchmarks.deepscholar" = ["queries/*.csv"]
 
 [dependency-groups]
 dev = [

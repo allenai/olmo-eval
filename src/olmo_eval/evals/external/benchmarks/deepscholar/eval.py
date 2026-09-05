@@ -337,6 +337,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
                 await self._write_search_shim(executor)
                 await self._write_organization_eval_patch(executor)
                 await self._patch_citation_lookup(executor)
+                await self._stage_queries(executor, ds_args)
 
                 n_success, n_total, generation_ok = await self._run_generation(
                     executor, ds_args, all_output, output_dir
@@ -471,6 +472,56 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         )
         logger.info(
             f"[{self.name}] Patched organization evaluator at {self._organization_evaluator_path}"
+        )
+
+    @property
+    def _queries_path(self) -> str:
+        return f"{self._repo}/dataset/queries.csv"
+
+    def _resolve_queries_csv(self, name: str) -> Path:
+        """A bare name selects queries/<name>.csv; anything else is a path."""
+        candidate = Path(name)
+        if candidate.suffix == ".csv" and candidate.exists():
+            return candidate
+        bundled = Path(__file__).parent / "queries" / f"{candidate.stem}.csv"
+        if bundled.exists():
+            return bundled
+        available = sorted(
+            p.stem for p in (Path(__file__).parent / "queries").glob("*.csv")
+        )
+        raise FileNotFoundError(
+            f"No queries CSV {name!r}; bundled options are {', '.join(available)}"
+        )
+
+    async def _stage_queries(self, executor: SandboxExecutor, ds_args: DeepScholarArgs) -> None:
+        """Write a prepared queries.csv into the checkout, if one was requested.
+
+        Upstream's load_queries() regenerates dataset/queries.csv from the
+        abstract column whenever the file is missing, so an input condition
+        only survives if the file is already there when generation starts.
+        Written in chunks: the CSV is ~100-200KB, too large for one argv.
+        """
+        if not ds_args.queries_csv:
+            return
+        source = self._resolve_queries_csv(ds_args.queries_csv)
+        encoded = base64.b64encode(source.read_bytes()).decode()
+        chunk = 32_000
+        target = shlex.quote(self._queries_path)
+        b64_path = shlex.quote(f"{self._queries_path}.b64")
+        await executor.execute_command(f"rm -f {b64_path} {target}", timeout=30.0)
+        for start in range(0, len(encoded), chunk):
+            await executor.execute_command(
+                f"printf '%s' {shlex.quote(encoded[start:start + chunk])} >> {b64_path}",
+                timeout=30.0,
+            )
+        await executor.execute_command(
+            f"base64 -d < {b64_path} > {target} && rm -f {b64_path}", timeout=60.0
+        )
+        result = await executor.execute_command(f"wc -l < {target}", timeout=30.0)
+        lines = str(getattr(result, "stdout", result)).strip()
+        logger.info(
+            f"[{self.name}] Staged {source.name} at {self._queries_path} "
+            f"({lines} lines including header)"
         )
 
     async def _patch_citation_lookup(self, executor: SandboxExecutor) -> None:

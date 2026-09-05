@@ -90,6 +90,9 @@ class DeepScholarArgs:
     allow_partial_generation: bool = False
 
     # Escape hatches for validation iterations
+    # Name of a CSV in queries/ (or a path) staged as dataset/queries.csv so the
+    # run uses its `query` column instead of the abstract-derived default.
+    queries_csv: str | None = None
     extra_gen_args: list[str] = field(default_factory=list)
     extra_eval_args: list[str] = field(default_factory=list)
 
@@ -124,6 +127,7 @@ class DeepScholarArgs:
             judge_model=data.get("judge_model", "gpt-4o"),
             evals=evals or list(PRIMARY_METRICS),
             allow_partial_generation=_parse_bool(data.get("allow_partial_generation")),
+            queries_csv=data.get("queries_csv"),
             extra_gen_args=_as_list(data.get("extra_gen_args")),
             extra_eval_args=_as_list(data.get("extra_eval_args")),
         )
