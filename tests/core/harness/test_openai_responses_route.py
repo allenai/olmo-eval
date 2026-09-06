@@ -222,6 +222,23 @@ class TestReasoningIsLabelled:
         assert turn.metadata == {}
         assert "metadata" not in turn.to_dict()
 
+    def test_a_turn_with_no_reasoning_claims_no_summary(self):
+        """One model response carries one reasoning block, and the Responses route answers a
+        search turn with six parallel calls; only the turn that holds the summary says so.
+        Found on the first live case, where 55 of 61 turns claimed a summary they did not hold.
+        """
+
+        scaffold, agent = agent_for(effort="medium")
+        items = self._items(agent, "One thought.")
+        items.append(self._message(agent, "answer"))
+        turns = scaffold._convert_trajectory(SimpleNamespace(new_items=items)).turns
+        assert [t.metadata for t in turns] == [{"reasoning_kind": "summary"}]
+        assert AgentTurn.assistant(content="x", reasoning_kind="summary").metadata == {}
+        # A response that reasoned and returned no summary still says what the field is.
+        assert AgentTurn.assistant(
+            content="x", reasoning="", reasoning_kind="summary"
+        ).metadata == {"reasoning_kind": "summary"}
+
     def test_the_turn_type_still_round_trips(self):
         labelled = AgentTurn.assistant(content="x", reasoning="y", reasoning_kind="summary")
         assert AgentTurn.from_dict(labelled.to_dict()) == labelled

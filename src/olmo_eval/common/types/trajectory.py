@@ -71,7 +71,14 @@ class AgentTurn:
             timestamp_ms=timestamp_ms,
             token_count=token_count,
             reasoning=reasoning,
-            metadata={"reasoning_kind": reasoning_kind} if reasoning_kind else {},
+            # The kind describes the reasoning, so a turn that has none carries no label:
+            # one model response yields one reasoning block and the parallel tool-call turns
+            # built from the same response would otherwise all claim a summary they do not hold.
+            metadata=(
+                {"reasoning_kind": reasoning_kind}
+                if reasoning_kind and reasoning is not None
+                else {}
+            ),
         )
 
     @classmethod
