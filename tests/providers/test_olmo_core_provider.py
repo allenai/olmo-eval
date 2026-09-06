@@ -747,3 +747,45 @@ class TestVLMLogprobsBoundaries:
     def test_nonpositive_limit_raises(self) -> None:
         with pytest.raises(ValueError, match="max_length > 0"):
             self._provider(max_length=0).logprobs([self._request("!")])
+
+
+class TestUntiedLmHeadGuard:
+    """A wrong checkpoint read that hands an untied model its embedding table as the
+    LM head must fail loudly instead of scoring at chance."""
+
+    @pytest.fixture(autouse=True)
+    def _torch(self):
+        self.torch = pytest.importorskip("torch")
+
+    def _cfg(self, tied: bool):
+        return SimpleNamespace(lm=SimpleNamespace(tie_word_embeddings=tied))
+
+    def test_duplicated_head_raises(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm.checkpoint import (
+            _verify_lm_head_is_untied,
+        )
+
+        emb = self.torch.randn(8, 4)
+        state = {"lm.embeddings.weight": emb, "lm.lm_head.w_out.weight": emb.clone()}
+        with pytest.raises(ValueError, match="byte-identical"):
+            _verify_lm_head_is_untied(state, self._cfg(tied=False), "/ckpt")
+
+    def test_distinct_head_passes(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm.checkpoint import (
+            _verify_lm_head_is_untied,
+        )
+
+        state = {
+            "lm.embeddings.weight": self.torch.randn(8, 4),
+            "lm.lm_head.w_out.weight": self.torch.randn(8, 4),
+        }
+        _verify_lm_head_is_untied(state, self._cfg(tied=False), "/ckpt")
+
+    def test_tied_model_is_exempt(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm.checkpoint import (
+            _verify_lm_head_is_untied,
+        )
+
+        emb = self.torch.randn(8, 4)
+        state = {"lm.embeddings.weight": emb, "lm.lm_head.w_out.weight": emb}
+        _verify_lm_head_is_untied(state, self._cfg(tied=True), "/ckpt")
