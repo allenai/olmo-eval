@@ -46,6 +46,7 @@ class AgentTurn:
         timestamp_ms: int | None = None,
         token_count: int | None = None,
         reasoning: str | None = None,
+        reasoning_kind: str | None = None,
     ) -> "AgentTurn":
         """Create an assistant turn.
 
@@ -55,6 +56,10 @@ class AgentTurn:
             timestamp_ms: Optional timestamp in milliseconds.
             token_count: Optional token count for this turn.
             reasoning: Optional reasoning text the model produced for this turn.
+            reasoning_kind: What that text is, when it is not the model's own chain.
+                ``summary`` for the OpenAI Responses API, which writes a summary of the
+                thinking and never exposes the thinking itself. It lands under ``metadata``,
+                so a turn without one is byte for byte the turn this method already built.
 
         Returns:
             A new AgentTurn with role="assistant".
@@ -66,6 +71,7 @@ class AgentTurn:
             timestamp_ms=timestamp_ms,
             token_count=token_count,
             reasoning=reasoning,
+            metadata={"reasoning_kind": reasoning_kind} if reasoning_kind else {},
         )
 
     @classmethod

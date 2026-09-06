@@ -171,6 +171,81 @@ def _chat_completions_model_class() -> type:
     return ReasoningFieldChatCompletionsModel
 
 
+#: The managed OpenAI endpoint. Every other base url this harness talks to -- a self-hosted
+#: vLLM, DeepSeek, anything behind litellm -- is a chat completions server and stays on that
+#: route.
+OPENAI_API_HOST = "api.openai.com"
+#: The one ``reasoning_effort`` the managed endpoint will answer on chat completions while a
+#: request carries ``tools``. Since GPT-5.4 every other value is refused outright, and the 5.x
+#: models default to ``medium``, so the refusal fires with the field unset too.
+NO_REASONING = "none"
+#: The summary verbosity asked for on the Responses route. ``concise`` is rejected by the 5.x
+#: series; ``auto`` lets the provider choose. Without it no reasoning comes back at all.
+REASONING_SUMMARY = "auto"
+#: What a Responses answer's reasoning is. Recorded on the turn beside the text, because the
+#: provider writes it and never exposes the model's own chain: a reader of one saved turn must
+#: not take it for the thinking the vLLM arms record.
+SUMMARY_REASONING_KIND = "summary"
+
+
+def _client_host(client: Any) -> str:
+    """The host an OpenAI client sends to, however its base url is spelled."""
+
+    base_url = getattr(client, "base_url", None)
+    if base_url is None:
+        return ""
+    host = getattr(base_url, "host", None)
+    if not host:
+        from urllib.parse import urlsplit
+
+        host = urlsplit(str(base_url)).hostname
+    return (host or "").lower()
+
+
+def _configured_effort(model_settings: Any) -> str | None:
+    """The ``reasoning_effort`` a run pinned, or None when it left it to the provider."""
+
+    reasoning = getattr(model_settings, "reasoning", None)
+    return getattr(reasoning, "effort", None)
+
+
+def responses_api_required(client: Any, model_settings: Any) -> bool:
+    """Whether this agent has to run against ``/v1/responses`` rather than chat completions.
+
+    Only the managed OpenAI endpoint, and only when the run asked for reasoning by name. An
+    unpinned effort deliberately does **not** count, even though a 5.x model defaults to
+    ``medium`` and would refuse a chat completion carrying tools: the same endpoint serves
+    models that have no reasoning at all, and sending them a ``reasoning`` block is its own 400.
+    So the run says which it wants. ``reasoning_effort=none`` remains the way to keep tools on
+    chat completions, exactly as the preset's docstring describes; naming any other effort is
+    the way to keep the model thinking, and moves the agent here.
+    """
+
+    if _client_host(client) != OPENAI_API_HOST:
+        return False
+    effort = _configured_effort(model_settings)
+    return bool(effort) and effort != NO_REASONING
+
+
+def with_reasoning_summary(model_settings: Any) -> Any:
+    """``model_settings`` asking the Responses route for a reasoning summary.
+
+    The effort the run pinned is kept; an unpinned one stays unpinned, so the provider's own
+    default stands. Without ``summary`` the answer carries a reasoning item with nothing in it
+    and the saved trajectory has no reasoning at all.
+    """
+
+    from agents import ModelSettings  # type: ignore[ty:unresolved-import]
+    from openai.types.shared import Reasoning
+
+    reasoning = getattr(model_settings, "reasoning", None)
+    effort = getattr(reasoning, "effort", None)
+    summary = Reasoning(effort=effort, summary=REASONING_SUMMARY)
+    if model_settings is None:
+        return ModelSettings(reasoning=summary)
+    return replace(model_settings, reasoning=summary)
+
+
 def _make_tool_error_formatter(valid_tool_names: Sequence[str]) -> Any:
     """Build a ``RunConfig.tool_error_formatter`` that names the tools the model may call.
 
@@ -264,6 +339,9 @@ class OpenAIAgentsScaffold(Scaffold):
         self._cached_provider_id: int | None = None
         self._cached_has_sandbox: bool = False
         self._sandbox_manager: SandboxManager | None = None
+        #: What the reasoning the current agent produces is, when it is not the chain:
+        #: ``summary`` once :meth:`_create_agent` has chosen the Responses route.
+        self._reasoning_kind: str | None = None
 
     def clear_cache(self) -> None:
         """Clear cached agent to allow recreation with new config/provider."""
@@ -402,14 +480,39 @@ class OpenAIAgentsScaffold(Scaffold):
             f"model={provider.model_name}"
         )
 
-        # vLLM returns thinking as ``reasoning``, which the SDK does not convert; the
-        # subclass mirrors it onto ``reasoning_content`` so it reaches the saved trajectory.
-        model = _chat_completions_model_class()(
-            openai_client=client,
-            model=provider.model_name,
-        )
-
         agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
+
+        # Only set model_settings when something was configured: the Agent's own
+        # default is an empty ModelSettings, and passing one built here would
+        # replace the SDK's defaults with this scaffold's idea of them.
+        model_settings = build_model_settings(config.scaffold_kwargs.get("model_settings"))
+        if model_settings is not None:
+            logger.debug(f"Applying model_settings from scaffold_kwargs: {model_settings}")
+
+        # Which of the two OpenAI routes this agent runs on. The managed endpoint refuses a
+        # chat completion that carries tools at any effort but none, so a thinking run there
+        # goes to /v1/responses; the tools, the loop and everything else are unchanged, and the
+        # reasoning that comes back is a provider summary rather than the model's own chain.
+        # Every other provider, and this one at effort none, keeps the chat completions model.
+        self._reasoning_kind = None
+        if responses_api_required(client, model_settings):
+            from agents import OpenAIResponsesModel  # type: ignore[ty:unresolved-import]
+
+            model_settings = with_reasoning_summary(model_settings)
+            self._reasoning_kind = SUMMARY_REASONING_KIND
+            logger.info(
+                f"Using the Responses API for {provider.model_name}: chat completions refuses "
+                f"function tools at reasoning effort "
+                f"{_configured_effort(model_settings) or 'the provider default'}"
+            )
+            model: Any = OpenAIResponsesModel(openai_client=client, model=provider.model_name)
+        else:
+            # vLLM returns thinking as ``reasoning``, which the SDK does not convert; the
+            # subclass mirrors it onto ``reasoning_content`` so it reaches the saved trajectory.
+            model = _chat_completions_model_class()(
+                openai_client=client,
+                model=provider.model_name,
+            )
 
         agent_kwargs: dict[str, Any] = {
             "name": self.name,
@@ -417,12 +520,6 @@ class OpenAIAgentsScaffold(Scaffold):
             "model": model,
             "tools": agent_tools,
         }
-        # Only set model_settings when something was configured: the Agent's own
-        # default is an empty ModelSettings, and passing one built here would
-        # replace the SDK's defaults with this scaffold's idea of them.
-        model_settings = build_model_settings(config.scaffold_kwargs.get("model_settings"))
-        if model_settings is not None:
-            logger.debug(f"Applying model_settings from scaffold_kwargs: {model_settings}")
 
         # This scaffold drives the OpenAI client directly instead of the provider's
         # generate path, so the request body built here is the only place a
@@ -791,13 +888,24 @@ class OpenAIAgentsScaffold(Scaffold):
                     # One model response yields one reasoning block. When the response has
                     # text it lands here, and any tool-call turns built from the same
                     # response carry none.
-                    turns.append(AgentTurn.assistant(content=content, reasoning=pending_reasoning))
+                    turns.append(
+                        AgentTurn.assistant(
+                            content=content,
+                            reasoning=pending_reasoning,
+                            reasoning_kind=self._reasoning_kind,
+                        )
+                    )
                     pending_reasoning = None
                 elif pending_reasoning:
                     # A message with no text part (e.g. a refusal) still ends the response
                     # that produced this reasoning; keep it here so it cannot slide onto a
                     # later, unrelated turn.
-                    turns.append(AgentTurn.assistant(reasoning=pending_reasoning))
+                    turns.append(
+                        AgentTurn.assistant(
+                            reasoning=pending_reasoning,
+                            reasoning_kind=self._reasoning_kind,
+                        )
+                    )
                     pending_reasoning = None
 
             elif item_class == "ToolCallItem":
@@ -817,7 +925,10 @@ class OpenAIAgentsScaffold(Scaffold):
                     # the response; the remaining tool-call turns carry none.
                     turns.append(
                         AgentTurn.assistant(
-                            content="", tool_calls=[tool_call], reasoning=pending_reasoning
+                            content="",
+                            tool_calls=[tool_call],
+                            reasoning=pending_reasoning,
+                            reasoning_kind=self._reasoning_kind,
                         )
                     )
                     pending_reasoning = None
@@ -826,7 +937,12 @@ class OpenAIAgentsScaffold(Scaffold):
                 if pending_reasoning:
                     # A tool output means the response that produced this reasoning is
                     # over (its own items had no branch above); flush rather than carry it.
-                    turns.append(AgentTurn.assistant(reasoning=pending_reasoning))
+                    turns.append(
+                        AgentTurn.assistant(
+                            reasoning=pending_reasoning,
+                            reasoning_kind=self._reasoning_kind,
+                        )
+                    )
                     pending_reasoning = None
                 output = getattr(item, "output", None)
                 raw = getattr(item, "raw_item", None)
@@ -852,7 +968,11 @@ class OpenAIAgentsScaffold(Scaffold):
         if pending_reasoning:
             # No assistant item followed this reasoning (the run stopped after it);
             # keep it on an otherwise empty assistant turn rather than dropping it.
-            turns.append(AgentTurn.assistant(reasoning=pending_reasoning))
+            turns.append(
+                AgentTurn.assistant(
+                    reasoning=pending_reasoning, reasoning_kind=self._reasoning_kind
+                )
+            )
 
         return AgentTrajectory(turns=tuple(turns))
 
