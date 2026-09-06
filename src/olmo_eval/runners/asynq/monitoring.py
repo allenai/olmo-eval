@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import queue
 import time
 
@@ -11,7 +12,13 @@ from olmo_eval.runners.asynq.types import WORKER_FATAL
 
 logger = get_logger(__name__)
 
-DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
+
+#: How long to wait for a worker's provider to come up. Large checkpoints read over
+#: shared storage can take most of the default 900s, and concurrent runs against the
+#: same weights take longer, so the env var raises the ceiling without a code change.
+DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = float(
+    os.environ.get("OLMO_EVAL_PROVIDER_INIT_TIMEOUT") or 900.0
+)
 
 
 def terminate_workers(

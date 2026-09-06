@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.common.types import LMRequest
 from olmo_eval.inference.errors import classify_terminal_provider_error
 from olmo_eval.inference.metrics.core.stats import compute_batch_hash
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
@@ -15,6 +17,18 @@ if TYPE_CHECKING:
     from olmo_eval.harness import Harness
 
 logger = get_logger(__name__)
+
+
+def _result_request(request: LMRequest | None) -> LMRequest | None:
+    """The request as echoed back to the parent: image payloads stripped.
+
+    Scoring and storage read the instance and outputs, never the pixels, so the
+    (possibly resolved) images tuple is dropped rather than pickled back through
+    the result queue.
+    """
+    if request is None or request.images is None:
+        return request
+    return replace(request, images=None)
 
 
 def _get_native_ids(items: list[QueueItem]) -> list[str]:
@@ -135,7 +149,7 @@ async def process_chat_request(
                 task_id=item.task_id,
                 instance_idx=item.instance_idx,
                 instance=item.instance,
-                request=prepared_request,
+                request=_result_request(prepared_request),
                 request_trace=request_trace,
                 outputs=[output_with_metadata],
                 error=harness_result.error,
@@ -160,7 +174,7 @@ async def process_chat_request(
                 task_id=item.task_id,
                 instance_idx=item.instance_idx,
                 instance=item.instance,
-                request=prepared_request,
+                request=_result_request(prepared_request),
                 request_trace=request_trace,
                 outputs=[],
                 error=error_detail,
@@ -219,7 +233,7 @@ async def process_batch(
                     task_id=item.task_id,
                     instance_idx=item.instance_idx,
                     instance=item.instance,
-                    request=prepared_request,
+                    request=_result_request(prepared_request),
                     request_trace=request_trace,
                     outputs=outputs,
                     error=None,
@@ -248,7 +262,7 @@ async def process_batch(
                     task_id=item.task_id,
                     instance_idx=item.instance_idx,
                     instance=item.instance,
-                    request=prepared_request,
+                    request=_result_request(prepared_request),
                     request_trace=request_trace,
                     outputs=[],
                     error=error_detail,
