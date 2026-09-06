@@ -573,6 +573,11 @@ def launch(
             if sandbox.required_secrets:
                 all_required_secrets.update(sandbox.required_secrets)
 
+    # An explicit --secret-env mapping that supplies a required env var satisfies
+    # the requirement, so only the rest must exist as user-scoped secrets.
+    explicitly_mapped = set(launch_config.secret_env_overrides.values())
+    all_required_secrets -= explicitly_mapped
+
     # Ensure secrets
     common_secrets, store_secrets, task_secrets = _ensure_secrets(
         launcher, dry_run, launch_config, all_required_secrets
