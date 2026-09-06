@@ -260,7 +260,7 @@ def _model_call_usage(result: Any) -> list[dict[str, int]] | None:
         result: The ``RunResult`` from ``Runner.run``.
 
     Returns:
-        One entry per model call, or None when the SDK reported no usage at all.
+        One entry per model call, or None when the run made none.
     """
     calls: list[dict[str, int]] = []
     for response in getattr(result, "raw_responses", None) or []:
@@ -883,9 +883,13 @@ class OpenAIAgentsScaffold(Scaffold):
         turns: list[AgentTurn] = []
         if result is None:
             return AgentTrajectory(turns=tuple(turns))
-        # What the run cost, kept beside what it did. Absent when the SDK reported no usage,
-        # so a trajectory from a provider that reports none is what it always was.
-        usage = _model_call_usage(result)
+        # What the run cost, kept beside what it did -- on the Responses route only, which is
+        # the route that needed it and the only one whose trajectory shape is new. Every other
+        # route keeps the trajectory it has always written: the SDK builds a Usage object for
+        # every call whether or not the provider reported one, so attaching this everywhere
+        # would put a `model_calls` key (zeros included) on every self-hosted run ever saved
+        # from here on.
+        usage = _model_call_usage(result) if self._reasoning_kind else None
         metadata = {"model_calls": usage} if usage else {}
 
         # Get items from new_items (primary source in agents SDK)

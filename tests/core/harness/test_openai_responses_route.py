@@ -226,13 +226,29 @@ class TestUsageIsKept:
             {"input_tokens": 4000, "output_tokens": 300, "total_tokens": 4300},
         ]
 
-    def test_a_run_the_sdk_reported_no_usage_for_records_none(self):
+    def test_a_run_that_made_no_call_records_nothing(self):
         scaffold, agent = agent_for(effort="medium")
         for result in (
             SimpleNamespace(new_items=[], raw_responses=[]),
             SimpleNamespace(new_items=[]),
         ):
             assert scaffold._convert_trajectory(result).metadata == {}
+
+    def test_an_old_route_keeps_the_trajectory_it_has_always_written(self):
+        """The SDK builds a Usage object for every call whether or not the provider reported
+        one, so attaching this on every route would put a `model_calls` key -- zeros included --
+        on every self-hosted trajectory saved from here on. It goes on the new route only.
+        """
+
+        scaffold, agent = agent_for(effort="medium", base_url=VLLM, chat_template_kwargs=None)
+        assert type(agent.model).__name__ == "ReasoningFieldChatCompletionsModel"
+        result = SimpleNamespace(
+            new_items=[],
+            raw_responses=[self._response(input=100, output=20), self._response()],
+        )
+        trajectory = scaffold._convert_trajectory(result)
+        assert trajectory.metadata == {}
+        assert "metadata" not in trajectory.to_dict()
 
 
 class TestReasoningIsLabelled:
