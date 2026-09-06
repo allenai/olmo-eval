@@ -34,7 +34,9 @@ from .llm_judge import (
     build_openai_judge_fn,
 )
 from .ngram_copying import NGramCopyingBPBScorer, compute_repeated_ngram_mask
-from .substring import SubstringRecallScorer
+from .retrieval import NDCGScorer, ndcg_at_k
+from .rouge import RougeLF1Scorer, RougeLRecallScorer
+from .substring import SubstringExactMatchScorer, SubstringRecallScorer
 from .tools import (
     ToolArgumentScorer,
     ToolCallScorer,
@@ -69,8 +71,12 @@ __all__ = [
     "MultipleChoiceScorer",
     "MultiplEScorer",
     "NGramCopyingBPBScorer",
+    "NDCGScorer",
+    "ndcg_at_k",
     "PerplexityScorer",
     "ProcessScorer",
+    "RougeLF1Scorer",
+    "RougeLRecallScorer",
     "RubricJudgeScorer",
     "SafetyScorer",
     "SandboxRequiredError",
@@ -80,6 +86,7 @@ __all__ = [
     "SQuADF1Scorer",
     "SimpleQAGrade",
     "SimpleQAJudgeScorer",
+    "SubstringExactMatchScorer",
     "SubstringRecallScorer",
     "ToolArgumentScorer",
     "ToolCallScorer",
