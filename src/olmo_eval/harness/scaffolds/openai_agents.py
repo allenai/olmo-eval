@@ -246,6 +246,42 @@ def with_reasoning_summary(model_settings: Any) -> Any:
     return replace(model_settings, reasoning=summary)
 
 
+def _model_call_usage(result: Any) -> list[dict[str, int]] | None:
+    """The token usage of every model call in one run, in the order the calls were made.
+
+    The SDK keeps a ``ModelResponse`` per call with the provider's own usage on it, and this
+    scaffold was throwing it away: a finished run recorded what the agent did and nothing about
+    what it cost, so a reasoning arm could only be priced from a billing dashboard after the
+    fact. The reasoning tokens are the interesting half -- they are billed as output, they are
+    the part a reasoning effort actually changes, and they are invisible in the trajectory
+    because the provider returns a summary rather than the thinking.
+
+    Args:
+        result: The ``RunResult`` from ``Runner.run``.
+
+    Returns:
+        One entry per model call, or None when the SDK reported no usage at all.
+    """
+    calls: list[dict[str, int]] = []
+    for response in getattr(result, "raw_responses", None) or []:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            continue
+        entry = {
+            "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+            "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+            "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+        }
+        reasoning = getattr(getattr(usage, "output_tokens_details", None), "reasoning_tokens", 0)
+        if reasoning:
+            entry["reasoning_tokens"] = int(reasoning)
+        cached = getattr(getattr(usage, "input_tokens_details", None), "cached_tokens", 0)
+        if cached:
+            entry["cached_input_tokens"] = int(cached)
+        calls.append(entry)
+    return calls or None
+
+
 def _make_tool_error_formatter(valid_tool_names: Sequence[str]) -> Any:
     """Build a ``RunConfig.tool_error_formatter`` that names the tools the model may call.
 
@@ -847,6 +883,10 @@ class OpenAIAgentsScaffold(Scaffold):
         turns: list[AgentTurn] = []
         if result is None:
             return AgentTrajectory(turns=tuple(turns))
+        # What the run cost, kept beside what it did. Absent when the SDK reported no usage,
+        # so a trajectory from a provider that reports none is what it always was.
+        usage = _model_call_usage(result)
+        metadata = {"model_calls": usage} if usage else {}
 
         # Get items from new_items (primary source in agents SDK)
         items = getattr(result, "new_items", None) or []
@@ -859,7 +899,7 @@ class OpenAIAgentsScaffold(Scaffold):
                         return self._convert_input_list_to_trajectory(input_list)
                 except Exception:
                     pass
-            return AgentTrajectory(turns=tuple(turns))
+            return AgentTrajectory(turns=tuple(turns), metadata=metadata)
 
         # The SDK emits reasoning as its own item ahead of the message or tool call
         # it belongs to, so hold it until that assistant turn is built.
@@ -974,7 +1014,7 @@ class OpenAIAgentsScaffold(Scaffold):
                 )
             )
 
-        return AgentTrajectory(turns=tuple(turns))
+        return AgentTrajectory(turns=tuple(turns), metadata=metadata)
 
     def _convert_input_list_to_trajectory(self, input_list: list[Any]) -> AgentTrajectory:
         """Convert input list (from to_input_list()) to AgentTrajectory.

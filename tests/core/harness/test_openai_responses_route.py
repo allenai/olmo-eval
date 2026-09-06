@@ -174,6 +174,67 @@ class TestRequestShape:
         assert body["instructions"] == preset.system_prompt
 
 
+class TestUsageIsKept:
+    """A reasoning arm can only be costed from the usage the SDK already has: the reasoning
+    tokens are billed as output, they are what an effort setting changes, and they appear
+    nowhere in the trajectory because the provider returns a summary rather than the thinking.
+    """
+
+    def _response(self, **usage):
+        from agents.items import ModelResponse
+        from agents.usage import Usage
+        from openai.types.responses.response_usage import (
+            InputTokensDetails,
+            OutputTokensDetails,
+        )
+
+        return ModelResponse(
+            output=[],
+            usage=Usage(
+                requests=1,
+                input_tokens=usage.get("input", 0),
+                output_tokens=usage.get("output", 0),
+                total_tokens=usage.get("input", 0) + usage.get("output", 0),
+                input_tokens_details=InputTokensDetails(
+                    cached_tokens=usage.get("cached", 0), cache_write_tokens=0
+                ),
+                output_tokens_details=OutputTokensDetails(
+                    reasoning_tokens=usage.get("reasoning", 0)
+                ),
+            ),
+            response_id="resp_1",
+        )
+
+    def test_every_model_call_is_recorded_in_order(self):
+        scaffold, agent = agent_for(effort="medium")
+        result = SimpleNamespace(
+            new_items=[],
+            raw_responses=[
+                self._response(input=1200, output=900, reasoning=800, cached=1024),
+                self._response(input=4000, output=300),
+            ],
+        )
+        trajectory = scaffold._convert_trajectory(result)
+        assert trajectory.metadata["model_calls"] == [
+            {
+                "input_tokens": 1200,
+                "output_tokens": 900,
+                "total_tokens": 2100,
+                "reasoning_tokens": 800,
+                "cached_input_tokens": 1024,
+            },
+            {"input_tokens": 4000, "output_tokens": 300, "total_tokens": 4300},
+        ]
+
+    def test_a_run_the_sdk_reported_no_usage_for_records_none(self):
+        scaffold, agent = agent_for(effort="medium")
+        for result in (
+            SimpleNamespace(new_items=[], raw_responses=[]),
+            SimpleNamespace(new_items=[]),
+        ):
+            assert scaffold._convert_trajectory(result).metadata == {}
+
+
 class TestReasoningIsLabelled:
     def _items(self, agent, summary: str):
         from agents.items import ReasoningItem
