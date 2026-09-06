@@ -17,6 +17,12 @@ Two deviations from the official harness, both deliberate:
   directly leaderboard-comparable unless the official judge is selected.
 * Attempts wait a randomized exponential backoff. Without one, a transient API
   condition exhausts every attempt at once and silently drops criteria.
+* Grading is deterministic (``temperature=0``, fixed seed) where the published
+  harness leaves sampling at the provider default, so a re-run reproduces its
+  numbers. Measured against the published harness on the same responses and
+  judge model, this costs about 0.02-0.03 of ``mean_criteria`` -- the modal
+  verdict is slightly stricter than a sampled one -- while raising the judge's
+  agreement with itself from roughly 86% to 98%.
 
 Validated replies are cached on disk so re-runs are free; the cache dir comes
 from ``GDP_PDF_JUDGE_CACHE_DIR`` or a fresh per-process temp dir. Requires
