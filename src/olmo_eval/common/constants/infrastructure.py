@@ -126,6 +126,7 @@ WEKA_CLUSTERS: set[str] = {
     "ai2/ceres",
     "ai2/neptune",
     "ai2/titan",
+    "ai2/holmes",
 }
 """Clusters with Weka storage available.
 
