@@ -949,6 +949,14 @@ class _FactCrawlerSession:
     The browser is dropped whenever a fetch times out or raises, and recycled after a bounded
     number of fetches: a shared browser that wedges must not silently turn the rest of the
     run's citations into ``unknown``.
+
+    A session lasts one ``score_responses`` call, which in the async runner is one scored
+    response, so a hundred case run launches on the order of a hundred browsers rather than the
+    thousands it launched per URL. Sharing a browser also shares its cookie jar and browser
+    context between that call's URLs, where a browser per URL gave every fetch a virgin
+    Chromium: no replay against a fake crawler can see that, and it is the one thing here that
+    could move a live FACT number. ``DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER=1`` restores the
+    old isolation and keeps the timeouts.
     """
 
     def __init__(self) -> None:
