@@ -1,9 +1,12 @@
 """Tests for the DeepResearch Bench RACE + FACT task."""
 
+import asyncio
 import builtins
 import hashlib
 import json
 import re
+import sys
+import types
 
 import pytest
 
@@ -1038,3 +1041,397 @@ async def test_race_parse_failure_retries_and_keeps_zero_instance(task, monkeypa
     assert response.scores["race_overall"] == 0.0
     assert response.scores["fact_has_citations"] == 0.0
     assert task.config.get_primary_metric().compute(scored) == 0.0
+
+
+class _FakeCrawlerRunConfig:
+    """Stands in for crawl4ai's run config, recording what the scorer asked for."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.page_timeout = kwargs.get("page_timeout")
+
+
+class _FakeCrawlResult:
+    def __init__(self, text="A valid source page.", success=True):
+        self.success = success
+        self.error_message = None if success else "blocked"
+        self.status_code = 200 if success else 403
+        self.markdown = types.SimpleNamespace(raw_markdown=text)
+
+
+def _install_fake_crawl4ai(monkeypatch, *, arun=None, start=None):
+    """Install a fake ``crawl4ai`` and count what crawl4ai logs as ``[INIT]``.
+
+    ``init`` counts browser starts, which is exactly the log line the hung 100-case run
+    showed 5,575 of against 5,357 completed fetches.
+    """
+    stats = {"init": 0, "fetch": 0, "close": 0, "configs": [], "urls": []}
+
+    class FakeAsyncWebCrawler:
+        def __init__(self, *_args, **_kwargs):
+            self.started = False
+
+        async def start(self):
+            if start is not None:
+                await start()
+            stats["init"] += 1
+            self.started = True
+            return self
+
+        async def close(self):
+            stats["close"] += 1
+            self.started = False
+
+        async def __aenter__(self):
+            return await self.start()
+
+        async def __aexit__(self, *_exc_info):
+            await self.close()
+
+        async def arun(self, url, config=None):
+            assert self.started, "arun called on a browser that was never started"
+            stats["fetch"] += 1
+            stats["urls"].append(url)
+            stats["configs"].append(config)
+            if arun is not None:
+                return await arun(url, config)
+            return _FakeCrawlResult(f"A valid source page for {url}")
+
+    module = types.ModuleType("crawl4ai")
+    module.AsyncWebCrawler = FakeAsyncWebCrawler
+    module.CrawlerRunConfig = _FakeCrawlerRunConfig
+    monkeypatch.setitem(sys.modules, "crawl4ai", module)
+    return stats
+
+
+def _stub_judges_over_urls(monkeypatch, urls):
+    """Stub both judges so FACT scores exactly one supported fact per URL."""
+    race_payload = {
+        dimension: [
+            {
+                "criterion": _criteria()["criterions"][dimension][0]["criterion"],
+                "article_1_score": 8,
+                "article_2_score": 2,
+            }
+        ]
+        for dimension in DEEPRESEARCH_DIMENSIONS
+    }
+
+    async def race_judge(_prompt):
+        return json.dumps(race_payload)
+
+    async def fact_judge(prompt):
+        if "Here is the main text" in prompt:
+            return json.dumps(
+                [
+                    {"fact": f"Fact about source {index}.", "ref_idx": index, "url": url}
+                    for index, url in enumerate(urls)
+                ]
+            )
+        return json.dumps([{"idx": 1, "result": "supported"}])
+
+    monkeypatch.setattr(deepresearch_bench, "build_deepresearch_race_judge_fn", lambda: race_judge)
+    monkeypatch.setattr(deepresearch_bench, "build_deepresearch_fact_judge_fn", lambda: fact_judge)
+
+
+def _urls(count):
+    return [f"https://example.test/source-{index}" for index in range(count)]
+
+
+async def _no_sleep(_delay):
+    return None
+
+
+class TestBoundedFactCrawler:
+    """One browser per scoring run, and no fetch without a deadline."""
+
+    @pytest.fixture
+    def scored_response(self, task):
+        instance = task.process_doc(_en_doc())
+        assert instance is not None
+        return _response(instance, "A report citing several sources.")
+
+    @pytest.mark.anyio
+    async def test_scoring_run_shares_one_browser_across_urls(
+        self, task, monkeypatch, scored_response
+    ):
+        stats = _install_fake_crawl4ai(monkeypatch)
+        urls = _urls(5)
+        _stub_judges_over_urls(monkeypatch, urls)
+
+        await task.score_responses([scored_response])
+
+        assert stats["fetch"] == 5
+        assert stats["init"] == 1
+        assert stats["close"] == 1
+        assert stats["urls"] == urls
+        assert scored_response.scores["fact_citation_accuracy"] == 1.0
+        assert scored_response.scores["fact_avg_citations"] == 5.0
+        assert deepresearch_bench._FACT_CRAWLER_SESSION.get() is None
+
+    @pytest.mark.anyio
+    async def test_page_timeout_defaults_to_the_crawl4ai_default(
+        self, task, monkeypatch, scored_response
+    ):
+        monkeypatch.delenv("DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS", raising=False)
+        stats = _install_fake_crawl4ai(monkeypatch)
+        _stub_judges_over_urls(monkeypatch, _urls(2))
+
+        await task.score_responses([scored_response])
+
+        assert [config.page_timeout for config in stats["configs"]] == [60_000, 60_000]
+
+    @pytest.mark.parametrize(
+        ("env_value", "expected"),
+        [("15000", 15_000), ("banana", 60_000), ("0", 60_000), ("", 60_000)],
+    )
+    @pytest.mark.anyio
+    async def test_page_timeout_comes_from_the_environment(
+        self, task, monkeypatch, scored_response, env_value, expected
+    ):
+        monkeypatch.setenv("DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS", env_value)
+        stats = _install_fake_crawl4ai(monkeypatch)
+        _stub_judges_over_urls(monkeypatch, _urls(1))
+
+        await task.score_responses([scored_response])
+
+        assert [config.page_timeout for config in stats["configs"]] == [expected]
+
+    @pytest.mark.anyio
+    async def test_browser_is_recycled_after_the_configured_fetch_count(
+        self, task, monkeypatch, scored_response
+    ):
+        monkeypatch.setenv("DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER", "2")
+        stats = _install_fake_crawl4ai(monkeypatch)
+        _stub_judges_over_urls(monkeypatch, _urls(5))
+
+        await task.score_responses([scored_response])
+
+        assert stats["fetch"] == 5
+        assert stats["init"] == 3
+        assert stats["close"] == 3
+
+    @pytest.mark.anyio
+    async def test_recycling_can_be_switched_off(self, task, monkeypatch, scored_response):
+        monkeypatch.setenv("DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER", "0")
+        stats = _install_fake_crawl4ai(monkeypatch)
+        _stub_judges_over_urls(monkeypatch, _urls(6))
+
+        await task.score_responses([scored_response])
+
+        assert stats["fetch"] == 6
+        assert stats["init"] == 1
+
+    @pytest.mark.anyio
+    async def test_fetch_outside_a_scoring_run_opens_and_closes_its_own_browser(self, monkeypatch):
+        stats = _install_fake_crawl4ai(monkeypatch)
+
+        assert "A valid source page" in await fetch_crawl4ai_page("https://example.test/one")
+        assert "A valid source page" in await fetch_crawl4ai_page("https://example.test/two")
+
+        assert (stats["init"], stats["fetch"], stats["close"]) == (2, 2, 2)
+
+    @pytest.mark.anyio
+    async def test_hung_fetch_times_out_fails_closed_and_drops_the_browser(self, task, monkeypatch):
+        async def hang(_url, _config):
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(
+            deepresearch_bench, "DEEPRESEARCH_FACT_FETCH_TIMEOUT_MARGIN_SECONDS", 0.05
+        )
+        monkeypatch.setenv("DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS", "1")
+        stats = _install_fake_crawl4ai(monkeypatch, arun=hang)
+
+        session = deepresearch_bench._FactCrawlerSession()
+        token = deepresearch_bench._FACT_CRAWLER_SESSION.set(session)
+        try:
+            first = await fetch_crawl4ai_page("https://example.test/hangs")
+            second = await fetch_crawl4ai_page("https://example.test/hangs-too")
+        finally:
+            deepresearch_bench._FACT_CRAWLER_SESSION.reset(token)
+            await session.discard()
+
+        assert first.startswith("Error fetching webpage: timed out after")
+        assert second.startswith("Error fetching webpage: timed out after")
+        assert deepresearch_bench.is_obvious_scrape_failure(first)
+        assert scrape_failure_unknown_results(first, 2) == [
+            {"idx": 0, "result": "unknown"},
+            {"idx": 1, "result": "unknown"},
+        ]
+        # Each timeout discards the browser it wedged, so the next URL starts on a fresh one.
+        assert (stats["init"], stats["close"]) == (2, 2)
+
+    @pytest.mark.anyio
+    async def test_hung_url_leaves_the_rest_of_the_run_scorable(self, task, monkeypatch):
+        instance = task.process_doc(_en_doc())
+        assert instance is not None
+        response = _response(instance, "A report citing a hung source and a live one.")
+        hung_url, live_url = _urls(2)
+
+        async def arun(url, _config):
+            if url == hung_url:
+                await asyncio.Event().wait()
+            return _FakeCrawlResult(f"A valid source page for {url}")
+
+        monkeypatch.setattr(
+            deepresearch_bench, "DEEPRESEARCH_FACT_FETCH_TIMEOUT_MARGIN_SECONDS", 0.05
+        )
+        monkeypatch.setenv("DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS", "1")
+        stats = _install_fake_crawl4ai(monkeypatch, arun=arun)
+        _stub_judges_over_urls(monkeypatch, [hung_url, live_url])
+        # The hang is an Event, not a sleep, so the retry ladder's backoff can be skipped.
+        monkeypatch.setattr(deepresearch_bench.asyncio, "sleep", _no_sleep)
+
+        await task.score_responses([response])
+
+        # The hung URL is retried the usual three times and then counts as unknown; the live
+        # URL is still fetched and still scores.
+        assert stats["urls"].count(hung_url) == deepresearch_bench.DEEPRESEARCH_SCRAPE_ATTEMPTS
+        assert live_url in stats["urls"]
+        assert response.scores["fact_citation_accuracy"] == 1.0
+        assert response.scores["fact_avg_effective_citations"] == 1.0
+        assert response.scores["fact_avg_citations"] == 1.0
+        assert [
+            detail["result"] for detail in response.outputs[0].metadata["deepresearch_fact"]
+        ] == [
+            "unknown",
+            "supported",
+        ]
+
+    @pytest.mark.anyio
+    async def test_browser_that_never_starts_fails_closed(self, monkeypatch):
+        async def start():
+            raise RuntimeError("chromium is missing")
+
+        stats = _install_fake_crawl4ai(monkeypatch, start=start)
+
+        page_text = await fetch_crawl4ai_page("https://example.test/page")
+
+        assert page_text == "Error fetching webpage: chromium is missing"
+        assert deepresearch_bench.is_obvious_scrape_failure(page_text)
+        assert stats["fetch"] == 0
+
+    @pytest.mark.anyio
+    async def test_browser_start_that_hangs_fails_closed(self, monkeypatch):
+        async def start():
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(
+            deepresearch_bench, "DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS", 0.05
+        )
+        _install_fake_crawl4ai(monkeypatch, start=start)
+
+        page_text = await fetch_crawl4ai_page("https://example.test/page")
+
+        assert page_text.startswith("Error fetching webpage: timed out after")
+        assert deepresearch_bench.is_obvious_scrape_failure(page_text)
+
+    @pytest.mark.anyio
+    async def test_raising_fetch_discards_the_browser_and_the_run_recovers(self, monkeypatch):
+        failures = []
+
+        async def arun(url, _config):
+            if not failures:
+                failures.append(url)
+                raise RuntimeError("the browser context went away")
+            return _FakeCrawlResult(f"A valid source page for {url}")
+
+        stats = _install_fake_crawl4ai(monkeypatch, arun=arun)
+
+        session = deepresearch_bench._FactCrawlerSession()
+        token = deepresearch_bench._FACT_CRAWLER_SESSION.set(session)
+        try:
+            first = await fetch_crawl4ai_page("https://example.test/breaks")
+            second = await fetch_crawl4ai_page("https://example.test/works")
+        finally:
+            deepresearch_bench._FACT_CRAWLER_SESSION.reset(token)
+            await session.discard()
+
+        assert first == "Error fetching webpage: the browser context went away"
+        assert "A valid source page" in second
+        assert stats["init"] == 2
+
+    @pytest.mark.anyio
+    async def test_failed_result_keeps_the_browser(self, monkeypatch):
+        async def arun(_url, _config):
+            return _FakeCrawlResult(success=False)
+
+        stats = _install_fake_crawl4ai(monkeypatch, arun=arun)
+
+        session = deepresearch_bench._FactCrawlerSession()
+        token = deepresearch_bench._FACT_CRAWLER_SESSION.set(session)
+        try:
+            first = await fetch_crawl4ai_page("https://example.test/blocked-1")
+            second = await fetch_crawl4ai_page("https://example.test/blocked-2")
+        finally:
+            deepresearch_bench._FACT_CRAWLER_SESSION.reset(token)
+            await session.discard()
+
+        assert first == "Error fetching webpage: blocked"
+        assert second == "Error fetching webpage: blocked"
+        # A blocked page is a page, not a broken browser: one browser served both.
+        assert stats["init"] == 1
+
+    @pytest.mark.anyio
+    async def test_browser_is_closed_when_scoring_raises(self, task, monkeypatch):
+        stats = _install_fake_crawl4ai(monkeypatch)
+
+        async def explode(_responses):
+            await fetch_crawl4ai_page("https://example.test/page")
+            raise RuntimeError("scoring blew up")
+
+        monkeypatch.setattr(task, "_score_responses", explode)
+
+        with pytest.raises(RuntimeError, match="scoring blew up"):
+            await task.score_responses([])
+
+        assert (stats["init"], stats["close"]) == (1, 1)
+        assert deepresearch_bench._FACT_CRAWLER_SESSION.get() is None
+
+    @pytest.mark.anyio
+    async def test_skipping_fact_never_launches_a_browser(self, task, monkeypatch):
+        instance = task.process_doc(_en_doc())
+        assert instance is not None
+        response = _response(instance, "A report citing sources.")
+        monkeypatch.setenv("DEEPRESEARCH_SKIP_FACT", "1")
+        stats = _install_fake_crawl4ai(monkeypatch)
+        _stub_judges_over_urls(monkeypatch, _urls(3))
+
+        await task.score_responses([response])
+
+        assert (stats["init"], stats["fetch"]) == (0, 0)
+
+
+class TestFactJudgeTimeout:
+    def _capture_builder(self, monkeypatch):
+        captured = []
+
+        async def sentinel(_prompt):
+            return ""
+
+        def fake_builder(**kwargs):
+            captured.append(kwargs)
+            return sentinel
+
+        monkeypatch.setattr(deepresearch_bench, "build_openai_judge_fn", fake_builder)
+        return captured
+
+    def test_fact_judge_carries_an_explicit_timeout_and_race_does_not(self, monkeypatch):
+        monkeypatch.delenv("DEEPRESEARCH_FACT_JUDGE_TIMEOUT_S", raising=False)
+        captured = self._capture_builder(monkeypatch)
+
+        build_deepresearch_race_judge_fn()
+        build_deepresearch_fact_judge_fn()
+
+        assert [call["timeout"] for call in captured] == [None, 600.0]
+
+    @pytest.mark.parametrize(
+        ("env_value", "expected"), [("120", 120.0), ("banana", 600.0), ("0", 600.0)]
+    )
+    def test_fact_judge_timeout_comes_from_the_environment(self, monkeypatch, env_value, expected):
+        monkeypatch.setenv("DEEPRESEARCH_FACT_JUDGE_TIMEOUT_S", env_value)
+        captured = self._capture_builder(monkeypatch)
+
+        build_deepresearch_fact_judge_fn()
+
+        assert captured[0]["timeout"] == expected

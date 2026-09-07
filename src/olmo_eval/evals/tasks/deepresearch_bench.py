@@ -29,6 +29,7 @@ import os
 import re
 from abc import ABC
 from collections.abc import Iterator, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -57,6 +58,21 @@ DEEPRESEARCH_JUDGE_MAX_TOKENS = 64_000
 DEEPRESEARCH_JUDGE_ATTEMPTS = 3
 DEEPRESEARCH_SCRAPE_ATTEMPTS = 3
 DEEPRESEARCH_PAGE_CONTENT_LIMIT = 200_000
+# Per-fetch page timeout handed to crawl4ai. The default is crawl4ai's own PAGE_TIMEOUT, so a
+# run that sets nothing fetches exactly as it did before the bound existed.
+DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS_DEFAULT = 60_000
+# Hard deadline added on top of the page timeout, covering everything crawl4ai does around the
+# navigation it applies page_timeout to (browser page setup, extraction, markdown generation).
+DEEPRESEARCH_FACT_FETCH_TIMEOUT_MARGIN_SECONDS = 30.0
+# Launching and closing a browser are bounded too: a browser that never comes up must not
+# become the run's new way of hanging.
+DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS = 120.0
+# Fetches per browser before it is recycled. One browser for a whole run is the point of the
+# shared session; recycling keeps a long run out of any leak a single Chromium accumulates.
+DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER_DEFAULT = 200
+# Per-request timeout for the FACT judge client. 600 s is the OpenAI client's own default,
+# pinned here so the scorer's bound cannot move when that default does.
+DEEPRESEARCH_FACT_JUDGE_TIMEOUT_SECONDS_DEFAULT = 600.0
 DEEPRESEARCH_DIMENSIONS = (
     "comprehensiveness",
     "insight",
@@ -791,28 +807,213 @@ def scrape_failure_unknown_results(page_text: str, fact_count: int) -> list[dict
     return _unknown_results(fact_count) if is_obvious_scrape_failure(page_text) else None
 
 
+def _env_int(name: str, default: int, *, minimum: int) -> int:
+    """Read a non-negative integer setting, falling back to the default when unusable."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Ignoring %s=%r: not an integer; using %d.", name, raw, default)
+        return default
+    if value < minimum:
+        logger.warning("Ignoring %s=%r: below %d; using %d.", name, raw, minimum, default)
+        return default
+    return value
+
+
+def _env_float(name: str, default: float, *, minimum: float) -> float:
+    """Read a positive float setting, falling back to the default when unusable."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("Ignoring %s=%r: not a number; using %s.", name, raw, default)
+        return default
+    if value < minimum:
+        logger.warning("Ignoring %s=%r: below %s; using %s.", name, raw, minimum, default)
+        return default
+    return value
+
+
+def fact_page_timeout_ms() -> int:
+    """Per-fetch page timeout in milliseconds, from ``DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS``."""
+    return _env_int(
+        "DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS",
+        DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS_DEFAULT,
+        minimum=1,
+    )
+
+
+def fact_crawler_recycle_after() -> int:
+    """Fetches per browser, from ``DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER`` (0 disables)."""
+    return _env_int(
+        "DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER",
+        DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER_DEFAULT,
+        minimum=0,
+    )
+
+
+def fact_judge_timeout_seconds() -> float:
+    """FACT judge request timeout, from ``DEEPRESEARCH_FACT_JUDGE_TIMEOUT_S``."""
+    return _env_float(
+        "DEEPRESEARCH_FACT_JUDGE_TIMEOUT_S",
+        DEEPRESEARCH_FACT_JUDGE_TIMEOUT_SECONDS_DEFAULT,
+        minimum=1.0,
+    )
+
+
+async def _close_crawler_quietly(crawler: Any | None) -> None:
+    """Close a browser without letting teardown failures reach the scoring loop."""
+    if crawler is None:
+        return
+    try:
+        await asyncio.wait_for(
+            crawler.close(), timeout=DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS
+        )
+    except Exception:
+        logger.warning("Closing the DeepResearch FACT browser failed.", exc_info=True)
+
+
+class _FactCrawlerSession:
+    """One crawl4ai browser, borrowed by every FACT fetch in a scoring run.
+
+    ``AsyncWebCrawler`` owns a Chromium process, so building one per URL made a 100-case run
+    launch about 5,500 browsers in a single process; such a run was observed to stop fetching
+    with hundreds of browsers initialised and to hang until its job timeout. A session launches
+    the browser once, lazily, and hands the same crawler to every fetch.
+
+    The browser is dropped whenever a fetch times out or raises, and recycled after a bounded
+    number of fetches: a shared browser that wedges must not silently turn the rest of the
+    run's citations into ``unknown``.
+    """
+
+    def __init__(self) -> None:
+        self.page_timeout_ms = fact_page_timeout_ms()
+        self._recycle_after = fact_crawler_recycle_after()
+        self._crawler: Any | None = None
+        self._fetches = 0
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, crawler_cls: Any) -> Any:
+        """Return the session's crawler, launching the browser on first use."""
+        async with self._lock:
+            if self._crawler is None:
+                crawler = crawler_cls()
+                try:
+                    await asyncio.wait_for(
+                        crawler.start(),
+                        timeout=DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS,
+                    )
+                except BaseException:
+                    await _close_crawler_quietly(crawler)
+                    raise
+                self._crawler = crawler
+                self._fetches = 0
+            return self._crawler
+
+    async def note_fetch(self) -> None:
+        """Count a completed fetch and recycle the browser once the cap is reached."""
+        self._fetches += 1
+        if self._recycle_after and self._fetches >= self._recycle_after:
+            logger.info(
+                "Recycling the DeepResearch Bench FACT browser after %d fetches.", self._fetches
+            )
+            await self.discard()
+
+    async def discard(self) -> None:
+        """Drop the current browser; the next fetch launches a fresh one."""
+        async with self._lock:
+            crawler, self._crawler = self._crawler, None
+            self._fetches = 0
+        await _close_crawler_quietly(crawler)
+
+    async def __aenter__(self) -> _FactCrawlerSession:
+        return self
+
+    async def __aexit__(self, *_exc_info: Any) -> None:
+        await self.discard()
+
+
+# The session of the scoring run currently on this task's context, if any. A context variable
+# keeps ``fetch_crawl4ai_page``'s signature (and every caller of it) unchanged, gives two
+# scoring runs in one process a browser each, and cannot outlive the run that set it.
+_FACT_CRAWLER_SESSION: ContextVar[_FactCrawlerSession | None] = ContextVar(
+    "deepresearch_fact_crawler_session", default=None
+)
+
+
+def _import_crawl4ai() -> tuple[Any, Any]:
+    """Import crawl4ai, naming the extra to install when it is missing."""
+    try:
+        from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+    except ImportError:
+        raise RuntimeError(
+            "DeepResearch Bench FACT scoring requires crawl4ai. "
+            "Install it with `pip install 'olmo-eval[crawl4ai]'`."
+        ) from None
+    return AsyncWebCrawler, CrawlerRunConfig
+
+
 async def fetch_crawl4ai_page(url: str) -> str:
-    """Call crawl4ai's underlying fetch logic without the registered-tool truncation."""
+    """Call crawl4ai's underlying fetch logic without the registered-tool truncation.
+
+    Inside a scoring run the fetch borrows that run's browser; outside one it opens and closes
+    a browser of its own, as this function always did. Either way the fetch is bounded, and
+    every failure returns an error string that the caller reads as ``unknown``.
+    """
     sanitized_url = url.strip()
     if not sanitized_url:
         return "Error: Empty URL."
     if urlsplit(sanitized_url).scheme.lower() not in {"http", "https"}:
         return "Error: Only http(s) URLs are supported."
 
-    try:
-        from crawl4ai import AsyncWebCrawler
-    except ImportError:
-        raise RuntimeError(
-            "DeepResearch Bench FACT scoring requires crawl4ai. "
-            "Install it with `pip install 'olmo-eval[crawl4ai]'`."
-        ) from None
+    crawler_cls, run_config_cls = _import_crawl4ai()
 
+    session = _FACT_CRAWLER_SESSION.get()
+    if session is not None:
+        return await _fetch_page_with_session(session, sanitized_url, crawler_cls, run_config_cls)
+    async with _FactCrawlerSession() as own_session:
+        return await _fetch_page_with_session(
+            own_session, sanitized_url, crawler_cls, run_config_cls
+        )
+
+
+async def _fetch_page_with_session(
+    session: _FactCrawlerSession,
+    url: str,
+    crawler_cls: Any,
+    run_config_cls: Any,
+) -> str:
+    """Fetch one URL through the session's browser, failing closed on every error."""
+    hard_deadline = (
+        session.page_timeout_ms / 1000.0 + DEEPRESEARCH_FACT_FETCH_TIMEOUT_MARGIN_SECONDS
+    )
     try:
-        async with AsyncWebCrawler() as crawler:
-            result = await crawler.arun(sanitized_url)
+        crawler = await session.acquire(crawler_cls)
+        result = await asyncio.wait_for(
+            crawler.arun(url, config=run_config_cls(page_timeout=session.page_timeout_ms)),
+            timeout=hard_deadline,
+        )
+    except TimeoutError:
+        # The browser is mid-navigation on a page that will not finish; drop it rather than
+        # hand a wedged Chromium to the next URL.
+        await session.discard()
+        logger.warning(
+            "crawl4ai FACT fetch exceeded %.1fs for %r; its facts count as unknown.",
+            hard_deadline,
+            url,
+        )
+        return f"Error fetching webpage: timed out after {hard_deadline:.1f}s"
     except Exception as exc:
-        logger.exception("crawl4ai FACT fetch failed for %r", sanitized_url)
+        await session.discard()
+        logger.exception("crawl4ai FACT fetch failed for %r", url)
         return f"Error fetching webpage: {exc}"
+
+    await session.note_fetch()
 
     if not getattr(result, "success", False):
         error_message = getattr(result, "error_message", None)
@@ -832,7 +1033,12 @@ async def fetch_crawl4ai_page(url: str) -> str:
     return text
 
 
-def _build_judge_fn(default_spec: str, scorer_name: str, default_effort: str) -> JudgeFn:
+def _build_judge_fn(
+    default_spec: str,
+    scorer_name: str,
+    default_effort: str,
+    timeout: float | None = None,
+) -> JudgeFn:
     spec = os.getenv("OLMO_EVAL_JUDGE", default_spec)
     model, separator, effort = spec.partition(":")
     return build_openai_judge_fn(
@@ -841,6 +1047,7 @@ def _build_judge_fn(default_spec: str, scorer_name: str, default_effort: str) ->
         max_tokens=DEEPRESEARCH_JUDGE_MAX_TOKENS,
         scorer_name=scorer_name,
         reasoning_effort=(effort if separator else default_effort),
+        timeout=timeout,
     )
 
 
@@ -865,11 +1072,16 @@ def build_deepresearch_race_judge_fn() -> JudgeFn:
 
 
 def build_deepresearch_fact_judge_fn() -> JudgeFn:
-    """Build the FACT judge with low effort unless a spec suffix overrides it."""
+    """Build the FACT judge with low effort unless a spec suffix overrides it.
+
+    Unlike the RACE judge this one carries an explicit request timeout: FACT judges every
+    citation of every instance, so an unbounded call here stalls the whole scoring run.
+    """
     return _build_judge_fn(
         os.getenv("OLMO_EVAL_JUDGE", DEEPRESEARCH_FACT_DEFAULT_JUDGE_SPEC),
         "DeepResearchBenchFACT",
         "low",
+        timeout=fact_judge_timeout_seconds(),
     )
 
 
@@ -1171,8 +1383,18 @@ class DeepResearchBench(Task):
         responses: Sequence[Response],
         context: Any = None,
     ) -> Sequence[Response]:
-        """Run RACE and FACT, retaining every instance in aggregate denominators."""
+        """Run RACE and FACT under one FACT browser, closed however scoring ends."""
         del context
+        session = _FactCrawlerSession()
+        token = _FACT_CRAWLER_SESSION.set(session)
+        try:
+            return await self._score_responses(responses)
+        finally:
+            _FACT_CRAWLER_SESSION.reset(token)
+            await session.discard()
+
+    async def _score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
+        """Run RACE and FACT, retaining every instance in aggregate denominators."""
         self._extract_answers(responses)
         race_judge = build_deepresearch_race_judge_fn()
         fact_judge = build_deepresearch_fact_judge_fn()

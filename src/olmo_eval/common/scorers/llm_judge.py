@@ -118,6 +118,7 @@ def build_openai_judge_fn(
     max_tokens: int = 10,
     temperature: float = 0.0,
     reasoning_effort: str | None = None,
+    timeout: float | None = None,
 ) -> JudgeFn:
     """Build a lazy async judge function using OpenAI API.
 
@@ -131,6 +132,9 @@ def build_openai_judge_fn(
         temperature: Sampling temperature for the judge.
         reasoning_effort: Optional reasoning effort ("minimal"/"low"/"medium"/"high")
             for reasoning models; dropped automatically if the model rejects it.
+        timeout: Optional per-request timeout in seconds for the OpenAI client. Left unset,
+            the client keeps its own default; a scorer that cannot afford an unbounded judge
+            call pins the bound it needs.
 
     Returns:
         An async judge function that validates and calls OpenAI.
@@ -162,7 +166,10 @@ def build_openai_judge_fn(
                     "Install with: pip install openai"
                 ) from None
 
-            _client.append(AsyncOpenAI(api_key=api_key))
+            client_kwargs: dict[str, Any] = {"api_key": api_key}
+            if timeout is not None:
+                client_kwargs["timeout"] = timeout
+            _client.append(AsyncOpenAI(**client_kwargs))
 
         messages: list[dict[str, str]] = []
         if system_prompt is not None:

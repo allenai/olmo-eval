@@ -386,3 +386,45 @@ class TestLLMJudgeScorerIntegration:
 
             score = await scorer.ascore_with_context(instance, output, ctx)
             assert score == 0.8
+
+
+def _stub_openai_recording_construction(monkeypatch):
+    """Install a stub ``openai`` module that records how the client was constructed."""
+    constructions: list[dict] = []
+
+    async def create(**_kwargs):
+        message = types.SimpleNamespace(content="ok")
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            constructions.append(dict(kwargs))
+            self.chat = types.SimpleNamespace(completions=types.SimpleNamespace(create=create))
+
+    module = types.ModuleType("openai")
+    module.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    return constructions
+
+
+class TestJudgeClientTimeout:
+    """A scorer that cannot afford an unbounded judge call can pin the client's timeout."""
+
+    @pytest.mark.anyio
+    async def test_client_keeps_its_own_default_when_no_timeout_is_asked_for(self, monkeypatch):
+        constructions = _stub_openai_recording_construction(monkeypatch)
+
+        judge = build_openai_judge_fn(model="gpt-5", max_tokens=64)
+        await judge("grade this")
+
+        assert constructions == [{"api_key": "test-key"}]
+
+    @pytest.mark.anyio
+    async def test_explicit_timeout_reaches_the_client(self, monkeypatch):
+        constructions = _stub_openai_recording_construction(monkeypatch)
+
+        judge = build_openai_judge_fn(model="gpt-5", max_tokens=64, timeout=42.0)
+        await judge("grade this")
+
+        assert constructions == [{"api_key": "test-key", "timeout": 42.0}]
