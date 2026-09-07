@@ -421,10 +421,16 @@ class TestJudgeClientTimeout:
         assert constructions == [{"api_key": "test-key"}]
 
     @pytest.mark.anyio
-    async def test_explicit_timeout_reaches_the_client(self, monkeypatch):
+    async def test_explicit_timeout_bounds_reads_and_leaves_connect_short(self, monkeypatch):
+        """A bare float would raise the connect timeout to the read timeout as well."""
         constructions = _stub_openai_recording_construction(monkeypatch)
 
         judge = build_openai_judge_fn(model="gpt-5", max_tokens=64, timeout=42.0)
         await judge("grade this")
 
-        assert constructions == [{"api_key": "test-key", "timeout": 42.0}]
+        assert len(constructions) == 1
+        assert constructions[0]["api_key"] == "test-key"
+        timeout = constructions[0]["timeout"]
+        assert (timeout.read, timeout.write, timeout.pool) == (42.0, 42.0, 42.0)
+        # The client's own default connect timeout, which openai 2.54 sets to 5 s.
+        assert timeout.connect == 5.0

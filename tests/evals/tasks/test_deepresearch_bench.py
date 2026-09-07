@@ -1059,7 +1059,11 @@ class _FakeCrawlResult:
         self.markdown = types.SimpleNamespace(raw_markdown=text)
 
 
-def _install_fake_crawl4ai(monkeypatch, *, arun=None, start=None):
+async def _raise_on_close():
+    raise RuntimeError("the browser refused to close")
+
+
+def _install_fake_crawl4ai(monkeypatch, *, arun=None, start=None, close=None):
     """Install a fake ``crawl4ai`` and count what crawl4ai logs as ``[INIT]``.
 
     ``init`` counts browser starts, which is exactly the log line the hung 100-case run
@@ -1081,6 +1085,8 @@ def _install_fake_crawl4ai(monkeypatch, *, arun=None, start=None):
         async def close(self):
             stats["close"] += 1
             self.started = False
+            if close is not None:
+                await close()
 
         async def __aenter__(self):
             return await self.start()
@@ -1212,6 +1218,28 @@ class TestBoundedFactCrawler:
         assert stats["close"] == 3
 
     @pytest.mark.anyio
+    async def test_recycling_every_fetch_restores_a_browser_per_url(
+        self, task, monkeypatch, scored_response
+    ):
+        """The escape hatch back to the pinned isolation: one fresh browser per URL."""
+        monkeypatch.setenv("DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER", "1")
+        stats = _install_fake_crawl4ai(monkeypatch)
+        _stub_judges_over_urls(monkeypatch, _urls(4))
+
+        await task.score_responses([scored_response])
+
+        assert (stats["fetch"], stats["init"], stats["close"]) == (4, 4, 4)
+
+    def test_default_page_timeout_matches_the_installed_crawl4ai(self):
+        """The semantics claim rests on this equality; crawl4ai is not pinned to a version."""
+        crawl4ai = pytest.importorskip("crawl4ai")
+
+        assert (
+            crawl4ai.CrawlerRunConfig().page_timeout
+            == deepresearch_bench.DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS_DEFAULT
+        )
+
+    @pytest.mark.anyio
     async def test_recycling_can_be_switched_off(self, task, monkeypatch, scored_response):
         monkeypatch.setenv("DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER", "0")
         stats = _install_fake_crawl4ai(monkeypatch)
@@ -1251,8 +1279,8 @@ class TestBoundedFactCrawler:
             deepresearch_bench._FACT_CRAWLER_SESSION.reset(token)
             await session.discard()
 
-        assert first.startswith("Error fetching webpage: timed out after")
-        assert second.startswith("Error fetching webpage: timed out after")
+        assert first.startswith("Error fetching webpage: page fetch timed out after")
+        assert second.startswith("Error fetching webpage: page fetch timed out after")
         assert deepresearch_bench.is_obvious_scrape_failure(first)
         assert scrape_failure_unknown_results(first, 2) == [
             {"idx": 0, "result": "unknown"},
@@ -1323,7 +1351,8 @@ class TestBoundedFactCrawler:
 
         page_text = await fetch_crawl4ai_page("https://example.test/page")
 
-        assert page_text.startswith("Error fetching webpage: timed out after")
+        # The message names the bound that fired, which is the browser's, not the fetch's.
+        assert page_text.startswith("Error fetching webpage: browser start timed out after")
         assert deepresearch_bench.is_obvious_scrape_failure(page_text)
 
     @pytest.mark.anyio
@@ -1389,6 +1418,83 @@ class TestBoundedFactCrawler:
         assert deepresearch_bench._FACT_CRAWLER_SESSION.get() is None
 
     @pytest.mark.anyio
+    async def test_fetch_that_ignores_cancellation_still_returns_on_time(self, monkeypatch):
+        """A deadline that waited for its own cancellation would not be a deadline."""
+        finished = asyncio.Event()
+
+        async def stubborn(_url, _config):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.2)
+                finished.set()
+                raise
+
+        monkeypatch.setattr(
+            deepresearch_bench, "DEEPRESEARCH_FACT_FETCH_TIMEOUT_MARGIN_SECONDS", 0.05
+        )
+        monkeypatch.setenv("DEEPRESEARCH_FACT_PAGE_TIMEOUT_MS", "1")
+        _install_fake_crawl4ai(monkeypatch, arun=stubborn)
+
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        page_text = await fetch_crawl4ai_page("https://example.test/stubborn")
+        elapsed = loop.time() - started
+
+        assert page_text.startswith("Error fetching webpage: page fetch timed out after")
+        assert elapsed < 0.15
+        assert not finished.is_set()
+        await asyncio.wait_for(finished.wait(), timeout=5)
+
+    @pytest.mark.anyio
+    async def test_close_failure_does_not_change_a_fetched_page(self, monkeypatch, caplog):
+        stats = _install_fake_crawl4ai(monkeypatch, close=_raise_on_close)
+
+        page_text = await fetch_crawl4ai_page("https://example.test/page")
+
+        assert "A valid source page" in page_text
+        assert not deepresearch_bench.is_obvious_scrape_failure(page_text)
+        assert stats["close"] == 1
+        assert "browser process may be left behind" in caplog.text
+
+    @pytest.mark.anyio
+    async def test_close_that_hangs_is_bounded(self, monkeypatch, caplog):
+        async def hang():
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(
+            deepresearch_bench, "DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS", 0.05
+        )
+        _install_fake_crawl4ai(monkeypatch, close=hang)
+
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        page_text = await fetch_crawl4ai_page("https://example.test/page")
+        elapsed = loop.time() - started
+
+        assert "A valid source page" in page_text
+        assert elapsed < 0.5
+        assert "browser process may be left behind" in caplog.text
+
+    @pytest.mark.anyio
+    async def test_discarding_a_replaced_browser_leaves_the_current_one_alone(self, monkeypatch):
+        stats = _install_fake_crawl4ai(monkeypatch)
+        session = deepresearch_bench._FactCrawlerSession()
+        crawler_cls = sys.modules["crawl4ai"].AsyncWebCrawler
+
+        stale = await session.acquire(crawler_cls)
+        await session.discard(stale)
+        current = await session.acquire(crawler_cls)
+
+        # A late timeout on the browser that was already dropped must not close its successor.
+        await session.discard(stale)
+
+        assert current is await session.acquire(crawler_cls)
+        assert (stats["init"], stats["close"]) == (2, 1)
+        await session.discard()
+        assert stats["close"] == 2
+
+    @pytest.mark.anyio
     async def test_skipping_fact_never_launches_a_browser(self, task, monkeypatch):
         instance = task.process_doc(_en_doc())
         assert instance is not None
@@ -1400,6 +1506,81 @@ class TestBoundedFactCrawler:
         await task.score_responses([response])
 
         assert (stats["init"], stats["fetch"]) == (0, 0)
+
+
+class TestFactJudgeDeadline:
+    """The judge is the other await FACT can stall on."""
+
+    def test_deadline_covers_the_client_retries(self, monkeypatch):
+        monkeypatch.delenv("DEEPRESEARCH_FACT_JUDGE_TIMEOUT_S", raising=False)
+        assert deepresearch_bench.fact_judge_deadline_seconds() == 600.0 * 3 + 30.0
+
+        monkeypatch.setenv("DEEPRESEARCH_FACT_JUDGE_TIMEOUT_S", "100")
+        assert deepresearch_bench.fact_judge_deadline_seconds() == 330.0
+
+    @pytest.mark.anyio
+    async def test_bounded_judge_gives_up_at_its_deadline(self):
+        async def hang(_prompt):
+            await asyncio.Event().wait()
+
+        judge = deepresearch_bench._bounded_judge_fn(hang, 0.05)
+
+        with pytest.raises(TimeoutError, match="FACT judge call timed out"):
+            await judge("grade this")
+
+    @pytest.mark.anyio
+    async def test_bounded_judge_passes_a_plain_call_through(self):
+        seen = []
+
+        async def judge_fn(prompt):
+            seen.append(prompt)
+            return "verdict"
+
+        judge = deepresearch_bench._bounded_judge_fn(judge_fn, 5.0)
+
+        assert await judge("grade this") == "verdict"
+        assert seen == ["grade this"]
+
+    @pytest.mark.anyio
+    async def test_hung_judge_cannot_stall_scoring(self, task, monkeypatch):
+        instance = task.process_doc(_en_doc())
+        assert instance is not None
+        response = _response(instance, "A report citing a source.")
+        race_payload = {
+            dimension: [
+                {
+                    "criterion": _criteria()["criterions"][dimension][0]["criterion"],
+                    "article_1_score": 8,
+                    "article_2_score": 2,
+                }
+            ]
+            for dimension in DEEPRESEARCH_DIMENSIONS
+        }
+
+        async def race_judge(_prompt):
+            return json.dumps(race_payload)
+
+        async def hung_fact_judge(_prompt):
+            await asyncio.Event().wait()
+
+        _install_fake_crawl4ai(monkeypatch)
+        monkeypatch.setattr(
+            deepresearch_bench, "build_deepresearch_race_judge_fn", lambda: race_judge
+        )
+        monkeypatch.setattr(
+            deepresearch_bench, "build_deepresearch_fact_judge_fn", lambda: hung_fact_judge
+        )
+        monkeypatch.setattr(deepresearch_bench, "fact_judge_deadline_seconds", lambda: 0.05)
+        monkeypatch.setattr(deepresearch_bench.asyncio, "sleep", _no_sleep)
+
+        scored = await task.score_responses([response])
+
+        # The extraction ladder sees three failed attempts and the instance keeps its zeros,
+        # which is what any other judge failure does; nothing waits on the hung call.
+        assert scored == [response]
+        assert response.scores["race_overall"] == pytest.approx(0.8)
+        assert response.scores["fact_has_citations"] == 0.0
+        assert response.scores["fact_avg_citations"] == 0.0
 
 
 class TestFactJudgeTimeout:

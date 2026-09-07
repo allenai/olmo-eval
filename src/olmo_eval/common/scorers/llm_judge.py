@@ -112,6 +112,24 @@ def _log_judge_usage(scorer_name: str, model: str, response: Any) -> None:
     )
 
 
+# The OpenAI client's own connect timeout, kept when a caller pins the read timeout.
+OPENAI_CONNECT_TIMEOUT_SECONDS = 5.0
+
+
+def _request_timeout(seconds: float) -> Any:
+    """Shape a judge timeout the way the OpenAI client shapes its own default.
+
+    The client's default is ``httpx.Timeout(600, connect=5.0)``. A bare float would set every
+    phase, connect included, so pinning the read bound would silently raise the connect bound
+    from five seconds to that value.
+    """
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover - httpx ships with the openai client
+        return seconds
+    return httpx.Timeout(seconds, connect=OPENAI_CONNECT_TIMEOUT_SECONDS)
+
+
 def build_openai_judge_fn(
     model: str = "gpt-4o-mini",
     scorer_name: str = "LLMJudgeScorer",
@@ -132,9 +150,11 @@ def build_openai_judge_fn(
         temperature: Sampling temperature for the judge.
         reasoning_effort: Optional reasoning effort ("minimal"/"low"/"medium"/"high")
             for reasoning models; dropped automatically if the model rejects it.
-        timeout: Optional per-request timeout in seconds for the OpenAI client. Left unset,
-            the client keeps its own default; a scorer that cannot afford an unbounded judge
-            call pins the bound it needs.
+        timeout: Optional per-request read timeout in seconds for the OpenAI client. Left
+            unset, the client keeps its own default; a scorer that cannot afford an unbounded
+            judge call pins the bound it needs. Connect keeps the client's own short timeout:
+            a bare float would apply the read bound to connect too, which would make a dead
+            endpoint stall for the read timeout instead of failing in seconds.
 
     Returns:
         An async judge function that validates and calls OpenAI.
@@ -168,7 +188,7 @@ def build_openai_judge_fn(
 
             client_kwargs: dict[str, Any] = {"api_key": api_key}
             if timeout is not None:
-                client_kwargs["timeout"] = timeout
+                client_kwargs["timeout"] = _request_timeout(timeout)
             _client.append(AsyncOpenAI(**client_kwargs))
 
         messages: list[dict[str, str]] = []

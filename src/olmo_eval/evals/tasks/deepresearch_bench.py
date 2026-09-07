@@ -70,9 +70,14 @@ DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS = 120.0
 # Fetches per browser before it is recycled. One browser for a whole run is the point of the
 # shared session; recycling keeps a long run out of any leak a single Chromium accumulates.
 DEEPRESEARCH_FACT_CRAWLER_RECYCLE_AFTER_DEFAULT = 200
-# Per-request timeout for the FACT judge client. 600 s is the OpenAI client's own default,
-# pinned here so the scorer's bound cannot move when that default does.
+# Per-request timeout for the FACT judge client. 600 s is the OpenAI client's own read default,
+# pinned here so the scorer's bound cannot move when that default does; the connect timeout stays
+# at the client's 5 s rather than inheriting this one.
 DEEPRESEARCH_FACT_JUDGE_TIMEOUT_SECONDS_DEFAULT = 600.0
+# HTTP attempts the OpenAI client makes per call (one try plus its two retries), used to turn the
+# per-request timeout into a wall-clock ceiling for a whole judge call.
+DEEPRESEARCH_FACT_JUDGE_ATTEMPTS_PER_CALL = 3
+DEEPRESEARCH_FACT_JUDGE_DEADLINE_MARGIN_SECONDS = 30.0
 DEEPRESEARCH_DIMENSIONS = (
     "comprehensiveness",
     "insight",
@@ -807,34 +812,49 @@ def scrape_failure_unknown_results(page_text: str, fact_count: int) -> list[dict
     return _unknown_results(fact_count) if is_obvious_scrape_failure(page_text) else None
 
 
+_WARNED_ENV_VARIABLES: set[str] = set()
+
+
+def _warn_once(name: str, message: str, *args: Any) -> None:
+    """Warn about one unusable variable once, not once per session.
+
+    Each scored response opens its own session in the async runner, so a junk value would
+    otherwise print a warning per case rather than a warning per run.
+    """
+    if name in _WARNED_ENV_VARIABLES:
+        return
+    _WARNED_ENV_VARIABLES.add(name)
+    logger.warning(message, *args)
+
+
 def _env_int(name: str, default: int, *, minimum: int) -> int:
-    """Read a non-negative integer setting, falling back to the default when unusable."""
+    """Read an integer setting of at least ``minimum``, falling back when it is unusable."""
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
     try:
         value = int(raw)
     except ValueError:
-        logger.warning("Ignoring %s=%r: not an integer; using %d.", name, raw, default)
+        _warn_once(name, "Ignoring %s=%r: not an integer; using %d.", name, raw, default)
         return default
     if value < minimum:
-        logger.warning("Ignoring %s=%r: below %d; using %d.", name, raw, minimum, default)
+        _warn_once(name, "Ignoring %s=%r: below %d; using %d.", name, raw, minimum, default)
         return default
     return value
 
 
 def _env_float(name: str, default: float, *, minimum: float) -> float:
-    """Read a positive float setting, falling back to the default when unusable."""
+    """Read a float setting of at least ``minimum``, falling back when it is unusable."""
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
     try:
         value = float(raw)
     except ValueError:
-        logger.warning("Ignoring %s=%r: not a number; using %s.", name, raw, default)
+        _warn_once(name, "Ignoring %s=%r: not a number; using %s.", name, raw, default)
         return default
     if value < minimum:
-        logger.warning("Ignoring %s=%r: below %s; using %s.", name, raw, minimum, default)
+        _warn_once(name, "Ignoring %s=%r: below %s; using %s.", name, raw, minimum, default)
         return default
     return value
 
@@ -866,16 +886,56 @@ def fact_judge_timeout_seconds() -> float:
     )
 
 
-async def _close_crawler_quietly(crawler: Any | None) -> None:
-    """Close a browser without letting teardown failures reach the scoring loop."""
+def _drop_abandoned_result(task: asyncio.Future) -> None:
+    """Retrieve the outcome of a task nobody is waiting for, so asyncio stays quiet."""
+    if not task.cancelled():
+        task.exception()
+
+
+async def with_deadline(coro: Any, seconds: float, description: str) -> Any:
+    """Await a coroutine under a deadline that does not itself wait for the cancellation.
+
+    ``asyncio.wait_for`` cancels the call and then waits for the cancellation to complete, so a
+    call that swallows cancellation or hangs during its own cleanup keeps its caller waiting for
+    as long as it likes. That is the failure this scorer exists to rule out, so the overrun call
+    is cancelled and abandoned instead, and the caller returns on time.
+
+    The one thing no deadline in a single event loop can preempt is synchronous work: while a
+    library parses a page on the loop thread, no timer runs.
+
+    Raises:
+        TimeoutError: if the call does not finish within ``seconds``.
+    """
+    task = asyncio.ensure_future(coro)
+    done, _pending = await asyncio.wait({task}, timeout=seconds)
+    if task in done:
+        return task.result()
+    task.cancel()
+    task.add_done_callback(_drop_abandoned_result)
+    raise TimeoutError(f"{description} timed out after {seconds:.1f}s")
+
+
+async def _close_crawler_quietly(crawler: Any) -> None:
+    """Close a browser without letting teardown failures reach the scoring loop.
+
+    A close that fails or overruns leaves a Chromium nobody owns, which is logged and then
+    ignored: the alternative, letting teardown decide a fetched page's facts, is how the pinned
+    code turned a successful fetch into ``unknown`` whenever a browser died on the way out.
+    """
     if crawler is None:
         return
     try:
-        await asyncio.wait_for(
-            crawler.close(), timeout=DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS
+        await with_deadline(
+            crawler.close(),
+            DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS,
+            "browser close",
         )
     except Exception:
-        logger.warning("Closing the DeepResearch FACT browser failed.", exc_info=True)
+        logger.warning(
+            "Closing the DeepResearch Bench FACT browser failed; a browser process may be "
+            "left behind.",
+            exc_info=True,
+        )
 
 
 class _FactCrawlerSession:
@@ -904,9 +964,10 @@ class _FactCrawlerSession:
             if self._crawler is None:
                 crawler = crawler_cls()
                 try:
-                    await asyncio.wait_for(
+                    await with_deadline(
                         crawler.start(),
-                        timeout=DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS,
+                        DEEPRESEARCH_FACT_BROWSER_LIFECYCLE_TIMEOUT_SECONDS,
+                        "browser start",
                     )
                 except BaseException:
                     await _close_crawler_quietly(crawler)
@@ -915,21 +976,31 @@ class _FactCrawlerSession:
                 self._fetches = 0
             return self._crawler
 
-    async def note_fetch(self) -> None:
+    async def note_fetch(self, crawler: Any) -> None:
         """Count a completed fetch and recycle the browser once the cap is reached."""
-        self._fetches += 1
-        if self._recycle_after and self._fetches >= self._recycle_after:
-            logger.info(
-                "Recycling the DeepResearch Bench FACT browser after %d fetches.", self._fetches
-            )
-            await self.discard()
-
-    async def discard(self) -> None:
-        """Drop the current browser; the next fetch launches a fresh one."""
         async with self._lock:
-            crawler, self._crawler = self._crawler, None
+            if self._crawler is not crawler:
+                return
+            self._fetches += 1
+            recycle = bool(self._recycle_after) and self._fetches >= self._recycle_after
+            fetches = self._fetches
+        if recycle:
+            logger.info("Recycling the DeepResearch Bench FACT browser after %d fetches.", fetches)
+            await self.discard(crawler)
+
+    async def discard(self, crawler: Any = None) -> None:
+        """Drop the browser; the next fetch launches a fresh one.
+
+        A caller that names the browser it wants dropped drops only that one: the scoring loop is
+        sequential today, but if it is ever parallelised a late timeout must not close the
+        replacement browser its neighbours are already fetching on.
+        """
+        async with self._lock:
+            if crawler is not None and self._crawler is not crawler:
+                return
+            current, self._crawler = self._crawler, None
             self._fetches = 0
-        await _close_crawler_quietly(crawler)
+        await _close_crawler_quietly(current)
 
     async def __aenter__(self) -> _FactCrawlerSession:
         return self
@@ -992,28 +1063,26 @@ async def _fetch_page_with_session(
     hard_deadline = (
         session.page_timeout_ms / 1000.0 + DEEPRESEARCH_FACT_FETCH_TIMEOUT_MARGIN_SECONDS
     )
+    crawler = None
     try:
         crawler = await session.acquire(crawler_cls)
-        result = await asyncio.wait_for(
+        result = await with_deadline(
             crawler.arun(url, config=run_config_cls(page_timeout=session.page_timeout_ms)),
-            timeout=hard_deadline,
-        )
-    except TimeoutError:
-        # The browser is mid-navigation on a page that will not finish; drop it rather than
-        # hand a wedged Chromium to the next URL.
-        await session.discard()
-        logger.warning(
-            "crawl4ai FACT fetch exceeded %.1fs for %r; its facts count as unknown.",
             hard_deadline,
-            url,
+            "page fetch",
         )
-        return f"Error fetching webpage: timed out after {hard_deadline:.1f}s"
+    except TimeoutError as exc:
+        # The browser is mid-navigation on a page that will not finish, and the abandoned call
+        # may still be holding it; drop it rather than hand a wedged Chromium to the next URL.
+        await session.discard(crawler)
+        logger.warning("crawl4ai FACT fetch for %r gave up: %s", url, exc)
+        return f"Error fetching webpage: {exc}"
     except Exception as exc:
-        await session.discard()
+        await session.discard(crawler)
         logger.exception("crawl4ai FACT fetch failed for %r", url)
         return f"Error fetching webpage: {exc}"
 
-    await session.note_fetch()
+    await session.note_fetch(crawler)
 
     if not getattr(result, "success", False):
         error_message = getattr(result, "error_message", None)
@@ -1071,11 +1140,43 @@ def build_deepresearch_race_judge_fn() -> JudgeFn:
     )
 
 
+def fact_judge_deadline_seconds() -> float:
+    """Wall-clock ceiling for one FACT judge call, retries included.
+
+    The request timeout bounds one HTTP attempt, and the OpenAI client retries twice on its own,
+    so the call itself is bounded only by the sum. This is that sum plus a margin: it can only
+    fire where the pinned code would already have been stalled for half an hour.
+    """
+    return (
+        fact_judge_timeout_seconds() * DEEPRESEARCH_FACT_JUDGE_ATTEMPTS_PER_CALL
+        + DEEPRESEARCH_FACT_JUDGE_DEADLINE_MARGIN_SECONDS
+    )
+
+
+def _bounded_judge_fn(judge_fn: JudgeFn, deadline: float) -> JudgeFn:
+    """Wrap a judge so one call cannot outlive its deadline.
+
+    A judge that overruns raises, the caller's retry ladder sees it as a failed attempt, and the
+    facts it was judging end up ``unknown`` exactly as any other judge failure does.
+    """
+
+    async def bounded(prompt: str, *, system_prompt: str | None = None) -> str:
+        call = (
+            judge_fn(prompt)
+            if system_prompt is None
+            else judge_fn(prompt, system_prompt=system_prompt)
+        )
+        return await with_deadline(call, deadline, "FACT judge call")
+
+    return bounded
+
+
 def build_deepresearch_fact_judge_fn() -> JudgeFn:
     """Build the FACT judge with low effort unless a spec suffix overrides it.
 
-    Unlike the RACE judge this one carries an explicit request timeout: FACT judges every
-    citation of every instance, so an unbounded call here stalls the whole scoring run.
+    Unlike the RACE judge this one carries an explicit per-request timeout: FACT judges every
+    citation of every instance, so a judge call that never returns stalls the scoring run just
+    as a fetch does. The whole call is bounded too, by ``_bounded_judge_fn`` where FACT uses it.
     """
     return _build_judge_fn(
         os.getenv("OLMO_EVAL_JUDGE", DEEPRESEARCH_FACT_DEFAULT_JUDGE_SPEC),
@@ -1397,7 +1498,9 @@ class DeepResearchBench(Task):
         """Run RACE and FACT, retaining every instance in aggregate denominators."""
         self._extract_answers(responses)
         race_judge = build_deepresearch_race_judge_fn()
-        fact_judge = build_deepresearch_fact_judge_fn()
+        fact_judge = _bounded_judge_fn(
+            build_deepresearch_fact_judge_fn(), fact_judge_deadline_seconds()
+        )
 
         race_failures = 0
         fact_skipped = 0
