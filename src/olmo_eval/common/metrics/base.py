@@ -879,6 +879,47 @@ class SubsetAccuracyMetric(Metric):
 
 
 @dataclass(frozen=True, slots=True)
+class MacroSubsetAccuracyMetric(Metric):
+    """
+    Unweighted mean of per-subset accuracies.
+
+    Every subset contributes equally regardless of how many instances it holds,
+    so a small subset is not diluted by a larger one. Subsets with no matching
+    instances are skipped rather than counted as zero.
+    """
+
+    name: str = "macro_accuracy"
+    scorer: type[Scorer] | Scorer = SafetyScorer
+    # Subset names, each formatted as ``metadata_key__value``.
+    subsets: tuple[str, ...] = ()
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        scorer_name = self.scorer().name
+
+        subset_means: list[float] = []
+        for subset_name in self.subsets:
+            subset, cat = subset_name.split("__")
+            scores = [
+                r.scores.get(scorer_name, 0.0)
+                for r in responses
+                if r.instance.metadata.get(subset) == cat
+            ]
+            if scores:
+                subset_means.append(sum(scores) / len(scores))
+
+        return sum(subset_means) / len(subset_means) if subset_means else 0.0
+
+    def compute_instance(self, response: Response) -> float | None:
+        """A macro average has no per-instance equivalent."""
+        return None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True, slots=True)
 class SafetyErrorMetric(Metric):
     """
     Counts the number of parsing errors from LLM-as-a-judge

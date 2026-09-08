@@ -134,6 +134,11 @@ class TaskResult(Base):
     num_instances: Mapped[int | None] = mapped_column(Integer)
     primary_metric: Mapped[str | None] = mapped_column(String(100))  # "metric_name:scorer_name"
 
+    # Failure accounting: instances_processed is saved plus hard-failed
+    instances_processed: Mapped[int | None] = mapped_column(Integer)
+    instances_failed: Mapped[int | None] = mapped_column(Integer)
+    error_summary: Mapped[str | None] = mapped_column(Text)
+
     # S3 keys for detailed task data
     s3_metrics_key: Mapped[str | None] = mapped_column(String(512))
     s3_predictions_key: Mapped[str | None] = mapped_column(String(512))

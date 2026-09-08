@@ -11,6 +11,7 @@ from .base import (
     LogprobPerCharMCAccuracyMetric,
     LogprobPerTokenMCAccuracyMetric,
     LogprobUncondMCAccuracyMetric,
+    MacroSubsetAccuracyMetric,
     MeanPerplexityMetric,
     Metric,
     PassAtKMetric,
@@ -26,6 +27,10 @@ from .ifeval import (
     IFEvalInstStrictAccuracy,
     IFEvalPromptLooseAccuracy,
     IFEvalPromptStrictAccuracy,
+)
+from .ngram_copying import (
+    NGRAM_COPYING_K_VALUES,
+    NGramCopyingBPBMetricByteAvg,
 )
 
 __all__ = [
@@ -45,6 +50,8 @@ __all__ = [
     "LogprobUncondMCAccuracyMetric",
     "MeanPerplexityMetric",
     "Metric",
+    "NGRAM_COPYING_K_VALUES",
+    "NGramCopyingBPBMetricByteAvg",
     "PassAtKMetric",
     "PassPowKMetric",
     "RecallMetric",
@@ -52,4 +59,5 @@ __all__ = [
     "ToolAccuracyMetric",
     "SubsetAccuracyMetric",
     "SafetyErrorMetric",
+    "MacroSubsetAccuracyMetric",
 ]

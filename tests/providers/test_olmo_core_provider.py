@@ -353,6 +353,26 @@ def test_generate_uncapped_fills_context(
     assert call["max_length"] == 32
 
 
+def test_describe_request_handles_uncapped_max_tokens(
+    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+) -> None:
+    """The trace path never resolves ``max_tokens``, so it must tolerate None.
+
+    ``describe_request`` is called for every request before generation, so
+    raising here would fail an uncapped task before inference starts.
+    """
+    provider, _, _ = fake_provider
+
+    trace = provider.describe_request(
+        LMRequest(request_type=RequestType.COMPLETION, prompt="Prompt"),
+        SamplingParams(max_tokens=None),
+    )
+
+    assert trace is not None
+    assert trace["provider"] == "OlmoCoreProvider"
+    assert trace["generation_kwargs"]["use_cache"] is True
+
+
 def test_generate_left_truncates_to_leave_completion_room(
     fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
 ) -> None:

@@ -1,6 +1,6 @@
 """IFEval OOD: out-of-distribution instruction-following slice of IFBench.
 
-Dataset: ``allenai/IFBench_test2`` (300 prompts), each carrying a list of
+Dataset: ``allenai/IFBench_test`` (300 prompts), each carrying a list of
 instruction IDs and per-instruction kwargs. Verifiers come from the vendored
 registry in :mod:`olmo_eval.common.scorers.ifeval_deps`.
 
@@ -35,7 +35,7 @@ _PRIMARY_METRIC = IFEvalPromptLooseAccuracy()
 
 @register("ifeval_ood")
 class IFEvalOOD(Task):
-    data_source = DataSource(path="allenai/IFBench_test2", split="train")
+    data_source = DataSource(path="allenai/IFBench_test", split="train")
     split = Split.TRAIN
     metrics = (
         IFEvalPromptStrictAccuracy(),
