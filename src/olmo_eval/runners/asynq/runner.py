@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+import tqdm
 from rich.console import Console
 
 from olmo_eval.common.configs import expand_tasks
@@ -911,6 +912,11 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         self,
     ) -> tuple[list[str], dict[str, TaskTracker], list[QueueItem]]:
         """Prepare all tasks and return tracking data structures."""
+        # tqdm.get_lock() does an unguarded check-then-set on a class attribute, so
+        # the worker pool below can race it and leave a thread reading tqdm._lock
+        # before it exists. Construct it here, on the one thread that is running.
+        tqdm.tqdm.get_lock()
+
         expanded_tasks = expand_tasks(self.task_specs)
 
         if not expanded_tasks:
