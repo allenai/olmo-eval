@@ -12,14 +12,30 @@ question is either a **Single Answer** (one entity/value) or a **Set Answer**
 test whether an agent can plan and execute a search process that returns a
 *complete and precise* answer set, not just a single plausible fact.
 
+There are two registered tasks, sharing the same dataset and data-loading
+code (`DeepSearchQABase` in `deepsearchqa.py`) but with different generation
+prompts and grading mechanics — see "How grading works" below:
+
+- **`deepsearchqa`** — a discrete `FINAL ANSWER: ...` line, matched against
+  the gold item set by index. This is the default; it's easier to validate
+  programmatically (see below) but is a bigger departure from the official
+  methodology.
+- **`deepsearchqa_official_judge`** — mirrors the official paper prompt
+  (Appendix A): the judge grades the model's raw free-form response
+  directly, no special output format required.
+
 ## Files
 
-- [`deepsearchqa.py`](deepsearchqa.py) — the task implementation (this file's
-  companion module).
+- [`deepsearchqa.py`](deepsearchqa.py) — dataset loading (`DeepSearchQABase`)
+  and the `deepsearchqa` task implementation.
+- [`deepsearchqa_official_judge.py`](deepsearchqa_official_judge.py) — the
+  `deepsearchqa_official_judge` task implementation (imports `DeepSearchQABase`
+  from `deepsearchqa.py`).
 - [`../../../../tests/evals/tasks/test_deepsearchqa.py`](../../../../tests/evals/tasks/test_deepsearchqa.py)
-  — unit tests for parsing, scoring, and the registered task/variant.
+  and [`../../../../tests/evals/tasks/test_deepsearchqa_official_judge.py`](../../../../tests/evals/tasks/test_deepsearchqa_official_judge.py)
+  — unit tests for parsing, scoring, and the registered tasks/variants.
 
-No other files were modified; the task is picked up automatically by the
+No other files were modified; both tasks are picked up automatically by the
 package's task auto-discovery (`src/olmo_eval/evals/tasks/__init__.py`), the
 same mechanism every other task in this directory relies on.
 
@@ -43,6 +59,19 @@ same mechanism every other task in this directory relies on.
 
 ## How grading works
 
+**The official grader is published.** The technical report
+([PDF](https://storage.googleapis.com/deepmind-media/DeepSearchQA/DeepSearchQA_benchmark_paper.pdf))
+grades with Gemini 2.5 Flash, zero-shot, using the exact prompt printed in
+Appendix A — it is not an unpublished/proprietary prompt. `deepsearchqa_official_judge`
+uses that prompt verbatim; `deepsearchqa` uses a different, independently
+written mechanic (below). Both deviate from the official leaderboard in the
+same unavoidable way: olmo-eval's judge infrastructure (`build_openai_judge_fn`)
+is OpenAI-only, so both grade with an OpenAI model instead of Gemini (default
+`gpt-5.5:medium`, overridable — see below), so absolute numbers from either
+task are not directly comparable to the public Kaggle leaderboard.
+
+### `deepsearchqa`: discrete extraction + index matching
+
 The model is prompted to end its response with:
 
 ```
@@ -53,8 +82,9 @@ Only the text after the last `FINAL ANSWER` marker is graded (the rest of the
 response — search steps, reasoning, etc. — is not scored directly). That line
 is split into a predicted item set `S` and compared against the gold item set
 `G` with an LLM judge that decides semantic equivalence per item (so
-"NZ" ≟ "New Zealand" counts as a match). From the judge's matched indices the
-task computes, per instance:
+"NZ" ≟ "New Zealand" counts as a match), returning two lists of matched
+indices (one per side). From those matched counts the task computes, per
+instance:
 
 | Metric                    | Formula                    |
 |----------------------------|----------------------------|
@@ -63,13 +93,30 @@ task computes, per instance:
 | `deepsearchqa_f1`          | harmonic mean of precision/recall (**primary metric**) |
 | `deepsearchqa_exact_match` | `1.0` iff the item sets match exactly, else `0.0` |
 
-**Deviation from the official benchmark**: the paper/starter notebook grade
-with a Gemini 2.5 Flash autorater using an unpublished prompt. olmo-eval's
-judge infrastructure (`build_openai_judge_fn`) is OpenAI-only, so this task
-uses an independently written judge prompt against an OpenAI model instead
-(default `gpt-5.5:medium`, overridable — see below). The metric *definitions*
-(precision/recall/F1 over item sets) match the paper; absolute numbers are
-not directly comparable to the public Kaggle leaderboard.
+This mechanic is easier to validate programmatically than the official one:
+checking a judge-returned index is valid is just `0 <= i < N` for an `N` you
+already know, with no need to reconcile the judge's own text against your
+source data. The trade-off is that it requires the model to produce a
+specific output format, and it's a bigger departure from the paper's
+free-form grading than "different judge model" alone.
+
+### `deepsearchqa_official_judge`: free-form response, official prompt
+
+No special output format is required — the model just answers the question,
+and the judge grades the full raw response directly (verbatim Appendix A
+prompt). The judge returns, per gold item, a boolean ("was this item found in
+the response") plus a free list of "Excessive Answers" (items claimed that
+aren't part of the gold answer). The task counts how many gold items were
+marked found (capped at the gold count) and how many excessive answers were
+listed, then computes the same precision/recall/F1/exact-match formulas under
+the `deepsearchqa_official_*` metric names.
+
+Note this task does **not** attempt to reconcile the judge's per-item keys
+back to the exact `gold_items` strings (an LLM won't reliably echo them
+byte-for-byte) — it only counts `True` values, which is enough to compute the
+aggregate metrics without needing per-item traceability. If you need to know
+*which* specific gold item was missed, use `deepsearchqa`'s index-matching
+metadata instead.
 
 This benchmark is about live information-seeking rather than parametric
 knowledge, so it is intended to be evaluated with search tools attached via
@@ -90,6 +137,9 @@ uv run olmo-eval run -m llama3.1-8b -t deepsearchqa
 
 # Quick iteration on a 50-instance subset
 uv run olmo-eval run -m llama3.1-8b -t deepsearchqa:mini --harness dr_tulu
+
+# The official-prompt variant works the same way; swap the task name
+uv run olmo-eval run -m llama3.1-8b -t deepsearchqa_official_judge:mini --harness dr_tulu
 
 # Preview instances/prompts without calling a model or the judge
 uv run olmo-eval task inspect deepsearchqa -n 3 --request
