@@ -77,6 +77,11 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
             if sample_metrics:
                 out_data["sample_metrics"] = sample_metrics
 
+            # Full text before strip_thinking removed the reasoning trace, so the
+            # trace length and termination can be audited from the predictions file.
+            if "original_text" in meta:
+                out_data["original_text"] = meta["original_text"]
+
             # Include execution result if present
             if "execution_result" in meta:
                 out_data["execution_result"] = meta["execution_result"]
