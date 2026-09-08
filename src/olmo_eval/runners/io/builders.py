@@ -82,6 +82,8 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 out_data["execution_result"] = meta["execution_result"]
             if "scoring_errors" in meta:
                 out_data["scoring_errors"] = meta["scoring_errors"]
+            if "judge_result" in meta:
+                out_data["judge_result"] = meta["judge_result"]
 
             model_output.append(out_data)
 

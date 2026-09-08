@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from olmo_eval.common.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class ChildAverageResult:
@@ -60,6 +64,32 @@ def _extract_primary_score(
     if not primary_metric_key:
         return None
     return extract_score_from_metrics(task_data.get("metrics", {}), primary_metric_key)
+
+
+def _log_tasks_excluded_from_suite(
+    suite_name: str,
+    task_specs: list[str],
+    task_results: dict[str, dict[str, Any]],
+) -> None:
+    """Name the failed tasks that a suite average leaves out.
+
+    A failed task publishes no metrics, so it drops out of the average on its
+    own. That is deliberate - a score computed on a subset of instances must not
+    pollute a suite average - but it silently changes what the average covers, so
+    say it once per excluded task instead of letting the reader infer it from
+    num_tasks.
+    """
+    for spec in task_specs:
+        task_data = task_results.get(spec)
+        if task_data is None or task_data.get("metrics"):
+            continue
+        error = task_data.get("error")
+        if not error:
+            continue
+        logger.warning(
+            f"Suite {suite_name}: excluding failed task {spec} from the aggregate "
+            f"({error}). The suite average covers the remaining tasks only."
+        )
 
 
 def _compute_child_average(
@@ -182,6 +212,12 @@ def compute_suite_aggregations(
         suite = get_suite(base_spec)
         if suite.aggregation == AggregationStrategy.NONE:
             continue
+
+        _log_tasks_excluded_from_suite(
+            spec,
+            [f"{task_spec}{priority_suffix}" for task_spec in suite.expand()],
+            task_results,
+        )
 
         if suite.aggregation == AggregationStrategy.AVERAGE_OF_AVERAGES:
             # Average of averages: each child (task or nested suite) gets equal weight

@@ -561,6 +561,28 @@ class TestBuildCommandWithTaskPackages:
         task_pos = install_cmd.find("uv pip install 'task-dep==1.0'")
         assert provider_pos < task_pos
 
+    def test_cuda_constraints_exclude_torch_companions_and_cutlass(self):
+        """Only Torch itself and the CUDA packages are pinned to the base image.
+
+        Provider releases pin torchvision/torchaudio alongside their Torch
+        generation, and vLLM pins CUTLASS DSL independently of Torch's CUDA
+        package set, so neither may be frozen to the image's build.
+        """
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=[],
+            env_exports=None,
+            provider_packages=["vllm==0.14.0"],
+        )
+
+        assert (
+            "uv pip freeze -q | grep -E '^(torch(==| @ )|nvidia-)' "
+            "| grep -vE '^nvidia-cutlass-dsl' > /tmp/cuda-constraints.txt"
+        ) in install_cmd
+        assert "grep -E '^(torch|nvidia-)' > /tmp/cuda-constraints.txt" not in install_cmd
+
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""
         from olmo_eval.launch import BeakerLauncher

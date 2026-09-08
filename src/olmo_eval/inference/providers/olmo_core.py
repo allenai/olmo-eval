@@ -381,7 +381,10 @@ class OlmoCoreProvider(InferenceProvider):
         return input_ids
 
     def _build_generation_kwargs(self, params: SamplingParams) -> dict[str, object]:
-        if params.max_tokens <= 0:
+        # ``max_tokens=None`` means "generate to the context limit"; the
+        # generation path resolves it per prompt via ``_resolve_max_tokens``,
+        # and the request-trace path never resolves it at all.
+        if params.max_tokens is not None and params.max_tokens <= 0:
             raise ValueError("OlmoCoreProvider requires sampling max_tokens > 0")
         if params.num_samples <= 0:
             raise ValueError("OlmoCoreProvider requires sampling num_samples > 0")

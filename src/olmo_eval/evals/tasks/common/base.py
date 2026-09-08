@@ -114,6 +114,7 @@ class OutputScoreAggregation(StrEnum):
 
     MAX = "max"
     FIRST = "first"
+    MEAN = "mean"
 
 
 @hide_unset()
@@ -171,6 +172,12 @@ class TaskConfig:
     #: Env-var names this task needs at runtime (e.g. an LLM-judge API key). The
     #: beaker launcher mounts each as the user-scoped secret ``{user}_{NAME}``.
     required_secrets: tuple[str, ...] = ()
+
+    # LLM-as-judge configuration. These stay optional so adding them does not
+    # perturb hashes for tasks that do not use a judge.
+    judge_model: str | None = None
+    judge_reasoning_effort: str | None = None
+    judge_max_tokens: int | None = None
 
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
@@ -266,7 +273,7 @@ class TaskConfig:
                 return pm.to_dict()
             return str(pm)
 
-        return {
+        serialized = {
             "name": self.name,
             "data_source": serialize_data_source(self.data_source),
             "fewshot_source": serialize_data_source(self.fewshot_source),
@@ -284,6 +291,22 @@ class TaskConfig:
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
             "dependencies": self.dependencies,
         }
+        if any(
+            value is not None
+            for value in (
+                self.judge_model,
+                self.judge_reasoning_effort,
+                self.judge_max_tokens,
+            )
+        ):
+            serialized.update(
+                {
+                    "judge_model": self.judge_model,
+                    "judge_reasoning_effort": self.judge_reasoning_effort,
+                    "judge_max_tokens": self.judge_max_tokens,
+                }
+            )
+        return serialized
 
     def get_primary_metric(self) -> Metric | None:
         """Get the effective primary metric for this task.
@@ -848,6 +871,8 @@ class Task(ABC):
             return max(ordered_scores)
         if aggregation == OutputScoreAggregation.FIRST:
             return ordered_scores[0]
+        if aggregation == OutputScoreAggregation.MEAN:
+            return sum(ordered_scores) / len(ordered_scores)
         raise ValueError(f"Unsupported output_score_aggregation: {aggregation}")
 
     def _expand_multi_output_responses(self, responses: Sequence[Response]) -> list[Response]:

@@ -42,6 +42,24 @@ def test_build_predictions_includes_scoring_errors() -> None:
     assert "is_greedy" not in predictions[0]["model_output"][0]
 
 
+def test_build_predictions_includes_per_output_judge_result() -> None:
+    judge_result = {
+        "parsed_outcome": None,
+        "parse_error": True,
+        "raw_judge_response": "unparseable",
+    }
+    response = Response(
+        instance=Instance(question="Q", gold_answer="A"),
+        request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q"),
+        outputs=[LMOutput(text="out", metadata={"judge_result": judge_result})],
+        scores={},
+    )
+
+    output = build_predictions([response])[0]["model_output"][0]
+
+    assert output["judge_result"] == judge_result
+
+
 def test_build_predictions_includes_sample_metrics_for_multiple_outputs() -> None:
     response = Response(
         instance=Instance(question="Q", gold_answer="A"),
