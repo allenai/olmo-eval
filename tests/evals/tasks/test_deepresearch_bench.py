@@ -1381,7 +1381,7 @@ class TestBoundedFactCrawler:
         assert stats["init"] == 2
 
     @pytest.mark.anyio
-    async def test_failed_result_keeps_the_browser(self, monkeypatch):
+    async def test_explicit_http_failure_keeps_the_browser(self, monkeypatch):
         async def arun(_url, _config):
             return _FakeCrawlResult(success=False)
 
@@ -1607,7 +1607,15 @@ class TestFactJudgeTimeout:
         assert [call["timeout"] for call in captured] == [None, 600.0]
 
     @pytest.mark.parametrize(
-        ("env_value", "expected"), [("120", 120.0), ("banana", 600.0), ("0", 600.0)]
+        ("env_value", "expected"),
+        [
+            ("120", 120.0),
+            ("banana", 600.0),
+            ("0", 600.0),
+            ("nan", 600.0),
+            ("inf", 600.0),
+            ("-inf", 600.0),
+        ],
     )
     def test_fact_judge_timeout_comes_from_the_environment(self, monkeypatch, env_value, expected):
         monkeypatch.setenv("DEEPRESEARCH_FACT_JUDGE_TIMEOUT_S", env_value)
@@ -1616,3 +1624,142 @@ class TestFactJudgeTimeout:
         build_deepresearch_fact_judge_fn()
 
         assert captured[0]["timeout"] == expected
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "error,status",
+    [
+        ("TargetClosedError: Target page, context or browser has been closed", None),
+        ("Browser context is closed", 403),
+        ("Connection closed while reading from the driver", 200),
+        ("Page.goto: net::ERR_CONNECTION_RESET", None),
+        ("Navigation timed out", None),
+        (None, None),
+    ],
+)
+async def test_unsuccessful_broken_browser_result_recovers(monkeypatch, error, status):
+    stats = None
+
+    async def arun(url, _config):
+        # The original browser stays broken for every URL; only replacement recovers.
+        if stats["init"] == 1:
+            result = _FakeCrawlResult(success=False)
+            result.error_message, result.status_code = error, status
+            return result
+        return _FakeCrawlResult(f"A valid source page for {url}")
+
+    stats = _install_fake_crawl4ai(monkeypatch, arun=arun)
+    async with deepresearch_bench._FactCrawlerSession() as session:
+        token = deepresearch_bench._FACT_CRAWLER_SESSION.set(session)
+        try:
+            first = await fetch_crawl4ai_page("https://example.test/broken")
+            assert deepresearch_bench.is_obvious_scrape_failure(first)
+            assert session._crawler is None
+            second = await fetch_crawl4ai_page("https://example.test/healthy")
+            assert "A valid source page" in second
+        finally:
+            deepresearch_bench._FACT_CRAWLER_SESSION.reset(token)
+    assert (stats["init"], stats["fetch"], stats["close"]) == (2, 2, 2)
+
+
+@pytest.mark.parametrize("status", [400, 403, 404, 429, 500, 503, 599])
+def test_ordinary_http_failures_do_not_require_rebuild(status):
+    result = _FakeCrawlResult(success=False)
+    result.status_code = status
+    assert not deepresearch_bench._failed_crawl_needs_rebuild(result)
+
+
+@pytest.mark.anyio
+async def test_caller_cancel_cancels_child_without_waiting_for_cleanup():
+    started, cancelled, release, finished = (asyncio.Event() for _ in range(4))
+    loop = asyncio.get_running_loop()
+    unhandled = []
+    old_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+
+    async def child():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+            finished.set()
+            raise RuntimeError("late cleanup failure") from None
+
+    wrapper = asyncio.create_task(deepresearch_bench.with_deadline(child(), 60, "child"))
+    try:
+        await started.wait()
+        wrapper.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(wrapper, 0.5)
+        await asyncio.wait_for(cancelled.wait(), 0.5)
+        assert not finished.is_set()
+    finally:
+        release.set()
+        await asyncio.wait_for(finished.wait(), 1)
+        await asyncio.sleep(0)
+        loop.set_exception_handler(old_handler)
+    assert not unhandled
+
+
+@pytest.mark.anyio
+async def test_dead_browser_unknown_preserves_scoring_denominators(task, monkeypatch):
+    stats = None
+
+    async def arun(url, _config):
+        if url.endswith("broken"):
+            result = _FakeCrawlResult(success=False)
+            result.error_message = "Target page, context or browser has been closed"
+            result.status_code = None
+            return result
+        return _FakeCrawlResult()
+
+    stats = _install_fake_crawl4ai(monkeypatch, arun=arun)
+    _stub_judges_over_urls(
+        monkeypatch, ["https://example.test/broken", "https://example.test/healthy"]
+    )
+    monkeypatch.setattr(deepresearch_bench.asyncio, "sleep", _no_sleep)
+    response = _response(task.process_doc(_en_doc()), "A report citing two sources.")
+    await task.score_responses([response])
+    assert [row["result"] for row in response.outputs[0].metadata["deepresearch_fact"]] == [
+        "unknown",
+        "supported",
+    ]
+    assert response.scores["race_overall"] == pytest.approx(0.8)
+    assert response.scores["fact_has_citations"] == 1.0
+    assert response.scores["fact_citation_accuracy"] == 1.0
+    assert response.scores["fact_avg_citations"] == 1.0
+    assert response.scores["fact_avg_effective_citations"] == 1.0
+    assert (stats["init"], stats["fetch"], stats["close"]) == (4, 4, 4)
+    assert deepresearch_bench._FACT_CRAWLER_SESSION.get() is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("phase", ["start", "fetch"])
+async def test_scoring_caller_cancellation_closes_browser_and_cancels_child(
+    task, monkeypatch, phase
+):
+    entered, stopped = asyncio.Event(), asyncio.Event()
+
+    async def hang(*_args):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    stats = _install_fake_crawl4ai(
+        monkeypatch, **({"start": hang} if phase == "start" else {"arun": hang})
+    )
+    _stub_judges_over_urls(monkeypatch, ["https://example.test/healthy"])
+    response = _response(task.process_doc(_en_doc()), "A report with one citation.")
+    scoring = asyncio.create_task(task.score_responses([response]))
+    await asyncio.wait_for(entered.wait(), 1)
+    scoring.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(scoring, 1)
+    await asyncio.wait_for(stopped.wait(), 1)
+    assert stats["close"] == 1
+    assert deepresearch_bench._FACT_CRAWLER_SESSION.get() is None

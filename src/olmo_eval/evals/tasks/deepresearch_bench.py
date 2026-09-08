@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 from abc import ABC
@@ -853,8 +854,10 @@ def _env_float(name: str, default: float, *, minimum: float) -> float:
     except ValueError:
         _warn_once(name, "Ignoring %s=%r: not a number; using %s.", name, raw, default)
         return default
-    if value < minimum:
-        _warn_once(name, "Ignoring %s=%r: below %s; using %s.", name, raw, minimum, default)
+    if not math.isfinite(value) or value < minimum:
+        _warn_once(
+            name, "Ignoring %s=%r: not finite or below %s; using %s.", name, raw, minimum, default
+        )
         return default
     return value
 
@@ -907,7 +910,12 @@ async def with_deadline(coro: Any, seconds: float, description: str) -> Any:
         TimeoutError: if the call does not finish within ``seconds``.
     """
     task = asyncio.ensure_future(coro)
-    done, _pending = await asyncio.wait({task}, timeout=seconds)
+    try:
+        done, _pending = await asyncio.wait({task}, timeout=seconds)
+    except BaseException:
+        task.cancel()
+        task.add_done_callback(_drop_abandoned_result)
+        raise
     if task in done:
         return task.result()
     task.cancel()
@@ -1061,6 +1069,39 @@ async def fetch_crawl4ai_page(url: str) -> str:
         )
 
 
+def _failed_crawl_needs_rebuild(result: Any) -> bool:
+    """Keep explicit HTTP page failures; discard browser failures and ambiguous failures.
+
+    crawl4ai catches Playwright exceptions and returns unsuccessful CrawlResults, so an
+    unsuccessful result is not evidence that the browser remains usable. Explicit HTTP
+    4xx/5xx responses are the exception: blocked/missing pages should retain the browser.
+    Browser/transport failure text overrides even a populated HTTP status. Unknown failures
+    rebuild conservatively, without retrying this URL or changing its unknown verdict.
+    """
+    error = str(getattr(result, "error_message", "") or "").lower()
+    if any(
+        marker in error
+        for marker in (
+            "targetclosederror",
+            "target page, context or browser has been closed",
+            "browser has been closed",
+            "browser closed",
+            "browser disconnected",
+            "browser context",
+            "connection closed",
+            "connection reset",
+            "transport",
+            "crash",
+            "net::err_",
+            "timeout",
+            "timed out",
+        )
+    ):
+        return True
+    status = getattr(result, "status_code", None)
+    return not (isinstance(status, int) and 400 <= status <= 599)
+
+
 async def _fetch_page_with_session(
     session: _FactCrawlerSession,
     url: str,
@@ -1090,7 +1131,10 @@ async def _fetch_page_with_session(
         logger.exception("crawl4ai FACT fetch failed for %r", url)
         return f"Error fetching webpage: {exc}"
 
-    await session.note_fetch(crawler)
+    if not getattr(result, "success", False) and _failed_crawl_needs_rebuild(result):
+        await session.discard(crawler)
+    else:
+        await session.note_fetch(crawler)
 
     if not getattr(result, "success", False):
         error_message = getattr(result, "error_message", None)
