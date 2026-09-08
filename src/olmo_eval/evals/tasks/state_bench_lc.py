@@ -12,7 +12,7 @@ from olmo_eval.common.types import Instance, LMRequest, RequestType
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register
 
-STATE_BENCH_REPO = "jacksonp-ai2/state-bench-lc"
+STATE_BENCH_REPO = "allenai/state-bench"
 
 STATE_BENCH_CONFIGS = (
     "cube-painting--aperiodic",
