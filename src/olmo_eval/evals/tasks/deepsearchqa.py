@@ -6,7 +6,10 @@ Health, History, Geography, Media, ...). Each problem is either a
 ``Single Answer`` (one entity/value) or a ``Set Answer`` (an enumeration or
 composite answer with multiple required items); on HuggingFace both are
 stored as one comma-joined ``answer`` string
-(``google/deepsearchqa``, config ``deepsearchqa``, split ``eval``).
+(``google/deepsearchqa``, config ``deepsearchqa``, split ``eval``). A handful
+of ``Set Answer`` rows encode "no items satisfy every constraint" as the
+literal text ``None``, which HuggingFace's CSV loader turns into a null; these
+are scored as an empty gold answer set rather than dropped.
 
 Grading follows the paper's outcome-based, set-comparison methodology: an
 LLM judge decides, per item, whether a submitted answer is semantically
@@ -202,7 +205,18 @@ def compute_deepsearchqa_scores(
     num_gold: int, num_pred: int, num_matched_gold: int, num_matched_pred: int
 ) -> dict[str, float]:
     """Compute precision/recall/F1/exact-match from item-level match counts."""
-    recall = num_matched_gold / num_gold if num_gold else 1.0
+    if num_gold == 0:
+        # Gold answer is the empty set: a correctly-empty prediction is a perfect score,
+        # any predicted item is an unwarranted hallucination.
+        is_correct = num_pred == 0
+        return {
+            "deepsearchqa_precision": 1.0 if is_correct else 0.0,
+            "deepsearchqa_recall": 1.0,
+            "deepsearchqa_f1": 1.0 if is_correct else 0.0,
+            "deepsearchqa_exact_match": 1.0 if is_correct else 0.0,
+        }
+
+    recall = num_matched_gold / num_gold
     precision = num_matched_pred / num_pred if num_pred else 0.0
     f1 = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
     exact_match = 1.0 if (num_pred > 0 and num_matched_pred == num_pred and recall == 1.0) else 0.0
@@ -281,21 +295,32 @@ class DeepSearchQA(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         question = doc.get("problem")
         answer = doc.get("answer")
-        if not question or not answer:
+        answer_type = doc.get("answer_type", "")
+        if not question:
             return None
 
-        gold_items = split_answer_set(answer)
-        if not gold_items:
-            return None
+        if not answer:
+            # The source CSV encodes "no items satisfy every constraint" as the literal
+            # text "None" on Set Answer rows; the HF CSV loader coerces that string to a
+            # null, so it arrives here indistinguishable from a missing field. A missing
+            # answer only makes sense as an intentional empty answer set for Set Answer
+            # rows; treat anything else as a malformed row.
+            if answer_type != "Set Answer":
+                return None
+            gold_items: list[str] = []
+        else:
+            gold_items = split_answer_set(answer)
+            if not gold_items:
+                return None
 
         return Instance(
             question=question,
-            gold_answer=answer,
+            gold_answer=answer or "",
             metadata={
                 "id": f"deepsearchqa_{index}",
                 "index": index,
                 "problem_category": doc.get("problem_category", ""),
-                "answer_type": doc.get("answer_type", ""),
+                "answer_type": answer_type,
                 "gold_items": gold_items,
             },
         )
@@ -361,9 +386,10 @@ class DeepSearchQA(Task):
             "deepsearchqa_predicted_items": pred_items,
         }
 
-        if not pred_items:
-            # Nothing to match against the gold set; skip the judge call.
-            scores = compute_deepsearchqa_scores(len(gold_items), 0, 0, 0)
+        if not pred_items or not gold_items:
+            # Nothing to match on one side (an empty prediction, or a gold answer
+            # that is itself the empty set); the outcome is already determined.
+            scores = compute_deepsearchqa_scores(len(gold_items), len(pred_items), 0, 0)
             return scores, base_metadata, 0
 
         prompt = build_deepsearchqa_judge_prompt(response.instance.question, gold_items, pred_items)

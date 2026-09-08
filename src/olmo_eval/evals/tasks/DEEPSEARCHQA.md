@@ -33,6 +33,13 @@ same mechanism every other task in this directory relies on.
 - Both answer types are parsed the same way: the `answer` column is split on
   `,` into a gold item set (a `"Single Answer"` becomes a one-item set), so
   scoring treats every instance uniformly as set comparison.
+- 4 `Set Answer` rows encode "no items satisfy every constraint" as the
+  literal text `None` in the source CSV; HuggingFace's CSV loader coerces
+  that to a null value. These are treated as an empty gold answer set (not
+  dropped) — a correctly-empty model prediction scores full marks, and any
+  predicted item scores zero. A missing `answer` on a `Single Answer` row is
+  still treated as malformed and dropped, since that combination shouldn't
+  occur in valid data.
 
 ## How grading works
 
