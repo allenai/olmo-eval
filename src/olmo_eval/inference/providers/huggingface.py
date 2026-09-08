@@ -196,6 +196,7 @@ class HuggingFaceProvider(InferenceProvider):
                             {
                                 "token": token_str,
                                 "logprob": lp,
+                                "token_id": int(tok),
                                 "bytes": list(token_str.encode("utf-8")),
                             }
                         )
@@ -283,6 +284,7 @@ class HuggingFaceProvider(InferenceProvider):
                         {
                             "token": token_str,
                             "logprob": lp,
+                            "token_id": int(tok),
                             "bytes": list(token_str.encode("utf-8")),
                         }
                     )

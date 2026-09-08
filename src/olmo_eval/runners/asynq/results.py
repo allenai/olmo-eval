@@ -19,7 +19,8 @@ from olmo_eval.runners.asynq.types import (
     ResultItem,
     TaskTracker,
 )
-from olmo_eval.runners.common.types import TaskResult
+from olmo_eval.runners.common.constants import HardFailureRateExceeded
+from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE, TaskResult
 from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
 from olmo_eval.runners.processing.utils import compute_task_hash
 
@@ -30,6 +31,55 @@ if TYPE_CHECKING:
     from olmo_eval.evals.tasks.common import Task
 
 logger = get_logger(__name__)
+
+
+def is_hard_failure(result_item: ResultItem) -> bool:
+    """Whether an instance result contributes nothing to the metrics.
+
+    A hard failure carries an error and no outputs at all. A soft failure (an
+    error alongside a usable output, e.g. MaxTurnsExceeded with a fallback
+    answer) still gets scored, so it is not a hard failure.
+    """
+    return bool(result_item.error) and not result_item.outputs
+
+
+InstanceKey = tuple[str, str, int]
+
+
+def _build_pending_instance_keys(trackers: dict[str, TaskTracker]) -> set[InstanceKey]:
+    """Build the exact set of inference results expected from workers."""
+    return {
+        (tracker.model_name, spec, instance_idx)
+        for spec, tracker in trackers.items()
+        for instance_idx in range(tracker.total_instances)
+    }
+
+
+def _consume_pending_instance(pending_instances: set[InstanceKey], result_item: ResultItem) -> None:
+    """Mark a result received, rejecting duplicate or unexpected identities."""
+    key = (result_item.model_name, result_item.task_id, result_item.instance_idx)
+    if key not in pending_instances:
+        raise RuntimeError(
+            "Received duplicate or unexpected inference result for "
+            f"{result_item.task_id}[{result_item.instance_idx}]"
+        )
+    pending_instances.remove(key)
+
+
+def _format_pending_instances(pending_instances: set[InstanceKey]) -> str:
+    """Summarize unresolved inference results for failure messages."""
+    ordered = sorted(pending_instances)
+    preview = ", ".join(
+        f"{model_name}:{spec}[{instance_idx}]" for model_name, spec, instance_idx in ordered[:10]
+    )
+    if len(ordered) > 10:
+        preview += f", ... and {len(ordered) - 10} more"
+    return f"{len(ordered)} inference result(s) pending ({preview})"
+
+
+def _format_worker_failure(error: object, pending_instances: set[InstanceKey]) -> str:
+    """Combine a fatal worker error with unresolved-instance accounting."""
+    return f"Worker process crashed with {_format_pending_instances(pending_instances)}: {error}"
 
 
 def _format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
@@ -81,6 +131,7 @@ async def process_results(
     write_predictions_fn: Any,
     save_requests: bool,
     write_requests_fn: Any,
+    max_hard_failure_rate: float = DEFAULT_MAX_HARD_FAILURE_RATE,
 ) -> dict[str, TaskResult]:
     """Process results from workers with inline async scoring.
 
@@ -98,6 +149,8 @@ async def process_results(
         model_name: Model name for reporting.
         save_predictions: Whether to save predictions.
         write_predictions_fn: Function to write predictions.
+        max_hard_failure_rate: Fraction of a task's instances allowed to hard-fail
+            before the task is marked failed.
 
     Returns:
         Dict mapping task spec to TaskResult.
@@ -145,6 +198,7 @@ async def process_results(
                 failed_instances=tracker.failed_instances,
                 total_instances=tracker.total_instances,
                 duration_seconds=time.time() - tracker.start_time,
+                max_hard_failure_rate=max_hard_failure_rate,
             )
             results[spec] = task_result
             tasks_complete += 1
@@ -205,108 +259,146 @@ async def process_results(
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
 
-    pending_instances = total_instances
+    pending_instances = _build_pending_instance_keys(trackers)
+    if len(pending_instances) != total_instances:
+        raise RuntimeError(
+            "Inference accounting mismatch before processing: "
+            f"runner expected {total_instances} instance(s), "
+            f"task trackers describe {len(pending_instances)}"
+        )
     last_health_check = time.time()
     health_check_interval = 5.0
+    workers_exited = False
 
-    # Collect instance results and score each inline
-    while pending_instances > 0:
-        _reap_done_tasks()
+    try:
+        # Collect instance results and score each inline
+        while pending_instances:
+            _reap_done_tasks()
 
-        try:
-            result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: result_queue.get(timeout=1.0)
+            try:
+                result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: result_queue.get(timeout=1.0)
+                )
+            except queue.Empty:
+                if workers_exited:
+                    exit_codes = [worker.exitcode for worker in workers]
+                    fatal_message = (
+                        f"All inference workers exited (exit codes: {exit_codes}) with "
+                        f"{_format_pending_instances(pending_instances)}"
+                    )
+                    logger.error(f"FATAL: {fatal_message}")
+                    raise RuntimeError(fatal_message) from None
+                workers_exited = all(worker.exitcode is not None for worker in workers)
+                if time.time() - last_health_check > health_check_interval:
+                    try:
+                        check_workers_alive(workers, result_queue)
+                    except RuntimeError as e:
+                        fatal_message = _format_worker_failure(e, pending_instances)
+                        logger.error(f"FATAL: {fatal_message}")
+                        raise RuntimeError(fatal_message) from e
+                    last_health_check = time.time()
+                continue
+
+            # Check for fatal worker crash
+            if result_item.task_id == WORKER_FATAL:
+                fatal_message = _format_worker_failure(result_item.error, pending_instances)
+                logger.error(f"FATAL: {fatal_message}")
+                raise RuntimeError(fatal_message)
+
+            _consume_pending_instance(pending_instances, result_item)
+            tracker = trackers[result_item.task_id]
+
+            if tracker.error:
+                continue
+
+            if is_hard_failure(result_item):
+                # is_hard_failure() guarantees an error is set; the `or ""` is for
+                # the type checker, which cannot see that through the predicate.
+                instance_error = result_item.error or ""
+                logger.warning(
+                    f"Instance {result_item.instance_idx} failed for "
+                    f"{result_item.task_id}: {instance_error}"
+                )
+                tracker.add_failure(result_item.instance_idx, instance_error)
+                scoring_progress.update(1)
+                check_task_completion(result_item.task_id)
+                continue
+
+            if result_item.error:
+                # Soft error - log warning but continue to scoring
+                logger.debug(
+                    f"Instance {result_item.instance_idx} completed with warning for "
+                    f"{result_item.task_id}: {result_item.error}"
+                )
+
+            # Build response
+            trajectory = None
+            if result_item.outputs:
+                meta = result_item.outputs[0].metadata or {}
+                traj_dict = meta.get("trajectory")
+                if traj_dict:
+                    trajectory = AgentTrajectory.from_dict(traj_dict)
+
+            assert result_item.instance is not None
+            assert result_item.request is not None
+            response = Response(
+                instance=result_item.instance,
+                request=result_item.request,
+                outputs=result_item.outputs,
+                trajectory=trajectory,
+                request_trace=result_item.request_trace,
             )
-        except queue.Empty:
-            if time.time() - last_health_check > health_check_interval:
-                check_workers_alive(workers, result_queue)
-                last_health_check = time.time()
-            continue
 
-        # Check for fatal worker crash
-        if result_item.task_id == WORKER_FATAL:
-            logger.error(f"FATAL: Worker crashed! {result_item.error}")
-            raise RuntimeError(f"Worker process crashed: {result_item.error}")
-
-        tracker = trackers[result_item.task_id]
-        pending_instances -= 1
-
-        if tracker.error:
-            continue
-
-        # Check for hard failures (no outputs at all)
-        # Soft failures (error with outputs, like MaxTurnsExceeded) should still be scored
-        if result_item.error and not result_item.outputs:
-            logger.warning(
-                f"Instance {result_item.instance_idx} failed for {result_item.task_id}: "
-                f"{result_item.error}"
+            # Score inline as an async task
+            assert tracker.task is not None
+            scoring_task = asyncio.create_task(
+                score_and_store(
+                    spec=result_item.task_id,
+                    instance_idx=result_item.instance_idx,
+                    response=response,
+                    task=tracker.task,
+                )
             )
-            tracker.add_failure(result_item.instance_idx, result_item.error)
-            scoring_progress.update(1)
-            check_task_completion(result_item.task_id)
-            continue
+            in_flight_scoring.add(scoring_task)
 
-        if result_item.error:
-            # Soft error - log warning but continue to scoring
-            logger.debug(
-                f"Instance {result_item.instance_idx} completed with warning for "
-                f"{result_item.task_id}: {result_item.error}"
-            )
+        # Wait for all in-flight scoring to complete
+        if in_flight_scoring:
+            await asyncio.gather(*in_flight_scoring, return_exceptions=True)
 
-        # Build response
-        trajectory = None
-        if result_item.outputs:
-            meta = result_item.outputs[0].metadata or {}
-            traj_dict = meta.get("trajectory")
-            if traj_dict:
-                trajectory = AgentTrajectory.from_dict(traj_dict)
+        # Final check — all tasks should be complete
+        if tasks_complete < total_tasks:
+            # Some tasks may have had all instances fail during inference
+            for spec in trackers:
+                if spec not in results:
+                    check_task_completion(spec)
+    finally:
+        scoring_progress.close()
 
-        assert result_item.instance is not None
-        assert result_item.request is not None
-        response = Response(
-            instance=result_item.instance,
-            request=result_item.request,
-            outputs=result_item.outputs,
-            trajectory=trajectory,
-            request_trace=result_item.request_trace,
-        )
-
-        # Score inline as an async task
-        assert tracker.task is not None
-        scoring_task = asyncio.create_task(
-            score_and_store(
-                spec=result_item.task_id,
-                instance_idx=result_item.instance_idx,
-                response=response,
-                task=tracker.task,
-            )
-        )
-        in_flight_scoring.add(scoring_task)
-
-    # Wait for all in-flight scoring to complete
-    if in_flight_scoring:
-        await asyncio.gather(*in_flight_scoring, return_exceptions=True)
-
-    # Final check — all tasks should be complete
-    if tasks_complete < total_tasks:
-        # Some tasks may have had all instances fail during inference
-        for spec in trackers:
-            if spec not in results:
-                check_task_completion(spec)
-
-    scoring_progress.close()
     return results
+
+
+def _format_instance_accounting(result: TaskResult) -> str:
+    """Render saved-vs-processed instance counts for the task summary line.
+
+    Matches the summary table: a task that never processed an instance (a
+    task-level failure) reports "-" rather than an invented count.
+    """
+    if not result.instances_processed:
+        return "instances: -"
+    accounting = f"{result.num_instances}/{result.instances_processed} instances saved"
+    if result.instances_failed:
+        accounting += f", {result.instances_failed} hard-failed"
+    return accounting
 
 
 def _report_task_completion(model_name: str, result: TaskResult) -> None:
     """Report when a task completes."""
     label = f"{model_name}:{result.spec}"
+    accounting = _format_instance_accounting(result)
     if result.error:
-        logger.error(f"\u2717 {label} (ERROR: {result.error})")
+        logger.error(f"\u2717 {label} ({accounting}) (ERROR: {result.error})")
     else:
-        logger.info(
-            f"\u2713 {label} ({result.num_instances} instances, {result.duration_seconds:.1f}s)"
-        )
+        logger.info(f"\u2713 {label} ({accounting}, {result.duration_seconds:.1f}s)")
 
 
 def aggregate_results(
@@ -352,12 +444,16 @@ def aggregate_results(
     for spec, task_result in results.items():
         task_data: dict[str, Any] = {}
 
+        # Instance counts describe what happened, not whether it was published, so
+        # they are recorded for failed tasks too. Metrics are not: a score computed
+        # on a subset must not read as the task's score.
+        task_data["num_instances"] = task_result.num_instances
+
         if task_result.error:
             task_data["error"] = task_result.error
             results_dict["errors"].append({"task": spec, "error": task_result.error})
         else:
             task_data["metrics"] = task_result.metrics
-            task_data["num_instances"] = task_result.num_instances
             task_data["duration_seconds"] = task_result.duration_seconds
             task_data["primary_metric"] = task_result.primary_metric
             if task_result.predictions:
@@ -374,6 +470,14 @@ def aggregate_results(
                         "score": primary[1],
                     }
 
+        # Saved-vs-processed accounting is recorded for every task, including the
+        # ones that errored, so a partial run cannot look complete downstream.
+        task_data["instances_saved"] = task_result.num_instances
+        task_data["instances_processed"] = task_result.instances_processed
+        task_data["instances_failed"] = task_result.instances_failed
+        if task_result.error_summary:
+            task_data["error_summary"] = task_result.error_summary
+
         task_data["config"] = task_result.config
         task_data["task_hash"] = (
             compute_task_hash(task_result.config) if task_result.config else None
@@ -386,3 +490,27 @@ def aggregate_results(
         results_dict["suites"] = suite_aggs
 
     return results_dict
+
+
+def check_hard_failure_gate(results: dict[str, TaskResult]) -> None:
+    """Fail the run when any task exceeded its hard-failure-rate budget.
+
+    Call this only after results have been written, so the failing run still leaves
+    metrics.json and predictions behind for diagnosis.
+
+    Args:
+        results: Dict mapping task spec to TaskResult.
+
+    Raises:
+        HardFailureRateExceeded: If at least one task tripped the gate.
+    """
+    tripped = sorted(
+        (result for result in results.values() if result.hard_failure_rate_exceeded),
+        key=lambda result: result.spec,
+    )
+    if not tripped:
+        return
+    details = "; ".join(f"{result.spec}: {result.error}" for result in tripped)
+    raise HardFailureRateExceeded(
+        f"{len(tripped)} task(s) exceeded the hard failure rate threshold: {details}"
+    )

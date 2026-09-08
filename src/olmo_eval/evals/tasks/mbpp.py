@@ -1,7 +1,7 @@
 """MBPP code generation task implementations."""
 
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
@@ -19,7 +19,10 @@ from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES, OLMO3_MBPP_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code, extract_code_before_fence
 from olmo_eval.evals.tasks.common import Task, register, register_variant
-from olmo_eval.evals.tasks.constants.mbpp import MBPP_FEWSHOT_SOURCES
+from olmo_eval.evals.tasks.constants.mbpp import (
+    MBPP_FEWSHOT_SOURCES,
+    MBPP_FEWSHOT_SOURCES_V2,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +163,8 @@ class MBPPPlusBase(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Build prompt from text and function signature
-        question = doc["prompt"].strip() + doc["code"].split(":")[0] + ":"
+        func_sig = doc["code"].split(":")[0] + ":"
+        question = doc["prompt"].strip() + func_sig
 
         # Build test code
         tests = doc.get("test_setup_code", "") or ""
@@ -285,6 +289,44 @@ register_variant(
     num_fewshot=3,
 )
 
+
+def _add_mbpp_fewshot_answer(instance: Instance, doc: dict[str, Any]) -> Instance:
+    """Add the body-only answer consumed by the corrected v2 formatter."""
+    func_sig = doc["code"].split(":")[0] + ":"
+    instance.metadata["fewshot_answer"] = doc["code"][len(func_sig) :]
+    return instance
+
+
+@register("mbpp:3shot:v2")
+class MBPP3ShotV2(MBPP):
+    """MBPP 3-shot with non-duplicated, body-only demonstration answers."""
+
+    num_fewshot = 3
+    formatter = CompletionFormatter(fewshot_answer_key="fewshot_answer")
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        return _add_mbpp_fewshot_answer(super().process_doc(doc, index), doc)
+
+
+@register("mbpp_plus:3shot:v2")
+class MBPPPlus3ShotV2(MBPPPlus):
+    """MBPP+ 3-shot with non-duplicated, body-only demonstration answers."""
+
+    num_fewshot = 3
+    formatter = CompletionFormatter(fewshot_answer_key="fewshot_answer")
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        return _add_mbpp_fewshot_answer(super().process_doc(doc, index), doc)
+
+
+for _v2_task_name in ("mbpp:3shot:v2", "mbpp_plus:3shot:v2"):
+    register_variant(
+        _v2_task_name,
+        "bpb",
+        formatter=PPLFormatter(leading_space=False),
+        metrics=(BPBMetricInstanceAvg(),),
+    )
+
 # =============================================================================
 # Pass@K Execution Variants (require sandbox)
 # =============================================================================
@@ -382,6 +424,7 @@ class MBPPOlmo3Base(MBPPBase):
     primary_metric = PassAtKMetric(k=1, scorer=CodeExecutionScorer)
 
     _ANSWER_PREFIX = "Here is the completed function:\n\n```python\n"
+    fewshot_sources = MBPP_FEWSHOT_SOURCES
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         random_test = doc["test_list"][0] if doc.get("test_list") else ""
@@ -428,7 +471,7 @@ class MBPPOlmo3Base(MBPPBase):
         if self.config.num_fewshot == 0:
             return []
 
-        instances = [self.process_doc(doc) for doc in MBPP_FEWSHOT_SOURCES]
+        instances = [self.process_doc(doc) for doc in self.fewshot_sources]
         return instances[: self.config.num_fewshot]
 
     def extract_answer(self, output: LMOutput) -> str | None:
@@ -437,6 +480,25 @@ class MBPPOlmo3Base(MBPPBase):
 
 register_variant(
     "mbpp:olmo3base",
+    "bpb",
+    formatter=PPLFormatter(leading_space=False),
+    metrics=(BPBMetricByteAvg(),),
+)
+
+
+@register("mbpp:olmo3base:v2")
+class MBPPOlmo3BaseV2(MBPPOlmo3Base):
+    """OLMo3 MBPP prompt with executable, multiline few-shot examples."""
+
+    fewshot_sources = MBPP_FEWSHOT_SOURCES_V2
+    sampling_params = replace(
+        MBPPOlmo3Base.sampling_params,
+        truncate_prompt_tokens=2048,
+    )
+
+
+register_variant(
+    "mbpp:olmo3base:v2",
     "bpb",
     formatter=PPLFormatter(leading_space=False),
     metrics=(BPBMetricByteAvg(),),

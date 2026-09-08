@@ -55,6 +55,7 @@ class Capability:
 
 
 DEFAULT_MAX_CONCURRENCY = 4
+DEFAULT_DEPLOYMENT_TIMEOUT = 6 * 60 * 60
 
 
 @hide_unset()
@@ -83,7 +84,8 @@ class SandboxConfig:
         environment: Environment variables as tuple of (name, value) pairs.
         volumes: Volume mounts as tuple of (host_path, container_path) pairs.
         modal_sandbox_kwargs: Additional kwargs for Modal sandbox configuration.
-        runtime_timeout: Timeout for Modal runtime in seconds.
+        runtime_timeout: Timeout for individual Modal runtime requests in seconds.
+        deployment_timeout: Maximum lifetime of a Modal sandbox in seconds.
         required_secrets: Environment variable names that must be set.
         enable_diagnostics: Whether to run background diagnostics monitor.
         inject_swerex: Whether to build a derived image with swe-rex pre-installed.
@@ -108,6 +110,7 @@ class SandboxConfig:
     volumes: tuple[tuple[str, str], ...] = ()
     modal_sandbox_kwargs: dict[str, Any] | None = None
     runtime_timeout: float = 3600.0
+    deployment_timeout: float = DEFAULT_DEPLOYMENT_TIMEOUT
     required_secrets: tuple[str, ...] = ()
     docker_args: tuple[str, ...] = ()
     log_dir: str | None = None
@@ -172,6 +175,7 @@ class SandboxConfig:
             volumes=tuple(tuple(v) for v in data.get("volumes", [])),
             modal_sandbox_kwargs=data.get("modal_sandbox_kwargs"),
             runtime_timeout=data.get("runtime_timeout", 3600.0),
+            deployment_timeout=data.get("deployment_timeout", DEFAULT_DEPLOYMENT_TIMEOUT),
             required_secrets=tuple(data.get("required_secrets", [])),
             docker_args=tuple(data.get("docker_args", [])),
             log_dir=data.get("log_dir"),

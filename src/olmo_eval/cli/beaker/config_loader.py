@@ -146,9 +146,15 @@ class LaunchConfigLoader:
         harness_overrides = self.cli_args.get("harness_overrides", [])
 
         if gpus is None and model_specs:
-            gpus = self._detect_gpu_requirement(model_specs[0], harness_name, harness_overrides)
+            gpus = max(
+                self._detect_gpu_requirement(model_spec, harness_name, harness_overrides)
+                for model_spec in model_specs
+            )
         elif gpus is None:
             gpus = 0  # Default to 0 if no model specified
+
+        if model_specs:
+            self._validate_gpu_requirement(gpus, model_specs, harness_name, harness_overrides)
 
         max_gpus_per_node = (
             max_gpus_per_node if max_gpus_per_node is not None else DEFAULT_MAX_GPUS_PER_NODE
@@ -292,23 +298,31 @@ class LaunchConfigLoader:
         """
         from olmo_eval.common.configs import get_provider_config
 
-        try:
-            provider_config = get_provider_config(model_spec)
-            if not provider_config.requires_local_gpu:
-                return 0
-        except Exception:
-            pass
-
         # Build effective harness config with overrides applied
         harness_config = self._get_effective_harness_config(harness_name, harness_overrides)
+
+        try:
+            provider_config = get_provider_config(model_spec)
+        except Exception:
+            # If the model cannot be resolved, retain the historical safe default
+            # of one local GPU (plus any auxiliary provider requirements).
+            provider_config = None
+
+        if harness_config and provider_config:
+            harness_config = harness_config.merge_provider(provider_config)
 
         # Calculate main provider GPU requirements
         main_instances = 1
         main_tp = 1
-        if harness_config and harness_config.provider:
-            main_tp = harness_config.provider.kwargs.get("tensor_parallel_size", 1)
-            main_instances = harness_config.provider.num_instances
-        main_gpus = main_instances * main_tp
+        main_provider = harness_config.provider if harness_config else provider_config
+        if main_provider:
+            main_tp = main_provider.kwargs.get("tensor_parallel_size", 1)
+            main_instances = main_provider.num_instances
+        main_gpus = (
+            main_instances * main_tp
+            if main_provider is None or main_provider.requires_local_gpu
+            else 0
+        )
 
         # Calculate auxiliary provider GPU requirements
         aux_gpus = 0
@@ -322,6 +336,26 @@ class LaunchConfigLoader:
                 aux_gpus += num_instances * tensor_parallel
 
         return main_gpus + aux_gpus
+
+    def _validate_gpu_requirement(
+        self,
+        gpus: int,
+        model_specs: list[str],
+        harness_name: str | None = None,
+        harness_overrides: list[str] | None = None,
+    ) -> None:
+        """Reject a GPU allocation too small for main or auxiliary providers."""
+        required_gpus = max(
+            self._detect_gpu_requirement(model_spec, harness_name, harness_overrides)
+            for model_spec in model_specs
+        )
+        if gpus < required_gpus:
+            console.print(
+                f"[red]Error:[/red] GPU count ({gpus}) is insufficient for the configured "
+                f"provider instances; at least {required_gpus} GPUs are required "
+                "across main and auxiliary providers"
+            )
+            raise SystemExit(1)
 
     def _get_effective_harness_config(
         self,

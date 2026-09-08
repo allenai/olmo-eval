@@ -1,7 +1,7 @@
 """Scorer for IFBench / IFEval instruction-following evaluation.
 
 Uses the ``ifbench`` package registry, which covers the original IFEval
-(DEFAULT) verifiers, the OOD verifiers used by ``allenai/IFBench_test2``,
+(DEFAULT) verifiers, the OOD verifiers used by ``allenai/IFBench_test``,
 and the verifiers used by the multi-turn ``VGraf/ifeval_mt`` slices. The
 scorer evaluates a response against per-instance instructions (looked up
 in ``instance.metadata["instruction_id_list"]`` / ``"kwargs"``) and writes
@@ -36,13 +36,18 @@ def _loose_response_variants(response: str) -> list[str]:
     ]
 
 
-def _check_one(
+def _build_instruction(
     instruction_cls: Any,
     instruction_id: str,
     kwargs: dict[str, Any],
     prompt: str,
-    response: str,
-) -> bool:
+) -> Any:
+    """Instantiate and configure a single instruction verifier.
+
+    Built once per instruction and reused for the strict check and every loose
+    variant: verifiers draw random parameters for unspecified kwargs, so
+    rebuilding per variant would score each variant against different criteria.
+    """
     instruction = instruction_cls(instruction_id)
     cleaned_kwargs = {k: v for k, v in kwargs.items() if v is not None}
     arg_keys = instruction.get_instruction_args_keys()
@@ -52,6 +57,10 @@ def _check_one(
     args = instruction.get_instruction_args()
     if args and "prompt" in args:
         instruction.build_description(prompt=prompt)
+    return instruction
+
+
+def _check_one(instruction: Any, response: str) -> bool:
     return bool(response.strip()) and bool(instruction.check_following(response))
 
 
@@ -75,6 +84,7 @@ class IFEvalScorer(Scorer):
 
         strict_results: list[bool] = []
         loose_results: list[bool] = []
+        errors: dict[str, str] = {}
 
         if instruction_ids:
             from ifbench import instructions_registry
@@ -82,22 +92,37 @@ class IFEvalScorer(Scorer):
             registry = instructions_registry.INSTRUCTION_DICT
             loose_variants = _loose_response_variants(response)
             for inst_id, inst_kwargs in zip(instruction_ids, kwargs_list, strict=True):
-                instruction_cls = registry[inst_id]
-                strict_results.append(
-                    _check_one(instruction_cls, inst_id, inst_kwargs, prompt, response)
+                # An instruction the dataset describes incorrectly — an
+                # unrecognized id, or kwargs the verifier does not accept —
+                # scores as not followed, matching the reference
+                # implementation, rather than failing the whole response.
+                # Failures raised while checking a successfully built
+                # instruction are not model behavior (missing NLTK corpora on
+                # an offline worker, say), so they propagate instead of being
+                # recorded as instructions the response did not follow.
+                try:
+                    instruction = _build_instruction(
+                        registry[inst_id], inst_id, inst_kwargs, prompt
+                    )
+                except (TypeError, KeyError) as exc:
+                    errors[inst_id] = f"{type(exc).__name__}: {exc}"
+                    strict_results.append(False)
+                    loose_results.append(False)
+                    continue
+                strict_results.append(_check_one(instruction, response))
+                loose_results.append(
+                    any(_check_one(instruction, variant) for variant in loose_variants)
                 )
-                loose_pass = any(
-                    _check_one(instruction_cls, inst_id, inst_kwargs, prompt, variant)
-                    for variant in loose_variants
-                )
-                loose_results.append(loose_pass)
 
         if output.metadata is None:
             output.metadata = {}
-        output.metadata["ifeval"] = {
+        result: dict[str, Any] = {
             "strict": strict_results,
             "loose": loose_results,
         }
+        if errors:
+            result["errors"] = errors
+        output.metadata["ifeval"] = result
 
         if not loose_results:
             return 0.0

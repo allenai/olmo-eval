@@ -31,7 +31,7 @@ dependencies = [
     "sympy>=1.12",
     "textual-plot>=0.10.1",
     "tree-sitter>=0.24.0",
-    "tree-sitter-python>=0.23.0,<0.26.0",
+    "tree-sitter-python>=0.23.0,<0.25.0",
     "ifbench @ git+https://github.com/allenai/IFBench.git@finbarr/clean-install",
     # syllapy (transitive via ifbench) imports pkg_resources, which setuptools>=81 removes.
     "setuptools<81",
@@ -64,7 +64,7 @@ litellm = [
     "litellm~=1.80.11",
 ]
 agents = [
-    "openai-agents~=0.7.0",
+    "openai-agents~=0.20.0",
     "httpx~=0.28.1",
 ]
 analysis = [
@@ -95,7 +95,9 @@ gpu = [
     "nvidia-ml-py>=12.560 ; platform_system != 'Darwin'",
 ]
 clients = [
-    "openai~=2.21.0",
+    # openai-agents pulls openai>=2.45 into the same resolution, so a patch pin here is
+    # unsatisfiable rather than protective. Track the same floor and the 3.x major boundary.
+    "openai>=2.45,<3",
 ]
 storage = [
     "olmo-eval[s3,postgres]",
@@ -143,8 +145,8 @@ dev = [
     "ruff>=0.14.0",
     "ty==0.0.39",
     "pre-commit>=4.0.0",
-    # Unit tests import analysis helpers directly, so dev installs need these extras too.
-    "olmo-eval[storage,beaker,hf,analysis]",
+    # Unit tests import optional helpers directly, so dev installs need these extras too.
+    "olmo-eval[storage,beaker,hf,analysis,sandbox]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
     "parameterized>=0.9.0",
@@ -191,6 +193,8 @@ select = [
 "src/olmo_eval/evals/tasks/squad.py" = ["E501"]
 # Static fewshot data with long string literals
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
+# Verbatim prompt template from the oe-eval/ZeroEval reference implementation
+"src/olmo_eval/evals/tasks/zebralogic.py" = ["E501", "W291"]
 [tool.ruff.format]
 docstring-code-format = true
 
@@ -244,6 +248,8 @@ allowed-unresolved-imports = [
     "instructions_registry.**",
     "instructions.**",
     "crawl4ai.**",
+    "modal.**",
+    "swerex.**",
 ]
 
 [tool.gantry]

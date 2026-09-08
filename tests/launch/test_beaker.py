@@ -561,6 +561,28 @@ class TestBuildCommandWithTaskPackages:
         task_pos = install_cmd.find("uv pip install 'task-dep==1.0'")
         assert provider_pos < task_pos
 
+    def test_cuda_constraints_exclude_torch_companions_and_cutlass(self):
+        """Only Torch itself and the CUDA packages are pinned to the base image.
+
+        Provider releases pin torchvision/torchaudio alongside their Torch
+        generation, and vLLM pins CUTLASS DSL independently of Torch's CUDA
+        package set, so neither may be frozen to the image's build.
+        """
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=[],
+            env_exports=None,
+            provider_packages=["vllm==0.14.0"],
+        )
+
+        assert (
+            "uv pip freeze -q | grep -E '^(torch(==| @ )|nvidia-)' "
+            "| grep -vE '^nvidia-cutlass-dsl' > /tmp/cuda-constraints.txt"
+        ) in install_cmd
+        assert "grep -E '^(torch|nvidia-)' > /tmp/cuda-constraints.txt" not in install_cmd
+
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""
         from olmo_eval.launch import BeakerLauncher
@@ -1079,6 +1101,73 @@ class TestDetectGpuRequirement:
         # 2 instances × 1 TP (main) + 0 (external server) = 2 GPUs
         assert gpus == 2
 
+    def test_local_auxiliary_counted_with_api_backed_main_provider(self):
+        """Local auxiliary instances require GPUs even when the main provider does not."""
+        loader = LaunchConfigLoader(config_path=None, cli_args={})
+
+        gpus = loader._detect_gpu_requirement(
+            model_spec="gpt-4o",
+            harness_name="dr_tulu",
+            harness_overrides=[
+                "auxiliary_providers.judge.kind=vllm_server",
+                "auxiliary_providers.judge.model=Qwen/Qwen3-8B",
+                "auxiliary_providers.judge.num_instances=3",
+            ],
+        )
+
+        assert gpus == 3
+
+    def test_rejects_gpu_count_below_main_and_auxiliary_requirements(self):
+        """An explicit allocation must fit every local provider instance."""
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "model": ("Qwen/Qwen3-8B",),
+                "task": ("olmobase:code",),
+                "cluster": "h100",
+                "workspace": "ai2/test-workspace",
+                "budget": "ai2/test-budget",
+                "gpus": 4,
+                "harness": "dr_tulu",
+                "harness_overrides": [
+                    "provider.num_instances=2",
+                    "auxiliary_providers.judge.kind=vllm_server",
+                    "auxiliary_providers.judge.model=Qwen/Qwen3-8B",
+                    "auxiliary_providers.judge.num_instances=3",
+                ],
+            },
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            loader.load()
+
+        assert exc_info.value.code == 1
+
+    def test_auto_sets_gpu_count_to_main_and_auxiliary_requirements(self):
+        """The default allocation grows to fit all local provider instances."""
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "model": ("Qwen/Qwen3-8B",),
+                "task": ("olmobase:code",),
+                "cluster": "h100",
+                "workspace": "ai2/test-workspace",
+                "budget": "ai2/test-budget",
+                "gpus": None,
+                "harness": "dr_tulu",
+                "harness_overrides": [
+                    "provider.num_instances=2",
+                    "auxiliary_providers.judge.kind=vllm_server",
+                    "auxiliary_providers.judge.model=Qwen/Qwen3-8B",
+                    "auxiliary_providers.judge.num_instances=3",
+                ],
+            },
+        )
+
+        config = loader.load()
+
+        assert config.gpus == 5
+
 
 class TestLaunchConfigLoaderExperimentNames:
     """Tests for auto-generated Beaker experiment names."""
@@ -1092,7 +1181,7 @@ class TestLaunchConfigLoaderExperimentNames:
                 "cluster": "h100",
                 "workspace": "ai2/test-workspace",
                 "budget": "ai2/test-budget",
-                "gpus": 0,
+                "gpus": 1,
             },
         )
 
@@ -1109,7 +1198,7 @@ class TestLaunchConfigLoaderExperimentNames:
                 "cluster": "h100",
                 "workspace": "ai2/test-workspace",
                 "budget": "ai2/test-budget",
-                "gpus": 0,
+                "gpus": 1,
             },
         )
 

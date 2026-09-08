@@ -26,7 +26,7 @@ echo "Running verification checks..."
 
 echo ""
 echo "==> Syncing dependencies..."
-uv sync --frozen --extra beaker --extra hf --extra postgres --extra analysis
+uv sync --frozen --extra beaker --extra hf --extra postgres --extra analysis --extra sandbox
 
 UV_RUN="uv run --frozen"
 
@@ -60,17 +60,27 @@ if [ "$NO_DOCKER" = true ]; then
     $UV_RUN pytest tests/ $PYTEST_ARGS --no-docker
 else
     # Start docker containers for integration tests
+    COMPOSE_FILE="tests/integration/docker-compose.yml"
+    cleanup_integration_containers() {
+        echo ""
+        echo "==> Stopping integration test containers..."
+        docker compose -f "$COMPOSE_FILE" down -v
+    }
+    trap cleanup_integration_containers EXIT
+
     echo ""
     echo "==> Starting integration test containers..."
-    docker compose -f tests/integration/docker-compose.yml up -d --wait
+    docker compose -f "$COMPOSE_FILE" up -d --wait
 
     # Run tests
-    $UV_RUN pytest tests/ $PYTEST_ARGS
-    TEST_EXIT_CODE=$?
+    if $UV_RUN pytest tests/ $PYTEST_ARGS; then
+        TEST_EXIT_CODE=0
+    else
+        TEST_EXIT_CODE=$?
+    fi
 
-    echo ""
-    echo "==> Stopping integration test containers..."
-    docker compose -f tests/integration/docker-compose.yml down -v
+    trap - EXIT
+    cleanup_integration_containers
 
     if [ $TEST_EXIT_CODE -ne 0 ]; then
         exit $TEST_EXIT_CODE

@@ -48,7 +48,7 @@ def check_workers_alive(
         timeout: How long to wait for queue items
 
     Raises:
-        RuntimeError: If all workers are dead or a fatal error is found
+        RuntimeError: If a worker exits unsuccessfully or a fatal error is found
     """
     # Check for fatal errors in queue (non-blocking)
     try:
@@ -72,13 +72,9 @@ def check_workers_alive(
     except queue.Empty:
         pass  # Queue empty, continue
 
-    # Check if all workers are dead
-    alive_count = sum(1 for w in workers if w.is_alive())
-    if alive_count == 0:
-        # All workers dead - check exit codes
-        exit_codes = [w.exitcode for w in workers]
-        if any(code != 0 and code is not None for code in exit_codes):
-            raise RuntimeError(f"All workers died unexpectedly. Exit codes: {exit_codes}")
+    for index, worker in enumerate(workers):
+        if worker.exitcode not in (None, 0):
+            raise RuntimeError(f"Inference worker {index} exited with code {worker.exitcode}")
 
 
 def wait_for_workers_ready(

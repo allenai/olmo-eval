@@ -10,7 +10,7 @@ Dataset: xlangai/DS-1000
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
@@ -296,4 +296,10 @@ register_variant(
     fewshot_seed=1234,
     formatter=CompletionFormatter(answer_prefix=""),
     metrics=(PassAtKMetric(k=1, scorer=DS1000Scorer),),
+)
+
+register_variant(
+    "ds1000",
+    "v2",
+    sampling_params=replace(DS1000.sampling_params, truncate_prompt_tokens=4096),
 )

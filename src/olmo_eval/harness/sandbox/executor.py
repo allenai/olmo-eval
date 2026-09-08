@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import logging
 import os
+import random
 import time
 import uuid
-from typing import Any
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, TypeVar
 
 import aiohttp
 
@@ -17,8 +21,31 @@ from olmo_eval.common.execution.environment import ExecutionResult
 
 from .config import SandboxConfig, SandboxMode
 from .diagnostics import start_internal_monitor
+from .errors import SandboxTransportError
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+_TRANSPORT_RETRIES = 3
+_TRANSPORT_RETRY_INITIAL_DELAY = 0.25
+_HEALTH_CHECK_RETRIES = 3
+_HEALTH_CHECK_RETRY_INITIAL_DELAY = 0.5
+_HEALTH_CHECK_TIMEOUT = 5.0
+
+
+def _exponential_backoff(initial_delay: float, retry: int) -> float:
+    """Return an exponential backoff delay with additive jitter."""
+    base_delay = initial_delay * (2 ** (retry - 1))
+    return base_delay + random.uniform(0.0, base_delay)
+
+
+@dataclass
+class _ControlCommandResult:
+    """Result from a short command used to control a streaming execution."""
+
+    stdout: str
+    stderr: str
+    exit_code: int
 
 
 def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
@@ -102,6 +129,8 @@ class SandboxExecutor:
         self._runtime: Any = None
         self._session_created: bool = False
         self._session_lock: asyncio.Lock = asyncio.Lock()
+        self._quarantined_reason: str | None = None
+        self._health_check_lock: asyncio.Lock = asyncio.Lock()
 
     def _log(self, level: int, msg: str) -> None:
         """Log a message with optional name prefix."""
@@ -134,52 +163,62 @@ class SandboxExecutor:
         self._log(logging.DEBUG, "Starting sandbox deployment...")
         prefix = f"[{self.name}] " if self.name else ""
 
-        # For Modal deployments, patch app lookup during deployment creation
-        # AND startup to use unique app names and avoid conflicts between
-        # concurrent runs.  The patch must cover both get_deployment() and
-        # deployment.start() because swe-rex calls modal.App.lookup("swe-rex")
-        # in both phases.
-        if self.config.mode == SandboxMode.MODAL:
-            from unittest.mock import patch
+        try:
+            # For Modal deployments, patch app lookup during deployment creation
+            # AND startup to use unique app names and avoid conflicts between
+            # concurrent runs.  The patch must cover both get_deployment() and
+            # deployment.start() because swe-rex calls modal.App.lookup("swe-rex")
+            # in both phases.
+            if self.config.mode == SandboxMode.MODAL:
+                from unittest.mock import patch
 
-            import modal  # type: ignore[ty:unresolved-import]
+                import modal
 
-            app_name = self._modal_app_name or _get_modal_app_name()
-            if not self._modal_app_name:
-                # Only log if we generated it (manager logs its own)
-                self._log(logging.INFO, f"Using Modal app: {app_name}")
-            original_lookup = modal.App.lookup
+                app_name = self._modal_app_name or _get_modal_app_name()
+                if not self._modal_app_name:
+                    # Only log if we generated it (manager logs its own)
+                    self._log(logging.INFO, f"Using Modal app: {app_name}")
+                original_lookup = modal.App.lookup
 
-            def patched_lookup(name: str, *args, **kwargs):
-                if name == "swe-rex":
-                    name = app_name
-                return original_lookup(name, *args, **kwargs)
+                def patched_lookup(name: str, *args, **kwargs):
+                    if name == "swe-rex":
+                        name = app_name
+                    return original_lookup(name, *args, **kwargs)
 
-            with patch.object(modal.App, "lookup", patched_lookup):
-                deployment = self.get_deployment()
+                with patch.object(modal.App, "lookup", patched_lookup):
+                    self._deployment = self.get_deployment()
+                    await _run_with_progress(
+                        self._deployment.start(),
+                        f"{prefix}Waiting for sandbox runtime",
+                        interval=5.0,
+                    )
+            else:
+                self._deployment = self.get_deployment()
                 await _run_with_progress(
-                    deployment.start(),
+                    self._deployment.start(),
                     f"{prefix}Waiting for sandbox runtime",
                     interval=5.0,
                 )
-        else:
-            deployment = self.get_deployment()
-            await _run_with_progress(
-                deployment.start(),
-                f"{prefix}Waiting for sandbox runtime",
-                interval=5.0,
-            )
 
-        self._deployment = deployment
-        self._runtime = deployment.runtime
-        self._log(logging.DEBUG, "Sandbox deployment ready!")
+            self._runtime = self._deployment.runtime
+            self._quarantined_reason = None
+            self._log(logging.DEBUG, "Sandbox deployment ready!")
 
-        if (
-            self.config.enable_diagnostics
-            and self.config.log_dir
-            and self.config.mode == SandboxMode.DOCKER
-        ):
-            await start_internal_monitor(self._runtime, self.name)
+            if (
+                self.config.enable_diagnostics
+                and self.config.log_dir
+                and self.config.mode == SandboxMode.DOCKER
+            ):
+                await start_internal_monitor(self._runtime, self.name)
+        except BaseException:
+            try:
+                await self.stop()
+            except BaseException as cleanup_error:
+                self._log(
+                    logging.WARNING,
+                    f"Failed to clean up deployment after startup failure: {cleanup_error}",
+                )
+            raise
 
     def get_deployment(self) -> Any:
         """Create the appropriate deployment based on configuration.
@@ -194,7 +233,7 @@ class SandboxExecutor:
         match self.config.mode:
             case SandboxMode.DOCKER:
                 try:
-                    from swerex.deployment.docker import (  # type: ignore[ty:unresolved-import]
+                    from swerex.deployment.docker import (
                         DockerDeployment,
                     )
                 except ImportError as e:
@@ -263,7 +302,7 @@ class SandboxExecutor:
 
             case SandboxMode.LOCAL:
                 try:
-                    from swerex.deployment.local import (  # type: ignore[ty:unresolved-import]
+                    from swerex.deployment.local import (
                         LocalDeployment,
                     )
                 except ImportError as e:
@@ -279,16 +318,14 @@ class SandboxExecutor:
 
             case SandboxMode.MODAL:
                 try:
-                    from swerex.deployment.modal import (  # type: ignore[ty:unresolved-import]
-                        ModalDeployment,
-                    )
+                    from .modal_deployment import ManagedModalDeployment
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex modal support not installed. "
                         "Install with: pip install 'swe-rex[modal]'"
                     ) from e
 
-                import modal  # type: ignore[ty:unresolved-import]
+                import modal
 
                 # Build image locally and push to registry (same as Docker/Podman mode)
                 # Modal will pull the pre-built image from the registry
@@ -340,10 +377,11 @@ class SandboxExecutor:
                 else:
                     modal_image = modal.Image.from_registry(image)
 
-                return ModalDeployment(
+                return ManagedModalDeployment(
                     image=modal_image,
                     startup_timeout=self.config.startup_timeout,
                     runtime_timeout=self.config.runtime_timeout,
+                    deployment_timeout=self.config.deployment_timeout,
                     modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
                 )
 
@@ -352,7 +390,7 @@ class SandboxExecutor:
         # Close session before stopping deployment
         if self._session_created and self._runtime is not None:
             try:
-                from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+                from swerex.runtime.abstract import (
                     CloseBashSessionRequest,
                 )
 
@@ -423,7 +461,7 @@ class SandboxExecutor:
         if self._runtime is None:
             raise RuntimeError("Sandbox not started. Call start() first or use async context.")
 
-        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
+        from swerex.runtime.abstract import Command
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
         prefix = log_prefix or self.name or "sandbox"
@@ -432,11 +470,16 @@ class SandboxExecutor:
             return await self._execute_streaming(command, effective_timeout, prefix)
 
         try:
-            response = await self._runtime.execute(
-                Command(
-                    command=["bash", "-c", command],
-                    timeout=effective_timeout,
-                )
+            runtime_command = Command(
+                command=["bash", "-c", command],
+                timeout=effective_timeout,
+            )
+            response = await self._run_with_transport_retries(
+                lambda: asyncio.wait_for(
+                    self._runtime.execute(runtime_command),
+                    timeout=effective_timeout + 1.0,
+                ),
+                operation="command execution",
             )
         except Exception as e:
             # Check for timeout errors (swerex.exceptions.CommandTimeoutError)
@@ -467,9 +510,13 @@ class SandboxExecutor:
     ) -> ExecutionResult:
         """Execute a command with streaming output to logs.
 
-        Uses background execution to avoid swerex HTTP timeout issues.
+        Uses background execution to avoid swerex HTTP timeout issues. For local
+        Docker/Podman deployments, short control commands bypass the swe-rex HTTP
+        server. Its async ``/execute`` handler calls blocking ``subprocess.run``;
+        if one poll blocks, the single server event loop otherwise stops answering
+        every subsequent poll, kill, and artifact-recovery request.
         """
-        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
+        from swerex.runtime.abstract import Command
 
         # Use unique temp paths to avoid conflicts with concurrent executions
         cmd_id = uuid.uuid4().hex[:12]
@@ -490,7 +537,10 @@ class SandboxExecutor:
             f"chmod +x {script_file}"
         )
         try:
-            await self._runtime.execute(Command(command=["bash", "-c", setup], timeout=30.0))
+            await asyncio.wait_for(
+                self._runtime.execute(Command(command=["bash", "-c", setup], timeout=30.0)),
+                timeout=31.0,
+            )
         except Exception as e:
             return ExecutionResult(False, f"Failed to create script: {e}", -1)
 
@@ -502,7 +552,10 @@ class SandboxExecutor:
             f"echo $! > {pid_file}"
         )
         try:
-            await self._runtime.execute(Command(command=["bash", "-c", start], timeout=10.0))
+            await asyncio.wait_for(
+                self._runtime.execute(Command(command=["bash", "-c", start], timeout=10.0)),
+                timeout=11.0,
+            )
         except Exception as e:
             return ExecutionResult(False, f"Failed to start command: {e}", -1)
 
@@ -527,7 +580,7 @@ class SandboxExecutor:
                     f'[ -n "$pid" ] && kill -KILL -$pid 2>/dev/null; '
                     "true"
                 )
-                await self._runtime.execute(Command(command=["bash", "-c", kill_cmd], timeout=5.0))
+                await self._execute_stream_control(kill_cmd, timeout=5.0)
             except Exception as e:
                 self._log(logging.DEBUG, f"Process group kill (may be already exited): {e}")
 
@@ -535,9 +588,7 @@ class SandboxExecutor:
             """Remove temporary files."""
             try:
                 cleanup_cmd = f"rm -f {output_file} {exit_code_file} {script_file} {pid_file}"
-                await self._runtime.execute(
-                    Command(command=["bash", "-c", cleanup_cmd], timeout=5.0)
-                )
+                await self._execute_stream_control(cleanup_cmd, timeout=5.0)
             except Exception:
                 pass  # Best effort cleanup
 
@@ -565,16 +616,24 @@ class SandboxExecutor:
                     f"echo '---EXIT_CODE---'; "
                     f"cat {exit_code_file} 2>/dev/null"
                 )
-                resp = await self._runtime.execute(
-                    Command(command=["bash", "-c", poll_cmd], timeout=10.0)
-                )
+                resp = await self._execute_stream_control(poll_cmd, timeout=10.0)
                 poll_duration = time.time() - poll_start
+                stdout = resp.stdout or ""
+                if "---EXIT_CODE---" not in stdout:
+                    # A live container always reaches the echo above, even while the
+                    # background command is still running (the final cat then exits 1).
+                    # Container-runtime failures return normally with a nonzero exit
+                    # code, so use the marker to distinguish those from an incomplete
+                    # poll and feed them into the existing consecutive-failure guard.
+                    detail = (resp.stderr or "").strip()
+                    msg = f"poll control command exited {resp.exit_code} before producing marker"
+                    if detail:
+                        msg += f": {detail}"
+                    raise RuntimeError(msg)
                 consecutive_failures = 0  # Reset on success
 
                 if poll_duration > 5.0:
                     self._log(logging.WARNING, f"Poll slow ({poll_duration:.1f}s)")
-
-                stdout = resp.stdout or ""
 
                 # Check if output was truncated
                 if "---TRUNCATED---" in stdout:
@@ -659,17 +718,11 @@ class SandboxExecutor:
 
         try:
             await asyncio.sleep(0.2)
-            resp = await self._runtime.execute(
-                Command(
-                    command=[
-                        "bash",
-                        "-c",
-                        f"cat {output_file} 2>/dev/null; "
-                        f"echo '---EXIT_CODE---'; "
-                        f"cat {exit_code_file} 2>/dev/null",
-                    ],
-                    timeout=30.0,
-                )
+            resp = await self._execute_stream_control(
+                f"cat {output_file} 2>/dev/null; "
+                f"echo '---EXIT_CODE---'; "
+                f"cat {exit_code_file} 2>/dev/null",
+                timeout=30.0,
             )
             parts = (resp.stdout or "").split("---EXIT_CODE---")
             full_output = parts[0] if parts else ""
@@ -698,6 +751,91 @@ class SandboxExecutor:
             full_output = (full_output + "\n[Command timed out]") if full_output else "[Timed out]"
 
         return ExecutionResult(exit_code == 0, full_output, exit_code)
+
+    async def _execute_stream_control(self, command: str, timeout: float) -> _ControlCommandResult:
+        """Run a short streaming-control command with a real client timeout.
+
+        DockerDeployment exposes the container name, so local container modes can
+        invoke the runtime CLI directly. This keeps polling independent of the
+        in-container swe-rex HTTP server and makes a stuck poll individually
+        cancellable. Modal has no local container CLI and keeps using swe-rex.
+        """
+        container_name = getattr(self._deployment, "container_name", None)
+        if self.config.mode == SandboxMode.DOCKER and container_name:
+            process = await asyncio.create_subprocess_exec(
+                self.config.container_runtime,
+                "exec",
+                container_name,
+                "bash",
+                "-c",
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            except TimeoutError:
+                process.kill()
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                raise
+            return _ControlCommandResult(
+                stdout=stdout.decode(errors="backslashreplace"),
+                stderr=stderr.decode(errors="backslashreplace"),
+                exit_code=process.returncode or 0,
+            )
+
+        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
+
+        response = await asyncio.wait_for(
+            self._runtime.execute(Command(command=["bash", "-c", command], timeout=timeout)),
+            timeout=timeout + 1.0,
+        )
+        return _ControlCommandResult(
+            stdout=response.stdout or "",
+            stderr=response.stderr or "",
+            exit_code=response.exit_code,
+        )
+
+    async def write_files(self, files: Mapping[str, str], timeout: float | None = None) -> None:
+        """Write files into the sandbox filesystem.
+
+        Contents travel in the request body rather than in a command argument,
+        so they are not bounded by the operating system's argument size limit.
+
+        Args:
+            files: Mapping of absolute sandbox path to file content.
+            timeout: Seconds allowed for each file, defaulting to the config's
+                command timeout. A write that exceeds it is retried like any
+                other transport failure, so a file can take up to the retry
+                budget times this value before the write is given up on.
+
+        Raises:
+            RuntimeError: If the sandbox is not started.
+            SandboxTransportError: If a write still fails after retries.
+        """
+        if self._runtime is None:
+            raise RuntimeError("Sandbox not started. Call start() first or use async context.")
+
+        from swerex.runtime.abstract import WriteFileRequest
+
+        effective_timeout = timeout if timeout is not None else self.config.command_timeout
+
+        for path, content in files.items():
+            request = WriteFileRequest(path=path, content=content)
+            await self._run_with_transport_retries(
+                # The runtime's request carries no timeout of its own, so this
+                # bound is the only thing keeping a stalled upload from waiting
+                # on the HTTP client's default.
+                lambda request=request: asyncio.wait_for(
+                    self._runtime.write_file(request),
+                    timeout=effective_timeout,
+                ),
+                # Naming the path here puts it in the retry logs and in the
+                # error raised once retries are exhausted, so a failure points
+                # at the file rather than at file writing in general.
+                operation=f"file write to {path}",
+            )
 
     async def execute_code(
         self,
@@ -736,15 +874,17 @@ class SandboxExecutor:
             )
 
         try:
-            from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
+            from swerex.runtime.abstract import Command
 
             effective_timeout = timeout if timeout is not None else self.config.command_timeout
 
-            response = await self._runtime.execute(
-                Command(
-                    command=[interpreter, "-c", code],
-                    timeout=effective_timeout,
-                )
+            runtime_command = Command(
+                command=[interpreter, "-c", code],
+                timeout=effective_timeout,
+            )
+            response = await self._run_with_transport_retries(
+                lambda: self._runtime.execute(runtime_command),
+                operation="code execution",
             )
 
             output = response.stdout or ""
@@ -759,6 +899,8 @@ class SandboxExecutor:
 
         except Exception as e:
             error_msg = str(e) or repr(e)
+            if self._is_transport_error(e):
+                raise
             self._log(logging.DEBUG, f"Code execution failed: {error_msg}")
             return ExecutionResult(
                 success=False,
@@ -776,7 +918,7 @@ class SandboxExecutor:
             if self._session_created:
                 return
 
-            from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+            from swerex.runtime.abstract import (
                 CreateBashSessionRequest,
             )
 
@@ -812,7 +954,7 @@ class SandboxExecutor:
 
         await self._ensure_session()
 
-        from swerex.runtime.abstract import BashAction  # type: ignore[ty:unresolved-import]
+        from swerex.runtime.abstract import BashAction
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
         prefix = log_prefix or self.name or "sandbox"
@@ -843,4 +985,106 @@ class SandboxExecutor:
     @property
     def is_running(self) -> bool:
         """Check if the sandbox is running."""
-        return self._deployment is not None and self._runtime is not None
+        return (
+            self._deployment is not None
+            and self._runtime is not None
+            and self._quarantined_reason is None
+        )
+
+    @staticmethod
+    def _is_transport_error(exc: Exception) -> bool:
+        """Return whether an exception came from the sandbox transport."""
+        # SWE-ReX attaches extra_info to exceptions decoded from a 511 response.
+        # Those came from the executed command and must not be retried even when
+        # their Python type also looks like a connection or timeout error.
+        if hasattr(exc, "extra_info"):
+            return False
+        return isinstance(
+            exc,
+            (
+                aiohttp.ClientConnectionError,
+                BrokenPipeError,
+                ConnectionAbortedError,
+                ConnectionResetError,
+                TimeoutError,
+                json.JSONDecodeError,
+            ),
+        )
+
+    async def _run_with_transport_retries(
+        self,
+        operation_fn: Callable[[], Awaitable[_T]],
+        *,
+        operation: str,
+    ) -> _T:
+        """Retry transient transport failures before considering quarantine."""
+        max_attempts = _TRANSPORT_RETRIES + 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = await operation_fn()
+            except Exception as exc:
+                if not self._is_transport_error(exc):
+                    raise
+                if attempt >= max_attempts:
+                    await self._quarantine_if_unresponsive(exc)
+                    raise SandboxTransportError(
+                        f"{operation} exhausted {max_attempts} transport attempt(s): {exc}"
+                    ) from exc
+                delay = _exponential_backoff(
+                    _TRANSPORT_RETRY_INITIAL_DELAY,
+                    attempt,
+                )
+                self._log(
+                    logging.WARNING,
+                    f"Transport failure during {operation} "
+                    f"(attempt {attempt}/{max_attempts}): {exc}; retrying in {delay}s",
+                )
+                await asyncio.sleep(delay)
+            else:
+                if attempt > 1:
+                    self._log(
+                        logging.INFO,
+                        f"Recovered {operation} after {attempt} attempts",
+                    )
+                return result
+
+        raise AssertionError("transport retry loop exited unexpectedly")
+
+    async def _quarantine_if_unresponsive(self, transport_error: Exception) -> None:
+        """Quarantine only after repeated independent health checks fail."""
+        async with self._health_check_lock:
+            if self._quarantined_reason is not None:
+                return
+
+            max_attempts = _HEALTH_CHECK_RETRIES + 1
+            last_health_error = "health check returned false"
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    alive = bool(await self._deployment.is_alive(timeout=_HEALTH_CHECK_TIMEOUT))
+                except Exception as exc:
+                    alive = False
+                    last_health_error = str(exc) or repr(exc)
+
+                if alive:
+                    return
+
+                if attempt < max_attempts:
+                    delay = _exponential_backoff(
+                        _HEALTH_CHECK_RETRY_INITIAL_DELAY,
+                        attempt,
+                    )
+                    self._log(
+                        logging.WARNING,
+                        f"Sandbox health check failed (attempt {attempt}/{max_attempts}); "
+                        f"retrying in {delay}s",
+                    )
+                    await asyncio.sleep(delay)
+
+            self._quarantined_reason = (
+                f"transport error: {transport_error}; health check: {last_health_error}"
+            )
+            self._log(
+                logging.WARNING,
+                "Quarantining sandbox after transport retries were exhausted "
+                f"and {max_attempts} failed health checks: {self._quarantined_reason}",
+            )

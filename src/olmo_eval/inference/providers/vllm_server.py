@@ -273,6 +273,8 @@ class VLLMServerProvider(InferenceProvider):
         completion_use_prompt_token_ids: bool | None = None,
         completion_client_side_stop_trim: bool | None = None,
         completion_sentencepiece_cleanup: bool | None = None,
+        enable_lora: bool = False,
+        lora_modules: list[str] | None = None,
         **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -284,7 +286,8 @@ class VLLMServerProvider(InferenceProvider):
             max_concurrency: Maximum number of concurrent requests.
             max_retries: Maximum number of retries for transient errors.
             tensor_parallel_size: Number of GPUs for tensor parallelism (server mode).
-            max_model_len: Maximum model context length (server mode).
+            max_model_len: Authoritative maximum model context length. Passed to managed
+                servers and used directly instead of metadata discovery for external servers.
             tokenizer: Tokenizer path override (server mode).
             enable_auto_tool_choice: Enable automatic tool choice (server mode).
             tool_call_parser: Tool call parser name (server mode).
@@ -306,6 +309,10 @@ class VLLMServerProvider(InferenceProvider):
                 stop sequence client-side after generation.
             completion_sentencepiece_cleanup: If True, replace SentencePiece space markers
                 with actual spaces in completion outputs.
+            enable_lora: Enable LoRA (Low-Rank Adaptation) support for model loading (server mode).
+            lora_modules: List of LoRA module paths to load (format: "module_name=/path/to/lora").
+                Only used if enable_lora is True (server mode). Raises an error if more than one
+                is passed.
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
@@ -329,7 +336,18 @@ class VLLMServerProvider(InferenceProvider):
         self._openai_module: Any = None
         self._tokenizer: Any = None
         self._server: VLLMServerProcess | None = None  # type: ignore[possibly-unresolved-reference]
-        self._max_length: int | None = None
+        if max_model_len is not None and max_model_len <= 0:
+            raise ValueError("max_model_len must be positive when set")
+        self._max_length: int | None = max_model_len
+        self._max_length_source: str | None = "configured" if max_model_len is not None else None
+        self._max_length_discovery_attempted = max_model_len is not None
+        self._enable_lora = enable_lora
+        self._lora_modules = lora_modules
+        self._request_model_name = model_name
+        if lora_modules and len(lora_modules) > 1:
+            raise ValueError("the vllm server provider can accept only one lora module")
+        if enable_lora and lora_modules:
+            self._request_model_name = lora_modules[0].split("=", 1)[0]
 
         if base_url:
             # Connect to existing server
@@ -350,7 +368,7 @@ class VLLMServerProvider(InferenceProvider):
                 refresh_hf_cache(model_name, **refresh_kwargs)
                 if tokenizer and tokenizer != model_name:
                     refresh_hf_cache(tokenizer, **refresh_kwargs)
-            if max_model_len:
+            if max_model_len is not None:
                 srv_kwargs["max_model_len"] = max_model_len
             if tokenizer:
                 srv_kwargs["tokenizer"] = tokenizer
@@ -362,6 +380,10 @@ class VLLMServerProvider(InferenceProvider):
                     srv_kwargs["tool_call_parser"] = tool_call_parser
             if trust_remote_code:
                 srv_kwargs["trust_remote_code"] = True
+            if enable_lora:
+                srv_kwargs["enable_lora"] = True
+            if lora_modules:
+                srv_kwargs["lora_modules"] = lora_modules
             self._server = VLLMServerProcess(
                 model_name=model_name,
                 tensor_parallel_size=tensor_parallel_size,
@@ -388,30 +410,52 @@ class VLLMServerProvider(InferenceProvider):
         self.close()
 
     @property
-    def max_length(self) -> int:
-        """Get the maximum model context length from the server."""
+    def max_length(self) -> int | None:
+        """Get an authoritative model context length, if one is available."""
+        if self._max_length is not None or self._max_length_discovery_attempted:
+            return self._max_length
+
+        self._max_length_discovery_attempted = True
+        client = httpx.Client(timeout=30.0)
+        try:
+            resp = client.get(f"{self.base_url}/models")
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise ValueError("/models response is not a JSON object")
+            model_records = data.get("data", [])
+            if not isinstance(model_records, list):
+                raise ValueError("/models response does not contain a list in 'data'")
+
+            for model_info in model_records:
+                if not isinstance(model_info, dict) or model_info.get("id") != self.model_name:
+                    continue
+                max_len = model_info.get("max_model_len")
+                if max_len is None:
+                    break
+                discovered_max_length = int(max_len)
+                if discovered_max_length <= 0:
+                    raise ValueError("max_model_len reported by /models must be positive")
+                self._max_length = discovered_max_length
+                self._max_length_source = "server"
+                break
+        except (httpx.HTTPError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Could not determine max_model_len from %s/models (%s); "
+                "leaving the context length unknown",
+                self.base_url,
+                exc,
+            )
+            return None
+        finally:
+            client.close()
+
         if self._max_length is None:
-            # Query /v1/models endpoint for max_model_len
-            client = httpx.Client(timeout=30.0)
-            try:
-                resp = client.get(f"{self.base_url}/models")
-                resp.raise_for_status()
-                data = resp.json()
-                for model_info in data.get("data", []):
-                    max_len = model_info.get("max_model_len")
-                    if max_len is not None:
-                        self._max_length = int(max_len)
-                        break
-            finally:
-                client.close()
-            if self._max_length is None:
-                # Fallback to a large default if server doesn't report it
-                self._max_length = 4096
-                logger.warning(
-                    "Could not determine max_model_len from server, defaulting to %d",
-                    self._max_length,
-                )
-        assert self._max_length is not None
+            logger.warning(
+                "Server model metadata does not provide max_model_len for %r; "
+                "leaving the context length unknown",
+                self.model_name,
+            )
         return self._max_length
 
     def _get_or_create_client(self) -> AsyncOpenAI:
@@ -525,7 +569,7 @@ class VLLMServerProvider(InferenceProvider):
 
         # Use remote tokenizer by default (no transformers dependency)
         if self._tokenizer is None:
-            self._tokenizer = RemoteTokenizer(self.base_url, self.model_name)
+            self._tokenizer = RemoteTokenizer(self.base_url, self._request_model_name)
         return self._tokenizer
 
     def get_tokenizer(self) -> Any:
@@ -594,10 +638,11 @@ class VLLMServerProvider(InferenceProvider):
                 trace["generation_kwargs"]["top_p"] = params.top_p
             if params.do_sample and params.temperature > 0 and params.top_k is not None:
                 trace["generation_kwargs"]["top_k"] = params.top_k
-            if params.truncate_prompt_tokens is not None:
-                trace["generation_kwargs"]["truncate_prompt_tokens"] = params.truncate_prompt_tokens
-            if params.truncation_side is not None:
-                trace["generation_kwargs"]["truncation_side"] = params.truncation_side
+            truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
+            if truncate_prompt_tokens is not None:
+                trace["generation_kwargs"]["truncate_prompt_tokens"] = truncate_prompt_tokens
+            if truncation_side is not None:
+                trace["generation_kwargs"]["truncation_side"] = truncation_side
             trace["stop_sequences"] = self._get_completion_stop_sequences(params) or []
             trace["input_mode"] = (
                 "prompt_token_ids" if self._completion_use_prompt_token_ids else "text"
@@ -620,10 +665,11 @@ class VLLMServerProvider(InferenceProvider):
             generation_kwargs["top_p"] = params.top_p
         if self.chat_template_kwargs:
             generation_kwargs["chat_template_kwargs"] = dict(self.chat_template_kwargs)
-        if params.truncate_prompt_tokens is not None:
-            generation_kwargs["truncate_prompt_tokens"] = params.truncate_prompt_tokens
-        if params.truncation_side is not None:
-            generation_kwargs["truncation_side"] = params.truncation_side
+        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
+        if truncate_prompt_tokens is not None:
+            generation_kwargs["truncate_prompt_tokens"] = truncate_prompt_tokens
+        if truncation_side is not None:
+            generation_kwargs["truncation_side"] = truncation_side
         trace["generation_kwargs"] = generation_kwargs
         trace["stop_sequences"] = list(params.stop_sequences or ())
         trace["input_mode"] = "messages"
@@ -663,6 +709,13 @@ class VLLMServerProvider(InferenceProvider):
 
         tokenizer = self._get_tokenizer(require_local=True)
         return tokenizer.encode(prompt, add_special_tokens=bool(self._add_bos_token))
+
+    def _get_prompt_truncation(
+        self,
+        params: SamplingParams,
+    ) -> tuple[int | None, str | None]:
+        """Return only caller-requested prompt truncation settings."""
+        return params.truncate_prompt_tokens, params.truncation_side
 
     def _postprocess_completion_text(self, text: str, stop_sequences: list[str] | None) -> str:
         """Apply optional legacy completion post-processing."""
@@ -757,7 +810,7 @@ class VLLMServerProvider(InferenceProvider):
     ) -> list[LMOutput]:
         """Generate using the /v1/completions endpoint."""
         kwargs: dict[str, Any] = {
-            "model": self.model_name,
+            "model": self._request_model_name,
             "prompt": request.prompt,
             "n": params.num_samples,
             "logprobs": 1,  # Request logprobs for metrics
@@ -766,7 +819,7 @@ class VLLMServerProvider(InferenceProvider):
         # rather than sending null, which some OpenAI-compatible servers reject.
         if params.max_tokens is not None:
             kwargs["max_tokens"] = params.max_tokens
-        extra_body: dict[str, Any] = {"add_special_tokens": False}
+        extra_body: dict[str, Any] = {"add_special_tokens": bool(self._add_bos_token)}
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
@@ -777,10 +830,11 @@ class VLLMServerProvider(InferenceProvider):
         stop_sequences = self._get_completion_stop_sequences(params)
         if stop_sequences:
             kwargs["stop"] = stop_sequences
-        if params.truncate_prompt_tokens is not None:
-            extra_body["truncate_prompt_tokens"] = params.truncate_prompt_tokens
-        if params.truncation_side is not None:
-            extra_body["truncation_side"] = params.truncation_side
+        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
+        if truncate_prompt_tokens is not None:
+            extra_body["truncate_prompt_tokens"] = truncate_prompt_tokens
+        if truncation_side is not None:
+            extra_body["truncation_side"] = truncation_side
         if self._completion_use_prompt_token_ids:
             http_client = self._get_raw_http_client()
             response = await http_client.post(
@@ -835,7 +889,7 @@ class VLLMServerProvider(InferenceProvider):
 
         # Build request kwargs
         kwargs: dict[str, Any] = {
-            "model": self.model_name,
+            "model": self._request_model_name,
             "messages": messages,
             "n": params.num_samples,
         }
@@ -851,10 +905,11 @@ class VLLMServerProvider(InferenceProvider):
         extra_body: dict[str, Any] = {}
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             extra_body["top_k"] = params.top_k
-        if params.truncate_prompt_tokens is not None:
-            extra_body["truncate_prompt_tokens"] = params.truncate_prompt_tokens
-        if params.truncation_side is not None:
-            extra_body["truncation_side"] = params.truncation_side
+        truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
+        if truncate_prompt_tokens is not None:
+            extra_body["truncate_prompt_tokens"] = truncate_prompt_tokens
+        if truncation_side is not None:
+            extra_body["truncation_side"] = truncation_side
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         if tools:
@@ -1029,13 +1084,13 @@ class VLLMServerProvider(InferenceProvider):
             if not context_enc and context == "":
                 context_enc = tokenizer.encode("", add_special_tokens=True)
 
-            # Left-truncate to max_length - 1 to match inline vLLM provider behavior.
-            # This ensures long prompts are handled the same way as oe-eval-internal:
-            # the context is left-truncated while preserving the continuation tokens.
-            # Use per-request max_length if set (e.g., from task config), else provider default.
-            max_len = request.max_length or self.max_length
             full_tokens = context_enc + continuation_enc
-            if len(full_tokens) > max_len - 1:
+            # Loglikelihood scoring intentionally left-truncates only when the task,
+            # provider configuration, or server metadata supplies an authoritative limit.
+            max_len = request.max_length if request.max_length is not None else self.max_length
+            if max_len is not None and max_len <= 1:
+                raise ValueError("max_length must be greater than 1 for loglikelihood requests")
+            if max_len is not None and len(full_tokens) > max_len - 1:
                 full_tokens = full_tokens[-(max_len - 1) :]
                 overflow = len(context_enc) + len(continuation_enc) - (max_len - 1)
                 context_len = max(0, len(context_enc) - overflow)
@@ -1050,7 +1105,7 @@ class VLLMServerProvider(InferenceProvider):
             resp = await http_client.post(
                 f"{self.base_url}/completions",
                 json={
-                    "model": self.model_name,
+                    "model": self._request_model_name,
                     "prompt": full_tokens,
                     "max_tokens": 1,
                     "temperature": params.temperature,
@@ -1112,6 +1167,7 @@ class VLLMServerProvider(InferenceProvider):
                     {
                         "token": token_str,
                         "logprob": logprob_val,
+                        "token_id": int(token_id),
                         "bytes": list(token_str.encode("utf-8")),
                     }
                 )
