@@ -81,10 +81,24 @@ class TestProcessDoc:
         assert instance is not None
         assert instance.metadata["gold_items"] == ["New Zealand"]
 
-    def test_skips_missing_problem_or_answer(self, task):
+    def test_skips_missing_problem(self, task):
         assert task.process_doc(_doc(problem="")) is None
-        assert task.process_doc(_doc(answer="")) is None
+
+    def test_skips_answer_that_is_only_junk_separators(self, task):
         assert task.process_doc(_doc(answer=" , ,")) is None
+
+    def test_missing_answer_on_single_answer_is_dropped_as_malformed(self, task):
+        assert task.process_doc(_doc(answer="", answer_type="Single Answer")) is None
+        assert task.process_doc(_doc(answer=None, answer_type="Single Answer")) is None
+
+    def test_missing_answer_on_set_answer_becomes_empty_gold_set(self, task):
+        # The source CSV spells "no items satisfy every constraint" as the literal
+        # text "None" on Set Answer rows; the CSV loader turns that into a null.
+        for missing in ("", None):
+            instance = task.process_doc(_doc(answer=missing, answer_type="Set Answer"))
+            assert instance is not None
+            assert instance.metadata["gold_items"] == []
+            assert instance.gold_answer == ""
 
 
 class TestSplitAnswerSet:
@@ -180,6 +194,28 @@ class TestComputeScores:
             "deepsearchqa_exact_match": 0.0,
         }
 
+    def test_empty_gold_set_and_empty_prediction_is_a_perfect_score(self):
+        scores = compute_deepsearchqa_scores(
+            num_gold=0, num_pred=0, num_matched_gold=0, num_matched_pred=0
+        )
+        assert scores == {
+            "deepsearchqa_precision": 1.0,
+            "deepsearchqa_recall": 1.0,
+            "deepsearchqa_f1": 1.0,
+            "deepsearchqa_exact_match": 1.0,
+        }
+
+    def test_empty_gold_set_with_hallucinated_prediction_scores_zero(self):
+        scores = compute_deepsearchqa_scores(
+            num_gold=0, num_pred=2, num_matched_gold=0, num_matched_pred=0
+        )
+        assert scores == {
+            "deepsearchqa_precision": 0.0,
+            "deepsearchqa_recall": 1.0,
+            "deepsearchqa_f1": 0.0,
+            "deepsearchqa_exact_match": 0.0,
+        }
+
 
 class TestScoreResponses:
     @pytest.mark.anyio
@@ -240,6 +276,43 @@ class TestScoreResponses:
 
         assert len(calls) == 2
         assert response.scores["deepsearchqa_f1"] == 1.0
+
+    @pytest.mark.anyio
+    async def test_empty_gold_set_with_correctly_empty_prediction_skips_judge(
+        self, task, monkeypatch
+    ):
+        instance = task.process_doc(_doc(answer="", answer_type="Set Answer"))
+        response = _response(instance, text="")
+        calls = []
+
+        async def judge(prompt):
+            calls.append(prompt)
+            return '{"matched_gold_indices": [], "matched_submitted_indices": []}'
+
+        monkeypatch.setattr(deepsearchqa, "build_deepsearchqa_judge_fn", lambda: judge)
+        await task.score_responses([response])
+
+        assert calls == []
+        assert response.scores["deepsearchqa_f1"] == 1.0
+        assert response.scores["deepsearchqa_exact_match"] == 1.0
+
+    @pytest.mark.anyio
+    async def test_empty_gold_set_with_hallucinated_prediction_skips_judge(self, task, monkeypatch):
+        instance = task.process_doc(_doc(answer="", answer_type="Set Answer"))
+        response = _response(instance, text="FINAL ANSWER: Some hallucinated item")
+        calls = []
+
+        async def judge(prompt):
+            calls.append(prompt)
+            return '{"matched_gold_indices": [], "matched_submitted_indices": []}'
+
+        monkeypatch.setattr(deepsearchqa, "build_deepsearchqa_judge_fn", lambda: judge)
+        await task.score_responses([response])
+
+        assert calls == []
+        assert response.scores["deepsearchqa_f1"] == 0.0
+        assert response.scores["deepsearchqa_recall"] == 1.0
+        assert response.scores["deepsearchqa_precision"] == 0.0
 
     @pytest.mark.anyio
     async def test_exhausted_retries_score_zero_without_raising(self, task, monkeypatch):
