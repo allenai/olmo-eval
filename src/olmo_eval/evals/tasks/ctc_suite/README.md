@@ -3,8 +3,8 @@
 Each task puts a corpus of N documents in-prompt and asks a question whose difficulty scales with
 how much of the corpus must be tracked *simultaneously* — from O(N) retrieval, through O(N²)
 relational tasks (find every contradicting pair), to O(NM)/O(N³) structural ones (cluster
-everything, find planted triples). Every task has a context ladder; a rung label is the measured
-median prompt length through the reference prompt path, not a document count.
+everything, find planted triples). Every task has a context ladder; a rung label is a token budget,
+not a document count — see the accuracy caveat below before treating it as a measured length.
 
 ## Quickstart
 
@@ -81,6 +81,14 @@ cap is documented on its RosterRow.
   saturates at ~0.98 and is emitted only as a secondary. Relevance in this data is bimodal
   (nothing between CE −5 and 0), which is also why an NDCG@10 over CE gains would collapse to
   the top-3 — measured before this metric was chosen.
+- **A rung label is a build target, not a per-task guarantee.** Labels were set from the reference
+  prompt path, and the xlong rungs were confirmed against it (real 1M rows measure p50 1.03–1.07M
+  tokens). But on the 2k–32k ladder, measurement through the Qwen3.5 tokenizer found two rows
+  systematically short of their label — `ctc_contradiction` ~1.5x and `ctc_niah` ~2.9x, both
+  consistent across that row's rungs — and `ctc_xabsence`'s labels are estimates pending a prefill
+  measure. Trends *within* a task are unaffected, since the scaling is consistent down the row;
+  **a cross-task comparison "at the same rung" is not comparing the same context length.** Quote
+  measured tokens on any absolute-length claim.
 - `ctc_parse_ok` is stored per output: a parse-rate collapse is a decoding/stopping regression
   wearing an accuracy drop's clothes. Check it before believing a low score.
 - Contexts ≥256k exceed most models' native windows; the serving side (YaRN etc.) is the caller's
