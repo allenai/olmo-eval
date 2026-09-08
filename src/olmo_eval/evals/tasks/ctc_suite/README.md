@@ -17,13 +17,35 @@ uv run olmo-eval run -m mock -t ctc_contradiction:r32k --dry-run
 # one task, one rung
 uv run olmo-eval run -m <model> -t ctc_nq:r64k --save-predictions
 
-# suites
-uv run olmo-eval run -m <model> -t ctc:figure     # all 22 tasks, 2k-32k grid (108 runs)
-uv run olmo-eval run -m <model> -t ctc:r128k      # every task at 128k (one x-axis column)
-uv run olmo-eval run -m <model> -t ctc:oolong     # one task's whole ladder
-uv run olmo-eval run -m <model> -t ctc:xlong      # everything above 32k (69 runs)
-uv run olmo-eval run -m <model> -t ctc            # all 177 task x rung combinations
+# suites -- by context length
+uv run olmo-eval run -m <model> -t ctc:figure       # all 22 tasks, 2k-32k grid (108 runs)
+uv run olmo-eval run -m <model> -t ctc:r128k        # every task at 128k (one x-axis column)
+uv run olmo-eval run -m <model> -t ctc:oolong       # one task's whole ladder
+uv run olmo-eval run -m <model> -t ctc:xlong        # everything above 32k (69 runs)
+
+# suites -- by corpus-tracking demand (the axis the suite is named for)
+uv run olmo-eval run -m <model> -t ctc:low          # the 11 O(N) rows, every rung (102 runs)
+uv run olmo-eval run -m <model> -t ctc:high         # the 11 O(N^2)+ rows, every rung (75 runs)
+uv run olmo-eval run -m <model> -t ctc:high:figure  # ... 2k-32k only (53 runs)
+uv run olmo-eval run -m <model> -t ctc:low:xlong    # the two axes compose (47 runs)
+
+uv run olmo-eval run -m <model> -t ctc              # all 177 task x rung combinations
 ```
+
+## low-CTC vs high-CTC
+
+`ctc:low` is the 11 rows where an answer-bearing document exists and the work is finding it --
+O(N) in corpus size, and in principle solvable by a retriever. `ctc:high` is the 11 rows where the
+answer is a *relation over* documents with no single span to retrieve: every contradicting pair
+(O(N^2)), the clustering of everything (O(NM)), the planted triple (O(N^3)). The split is 11/11,
+declared per row as `RosterRow.ctc_class` and pinned by test; the per-row `complexity` field
+records which class of the four it is.
+
+This axis is **orthogonal to context length** -- `ctc:figure`/`ctc:xlong` cut the same 22 tasks by
+rung. `ctc:high:figure` is the cheapest useful probe of the two: it is where a model that merely
+retrieves well separates from one that tracks a corpus, at grid-sized cost. Aggregation is
+DISPLAY_ONLY for these suites too; read low-vs-high per task or as a gap on a shared metric, never
+as one mean against another.
 
 A bare task name (`-t ctc_nq`) evaluates the 32k rung. Suite aggregation is DISPLAY_ONLY on
 purpose: the metrics are heterogeneous (f1, pair f1, kendall tau, ce_pos_recall, partial credit)
@@ -67,7 +89,10 @@ cap is documented on its RosterRow.
 ## Design and provenance
 
 - Prompt templates, parsers, metrics, gold-index conventions and stop rules are **vendored
-  byte-faithful** under `_vendor/` from the `ctc` package (AI2 OLMo-core branch `prasann/ctc`),
+  byte-faithful** under `_vendor/` from the `ctc` package (AI2 OLMo-core branch `prasann/ctc`,
+  re-vendored 2026-09-08 at `b7ee85a93`; every vendored file is byte-identical to it). Only the
+  subtrees this harness reads are vendored -- `format/`, `tasks/`, `eval/stopping.py` and the pure
+  `data/ladders.py` table; the generators, backends and runner are not,
   where they are golden-fixture-tested against the implementation that produced the suite's
   published numbers. Fix upstream and re-vendor; do not edit `_vendor/` (it is ruff-excluded to
   stay diffable).

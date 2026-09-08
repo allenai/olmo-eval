@@ -11,8 +11,9 @@ import json
 import pytest
 
 from olmo_eval.common.types import LMOutput
+from olmo_eval.evals.suites import get_suite
 from olmo_eval.evals.tasks.common.registry import get_task, list_tasks, list_variants
-from olmo_eval.evals.tasks.ctc_suite import ROSTER, RUNG_TOKENS
+from olmo_eval.evals.tasks.ctc_suite import ROSTER, RUNG_TOKENS, CTCClass
 
 
 def test_all_22_rows_register() -> None:
@@ -34,6 +35,50 @@ def test_sub500_rungs_are_flagged() -> None:
                 assert row.eval_size.get(rung, 500) < 500, (
                     f"{name}:{rung} must carry an eval_size flag -- xlong rungs are subsampled"
                 )
+
+
+#: The 11 rows whose answer is a relation over documents rather than a document to retrieve.
+#: Pinned here, not derived from the roster, so that flipping a row's class is a two-file change
+#: someone has to mean -- ``ctc:high`` is a number people report against.
+_HIGH_CTC = {
+    "ctc_qdmatch_fiqa",
+    "ctc_qdmatch_nq",
+    "ctc_qdmatch_hpqa",
+    "ctc_outlier",
+    "ctc_grouping",
+    "ctc_absence",
+    "ctc_xabsence",
+    "ctc_reorder",
+    "ctc_contradiction",
+    "ctc_strmatch",
+    "ctc_textgroups",
+}
+
+
+def test_ctc_class_split_is_the_declared_one() -> None:
+    high = {n for n, row in ROSTER.items() if row.ctc_class is CTCClass.HIGH}
+    low = {n for n, row in ROSTER.items() if row.ctc_class is CTCClass.LOW}
+    assert high == _HIGH_CTC
+    assert low == set(ROSTER) - _HIGH_CTC
+    assert len(high) == len(low) == 11
+    # The coarse split must agree with the per-row complexity notation the README table prints.
+    for name, row in ROSTER.items():
+        expected = CTCClass.LOW if row.complexity == "O(N)" else CTCClass.HIGH
+        assert row.ctc_class is expected, f"{name}: {row.complexity} vs {row.ctc_class}"
+
+
+def test_low_and_high_suites_partition_the_suite() -> None:
+    low = set(get_suite("ctc:low").expand())
+    high = set(get_suite("ctc:high").expand())
+    assert not (low & high), "a task:rung cannot be both low- and high-CTC"
+    assert low | high == set(get_suite("ctc").expand())
+    for cls in ("low", "high"):
+        halves = set(get_suite(f"ctc:{cls}:figure").expand()) | set(
+            get_suite(f"ctc:{cls}:xlong").expand()
+        )
+        assert halves == set(get_suite(f"ctc:{cls}").expand()), (
+            f"ctc:{cls}:figure + ctc:{cls}:xlong must cover ctc:{cls}"
+        )
 
 
 def _write_ladder(tmp_path, subset: str, rung_tokens: int, example: dict) -> None:

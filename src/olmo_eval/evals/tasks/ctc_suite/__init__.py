@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 from olmo_eval.common.metrics.base import Metric
@@ -50,7 +51,14 @@ from ._vendor.ctc.format.prompts import GROUPING_INSTRUCTION
 from ._vendor.ctc.tasks import load_all as _load_all_specs
 from ._vendor.ctc.tasks._grouping import make_grouping_spec
 
-__all__ = ["HF_DATASET", "ROSTER", "CTCScorer", "CTCMeanMetric", "CTCSuiteTask"]
+__all__ = [
+    "HF_DATASET",
+    "ROSTER",
+    "CTCClass",
+    "CTCScorer",
+    "CTCMeanMetric",
+    "CTCSuiteTask",
+]
 
 #: Public HF dataset holding every rung file. One config per ROSTER row, one split per rung.
 HF_DATASET = "PrasannSinghal/ctc-suite-eval"
@@ -105,12 +113,32 @@ _LADDER_FULL = tuple(RUNG_TOKENS)  # 2k .. 1m
 _LADDER_TO_512K = _LADDER_FULL[:-1]
 
 
+class CTCClass(StrEnum):
+    """How much of the corpus a row forces the model to track at once.
+
+    This is the axis the suite is named for, so it is declared per row rather than inferred:
+    :data:`LOW` rows are answerable by finding the right document(s) -- work that scales O(N) in
+    corpus size and that a retriever could in principle do -- while :data:`HIGH` rows require
+    relating documents to each other (O(N^2) pair-finding, O(NM) clustering, O(N^3) triples) and
+    have no single answer-bearing span. The split is 11/11 and is what ``ctc:low`` / ``ctc:high``
+    select; it is orthogonal to context length, which ``ctc:figure`` / ``ctc:xlong`` select.
+    """
+
+    LOW = "low"
+    HIGH = "high"
+
+
 @dataclass(frozen=True)
 class RosterRow:
     """One row of the 22-task suite.
 
     :param subset: HF config name == local ladder directory name.
     :param spec: The vendored :class:`TaskSpec` that formats and grades this row.
+    :param ctc_class: :class:`CTCClass` -- low (O(N), retrieval-shaped) or high (O(N^2)+,
+        relational/structural). Declared with no default: a new row must classify itself, because
+        a silently-defaulted row would quietly change what ``ctc:low``/``ctc:high`` mean.
+    :param complexity: The class in the notation the README table uses (``"O(N)"``, ``"O(N^2)"``,
+        ``"O(NM)"``, ``"O(N^3)"``), recorded so the coarse two-way split stays auditable.
     :param rungs: Rung labels with data, ascending.
     :param eval_size: ``{rung_label: rows}`` for any rung below the 500-example floor. A number
         quoted from one of these must carry the size inline -- a small eval inflates noise into
@@ -121,6 +149,8 @@ class RosterRow:
 
     subset: str
     spec: str
+    ctc_class: CTCClass
+    complexity: str
     rungs: tuple[str, ...] = _LADDER_2K_32K
     eval_size: dict[str, int] = field(default_factory=dict)
     rung_alias: dict[str, int] = field(default_factory=dict)
@@ -132,15 +162,32 @@ _SUB500_XLONG = {"r256k": 125, "r512k": 125, "r1m": 125}
 #: The frozen 22-row roster (records/ctc-final-suite.md, 2026-08-12). Row order is figure order.
 ROSTER: dict[str, RosterRow] = {
     "ctc_fiqa": RosterRow(
-        subset="fiqa", spec="retrieval", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
+        subset="fiqa",
+        spec="retrieval",
+        rungs=_LADDER_FULL,
+        eval_size=dict(_SUB500_XLONG),
     ),
     "ctc_nq": RosterRow(
-        subset="nq", spec="retrieval", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
+        subset="nq",
+        spec="retrieval",
+        rungs=_LADDER_FULL,
+        eval_size=dict(_SUB500_XLONG),
     ),
     "ctc_hpqa": RosterRow(
-        subset="hotpotqa", spec="retrieval", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
+        subset="hotpotqa",
+        spec="retrieval",
+        rungs=_LADDER_FULL,
+        eval_size=dict(_SUB500_XLONG),
     ),
     "ctc_qdmatch_fiqa": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(N^2)",
         subset="qdmatch_fiqa",
         spec="qdmatch",
         rungs=_LADDER_TO_512K,
@@ -149,9 +196,16 @@ ROSTER: dict[str, RosterRow] = {
         "and a 1M example needs ~8k distinct units",
     ),
     "ctc_qdmatch_nq": RosterRow(
-        subset="qdmatch_nq", spec="qdmatch", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
+        ctc_class=CTCClass.HIGH,
+        complexity="O(N^2)",
+        subset="qdmatch_nq",
+        spec="qdmatch",
+        rungs=_LADDER_FULL,
+        eval_size=dict(_SUB500_XLONG),
     ),
     "ctc_qdmatch_hpqa": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(N^2)",
         subset="qdmatch_hpqa",
         spec="qdmatch",
         rungs=_LADDER_FULL[:-2],
@@ -159,9 +213,16 @@ ROSTER: dict[str, RosterRow] = {
         note="caps at 256k: 4,000 recoverable HotpotQA units, and a 512k example needs ~7k",
     ),
     "ctc_outlier_amzn": RosterRow(
-        subset="outlier_amzn", spec="outlier", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
+        subset="outlier_amzn",
+        spec="outlier",
+        rungs=_LADDER_FULL,
+        eval_size=dict(_SUB500_XLONG),
     ),
     "ctc_outlier": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(NM)",
         subset="outlier",
         spec="outlier",
         rungs=_LADDER_FULL,
@@ -170,6 +231,8 @@ ROSTER: dict[str, RosterRow] = {
         "files are not used",
     ),
     "ctc_outlier_fixedm": RosterRow(
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
         subset="outlier_fixedM",
         spec="outlier",
         rungs=_LADDER_TO_512K,
@@ -178,16 +241,30 @@ ROSTER: dict[str, RosterRow] = {
         "topics need ~2,400 same-topic chunks each at 1M and the wiki pool cannot supply that",
     ),
     "ctc_oolong": RosterRow(
-        subset="oolong", spec="oolong", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
+        subset="oolong",
+        spec="oolong",
+        rungs=_LADDER_FULL,
+        eval_size=dict(_SUB500_XLONG),
     ),
-    "ctc_grouping": RosterRow(subset="grouping", spec="grouping"),
+    "ctc_grouping": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(NM)",
+        subset="grouping",
+        spec="grouping",
+    ),
     "ctc_absence": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(N^2)",
         subset="absence_gutenberg",
         spec="absence",
         rungs=("r2k", "r4k", "r8k", "r16k"),
         note="corpus is a contiguous Gutenberg passage; rung ceiling is bounded by book length",
     ),
     "ctc_xabsence": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(N^2)",
         subset="xabsence",
         spec="xabsence",
         note="the one-sided EXACT-COPY Gutenberg build (2026-08-14): B-side twins are "
@@ -195,18 +272,32 @@ ROSTER: dict[str, RosterRow] = {
         "kept in the dataset as the xabsence_paraphrase config",
     ),
     "ctc_rerank": RosterRow(
-        subset="rerank", spec="rerank", rungs=_LADDER_TO_512K, eval_size=dict(_SUB500_XLONG)
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
+        subset="rerank",
+        spec="rerank",
+        rungs=_LADDER_TO_512K,
+        eval_size=dict(_SUB500_XLONG),
     ),
     "ctc_msmarco": RosterRow(
-        subset="msmarco", spec="retrieval", rungs=_LADDER_TO_512K, eval_size=dict(_SUB500_XLONG)
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
+        subset="msmarco",
+        spec="retrieval",
+        rungs=_LADDER_TO_512K,
+        eval_size=dict(_SUB500_XLONG),
     ),
     "ctc_reorder": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(N^2)",
         subset="reorder",
         spec="reorder",
         rungs=("r2k", "r4k", "r8k", "r16k"),
         note="chunks are contiguous in one book; rung ceiling is bounded by book length",
     ),
     "ctc_obliq": RosterRow(
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
         subset="obliq_twitter",
         spec="retrieval",
         rungs=_LADDER_FULL,
@@ -214,9 +305,16 @@ ROSTER: dict[str, RosterRow] = {
         note="126 examples at every rung -- flag the size inline",
     ),
     "ctc_niah": RosterRow(
-        subset="niah", spec="retrieval", rungs=_LADDER_FULL, eval_size=dict(_SUB500_XLONG)
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
+        subset="niah",
+        spec="retrieval",
+        rungs=_LADDER_FULL,
+        eval_size=dict(_SUB500_XLONG),
     ),
     "ctc_contradiction": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(N^2)",
         subset="contradiction_iid",
         spec="contradiction",
         rungs=_LADDER_FULL,
@@ -224,9 +322,21 @@ ROSTER: dict[str, RosterRow] = {
         rung_alias={"r2k": 2560},
         note="the IID realistic-mode ladder; never mix with the retired both-mode ladder",
     ),
-    "ctc_strmatch": RosterRow(subset="strmatch", spec="strmatch"),
-    "ctc_textgroups": RosterRow(subset="textgroups", spec="textgroups"),
+    "ctc_strmatch": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(N^2)",
+        subset="strmatch",
+        spec="strmatch",
+    ),
+    "ctc_textgroups": RosterRow(
+        ctc_class=CTCClass.HIGH,
+        complexity="O(N^3)",
+        subset="textgroups",
+        spec="textgroups",
+    ),
     "ctc_scifact": RosterRow(
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
         subset="scifact",
         spec="retrieval",
         eval_size={r: 300 for r in _LADDER_2K_32K},
