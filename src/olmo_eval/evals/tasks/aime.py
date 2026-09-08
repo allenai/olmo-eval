@@ -8,7 +8,7 @@ from olmo_eval.common.scorers import MinervaMathScorer
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import register, register_variant
-from olmo_eval.evals.tasks.minerva_math import MinervaMathTask
+from olmo_eval.evals.tasks.minerva_math import OLMO3_ADAPT_BOXED_SUFFIX, MinervaMathTask
 
 _PASS_AT_32_METRICS = {
     "acc": AccuracyMetric(scorer=MinervaMathScorer),
@@ -161,4 +161,24 @@ for _year in (2022, 2023, 2024, 2025, 2026):
         f"aime_{_year}",
         "16k",
         sampling_params=_PASS_AT_32_16K_SAMPLING,
+    )
+
+
+# Olmo 3 paper protocol (oe-eval ``aime:<year>::olmo3:adapt``): zero-shot chat with the
+# boxed-answer instruction, 32 samples at T=0.6 / top-p 0.95, 16384-token budget, pass@1 as
+# the primary metric, thinking trace stripped before scoring.
+_OLMO3_ADAPT_AIME_FORMATTER = ChatFormatter(user_template="{question}" + OLMO3_ADAPT_BOXED_SUFFIX)
+_OLMO3_ADAPT_AIME_SAMPLING = SamplingParams(
+    max_tokens=16384, temperature=0.6, top_p=0.95, num_samples=32
+)
+
+for _year in (2024, 2025):
+    register_variant(
+        f"aime_{_year}",
+        "olmo3adapt",
+        formatter=_OLMO3_ADAPT_AIME_FORMATTER,
+        metrics=tuple(_PASS_AT_32_METRICS.values()),
+        primary_metric=_PASS_AT_32_METRICS["k1"],
+        sampling_params=_OLMO3_ADAPT_AIME_SAMPLING,
+        strip_thinking=True,
     )

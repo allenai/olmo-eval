@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -159,6 +160,12 @@ class TaskConfig:
     max_length: int | None = None
     answer_extractor: Callable[[str], str] | None = None
 
+    #: Strip a ``<think>...</think>`` reasoning trace from each output before answer
+    #: extraction and scoring (mirrors oe-eval's ``r1_style`` output processor: everything
+    #: up to the last ``</think>`` is removed). The full text is kept in
+    #: ``output.metadata["original_text"]``. Outputs with no closing tag are scored as-is.
+    strip_thinking: bool = False
+
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
     dependencies: list[str] | None = None
 
@@ -282,6 +289,7 @@ class TaskConfig:
             "output_score_aggregation": self.output_score_aggregation.value,
             "max_length": self.max_length,
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
+            "strip_thinking": self.strip_thinking,
             "dependencies": self.dependencies,
         }
 
@@ -530,6 +538,8 @@ class Task(ABC):
         Subclasses needing custom answer extraction should override
         `_extract_answers()` rather than this method.
         """
+        if self.config.strip_thinking:
+            self._strip_thinking(responses)
         self._extract_answers(responses)
 
         # Check if any scorers need async execution
@@ -571,6 +581,18 @@ class Task(ABC):
                 for s in self._get_scorers().values()
             )
         return self._has_async_cache
+
+    def _strip_thinking(self, responses: Sequence[Response]) -> None:
+        """Drop the reasoning trace so scorers see only the final answer."""
+        for response in responses:
+            for output in response.outputs:
+                text = output.text or ""
+                if "</think>" not in text:
+                    continue
+                if output.metadata is None:
+                    output.metadata = {}
+                output.metadata["original_text"] = text
+                output.text = re.sub(r"(?s).*</think>", "", text).lstrip()
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Extract answers from outputs. Override for complex multi-output logic."""

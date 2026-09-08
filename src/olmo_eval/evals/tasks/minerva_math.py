@@ -2,7 +2,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
+from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg, PassAtKMetric
 from olmo_eval.common.scorers import MinervaMathScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
@@ -360,3 +360,24 @@ for _bpb_subset in MATH_SUBSETS:
 
     register_variant(_bpb_task_name, "olmo3base", fewshot_source="minerva_math_fixed")
     register_variant(_bpb_task_name, "olmes", fewshot_source="minerva_math_fixed")
+
+
+# Olmo 3 paper protocol (oe-eval ``minerva_math_<subset>::olmo3:adapt``): zero-shot chat with
+# the boxed-answer instruction, T=0.6 / top-p 0.95, no stop sequences, thinking trace stripped
+# before scoring. max_tokens is 32768 rather than oe-eval's 131072 so the request fits a
+# 65536-token context; override with ``-o max_tokens=...`` for bigger models.
+OLMO3_ADAPT_BOXED_SUFFIX = "\n\nPresent the answer in LaTex format: \\boxed{{Your answer}}"
+_OLMO3_ADAPT_FORMATTER = ChatFormatter(user_template="{question}" + OLMO3_ADAPT_BOXED_SUFFIX)
+_OLMO3_ADAPT_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
+
+for _subset in MATH_SUBSETS:
+    register_variant(
+        f"minerva_math_{_subset}",
+        "olmo3adapt",
+        formatter=_OLMO3_ADAPT_FORMATTER,
+        num_fewshot=0,
+        metrics=(AccuracyMetric(scorer=MinervaMathScorer),),
+        primary_metric=AccuracyMetric(scorer=MinervaMathScorer),
+        sampling_params=_OLMO3_ADAPT_SAMPLING,
+        strip_thinking=True,
+    )
