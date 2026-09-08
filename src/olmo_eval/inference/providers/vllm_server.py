@@ -273,6 +273,8 @@ class VLLMServerProvider(InferenceProvider):
         completion_use_prompt_token_ids: bool | None = None,
         completion_client_side_stop_trim: bool | None = None,
         completion_sentencepiece_cleanup: bool | None = None,
+        enable_lora: bool = False,
+        lora_modules: list[str] | None = None,
         **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -307,6 +309,10 @@ class VLLMServerProvider(InferenceProvider):
                 stop sequence client-side after generation.
             completion_sentencepiece_cleanup: If True, replace SentencePiece space markers
                 with actual spaces in completion outputs.
+            enable_lora: Enable LoRA (Low-Rank Adaptation) support for model loading (server mode).
+            lora_modules: List of LoRA module paths to load (format: "module_name=/path/to/lora").
+                Only used if enable_lora is True (server mode). Raises an error if more than one
+                is passed.
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
@@ -335,6 +341,13 @@ class VLLMServerProvider(InferenceProvider):
         self._max_length: int | None = max_model_len
         self._max_length_source: str | None = "configured" if max_model_len is not None else None
         self._max_length_discovery_attempted = max_model_len is not None
+        self._enable_lora = enable_lora
+        self._lora_modules = lora_modules
+        self._request_model_name = model_name
+        if lora_modules and len(lora_modules) > 1:
+            raise ValueError("the vllm server provider can accept only one lora module")
+        if enable_lora and lora_modules:
+            self._request_model_name = lora_modules[0].split("=", 1)[0]
 
         if base_url:
             # Connect to existing server
@@ -367,6 +380,10 @@ class VLLMServerProvider(InferenceProvider):
                     srv_kwargs["tool_call_parser"] = tool_call_parser
             if trust_remote_code:
                 srv_kwargs["trust_remote_code"] = True
+            if enable_lora:
+                srv_kwargs["enable_lora"] = True
+            if lora_modules:
+                srv_kwargs["lora_modules"] = lora_modules
             self._server = VLLMServerProcess(
                 model_name=model_name,
                 tensor_parallel_size=tensor_parallel_size,
@@ -552,7 +569,7 @@ class VLLMServerProvider(InferenceProvider):
 
         # Use remote tokenizer by default (no transformers dependency)
         if self._tokenizer is None:
-            self._tokenizer = RemoteTokenizer(self.base_url, self.model_name)
+            self._tokenizer = RemoteTokenizer(self.base_url, self._request_model_name)
         return self._tokenizer
 
     def get_tokenizer(self) -> Any:
@@ -793,7 +810,7 @@ class VLLMServerProvider(InferenceProvider):
     ) -> list[LMOutput]:
         """Generate using the /v1/completions endpoint."""
         kwargs: dict[str, Any] = {
-            "model": self.model_name,
+            "model": self._request_model_name,
             "prompt": request.prompt,
             "n": params.num_samples,
             "logprobs": 1,  # Request logprobs for metrics
@@ -802,7 +819,7 @@ class VLLMServerProvider(InferenceProvider):
         # rather than sending null, which some OpenAI-compatible servers reject.
         if params.max_tokens is not None:
             kwargs["max_tokens"] = params.max_tokens
-        extra_body: dict[str, Any] = {"add_special_tokens": False}
+        extra_body: dict[str, Any] = {"add_special_tokens": bool(self._add_bos_token)}
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
@@ -872,7 +889,7 @@ class VLLMServerProvider(InferenceProvider):
 
         # Build request kwargs
         kwargs: dict[str, Any] = {
-            "model": self.model_name,
+            "model": self._request_model_name,
             "messages": messages,
             "n": params.num_samples,
         }
@@ -1088,7 +1105,7 @@ class VLLMServerProvider(InferenceProvider):
             resp = await http_client.post(
                 f"{self.base_url}/completions",
                 json={
-                    "model": self.model_name,
+                    "model": self._request_model_name,
                     "prompt": full_tokens,
                     "max_tokens": 1,
                     "temperature": params.temperature,
