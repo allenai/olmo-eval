@@ -12,7 +12,7 @@ from olmo_eval.common.types import Instance, LMRequest, RequestType
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register
 
-STATE_BENCH_REPO = "jacksonp-ai2/state-bench-lc"
+STATE_BENCH_REPO = "allenai/state-bench"
 
 STATE_BENCH_CONFIGS = (
     "cube-painting--aperiodic",
@@ -46,28 +46,17 @@ STATE_BENCH_TOKEN_STRATA = (
     "tokens_256k",
     "tokens_512k",
     "tokens_1m",
-    "tokens_2m_plus",
 )
 
 STATE_BENCH_CONFIGS_SET = frozenset(STATE_BENCH_CONFIGS)
 
-# Token strata are half-open [min, max) token ranges, and the state-bench staging pipeline
-# omits a stratum from a rendered config when that config has no rows inside it. A task
-# pointing at an omitted split fails at dataset load, so strata are enumerated per config
-# rather than as a full config x stratum cross product.
+# Token strata are half-open [min, max) token ranges, and the dataset omits a stratum from a
+# config when that config has no rows inside it. A task pointing at an omitted split fails at
+# dataset load, so strata are enumerated per config rather than as a full cross product.
 #
-# Generation is capped at `extra_assignments.max: 64000` (state-bench
-# `configs/experiments/default.yaml`), and that cap was sized against ruler -- the most
-# token-dense formatter, at roughly 15.2 tokens per assignment -- so ruler just grazes 1m
-# tokens and every sparser formatter tops out proportionally lower. Only the nine configs
-# below put rows above the 524_288-token floor of `tokens_1m`; the other nine never reach
-# it, so this is intended dataset behavior rather than missing or unpublished data.
-#
-# The same cap puts `tokens_2m_plus` out of reach entirely: ruler peaks at 982_531 tokens,
-# short of that stratum's 1_048_576-token floor, so no config stages the split and the
-# stratum maps to no configs at all.
-#
-# Strata absent from this mapping are available for every config.
+# Generation caps the number of extra assignments, and that cap is sized against the most
+# token-dense formatter, so sparser formatters top out at shorter contexts. Only the configs
+# below reach the `tokens_1m` floor; strata absent from this mapping exist for every config.
 STATE_BENCH_CONFIGS_BY_STRATUM: dict[str, frozenset[str]] = {
     "tokens_1m": frozenset(
         {
@@ -82,7 +71,6 @@ STATE_BENCH_CONFIGS_BY_STRATUM: dict[str, frozenset[str]] = {
             "status-lights--periodic",
         }
     ),
-    "tokens_2m_plus": frozenset(),
 }
 
 
