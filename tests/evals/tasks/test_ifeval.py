@@ -1,9 +1,8 @@
 """Tests for the single-turn IFEval task."""
 
-from __future__ import annotations
-
-import unittest
 from typing import Any
+
+import pytest
 
 from olmo_eval.common.scorers import IFEvalScorer
 from olmo_eval.common.types import Instance, LMOutput, RequestType
@@ -20,100 +19,111 @@ _DOC: dict[str, Any] = {
     "instruction_id_list": ["detectable_format:number_bullet_lists"],
     "kwargs": [{"num_bullets": 3, "num_placeholders": None, "language": None}],
 }
+_THREE_BULLETS = "* Led backend\n* Shipped v2\n* Cut latency"
 
 
-def _instance(task: Any) -> Instance:
-    instance = task.process_doc(dict(_DOC), index=0)
+def _instance() -> Instance:
+    instance = get_task("ifeval").process_doc(dict(_DOC), index=0)
     assert instance is not None
     return instance
 
 
-class TestIFEvalTask(unittest.TestCase):
-    def test_registered(self) -> None:
-        task = get_task("ifeval")
-        self.assertEqual(task.request_type, RequestType.CHAT)
-        self.assertEqual(task.config.sampling_params.max_tokens, 2048)
-        self.assertEqual(task.config.sampling_params.temperature, 0.0)
-        self.assertFalse(task.config.sampling_params.do_sample)
-
-    def test_metrics(self) -> None:
-        """All four IFEval aggregations, with loose prompt-level primary."""
-        task = get_task("ifeval")
-        self.assertEqual(
-            {metric.name for metric in task.config.metrics},
-            {
-                "prompt_level_strict_acc",
-                "prompt_level_loose_acc",
-                "inst_level_strict_acc",
-                "inst_level_loose_acc",
-            },
-        )
-        primary = task.config.get_primary_metric()
-        assert primary is not None
-        self.assertEqual(primary.name, "prompt_level_loose_acc")
-
-    def test_process_doc_drops_null_padded_kwargs(self) -> None:
-        """Absent kwargs arrive as None and must not reach the verifier."""
-        instance = _instance(get_task("ifeval"))
-        self.assertEqual(instance.metadata["kwargs"], [{"num_bullets": 3}])
-        self.assertEqual(
-            instance.metadata["instruction_id_list"],
-            ["detectable_format:number_bullet_lists"],
-        )
-        self.assertEqual(instance.metadata["key"], 1000)
-        self.assertEqual(instance.metadata["prompt"], _DOC["prompt"])
-        self.assertIsNone(instance.gold_answer)
-
-    def test_process_doc_without_instructions(self) -> None:
-        task = get_task("ifeval")
-        instance = task.process_doc({"key": 7, "prompt": "Hello."}, index=0)
-        assert instance is not None
-        self.assertEqual(instance.metadata["instruction_id_list"], [])
-        self.assertEqual(instance.metadata["kwargs"], [])
-
-    def test_format_request_is_single_user_message(self) -> None:
-        task = get_task("ifeval")
-        request = task.format_request(_instance(task))
-        self.assertEqual(request.request_type, RequestType.CHAT)
-        self.assertEqual(len(request.messages), 1)
-        self.assertEqual(request.messages[0]["role"], "user")
-        self.assertEqual(request.messages[0]["content"], _DOC["prompt"])
-
-    def test_extract_answer_is_verbatim(self) -> None:
-        task = get_task("ifeval")
-        self.assertEqual(task.extract_answer(LMOutput(text="  spaced  ")), "  spaced  ")
+def _score(text: str) -> tuple[float, dict[str, Any]]:
+    """Score through the task's extraction step, as the pipeline does."""
+    task = get_task("ifeval")
+    output = LMOutput(text=text)
+    output.extracted_answer = task.extract_answer(output)
+    score = IFEvalScorer().score(_instance(), output)
+    return score, output.metadata["ifeval"]
 
 
-class TestIFEvalScoring(unittest.TestCase):
-    """The task's metadata must drive the scorer end to end."""
-
-    def setUp(self) -> None:
-        self.instance = _instance(get_task("ifeval"))
-        self.scorer = IFEvalScorer()
-
-    def _score(self, text: str) -> tuple[float, dict[str, Any]]:
-        output = LMOutput(text=text)
-        score = self.scorer.score(self.instance, output)
-        return score, output.metadata["ifeval"]
-
-    def test_compliant_response(self) -> None:
-        score, result = self._score("* Led backend\n* Shipped v2\n* Cut latency")
-        self.assertEqual(score, 1.0)
-        self.assertEqual(result["strict"], [True])
-        self.assertEqual(result["loose"], [True])
-
-    def test_noncompliant_response(self) -> None:
-        score, result = self._score("I led the backend team and shipped v2.")
-        self.assertEqual(score, 0.0)
-        self.assertEqual(result["strict"], [False])
-        self.assertEqual(result["loose"], [False])
-
-    def test_no_instructions_scores_zero(self) -> None:
-        task = get_task("ifeval")
-        instance = task.process_doc({"key": 7, "prompt": "Hello."}, index=0)
-        assert instance is not None
-        self.assertEqual(self.scorer.score(instance, LMOutput(text="hi")), 0.0)
+def test_registered() -> None:
+    task = get_task("ifeval")
+    assert task.request_type == RequestType.CHAT
+    params = task.config.sampling_params
+    assert params.max_tokens is None
+    assert params.temperature == 0.6
+    assert params.top_p == 0.95
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_metrics() -> None:
+    """All four IFEval aggregations, with loose prompt-level primary."""
+    task = get_task("ifeval")
+    assert {metric.name for metric in task.config.metrics} == {
+        "prompt_level_strict_acc",
+        "prompt_level_loose_acc",
+        "inst_level_strict_acc",
+        "inst_level_loose_acc",
+    }
+    primary = task.config.get_primary_metric()
+    assert primary is not None
+    assert primary.name == "prompt_level_loose_acc"
+
+
+def test_process_doc_drops_null_padded_kwargs() -> None:
+    """Absent kwargs arrive as None and must not reach the verifier."""
+    instance = _instance()
+    assert instance.metadata["kwargs"] == [{"num_bullets": 3}]
+    assert instance.metadata["instruction_id_list"] == ["detectable_format:number_bullet_lists"]
+    assert instance.metadata["key"] == 1000
+    assert instance.metadata["prompt"] == _DOC["prompt"]
+    assert instance.gold_answer is None
+
+
+def test_process_doc_without_instructions() -> None:
+    instance = get_task("ifeval").process_doc({"key": 7, "prompt": "Hello."}, index=0)
+    assert instance is not None
+    assert instance.metadata["instruction_id_list"] == []
+    assert instance.metadata["kwargs"] == []
+
+
+def test_format_request_is_single_user_message() -> None:
+    request = get_task("ifeval").format_request(_instance())
+    assert request.request_type == RequestType.CHAT
+    assert len(request.messages) == 1
+    assert request.messages[0]["role"] == "user"
+    assert request.messages[0]["content"] == _DOC["prompt"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("  spaced  ", "  spaced  "),
+        ("<think>draft the bullets</think>" + _THREE_BULLETS, _THREE_BULLETS),
+        ("<think>never closed", "<think>never closed"),
+    ],
+)
+def test_extract_answer_drops_think_block(text: str, expected: str) -> None:
+    assert get_task("ifeval").extract_answer(LMOutput(text=text)) == expected
+
+
+def test_compliant_response() -> None:
+    score, result = _score(_THREE_BULLETS)
+    assert score == 1.0
+    assert result["strict"] == [True]
+    assert result["loose"] == [True]
+
+
+def test_noncompliant_response() -> None:
+    score, result = _score("I led the backend team and shipped v2.")
+    assert score == 0.0
+    assert result["strict"] == [False]
+    assert result["loose"] == [False]
+
+
+def test_think_block_is_not_verified() -> None:
+    """Bullets drafted while thinking must not count toward the constraint."""
+    score, result = _score("<think>* a\n* b\n* c\n* d</think>" + _THREE_BULLETS)
+    assert score == 1.0
+    assert result["strict"] == [True]
+
+
+def test_scorer_falls_back_to_text_without_extraction() -> None:
+    output = LMOutput(text=_THREE_BULLETS)
+    assert IFEvalScorer().score(_instance(), output) == 1.0
+
+
+def test_no_instructions_scores_zero() -> None:
+    instance = get_task("ifeval").process_doc({"key": 7, "prompt": "Hello."}, index=0)
+    assert instance is not None
+    assert IFEvalScorer().score(instance, LMOutput(text="hi")) == 0.0

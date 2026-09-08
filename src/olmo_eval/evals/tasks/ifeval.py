@@ -5,8 +5,12 @@ IDs and per-instruction kwargs. Verifiers come from the vendored registry in
 :mod:`olmo_eval.common.scorers.ifeval_deps`, which covers every instruction ID
 used by this dataset.
 
-Mirrors the ``ifeval::tulu`` configuration in oe-eval-internal: chat format,
-``max_gen_toks=2048``, primary metric ``prompt_level_loose_acc``.
+Mirrors the ``ifeval::hamish_zs_reasoning_deepseek`` configuration in
+oe-eval-internal, the regime used for Olmo 3 post-training evaluation: chat
+format, sampled decoding (temperature 0.6, top-p 0.95) with generation bounded
+only by the model context, primary metric ``prompt_level_loose_acc``.
+Reasoning inside ``<think>`` tags is removed before verification, as the
+reference harness does for reasoning models.
 """
 
 from __future__ import annotations
@@ -22,13 +26,13 @@ from olmo_eval.common.metrics import (
 )
 from olmo_eval.common.types import (
     Instance,
-    LMOutput,
     LMRequest,
     RequestType,
     SamplingParams,
     Split,
 )
 from olmo_eval.data import DataSource
+from olmo_eval.evals.extract import extract_think_answer
 from olmo_eval.evals.tasks.common import Task, register
 
 _PRIMARY_METRIC = IFEvalPromptLooseAccuracy()
@@ -46,10 +50,11 @@ class IFEval(Task):
     )
     primary_metric = _PRIMARY_METRIC
     sampling_params = SamplingParams(
-        max_tokens=2048,
-        temperature=0.0,
-        do_sample=False,
+        max_tokens=None,
+        temperature=0.6,
+        top_p=0.95,
     )
+    answer_extractor = extract_think_answer
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -81,6 +86,3 @@ class IFEval(Task):
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
         )
-
-    def extract_answer(self, output: LMOutput) -> str:
-        return output.text
