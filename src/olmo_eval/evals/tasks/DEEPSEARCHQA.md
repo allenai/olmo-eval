@@ -126,8 +126,12 @@ how much of the answer the model already knows.
 ## Running it
 
 ```bash
-# Requires an OpenAI key for the LLM judge
+# Requires an OpenAI key for the LLM judge (always needed, regardless of harness)
 export OPENAI_API_KEY=...
+
+# --harness dr_tulu additionally requires its own search-tool keys
+export S2_API_KEY=...       # Semantic Scholar
+export SERPER_API_KEY=...   # Google web search
 
 # Full 900-instance run with search tools (the intended way to run this eval)
 uv run olmo-eval run -m llama3.1-8b -t deepsearchqa --harness dr_tulu
