@@ -15,11 +15,16 @@ Grading follows the paper's outcome-based, set-comparison methodology: an
 LLM judge decides, per item, whether a submitted answer is semantically
 equivalent to a ground-truth answer (and vice versa), and the task reports
 Precision (``|S ∩ G| / |S|``), Recall (``|S ∩ G| / |G|``), their harmonic
-mean F1 (the primary metric), and an all-or-nothing Exact Match rate. Unlike
-the paper/starter-notebook's official grader (a Gemini 2.5 Flash autorater
-whose exact prompt is not published), this task uses olmo-eval's OpenAI-based
-judge infrastructure with an independently written judge prompt, so absolute
-numbers are not directly comparable to the public leaderboard. Set
+mean F1 (the primary metric), and an all-or-nothing Exact Match rate. The
+official grader (Gemini 2.5 Flash, zero-shot) and its exact prompt *are*
+published, in Appendix A of the technical report. This task nonetheless uses
+an independently written judge prompt against olmo-eval's OpenAI-based judge
+infrastructure (``build_openai_judge_fn`` is OpenAI-only), so absolute
+numbers are not directly comparable to the public leaderboard: the official
+prompt grades the model's raw free-form response directly, while this task
+requires a discrete ``FINAL ANSWER: ...`` line and matches two pre-extracted
+item lists by index. See ``deepsearchqa_official_judge`` for a second task
+that instead mirrors the official prompt and grading mechanic. Set
 ``OLMO_EVAL_JUDGE=<model>[:<effort>]`` to change the judge model.
 
 The task asks the model to end its response with a ``FINAL ANSWER: ...`` line
@@ -271,15 +276,16 @@ EXACT_MATCH_METRIC = _metric("deepsearchqa_exact_match")
 DEEPSEARCHQA_METRICS = (F1_METRIC, PRECISION_METRIC, RECALL_METRIC, EXACT_MATCH_METRIC)
 
 
-@register("deepsearchqa")
-class DeepSearchQA(Task):
-    """DeepSearchQA multi-step search question answering, graded by item-set F1."""
+class DeepSearchQABase(Task):
+    """Shared data loading for the DeepSearchQA task family.
+
+    Subclasses differ only in generation prompt and grading mechanic; the
+    dataset, schema, and empty-gold-set handling are identical across them.
+    """
 
     data_source = DataSource(
         path=DEEPSEARCHQA_REPO, subset=DEEPSEARCHQA_CONFIG, split=DEEPSEARCHQA_SPLIT
     )
-    metrics = DEEPSEARCHQA_METRICS
-    primary_metric = F1_METRIC
     sampling_params = SamplingParams(temperature=0.0, max_tokens=4096)
     required_secrets = ("OPENAI_API_KEY",)
 
@@ -324,6 +330,14 @@ class DeepSearchQA(Task):
                 "gold_items": gold_items,
             },
         )
+
+
+@register("deepsearchqa")
+class DeepSearchQA(DeepSearchQABase):
+    """DeepSearchQA multi-step search question answering, graded by item-set F1."""
+
+    metrics = DEEPSEARCHQA_METRICS
+    primary_metric = F1_METRIC
 
     def format_request(self, instance: Instance) -> LMRequest:
         prompt = DEEPSEARCHQA_GENERATION_PROMPT.format(question=instance.question)
