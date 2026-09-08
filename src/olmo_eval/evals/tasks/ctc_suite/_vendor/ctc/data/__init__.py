@@ -1,1 +1,1 @@
-"""Vendored subset: only the ladder tables (pure data). Generators are NOT vendored."""
+"""Task data generation: JSONL in, JSONL out. Tokenization into olmo-core shards lives elsewhere."""
