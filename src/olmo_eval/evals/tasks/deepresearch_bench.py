@@ -1075,7 +1075,8 @@ def _failed_crawl_needs_rebuild(result: Any) -> bool:
     crawl4ai catches Playwright exceptions and returns unsuccessful CrawlResults, so an
     unsuccessful result is not evidence that the browser remains usable. Explicit HTTP
     4xx/5xx responses are the exception: blocked/missing pages should retain the browser.
-    Browser/transport failure text overrides even a populated HTTP status. Unknown failures
+    Browser/transport failure text overrides even a populated HTTP status. Generic timeout
+    wording alone does not: HTTP 408/504 are ordinary page failures too. Unknown failures
     rebuild conservatively, without retrying this URL or changing its unknown verdict.
     """
     error = str(getattr(result, "error_message", "") or "").lower()
@@ -1093,8 +1094,22 @@ def _failed_crawl_needs_rebuild(result: Any) -> bool:
             "transport",
             "crash",
             "net::err_",
-            "timeout",
-            "timed out",
+        )
+    ):
+        return True
+    # HTTP reason phrases also contain "timeout". Override a known HTTP status only
+    # when the message identifies a local browser/navigation timeout, not the server's
+    # Request Timeout or Gateway Timeout response.
+    if ("timeout" in error or "timed out" in error) and any(
+        marker in error
+        for marker in (
+            "timeouterror",
+            "playwright",
+            "browser",
+            "navigation",
+            "navigating to",
+            "page.goto",
+            "page.wait_for",
         )
     ):
         return True

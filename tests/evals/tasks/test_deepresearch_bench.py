@@ -1635,6 +1635,12 @@ class TestFactJudgeTimeout:
         ("Connection closed while reading from the driver", 200),
         ("Page.goto: net::ERR_CONNECTION_RESET", None),
         ("Navigation timed out", None),
+        ("Navigation timed out", 408),
+        ("Page.goto: Timeout 1000ms exceeded", 504),
+        ("TimeoutError: Timeout 1000ms exceeded", 403),
+        ("Browser launch timed out", 504),
+        ("Transport timed out", 408),
+        ("Target page, context or browser has been closed", 504),
         (None, None),
     ],
 )
@@ -1763,3 +1769,38 @@ async def test_scoring_caller_cancellation_closes_browser_and_cancels_child(
     await asyncio.wait_for(stopped.wait(), 1)
     assert stats["close"] == 1
     assert deepresearch_bench._FACT_CRAWLER_SESSION.get() is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "status,error",
+    [
+        (403, "Forbidden"),
+        (408, "HTTP 408 Request Timeout"),
+        (504, "HTTP 504 Gateway Timeout"),
+        (504, "Gateway Timeout: upstream request timed out"),
+    ],
+)
+async def test_http_timeout_response_keeps_browser_for_next_healthy_url(monkeypatch, status, error):
+    async def arun(url, _config):
+        if url.endswith("failed"):
+            result = _FakeCrawlResult(success=False)
+            result.error_message, result.status_code = error, status
+            return result
+        return _FakeCrawlResult("Healthy evidence page")
+
+    stats = _install_fake_crawl4ai(monkeypatch, arun=arun)
+    async with deepresearch_bench._FactCrawlerSession() as session:
+        token = deepresearch_bench._FACT_CRAWLER_SESSION.set(session)
+        try:
+            failed = await fetch_crawl4ai_page("https://example.test/failed")
+            assert failed == f"Error fetching webpage: {error}"
+            assert scrape_failure_unknown_results(failed, 1) == [{"idx": 0, "result": "unknown"}]
+            retained = session._crawler
+            assert retained is not None
+            healthy = await fetch_crawl4ai_page("https://example.test/healthy")
+            assert healthy == "Healthy evidence page"
+            assert session._crawler is retained
+        finally:
+            deepresearch_bench._FACT_CRAWLER_SESSION.reset(token)
+    assert (stats["init"], stats["fetch"], stats["close"]) == (1, 2, 1)
