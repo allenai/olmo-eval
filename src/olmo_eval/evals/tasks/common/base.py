@@ -160,14 +160,7 @@ class TaskConfig:
     max_length: int | None = None
     answer_extractor: Callable[[str], str] | None = None
 
-    #: Strip a ``<think>...</think>`` reasoning trace from each output before answer
-    #: extraction and scoring (mirrors oe-eval's ``r1_style`` output processor: everything
-    #: up to the last ``</think>`` is removed). The full text is kept in
-    #: ``output.metadata["original_text"]``, which logprob-normalized fields (bits per
-    #: byte, logits per char) keep using, since the logprobs cover the whole generation.
-    #: Outputs with no closing tag are scored as-is. The runner applies this via
-    #: :meth:`Task.strip_thinking_traces` before ``score_responses``, so tasks that
-    #: override ``score_responses`` are covered too.
+    #: Drop ``<think>...</think>`` traces before scoring; see :meth:`Task.strip_thinking_traces`.
     strip_thinking: bool = False
 
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
