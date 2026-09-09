@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -160,6 +161,9 @@ class TaskConfig:
     max_length: int | None = None
     answer_extractor: Callable[[str], str] | None = None
 
+    #: Drop ``<think>...</think>`` traces before scoring; see :meth:`Task.strip_thinking_traces`.
+    strip_thinking: bool = False
+
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
     dependencies: list[str] | None = None
 
@@ -289,6 +293,7 @@ class TaskConfig:
             "output_score_aggregation": self.output_score_aggregation.value,
             "max_length": self.max_length,
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
+            "strip_thinking": self.strip_thinking,
             "dependencies": self.dependencies,
         }
         if any(
@@ -594,6 +599,25 @@ class Task(ABC):
                 for s in self._get_scorers().values()
             )
         return self._has_async_cache
+
+    def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
+        """Drop ``<think>...</think>`` traces so scorers see only the final answer.
+
+        No-op unless ``config.strip_thinking`` is set. Runners call this before
+        ``score_responses`` (which tasks may override). Idempotent: a stripped
+        output has no ``</think>`` left, so a second pass leaves it alone.
+        """
+        if not self.config.strip_thinking:
+            return
+        for response in responses:
+            for output in response.outputs:
+                text = output.text or ""
+                if "</think>" not in text:
+                    continue
+                if output.metadata is None:
+                    output.metadata = {}
+                output.metadata.setdefault("original_text", text)
+                output.text = re.sub(r"(?s).*</think>", "", text).lstrip()
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Extract answers from outputs. Override for complex multi-output logic."""

@@ -224,7 +224,10 @@ class BitsPerByteScorer(Scorer):
 
         total_logprob = sum(tok.get("logprob", 0.0) for tok in output.logprobs)
 
-        num_bytes = len(output.text.encode("utf-8")) if output.text else 0
+        # The logprobs cover the whole generation; if strip_thinking removed a
+        # reasoning trace from output.text, normalize by the original text.
+        text = (output.metadata or {}).get("original_text") or output.text
+        num_bytes = len(text.encode("utf-8")) if text else 0
 
         if num_bytes == 0:
             return 0.0

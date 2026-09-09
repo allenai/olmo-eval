@@ -298,6 +298,91 @@ class TestTaskScoring:
 
 
 @pytest.mark.anyio
+class TestStripThinking:
+    """Tests for TaskConfig.strip_thinking (applied by the runner via strip_thinking_traces)."""
+
+    def _make_response(self, texts: list[str]) -> Response:
+        return Response(
+            instance=Instance(question="What is 2+2?", gold_answer="4"),
+            request=LMRequest(request_type=RequestType.COMPLETION, prompt="What is 2+2?"),
+            outputs=[LMOutput(text=text) for text in texts],
+        )
+
+    async def test_strips_trace_before_extraction_and_scoring(self):
+        metric = AccuracyMetric(scorer=ExactMatchScorer)
+        config = TaskConfig(
+            name="test", data_source="test/dataset", metrics=(metric,), strip_thinking=True
+        )
+        task = ConcreteTask(config)
+        response = self._make_response(["<think>Maybe 5? No, 4.</think>\n\n4"])
+
+        task.strip_thinking_traces([response])
+        scored = await task.score_responses([response])
+
+        output = scored[0].outputs[0]
+        assert output.text == "4"
+        assert output.extracted_answer == "4"
+        assert output.metadata["original_text"] == "<think>Maybe 5? No, 4.</think>\n\n4"
+        assert scored[0].scores["exact_match"] == 1.0
+
+    def test_strips_up_to_last_closing_tag(self):
+        config = TaskConfig(name="test", data_source="test/dataset", strip_thinking=True)
+        task = ConcreteTask(config)
+        response = self._make_response(["<think>a</think> draft <think>b</think> 4"])
+
+        task.strip_thinking_traces([response])
+
+        assert response.outputs[0].text == "4"
+
+    def test_unterminated_trace_is_scored_as_is(self):
+        config = TaskConfig(name="test", data_source="test/dataset", strip_thinking=True)
+        task = ConcreteTask(config)
+        response = self._make_response(["<think>still thinking about 4"])
+
+        task.strip_thinking_traces([response])
+
+        output = response.outputs[0]
+        assert output.text == "<think>still thinking about 4"
+        assert "original_text" not in output.metadata
+
+    def test_output_without_trace_is_unchanged(self):
+        config = TaskConfig(name="test", data_source="test/dataset", strip_thinking=True)
+        task = ConcreteTask(config)
+        response = self._make_response(["4"])
+
+        task.strip_thinking_traces([response])
+
+        assert response.outputs[0].text == "4"
+        assert "original_text" not in response.outputs[0].metadata
+
+    def test_second_pass_is_a_no_op(self):
+        config = TaskConfig(name="test", data_source="test/dataset", strip_thinking=True)
+        task = ConcreteTask(config)
+        response = self._make_response(["<think>reasoning</think>4"])
+
+        task.strip_thinking_traces([response])
+        task.strip_thinking_traces([response])
+
+        assert response.outputs[0].text == "4"
+        assert response.outputs[0].metadata["original_text"] == "<think>reasoning</think>4"
+
+    async def test_disabled_by_default(self):
+        config = TaskConfig(name="test", data_source="test/dataset")
+        task = ConcreteTask(config)
+        response = self._make_response(["<think>reasoning</think>4"])
+
+        task.strip_thinking_traces([response])
+        await task.score_responses([response])
+
+        assert response.outputs[0].text == "<think>reasoning</think>4"
+        assert response.outputs[0].extracted_answer == "<think>reasoning</think>4"
+
+    def test_to_dict_includes_strip_thinking(self):
+        config = TaskConfig(name="test", data_source="test/dataset", strip_thinking=True)
+        assert config.to_dict()["strip_thinking"] is True
+
+
+@pytest.mark.anyio
 class TestProcessScoring:
     """Tests for process-backed scorer execution."""
 
