@@ -80,7 +80,10 @@ class IFEvalScorer(Scorer):
         instruction_ids: list[str] = instance.metadata.get("instruction_id_list", [])
         kwargs_list: list[dict[str, Any]] = instance.metadata.get("kwargs", [])
         prompt: str = instance.metadata.get("prompt", instance.question)
-        response: str = output.text or ""
+        # Verify what the task extracted when it did (reasoning models'
+        # ``<think>`` content is removed there); otherwise the raw text.
+        extracted = output.extracted_answer
+        response: str = extracted if isinstance(extracted, str) else (output.text or "")
 
         strict_results: list[bool] = []
         loose_results: list[bool] = []
