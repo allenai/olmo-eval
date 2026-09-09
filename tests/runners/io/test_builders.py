@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from olmo_eval.common.metrics import LogprobPerTokenMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.runners.io.builders import build_predictions
@@ -176,3 +178,26 @@ def test_build_predictions_includes_original_text_when_present() -> None:
     outputs = predictions[0]["model_output"]
     assert outputs[0]["original_text"] == "<think>reasoning</think>A"
     assert "original_text" not in outputs[1]
+
+
+def test_build_predictions_normalizes_logprobs_by_original_text() -> None:
+    original = "<think>reasoning</think>4"  # 25 chars, 25 bytes
+    response = Response(
+        instance=Instance(question="Q", gold_answer="4"),
+        request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q"),
+        outputs=[
+            LMOutput(
+                text="4",
+                extracted_answer="4",
+                logprobs=[{"token": "x", "logprob": -1.0} for _ in range(5)],
+                metadata={"original_text": original},
+            )
+        ],
+    )
+
+    output = build_predictions([response])[0]["model_output"][0]
+
+    assert output["num_chars"] == 1
+    assert output["num_chars_all"] == len(original)
+    assert output["logits_per_char"] == -5.0 / len(original)
+    assert output["bits_per_byte"] == 5.0 / (len(original.encode("utf-8")) * math.log(2))
