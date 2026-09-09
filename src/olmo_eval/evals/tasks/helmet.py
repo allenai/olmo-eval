@@ -336,6 +336,7 @@ class HelmetKiltTask(HelmetTask):
             max_samples=self.config.limit,
             seed=self.config.seed,
             popularity_threshold=self.helmet_config.get("popularity_threshold"),
+            max_prompt_tokens=self.helmet_config["max_prompt_tokens"],
         )
 
     def extract_answer(self, output: LMOutput) -> Any:
