@@ -4,8 +4,13 @@ Ports HELMET's `load_qa` (https://github.com/princeton-nlp/HELMET, data.py):
 an open-domain question plus a stack of retrieved Wikipedia passages, where the
 model must answer from the passages.
 
-Context length is set by how many passages were retrieved, not by truncation,
-so each length tier is a separate pre-retrieved file. That retrieval was run
+Context length is set primarily by how many passages were retrieved, so each
+length tier is a separate pre-retrieved file. The retrieved passages
+overshoot the tier's budget, though, and HELMET relies on trimming the end of
+the passage block at inference time (`tokenize` in its model_utils.py); that
+trim is reproduced here with the same fixed reference tokenizer the other
+long-context loaders use, so the prompt a model sees is independent of its own
+tokenizer. That retrieval was run
 once by the HELMET authors and is re-hosted unpacked on `allenai/helmet-plus`;
 see `kilt/manifest.json` there for the tier -> file mapping. These files are
 large (the 128k tiers are 1-3 GB each) but are cached by huggingface_hub after
@@ -30,6 +35,7 @@ import logging
 import random
 from typing import Any
 
+from olmo_eval.data.helmet_infbench_loader import REFERENCE_TOKENIZER, _load_reference_tokenizer
 from olmo_eval.data.helmet_loader import download_helmet_plus_file, sample_jsonl_by_key
 
 logger = logging.getLogger(__name__)
@@ -89,6 +95,24 @@ def _drop_duplicates(records: list[dict[str, Any]], key: str) -> list[dict[str, 
     return out
 
 
+def _truncate_prompt_context(
+    sample: dict[str, Any], prompt_template: str, max_prompt_tokens: int, tokenizer
+) -> dict[str, Any]:
+    """Trim the end of `context` until the rendered prompt fits `max_prompt_tokens`.
+
+    Mirrors HELMET's `tokenize`: the overflow is measured on the full prompt and
+    removed from the passage block alone, so the instruction, demonstrations and
+    question survive intact.
+    """
+    prompt_len = len(tokenizer(prompt_template.format(**sample))["input_ids"])
+    overflow = prompt_len - max_prompt_tokens
+    if overflow <= 0 or not sample["context"]:
+        return sample
+    offsets = tokenizer(sample["context"], return_offsets_mapping=True)["offset_mapping"]
+    cut_at = offsets[-overflow][0] if overflow < len(offsets) else 0
+    return {**sample, "context": sample["context"][:cut_at]}
+
+
 def load_kilt_dataset(
     task: str,
     length_name: str,
@@ -96,6 +120,8 @@ def load_kilt_dataset(
     max_samples: int | None = None,
     seed: int = 42,
     popularity_threshold: float | None = None,
+    max_prompt_tokens: int | None = None,
+    reference_tokenizer: str = REFERENCE_TOKENIZER,
 ) -> dict[str, Any]:
     """Load a HELMET RAG dataset for one task at one length tier.
 
@@ -110,6 +136,11 @@ def load_kilt_dataset(
         popularity_threshold: PopQA only -- keep entities whose subject
             popularity is below 10^threshold, which is how HELMET restricts the
             task to genuinely long-tail entities.
+        max_prompt_tokens: Budget for the rendered prompt, measured with the
+            reference tokenizer. Passages are trimmed from the end until the
+            prompt fits; None disables the trim.
+        reference_tokenizer: Tokenizer used for the budget. Changing it changes
+            how much text every model sees.
 
     Returns:
         Dictionary with `data` (processed records) and the HELMET prompt templates.
@@ -177,9 +208,18 @@ def load_kilt_dataset(
             "answer": sample["answers"],
         }
 
+    prompt_template = _USER_TEMPLATE + "\n" + _SYSTEM_TEMPLATE
+    rows = [build(r) for r in data]
+    if max_prompt_tokens is not None:
+        tokenizer = _load_reference_tokenizer(reference_tokenizer)
+        rows = [
+            _truncate_prompt_context(row, prompt_template, max_prompt_tokens, tokenizer)
+            for row in rows
+        ]
+
     return {
-        "data": [build(r) for r in data],
-        "prompt_template": _USER_TEMPLATE + "\n" + _SYSTEM_TEMPLATE,
+        "data": rows,
+        "prompt_template": prompt_template,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }

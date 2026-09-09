@@ -265,6 +265,9 @@ def _generate_helmet_tasks() -> dict:
                 task["alce_task"] = base_config["alce_task"]
             if "kilt_task" in base_config:
                 task["kilt_task"] = base_config["kilt_task"]
+                # HELMET trims the retrieved passages at inference time so the
+                # prompt plus generation fits the tier
+                task["max_prompt_tokens"] = size - max_gen_toks
                 if "popularity_threshold" in base_config:
                     task["popularity_threshold"] = base_config["popularity_threshold"]
             if "icl_dataset" in base_config:
