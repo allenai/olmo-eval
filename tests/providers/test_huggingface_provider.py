@@ -70,9 +70,13 @@ def test_text_path_leaves_completion_prompts_alone(provider: HuggingFaceProvider
 class _FakeAutoConfig:
     """Stand-in for a loaded HF config."""
 
-    def __init__(self, *, vision_config=None, architectures=None) -> None:
+    def __init__(self, *, vision_config=None, vit_config=None, architectures=None, auto_map=None):
         if vision_config is not None:
             self.vision_config = vision_config
+        if vit_config is not None:
+            self.vit_config = vit_config
+        if auto_map is not None:
+            self.auto_map = auto_map
         self.architectures = architectures or []
 
 
@@ -121,4 +125,44 @@ def test_looks_multimodal_is_false_when_the_config_cannot_be_read(monkeypatch) -
     from olmo_eval.inference.providers.huggingface import looks_multimodal_hf
 
     _patch_autoconfig(monkeypatch, None)
+    assert looks_multimodal_hf("some/model") is False
+
+
+def test_looks_multimodal_detects_molmo2_via_auto_map(monkeypatch) -> None:
+    # The real shape, which the first attempt missed: Molmo2 names its vision tower
+    # `vit_config` (not `vision_config`) and its architecture is remote code, so it is
+    # absent from transformers' built-in mapping. Only auto_map identifies it.
+    from olmo_eval.inference.providers.huggingface import looks_multimodal_hf
+
+    _patch_autoconfig(
+        monkeypatch,
+        _FakeAutoConfig(
+            vit_config=object(),
+            architectures=["Molmo2ForConditionalGeneration"],
+            auto_map={
+                "AutoConfig": "configuration_molmo2.Molmo2Config",
+                "AutoModelForImageTextToText": "modeling_molmo2.Molmo2ForConditionalGeneration",
+            },
+        ),
+    )
+    assert looks_multimodal_hf("some/export") is True
+
+
+def test_looks_multimodal_detects_a_vit_config_alone(monkeypatch) -> None:
+    from olmo_eval.inference.providers.huggingface import looks_multimodal_hf
+
+    _patch_autoconfig(monkeypatch, _FakeAutoConfig(vit_config=object()))
+    assert looks_multimodal_hf("some/model") is True
+
+
+def test_looks_multimodal_ignores_a_text_only_auto_map(monkeypatch) -> None:
+    from olmo_eval.inference.providers.huggingface import looks_multimodal_hf
+
+    _patch_autoconfig(
+        monkeypatch,
+        _FakeAutoConfig(
+            architectures=["Qwen3ForCausalLM"],
+            auto_map={"AutoModelForCausalLM": "modeling_x.XForCausalLM"},
+        ),
+    )
     assert looks_multimodal_hf("some/model") is False

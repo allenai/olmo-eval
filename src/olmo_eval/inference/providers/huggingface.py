@@ -201,6 +201,11 @@ def _patch_molmo2_generation_cache_position(model: Any) -> None:
     cls.prepare_inputs_for_generation = prepare_inputs_for_generation
 
 
+#: Config attributes that hold a vision tower. Molmo2 uses ``vit_config`` where most
+#: released repos use ``vision_config``, so checking only the latter misses it.
+_VISION_CONFIG_ATTRS = ("vision_config", "vit_config", "vision_tower_config")
+
+
 def looks_multimodal_hf(model_name: str, **model_kwargs: Any) -> bool:
     """Whether an HF checkpoint is an image-text-to-text model.
 
@@ -213,6 +218,12 @@ def looks_multimodal_hf(model_name: str, **model_kwargs: Any) -> bool:
     Without this, a real HF multimodal directory fell through to the text-only path and died
     with ``Unrecognized configuration class Molmo2Config ... AutoModelForCausalLM``, which
     names neither the cause nor the ``multimodal`` flag that would have fixed it.
+
+    Checks three signals, because no single one covers both released and remote-code repos:
+    ``auto_map`` declaring ``AutoModelForImageTextToText`` (the only reliable signal for a
+    remote-code model such as Molmo2, whose architecture is absent from the built-in
+    mapping), a vision-tower sub-config under any of its usual names, and membership of
+    transformers' image-text-to-text mapping.
 
     Returns ``False`` rather than raising when the config cannot be read: the caller then
     takes the text path and fails with its own error, which is no worse than before.
@@ -232,8 +243,13 @@ def looks_multimodal_hf(model_name: str, **model_kwargs: Any) -> bool:
     except Exception:
         return False
 
-    # A vision tower is the most reliable signal and needs no registry lookup.
-    if getattr(config, "vision_config", None) is not None:
+    # Remote-code repos declare the head they load with; this is authoritative and is the
+    # only one of the three that catches Molmo2.
+    auto_map = getattr(config, "auto_map", None) or {}
+    if isinstance(auto_map, dict) and "AutoModelForImageTextToText" in auto_map:
+        return True
+
+    if any(getattr(config, attr, None) is not None for attr in _VISION_CONFIG_ATTRS):
         return True
 
     architectures = getattr(config, "architectures", None) or ()
