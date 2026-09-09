@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from olmo_eval.common.execution import ExecutionResult
-from olmo_eval.common.scorers import SandboxRequiredError
+from olmo_eval.common.scorers import SandboxRequiredError, ScoringIncompleteError
 from olmo_eval.common.scorers.code_execution.scripts import get_script
 from olmo_eval.common.types import Instance, LMOutput, RequestType
 from olmo_eval.evals.tasks.common import get_task
@@ -21,10 +21,9 @@ from olmo_eval.evals.tasks.livecodebench import (
     RELEASE_V3_FILES,
     RELEASE_V4_V6_FILES,
     SYSTEM_PROMPT,
-    GradingFailedError,
+    VERDICT_PREFIX,
     LiveCodeBenchScorer,
 )
-from olmo_eval.harness.sandbox.errors import SandboxInfrastructureError
 
 STDIN_DOC = {
     "question_id": "abc123_a",
@@ -196,7 +195,7 @@ class _StubStagingEnv:
     def __init__(
         self, output: str = '{"passed": true, "num_tests": 3}', success: bool = True
     ) -> None:
-        self.output = output
+        self.output = VERDICT_PREFIX + output if output.startswith("{") else output
         self.success = success
         self.staged: dict[str, str] = {}
         self.commands: list[str] = []
@@ -334,14 +333,21 @@ class TestLiveCodeBenchScorer:
         output = LMOutput(text="unused")
         output.extracted_answer = "print(1)"
 
-        with pytest.raises(GradingFailedError, match="No grader verdict"):
+        with pytest.raises(ScoringIncompleteError, match="No grader verdict"):
             await scorer.ascore(_instance(), output, env)
         assert output.metadata["execution_result"]["success"] is False
 
-    async def test_grading_failures_are_recorded_against_the_task(self) -> None:
-        # The runner only reports lost scores at the task level for
-        # infrastructure failures; anything else becomes a quiet zero.
-        assert issubclass(GradingFailedError, SandboxInfrastructureError)
+    async def test_verdict_is_found_among_solution_noise(self, stub_rows: None) -> None:
+        # The sandbox appends stderr after stdout, so a solution that prints a
+        # JSON object to stderr lands after the real verdict.
+        scorer = LiveCodeBenchScorer()
+        verdict = VERDICT_PREFIX + '{"passed": true, "num_tests": 3}'
+        env = _StubStagingEnv(output=f'debug\n{verdict}\n{{"passed": false}}\n')
+        output = LMOutput(text="unused")
+        output.extracted_answer = "print(1)"
+
+        assert await scorer.ascore(_instance(), output, env) == 1.0
+        assert output.metadata["execution_result"]["num_tests"] == 3
 
     async def test_verdict_with_no_tests_is_a_grading_failure(self, stub_rows: None) -> None:
         # Passing every test in an empty set is what an undecodable payload
@@ -351,7 +357,7 @@ class TestLiveCodeBenchScorer:
         output = LMOutput(text="unused")
         output.extracted_answer = "print(1)"
 
-        with pytest.raises(GradingFailedError, match="No test cases were graded"):
+        with pytest.raises(ScoringIncompleteError, match="No test cases were graded"):
             await scorer.ascore(_instance(), output, env)
 
     async def test_grader_error_is_a_grading_failure(self, stub_rows: None) -> None:
@@ -363,7 +369,7 @@ class TestLiveCodeBenchScorer:
         output = LMOutput(text="unused")
         output.extracted_answer = "print(1)"
 
-        with pytest.raises(GradingFailedError, match="KeyError"):
+        with pytest.raises(ScoringIncompleteError, match="KeyError"):
             await scorer.ascore(_instance(), output, env)
 
     async def test_grader_runs_under_a_time_limit_that_leaves_cleanup_to_the_shell(
@@ -407,7 +413,7 @@ class TestLiveCodeBenchScorer:
         output = LMOutput(text="unused")
         output.extracted_answer = "print(1)"
 
-        with pytest.raises(GradingFailedError, match="row order changed"):
+        with pytest.raises(ScoringIncompleteError, match="row order changed"):
             await scorer.ascore(instance, output, _StubStagingEnv())
 
 
@@ -447,8 +453,10 @@ def _grade(
             timeout=120,
         )
 
-    verdicts = [line for line in process.stdout.strip().splitlines() if line.startswith("{")]
-    return json.loads(verdicts[-1])
+    verdicts = [
+        line for line in process.stdout.strip().splitlines() if line.startswith(VERDICT_PREFIX)
+    ]
+    return json.loads(verdicts[-1][len(VERDICT_PREFIX) :])
 
 
 SUM_TESTS = [
@@ -514,6 +522,18 @@ class TestGraderStdinMode:
         assert verdict["passed"] is False
         assert verdict["error_code"] == -3
         assert "budget" in verdict["error_message"]
+
+    def test_closing_stdout_keeps_the_output(self) -> None:
+        solution = (
+            "a, b = map(int, input().split())\nprint(a + b)\nimport sys\nsys.stdout.close()\n"
+        )
+        assert _grade(solution, SUM_TESTS)["passed"] is True
+
+    def test_large_integers_convert_to_strings(self) -> None:
+        # The interpreter's default limit on int/str conversion is far below
+        # what contest answers reach; the reference harness raises it.
+        tests = [{"input": "5000\n", "output": "1" + "0" * 5000 + "\n"}]
+        assert _grade("n = int(input())\nprint(10 ** n)\n", tests)["passed"] is True
 
     def test_crashed_interpreter_is_a_failed_solution(self) -> None:
         # A crash takes down the process running the solution, not the grader.
@@ -589,7 +609,7 @@ class TestGraderCallMode:
 
 class TestGraderPayloads:
     def test_undecodable_test_cases_yield_no_tests_and_no_pass(self) -> None:
-        # Formerly an empty test set, which every solution passed.
+        # An empty test set is passed by every solution, so it must not be one.
         verdict = _grade("print(1)\n", "not json and not base64 pickle")
         assert verdict["passed"] is False
         assert verdict["num_tests"] == 0

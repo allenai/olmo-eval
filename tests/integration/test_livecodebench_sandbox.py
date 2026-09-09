@@ -22,7 +22,6 @@ from olmo_eval.evals.tasks.livecodebench import (
     LIVECODEBENCH_REPO,
     RELEASE_V3_FILES,
     LiveCodeBenchScorer,
-    _parse_verdict,
     _test_case_rows,
 )
 from olmo_eval.harness.sandbox import Capability, SandboxConfig, SandboxManager, SandboxMode
@@ -174,15 +173,13 @@ async def test_private_test_cases_reach_the_container(
 
     result = output.metadata["execution_result"]
     assert result["success"] is True
-    verdict = _parse_verdict(result["output"])
-    assert verdict is not None
 
     # Public cases are plain JSON on the row; the private ones are what the
     # grader had to decode in the container.
     row = _test_case_rows(LIVECODEBENCH_REPO, RELEASE_V3_FILES)[instance.metadata["row"]]
     public_count = len(json.loads(row["public_test_cases"]))
     assert public_count > 0
-    assert verdict["num_tests"] > public_count
+    assert result["num_tests"] > public_count
 
 
 @pytest.mark.anyio

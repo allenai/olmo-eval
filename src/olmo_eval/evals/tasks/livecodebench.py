@@ -25,7 +25,11 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.common.execution.environment import StagingExecutionEnvironment
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import PassAtKMetric
-from olmo_eval.common.scorers import ExecutionScorer, SandboxRequiredError
+from olmo_eval.common.scorers import (
+    ExecutionScorer,
+    SandboxRequiredError,
+    ScoringIncompleteError,
+)
 from olmo_eval.common.scorers.code_execution.scripts import get_script
 from olmo_eval.common.types import (
     Instance,
@@ -36,7 +40,6 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
-from olmo_eval.harness.sandbox.errors import SandboxInfrastructureError
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ExecutionEnvironment
@@ -116,7 +119,7 @@ def _stage_problem(metadata: dict[str, Any], timeout: float) -> str:
     if row["question_id"] != metadata["id"]:
         # Grading against another problem's tests would score every
         # solution wrong while still looking like a plausible result.
-        raise GradingFailedError(
+        raise ScoringIncompleteError(
             f"Test cases for problem {metadata['id']} are not at row "
             f"{metadata['row']}; the dataset's row order changed."
         )
@@ -146,13 +149,18 @@ def _extract_last_code_block(text: str) -> str | None:
     return "\n".join(lines[fences[-2] + 1 : fences[-1]])
 
 
+#: The grader marks its verdict line with this so that nothing a solution
+#: writes, on either stream, can be mistaken for it.
+VERDICT_PREFIX = "LCB_VERDICT "
+
+
 def _parse_verdict(output: str) -> dict[str, Any] | None:
-    """Read the grader's JSON verdict, which is the last line it prints."""
+    """Read the grader's JSON verdict from the command output."""
     for line in reversed((output or "").strip().splitlines()):
         line = line.strip()
-        if line.startswith("{") and line.endswith("}"):
+        if line.startswith(VERDICT_PREFIX):
             try:
-                return json.loads(line)
+                return json.loads(line[len(VERDICT_PREFIX) :])
             except json.JSONDecodeError:
                 continue
     return None
@@ -193,14 +201,6 @@ class LiveCodeBenchFormatter(ChatFormatter):
 GRADER_ERROR_CODE = -5
 
 
-class GradingFailedError(SandboxInfrastructureError):
-    """The grader produced no usable verdict, so the solution was never scored.
-
-    Raised as an infrastructure failure so that the task's result records the
-    lost scores instead of publishing them as zeros.
-    """
-
-
 @dataclass(frozen=True, slots=True)
 class LiveCodeBenchScorer(ExecutionScorer):
     """Run one solution against a problem's contest test cases in a sandbox.
@@ -220,8 +220,8 @@ class LiveCodeBenchScorer(ExecutionScorer):
     timeout: float = 6.0
     #: Ceiling for one grading run. The grader itself stops a solution at the
     #: reference harness's budget of ``(timeout + 1) * num_tests + 5`` seconds,
-    #: so this only needs to exceed that for the largest problem in a release:
-    #: 103 test cases, or 726 seconds, across the shipped releases.
+    #: so this only needs to exceed that budget for the problem with the most
+    #: test cases in a release.
     overall_timeout: float = 900.0
     max_output_len: int = 4000
 
@@ -260,6 +260,7 @@ class LiveCodeBenchScorer(ExecutionScorer):
         verdict = _parse_verdict(result.output)
         output.metadata["execution_result"] = {
             "success": bool(verdict and verdict.get("passed")),
+            "num_tests": (verdict or {}).get("num_tests"),
             "exit_code": result.exit_code,
             "error": result.error or (verdict or {}).get("error_message", ""),
             "output": result.output[: self.max_output_len] if result.output else "",
@@ -267,18 +268,18 @@ class LiveCodeBenchScorer(ExecutionScorer):
 
         problem_id = metadata.get("id", "?")
         if verdict is None:
-            raise GradingFailedError(
+            raise ScoringIncompleteError(
                 f"No grader verdict for problem {problem_id} "
                 f"(exit code {result.exit_code}): "
                 f"{(result.error or result.output or '')[:500]}"
             )
         if not verdict.get("num_tests"):
-            raise GradingFailedError(
+            raise ScoringIncompleteError(
                 f"No test cases were graded for problem {problem_id}: "
                 f"{verdict.get('error_message', 'the grader decoded an empty test set')}"
             )
         if verdict.get("error_code") == GRADER_ERROR_CODE:
-            raise GradingFailedError(
+            raise ScoringIncompleteError(
                 f"The grader failed on problem {problem_id}: {verdict.get('error_message', '')}"
             )
         return 1.0 if verdict.get("passed") else 0.0
@@ -325,7 +326,7 @@ ADAPT_SAMPLING = SamplingParams(
 
 @register("livecodebench")
 class LiveCodeBench(Task):
-    """LiveCodeBench release_v3: contests through the v3 cutoff (612 problems)."""
+    """LiveCodeBench release_v3: contests through the v3 cutoff."""
 
     release_files: tuple[str, ...] = RELEASE_V3_FILES
 
@@ -388,7 +389,7 @@ class LiveCodeBench(Task):
 
 @register("livecodebench_hidden")
 class LiveCodeBenchHidden(LiveCodeBench):
-    """LiveCodeBench v4-v6: contests after the v3 cutoff (443 problems).
+    """LiveCodeBench v4-v6: contests after the v3 cutoff.
 
     Held out from the main task so that problems postdating a model's training
     data can be scored separately.

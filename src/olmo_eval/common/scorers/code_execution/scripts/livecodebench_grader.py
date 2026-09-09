@@ -71,20 +71,23 @@ def cancel_alarm():
     signal.setitimer(signal.ITIMER_REAL, 0)
 
 
+class CapturedOutput(StringIO):
+    """Stdout stand-in that survives a solution closing it."""
+
+    def close(self):
+        pass
+
+
 class Capturing(list):
     """Collect everything a block writes to stdout."""
 
     def __enter__(self):
         self._stdout = sys.stdout
-        sys.stdout = self._stringio = StringIO()
+        sys.stdout = self._stringio = CapturedOutput()
         return self
 
     def __exit__(self, *args):
-        try:
-            self.append(self._stringio.getvalue())
-        except ValueError:
-            # The solution closed stdout; whatever it wrote is gone.
-            self.append("")
+        self.append(self._stringio.getvalue())
         del self._stringio
         sys.stdout = self._stdout
 
@@ -387,11 +390,15 @@ def reliability_guard():
 
 
 MAX_ERROR_MESSAGE_LEN = 2000
+VERDICT_PREFIX = "LCB_VERDICT "
 
 
 def grade(solution, inputs, outputs, fn_name, timeout):
     """Grade a solution in this process and return ``(passed, detail)``."""
     signal.signal(signal.SIGALRM, timeout_handler)
+    # Contest answers can be integers far past the interpreter's default limit
+    # on converting between int and str; the reference harness raises it too.
+    sys.set_int_max_str_digits(50000)
     reliability_guard()
     try:
         if fn_name:
@@ -507,10 +514,10 @@ def main():
 
     verdict["num_tests"] = len(inputs)
     verdict["elapsed"] = round(time.time() - started, 3)
-    # The harness reads the last line of stdout. The child may have written
-    # there without a trailing newline, so start a fresh line first.
+    # The harness looks for the marked line. The child may have written to
+    # stdout without a trailing newline, so start a fresh line first.
     sys.stdout = sys.__stdout__
-    print("\n" + json.dumps(verdict), flush=True)
+    print("\n" + VERDICT_PREFIX + json.dumps(verdict), flush=True)
 
 
 if __name__ == "__main__":
