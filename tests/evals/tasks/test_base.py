@@ -320,7 +320,7 @@ class TestStripThinking:
         scored = await task.score_responses([response])
 
         output = scored[0].outputs[0]
-        assert output.text == "4"
+        assert output.text == "\n\n4"
         assert output.extracted_answer == "4"
         assert output.metadata["original_text"] == "<think>Maybe 5? No, 4.</think>\n\n4"
         assert scored[0].scores["exact_match"] == 1.0
@@ -329,6 +329,25 @@ class TestStripThinking:
         config = TaskConfig(name="test", data_source="test/dataset", strip_thinking=True)
         task = ConcreteTask(config)
         response = self._make_response(["<think>a</think> draft <think>b</think> 4"])
+
+        task.strip_thinking_traces([response])
+
+        assert response.outputs[0].text == " 4"
+
+    def test_text_after_trace_is_kept_verbatim(self):
+        """Leading whitespace survives; whitespace-sensitive verifiers depend on it."""
+        config = TaskConfig(name="test", data_source="test/dataset", strip_thinking=True)
+        task = ConcreteTask(config)
+        response = self._make_response(["<think>plan</think>\n\nFirst line.\n\nSecond line."])
+
+        task.strip_thinking_traces([response])
+
+        assert response.outputs[0].text == "\n\nFirst line.\n\nSecond line."
+
+    def test_answer_tags_are_removed(self):
+        config = TaskConfig(name="test", data_source="test/dataset", strip_thinking=True)
+        task = ConcreteTask(config)
+        response = self._make_response(["<think>plan</think>\n<answer>4</answer>"])
 
         task.strip_thinking_traces([response])
 

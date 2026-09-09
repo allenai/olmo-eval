@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import logging
 import math
-import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -606,9 +605,17 @@ class Task(ABC):
         No-op unless ``config.strip_thinking`` is set. Runners call this before
         ``score_responses`` (which tasks may override). Idempotent: a stripped
         output has no ``</think>`` left, so a second pass leaves it alone.
+
+        The text after the trace is kept byte-for-byte, matching the reference
+        harness's ``r1_style`` processing: whitespace-sensitive verifiers (the
+        IFEval loose variants drop the response's first line, and paragraph
+        checks index on blank-line splits) give different verdicts if leading
+        whitespace is trimmed here.
         """
         if not self.config.strip_thinking:
             return
+        from olmo_eval.evals.extract import extract_think_answer
+
         for response in responses:
             for output in response.outputs:
                 text = output.text or ""
@@ -617,7 +624,7 @@ class Task(ABC):
                 if output.metadata is None:
                     output.metadata = {}
                 output.metadata.setdefault("original_text", text)
-                output.text = re.sub(r"(?s).*</think>", "", text).lstrip()
+                output.text = extract_think_answer(text) or ""
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Extract answers from outputs. Override for complex multi-output logic."""
