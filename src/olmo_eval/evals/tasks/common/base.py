@@ -163,7 +163,11 @@ class TaskConfig:
     #: Strip a ``<think>...</think>`` reasoning trace from each output before answer
     #: extraction and scoring (mirrors oe-eval's ``r1_style`` output processor: everything
     #: up to the last ``</think>`` is removed). The full text is kept in
-    #: ``output.metadata["original_text"]``. Outputs with no closing tag are scored as-is.
+    #: ``output.metadata["original_text"]``, which logprob-normalized fields (bits per
+    #: byte, logits per char) keep using, since the logprobs cover the whole generation.
+    #: Outputs with no closing tag are scored as-is. The runner applies this via
+    #: :meth:`Task.strip_thinking_traces` before ``score_responses``, so tasks that
+    #: override ``score_responses`` are covered too.
     strip_thinking: bool = False
 
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
@@ -538,8 +542,6 @@ class Task(ABC):
         Subclasses needing custom answer extraction should override
         `_extract_answers()` rather than this method.
         """
-        if self.config.strip_thinking:
-            self._strip_thinking(responses)
         self._extract_answers(responses)
 
         # Check if any scorers need async execution
@@ -582,8 +584,15 @@ class Task(ABC):
             )
         return self._has_async_cache
 
-    def _strip_thinking(self, responses: Sequence[Response]) -> None:
-        """Drop the reasoning trace so scorers see only the final answer."""
+    def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
+        """Drop ``<think>...</think>`` traces so scorers see only the final answer.
+
+        No-op unless ``config.strip_thinking`` is set. Runners call this before
+        ``score_responses`` (which tasks may override). Idempotent: a stripped
+        output has no ``</think>`` left, so a second pass leaves it alone.
+        """
+        if not self.config.strip_thinking:
+            return
         for response in responses:
             for output in response.outputs:
                 text = output.text or ""
@@ -591,7 +600,7 @@ class Task(ABC):
                     continue
                 if output.metadata is None:
                     output.metadata = {}
-                output.metadata["original_text"] = text
+                output.metadata.setdefault("original_text", text)
                 output.text = re.sub(r"(?s).*</think>", "", text).lstrip()
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
