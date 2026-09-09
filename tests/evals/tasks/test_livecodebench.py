@@ -365,9 +365,9 @@ class TestLiveCodeBenchScorer:
 
 def _grade(
     solution: str,
-    tests: list[dict[str, str]],
+    tests: list[dict[str, str]] | str,
     fn_name: str | None = None,
-    timeout: int = 5,
+    timeout: float = 5,
 ) -> dict[str, Any]:
     """Run the container-side grader the way the sandbox would."""
     with tempfile.TemporaryDirectory() as work_dir:
@@ -376,7 +376,7 @@ def _grade(
         with open(os.path.join(work_dir, "problem.json"), "w") as handle:
             json.dump(
                 {
-                    "public_test_cases": json.dumps(tests),
+                    "public_test_cases": tests if isinstance(tests, str) else json.dumps(tests),
                     "private_test_cases": "",
                     "fn_name": fn_name,
                     "timeout": timeout,
@@ -445,6 +445,32 @@ class TestGraderStdinMode:
         assert verdict["passed"] is False
         assert verdict["error_code"] == -3
 
+    def test_sub_second_timeout_is_enforced(self) -> None:
+        # A whole-second alarm would round this down to no alarm at all.
+        verdict = _grade("while True:\n    pass\n", SUM_TESTS, timeout=0.5)
+        assert verdict["passed"] is False
+        assert verdict["error_code"] == -3
+
+    def test_solution_that_disarms_the_alarm_hits_the_overall_budget(self) -> None:
+        # The per-case alarm can be silenced from inside the solution; the
+        # budget for the whole run cannot, because another process keeps it.
+        solution = (
+            "import signal\nsignal.signal(signal.SIGALRM, signal.SIG_IGN)\nwhile True:\n    pass\n"
+        )
+        verdict = _grade(solution, SUM_TESTS[:1], timeout=0.1)
+        assert verdict["passed"] is False
+        assert verdict["error_code"] == -3
+        assert "budget" in verdict["error_message"]
+
+    def test_crashed_interpreter_is_a_failed_solution(self) -> None:
+        # A crash takes down the process running the solution, not the grader.
+        solution = "import ctypes\nctypes.string_at(0)\n"
+        verdict = _grade(solution, SUM_TESTS)
+        assert verdict["passed"] is False
+        assert verdict["error_code"] == -4
+        assert "signal" in verdict["error_message"]
+        assert verdict["num_tests"] == len(SUM_TESTS)
+
     def test_syntax_error_is_reported_as_a_compilation_failure(self) -> None:
         verdict = _grade("  this is not python\n", SUM_TESTS)
         assert verdict["passed"] is False
@@ -494,3 +520,29 @@ class TestGraderCallMode:
     def test_module_level_function_is_found(self) -> None:
         solution = "def double(nums):\n    return [n * 2 for n in nums]\n"
         assert _grade(solution, DOUBLE_TESTS, fn_name="double")["passed"] is True
+
+    def test_endless_module_body_is_a_timeout_not_a_compile_error(self) -> None:
+        solution = "while True:\n    pass\ndef double(nums):\n    return nums\n"
+        verdict = _grade(solution, DOUBLE_TESTS, fn_name="double", timeout=1)
+        assert verdict["passed"] is False
+        assert verdict["error_code"] == -3
+
+    def test_exiting_from_the_function_is_a_runtime_error(self) -> None:
+        solution = "def double(nums):\n    import sys\n    sys.exit(0)\n"
+        verdict = _grade(solution, DOUBLE_TESTS, fn_name="double")
+        assert verdict["passed"] is False
+        assert verdict["error_code"] == -4
+
+
+class TestGraderPayloads:
+    def test_undecodable_test_cases_yield_no_tests_and_no_pass(self) -> None:
+        # Formerly an empty test set, which every solution passed.
+        verdict = _grade("print(1)\n", "not json and not base64 pickle")
+        assert verdict["passed"] is False
+        assert verdict["num_tests"] == 0
+        assert verdict["error_code"] == -5
+        assert "neither JSON nor compressed pickle" in verdict["error_message"]
+
+    def test_case_count_is_reported(self) -> None:
+        solution = "a, b = map(int, input().split())\nprint(a + b)\n"
+        assert _grade(solution, SUM_TESTS)["num_tests"] == len(SUM_TESTS)

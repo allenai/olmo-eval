@@ -4,6 +4,12 @@ Runs inside a sandbox, not in the harness process. Reads ``problem.json`` and
 ``solution.py`` from its own directory and prints a single JSON verdict to
 stdout.
 
+The solution runs in a forked child, as it does in the reference harness, so
+that a solution which crashes the interpreter or exhausts its time budget is
+reported as a failed solution rather than leaving no verdict behind. Only a
+problem whose test cases cannot be decoded produces a verdict with no tests,
+which the harness treats as a grading failure rather than a score.
+
 Problems come in two shapes. A problem with a function name expects the
 solution to define that function (on a ``Solution`` class for LeetCode
 problems); its inputs and outputs are JSON values compared directly. A problem
@@ -21,6 +27,7 @@ import faulthandler
 import json
 import os
 import pickle
+import select
 import signal
 import sys
 import time
@@ -55,6 +62,15 @@ def timeout_handler(signum, frame):
     raise TimeoutException
 
 
+def start_alarm(seconds):
+    """Arm the per-case timer. Unlike ``signal.alarm`` this keeps fractions of a second."""
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+
+
+def cancel_alarm():
+    signal.setitimer(signal.ITIMER_REAL, 0)
+
+
 class Capturing(list):
     """Collect everything a block writes to stdout."""
 
@@ -64,7 +80,11 @@ class Capturing(list):
         return self
 
     def __exit__(self, *args):
-        self.append(self._stringio.getvalue())
+        try:
+            self.append(self._stringio.getvalue())
+        except ValueError:
+            # The solution closed stdout; whatever it wrote is gone.
+            self.append("")
         del self._stringio
         sys.stdout = self._stdout
 
@@ -174,7 +194,7 @@ class CompilationError(Exception):
 
 def compile_code(code, timeout):
     """Execute a solution's module body and return the object to call into."""
-    signal.alarm(timeout)
+    start_alarm(timeout)
     try:
         module = ModuleType("tmp_sol", "")
         exec(code, module.__dict__)
@@ -183,12 +203,16 @@ def compile_code(code, timeout):
         if "class Solution" in code:
             return module.Solution()
         return module
+    except TimeoutException:
+        # Module-level work that never finishes is a slow solution, not a
+        # broken one.
+        raise
     except Exception as exc:
         # A solution that does not compile is a failed solution, reported the
         # same way as one whose entry point is missing.
         raise CompilationError(repr(exc)) from exc
     finally:
-        signal.alarm(0)
+        cancel_alarm()
 
 
 def get_stripped_lines(value):
@@ -213,12 +237,12 @@ def grade_call_based(code, inputs, outputs, fn_name, timeout):
     parsed_inputs = [[json.loads(line) for line in case.split("\n")] for case in inputs]
     parsed_outputs = [json.loads(case) for case in outputs]
 
-    for gt_input, gt_output in zip(parsed_inputs, parsed_outputs, strict=False):
-        signal.alarm(timeout)
+    for gt_input, gt_output in zip(parsed_inputs, parsed_outputs, strict=True):
+        start_alarm(timeout)
         faulthandler.enable()
         try:
             prediction = method(*gt_input)
-            signal.alarm(0)
+            cancel_alarm()
 
             # Tuples and lists are not distinguished: ground truth is never a tuple.
             if isinstance(prediction, tuple):
@@ -226,12 +250,14 @@ def grade_call_based(code, inputs, outputs, fn_name, timeout):
 
             if prediction != gt_output:
                 return False, {"error_code": -2, "error_message": "Wrong Answer"}
-        except Exception as exc:
-            if "timeoutexception" in repr(exc).lower():
-                return False, {"error_code": -3, "error_message": "Time Limit Exceeded"}
+        except TimeoutException:
+            return False, {"error_code": -3, "error_message": "Time Limit Exceeded"}
+        except (Exception, SystemExit) as exc:
+            # A whole-program solution may exit; a function that does so has
+            # no answer.
             return False, {"error_code": -4, "error_message": f"Runtime Error: {exc!r}"}
         finally:
-            signal.alarm(0)
+            cancel_alarm()
             faulthandler.disable()
 
     return True, {}
@@ -245,19 +271,19 @@ def grade_stdio(code, inputs, outputs, timeout):
     if method is None:
         return False, {"error_code": -4, "error_message": "Function not found in generated code"}
 
-    for gt_input, gt_output in zip(inputs, outputs, strict=False):
-        signal.alarm(timeout)
+    for gt_input, gt_output in zip(inputs, outputs, strict=True):
+        start_alarm(timeout)
         faulthandler.enable()
         with Capturing() as captured:
             try:
                 call_method(method, gt_input)
-                signal.alarm(0)
+                cancel_alarm()
+            except TimeoutException:
+                return False, {"error_code": -3, "error_message": "Time Limit Exceeded"}
             except Exception as exc:
-                if "timeoutexception" in repr(exc).lower():
-                    return False, {"error_code": -3, "error_message": "Time Limit Exceeded"}
                 return False, {"error_code": -4, "error_message": f"Runtime Error: {exc!r}"}
             finally:
-                signal.alarm(0)
+                cancel_alarm()
                 faulthandler.disable()
 
         prediction_lines = get_stripped_lines(captured[0])
@@ -289,18 +315,21 @@ def grade_stdio(code, inputs, outputs, timeout):
 
 
 def decode_test_cases(encoded):
-    """Decode a test case blob, which may be JSON or compressed pickle."""
+    """Decode a test case blob, which may be JSON or compressed pickle.
+
+    Raises ``ValueError`` for a blob in neither form, so that a payload the
+    grader cannot read is never mistaken for a problem with no tests.
+    """
     if not encoded:
         return []
     try:
         return json.loads(encoded)
     except json.JSONDecodeError:
-        try:
-            return json.loads(
-                pickle.loads(zlib.decompress(base64.b64decode(encoded.encode("utf-8"))))
-            )
-        except Exception:
-            return []
+        pass
+    try:
+        return json.loads(pickle.loads(zlib.decompress(base64.b64decode(encoded.encode("utf-8")))))
+    except Exception as exc:
+        raise ValueError(f"test cases are neither JSON nor compressed pickle: {exc!r}") from exc
 
 
 def reliability_guard():
@@ -357,6 +386,96 @@ def reliability_guard():
         loaded_modules[blocked] = None
 
 
+MAX_ERROR_MESSAGE_LEN = 2000
+
+
+def grade(solution, inputs, outputs, fn_name, timeout):
+    """Grade a solution in this process and return ``(passed, detail)``."""
+    signal.signal(signal.SIGALRM, timeout_handler)
+    reliability_guard()
+    try:
+        if fn_name:
+            return grade_call_based(solution, inputs, outputs, fn_name, timeout)
+        return grade_stdio(solution, inputs, outputs, timeout)
+    except CompilationError as exc:
+        return False, {"error_code": -4, "error_message": f"Compilation error: {exc}"}
+    except TimeoutException:
+        return False, {"error_code": -3, "error_message": "Time Limit Exceeded"}
+
+
+def grade_in_child(solution, inputs, outputs, fn_name, timeout, budget):
+    """Grade in a forked child and return the verdict fields it reports.
+
+    The child sends its verdict back over a pipe. A child that dies before
+    reporting, or is still running when ``budget`` seconds are up, is a failed
+    solution: the parent never depends on the solution's process surviving.
+    """
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        try:
+            passed, detail = grade(solution, inputs, outputs, fn_name, timeout)
+            verdict: dict[str, Any] = {"passed": passed, **detail}
+        except BaseException as exc:
+            verdict = {
+                "passed": False,
+                "error_code": -5,
+                "error_message": f"TestRunnerError: {exc!r}",
+            }
+        if "error_message" in verdict:
+            verdict["error_message"] = verdict["error_message"][:MAX_ERROR_MESSAGE_LEN]
+        with os.fdopen(write_fd, "wb") as pipe:
+            pipe.write(json.dumps(verdict).encode("utf-8"))
+        os._exit(0)
+
+    os.close(write_fd)
+    chunks = []
+    deadline = time.monotonic() + budget
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+                return {
+                    "passed": False,
+                    "error_code": -3,
+                    "error_message": (
+                        f"Time Limit Exceeded: over the {budget:.0f}s budget for all tests"
+                    ),
+                }
+            ready, _, _ = select.select([read_fd], [], [], remaining)
+            if not ready:
+                continue
+            chunk = os.read(read_fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        os.close(read_fd)
+    _, status = os.waitpid(pid, 0)
+
+    if chunks:
+        return json.loads(b"".join(chunks).decode("utf-8"))
+    if os.WIFSIGNALED(status):
+        # The interpreter itself died: deep recursion, memory exhaustion.
+        return {
+            "passed": False,
+            "error_code": -4,
+            "error_message": (
+                f"Runtime Error: solution process killed by signal {os.WTERMSIG(status)}"
+            ),
+        }
+    return {
+        "passed": False,
+        "error_code": -5,
+        "error_message": (
+            f"TestRunnerError: solution process exited {os.WEXITSTATUS(status)} without a verdict"
+        ),
+    }
+
+
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "problem.json")) as handle:
@@ -364,39 +483,34 @@ def main():
     with open(os.path.join(here, "solution.py")) as handle:
         solution = handle.read()
 
-    test_cases = decode_test_cases(problem["public_test_cases"]) + decode_test_cases(
-        problem["private_test_cases"]
-    )
-    inputs = [case["input"] for case in test_cases]
-    outputs = [case["output"] for case in test_cases]
     fn_name = problem.get("fn_name")
-    timeout = int(problem.get("timeout", 6))
-
-    signal.signal(signal.SIGALRM, timeout_handler)
-    reliability_guard()
+    timeout = float(problem.get("timeout", 6))
 
     started = time.time()
     try:
-        if fn_name:
-            passed, detail = grade_call_based(solution, inputs, outputs, fn_name, timeout)
-        else:
-            passed, detail = grade_stdio(solution, inputs, outputs, timeout)
-    except CompilationError as exc:
-        passed, detail = False, {"error_code": -4, "error_message": f"Compilation error: {exc}"}
-    except TimeoutException:
-        passed, detail = False, {"error_code": -3, "error_message": "Time Limit Exceeded"}
+        test_cases = decode_test_cases(problem["public_test_cases"]) + decode_test_cases(
+            problem["private_test_cases"]
+        )
+        inputs = [case["input"] for case in test_cases]
+        outputs = [case["output"] for case in test_cases]
     except Exception as exc:
-        passed, detail = False, {"error_code": -5, "error_message": f"TestRunnerError: {exc!r}"}
+        inputs = []
+        verdict: dict[str, Any] = {
+            "passed": False,
+            "error_code": -5,
+            "error_message": f"TestRunnerError: {exc!r}"[:MAX_ERROR_MESSAGE_LEN],
+        }
+    else:
+        # The reference harness gives the whole run this long before killing it.
+        budget = (timeout + 1) * len(inputs) + 5
+        verdict = grade_in_child(solution, inputs, outputs, fn_name, timeout, budget)
 
-    verdict = {
-        "passed": passed,
-        "num_tests": len(inputs),
-        "elapsed": round(time.time() - started, 3),
-    }
-    verdict.update(detail)
-    # The harness reads the last line of stdout; solutions print freely above it.
+    verdict["num_tests"] = len(inputs)
+    verdict["elapsed"] = round(time.time() - started, 3)
+    # The harness reads the last line of stdout. The child may have written
+    # there without a trailing newline, so start a fresh line first.
     sys.stdout = sys.__stdout__
-    print(json.dumps(verdict))
+    print("\n" + json.dumps(verdict), flush=True)
 
 
 if __name__ == "__main__":
