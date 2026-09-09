@@ -37,6 +37,7 @@ from olmo_eval.evals.tasks.common.image_qa_base import (
     apply_caption,
     lazy_hf_image,
     load_instance_image,
+    render_question,
     resolve_image_mode,
 )
 
@@ -187,7 +188,8 @@ class MmmuProTask(ImageQATask):
                 "exists only inside the screenshot. Use the standard settings instead."
             )
 
-        question = apply_caption(instance.question, caption) if caption else instance.question
+        question = render_question(self.config, instance)
+        question = apply_caption(question, caption) if caption else question
         if not send_image:
             images = None
         elif "images" in meta:  # standard: attach all interleaved images, in token order

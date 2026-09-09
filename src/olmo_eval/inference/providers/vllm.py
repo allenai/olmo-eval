@@ -198,12 +198,18 @@ class VLLMProvider(InferenceProvider):
         self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
 
         # Raise the per-prompt image cap (vLLM defaults to 1). setdefault so an explicit
-        # limit_mm_per_prompt in engine_kwargs still wins.
-        self._max_images = int(max_images)
+        # limit_mm_per_prompt in engine_kwargs still wins -- and then read the effective
+        # value back, because the guard in _format_prompt has to track the limit the engine
+        # will actually enforce. Leaving it at max_images would make the guard permissive
+        # in exactly the case it exists for: an explicit limit *below* max_images, where
+        # vLLM fails the entire chunk rather than the one oversized request.
         self._strip_reasoning = bool(strip_reasoning)
         self._chat_template_kwargs = dict(chat_template_kwargs or {})
-        if self._max_images > 0:
-            engine_kwargs.setdefault("limit_mm_per_prompt", {"image": self._max_images})
+        if int(max_images) > 0:
+            engine_kwargs.setdefault("limit_mm_per_prompt", {"image": int(max_images)})
+        self._max_images = int(
+            (engine_kwargs.get("limit_mm_per_prompt") or {}).get("image", max_images)
+        )
 
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
 

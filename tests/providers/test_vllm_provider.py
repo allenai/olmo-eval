@@ -459,3 +459,23 @@ def test_chat_template_kwargs_are_forwarded(
     provider.generate([request], SamplingParams(max_tokens=8))
 
     assert tokenizer.template_calls[0]["enable_thinking"] is False
+
+
+def test_max_images_guard_tracks_the_effective_engine_limit(monkeypatch) -> None:
+    # limit_mm_per_prompt is applied with setdefault, so an explicit engine limit wins. If
+    # the guard kept reading max_images it would be permissive in exactly the case it
+    # exists for -- an engine limit *below* max_images, where vLLM fails the whole chunk.
+    captured: dict[str, object] = {}
+
+    class RecordingLLM:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.LLM = RecordingLLM
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+
+    provider = VLLMProvider("test-model", max_images=8, limit_mm_per_prompt={"image": 2})
+
+    assert captured["limit_mm_per_prompt"] == {"image": 2}
+    assert provider._max_images == 2
