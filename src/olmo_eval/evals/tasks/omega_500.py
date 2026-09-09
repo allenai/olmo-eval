@@ -26,7 +26,11 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.extract import ExtractedAnswer, extract_answer_with_format
+from olmo_eval.evals.extract import (
+    ExtractedAnswer,
+    extract_answer_with_format,
+    extract_think_answer,
+)
 from olmo_eval.evals.tasks.common import Task, register
 
 _BOXED_SUFFIX = "\n\nPresent the answer in LaTex format: \\boxed{Your answer}"
@@ -73,7 +77,13 @@ _DELIMITERS_TO_STRIP = (
 
 
 def _extract(continuation: str) -> ExtractedAnswer:
-    """Normalize a continuation and extract the final answer."""
+    """Normalize a continuation and extract the final answer.
+
+    Reasoning enclosed in ``<think>`` tags is dropped first, as the reference
+    harness does for reasoning models, so boxed or prefixed answers mentioned
+    while thinking cannot be mistaken for the final answer.
+    """
+    continuation = extract_think_answer(continuation) or ""
     output = re.sub(r"(\d),(\d)", r"\1\2", continuation)
     res = re.sub(r"\.\s*$", "", output).strip()
     for left, right in _DELIMITERS_TO_STRIP:

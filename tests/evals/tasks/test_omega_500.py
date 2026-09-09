@@ -103,6 +103,17 @@ class TestOmegaScorers(unittest.TestCase):
     def test_empty_response(self) -> None:
         self.assertEqual(self._scores("42", ""), (0.0, 0.0))
 
+    def test_strips_think_block(self) -> None:
+        text = (
+            "<think>Could be 41, or \\boxed{41}.</think>\n\n"
+            "Therefore, the final answer is \\boxed{42}."
+        )
+        self.assertEqual(self._scores("42", text), (1.0, 1.0))
+        self.assertEqual(
+            self._scores("42", "<think>Therefore, the final answer is \\boxed{42}.</think>"),
+            (0.0, 0.0),
+        )
+
     def test_format_correct_recorded_in_metadata(self) -> None:
         output = LMOutput(text="Therefore, the final answer is \\boxed{42}.")
         _STRICT.score(_make_instance("42"), output)
