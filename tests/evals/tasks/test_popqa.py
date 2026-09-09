@@ -132,6 +132,14 @@ class TestPopQAContainsScorer(unittest.TestCase):
     def test_empty_response(self) -> None:
         self.assertEqual(self._score(""), 0.0)
 
+    def test_strips_think_block(self) -> None:
+        think_wrong = "<think>USA is a candidate</think>\nFrance"
+        self.assertEqual(self._score(think_wrong), 0.0)
+        self.assertEqual(self.first_line.score(self.instance, LMOutput(text=think_wrong)), 0.0)
+
+        think_right = "<think>maybe Canada</think>\nThe USA, of course.\nSome elaboration"
+        self.assertEqual(self.first_line.score(self.instance, LMOutput(text=think_right)), 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

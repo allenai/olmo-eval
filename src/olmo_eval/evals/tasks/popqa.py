@@ -25,6 +25,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
+from olmo_eval.evals.extract import extract_think_answer
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 from olmo_eval.evals.tasks.constants.popqa import POPQA_FIXED_FEWSHOT
 
@@ -39,19 +40,21 @@ class PopQAContainsScorer(Scorer):
 
     A response is correct if any accepted alias appears in it verbatim,
     lowercased, or capitalized — the matching rule used by the reference
-    implementation. With ``first_line`` set, only text up to the first
-    newline is searched: models that ramble past their answer invent
-    follow-up Q/A pairs full of plausible entity names, and whole-output
-    containment credits those accidental hits.
+    implementation. Reasoning enclosed in ``<think>`` tags is dropped first,
+    as the reference harness does for reasoning models. With ``first_line``
+    set, only text up to the first newline of the remaining answer is
+    searched: models that ramble past their answer invent follow-up Q/A
+    pairs full of plausible entity names, and whole-output containment
+    credits those accidental hits.
     """
 
     name: str = "popqa_contains"
     first_line: bool = False
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        response = output.text or ""
+        response = extract_think_answer(output.text or "") or ""
         if self.first_line:
-            response = response.split("\n")[0]
+            response = response.lstrip().split("\n")[0]
         aliases = instance.metadata.get("aliases") or []
         if not aliases and instance.gold_answer:
             aliases = [instance.gold_answer]
