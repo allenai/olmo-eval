@@ -184,14 +184,17 @@ def parse_deepsearchqa_judge_response(
     raw: str, num_gold: int, num_pred: int
 ) -> tuple[set[int], set[int]] | None:
     """Parse the judge's matched-index JSON, or None if it is unparseable."""
-    match = _JSON_OBJECT.search(raw)
-    if match is None:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
+    decoder = json.JSONDecoder()
+    data: Any | None = None
+    for match in re.finditer(r"\{", raw):
+        try:
+            candidate, _end = decoder.raw_decode(raw[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict):
+            data = candidate
+            break
+    if data is None:
         return None
 
     gold_raw, pred_raw = data.get("matched_gold_indices"), data.get("matched_submitted_indices")
