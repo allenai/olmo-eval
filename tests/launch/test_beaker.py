@@ -989,3 +989,27 @@ class TestLaunchConfigLoaderExperimentNames:
         config = loader.load()
 
         assert config.name == "mimo-7b-base-olmobase_code-and-2-more"
+
+
+def test_isolated_vllm_venv_gets_ninja_for_flashinfer_jit():
+    """flashinfer compiles kernels on first use by shelling out to ninja, so a venv without it
+    fails at request time, not startup: the server comes up, the first request needing an
+    uncached kernel dies with `run_ninja ... exit status 127`, and the engine core dies with it.
+    A stock Qwen/Qwen3.5-9B arc_challenge run logged 4,015 such failures and still reported
+    Success with a score of 0.0."""
+    from olmo_eval.launch import BeakerLauncher
+
+    launcher = BeakerLauncher()
+    # Both ways an isolated venv gets built: the bundled vLLM, and a custom fork. The fork path
+    # needs ninja just as much, which is why the step sits outside the has_vllm branch.
+    for kwargs in ({"extras": ["vllm"], "provider_packages": None},
+                   {"extras": ["clients"], "provider_packages": ["https://github.com/u/vllm@x"]}):
+        cmd = launcher._build_install_cmd(env_exports=None, vllm_isolated_venv=True, **kwargs)
+        assert "uv venv /opt/vllm-venv" in cmd
+        assert "uv pip install --python /opt/vllm-venv/bin/python" in cmd
+        assert " ninja" in cmd
+
+    no_venv = launcher._build_install_cmd(
+        extras=["vllm"], env_exports=None, provider_packages=None, vllm_isolated_venv=False
+    )
+    assert "ninja" not in no_venv

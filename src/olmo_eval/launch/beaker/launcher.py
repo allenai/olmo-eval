@@ -887,6 +887,16 @@ class BeakerLauncher:
                     f'${{UV_CACHE_DIR:+--cache-dir "$UV_CACHE_DIR"}} '
                     f"-c {vllm_lock_constraints} -e '.[vllm]'"
                 )
+            # flashinfer JIT-compiles kernels on first use and shells out to ninja to do it, so
+            # a venv without ninja fails at request time rather than at startup: the server comes
+            # up, the first request needing an uncached kernel dies with `run_ninja ... exit
+            # status 127`, and the engine core goes with it. Hit by any gated-delta-net model
+            # (Qwen3.5) on its first prefill. Outside the has_vllm branch on purpose -- a venv
+            # built from a custom vLLM fork needs it just the same.
+            steps.append(
+                f"uv pip install --python {vllm_venv}/bin/python "
+                f'${{UV_CACHE_DIR:+--cache-dir "$UV_CACHE_DIR"}} ninja'
+            )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
 

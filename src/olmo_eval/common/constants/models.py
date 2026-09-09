@@ -82,14 +82,13 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         # native tool dialect — NOT oi_contract. Pairs with the official olmo3 vLLM tool parser
         # (auto-inferred from the model name) for the openai_agents scaffold.
         # Qwen3.5 checkpoints (stock or SFT-then-rewrapped), path per-run via $OLMO3_EVAL_MODEL.
-        # Both settings exist for the same reason the olmo3-7b-anneal preset above does, and this
-        # family needs them harder. The loglikelihood suites request prompt_logprobs, whose float32
-        # logits tensor scales with the vocabulary, and Qwen3.5 carries 248,320 tokens against
-        # OLMo's ~100k. Its max_position_embeddings is 262144, so at vLLM's 0.9 default the KV
-        # cache is sized for a 262k context and there is nothing left for those logits: the server
-        # starts, 500s on the first prompt_logprobs request and dies, and olmo-eval records the
-        # remaining requests as warnings and reports a score of 0.0 rather than a failure. 8192 is
-        # far above what the few-shot MC and bpb suites prompt with.
+        # max_model_len is capped because the published config advertises 262144, far past what
+        # any suite here prompts with, and gpu_memory_utilization follows the olmo3-7b-anneal
+        # preset above so the prompt_logprobs logits tensor has room -- this family carries a
+        # 248,320-token vocabulary against OLMo's ~100k. Neither knob was what broke the first
+        # runs: those died because the isolated vLLM venv had no ninja for flashinfer to JIT the
+        # gated delta-net prefill kernel with (see the launcher), which surfaced as a 0.0 score
+        # rather than a failure. Both settings are still right for the family; they are not the fix.
         "qwen35-9b": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             model=os.environ.get("OLMO3_EVAL_MODEL", ""),
