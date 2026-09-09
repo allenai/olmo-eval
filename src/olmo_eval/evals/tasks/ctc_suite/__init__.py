@@ -56,6 +56,7 @@ __all__ = [
     "ROSTER",
     "CTCClass",
     "CTCScorer",
+    "CTCParseScorer",
     "CTCMeanMetric",
     "CTCSuiteTask",
 ]
@@ -301,8 +302,14 @@ ROSTER: dict[str, RosterRow] = {
         subset="obliq_twitter",
         spec="retrieval",
         rungs=_LADDER_FULL,
-        eval_size={**{r: 126 for r in _LADDER_FULL[:7]}, "r256k": 125, "r512k": 125, "r1m": 125},
-        note="126 examples at every rung -- flag the size inline",
+        eval_size={
+            "r2k": 123,
+            **{r: 126 for r in _LADDER_FULL[1:7]},
+            "r256k": 125,
+            "r512k": 125,
+            "r1m": 125,
+        },
+        note="123-126 examples per rung -- flag the size inline",
     ),
     "ctc_niah": RosterRow(
         ctc_class=CTCClass.LOW,
@@ -355,8 +362,19 @@ def _resolve_spec(spec_name: str):
 def _data_source(row: RosterRow, rung: str) -> DataSource:
     """The canonical HF source. The split IS the rung label, which is also how
     :meth:`CTCSuiteTask._load_instances` knows which local file to substitute when
-    ``CTC_SUITE_DATA_ROOT`` is set (checked at load time, not import time)."""
-    return DataSource(path=HF_DATASET, subset=row.subset, split=rung)
+    ``CTC_SUITE_DATA_ROOT`` is set (checked at load time, not import time).
+
+    ``data_files`` pins the ONE parquet this rung needs. Without it the loader resolves the whole
+    config and builds every split before handing back the requested one, so ``-t ctc_nq:r2k``
+    downloads the entire 2k-to-1M nq ladder (~900MB) to read 500 short rows -- slow on every rung,
+    and a download failure anywhere in the ladder fails a rung that did not need those files.
+    """
+    return DataSource(
+        path=HF_DATASET,
+        subset=row.subset,
+        split=rung,
+        data_files={rung: f"data/{row.subset}/{rung}.parquet"},
+    )
 
 
 @dataclass(frozen=True)
@@ -394,6 +412,27 @@ class CTCScorer(Scorer):
         output.metadata["ctc_parse_ok"] = parsed is not None
         output.metadata["ctc_all_metrics"] = {k: float(v) for k, v in scored.items()}
         return float(value)
+
+
+@dataclass(frozen=True)
+class CTCParseScorer(Scorer):
+    """1.0 when the task's own parser got a usable answer out of the generation, else 0.0.
+
+    Exists because a parse-rate collapse is a decoding/stopping regression wearing an accuracy
+    drop's clothes, and the shipped output files previously had no way to tell them apart:
+    ``CTCScorer`` recorded ``ctc_parse_ok`` on ``output.metadata``, which the predictions writer
+    does not persist. Declaring it as a scorer puts the number in ``metrics.json`` and in every
+    prediction's ``instance_metrics`` instead, which is where anyone reading a low score looks.
+    """
+
+    name: str = "ctc_parse_ok"
+    spec_name: str = ""
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        spec = _resolve_spec(self.spec_name)
+        example = instance.metadata["example"]
+        cleaned = _apply_stop(output.text or "", STOP_PRESETS[spec.stop])
+        return float(spec.parse(cleaned, len(example["documents"])) is not None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -482,6 +521,7 @@ class CTCSuiteTask(Task):
 def _make_row_task(task_name: str, row: RosterRow) -> None:
     spec = _resolve_spec(row.spec)
     metric = CTCMeanMetric(name=spec.primary_metric, scorer=CTCScorer(spec_name=row.spec))
+    parse_rate = CTCMeanMetric(name="parse_rate", scorer=CTCParseScorer(spec_name=row.spec))
 
     cls = type(
         f"CTC_{row.subset}",
@@ -492,7 +532,7 @@ def _make_row_task(task_name: str, row: RosterRow) -> None:
             "data_source": _data_source(
                 row, DEFAULT_RUNG if DEFAULT_RUNG in row.rungs else row.rungs[-1]
             ),
-            "metrics": (metric,),
+            "metrics": (metric, parse_rate),
             "primary_metric": metric,
         },
     )

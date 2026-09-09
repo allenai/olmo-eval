@@ -170,3 +170,26 @@ def test_gold_index_base_is_the_graders(tmp_path, monkeypatch) -> None:
     # answering with the raw stored index (0-based "4") instead of the prompt's 1-based "5"
     # must NOT get credit
     assert scorer.score(inst, LMOutput(text="[4]")) == 0.0
+
+
+def test_every_row_reports_parse_rate_next_to_its_primary_metric():
+    """A parse-rate collapse is a decoding regression wearing an accuracy drop's clothes, and the
+    suite README tells readers to check it. It previously lived only on ``output.metadata``, which
+    the predictions writer drops, so the advice was unfollowable from the shipped files."""
+    from olmo_eval.evals.tasks.common import get_task
+
+    for name in ROSTER:
+        metrics = get_task(name).config.metrics
+        assert "parse_rate" in {m.name for m in metrics}, f"{name} lost its parse-rate metric"
+        assert get_task(name).config.primary_metric.name != "parse_rate"
+
+
+def test_each_rung_pins_the_single_parquet_it_needs():
+    """Without ``data_files`` the loader builds every split in the config first, so one rung
+    downloads the whole 2k-to-1M ladder (~900MB for nq) to read a few hundred short rows."""
+    from olmo_eval.evals.tasks.common import get_task
+
+    for name, row in ROSTER.items():
+        for rung in row.rungs:
+            source = get_task(f"{name}:{rung}").config.data_source
+            assert source.data_files == {rung: f"data/{row.subset}/{rung}.parquet"}

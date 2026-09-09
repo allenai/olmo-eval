@@ -74,6 +74,10 @@ cap is documented on its RosterRow.
 
 ## Numbers that must travel with results
 
+- Small base models often cannot answer in the suite's answer space at all, which floors every
+  row below chance rather than ranking them. Measured on the OLMo hybrid ladder at r2k: the share
+  of generations emitting any `[id]` is 3.5-13.5% at 450M and 5-61% at 810M, reaching ~100% at
+  1.4B. Read `parse_rate` before reading a score from a sub-1B checkpoint.
 - Rungs ≥256k hold **125 examples** (seeded subsample; SE ≈ ±0.041 at f1≈0.7). `ctc_scifact` is
   300 and `ctc_obliq` 126 at every rung. Everything else is 500. Quote sizes inline.
 - **rerank's metric is ce_pos_recall**: the fraction of documents with cross-encoder score > 0
@@ -89,8 +93,17 @@ cap is documented on its RosterRow.
   measure. Trends *within* a task are unaffected, since the scaling is consistent down the row;
   **a cross-task comparison "at the same rung" is not comparing the same context length.** Quote
   measured tokens on any absolute-length claim.
-- `ctc_parse_ok` is stored per output: a parse-rate collapse is a decoding/stopping regression
-  wearing an accuracy drop's clothes. Check it before believing a low score.
+- **Every row reports `parse_rate` alongside its primary metric.** A parse-rate collapse is a
+  decoding/stopping regression wearing an accuracy drop's clothes, so check it before believing a
+  low score. It is in `metrics.json` and in each prediction's `instance_metrics`. (It used to be
+  written only to `output.metadata` as `ctc_parse_ok`, which the predictions writer drops -- the
+  advice was unfollowable from the shipped files.)
+- **A near-zero score is a parser hypothesis until you have read the raw generations.** Measured
+  2026-09-09 on Qwen3.5-4B-Base at r2k: `ctc_textgroups` scores 0.000 with `parse_rate` 0.00
+  because the model never emits a pair list -- it opens with a plan and then repeats
+  "Combination N: ... Invalid" verbatim until the budget ends it. Raising the budget 200 -> 1024
+  was tried and reverted; 8/10 still hit the larger cap. That row is repetition-gated, not
+  truncation-gated.
 - Contexts ≥256k exceed most models' native windows; the serving side (YaRN etc.) is the caller's
   responsibility and belongs next to any reported number.
 
@@ -98,7 +111,7 @@ cap is documented on its RosterRow.
 
 - Prompt templates, parsers, metrics, gold-index conventions and stop rules are **vendored
   byte-faithful** under `_vendor/` from the `ctc` package (AI2 OLMo-core branch `prasann/ctc`,
-  re-vendored 2026-09-08 at `b7ee85a93`; every vendored file is byte-identical to it). Only the
+  re-vendored 2026-09-09 at `c2b345fba`; every vendored file is byte-identical to it). Only the
   subtrees this harness reads are vendored -- `format/`, `tasks/`, `eval/stopping.py` and the pure
   `data/ladders.py` table; the generators, backends and runner are not,
   where they are golden-fixture-tested against the implementation that produced the suite's
