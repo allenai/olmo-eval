@@ -21,8 +21,10 @@ from olmo_eval.evals.tasks.livecodebench import (
     RELEASE_V3_FILES,
     RELEASE_V4_V6_FILES,
     SYSTEM_PROMPT,
+    GradingFailedError,
     LiveCodeBenchScorer,
 )
+from olmo_eval.harness.sandbox.errors import SandboxInfrastructureError
 
 STDIN_DOC = {
     "question_id": "abc123_a",
@@ -191,7 +193,9 @@ def test_variants_are_registered_for_both_releases() -> None:
 class _StubStagingEnv:
     """Execution environment that records staged files and returns a verdict."""
 
-    def __init__(self, output: str = '{"passed": true}', success: bool = True) -> None:
+    def __init__(
+        self, output: str = '{"passed": true, "num_tests": 3}', success: bool = True
+    ) -> None:
         self.output = output
         self.success = success
         self.staged: dict[str, str] = {}
@@ -311,7 +315,8 @@ class TestLiveCodeBenchScorer:
     async def test_failing_verdict_scores_zero(self, stub_rows: None) -> None:
         scorer = LiveCodeBenchScorer()
         env = _StubStagingEnv(
-            output='{"passed": false, "error_code": -2, "error_message": "Wrong Answer"}'
+            output='{"passed": false, "num_tests": 3, "error_code": -2, '
+            '"error_message": "Wrong Answer"}'
         )
         output = LMOutput(text="unused")
         output.extracted_answer = "print(2)"
@@ -321,14 +326,62 @@ class TestLiveCodeBenchScorer:
         assert score == 0.0
         assert output.metadata["execution_result"]["error"] == "Wrong Answer"
 
-    async def test_unparseable_output_scores_zero(self, stub_rows: None) -> None:
+    async def test_missing_verdict_is_a_grading_failure(self, stub_rows: None) -> None:
+        # A grader that never reported (no python3, a killed container) must
+        # not turn into a plausible score of zero.
         scorer = LiveCodeBenchScorer()
-        env = _StubStagingEnv(output="container died", success=False)
+        env = _StubStagingEnv(output="bash: python3: command not found", success=False)
         output = LMOutput(text="unused")
         output.extracted_answer = "print(1)"
 
-        assert await scorer.ascore(_instance(), output, env) == 0.0
+        with pytest.raises(GradingFailedError, match="No grader verdict"):
+            await scorer.ascore(_instance(), output, env)
         assert output.metadata["execution_result"]["success"] is False
+
+    async def test_grading_failures_are_recorded_against_the_task(self) -> None:
+        # The runner only reports lost scores at the task level for
+        # infrastructure failures; anything else becomes a quiet zero.
+        assert issubclass(GradingFailedError, SandboxInfrastructureError)
+
+    async def test_verdict_with_no_tests_is_a_grading_failure(self, stub_rows: None) -> None:
+        # Passing every test in an empty set is what an undecodable payload
+        # looks like; it must not count as a pass.
+        scorer = LiveCodeBenchScorer()
+        env = _StubStagingEnv(output='{"passed": true, "num_tests": 0}')
+        output = LMOutput(text="unused")
+        output.extracted_answer = "print(1)"
+
+        with pytest.raises(GradingFailedError, match="No test cases were graded"):
+            await scorer.ascore(_instance(), output, env)
+
+    async def test_grader_error_is_a_grading_failure(self, stub_rows: None) -> None:
+        scorer = LiveCodeBenchScorer()
+        env = _StubStagingEnv(
+            output='{"passed": false, "num_tests": 3, "error_code": -5, '
+            '"error_message": "TestRunnerError: KeyError(\'input\')"}'
+        )
+        output = LMOutput(text="unused")
+        output.extracted_answer = "print(1)"
+
+        with pytest.raises(GradingFailedError, match="KeyError"):
+            await scorer.ascore(_instance(), output, env)
+
+    async def test_grader_runs_under_a_time_limit_that_leaves_cleanup_to_the_shell(
+        self, stub_rows: None
+    ) -> None:
+        scorer = LiveCodeBenchScorer(overall_timeout=120.0)
+        env = _StubStagingEnv()
+        output = LMOutput(text="unused")
+        output.extracted_answer = "print(1)"
+
+        await scorer.ascore(_instance(), output, env)
+
+        command = env.commands[0]
+        assert "timeout 120 python3 grade.py" in command
+        # Directories left by runs the sandbox had to kill are swept, but
+        # only ones too old to belong to a run still in flight.
+        assert command.index("find /tmp") < command.index("python3 grade.py")
+        assert "-name 'lcb-*' -mmin +4 " in command
 
     async def test_missing_answer_scores_zero_without_executing(self) -> None:
         scorer = LiveCodeBenchScorer()
@@ -354,7 +407,7 @@ class TestLiveCodeBenchScorer:
         output = LMOutput(text="unused")
         output.extracted_answer = "print(1)"
 
-        with pytest.raises(RuntimeError, match="row order changed"):
+        with pytest.raises(GradingFailedError, match="row order changed"):
             await scorer.ascore(instance, output, _StubStagingEnv())
 
 

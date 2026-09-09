@@ -11,9 +11,11 @@ Dataset: livecodebench/code_generation_lite
 
 from __future__ import annotations
 
+import asyncio
 import json
-import logging
+import math
 import shlex
+import threading
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
@@ -34,11 +36,10 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.harness.sandbox.errors import SandboxInfrastructureError
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ExecutionEnvironment
-
-logger = logging.getLogger(__name__)
 
 LIVECODEBENCH_REPO = "livecodebench/code_generation_lite"
 
@@ -78,20 +79,54 @@ STDIN_INSTRUCTION = (
 )
 
 
-@lru_cache(maxsize=4)
-def _test_case_rows(repo: str, files: tuple[str, ...]) -> Any:
-    """Open a release's data files for random access by row.
+_TEST_CASE_ROWS_LOCK = threading.Lock()
 
-    Test payloads run to gigabytes per release, so they are read here when a
-    solution is graded rather than carried on every instance, which would put
-    them in the request records written for the run.
-    """
+
+@lru_cache(maxsize=4)
+def _open_test_case_rows(repo: str, files: tuple[str, ...]) -> Any:
     from datasets import load_dataset
 
     return load_dataset(
         "json",
         data_files={"train": [f"hf://datasets/{repo}/{name}" for name in files]},
         split="train",
+    )
+
+
+def _test_case_rows(repo: str, files: tuple[str, ...]) -> Any:
+    """Open a release's data files for random access by row.
+
+    Test payloads run to gigabytes per release, so they are read here when a
+    solution is graded rather than carried on every instance, which would put
+    them in the request records written for the run. Scorers read from worker
+    threads, so the one-time load is serialized rather than repeated by each
+    thread that finds the cache empty.
+    """
+    with _TEST_CASE_ROWS_LOCK:
+        return _open_test_case_rows(repo, files)
+
+
+def _stage_problem(metadata: dict[str, Any], timeout: float) -> str:
+    """Serialize a problem's test cases for the grader.
+
+    Reading the row and encoding it can take most of a second for the largest
+    problems, so callers run this off the event loop.
+    """
+    row = _test_case_rows(metadata["test_repo"], tuple(metadata["test_files"]))[metadata["row"]]
+    if row["question_id"] != metadata["id"]:
+        # Grading against another problem's tests would score every
+        # solution wrong while still looking like a plausible result.
+        raise GradingFailedError(
+            f"Test cases for problem {metadata['id']} are not at row "
+            f"{metadata['row']}; the dataset's row order changed."
+        )
+    return json.dumps(
+        {
+            "public_test_cases": row["public_test_cases"],
+            "private_test_cases": row["private_test_cases"],
+            "fn_name": metadata.get("fn_name"),
+            "timeout": timeout,
+        }
     )
 
 
@@ -154,6 +189,18 @@ class LiveCodeBenchFormatter(ChatFormatter):
         )
 
 
+#: The grader reports this code when it, rather than the solution, failed.
+GRADER_ERROR_CODE = -5
+
+
+class GradingFailedError(SandboxInfrastructureError):
+    """The grader produced no usable verdict, so the solution was never scored.
+
+    Raised as an infrastructure failure so that the task's result records the
+    lost scores instead of publishing them as zeros.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class LiveCodeBenchScorer(ExecutionScorer):
     """Run one solution against a problem's contest test cases in a sandbox.
@@ -161,13 +208,20 @@ class LiveCodeBenchScorer(ExecutionScorer):
     The test cases are staged as a file rather than passed in the command,
     because a single problem's cases can run to tens of megabytes and command
     text is bounded by the operating system's argument size limit.
+
+    A solution that is wrong, crashes, or runs out of time scores zero. A
+    grading run that produced no verdict, found no test cases, or failed
+    inside the grader raises instead, so a broken image or payload is recorded
+    as an infrastructure failure on the task rather than as a plausible score.
     """
 
     name: str = "code_exec"
     #: Per test case, matching the reference harness.
     timeout: float = 6.0
-    #: Ceiling for one solution across all of its test cases. Grading stops at
-    #: the first failure, so only a solution that passes runs the full set.
+    #: Ceiling for one grading run. The grader itself stops a solution at the
+    #: reference harness's budget of ``(timeout + 1) * num_tests + 5`` seconds,
+    #: so this only needs to exceed that for the largest problem in a release:
+    #: 103 test cases, or 726 seconds, across the shipped releases.
     overall_timeout: float = 900.0
     max_output_len: int = 4000
 
@@ -188,48 +242,64 @@ class LiveCodeBenchScorer(ExecutionScorer):
             )
 
         metadata = instance.metadata
-        row = _test_case_rows(metadata["test_repo"], tuple(metadata["test_files"]))[metadata["row"]]
-        if row["question_id"] != metadata["id"]:
-            # Grading against another problem's tests would score every
-            # solution wrong while still looking like a plausible result.
-            raise RuntimeError(
-                f"Test cases for problem {metadata['id']} are not at row "
-                f"{metadata['row']}; the dataset's row order changed."
-            )
-        problem = {
-            "public_test_cases": row["public_test_cases"],
-            "private_test_cases": row["private_test_cases"],
-            "fn_name": metadata.get("fn_name"),
-            "timeout": self.timeout,
-        }
+        problem = await asyncio.to_thread(_stage_problem, metadata, self.timeout)
 
         work_dir = f"/tmp/lcb-{uuid.uuid4().hex}"
-        quoted = shlex.quote(work_dir)
         result = await execution_env.execute_with_files(
-            f"cd {quoted} && python3 grade.py; status=$?; rm -rf {quoted}; exit $status",
+            self._command(work_dir),
             {
                 f"{work_dir}/grade.py": get_script("livecodebench_grader"),
-                f"{work_dir}/problem.json": json.dumps(problem),
+                f"{work_dir}/problem.json": problem,
                 f"{work_dir}/solution.py": output.extracted_answer,
             },
-            timeout=self.overall_timeout,
+            # Leave the command time to remove the staged files once the
+            # grader has been stopped.
+            timeout=self.overall_timeout + 60.0,
         )
 
         verdict = _parse_verdict(result.output)
-        passed = bool(verdict and verdict.get("passed"))
         output.metadata["execution_result"] = {
-            "success": passed,
+            "success": bool(verdict and verdict.get("passed")),
             "exit_code": result.exit_code,
             "error": result.error or (verdict or {}).get("error_message", ""),
             "output": result.output[: self.max_output_len] if result.output else "",
         }
+
+        problem_id = metadata.get("id", "?")
         if verdict is None:
-            logger.warning(
-                "No grader verdict for instance %s: %s",
-                metadata.get("id", "?"),
-                (result.error or result.output or "")[:200],
+            raise GradingFailedError(
+                f"No grader verdict for problem {problem_id} "
+                f"(exit code {result.exit_code}): "
+                f"{(result.error or result.output or '')[:500]}"
             )
-        return 1.0 if passed else 0.0
+        if not verdict.get("num_tests"):
+            raise GradingFailedError(
+                f"No test cases were graded for problem {problem_id}: "
+                f"{verdict.get('error_message', 'the grader decoded an empty test set')}"
+            )
+        if verdict.get("error_code") == GRADER_ERROR_CODE:
+            raise GradingFailedError(
+                f"The grader failed on problem {problem_id}: {verdict.get('error_message', '')}"
+            )
+        return 1.0 if verdict.get("passed") else 0.0
+
+    def _command(self, work_dir: str) -> str:
+        """Shell command that grades the staged problem and removes it after.
+
+        The grader runs under ``timeout`` so that the shell survives to remove
+        the staged files when the grader is stopped. Directories left by runs
+        the sandbox itself had to kill are swept first; only ones older than
+        this scorer's ceiling can no longer belong to a run in flight.
+        """
+        quoted = shlex.quote(work_dir)
+        ceiling = math.ceil(self.overall_timeout)
+        stale_minutes = math.ceil((self.overall_timeout + 60.0) / 60.0) + 1
+        return (
+            f"find /tmp -maxdepth 1 -name 'lcb-*' -mmin +{stale_minutes} "
+            "-exec rm -rf {} + 2>/dev/null; "
+            f"cd {quoted} && timeout {ceiling} python3 grade.py; "
+            f"status=$?; rm -rf {quoted}; exit $status"
+        )
 
 
 PASS_AT_KS = (1, 5, 10)
