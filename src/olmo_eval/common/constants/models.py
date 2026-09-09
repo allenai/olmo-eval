@@ -81,6 +81,21 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         # ALTERNATE baseline anchor, evaluated on the STOCK pythonic harness (-H dr_tulu) — its
         # native tool dialect — NOT oi_contract. Pairs with the official olmo3 vLLM tool parser
         # (auto-inferred from the model name) for the openai_agents scaffold.
+        # Qwen3.5 checkpoints (stock or SFT-then-rewrapped), path per-run via $OLMO3_EVAL_MODEL.
+        # Both settings exist for the same reason the olmo3-7b-anneal preset above does, and this
+        # family needs them harder. The loglikelihood suites request prompt_logprobs, whose float32
+        # logits tensor scales with the vocabulary, and Qwen3.5 carries 248,320 tokens against
+        # OLMo's ~100k. Its max_position_embeddings is 262144, so at vLLM's 0.9 default the KV
+        # cache is sized for a 262k context and there is nothing left for those logits: the server
+        # starts, 500s on the first prompt_logprobs request and dies, and olmo-eval records the
+        # remaining requests as warnings and reports a score of 0.0 rather than a failure. 8192 is
+        # far above what the few-shot MC and bpb suites prompt with.
+        "qwen35-9b": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model=os.environ.get("OLMO3_EVAL_MODEL", ""),
+            max_model_len=int(os.environ.get("OLMO3_EVAL_MAX_LEN", "8192")),
+            kwargs={"gpu_memory_utilization": 0.7},
+        ),
         "olmo-3-7b-instruct-sft": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             model="allenai/Olmo-3-7B-Instruct-SFT",
