@@ -1,6 +1,7 @@
 """Shared utilities for the CLI."""
 
 import dataclasses
+import functools
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -110,27 +111,23 @@ HARNESS_CONFIG_FIELDS = frozenset(
     }
 )
 
-TASK_CONFIG_FIELDS = frozenset(
-    {
-        "name",
-        "data_source",
-        "fewshot_source",
-        "formatter",
-        "metrics",
-        "num_fewshot",
-        "fewshot_seed",
-        "limit",
-        "seed",
-        "split",
-        "primary_metric",
-        "sampling_params",
-        "dependencies",
-        "sandbox_allocation_weight",
-        "prompt_templates",
-        "system_prompt_style",
-        "priority",  # Special: extracted for job priority, not a real TaskConfig field
-    }
-)
+#: Not a real TaskConfig field -- extracted upstream for job priority.
+_EXTRA_TASK_OVERRIDE_KEYS = frozenset({"priority"})
+
+
+@functools.cache
+def task_config_fields() -> frozenset[str]:
+    """Override keys accepted after ``-t``, derived from ``TaskConfig`` itself.
+
+    Enumerating the dataclass rather than hardcoding a list keeps this from drifting as
+    fields are added: a hand-maintained copy silently rejected valid overrides with
+    "not a TaskConfig field", which reads like a typo in the flag rather than a stale
+    allowlist. ``TaskConfig`` is imported lazily to avoid a circular import at module
+    load (it is otherwise only needed under ``TYPE_CHECKING`` here).
+    """
+    from olmo_eval.evals.tasks.common.base import TaskConfig
+
+    return frozenset({f.name for f in dataclasses.fields(TaskConfig)} | _EXTRA_TASK_OVERRIDE_KEYS)
 
 
 def _get_override_top_level_key(override: str) -> str:
@@ -177,7 +174,7 @@ def process_ordered_args(
             # Apply to task or harness with validation
             if last_flag == "t" and current_task:
                 sampling_fields = {f.name for f in dataclasses.fields(types.SamplingParams)}
-                if top_key not in TASK_CONFIG_FIELDS and top_key not in sampling_fields:
+                if top_key not in task_config_fields() and top_key not in sampling_fields:
                     raise click.UsageError(
                         f"Invalid task override: '{top_key}' is not a TaskConfig or "
                         f"SamplingParams field. Did you mean to put this after --harness "

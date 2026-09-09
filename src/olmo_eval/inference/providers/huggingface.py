@@ -15,6 +15,7 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.reasoning import split_reasoning
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 logger = get_logger(__name__)
@@ -200,6 +201,68 @@ def _patch_molmo2_generation_cache_position(model: Any) -> None:
     cls.prepare_inputs_for_generation = prepare_inputs_for_generation
 
 
+#: Config attributes that hold a vision tower. Molmo2 uses ``vit_config`` where most
+#: released repos use ``vision_config``, so checking only the latter misses it.
+_VISION_CONFIG_ATTRS = ("vision_config", "vit_config", "vision_tower_config")
+
+
+def looks_multimodal_hf(model_name: str, **model_kwargs: Any) -> bool:
+    """Whether an HF checkpoint is an image-text-to-text model.
+
+    Two distinct artifacts in this repo are both called an "OLMo-core export".
+    :func:`is_olmo_core_hf_export` recognises the *legacy* one (``olmo_core_config.json``
+    plus OLMo-core key names), which needs its own loader. ``tools/olmo_core_to_hf`` writes
+    the *other* one: a genuine HF directory. That is not a special case at all, so detect it
+    the same way any released multimodal repo is detected -- from the config.
+
+    Without this, a real HF multimodal directory fell through to the text-only path and died
+    with ``Unrecognized configuration class Molmo2Config ... AutoModelForCausalLM``, which
+    names neither the cause nor the ``multimodal`` flag that would have fixed it.
+
+    Checks three signals, because no single one covers both released and remote-code repos:
+    ``auto_map`` declaring ``AutoModelForImageTextToText`` (the only reliable signal for a
+    remote-code model such as Molmo2, whose architecture is absent from the built-in
+    mapping), a vision-tower sub-config under any of its usual names, and membership of
+    transformers' image-text-to-text mapping.
+
+    Returns ``False`` rather than raising when the config cannot be read: the caller then
+    takes the text path and fails with its own error, which is no worse than before.
+    """
+    try:
+        from transformers import AutoConfig
+    except ImportError:
+        return False
+
+    config_kwargs = {
+        key: value
+        for key, value in model_kwargs.items()
+        if key in HuggingFaceProvider._TOKENIZER_KWARGS
+    }
+    try:
+        config = AutoConfig.from_pretrained(model_name, **config_kwargs)
+    except Exception:
+        return False
+
+    # Remote-code repos declare the head they load with; this is authoritative and is the
+    # only one of the three that catches Molmo2.
+    auto_map = getattr(config, "auto_map", None) or {}
+    if isinstance(auto_map, dict) and "AutoModelForImageTextToText" in auto_map:
+        return True
+
+    if any(getattr(config, attr, None) is not None for attr in _VISION_CONFIG_ATTRS):
+        return True
+
+    architectures = getattr(config, "architectures", None) or ()
+    try:
+        from transformers.models.auto.modeling_auto import (
+            MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES,
+        )
+    except ImportError:
+        return False
+    known = set(MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES.values())
+    return any(arch in known for arch in architectures)
+
+
 class HuggingFaceProvider(InferenceProvider):
     """Provider using Hugging Face Transformers for local inference.
 
@@ -248,9 +311,10 @@ class HuggingFaceProvider(InferenceProvider):
         model_name: str,
         tokenizer: str | None = None,
         *,
-        multimodal: bool = False,
+        multimodal: bool | None = None,
         max_crops: int = 24,
         autocast_dtype: str | None = None,
+        strip_reasoning: bool = False,
         **model_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -259,8 +323,14 @@ class HuggingFaceProvider(InferenceProvider):
             model_name: HuggingFace model identifier or local path.
             tokenizer: Tokenizer path/identifier. If not specified, uses the model path.
             multimodal: Load an image-text-to-text model (AutoProcessor +
-                AutoModelForImageTextToText) instead of a text-only causal LM.
+                AutoModelForImageTextToText) instead of a text-only causal LM. ``None``
+                (default) auto-detects from the checkpoint; pass ``True``/``False`` to
+                force either path.
             max_crops: Maximum image crops passed to the multimodal processor.
+            strip_reasoning: For reasoning models that emit a ``</think>``-terminated
+                trace (e.g. Qwen3-VL-Thinking), keep only the text after the final
+                ``</think>`` as the answer and expose the trace on the output's
+                ``metadata["reasoning"]``. No-op when the output has no ``</think>``.
             autocast_dtype: If set (e.g. ``"bfloat16"``), run multimodal generation under
                 ``torch.autocast`` with this dtype. Pair with fp32 weights (``dtype="float32"``)
                 to match mm_olmo's ``amp_bf16`` eval numerics (fp32 master weights + bf16
@@ -272,14 +342,26 @@ class HuggingFaceProvider(InferenceProvider):
             model_kwargs.pop(key, None)
 
         super().__init__(model_name)
-        if not multimodal:
+        if multimodal is None:
             from .olmo_core_vlm_utils import is_olmo_core_hf_export
 
             if is_olmo_core_hf_export(model_name):
+                # Legacy consolidated export: olmo_core_config.json + OLMo-core key names.
                 multimodal = True
+                logger.info("Detected a consolidated OLMo-core export; loading as multimodal.")
+            elif looks_multimodal_hf(model_name, **model_kwargs):
+                multimodal = True
+                logger.info(
+                    "Detected an image-text-to-text HF config for %s; loading as multimodal. "
+                    "Pass multimodal=false to force the text-only path.",
+                    model_name,
+                )
+            else:
+                multimodal = False
         self.is_multimodal = bool(multimodal)
         self.max_crops = int(max_crops)
         self.autocast_dtype = autocast_dtype
+        self.strip_reasoning = bool(strip_reasoning)
         self.processor = None
         self.device = _get_device()
         if self.is_multimodal:
@@ -481,6 +563,25 @@ class HuggingFaceProvider(InferenceProvider):
             chat.insert(0, {"role": "user", "content": image_parts})
         return chat
 
+    def _format_text_prompt(self, request: LMRequest) -> str:
+        """Render a request to text for the non-multimodal generate path.
+
+        A CHAT request carries its content on ``messages`` and leaves ``prompt`` empty, so
+        reading ``request.prompt`` alone yields "" -- which tokenizes to zero tokens and
+        surfaces as ``cannot reshape tensor of 0 elements`` from inside attention rather
+        than as anything resembling a prompt problem. Apply the chat template instead,
+        matching ``VLLMProvider._format_prompt``.
+        """
+        if request.request_type == RequestType.CHAT and request.messages:
+            if not hasattr(self.tokenizer, "apply_chat_template"):
+                raise ValueError("CHAT requests require a tokenizer with apply_chat_template")
+            return self.tokenizer.apply_chat_template(
+                list(request.messages),
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        return request.prompt
+
     def _generate_multimodal(
         self, requests: list[LMRequest], params: SamplingParams
     ) -> list[list[LMOutput]]:
@@ -533,13 +634,16 @@ class HuggingFaceProvider(InferenceProvider):
                 gen_ids = output_ids[prompt_len:]
                 gen_ids, generated = self._truncate_at_stop(gen_ids, params.stop_sequences)
                 num_tokens = int(len(gen_ids))
-                request_outputs.append(
-                    LMOutput(
-                        text=generated.strip(),
-                        logprobs=None,
-                        metadata={"num_tokens": num_tokens, "num_tokens_all": num_tokens},
-                    )
-                )
+                answer = generated.strip()
+                meta: dict[str, Any] = {
+                    "num_tokens": num_tokens,
+                    "num_tokens_all": num_tokens,
+                }
+                if self.strip_reasoning:
+                    reasoning, answer = split_reasoning(answer)
+                    if reasoning:
+                        meta["reasoning"] = reasoning
+                request_outputs.append(LMOutput(text=answer, logprobs=None, metadata=meta))
             results.append(request_outputs)
 
         return results
@@ -563,7 +667,7 @@ class HuggingFaceProvider(InferenceProvider):
 
         results = []
         for request in requests:
-            prompt = request.prompt
+            prompt = self._format_text_prompt(request)
             encoded = self.tokenizer(prompt, return_tensors="pt").to(self.device)
             prompt_len = encoded["input_ids"].shape[1]
             gen_kwargs = self._build_generate_kwargs(params, prompt_len)
