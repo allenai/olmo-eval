@@ -39,8 +39,9 @@ CheckpointFormat = Literal["olmo_core_dcp", "olmo_core_unsharded", "mm_olmo_dcp"
 _EXPECTED_FORMATS = (
     "expected one of: a raw OLMo-core multimodal checkpoint (config.json with a "
     "MultimodalLMConfig under 'model' + model_and_optim/.metadata), a consolidated "
-    "OLMo-core export (olmo_core_config.json + model.safetensors with lm.*/vision.*/"
-    "connector.* keys), or an mm_olmo/Molmo2-trainer checkpoint (config.yaml + "
+    "OLMo-core export (olmo_core_config.json + model.safetensors with lm.* plus either "
+    "vision_backbone.vision.*/vision_backbone.connector.* or the older bare "
+    "vision.*/connector.* keys), or an mm_olmo/Molmo2-trainer checkpoint (config.yaml + "
     "model_and_optim/.metadata with model.transformer.*/model.vision_backbone.* keys)"
 )
 
@@ -476,13 +477,34 @@ def load_checkpoint_weights(
     if info.format == "olmo_core_dcp":
         from olmo_core.distributed.checkpoint import load_model_and_optim_state
 
-        load_model_and_optim_state(str(Path(checkpoint_dir) / "model_and_optim"), model)
+        # OLMo-core moved the ViT and connector under a `vision_backbone.` submodule, so a
+        # freshly built model reports `vision_backbone.vision.*` while every checkpoint
+        # written before that rename has bare `vision.*`. Remap at the checkpoint layer.
+        #
+        # Passing this unconditionally is safe and needs no format sniffing:
+        # `swap_param_keys` skips any entry whose checkpoint-side key is absent from the
+        # checkpoint metadata, so a post-rename checkpoint is untouched.
+        key_mapping = (
+            model.legacy_vision_key_mapping()
+            if hasattr(model, "legacy_vision_key_mapping")
+            else None
+        )
+        load_model_and_optim_state(
+            str(Path(checkpoint_dir) / "model_and_optim"), model, key_mapping=key_mapping
+        )
         return
 
     if info.format == "olmo_core_unsharded":
+        from olmo_core.nn.vision.molmo2_loader import canonicalize_vision_keys
         from safetensors.torch import load_file
 
-        state_dict = load_file(str(Path(checkpoint_dir) / "model.safetensors"))
+        # These come from OLMo-core's scripts/unshard.py, which is key-agnostic: exports
+        # taken before the rename carry bare `vision.*`, later ones `vision_backbone.*`.
+        # `load_state_dict` below is strict, so normalize to the canonical layout first.
+        # canonicalize_vision_keys is idempotent, so post-rename exports pass through.
+        state_dict = canonicalize_vision_keys(
+            load_file(str(Path(checkpoint_dir) / "model.safetensors"))
+        )
         model.load_state_dict(state_dict)
         return
 
@@ -581,6 +603,27 @@ def convert_olmo_core_to_molmo2_hf_state_dict(
     import torch
 
     sd = dict(state_dict)
+
+    # OLMo-core registers the ViT and connector under a `vision_backbone.` submodule.
+    # Checkpoints written before that rename (and, for a while after it, checkpoints whose
+    # model keys were rewritten back to the legacy names by a `state_dict()` override on
+    # `MultimodalLM`) use bare `vision.*` / `connector.*`. Every lookup below — including
+    # the `vision.blocks.N` layer-index regex — is written against the legacy names, so
+    # normalize once here and accept either layout.
+    #
+    # Only strip when the remainder is one of the two known vision subtrees, so an
+    # unrelated key that merely starts with `vision_backbone.` is left alone.
+    _VB_PREFIX = "vision_backbone."
+    sd = {
+        (
+            key[len(_VB_PREFIX) :]
+            if key.startswith(_VB_PREFIX)
+            and key[len(_VB_PREFIX) :].startswith(("vision.", "connector."))
+            else key
+        ): value
+        for key, value in sd.items()
+    }
+
     out: dict[str, torch.Tensor] = {}
 
     def take(key: str) -> torch.Tensor:
