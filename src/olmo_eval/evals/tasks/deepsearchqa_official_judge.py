@@ -169,14 +169,17 @@ def parse_deepsearchqa_official_judge_response(raw: str, num_gold: int) -> tuple
     marked true, matching the official recall/precision formulas without
     needing per-item traceability.
     """
-    match = _JSON_OBJECT.search(raw)
-    if match is None:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
+    decoder = json.JSONDecoder()
+    data: Any | None = None
+    for match in re.finditer(r"\{", raw):
+        try:
+            candidate, _end = decoder.raw_decode(raw[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict):
+            data = candidate
+            break
+    if data is None:
         return None
 
     correctness = data.get("Answer Correctness")
