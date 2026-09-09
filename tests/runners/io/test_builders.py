@@ -137,3 +137,24 @@ def test_build_predictions_materializes_exact_mc_accuracy_metric_keys() -> None:
 
     assert predictions[0]["instance_metrics"]["logprob"]["logprob"] == -1.0
     assert predictions[0]["instance_metrics"]["accuracy"]["logprob"] == 1.0
+
+
+def test_build_predictions_includes_original_text_when_present() -> None:
+    response = Response(
+        instance=Instance(question="Q", gold_answer="A"),
+        request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q"),
+        outputs=[
+            LMOutput(
+                text="A",
+                extracted_answer="A",
+                metadata={"original_text": "<think>reasoning</think>A"},
+            ),
+            LMOutput(text="B", extracted_answer="B"),
+        ],
+    )
+
+    predictions = build_predictions([response])
+
+    outputs = predictions[0]["model_output"]
+    assert outputs[0]["original_text"] == "<think>reasoning</think>A"
+    assert "original_text" not in outputs[1]
