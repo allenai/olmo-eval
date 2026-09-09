@@ -65,3 +65,60 @@ def test_text_path_leaves_completion_prompts_alone(provider: HuggingFaceProvider
     request = LMRequest(request_type=RequestType.COMPLETION, prompt="raw text")
 
     assert provider._format_text_prompt(request) == "raw text"
+
+
+class _FakeAutoConfig:
+    """Stand-in for a loaded HF config."""
+
+    def __init__(self, *, vision_config=None, architectures=None) -> None:
+        if vision_config is not None:
+            self.vision_config = vision_config
+        self.architectures = architectures or []
+
+
+def _patch_autoconfig(monkeypatch, config):
+    import transformers
+
+    class _Auto:
+        @staticmethod
+        def from_pretrained(name, **kwargs):
+            if config is None:
+                raise OSError("no config")
+            return config
+
+    monkeypatch.setattr(transformers, "AutoConfig", _Auto)
+
+
+def test_looks_multimodal_detects_a_vision_config(monkeypatch) -> None:
+    # This PR's exporter writes a genuine HF directory, which is_olmo_core_hf_export (built
+    # for the legacy olmo_core_config.json layout) does not recognise -- so the provider
+    # fell through to the text path and died on AutoModelForCausalLM.
+    from olmo_eval.inference.providers.huggingface import looks_multimodal_hf
+
+    _patch_autoconfig(monkeypatch, _FakeAutoConfig(vision_config=object()))
+    assert looks_multimodal_hf("some/model") is True
+
+
+def test_looks_multimodal_detects_a_known_architecture(monkeypatch) -> None:
+    from olmo_eval.inference.providers.huggingface import looks_multimodal_hf
+
+    _patch_autoconfig(
+        monkeypatch, _FakeAutoConfig(architectures=["Qwen3VLForConditionalGeneration"])
+    )
+    assert looks_multimodal_hf("some/model") is True
+
+
+def test_looks_multimodal_is_false_for_a_text_model(monkeypatch) -> None:
+    from olmo_eval.inference.providers.huggingface import looks_multimodal_hf
+
+    _patch_autoconfig(monkeypatch, _FakeAutoConfig(architectures=["Qwen3ForCausalLM"]))
+    assert looks_multimodal_hf("some/model") is False
+
+
+def test_looks_multimodal_is_false_when_the_config_cannot_be_read(monkeypatch) -> None:
+    # Falling back to the text path is no worse than the previous behaviour; raising here
+    # would break every text run whose config needs kwargs we do not forward.
+    from olmo_eval.inference.providers.huggingface import looks_multimodal_hf
+
+    _patch_autoconfig(monkeypatch, None)
+    assert looks_multimodal_hf("some/model") is False

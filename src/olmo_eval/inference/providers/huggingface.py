@@ -201,6 +201,52 @@ def _patch_molmo2_generation_cache_position(model: Any) -> None:
     cls.prepare_inputs_for_generation = prepare_inputs_for_generation
 
 
+def looks_multimodal_hf(model_name: str, **model_kwargs: Any) -> bool:
+    """Whether an HF checkpoint is an image-text-to-text model.
+
+    Two distinct artifacts in this repo are both called an "OLMo-core export".
+    :func:`is_olmo_core_hf_export` recognises the *legacy* one (``olmo_core_config.json``
+    plus OLMo-core key names), which needs its own loader. ``tools/olmo_core_to_hf`` writes
+    the *other* one: a genuine HF directory. That is not a special case at all, so detect it
+    the same way any released multimodal repo is detected -- from the config.
+
+    Without this, a real HF multimodal directory fell through to the text-only path and died
+    with ``Unrecognized configuration class Molmo2Config ... AutoModelForCausalLM``, which
+    names neither the cause nor the ``multimodal`` flag that would have fixed it.
+
+    Returns ``False`` rather than raising when the config cannot be read: the caller then
+    takes the text path and fails with its own error, which is no worse than before.
+    """
+    try:
+        from transformers import AutoConfig
+    except ImportError:
+        return False
+
+    config_kwargs = {
+        key: value
+        for key, value in model_kwargs.items()
+        if key in HuggingFaceProvider._TOKENIZER_KWARGS
+    }
+    try:
+        config = AutoConfig.from_pretrained(model_name, **config_kwargs)
+    except Exception:
+        return False
+
+    # A vision tower is the most reliable signal and needs no registry lookup.
+    if getattr(config, "vision_config", None) is not None:
+        return True
+
+    architectures = getattr(config, "architectures", None) or ()
+    try:
+        from transformers.models.auto.modeling_auto import (
+            MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES,
+        )
+    except ImportError:
+        return False
+    known = set(MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES.values())
+    return any(arch in known for arch in architectures)
+
+
 class HuggingFaceProvider(InferenceProvider):
     """Provider using Hugging Face Transformers for local inference.
 
@@ -249,7 +295,7 @@ class HuggingFaceProvider(InferenceProvider):
         model_name: str,
         tokenizer: str | None = None,
         *,
-        multimodal: bool = False,
+        multimodal: bool | None = None,
         max_crops: int = 24,
         autocast_dtype: str | None = None,
         strip_reasoning: bool = False,
@@ -261,7 +307,9 @@ class HuggingFaceProvider(InferenceProvider):
             model_name: HuggingFace model identifier or local path.
             tokenizer: Tokenizer path/identifier. If not specified, uses the model path.
             multimodal: Load an image-text-to-text model (AutoProcessor +
-                AutoModelForImageTextToText) instead of a text-only causal LM.
+                AutoModelForImageTextToText) instead of a text-only causal LM. ``None``
+                (default) auto-detects from the checkpoint; pass ``True``/``False`` to
+                force either path.
             max_crops: Maximum image crops passed to the multimodal processor.
             strip_reasoning: For reasoning models that emit a ``</think>``-terminated
                 trace (e.g. Qwen3-VL-Thinking), keep only the text after the final
@@ -278,11 +326,22 @@ class HuggingFaceProvider(InferenceProvider):
             model_kwargs.pop(key, None)
 
         super().__init__(model_name)
-        if not multimodal:
+        if multimodal is None:
             from .olmo_core_vlm_utils import is_olmo_core_hf_export
 
             if is_olmo_core_hf_export(model_name):
+                # Legacy consolidated export: olmo_core_config.json + OLMo-core key names.
                 multimodal = True
+                logger.info("Detected a consolidated OLMo-core export; loading as multimodal.")
+            elif looks_multimodal_hf(model_name, **model_kwargs):
+                multimodal = True
+                logger.info(
+                    "Detected an image-text-to-text HF config for %s; loading as multimodal. "
+                    "Pass multimodal=false to force the text-only path.",
+                    model_name,
+                )
+            else:
+                multimodal = False
         self.is_multimodal = bool(multimodal)
         self.max_crops = int(max_crops)
         self.autocast_dtype = autocast_dtype

@@ -233,6 +233,25 @@ def load_captions(path: str) -> dict[str, str]:
     return _CAPTION_CACHE[path]
 
 
+def reject_unsupported_prompt_knobs(config, task_name: str) -> None:
+    """Refuse ``image_mode`` / ``prompt_style`` on task families that do not implement them.
+
+    Only :class:`ImageQATask` and ``MmmuProTask`` route these through ``format_request``.
+    The pointing and multi-image families build prompts by their own rules, so silently
+    ignoring the flags would run the unmodified image benchmark and label it a text-only or
+    caption ablation -- a wrong number with nothing to indicate it.
+    """
+    mode = getattr(config, "image_mode", "real") or "real"
+    style = getattr(config, "prompt_style", "molmo") or "molmo"
+    if mode != "real" or style != "molmo":
+        raise ValueError(
+            f"{task_name} does not implement image_mode/prompt_style (got "
+            f"image_mode={mode!r}, prompt_style={style!r}). They are wired through "
+            f"ImageQATask and MmmuProTask only; running here would evaluate the "
+            f"unmodified benchmark and report it as an ablation."
+        )
+
+
 def resolve_image_mode(config, instance: Instance) -> tuple[bool, str | None]:
     """Resolve ``config.image_mode`` for one instance.
 

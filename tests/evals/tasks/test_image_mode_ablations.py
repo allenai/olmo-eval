@@ -254,8 +254,17 @@ def test_unknown_prompt_style_raises():
 
 
 @pytest.mark.parametrize(
-    "spec", ["vqa2:neutral", "chart_qa:neutral", "doc_qa:neutral", "info_qa:neutral",
-             "text_vqa:neutral", "ai2d:neutral", "real_world_qa:neutral", "mmmu:neutral"]
+    "spec",
+    [
+        "vqa2:neutral",
+        "chart_qa:neutral",
+        "doc_qa:neutral",
+        "info_qa:neutral",
+        "text_vqa:neutral",
+        "ai2d:neutral",
+        "real_world_qa:neutral",
+        "mmmu:neutral",
+    ],
 )
 def test_neutral_variants_are_registered(spec: str):
     assert get_task(spec).config.prompt_style == "neutral"
@@ -315,3 +324,62 @@ def test_mmmu_cot_variant_is_registered():
     cfg = get_task("mmmu:cot").config
     assert cfg.prompt_style == "cot"
     assert cfg.answer_extractor is extract_cot_answer
+
+
+# ---------------------------------------------------------------------------
+# Review #6: only ImageQATask/MmmuProTask implement the knobs
+# ---------------------------------------------------------------------------
+
+
+def test_mmmu_pro_honours_prompt_style():
+    # mmmu_pro overrides format_request and previously called resolve_image_mode but not
+    # render_question, so prompt_style was silently ignored there.
+    from olmo_eval.evals.tasks.mmmu_pro import MmmuProTask
+
+    task = MmmuProTask(TaskConfig(name="mmmu_pro", prompt_style="neutral"))
+    instance = Instance(
+        question="<image 1> What is the value?\nOnly return the correct answer option.\nA. 6",
+        metadata={"mmmu_pro_setting": "standard10", "example_id": "s1", "images": [_tiny_image()]},
+    )
+
+    content = task.format_request(instance).messages[0]["content"]
+    assert "<image" not in content
+
+
+@pytest.mark.parametrize("knob", [{"image_mode": "none"}, {"prompt_style": "neutral"}])
+def test_pointing_and_multi_image_refuse_unimplemented_knobs(knob):
+    # These families build prompts by their own rules. Silently ignoring the flags would run
+    # the unmodified image benchmark and report it as an ablation.
+    from olmo_eval.evals.tasks.common.image_qa_base import reject_unsupported_prompt_knobs
+
+    with pytest.raises(ValueError, match="does not implement image_mode/prompt_style"):
+        reject_unsupported_prompt_knobs(TaskConfig(name="t", **knob), "PointingTask")
+
+
+def test_guard_allows_the_defaults():
+    from olmo_eval.evals.tasks.common.image_qa_base import reject_unsupported_prompt_knobs
+
+    reject_unsupported_prompt_knobs(TaskConfig(name="t"), "PointingTask")
+
+
+# ---------------------------------------------------------------------------
+# Review #5 / #8
+# ---------------------------------------------------------------------------
+
+
+def test_mmmu_cot_sets_a_usable_token_budget():
+    # The base task caps at 12 tokens, which truncates before the required "Answer:" line,
+    # so the variant could not work at its own default.
+    assert get_task("mmmu:cot").config.sampling_params.max_tokens == 2048
+
+
+def test_to_dict_records_the_prompt_and_ablation_fields():
+    # Without these an ablation run serializes identically to the real benchmark run.
+    cfg = TaskConfig(
+        name="t", image_mode="caption", caption_source="/tmp/c.jsonl", prompt_style="neutral"
+    )
+    d = cfg.to_dict()
+    assert d["image_mode"] == "caption"
+    assert d["caption_source"] == "/tmp/c.jsonl"
+    assert d["prompt_style"] == "neutral"
+    assert "prompt_templates" in d and "system_prompt_style" in d

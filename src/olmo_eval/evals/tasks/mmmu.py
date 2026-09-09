@@ -129,4 +129,13 @@ register_variant("mmmu", "neutral", prompt_style="neutral")
 # reasoning and requires a final "Answer:" line, and pairs it with an extractor that reads
 # the LAST such marker -- the shared clean_prediction takes the first, which on a trace
 # would score a discarded intermediate guess. Needs a large max_tokens (~2048).
-register_variant("mmmu", "cot", prompt_style="cot", answer_extractor=extract_cot_answer)
+register_variant(
+    "mmmu",
+    "cot",
+    prompt_style="cot",
+    answer_extractor=extract_cot_answer,
+    # The base task caps generation at 12 tokens, which truncates long before the
+    # required "Answer:" line. Measured on Qwen3-VL-4B-Instruct, 2048 leaves 68% of
+    # responses able to reach it; below that the variant cannot work at all.
+    sampling_params=SamplingParams(temperature=0.0, max_tokens=2048),
+)
