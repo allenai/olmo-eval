@@ -255,3 +255,101 @@ def test_mixed_declared_file_types_are_rejected(
             token=None,
             data_files=["a.jsonl", "b.parquet"],
         )
+
+
+class _ScriptRejectingLoader(_RecordingLoader):
+    """Stands in for `datasets.load_dataset` against a repository with a script.
+
+    The first call names the repository and fails the way `datasets` v4+ fails
+    on a legacy loading script. Later calls name a loader module and succeed,
+    so a test can follow a load all the way through the fallback.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+    def __call__(self, path: str, **kwargs: Any) -> list[dict[str, str]]:
+        self.calls.append({"path": path, **kwargs})
+        if len(self.calls) == 1:
+            raise self.error
+        return [{"doc": "loaded"}]
+
+
+def _reject_scripts(monkeypatch: pytest.MonkeyPatch, error: Exception) -> _ScriptRejectingLoader:
+    """Make loading the repository itself raise `error`."""
+    import datasets
+
+    loader = _ScriptRejectingLoader(error)
+    monkeypatch.setattr(datasets, "load_dataset", loader)
+    return loader
+
+
+def test_load_carries_declared_files_and_revision_into_the_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The public entry point has to hand the fallback what the source asked
+    # for; dropping either one reads the wrong files, or the right files at
+    # the wrong revision.
+    loader = _reject_scripts(monkeypatch, RuntimeError("Dataset scripts are no longer supported"))
+    _all_repo_files(monkeypatch, ["test.jsonl", "test2.jsonl", "test3.jsonl"])
+    source = DataSource(
+        path="org/scripted-repo",
+        data_files=("test.jsonl", "test2.jsonl"),
+        split="train",
+        revision="abc123",
+    )
+
+    assert list(HuggingFaceBackend().load(source)) == [{"doc": "loaded"}]
+
+    attempted, fell_back = loader.calls
+    assert attempted["path"] == "org/scripted-repo"
+    # `datasets` rejects a tuple, so the source's files arrive as a list.
+    assert attempted["data_files"] == ["test.jsonl", "test2.jsonl"]
+    assert attempted["revision"] == "abc123"
+    assert fell_back["data_files"] == {
+        "train": [
+            "hf://datasets/org/scripted-repo@abc123/test.jsonl",
+            "hf://datasets/org/scripted-repo@abc123/test2.jsonl",
+        ]
+    }
+
+
+def test_load_reaches_subset_matching_without_declared_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loader = _reject_scripts(monkeypatch, RuntimeError("Dataset scripts are no longer supported"))
+    _all_repo_files(monkeypatch, ["math/test.jsonl", "biology/test.jsonl", "README.md"])
+    source = DataSource(path="org/scripted-repo", subset="math", split="test")
+
+    assert list(HuggingFaceBackend().load(source)) == [{"doc": "loaded"}]
+
+    attempted, fell_back = loader.calls
+    assert "data_files" not in attempted
+    assert "revision" not in attempted
+    assert fell_back["data_files"] == {"test": ["hf://datasets/org/scripted-repo/math/test.jsonl"]}
+
+
+def test_load_falls_back_when_the_library_reports_a_cache_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The library's own fallback logic swallows the script error and raises
+    # this instead, so the cache miss has to trigger the fallback too.
+    loader = _reject_scripts(monkeypatch, ValueError("Couldn't find cache for org/scripted-repo"))
+    _all_repo_files(monkeypatch, ["test.jsonl"])
+    source = DataSource(path="org/scripted-repo", data_files="test.jsonl", split="train")
+
+    assert list(HuggingFaceBackend().load(source)) == [{"doc": "loaded"}]
+
+    assert loader.calls[1]["data_files"] == {
+        "train": ["hf://datasets/org/scripted-repo/test.jsonl"]
+    }
+
+
+def test_load_does_not_swallow_unrelated_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    _reject_scripts(monkeypatch, ValueError("Split 'train' not found"))
+    _all_repo_files(monkeypatch, ["test.jsonl"])
+    source = DataSource(path="org/scripted-repo", data_files="test.jsonl", split="train")
+
+    with pytest.raises(ValueError, match="not found"):
+        list(HuggingFaceBackend().load(source))
