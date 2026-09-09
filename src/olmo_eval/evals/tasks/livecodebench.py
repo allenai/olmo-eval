@@ -65,7 +65,9 @@ USER_TEMPLATE = (
     "### Answer: (use the provided format with backticks)\n\n"
 )
 
-THINK_INSTRUCTION = (
+REASONING_INSTRUCTION = "Provide CONCISE reasoning on how to arrive at the answer.\n"
+
+THINK_TAG_INSTRUCTION = (
     "Provide CONCISE reasoning on how to arrive at the answer in the <think> </think> tag.\n"
 )
 
@@ -307,13 +309,24 @@ PASS_AT_KS = (1, 5, 10)
 METRICS = tuple(PassAtKMetric(k=k, scorer=LiveCodeBenchScorer) for k in PASS_AT_KS)
 PASS_AT_1 = PassAtKMetric(k=1, scorer=LiveCodeBenchScorer)
 
-THINK_FORMATTER = LiveCodeBenchFormatter(
+# The default prompt is LiveCodeBench's own system prompt with a reasoning
+# line that names no tags. A model whose chat template opens a thinking block
+# reasons there, and one without such a template reasons inline, so the
+# instruction measures the same thing for both. Asking for literal <think>
+# tags, as the OLMo 3 post-training regime does, also measured how a model
+# copes with a tag its template may already have opened.
+DEFAULT_FORMATTER = LiveCodeBenchFormatter(
     system_prompt=SYSTEM_PROMPT,
-    reasoning_instruction=THINK_INSTRUCTION,
+    reasoning_instruction=REASONING_INSTRUCTION,
 )
+THINK_TAG_FORMATTER = LiveCodeBenchFormatter(
+    system_prompt=SYSTEM_PROMPT,
+    reasoning_instruction=THINK_TAG_INSTRUCTION,
+)
+NO_SYSTEM_FORMATTER = LiveCodeBenchFormatter(reasoning_instruction=REASONING_INSTRUCTION)
 PLAIN_FORMATTER = LiveCodeBenchFormatter(system_prompt=SYSTEM_PROMPT)
 
-# Defaults mirror oe-eval's ``livecodebench_codegeneration::olmo3:adapt``, the
+# Sampling mirrors oe-eval's ``livecodebench_codegeneration::olmo3:adapt``, the
 # OLMo 3 post-training regime. max_tokens=None generates to the model's context
 # limit, matching the reference regime's effective behavior on any context size.
 ADAPT_SAMPLING = SamplingParams(
@@ -336,7 +349,7 @@ class LiveCodeBench(Task):
         split="train",
     )
     split = Split.TRAIN
-    formatter = THINK_FORMATTER
+    formatter = DEFAULT_FORMATTER
     metrics = METRICS
     primary_metric = PASS_AT_1
     sampling_params = ADAPT_SAMPLING
@@ -405,6 +418,15 @@ class LiveCodeBenchHidden(LiveCodeBench):
 
 
 for _task_name in ("livecodebench", "livecodebench_hidden"):
+    # Mirrors oe-eval's ``::olmo3:adapt`` prompt, which asks for the reasoning
+    # inside literal <think> tags.
+    register_variant(_task_name, "think_tags", formatter=THINK_TAG_FORMATTER)
+
+    # Mirrors oe-eval-internal's ``::tulu-thinker_deepseek_no_think_tags``, the
+    # regime reported in the OLMo 3 paper: the default prompt with no system
+    # message.
+    register_variant(_task_name, "paper", formatter=NO_SYSTEM_FORMATTER)
+
     # Mirrors oe-eval's ``::tulu``: no reasoning instruction, shorter budget.
     register_variant(
         _task_name,

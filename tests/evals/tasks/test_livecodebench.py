@@ -84,16 +84,42 @@ def test_test_cases_are_referenced_not_carried() -> None:
     assert "private_test_cases" not in instance.metadata
 
 
-def test_default_prompt_requests_reasoning_in_think_tags() -> None:
+def test_default_prompt_asks_for_concise_reasoning_without_naming_tags() -> None:
+    # A template that opens a thinking block and one that does not both get
+    # the same instruction; literal tags would suit only one of them.
     task = get_task("livecodebench")
     request = task.format_request(task.process_doc(STDIN_DOC))
 
     assert request.request_type == RequestType.CHAT
     assert request.messages[0] == {"role": "system", "content": SYSTEM_PROMPT}
     user = request.messages[1]["content"]
-    assert user.startswith("### Question:\nPrint the sum of two integers.\n\n### Format:\n")
-    assert "<think> </think> tag" in user
+    assert user.startswith(
+        "### Question:\nPrint the sum of two integers.\n\n"
+        "### Format:\nProvide CONCISE reasoning on how to arrive at the answer.\n"
+    )
+    assert "<think>" not in user
     assert user.endswith("### Answer: (use the provided format with backticks)\n\n")
+
+
+def test_think_tags_variant_asks_for_reasoning_in_tags() -> None:
+    task = get_task("livecodebench:think_tags")
+    user = task.format_request(task.process_doc(STDIN_DOC)).messages[1]["content"]
+
+    assert (
+        "Provide CONCISE reasoning on how to arrive at the answer in the <think> </think> tag."
+        in user
+    )
+
+
+def test_paper_variant_sends_no_system_message() -> None:
+    task = get_task("livecodebench:paper")
+    request = task.format_request(task.process_doc(STDIN_DOC))
+
+    assert request.system_prompt is None
+    assert [message["role"] for message in request.messages] == ["user"]
+    user = request.messages[0]["content"]
+    assert "Provide CONCISE reasoning on how to arrive at the answer.\n" in user
+    assert "<think>" not in user
 
 
 def test_tulu_variant_drops_the_reasoning_line() -> None:
@@ -180,7 +206,7 @@ def test_grpo_variant_reports_pass_at_10() -> None:
 
 
 def test_variants_are_registered_for_both_releases() -> None:
-    for variant in ("tulu", "lite", "grpo"):
+    for variant in ("think_tags", "paper", "tulu", "lite", "grpo"):
         assert get_task(f"livecodebench_hidden:{variant}") is not None
 
 
