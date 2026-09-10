@@ -111,26 +111,12 @@ HARNESS_CONFIG_FIELDS = frozenset(
     }
 )
 
-TASK_CONFIG_FIELDS = frozenset(
-    {
-        "name",
-        "data_source",
-        "fewshot_source",
-        "formatter",
-        "metrics",
-        "num_fewshot",
-        "fewshot_seed",
-        "limit",
-        "seed",
-        "split",
-        "primary_metric",
-        "sampling_params",
-        "dependencies",
-        "sandbox_allocation_weight",
-        "strip_thinking",
-        "priority",  # Special: extracted for job priority, not a real TaskConfig field
-    }
-)
+def task_config_fields() -> frozenset[str]:
+    """Names accepted as ``-o`` task overrides: every TaskConfig field, plus
+    ``priority``, which is extracted for job priority rather than stored."""
+    from olmo_eval.evals.tasks.common.base import TaskConfig
+
+    return frozenset(f.name for f in dataclasses.fields(TaskConfig)) | {"priority"}
 
 
 def _get_override_top_level_key(override: str) -> str:
@@ -177,7 +163,7 @@ def process_ordered_args(
             # Apply to task or harness with validation
             if last_flag == "t" and current_task:
                 sampling_fields = {f.name for f in dataclasses.fields(types.SamplingParams)}
-                if top_key not in TASK_CONFIG_FIELDS and top_key not in sampling_fields:
+                if top_key not in task_config_fields() and top_key not in sampling_fields:
                     raise click.UsageError(
                         f"Invalid task override: '{top_key}' is not a TaskConfig or "
                         f"SamplingParams field. Did you mean to put this after --harness "
