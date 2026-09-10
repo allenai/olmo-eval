@@ -28,8 +28,12 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
         for out in resp.outputs:
             # Get values from metadata (set by backend) or compute from logprobs
             meta = out.metadata or {}
-            num_bytes = len(out.text.encode("utf-8")) if out.text else 0
             num_chars = len(out.text) if out.text else 0
+            # Logprobs describe the whole generation. If strip_thinking removed a
+            # reasoning trace, normalize by the original text, not the stripped answer.
+            full_text = meta.get("original_text") or out.text or ""
+            num_bytes = len(full_text.encode("utf-8"))
+            num_chars_all = len(full_text)
 
             # Use metadata values if available (from vLLM provider), else compute
             sum_logits: float | None
@@ -62,12 +66,14 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
 
                 if num_tokens:
                     out_data["logits_per_token"] = sum_logits / num_tokens
-                if num_chars > 0:
-                    out_data["logits_per_char"] = sum_logits / num_chars
+                if num_chars_all > 0:
+                    out_data["logits_per_char"] = sum_logits / num_chars_all
                 if num_bytes > 0:
                     out_data["bits_per_byte"] = -sum_logits / (num_bytes * math.log(2))
 
             out_data["num_chars"] = num_chars
+            if "original_text" in meta:
+                out_data["num_chars_all"] = num_chars_all
 
             sample_metrics: dict[str, dict[str, float]] = {}
             for key, value in meta.items():
@@ -76,6 +82,11 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                     sample_metrics.setdefault(scorer_name, {})[scorer_name] = float(value)
             if sample_metrics:
                 out_data["sample_metrics"] = sample_metrics
+
+            # Full text before strip_thinking removed the reasoning trace, so the
+            # trace length and termination can be audited from the predictions file.
+            if "original_text" in meta:
+                out_data["original_text"] = meta["original_text"]
 
             # Include execution result if present
             if "execution_result" in meta:

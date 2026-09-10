@@ -155,6 +155,7 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
     responses = [tracker.responses[i] for i in sorted(tracker.responses.keys())]
 
     # Score and compute metrics
+    tracker.task.strip_thinking_traces(responses)
     scored = await tracker.task.score_responses(responses)
     metrics = tracker.task.compute_metrics(scored)
     infrastructure_failures = _count_infrastructure_scoring_errors(scored)
