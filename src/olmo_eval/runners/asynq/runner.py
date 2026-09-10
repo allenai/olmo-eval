@@ -19,6 +19,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.common.logging import configure_worker_logging, get_logger
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
+    resolve_provider_init_timeout,
     terminate_workers,
     wait_for_init_times,
     wait_for_workers_ready,
@@ -829,8 +830,15 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
 
             # Wait for workers to report their init times (also checks for crashes)
+            provider_init_timeout = resolve_provider_init_timeout(
+                self.harness_config.provider.kwargs.get("startup_timeout")
+            )
             provider_init_seconds = wait_for_init_times(
-                init_queue, num_inference_workers, workers=workers, result_queue=result_queue
+                init_queue,
+                num_inference_workers,
+                workers=workers,
+                result_queue=result_queue,
+                timeout=provider_init_timeout,
             )
             if len(provider_init_seconds) != num_inference_workers:
                 raise RuntimeError(
@@ -1027,7 +1035,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Apply per-task overrides
         per_task = self.task_overrides.get(spec, {})
         for key, value in per_task.items():
-            if key in task_fields:
+            if key == "sampling_params" and isinstance(value, dict):
+                sampling_overrides.update(value)
+            elif key in task_fields:
                 task_overrides[key] = value
             elif key in sampling_fields:
                 sampling_overrides[key] = value

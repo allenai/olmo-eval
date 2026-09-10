@@ -82,6 +82,7 @@ logs/
 
 # Eval output
 main/
+results/
 
 # LitSearch rerank pools: built locally, hosted on HF (allenai/litsearch-rerank-pools)
 src/olmo_eval/evals/tasks/data/litsearch_rerank_pools.jsonl

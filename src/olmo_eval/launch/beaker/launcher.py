@@ -344,6 +344,7 @@ class BeakerJobConfig:
         shared_memory: Shared memory size (e.g., "10GiB").
         priority: Job priority level.
         preemptible: Whether the job can be preempted.
+        min_runtime: Minimum protected runtime before the job can be interrupted.
         timeout: Job timeout (e.g., "24h", "30m").
         retries: Number of retries on failure.
         beaker_image: Container image to use.
@@ -369,6 +370,7 @@ class BeakerJobConfig:
     # Job settings
     priority: str = "normal"
     preemptible: bool = True
+    min_runtime: str | None = None
     timeout: str | None = "24h"
     retries: int | None = None
 
@@ -859,6 +861,9 @@ class BeakerLauncher:
 
         runtime_torch_version = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_VERSION")
         runtime_torch_index_url = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_INDEX_URL")
+        vllm_cuda_toolkit_package = (env_exports or {}).get(
+            "OLMO_EVAL_VLLM_CUDA_TOOLKIT_PACKAGE"
+        )
 
         def runtime_torch_spec() -> str:
             spec = f"torch=={runtime_torch_version}"
@@ -931,6 +936,17 @@ class BeakerLauncher:
                     f'--cache-dir "$UV_CACHE_DIR" '
                     f"-c {vllm_lock_constraints} -e '.[vllm]'"
                 )
+            # Optional runtime hook for narrowly scoped vLLM compatibility
+            # patches. Linking it into site-packages makes Python load it even
+            # when a server subprocess sanitizes PYTHONPATH.
+            steps.append(
+                'if [ "${OLMO_EVAL_VLLM_GPTOSS_NONPOW2_TOPK_FALLBACK:-}" = "1" ] '
+                '|| [ -n "${OLMO_EVAL_VLLM_QWEN_EXPERT_WEIGHT_MODE:-}" ] '
+                '|| [ "${OLMO_EVAL_VLLM_INSTALL_SITECUSTOMIZE:-}" = "1" ]; then '
+                f'{vllm_venv}/bin/python '
+                '"$PYTHONPATH/olmo_eval/compat/install_vllm_sitecustomize.py"; '
+                "fi"
+            )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
 
@@ -963,6 +979,19 @@ class BeakerLauncher:
                         force_reinstall=True,
                     )
                 )
+
+        # Some vLLM releases depend on an unconstrained CUDA compiler package.
+        # Install an explicitly selected toolkit after the provider so its
+        # compiler, CCCL headers, and runtime headers stay on one CUDA minor.
+        if vllm_cuda_toolkit_package:
+            steps.append(
+                build_install_command(
+                    provider_package_spec(vllm_cuda_toolkit_package),
+                    constraints,
+                    venv_path=vllm_venv if use_isolated_vllm_venv else None,
+                    force_reinstall=True,
+                )
+            )
 
         # Install task-specific dependencies
         if task_packages:
@@ -1001,6 +1030,7 @@ class BeakerLauncher:
             "UV_CACHE_DIR",
             "OLMO_EVAL_RUNTIME_TORCH_VERSION",
             "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
+            "OLMO_EVAL_VLLM_CUDA_TOOLKIT_PACKAGE",
         )
         for key in install_env_keys:
             if key in config.env_vars:
@@ -1080,7 +1110,10 @@ class BeakerLauncher:
             gpus=config.num_gpus,
             shared_memory=config.shared_memory,
             priority=config.priority,
-            preemptible=config.preemptible,
+            # minRuntime is the current allocation-aware scheduling API. The
+            # deprecated preemptible field cannot be combined with it.
+            preemptible=None if config.min_runtime is not None else config.preemptible,
+            min_runtime=config.min_runtime,
             task_timeout=config.timeout,
             retries=config.retries,
             budget=config.budget,
@@ -1149,6 +1182,8 @@ class BeakerLauncher:
 
         preempt_str = "[green]yes[/]" if config.preemptible else "[red]no[/]"
         header_lines.append(f"[bold blue]Preemptible:[/] {preempt_str}")
+        if config.min_runtime is not None:
+            header_lines.append(f"[bold blue]Minimum runtime:[/] {config.min_runtime}")
 
         header_text = Text.from_markup("\n".join(header_lines))
         _console.print(Panel(header_text, title="[bold]Beaker Experiment[/]", border_style="blue"))

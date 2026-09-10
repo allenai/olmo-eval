@@ -109,7 +109,9 @@ class BaseEvalRunner(ABC):
         # Apply per-task overrides
         per_task = self.task_overrides.get(spec, {})
         for key, value in per_task.items():
-            if key in task_fields:
+            if key == "sampling_params" and isinstance(value, dict):
+                sampling_ovr.update(value)
+            elif key in task_fields:
                 task_ovr[key] = value
             elif key in sampling_fields:
                 sampling_ovr[key] = value

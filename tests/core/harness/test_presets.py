@@ -149,6 +149,15 @@ class TestHarnessPresets:
         assert bigcodebench_sandbox.dockerfile_extra == ()
         assert bigcodebench_sandbox.instances is None
 
+    def test_codex_python_preinstalls_swerex(self):
+        """The Python sandbox must not rely on pipx PATH mutation at startup."""
+        config = get_harness_preset("codex_python")
+
+        assert len(config.sandboxes) == 1
+        sandbox = config.sandboxes[0]
+        assert sandbox.inject_swerex is True
+        assert sandbox.startup_timeout == 300.0
+
 
 class TestSearchTools:
     """Tests for search tools in the search preset."""
