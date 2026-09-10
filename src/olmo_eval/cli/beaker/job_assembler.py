@@ -476,7 +476,7 @@ class JobConfigAssembler:
         provider_extra_override = (
             {
                 "olmo_core": "olmo_core",
-                "olmo_core_vlm": "olmo_core",
+                "olmo_core_vlm": "olmo_core_vlm",
                 "vllm": "vllm",
                 "vllm_server": "vllm",
             }.get(provider_kind)

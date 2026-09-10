@@ -190,6 +190,11 @@ def build_model_config(
 
     if info.format in ("olmo_core_dcp", "olmo_core_unsharded"):
         model_config = _rewrite_legacy_class_names(info.model_config)
+        if attention_backend is not None:
+            # Enum coercion inside from_dict runs before any post-hoc normalization
+            # could, and training configs pin backends (`flex`) that a given
+            # OLMo-core release may not define — rewrite them in the raw dict.
+            model_config = _rewrite_backend_values(model_config, attention_backend)
         cfg = MultimodalLMConfig.from_dict(model_config)
     else:
         cfg = _mm_olmo_model_config_to_multimodal_lm_config(
@@ -198,6 +203,22 @@ def build_model_config(
     if attention_backend is not None:
         _normalize_attention_backend(cfg, attention_backend)
     return cfg
+
+
+def _rewrite_backend_values(config: Any, backend: str) -> Any:
+    """Replace attention ``backend`` string values in a raw config tree."""
+    if isinstance(config, dict):
+        return {
+            key: (
+                backend
+                if key == "backend" and isinstance(value, str)
+                else _rewrite_backend_values(value, backend)
+            )
+            for key, value in config.items()
+        }
+    if isinstance(config, list):
+        return [_rewrite_backend_values(value, backend) for value in config]
+    return config
 
 
 def _normalize_attention_backend(cfg: Any, backend: str) -> None:
@@ -231,7 +252,15 @@ def _mm_olmo_model_config_to_multimodal_lm_config(
     dispatch (qwen3_4B / qwen3_8B / olmo3_7B) and ViT-truncation logic stay in
     one place.
     """
-    from olmo_core.nn.vision.molmo2_loader import molmo2_config_from_hf_config
+    try:
+        from olmo_core.nn.vision.molmo2_loader import molmo2_config_from_hf_config
+    except ImportError as e:
+        raise ImportError(
+            "Loading mm_olmo-format checkpoints needs olmo_core.nn.vision.molmo2_loader, "
+            "which no released ai2-olmo-core ships yet — install OLMo-core's vision branch "
+            "(e.g. -o provider.package=https://github.com/allenai/OLMo-core.git@vision). "
+            "Native OLMo-core checkpoints do not need it."
+        ) from e
 
     llm = model_config["llm"]
     backbone = model_config["vision_backbone"]
@@ -386,7 +415,16 @@ def _load_mm_olmo_state_dict(checkpoint_dir: str, model_cfg: Any) -> dict[str, t
     patch-embedding permutation.
     """
     from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_keys
-    from olmo_core.nn.vision.molmo2_loader import molmo2_hf_state_dict_to_multimodal_lm
+
+    try:
+        from olmo_core.nn.vision.molmo2_loader import molmo2_hf_state_dict_to_multimodal_lm
+    except ImportError as e:
+        raise ImportError(
+            "Loading mm_olmo-format checkpoints needs olmo_core.nn.vision.molmo2_loader, "
+            "which no released ai2-olmo-core ships yet — install OLMo-core's vision branch "
+            "(e.g. -o provider.package=https://github.com/allenai/OLMo-core.git@vision). "
+            "Native OLMo-core checkpoints do not need it."
+        ) from e
 
     _ensure_mm_olmo_unpickle_shim()
 

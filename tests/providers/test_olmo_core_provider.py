@@ -789,3 +789,48 @@ class TestUntiedLmHeadGuard:
         emb = self.torch.randn(8, 4)
         state = {"lm.embeddings.weight": emb, "lm.lm_head.w_out.weight": emb}
         _verify_lm_head_is_untied(state, self._cfg(tied=True), "/ckpt")
+
+
+class TestChatMessagesForRequest:
+    """A completion prompt must survive harness-injected system messages."""
+
+    def _request(self, prompt=None, messages=None):
+        return LMRequest(
+            request_type=RequestType.CHAT,
+            prompt=prompt,
+            messages=tuple(messages) if messages else None,
+        )
+
+    def test_bare_prompt_becomes_user_turn(self):
+        from olmo_eval.inference.request_utils import chat_messages_for_request
+
+        msgs = chat_messages_for_request(self._request(prompt="How many people?"))
+        assert msgs == ({"role": "user", "content": "How many people?"},)
+
+    def test_prompt_survives_injected_system_message(self):
+        from olmo_eval.inference.request_utils import chat_messages_for_request
+
+        msgs = chat_messages_for_request(
+            self._request(
+                prompt="How many people?", messages=[{"role": "system", "content": "Be terse."}]
+            )
+        )
+        assert msgs == (
+            {"role": "system", "content": "Be terse."},
+            {"role": "user", "content": "How many people?"},
+        )
+
+    def test_existing_user_turn_is_untouched(self):
+        from olmo_eval.inference.request_utils import chat_messages_for_request
+
+        original = (
+            {"role": "system", "content": "Be terse."},
+            {"role": "user", "content": "Original question"},
+        )
+        msgs = chat_messages_for_request(self._request(prompt="ignored", messages=original))
+        assert msgs == original
+
+    def test_no_prompt_no_messages(self):
+        from olmo_eval.inference.request_utils import chat_messages_for_request
+
+        assert chat_messages_for_request(self._request()) == ()

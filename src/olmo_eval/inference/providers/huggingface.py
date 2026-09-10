@@ -15,6 +15,7 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.request_utils import chat_messages_for_request
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 logger = get_logger(__name__)
@@ -463,7 +464,7 @@ class HuggingFaceProvider(InferenceProvider):
         is preserved as a text-only turn; images attach to the first user turn.
         """
         image_parts = [{"type": "image", "image": img} for img in (request.images or ())]
-        messages = request.messages or ({"role": "user", "content": request.prompt},)
+        messages = chat_messages_for_request(request)
 
         chat: list[dict[str, Any]] = []
         attached = False
