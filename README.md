@@ -1470,7 +1470,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/build_image.sh
 
 # Specific CUDA + PyTorch version
-./scripts/build_image.sh --cuda-version 12.8.1 --torch-version 2.10.0
+./scripts/build_image.sh --cuda-version 12.9.1 --torch-version 2.13.0
 
 # Production build
 ./scripts/build_image.sh --platform linux/amd64
@@ -1479,7 +1479,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/build_image.sh --help
 ```
 
-**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1
+**Supported CUDA versions**: 12.6.1, 12.9.1, 13.0.2, 13.0.3 (PyTorch 2.12+ no longer ships a cu128 build, so 12.8.x is unsupported)
 **PyTorch version**: Configurable via `--torch-version`
 **Configuration**: See `scripts/build_config.sh`
 
