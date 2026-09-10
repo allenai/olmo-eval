@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from olmo_eval.common.formatters import Formatter
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.repr import hide_unset
-from olmo_eval.common.scorers import Scorer
+from olmo_eval.common.scorers import Scorer, ScoringIncompleteError
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -43,13 +43,16 @@ def _format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
     message = str(exc).strip()
     if message:
         error["message"] = message
-    try:
-        from olmo_eval.harness.sandbox import SandboxInfrastructureError
+    if isinstance(exc, ScoringIncompleteError):
+        error["infrastructure"] = "true"
+    else:
+        try:
+            from olmo_eval.harness.sandbox import SandboxInfrastructureError
 
-        if isinstance(exc, SandboxInfrastructureError):
-            error["infrastructure"] = "true"
-    except ImportError:
-        pass
+            if isinstance(exc, SandboxInfrastructureError):
+                error["infrastructure"] = "true"
+        except ImportError:
+            pass
     return error
 
 
