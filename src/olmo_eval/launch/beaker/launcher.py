@@ -861,9 +861,7 @@ class BeakerLauncher:
 
         runtime_torch_version = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_VERSION")
         runtime_torch_index_url = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_INDEX_URL")
-        vllm_cuda_toolkit_package = (env_exports or {}).get(
-            "OLMO_EVAL_VLLM_CUDA_TOOLKIT_PACKAGE"
-        )
+        vllm_cuda_toolkit_package = (env_exports or {}).get("OLMO_EVAL_VLLM_CUDA_TOOLKIT_PACKAGE")
 
         def runtime_torch_spec() -> str:
             spec = f"torch=={runtime_torch_version}"
@@ -938,13 +936,20 @@ class BeakerLauncher:
                 )
             # Optional runtime hook for narrowly scoped vLLM compatibility
             # patches. Linking it into site-packages makes Python load it even
-            # when a server subprocess sanitizes PYTHONPATH.
+            # when a server subprocess sanitizes PYTHONPATH. The hook module
+            # lives on older branches only; without it these variables are
+            # rejected so a reduced-K request cannot silently run native
+            # (adaptive-compute routing now uses ADAPTIVE_ROUTING_* with the
+            # provider.package / provider.dependencies overrides instead).
             steps.append(
                 'if [ "${OLMO_EVAL_VLLM_GPTOSS_NONPOW2_TOPK_FALLBACK:-}" = "1" ] '
                 '|| [ -n "${OLMO_EVAL_VLLM_QWEN_EXPERT_WEIGHT_MODE:-}" ] '
                 '|| [ "${OLMO_EVAL_VLLM_INSTALL_SITECUSTOMIZE:-}" = "1" ]; then '
-                f'{vllm_venv}/bin/python '
+                'if [ -f "$PYTHONPATH/olmo_eval/compat/install_vllm_sitecustomize.py" ]; then '
+                f"{vllm_venv}/bin/python "
                 '"$PYTHONPATH/olmo_eval/compat/install_vllm_sitecustomize.py"; '
+                "else echo 'OLMO_EVAL_VLLM_* routing hooks are not on this branch; "
+                "use ADAPTIVE_ROUTING_* with provider.package' >&2; exit 1; fi; "
                 "fi"
             )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
