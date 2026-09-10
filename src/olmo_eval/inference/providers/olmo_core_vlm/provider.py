@@ -39,6 +39,7 @@ from olmo_eval.common.debug import is_debug_requests
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.providers.olmo_core_vlm import cache, checkpoint, preprocessing
+from olmo_eval.inference.request_utils import chat_messages_for_request
 
 if TYPE_CHECKING:
     import torch
@@ -253,7 +254,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
         prefixes for multi-image requests), exactly like the released
         processor's ``apply_chat_template``.
         """
-        messages = list(request.messages or ({"role": "user", "content": request.prompt},))
+        messages = list(chat_messages_for_request(request))
         chat: list[dict[str, Any]] = []
         attached = False
         for msg in messages:
