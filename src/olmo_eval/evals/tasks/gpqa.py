@@ -271,6 +271,16 @@ for _subset in _SUBSETS:
     register(_subset)(_cls)
     register_variant(_subset, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
     register_variant(_subset, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),))
+    register_variant(
+        _subset,
+        "qwen3_thinking",
+        sampling_params=SamplingParams(
+            max_tokens=32768,
+            temperature=0.6,
+            top_p=0.95,
+            top_k=20,
+        ),
+    )
 
     # Subject-filtered tasks
     for _subject in _SUBJECTS:

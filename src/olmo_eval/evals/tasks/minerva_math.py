@@ -2,7 +2,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
+from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg, PassAtKMetric
 from olmo_eval.common.scorers import MinervaMathScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
@@ -184,6 +184,24 @@ for subset in MATH_SUBSETS:
 @register("math500")
 class Math500(Math500Task):
     data_source = DataSource(path="HuggingFaceH4/MATH-500")
+
+
+register_variant(
+    "math500",
+    "chat",
+    formatter=ChatFormatter(
+        user_template=(
+            "{question}\nPlease reason step by step, and put your final answer within \\boxed{{}}."
+        )
+    ),
+    num_fewshot=0,
+    sampling_params=SamplingParams(
+        max_tokens=32768,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+    ),
+)
 
 
 for _subset in MATH_SUBSETS:

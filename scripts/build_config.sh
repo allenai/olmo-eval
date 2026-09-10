@@ -12,6 +12,7 @@ SUPPORTED_CUDA_VERSIONS=(
     "12.8.0"
     "12.8.1"
     "12.9.1"
+    "13.0.2"
 )
 
 # Default CUDA version

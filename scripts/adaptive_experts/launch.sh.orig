@@ -1,0 +1,343 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+LEDGER="${LEDGER:-${ROOT_DIR}/notes/beaker_jobs.jsonl}"
+CLUSTER="${CLUSTER:-ai2/jupiter}"
+WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
+PRIORITY="${PRIORITY:-urgent}"
+GROUP="${GROUP:-adaptive-experts-qwen3-30b-20260710}"
+RUN_TAG="${RUN_TAG:-}"
+SMOKE_MAX_TOKENS="${SMOKE_MAX_TOKENS:-8192}"
+TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-}"
+SNAPSHOT_ROOT="${SNAPSHOT_ROOT:-$(dirname "${ROOT_DIR}")/.run_snapshots/olmo-eval}"
+
+DRY_RUN=false
+PHASE=""
+SOURCE_COMMIT="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+SOURCE_HASH="working-tree"
+SOURCE_SNAPSHOT="${ROOT_DIR}"
+LAUNCH_CWD="${ROOT_DIR}"
+CLEAN_WORKTREE=""
+declare -a EXPERT_COUNTS=()
+
+usage() {
+    echo "Usage: $0 --phase PHASE [--experts K ...] [--dry-run]"
+    echo "Phases: base-smoke, base-math, hybrid-smoke, hybrid-capability-smoke, glm-air-gpu-smoke, base, hybrid-pilot"
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --phase)
+            PHASE="$2"
+            shift 2
+            ;;
+        --experts)
+            EXPERT_COUNTS+=("$2")
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ -z "${PHASE}" ]]; then
+    usage >&2
+    exit 2
+fi
+
+if [[ -n "${RUN_TAG}" && ! "${RUN_TAG}" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    echo "RUN_TAG may only contain letters, digits, dots, underscores, and dashes" >&2
+    exit 2
+fi
+if [[ ! "${SMOKE_MAX_TOKENS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "SMOKE_MAX_TOKENS must be a positive integer" >&2
+    exit 2
+fi
+if [[ -n "${TENSOR_PARALLEL_SIZE}" && ! "${TENSOR_PARALLEL_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "TENSOR_PARALLEL_SIZE must be a positive integer" >&2
+    exit 2
+fi
+NAME_SUFFIX="${RUN_TAG:+-${RUN_TAG}}"
+
+case "${PHASE}" in
+    base-smoke|hybrid-smoke)
+        if [[ "${#EXPERT_COUNTS[@]}" -eq 0 ]]; then
+            EXPERT_COUNTS=(1 8 16)
+        fi
+        ;;
+    hybrid-capability-smoke)
+        if [[ "${#EXPERT_COUNTS[@]}" -eq 0 ]]; then
+            EXPERT_COUNTS=(8)
+        fi
+        ;;
+    glm-air-gpu-smoke)
+        if [[ "${#EXPERT_COUNTS[@]}" -eq 0 ]]; then
+            EXPERT_COUNTS=(8)
+        fi
+        if [[ -z "${TENSOR_PARALLEL_SIZE}" ]]; then
+            echo "glm-air-gpu-smoke requires TENSOR_PARALLEL_SIZE" >&2
+            exit 2
+        fi
+        ;;
+    base|base-math|hybrid-pilot)
+        if [[ "${#EXPERT_COUNTS[@]}" -eq 0 ]]; then
+            EXPERT_COUNTS=(1 2 4 8 16)
+        fi
+        ;;
+    *)
+        echo "Unknown phase: ${PHASE}" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
+
+for k in "${EXPERT_COUNTS[@]}"; do
+    case "${k}" in
+        1|2|3|4|5|6|7|8|9|10|11|12|16|32) ;;
+        *)
+            echo "Unsupported expert count: ${k}" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cleanup() {
+    if [[ -n "${CLEAN_WORKTREE}" ]]; then
+        git -C "${ROOT_DIR}" worktree remove --force "${CLEAN_WORKTREE}" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
+
+prepare_launch_context() {
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        return
+    fi
+
+    # Gantry requires a clean Git checkout, but the job itself should run the exact
+    # local evaluation code. Copy that code to a content-addressed Weka snapshot and
+    # submit from a disposable clean worktree at the same base commit.
+    SOURCE_HASH="$({
+        printf '%s\n' "${SOURCE_COMMIT}"
+        find "${ROOT_DIR}/src" -type f \
+            ! -path '*/__pycache__/*' \
+            ! -name '*.pyc' \
+            -print0 \
+            | sort -z \
+            | xargs -0 sha256sum
+    } | sha256sum | cut -d' ' -f1)"
+    SOURCE_SNAPSHOT="${SNAPSHOT_ROOT}/${SOURCE_HASH}"
+
+    if [[ ! -d "${SOURCE_SNAPSHOT}/src" ]]; then
+        mkdir -p "${SNAPSHOT_ROOT}"
+        local snapshot_tmp
+        snapshot_tmp="$(mktemp -d "${SNAPSHOT_ROOT}/.${SOURCE_HASH}.XXXXXX")"
+        mkdir -p "${snapshot_tmp}/src"
+        cp -a "${ROOT_DIR}/src/." "${snapshot_tmp}/src/"
+        mv "${snapshot_tmp}" "${SOURCE_SNAPSHOT}"
+    fi
+
+    CLEAN_WORKTREE="$(mktemp -d "${TMPDIR:-/tmp}/olmo-eval-gantry.XXXXXX")"
+    rmdir "${CLEAN_WORKTREE}"
+    git -C "${ROOT_DIR}" worktree add --detach --quiet "${CLEAN_WORKTREE}" "${SOURCE_COMMIT}"
+    LAUNCH_CWD="${CLEAN_WORKTREE}"
+
+    echo "Source snapshot: ${SOURCE_SNAPSHOT}"
+    echo "Submission checkout: ${LAUNCH_CWD} (${SOURCE_COMMIT})"
+}
+
+prepare_launch_context
+
+command_string() {
+    local rendered=""
+    local token
+    for token in "$@"; do
+        printf -v token '%q' "${token}"
+        rendered+="${rendered:+ }${token}"
+    done
+    printf '%s' "${rendered}"
+}
+
+launch_one() {
+    local phase=$1
+    local expert_count=$2
+    local model=$3
+    local harness=$4
+    local replicas=$5
+    local name=$6
+    shift 6
+    local -a task_args=("$@")
+    local -a task_specs=()
+    local i
+    for ((i = 0; i < ${#task_args[@]}; i++)); do
+        if [[ "${task_args[$i]}" == "-t" ]]; then
+            task_specs+=("${task_args[$((i + 1))]}")
+        fi
+    done
+
+    local -a cmd=(
+        uv run --project "${ROOT_DIR}" --frozen --no-group vllm olmo-eval beaker launch
+        -H "${harness}"
+        -o "provider.num_instances=${replicas}"
+        -o "provider.kwargs.hf_overrides={\"num_experts_per_tok\":${expert_count}}"
+        -o "metrics.collect_gpu=true"
+    )
+
+    if [[ -n "${TENSOR_PARALLEL_SIZE}" ]]; then
+        cmd+=(-o "provider.kwargs.tensor_parallel_size=${TENSOR_PARALLEL_SIZE}")
+    fi
+    if [[ "${phase}" == "glm-air-gpu-smoke" ]]; then
+        cmd+=(
+            -o "provider.max_model_len=4096"
+            -o "provider.kwargs.gpu_memory_utilization=0.95"
+            -o "provider.kwargs.max_num_seqs=1"
+            -o "provider.kwargs.reasoning_parser=glm45"
+            -o "provider.kwargs.startup_timeout=900"
+        )
+    fi
+    cmd+=(-m "${model}")
+
+    cmd+=("${task_args[@]}")
+    cmd+=(
+        --name "${name}"
+        --cluster "${CLUSTER}"
+        --workspace "${WORKSPACE}"
+        --priority "${PRIORITY}"
+        --group "${GROUP}"
+        -e "PYTHONPATH=${SOURCE_SNAPSHOT}/src"
+        --secret-env jacobm_HF_TOKEN:HF_TOKEN
+        --no-store
+        --no-follow
+        -y
+    )
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        cmd+=(--dry-run)
+    fi
+
+    echo
+    echo "Launching ${name}"
+    echo "$(command_string "${cmd[@]}")"
+
+    local output_file
+    output_file="$(mktemp)"
+    trap 'rm -f "${output_file}"' RETURN
+
+    set +e
+    (cd "${LAUNCH_CWD}" && "${cmd[@]}") 2>&1 | tee "${output_file}"
+    local launch_status=${PIPESTATUS[0]}
+    set -e
+
+    if [[ "${DRY_RUN}" == "false" ]]; then
+        local -a experiment_ids=()
+        mapfile -t experiment_ids < <(
+            grep -Eo 'https://beaker.org/ex/[A-Za-z0-9]+' "${output_file}" \
+                | sed 's#https://beaker.org/ex/##' \
+                | sort -u
+        )
+
+        if [[ "${#experiment_ids[@]}" -eq 0 && "${launch_status}" -eq 0 ]]; then
+            echo "Launch succeeded but no Beaker experiment ID was captured; refusing to continue." >&2
+            return 1
+        fi
+
+        local experiment_id
+        local -a record_tasks=()
+        for task in "${task_specs[@]}"; do
+            record_tasks+=(--task "${task}")
+        done
+        for experiment_id in "${experiment_ids[@]}"; do
+            python "${ROOT_DIR}/scripts/adaptive_experts/record_beaker_job.py" \
+                --ledger "${LEDGER}" \
+                --phase "${phase}" \
+                --run-tag "${RUN_TAG}" \
+                --expert-count "${expert_count}" \
+                --model "${model}" \
+                "${record_tasks[@]}" \
+                --cluster "${CLUSTER}" \
+                --workspace "${WORKSPACE}" \
+                --priority "${PRIORITY}" \
+                --group "${GROUP}" \
+                --source-commit "${SOURCE_COMMIT}" \
+                --source-hash "${SOURCE_HASH}" \
+                --source-snapshot "${SOURCE_SNAPSHOT}" \
+                --result-storage beaker_dataset \
+                --experiment-id "${experiment_id}" \
+                --command "$(command_string "${cmd[@]}")"
+            echo "Recorded https://beaker.org/ex/${experiment_id} in ${LEDGER}"
+        done
+    fi
+
+    rm -f "${output_file}"
+    trap - RETURN
+    return "${launch_status}"
+}
+
+for k in "${EXPERT_COUNTS[@]}"; do
+    case "${PHASE}" in
+        base-smoke)
+            launch_one \
+                base-smoke "${k}" qwen3-30b-a3b-base default 1 \
+                "adaptive-qwen3-base-k${k}-smoke${NAME_SUFFIX}" \
+                -t arc_challenge:mc:olmo3base -o limit=16 \
+                -t minerva_math_algebra:olmo3base -o limit=16
+            ;;
+        hybrid-smoke)
+            launch_one \
+                hybrid-smoke "${k}" qwen3-30b-a3b default 1 \
+                "adaptive-qwen3-hybrid-k${k}-smoke${NAME_SUFFIX}" \
+                -t math500:chat -o limit=16 -o "sampling_params.max_tokens=${SMOKE_MAX_TOKENS}" \
+                -t gpqa_diamond:qwen3_thinking -o limit=16 \
+                -o "sampling_params.max_tokens=${SMOKE_MAX_TOKENS}"
+            ;;
+        hybrid-capability-smoke)
+            launch_one \
+                hybrid-capability-smoke "${k}" qwen3-30b-a3b codex_python 1 \
+                "adaptive-qwen3-hybrid-k${k}-capability-smoke${NAME_SUFFIX}" \
+                -t humaneval_plus:chat:pass_at_1:qwen3_thinking -o limit=8 \
+                -t ifeval_ood -o limit=8
+            ;;
+        glm-air-gpu-smoke)
+            launch_one \
+                glm-air-gpu-smoke "${k}" zai-org/GLM-4.5-Air default 1 \
+                "adaptive-glm45-air-k${k}-tp${TENSOR_PARALLEL_SIZE}-gpu-smoke${NAME_SUFFIX}" \
+                -t math500:chat -o limit=1 \
+                -o "sampling_params.max_tokens=64"
+            ;;
+        hybrid-pilot)
+            launch_one \
+                hybrid-pilot "${k}" qwen3-30b-a3b default 4 \
+                "adaptive-qwen3-hybrid-k${k}-pilot${NAME_SUFFIX}" \
+                -t adaptive_experts:hybrid_pilot
+            ;;
+        base)
+            launch_one \
+                base "${k}" qwen3-30b-a3b-base default 8 \
+                "adaptive-qwen3-base-k${k}-full${NAME_SUFFIX}" \
+                -t olmobase:mcqa_stem \
+                -t olmobase:mcqa_non_stem \
+                -t olmobase:gen \
+                -t olmobase:math \
+                -t olmobase:easy:qa:rc \
+                -t olmobase:easy:qa:bpb \
+                -t olmobase:easy:math:bpb \
+                -t olmobase:easy:code:bpb
+            ;;
+        base-math)
+            launch_one \
+                base-math "${k}" qwen3-30b-a3b-base default 8 \
+                "adaptive-qwen3-base-k${k}-math${NAME_SUFFIX}" \
+                -t olmobase:math
+            ;;
+    esac
+done

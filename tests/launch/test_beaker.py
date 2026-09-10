@@ -79,10 +79,11 @@ class TestClusterWekaSupport:
             "ai2/titan",
             "ai2/titan-batch-b200-aus-ib",
             "ai2/titan-cirrascale",
+            "ai2/holmes",
         ],
     )
-    def test_titan_clusters_have_weka(self, cluster):
-        """Titan clusters should receive Weka-backed cache environment variables."""
+    def test_b300_clusters_have_weka(self, cluster):
+        """B300 clusters should receive Weka-backed cache environment variables."""
         assert cluster_has_weka(cluster) is True
 
 
@@ -161,6 +162,7 @@ class TestBeakerJobConfig:
         assert config.budget == "ai2/oe-base"
         assert config.priority == "normal"
         assert config.preemptible is True
+        assert config.min_runtime is None
         assert config.timeout == "24h"
 
     def test_full_config(self):
@@ -173,6 +175,7 @@ class TestBeakerJobConfig:
             cluster=["ai2/jupiter", "ai2/saturn"],
             priority="high",
             preemptible=False,
+            min_runtime="1h",
             timeout="48h",
             retries=2,
             workspace="ai2/custom-workspace",
@@ -188,6 +191,7 @@ class TestBeakerJobConfig:
         assert config.cluster == ["ai2/jupiter", "ai2/saturn"]
         assert config.priority == "high"
         assert config.preemptible is False
+        assert config.min_runtime == "1h"
         assert config.retries == 2
         assert config.nfs is True
         assert len(config.weka_buckets) == 1
@@ -561,6 +565,34 @@ class TestBuildCommandWithTaskPackages:
         task_pos = install_cmd.find("uv pip install 'task-dep==1.0'")
         assert provider_pos < task_pos
 
+    def test_pinned_cuda_toolkit_installs_after_provider_in_vllm_venv(self):
+        """A CUDA compiler pin should override provider transitive dependencies."""
+        from olmo_eval.launch import BeakerLauncher
+
+        cuda_package = "cuda-toolkit[cudart,nvcc,nvrtc,nvvm,cccl,crt]==13.0.2"
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=["clients"],
+            env_exports={
+                "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL": (
+                    "https://download.pytorch.org/whl/cu130"
+                ),
+                "OLMO_EVAL_VLLM_CUDA_TOOLKIT_PACKAGE": cuda_package,
+            },
+            provider_packages=["vllm==0.26.0"],
+            vllm_isolated_venv=True,
+        )
+
+        provider_pos = install_cmd.find("'vllm==0.26.0'")
+        toolkit_pos = install_cmd.find(f"'{cuda_package}'")
+        assert provider_pos >= 0
+        assert toolkit_pos > provider_pos
+        assert (
+            "uv pip install --python /opt/vllm-venv/bin/python "
+            "--refresh-package cuda-toolkit --reinstall-package cuda-toolkit"
+        ) in install_cmd
+        assert "--extra-index-url https://download.pytorch.org/whl/cu130" in install_cmd
+
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""
         from olmo_eval.launch import BeakerLauncher
@@ -668,6 +700,27 @@ class TestBuildCommandWithTaskPackages:
             "'vllm @ git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check]" not in install_cmd
+
+    def test_isolated_vllm_installs_opt_in_sitecustomize(self):
+        """Runtime patch or compatibility flags install the isolated-venv hook."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=["vllm", "clients"],
+            env_exports=None,
+            vllm_isolated_venv=True,
+        )
+
+        assert (
+            'if [ "${OLMO_EVAL_VLLM_GPTOSS_NONPOW2_TOPK_FALLBACK:-}" = "1" ] '
+            '|| [ -n "${OLMO_EVAL_VLLM_QWEN_EXPERT_WEIGHT_MODE:-}" ] '
+            '|| [ "${OLMO_EVAL_VLLM_INSTALL_SITECUSTOMIZE:-}" = "1" ]; then'
+        ) in install_cmd
+        assert (
+            '/opt/vllm-venv/bin/python '
+            '"$PYTHONPATH/olmo_eval/compat/install_vllm_sitecustomize.py"'
+        ) in install_cmd
 
     def test_olmo_core_extra_does_not_try_to_build_flash_attention(self):
         """Default OLMo-core jobs must not compile flash-attn at startup."""

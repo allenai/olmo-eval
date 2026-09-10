@@ -180,8 +180,9 @@ class HarnessPresets:
                     instances=4,
                     image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
                     mode=SandboxMode.DOCKER,
-                    startup_timeout=60.0,
+                    startup_timeout=300.0,
                     log_dir=_get_logs_dir(),
+                    inject_swerex=True,
                 ),
             ),
         )

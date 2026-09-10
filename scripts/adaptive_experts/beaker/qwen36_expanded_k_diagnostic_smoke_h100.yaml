@@ -1,0 +1,59 @@
+version: v2
+description: >-
+  One-H100 fallback smoke for the Qwen3.6 matched-token K=32 router-mass and
+  expert-contribution diagnostic.
+tasks:
+  - name: smoke
+    image:
+      beaker: 01KVTPSG86RYVXV13FGQDM9GXT
+    command: [/bin/bash, -lc]
+    arguments:
+      - >-
+        set -euo pipefail;
+        UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache
+        uv pip install --python /opt/venv/bin/python
+        "transformers==5.7.0" "accelerate>=1.0" &&
+        /opt/venv/bin/python
+        /weka/oe-adapt-default/jacobm/olmoe3/adaptive-compute/olmo-eval/scripts/adaptive_experts/qwen36_expanded_k_diagnostic.py
+        --model Qwen/Qwen3.6-35B-A3B
+        --manifest /weka/oe-adapt-default/jacobm/olmoe3/adaptive-compute/olmo-eval/notes/router_profile/qwen35_k8_manifest.jsonl
+        --output /results
+        --limit 1
+        --max-prompt-tokens 96
+        --max-new-tokens 4
+        --validation-tokens 8
+    envVars:
+      - name: HF_HOME
+        value: /weka/oe-eval-default/oyvindt/hf-cache
+      - name: HF_HUB_CACHE
+        value: /weka/oe-eval-default/oyvindt/hf-cache
+      - name: HF_TOKEN
+        secret: jacobm_HF_TOKEN
+      - name: PYTORCH_ALLOC_CONF
+        value: expandable_segments:True
+    datasets:
+      - mountPath: /weka/oe-adapt-default
+        source:
+          weka: oe-adapt-default
+      - mountPath: /weka/oe-eval-default
+        source:
+          weka: oe-eval-default
+    result:
+      path: /results
+    resources:
+      cpuCount: 24
+      gpuCount: 1
+      memory: 150 GiB
+      sharedMemory: 24 GiB
+    context:
+      priority: urgent
+      minRuntime: 0s
+      autoResume: true
+    constraints:
+      cluster:
+        - ai2/jupiter
+        - ai2/ceres
+    hostNetworking: false
+    propagateFailure: false
+    propagatePreemption: false
+    timeout: 4h0m0s

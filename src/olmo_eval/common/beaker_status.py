@@ -42,7 +42,16 @@ class BeakerStatusReporter:
         except BeakerConfigurationError:
             self._client = None
             return
-        self._workload = self._client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+        try:
+            self._workload = self._client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+        except Exception:
+            # UI status is strictly best-effort. A transient Beaker control-plane
+            # outage must never prevent the actual workload from starting.
+            logger.warning(
+                "Disabling Beaker status updates after initialization failed",
+                exc_info=True,
+            )
+            self._client = None
 
     def update(self, message: str, force: bool = False) -> None:
         """Push a status message to the Beaker workload description.
@@ -58,7 +67,15 @@ class BeakerStatusReporter:
             return
 
         full_message = f"{message} {self._git_suffix}"
-        self._client.workload.update(self._workload, description=full_message)
+        try:
+            self._client.workload.update(self._workload, description=full_message)
+        except Exception:
+            # Disable further attempts: some transport failures block until a
+            # long RPC deadline before raising, stalling model initialization.
+            logger.warning("Disabling Beaker status updates after an update failed", exc_info=True)
+            self._client = None
+            self._workload = None
+            return
         self._last_update = now
 
     def progress_callback(self, label: str, units: str = "items/sec") -> Callable[..., None]:

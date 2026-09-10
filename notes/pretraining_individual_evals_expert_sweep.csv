@@ -1,0 +1,1145 @@
+k,suite,evaluation,display_name,kind,direction,score
+1,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.22218452218452217
+1,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.21608114908419093
+1,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.2522113315802056
+1,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.20738413197172034
+1,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.237
+1,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.2269722269641278
+2,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.337480824980825
+2,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.2842288243592523
+2,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.29572077456371026
+2,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.22545168892380205
+2,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.474
+2,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.3233764225655179
+3,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.8136678886678888
+3,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.5692723089719558
+3,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.532153956490557
+3,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.5294579732914375
+3,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.869
+3,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.6627104254843678
+4,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.9017816517816518
+4,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.7018439386785231
+4,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.615825962228066
+4,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.6355066771406127
+4,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.906
+4,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.7521916459657707
+5,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.9362381862381862
+5,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.7526358456025943
+5,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.6605307195792494
+5,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.6999214454045561
+5,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.936
+5,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.7970652393649172
+6,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.9015712140712141
+6,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.7516075687266889
+6,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.6512072675113555
+6,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.6732128829536528
+6,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.879
+6,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.7713197866525823
+7,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.9243805493805494
+7,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.776280687820051
+7,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.6760698063590724
+7,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.6944226237234878
+7,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.905
+7,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.7952307334566322
+8,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.8047394797394798
+8,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.6834772457198846
+8,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.5761415252211332
+8,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.6190102120974077
+8,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.801
+8,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.6968736925555811
+9,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.8587894712894713
+9,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.7316122276251753
+9,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.6273009801577815
+9,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.6606441476826395
+9,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.849
+9,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.7454693653510135
+10,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.7930383305383305
+10,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.6658560373991587
+10,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.5849868515419555
+10,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.6040848389630793
+10,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.77
+10,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.6835932116885048
+11,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.842964717964718
+11,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.7138817869729236
+11,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.6155868993545303
+11,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.6331500392772977
+11,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.839
+11,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.7289166887138939
+12,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.5178368303368304
+12,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.43293946659602484
+12,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.3846521635190055
+12,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.399057344854674
+12,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.485
+12,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.4438971610613069
+16,olmobase:mcqa_stem,arc:mc:olmo3base,ARC,constituent,higher,0.4662251537251537
+16,olmobase:mcqa_stem,mmlu:stem:mc:olmo3base,MMLU STEM,constituent,higher,0.3687009475701201
+16,olmobase:mcqa_stem,medmcqa:mc:olmo3base,MedMCQA,constituent,higher,0.3516614869710734
+16,olmobase:mcqa_stem,medqa_en:mc:olmo3base,MedQA,constituent,higher,0.33857030636292224
+16,olmobase:mcqa_stem,sciq:mc:olmo3base,SciQ,constituent,higher,0.455
+16,olmobase:mcqa_stem,olmobase:mcqa_stem,Aggregate,aggregate,higher,0.3960315789258539
+1,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.22355473302696446
+1,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.2250530376400016
+1,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.218378341556149
+1,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.1895
+1,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.4597
+1,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.3109
+1,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.23098591549295774
+1,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.22544080604534006
+1,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.24225083452551263
+1,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.22761380690345173
+1,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.23744075829383887
+1,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.2537107484985651
+2,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.280415176533531
+2,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.30474519784401194
+2,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.29212657216670146
+2,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.2244
+2,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.5084
+2,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.3622
+2,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.2784037558685446
+2,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.2531486146095718
+2,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.3714830710538865
+2,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.31015507753876936
+2,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.2938388625592417
+2,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.316301484379478
+3,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.6089151079016648
+3,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.6376829983154862
+3,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.671226762017182
+3,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.5469
+3,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.7023
+3,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.6657
+3,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.6788732394366197
+3,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.4275818639798489
+3,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.8240343347639485
+3,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.583791895947974
+3,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.7734597156398104
+3,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.6473150834547758
+4,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.7110010069652104
+4,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.726075511536091
+4,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.7889382780902431
+4,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.7334
+4,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.8292
+4,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.7693
+4,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.8657276995305164
+4,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.5780856423173804
+4,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.882689556509299
+4,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.6688344172086043
+4,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.9127962085308057
+4,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.7696407564261954
+5,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.7613155845012071
+5,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.7710058691406515
+5,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.8389227377923988
+5,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.8108
+5,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.8806
+5,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.8106
+5,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.9164319248826291
+5,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.6467254408060453
+5,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.9213161659513591
+5,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.735367683841921
+5,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.9559241706161138
+5,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.8226372343211206
+6,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.7321994625339774
+6,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.748683423460165
+6,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.805411792581363
+6,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.8003
+6,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.8574
+6,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.7902
+6,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.8868544600938967
+6,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.6643576826196473
+6,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.8788745827372437
+6,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.711855927963982
+6,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.9184834123222749
+6,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.7995109767556863
+7,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.7689125646177851
+7,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.7607495127585062
+7,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.8285032791269281
+7,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.8215
+7,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.8773
+7,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.8053
+7,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.907981220657277
+7,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.6819899244332494
+7,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.9070100143061517
+7,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.7243621810905453
+7,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.9270142180094787
+7,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.8191475377272656
+8,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.695304359418049
+8,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.670256052716372
+8,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.7394497178232992
+8,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.7241
+8,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.7721
+8,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.7038
+8,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.7985915492957747
+8,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.5875314861460957
+8,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.7978063900810682
+8,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.6383191595797899
+8,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.8255924170616113
+8,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.7229864665565509
+9,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.7336368539269615
+9,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.7225451995922351
+9,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.787030385924151
+9,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.7705
+9,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.8303
+9,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.7562
+9,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.8586854460093897
+9,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.6523929471032746
+9,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.8454935622317596
+9,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.6828414207103551
+9,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.8658767772511848
+9,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.7732275084317556
+10,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.6832148814237352
+10,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.6571351516790752
+10,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.7364887129346446
+10,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.7135
+10,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.7584
+10,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.6994
+10,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.7854460093896714
+10,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.5963476070528967
+10,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.7873152122079161
+10,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.6208104052026013
+10,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.8
+10,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.7125507254445945
+11,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.707890020386486
+11,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.7114440723701155
+11,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.7607468817886928
+11,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.7538
+11,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.8124
+11,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.7392
+11,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.8291079812206573
+11,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.6429471032745592
+11,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.8350023843586075
+11,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.6538269134567284
+11,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.8530805687203792
+11,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.7544950841432932
+12,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.44843647481322235
+12,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.4369117333754367
+12,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.4862779506764901
+12,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.4583
+12,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.4939
+12,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.4582
+12,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.5098591549295775
+12,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.3797229219143577
+12,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.5135908440629471
+12,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.4032016008004002
+12,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.5341232227488152
+12,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.4656839912110224
+16,olmobase:mcqa_non_stem,mmlu:humanities:mc:olmo3base,MMLU humanities,constituent,higher,0.4014978701203632
+16,olmobase:mcqa_non_stem,mmlu:other:mc:olmo3base,MMLU other,constituent,higher,0.3959086849330614
+16,olmobase:mcqa_non_stem,mmlu:social_sciences:mc:olmo3base,MMLU social sciences,constituent,higher,0.4385671691639282
+16,olmobase:mcqa_non_stem,csqa:mc_olmo3base,CommonsenseQA,constituent,higher,0.4077
+16,olmobase:mcqa_non_stem,piqa:mc_olmo3base,PIQA,constituent,higher,0.443
+16,olmobase:mcqa_non_stem,socialiqa:mc_olmo3base,SocialIQA,constituent,higher,0.4064
+16,olmobase:mcqa_non_stem,coqa:mc:olmo3base,CoQA,constituent,higher,0.44553990610328637
+16,olmobase:mcqa_non_stem,drop:mc:olmo3base,DROP,constituent,higher,0.35579345088161207
+16,olmobase:mcqa_non_stem,jeopardy:mc:olmo3base,Jeopardy,constituent,higher,0.4554124940391035
+16,olmobase:mcqa_non_stem,naturalqs:mc:olmo3base,NaturalQuestions,constituent,higher,0.36718359179589793
+16,olmobase:mcqa_non_stem,squad:mc:olmo3base,SQuAD,constituent,higher,0.4720379146919431
+16,olmobase:mcqa_non_stem,olmobase:mcqa_non_stem,Aggregate,aggregate,higher,0.41718555288447234
+1,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.2502
+1,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.0
+1,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.4553
+1,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.2016653769285436
+1,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.003963926174496645
+1,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.0012145582235330958
+1,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.002822714681440443
+1,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.00787618439379401
+1,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.004570410105537168
+1,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.10306813005637167
+2,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.5052
+2,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.0780128080729672
+2,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.5148
+2,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.5396454934015679
+2,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.0202369966442953
+2,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.03464700015319214
+2,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.015232686980609419
+2,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.06548326709319316
+2,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.06686158829300545
+2,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.20445776007098118
+3,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.6964
+3,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.3737628565883951
+3,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.6335
+3,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.7977125014969793
+3,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.23613464765100672
+3,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.4550138576051364
+3,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.18971745152354572
+3,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.5849817454505087
+3,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.41213306769590236
+3,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.4865951253346082
+4,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7652
+4,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.5503590141665049
+4,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7567
+4,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.8832434825171255
+4,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.39177852348993286
+4,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.603219666660309
+4,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.3055013850415512
+4,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.7882959284484846
+4,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.5510615014564725
+4,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.6217066113089312
+5,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.8094
+5,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.6508829807878905
+5,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.8349
+5,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.9116374704298478
+5,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.431501677852349
+5,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.6675889058952572
+5,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.32711357340720226
+5,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.5659568072193654
+5,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.6176573899940254
+5,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.6462932006206598
+6,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7732
+6,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.6671841645643315
+6,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.8091
+6,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.8770588680083019
+6,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.4694672818791946
+6,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.6548558502877051
+6,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.29008033240997233
+6,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.46365056051785325
+6,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.6048295717508478
+6,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.6232696254909118
+7,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7928
+7,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.7021152726567048
+7,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.8339
+7,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.8983778255005251
+7,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.5321885486577181
+7,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.6793426873126873
+7,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.27162880886426594
+7,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.5433222191794901
+7,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.621591488283458
+7,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.6528074278283166
+8,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.6999
+8,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.6303124393557151
+8,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7338
+8,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.7971039259763839
+8,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.48124265939597316
+8,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.5951397799586035
+8,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.1822770083102493
+8,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.7127666637548464
+8,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.5479220749274992
+8,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.59782939463103
+9,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7411
+9,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.6805744226664079
+9,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7887
+9,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.843690682708277
+9,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.5354016359060403
+9,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.6358536372691636
+9,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.331393351800554
+9,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.6792526510196992
+9,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.58677510930363
+9,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.6469712767415302
+10,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.6849
+10,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.6332233650300796
+10,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7243
+10,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.7814561956735805
+10,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.5001101090604027
+10,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.5893808768029356
+10,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.31664542936288087
+10,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.72067539912661
+10,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.5381837838121513
+10,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.6098750176520711
+11,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7181
+11,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.676693188433922
+11,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7714
+11,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.8182129969997787
+11,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.5409763003355704
+11,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.6284553052503052
+11,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.3298476454293629
+11,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.7722025681950857
+11,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.5684869329663563
+11,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.6471527708455979
+12,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.4391
+12,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.4123811372016301
+12,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.4785
+12,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.5143713980154578
+12,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.3363601090604027
+12,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.38228101010101007
+12,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.2054736842105263
+12,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.4763201048978638
+12,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.34857300287881154
+12,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.39926227181841134
+16,olmobase:gen,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.3927
+16,olmobase:gen,lambada:olmo3base,LAMBADA,constituent,higher,0.38288375703473704
+16,olmobase:gen,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.4308
+16,olmobase:gen,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.46840984610749287
+16,olmobase:gen,drop:gen:olmo3base,DROP,constituent,higher,0.3170364932885906
+16,olmobase:gen,jeopardy:gen:olmo3base,Jeopardy,constituent,higher,0.34717491988403754
+16,olmobase:gen,naturalqs:gen:olmo3base,NaturalQuestions,constituent,higher,0.18252077562326868
+16,olmobase:gen,squad:gen:olmo3base,SQuAD,constituent,higher,0.4321085835552589
+16,olmobase:gen,coqa:gen:olmo3base,CoQA,constituent,higher,0.3207009607570809
+16,olmobase:gen,olmobase:gen,Aggregate,aggregate,higher,0.36381503736116294
+1,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.01042456406368461
+1,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.006275
+1,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.00043842352235184885
+1,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.00571266252867882
+2,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.013078089461713419
+2,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.006041666666666667
+2,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.009717518605479378
+2,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.009612424911286487
+3,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.31624336618650495
+3,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.15072500000000003
+3,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.23469356693385732
+3,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.23388731104012075
+4,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.5532600454890069
+4,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.32416666666666666
+4,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.4500389499620886
+4,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.442488554039254
+5,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.7294351781652767
+5,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.48640833333333333
+5,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.5240048818464526
+5,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.5799494644483542
+6,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.7250758150113723
+6,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.4729916666666667
+6,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.5243676090043232
+6,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.5741450302274541
+7,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.7882865807429871
+7,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.5826416666666666
+7,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.548963354768651
+7,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.6399638673927682
+8,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.7102918877937832
+8,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.5299666666666667
+8,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.48671580615586063
+8,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.5756581202054368
+9,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.7666793025018954
+9,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.5814666666666667
+9,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.5073644042158504
+9,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.6185034577948042
+10,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.7059325246398787
+10,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.560625
+10,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.4634875475121184
+10,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.5766816907173323
+11,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.7644048521607278
+11,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.598675
+11,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.4996428563218705
+11,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.6209075694941995
+12,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.4851213040181956
+12,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.36722499999999997
+12,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.3162512804723182
+12,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.38953252816350464
+16,olmobase:math,gsm8k:olmo3base,GSM8K,constituent,higher,0.42181576952236544
+16,olmobase:math,gsm_symb:olmo3base,GSM-Symbolic,constituent,higher,0.3239
+16,olmobase:math,minerva_math:olmo3base,Minerva Math,constituent,higher,0.29443658892147695
+16,olmobase:math,olmobase:math,Aggregate,aggregate,higher,0.34671745281461414
+1,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.24275893175210583
+1,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.2357312529892189
+1,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.18591318591318592
+1,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.2502
+1,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.4553
+1,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.33111566018423744
+1,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.4455930359085963
+1,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.168075117370892
+1,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.20591939546599497
+1,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.22365283738674296
+1,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.19609804902451225
+1,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.21943127962085307
+1,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.232
+1,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.3824451410658307
+1,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.2016653769285436
+1,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.21923076923076923
+1,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.18518518518518517
+1,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.0
+1,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.22256753526177384
+1,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.18538884524744698
+1,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.36283185840707965
+1,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.2498256580277376
+2,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.3981926776295377
+2,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.322235062822545
+2,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.2702702702702703
+2,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.5052
+2,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.5148
+2,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.4017400204708291
+2,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.6229597388465724
+2,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.33380281690140845
+2,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.2663727959697733
+2,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.4988078206962327
+2,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.27763881940970486
+2,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.4056872037914692
+2,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.62
+2,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.5329153605015674
+2,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.5396454934015679
+2,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.23653846153846153
+2,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.23148148148148148
+2,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.0782068697845915
+2,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.2907004542194597
+2,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.24430479183032208
+2,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.5493046776232617
+2,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.40383078285100593
+3,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.5685754013399065
+3,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.4579525089701249
+3,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.47583947583947583
+3,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.6964
+3,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.6335
+3,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.4882292732855681
+3,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.7257889009793254
+3,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.6704225352112676
+3,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.46914357682619645
+3,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.793037672865999
+3,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.5282641320660331
+3,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.690521327014218
+3,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.855
+3,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.5172413793103449
+3,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.7977125014969793
+3,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.27884615384615385
+3,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.26851851851851855
+3,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.3741509800116437
+3,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.34592397800621566
+3,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.3676355066771406
+3,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.5006321112515802
+3,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.576630066376422
+4,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.6516358120453684
+4,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.5277144906144777
+4,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.6224406224406225
+4,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7652
+4,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7567
+4,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.5383828045035824
+4,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.7557127312295974
+4,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.8032863849765258
+4,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.6649874055415617
+4,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.8588459704339533
+4,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.6173086543271635
+4,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.8246445497630331
+4,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.873
+4,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.7021943573667712
+4,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.8832434825171255
+4,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.2846153846153846
+4,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.3055555555555556
+4,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.5495827673200078
+4,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.40545063351661487
+4,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.4556166535742341
+4,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.8609355246523388
+4,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.690362254990683
+5,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.7240536766987279
+5,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.5702010508692736
+5,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.7076167076167076
+5,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.8094
+5,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.8349
+5,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.5839303991811668
+5,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.7965179542981502
+5,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.8708920187793427
+5,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.7380352644836272
+5,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.8984263233190272
+5,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.6843421710855427
+5,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.8535545023696682
+5,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.913
+5,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.7335423197492164
+5,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.9116374704298478
+5,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.27115384615384613
+5,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.32407407407407407
+5,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.6526295361925092
+5,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.42983504661726035
+5,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.5074626865671642
+5,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.9146649810366625
+5,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.7439285320680997
+6,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.7049613024442376
+6,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.5567217622895824
+6,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.6822276822276823
+6,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7732
+6,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.8091
+6,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.5660184237461617
+6,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.7540805223068553
+6,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.8361502347417841
+6,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.7304785894206549
+6,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.8593228421554602
+6,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.6528264132066033
+6,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.8227488151658767
+6,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.862
+6,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.6865203761755486
+6,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.8770588680083019
+6,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.2903846153846154
+6,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.2777777777777778
+6,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.6660197942945857
+6,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.42027253167583073
+6,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.5003927729772192
+6,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.8824273072060683
+6,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.7180278020022344
+7,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.7377687569667092
+7,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.5778315878047299
+7,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.7182637182637183
+7,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7928
+7,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.8339
+7,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.5767656090071648
+7,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.7818280739934712
+7,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.8619718309859155
+7,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.7657430730478589
+7,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.8674296614210777
+7,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.6623311655827914
+7,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.8582938388625593
+7,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.898
+7,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.7304075235109718
+7,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.8983778255005251
+7,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.27115384615384613
+7,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.2777777777777778
+7,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.7019212109450805
+7,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.42935692087018884
+7,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.5137470542026709
+7,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.9051833122629582
+7,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.7427326928014942
+8,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.6428225658174463
+8,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.5053171777422787
+8,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.6314496314496314
+8,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.6999
+8,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7338
+8,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.5046059365404298
+8,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.6713819368879217
+8,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.7492957746478873
+8,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.6807304785894207
+8,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.7792083929422985
+8,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.5887943971985993
+8,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.7635071090047393
+8,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.777
+8,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.6802507836990596
+8,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.7971039259763839
+8,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.2673076923076923
+8,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.25
+8,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.6272074519697264
+8,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.3901506096103275
+8,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.45640219952867245
+8,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.7876106194690266
+8,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.6561336311091499
+9,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.6961803760011951
+9,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.5406584823133078
+9,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.6723996723996724
+9,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7411
+9,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7887
+9,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.5429887410440123
+9,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.7328618063112078
+9,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.7995305164319249
+9,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.7367758186397985
+9,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.8288030519790176
+9,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.6123061530765382
+9,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.818957345971564
+9,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.833
+9,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.6990595611285266
+9,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.843690682708277
+9,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.275
+9,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.26851851851851855
+9,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.6817387929361537
+9,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.4128615825962228
+9,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.48860958366064416
+9,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.8508217446270544
+9,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.7011075743065851
+10,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.6371350018960941
+10,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.5035262485552467
+10,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.6248976248976249
+10,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.6849
+10,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7243
+10,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.5168884339815762
+10,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.6653971708378672
+10,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.7549295774647887
+10,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.6908060453400504
+10,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.7701478302336672
+10,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.5647823911955978
+10,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.7606635071090048
+10,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.765
+10,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.6175548589341693
+10,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.7814561956735805
+10,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.25384615384615383
+10,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.25
+10,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.6415680186299243
+10,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.38034903179536217
+10,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.44461901021209743
+10,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.7699115044247787
+10,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.6473069711148122
+11,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.6957767377989221
+11,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.5369412074263837
+11,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.6552006552006552
+11,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.7181
+11,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.7714
+11,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.5491299897645855
+11,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.7181719260065288
+11,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.7906103286384977
+11,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.7141057934508817
+11,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.8059132093466858
+11,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.5947973986993497
+11,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.8203791469194313
+11,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.793
+11,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.6833855799373041
+11,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.8182129969997787
+11,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.27307692307692305
+11,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.25925925925925924
+11,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.6797981758199108
+11,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.3958881185751853
+11,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.4783974862529458
+11,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.816055625790139
+11,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.6860665461382729
+12,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.42021825191620416
+12,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.3248724168287766
+12,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.4176904176904177
+12,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.4391
+12,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.4785
+12,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.3336745138178096
+12,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.41077257889009794
+12,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.4812206572769953
+12,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.45025188916876574
+12,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.5135908440629471
+12,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.37018509254627313
+12,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.5104265402843602
+12,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.504
+12,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.4482758620689655
+12,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.5143713980154578
+12,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.17692307692307693
+12,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.1574074074074074
+12,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.425383271880458
+12,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.25077695433899116
+12,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.2678711704634721
+12,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.5088495575221239
+12,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.42473849561958504
+16,olmobase:easy:qa:rc,arc:rc:olmo3base,ARC,constituent,higher,0.3826605072338861
+16,olmobase:easy:qa:rc,mmlu:rc:olmo3base,MMLU,constituent,higher,0.29526190150466697
+16,olmobase:easy:qa:rc,csqa:rc:olmo3base,CommonsenseQA,constituent,higher,0.37674037674037675
+16,olmobase:easy:qa:rc,hellaswag:rc:olmo3base,HellaSwag,constituent,higher,0.3927
+16,olmobase:easy:qa:rc,winogrande:rc:olmo3base,WinoGrande,constituent,higher,0.4308
+16,olmobase:easy:qa:rc,socialiqa:rc:olmo3base,SocialIQA,constituent,higher,0.30808597748208805
+16,olmobase:easy:qa:rc,piqa:rc:olmo3base,PIQA,constituent,higher,0.3797606093579978
+16,olmobase:easy:qa:rc,coqa:rc:olmo3base,CoQA,constituent,higher,0.4309859154929577
+16,olmobase:easy:qa:rc,drop:rc:olmo3base,DROP,constituent,higher,0.3998740554156171
+16,olmobase:easy:qa:rc,jeopardy:rc:olmo3base,Jeopardy,constituent,higher,0.46494992846924177
+16,olmobase:easy:qa:rc,naturalqs:rc:olmo3base,NaturalQuestions,constituent,higher,0.33166583291645824
+16,olmobase:easy:qa:rc,squad:rc:olmo3base,SQuAD,constituent,higher,0.45829383886255926
+16,olmobase:easy:qa:rc,sciq:rc:olmo3base,SciQ,constituent,higher,0.448
+16,olmobase:easy:qa:rc,qasper_yesno:rc:olmo3base,Qasper Yes/No,constituent,higher,0.4263322884012539
+16,olmobase:easy:qa:rc,basic_skills:rc:olmo3base,Basic Skills,constituent,higher,0.46840984610749287
+16,olmobase:easy:qa:rc,lab_bench_dbqa:olmo3base,LAB-Bench DBQA,constituent,higher,0.1673076923076923
+16,olmobase:easy:qa:rc,lab_bench_protocolqa:olmo3base,LAB-Bench ProtocolQA,constituent,higher,0.1388888888888889
+16,olmobase:easy:qa:rc,lambada,LAMBADA,constituent,higher,0.39161653405783037
+16,olmobase:easy:qa:rc,medmcqa:rc:olmo3base,MedMCQA,constituent,higher,0.21898159215873775
+16,olmobase:easy:qa:rc,medqa_en:rc:olmo3base,MedQA,constituent,higher,0.23644933228593873
+16,olmobase:easy:qa:rc,sciriff_yesno:rc:olmo3base,SciRIFF Yes/No,constituent,higher,0.4664981036662453
+16,olmobase:easy:qa:rc,olmobase:easy:qa:rc,Aggregate,aggregate,higher,0.3846350863238605
+1,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.23550637202514335
+1,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,4.3535867287257375
+1,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.1891891891891892
+1,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,3.1688236090859436
+1,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,3.3140056893207994
+1,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,3.413546136197687
+1,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.45973884657236125
+1,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,4.193391319842796
+1,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,6.682121967230924
+1,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,4.371433933300009
+1,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,5.105201789530703
+1,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,4.471241729666619
+1,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,3.722007803509113
+1,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,4.25328699252674
+1,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,5.494180719405905
+1,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,9.506300429060765
+1,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,4.9508875716649285
+1,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,4.123024150415731
+1,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,5.114334708793297
+1,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,4.530927327061683
+1,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,4.407928856424744
+1,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,4.293573834018082
+2,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.4022139770859907
+2,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,1.4015486127759273
+2,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.27927927927927926
+2,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,1.119828438297262
+2,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.5950897942347049
+2,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.7457890337225752
+2,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.6202393906420022
+2,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,1.5030980257725706
+2,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,2.6369565119385676
+2,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,1.2973525373471269
+2,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,1.9467469035975398
+2,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,1.3110032542916459
+2,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,1.3261786039454757
+2,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,1.2241067639351253
+2,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,1.3710859928863186
+2,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,4.76566819477487
+2,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.7343756520414597
+2,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,1.501695877770011
+2,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,1.8962010239839429
+2,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,1.3900476340064212
+2,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,1.420807564962305
+2,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,1.6105016894005921
+3,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.5645196274462486
+3,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.7832302301599613
+3,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.48402948402948404
+3,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.7905009112108741
+3,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.2720281921261911
+3,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.320446137058847
+3,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.7236126224156693
+3,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.6356588784368816
+3,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,1.4734677970931953
+3,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.41015497910955856
+3,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.8284833858915411
+3,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.49842179694795324
+3,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.48624706636933046
+3,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.6626452241617642
+3,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.5149099648770614
+3,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,3.4650209159945664
+3,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.2394653205924127
+3,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.6865365771316146
+3,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,1.0430561917950147
+3,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.6503307439250112
+3,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.8660402376361326
+3,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.9457388400189914
+4,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.6522786166557497
+4,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.6577908352203523
+4,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.6183456183456183
+4,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.6988655316373283
+4,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.2119696631703114
+4,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.1670886709947308
+4,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.764961915125136
+4,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.42394307505558987
+4,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.986238803070327
+4,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.2790798149084642
+4,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.6376847230097299
+4,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.31359808772235953
+4,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.33589164696407847
+4,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.32963625846136574
+4,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.2889984653823457
+4,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,3.2464702035507544
+4,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.1271389351492316
+4,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.45881990719909355
+4,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.8599049925504795
+4,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.5336697226276244
+4,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.16876746577910917
+4,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.7571398667117081
+5,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.7189514599924156
+5,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.6127250696652959
+5,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.7010647010647011
+5,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.6641081449233334
+5,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.2972252347756774
+5,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.0703393072837675
+5,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.8035908596300326
+5,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.3690260736120084
+5,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.8980482538411331
+5,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.24463339626640457
+5,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.5620201613531138
+5,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.31078214661019904
+5,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.31088108840459727
+5,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.2661265349418044
+5,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.25551887189050176
+5,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,3.0682446098927048
+5,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.0805959277151964
+5,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.3640056308393681
+5,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.8099290205540596
+5,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.4991685401436275
+5,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.12224033833067045
+5,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.7164080335332955
+6,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.7078729559531607
+6,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.5923867197604362
+6,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.6895986895986896
+6,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.6480131466350038
+6,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.3000530771921381
+6,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.060168332242074
+6,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.7714907508161044
+6,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.3536014882208511
+6,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.8112067944667747
+6,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.2299656950925043
+6,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.5435426459244465
+6,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.31471787558710435
+6,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.2891300438806663
+6,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.24572167735893097
+6,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.23197217167200493
+6,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,2.983207350718229
+6,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.035974987044397
+6,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.31219316259819585
+6,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.7820675621547585
+6,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.4979852273496343
+6,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.09634169426987658
+6,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.6903806679468646
+7,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.7312222049850037
+7,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.5813418348128151
+7,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.7182637182637183
+7,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.6394372735703747
+7,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.291705547849384
+7,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.073454321190179
+7,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.7850924918389554
+7,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.34921205772896924
+7,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.7274867690212612
+7,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.22580978331295923
+7,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.5325869938140334
+7,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.27446231912956764
+7,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.27850554610326445
+7,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.22957071303674026
+7,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.22754241620243254
+7,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,2.9210311078683717
+7,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.0466059140100845
+7,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.28381481957851556
+7,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.7664594155084616
+7,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.4926680284111448
+7,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.08457825398973884
+7,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.6771293905981128
+8,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.6461033830914377
+8,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.5782662842468453
+8,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.6363636363636364
+8,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.635659327616767
+8,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.2627908000415187
+8,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.0932023870800804
+8,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.6773667029379761
+8,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.351187444999283
+8,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.7078683043689449
+8,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.22190679683013423
+8,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.5287024783740207
+8,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.2580402225583002
+8,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.2672589400833019
+8,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.22764622356982359
+8,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.22188526883123771
+8,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,2.9174596562151063
+8,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.0419626049397401
+8,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.26461509152519025
+8,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.7531155188942672
+8,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.4998274306585284
+8,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.07575089447069296
+8,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.6615307880666599
+9,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.7033984612909527
+9,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.5825880678083086
+9,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.6691236691236692
+9,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.6381506446561294
+9,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.2854439757491103
+9,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.0746032206573213
+9,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.735038084874864
+9,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.3477753267557865
+9,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.670922539359269
+9,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.2181090713860787
+9,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.5357940465577034
+9,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.23036824260034022
+9,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.2704116072722837
+9,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.21598586370575215
+9,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.21840672066804356
+9,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,2.874422176246273
+9,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.0381076928388162
+9,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.2543805261874784
+9,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.7622262240667852
+9,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.479578229124465
+9,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.07348112645366588
+9,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.6604595924129714
+10,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.6473279438296503
+10,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.5802302760640896
+10,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.6167076167076168
+10,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.638356808929266
+10,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.2707560779840505
+10,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.05637820231712
+10,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.6719260065288357
+10,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.3573270644200537
+10,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.6186832701490649
+10,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.2177645112278772
+10,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.5374580852984527
+10,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.2111896846118906
+10,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.2588544726489752
+10,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.21296698799018543
+10,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.22299752132198694
+10,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,2.9229322606545463
+10,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.0547849072690043
+10,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.24839947258869313
+10,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.7621187572013184
+10,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.48175848001776667
+10,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.07563578908991644
+10,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.6523923290071372
+11,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.690322594546144
+11,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.57904109167017
+11,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.6797706797706797
+11,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.6413565197537139
+11,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.2507529227650418
+11,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.0484479232174302
+11,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.7170837867247007
+11,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.3561259152583707
+11,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.5396781217388393
+11,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.21506545680599085
+11,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.539212333526946
+11,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.1978773452733864
+11,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.26678513713688257
+11,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.20312779582620227
+11,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.21749715316211857
+11,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,2.904564684488723
+11,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.0481443007958706
+11,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.24211724125420964
+11,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.758573782651252
+11,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.4807880202594756
+11,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.07332054401745755
+11,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.6484941335436463
+12,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.4244672263016973
+12,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.5801591212237616
+12,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.407043407043407
+12,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.6438702086920314
+12,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.236525232325824
+12,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,1.0235764940676484
+12,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.4423286180631121
+12,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.36142314024093025
+12,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.48765972123827184
+12,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.22482494450903384
+12,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.5347869787386904
+12,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.1961694310069387
+12,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.24783586605731264
+12,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.22160158481717365
+12,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.22077370492993945
+12,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,2.881472753450232
+12,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.0775158688281221
+12,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.24068798806984132
+12,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.7735750718544128
+12,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.4620674564622406
+12,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.07933590836369143
+12,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.6180328659620453
+16,olmobase:easy:qa:bpb,arc:bpb:olmo3base,ARC,constituent,lower,0.38869640661449534
+16,olmobase:easy:qa:bpb,mmlu:bpb,MMLU,constituent,lower,0.5846888340688186
+16,olmobase:easy:qa:bpb,csqa:bpb:olmo3base,CommonsenseQA,constituent,lower,0.38493038493038495
+16,olmobase:easy:qa:bpb,hellaswag:bpb:olmo3base,HellaSwag,constituent,lower,0.6534454123100394
+16,olmobase:easy:qa:bpb,winogrande:bpb:olmo3base,WinoGrande,constituent,lower,1.2064413252053598
+16,olmobase:easy:qa:bpb,socialiqa:bpb:olmo3base,SocialIQA,constituent,lower,0.9976920798753731
+16,olmobase:easy:qa:bpb,piqa:bpb:olmo3base,PIQA,constituent,lower,0.39662676822633297
+16,olmobase:easy:qa:bpb,coqa:bpb:olmo3base,CoQA,constituent,lower,0.37036728442534134
+16,olmobase:easy:qa:bpb,drop:bpb:olmo3base,DROP,constituent,lower,0.3849385254642664
+16,olmobase:easy:qa:bpb,jeopardy:bpb:olmo3base,Jeopardy,constituent,lower,0.22886642565141438
+16,olmobase:easy:qa:bpb,naturalqs:bpb:olmo3base,NaturalQuestions,constituent,lower,0.5428889619202131
+16,olmobase:easy:qa:bpb,squad:bpb:olmo3base,SQuAD,constituent,lower,0.16490525188965272
+16,olmobase:easy:qa:bpb,sciq:bpb:olmo3base,SciQ,constituent,lower,0.24824240079051849
+16,olmobase:easy:qa:bpb,qasper_yesno:bpb:olmo3base,Qasper Yes/No,constituent,lower,0.2239437918333264
+16,olmobase:easy:qa:bpb,basic_skills:bpb:olmo3base,Basic Skills,constituent,lower,0.2188646785273007
+16,olmobase:easy:qa:bpb,lab_bench_dbqa:bpb:olmo3base,LAB-Bench DBQA,constituent,lower,2.932129610471505
+16,olmobase:easy:qa:bpb,lab_bench_protocolqa:bpb:olmo3base,LAB-Bench ProtocolQA,constituent,lower,1.0553915969149241
+16,olmobase:easy:qa:bpb,lambada:bpb:olmo3base,LAMBADA,constituent,lower,0.23027690027232645
+16,olmobase:easy:qa:bpb,medmcqa:bpb:olmo3base,MedMCQA,constituent,lower,0.7806047708136511
+16,olmobase:easy:qa:bpb,medqa_en:bpb:olmo3base,MedQA,constituent,lower,0.45555909392978855
+16,olmobase:easy:qa:bpb,sciriff_yesno:bpb:olmo3base,SciRIFF Yes/No,constituent,lower,0.07787282000396036
+16,olmobase:easy:qa:bpb,olmobase:easy:qa:bpb,Aggregate,aggregate,lower,0.6071221469604304
+1,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,5.155702488553791
+1,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,4.099362116553409
+1,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,4.865198724970483
+1,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,5.766446814296809
+1,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,4.745801389397948
+1,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,4.434820759156523
+1,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,5.65264950979774
+1,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,4.959997400389528
+2,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.8663757156352669
+2,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.8214823613947637
+2,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.8686605684321738
+2,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.8800546783680085
+2,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.9241294129684575
+2,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.8145670859155448
+2,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.7233000800496945
+2,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.8426528432519872
+3,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.4465067519909872
+3,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.46070723763548244
+3,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.45446785343086404
+3,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.3899462600709592
+3,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.49425486192496887
+3,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.43825586008310274
+3,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.2901882893379576
+3,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.42490387349633174
+4,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.3771293877039349
+4,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.38853444870054227
+4,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.37024175538762893
+4,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.2967660543455612
+4,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.4148514245599226
+4,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.3703024077042348
+4,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.21128866867681603
+4,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.3470163067255201
+5,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.35587701535523736
+5,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.3628666377375517
+5,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.3371358886374828
+5,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.26794301393173003
+5,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.388099819998805
+5,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.3526063247437797
+5,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.1853906529502374
+5,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.32141705047926056
+6,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.3491547626546042
+6,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.3534735532271713
+6,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.32037771491340694
+6,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.25658734784922194
+6,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.380620875986223
+6,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.34634351595565055
+6,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.17766314065048947
+6,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.3120315587481096
+7,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.34586128534113925
+7,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.3498267653056936
+7,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.31566381916133296
+7,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.25022898108925734
+7,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.3745845549821595
+7,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.3435541617044544
+7,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.17147397553500363
+7,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.3073133633027201
+8,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.3455172950235367
+8,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.3467031220873669
+8,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.3161232817833689
+8,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.2501043054199429
+8,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.37277715220233204
+8,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.34395000403813886
+8,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.16911217845146012
+8,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.3063267627151638
+9,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.34696448148138653
+9,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.35214834499533315
+9,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.3176843148894637
+9,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.24957980868835924
+9,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.37575913106396125
+9,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.34339071122856046
+9,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.17123567453176697
+9,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.308108923839833
+10,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.34745665326373354
+10,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.34858379271198386
+10,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.3167780319843378
+10,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.249711452637457
+10,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.37619895423337707
+10,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.34699916239424466
+10,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.1718350215677059
+10,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.3082232955418343
+11,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.3491577143024187
+11,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.3513015463250427
+11,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.3154683273402931
+11,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.2505343145850941
+11,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.3747714832088433
+11,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.3472638167444479
+11,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.1732884932156432
+11,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.3088265279602547
+12,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.34956893845150055
+12,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.3540545948153467
+12,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.3162581063547873
+12,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.24918042062067972
+12,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.37175546797147024
+12,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.34620934201147535
+12,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.1739422248461526
+12,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.3087098707244875
+16,olmobase:easy:math:bpb,minerva_math_algebra:bpb:olmo3base,Minerva Math: Algebra,constituent,lower,0.35274549495997837
+16,olmobase:easy:math:bpb,minerva_math_counting_and_probability:bpb:olmo3base,Minerva Math: Counting And Probability,constituent,lower,0.3528828329190622
+16,olmobase:easy:math:bpb,minerva_math_geometry:bpb:olmo3base,Minerva Math: Geometry,constituent,lower,0.3261940450762317
+16,olmobase:easy:math:bpb,minerva_math_intermediate_algebra:bpb:olmo3base,Minerva Math: Intermediate Algebra,constituent,lower,0.2537101966388415
+16,olmobase:easy:math:bpb,minerva_math_number_theory:bpb:olmo3base,Minerva Math: Number Theory,constituent,lower,0.3778548957705317
+16,olmobase:easy:math:bpb,minerva_math_prealgebra:bpb:olmo3base,Minerva Math: Prealgebra,constituent,lower,0.35220795991276077
+16,olmobase:easy:math:bpb,minerva_math_precalculus:bpb:olmo3base,Minerva Math: Precalculus,constituent,lower,0.18187525744848018
+16,olmobase:easy:math:bpb,olmobase:easy:math:bpb,Aggregate,aggregate,lower,0.3139243832465552
+1,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,4.191662330272049
+1,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,4.931134123163195
+1,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,4.7644226678985335
+1,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,4.629073040444593
+2,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.7733298769518094
+2,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.9826587981393954
+2,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.7612532360845146
+2,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.839080637058573
+3,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.41164110492685774
+3,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.5282625934237243
+3,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.33189379936057034
+3,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.4239324992370508
+4,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.35965157891562427
+4,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.3447604074160041
+4,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.24936392366929752
+4,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.31792530333364194
+5,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.34497511103349193
+5,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.2956460109740051
+5,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.22490693397537004
+5,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.288509351994289
+6,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.33777659277641786
+6,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.27229533076106965
+6,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.21599735094035502
+6,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.2753564248259475
+7,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.3157188389508675
+7,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.2577871569983047
+7,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.21370361921075073
+7,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.26240320505330766
+8,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.30411805457998536
+8,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.25679507359763265
+8,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.21340230721592457
+8,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.2581051451311809
+9,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.28833193501933796
+9,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.26240474139392583
+9,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.21452761181091404
+9,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.25508809607472593
+10,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.2961160935744433
+10,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.26264765685649255
+10,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.21586561436004545
+10,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.2582097882636604
+11,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.3002574903595916
+11,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.26233328301802067
+11,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.21722846806732135
+11,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.2599397471483112
+12,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.29998411452945734
+12,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.2584473018545158
+12,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.21971356988213314
+12,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.2593816620887021
+16,olmobase:easy:code:bpb,codex_humaneval:bpb:olmo3base,HumanEval,constituent,lower,0.2711469050953267
+16,olmobase:easy:code:bpb,mbpp:bpb:olmo3base,MBPP,constituent,lower,0.2656767905978699
+16,olmobase:easy:code:bpb,mt_mbpp:bpb:olmo3base,Multilingual MBPP,constituent,lower,0.22885460332716404
+16,olmobase:easy:code:bpb,olmobase:easy:code:bpb,Aggregate,aggregate,lower,0.25522609967345355

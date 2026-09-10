@@ -77,6 +77,36 @@ class BeakerStatusReporterTest(unittest.TestCase):
 
         self.assertEqual(fake_client.workload.update.call_count, 2)
 
+    def test_initialization_failure_disables_reporter(self) -> None:
+        fake_client = mock.MagicMock()
+        fake_client.workload.get.side_effect = RuntimeError("control plane unavailable")
+        with (
+            mock.patch.dict("os.environ", {"BEAKER_WORKLOAD_ID": "wl_xyz"}, clear=True),
+            mock.patch.object(beaker_status.Beaker, "from_env", return_value=fake_client),
+        ):
+            reporter = beaker_status.BeakerStatusReporter()
+
+        self.assertIsNone(reporter._client)
+        self.assertIsNone(reporter._workload)
+        reporter.update("ignored")
+
+    def test_update_failure_is_nonfatal_and_disables_reporter(self) -> None:
+        fake_client = mock.MagicMock()
+        fake_workload = mock.MagicMock()
+        fake_client.workload.get.return_value = fake_workload
+        fake_client.workload.update.side_effect = RuntimeError("transport unavailable")
+        with (
+            mock.patch.dict("os.environ", {"BEAKER_WORKLOAD_ID": "wl_xyz"}, clear=True),
+            mock.patch.object(beaker_status.Beaker, "from_env", return_value=fake_client),
+        ):
+            reporter = beaker_status.BeakerStatusReporter(min_interval=0.0)
+            reporter.update("best effort")
+            reporter.update("disabled")
+
+        self.assertEqual(fake_client.workload.update.call_count, 1)
+        self.assertIsNone(reporter._client)
+        self.assertIsNone(reporter._workload)
+
 
 if __name__ == "__main__":
     unittest.main()

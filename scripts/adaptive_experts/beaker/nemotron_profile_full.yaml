@@ -1,0 +1,109 @@
+version: v2
+description: >-
+  Four balanced urgent shards for the 60-prompt BF16 Nemotron-3-Super
+  native-K router and routed/shared expert-contribution profile.
+tasks:
+  - &profile_task
+    name: shard-0
+    image:
+      beaker: 01KVTNKQXYACY9J3HEE265KJXA
+    command: [/bin/bash, -lc]
+    arguments:
+      - >-
+        UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache
+        uv pip install --python /opt/venv/bin/python
+        "transformers==5.7.0" "accelerate>=1.0" &&
+        /opt/venv/bin/python
+        /profile_code/nemotron_router_contribution_profile.py
+        --model nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
+        --manifest /profile_data/qwen3_k8_manifest.jsonl
+        --output /results
+        --num-shards 4
+        --shard-index 0
+        --max-new-tokens 32768
+        --chunk-size 64
+    envVars:
+      - name: HF_HOME
+        value: /weka/oe-eval-default/oyvindt/hf-cache
+      - name: HF_HUB_CACHE
+        value: /weka/oe-eval-default/oyvindt/hf-cache
+      - name: HF_TOKEN
+        secret: jacobm_HF_TOKEN
+      - name: PYTORCH_ALLOC_CONF
+        value: expandable_segments:True
+    datasets:
+      - mountPath: /profile_code
+        source:
+          beaker: 01KXSHHFMDVT4Z2SD73ZQS0D6S
+      - mountPath: /profile_data
+        source:
+          beaker: 01KXS8SVQE3YW8Z64QCCCWP91B
+      - mountPath: /weka/oe-eval-default
+        source:
+          weka: oe-eval-default
+    result:
+      path: /results
+    resources:
+      cpuCount: 48
+      gpuCount: 4
+      memory: 256 GiB
+      sharedMemory: 32 GiB
+    context:
+      priority: urgent
+      minRuntime: 0s
+      autoResume: true
+    constraints:
+      cluster:
+        - ai2/jupiter
+    hostNetworking: false
+    propagateFailure: false
+    propagatePreemption: false
+    timeout: 72h0m0s
+  - <<: *profile_task
+    name: shard-1
+    arguments:
+      - >-
+        UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache
+        uv pip install --python /opt/venv/bin/python
+        "transformers==5.7.0" "accelerate>=1.0" &&
+        /opt/venv/bin/python
+        /profile_code/nemotron_router_contribution_profile.py
+        --model nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
+        --manifest /profile_data/qwen3_k8_manifest.jsonl
+        --output /results
+        --num-shards 4
+        --shard-index 1
+        --max-new-tokens 32768
+        --chunk-size 64
+  - <<: *profile_task
+    name: shard-2
+    arguments:
+      - >-
+        UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache
+        uv pip install --python /opt/venv/bin/python
+        "transformers==5.7.0" "accelerate>=1.0" &&
+        /opt/venv/bin/python
+        /profile_code/nemotron_router_contribution_profile.py
+        --model nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
+        --manifest /profile_data/qwen3_k8_manifest.jsonl
+        --output /results
+        --num-shards 4
+        --shard-index 2
+        --max-new-tokens 32768
+        --chunk-size 64
+  - <<: *profile_task
+    name: shard-3
+    arguments:
+      - >-
+        UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache
+        uv pip install --python /opt/venv/bin/python
+        "transformers==5.7.0" "accelerate>=1.0" &&
+        /opt/venv/bin/python
+        /profile_code/nemotron_router_contribution_profile.py
+        --model nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
+        --manifest /profile_data/qwen3_k8_manifest.jsonl
+        --output /results
+        --num-shards 4
+        --shard-index 3
+        --max-new-tokens 32768
+        --chunk-size 64

@@ -295,6 +295,18 @@ register_variant(
     ),
 )
 
+for _task_name in ("humaneval", "humaneval_plus"):
+    register_variant(
+        _task_name,
+        "qwen3_thinking",
+        sampling_params=SamplingParams(
+            max_tokens=32768,
+            temperature=0.6,
+            top_p=0.95,
+            top_k=20,
+        ),
+    )
+
 
 # =============================================================================
 # OLMo3 base variant (```python code block prompt wrapping)

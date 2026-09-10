@@ -1,0 +1,150 @@
+{
+  "linear_attention": {
+    "layers": 30,
+    "selected_rank_weights": [
+      0.20692336536202405,
+      0.15413483091016397,
+      0.130665042612819,
+      0.11641611723450232,
+      0.10673250385751772,
+      0.09981066165322008,
+      0.09463839371902258,
+      0.09067784667642813
+    ],
+    "selected_cumulative_shares": [
+      0.20692336536202405,
+      0.3610581962721881,
+      0.49172323888500713,
+      0.6081393561195093,
+      0.7148718599770271,
+      0.8146825216302472,
+      0.9093209153492698,
+      0.9999987620256977
+    ],
+    "router": {
+      "raw_top8_mass": 0.113196561007014,
+      "full_entropy": 5.296404357918943,
+      "full_effective_experts": 201.07586431503853,
+      "selected_entropy": 2.022439216994911,
+      "selected_effective_experts": 7.572057387340998,
+      "rank8_rank9_probability_gap": 0.00041372293992392444,
+      "rank8_rank9_logit_gap": 0.03903480816842632,
+      "selected_weight_sum": 0.9999987620256978
+    },
+    "shared_branch": {
+      "shared_gate": 0.17202180401835016,
+      "routed_output_norm": 0.6985843096019854,
+      "shared_unweighted_norm": 5.167843895714873,
+      "shared_output_norm": 0.7664958955266206,
+      "total_moe_output_norm": 1.1187796439147482,
+      "routed_to_total_norm_ratio": 0.6673041386154467,
+      "shared_to_total_norm_ratio": 0.6585028270322966,
+      "shared_branch_norm_fraction": 0.498444313894501,
+      "routed_projection_share": 0.5085429558705573,
+      "shared_projection_share": 0.4913552773139259,
+      "routed_shared_cosine": 0.056857720985396994,
+      "branch_coherence_ratio": 0.7561057760354033,
+      "total_reconstruction_relative_l2": 0.0022848693797903196
+    }
+  },
+  "full_attention": {
+    "layers": 10,
+    "selected_rank_weights": [
+      0.20643355700318775,
+      0.15319385443730055,
+      0.1302170898416249,
+      0.11635052863573765,
+      0.10700143885959268,
+      0.10026205939001076,
+      0.09521641789583325,
+      0.09132398368211245
+    ],
+    "selected_cumulative_shares": [
+      0.20643355700318775,
+      0.35962741144048826,
+      0.4898445012821132,
+      0.6061950299178508,
+      0.7131964687774434,
+      0.8134585281674542,
+      0.9086749460632875,
+      0.9999989297454001
+    ],
+    "router": {
+      "raw_top8_mass": 0.11112008547772403,
+      "full_entropy": 5.30296481922012,
+      "full_effective_experts": 202.45793466968743,
+      "selected_entropy": 2.023642716348365,
+      "selected_effective_experts": 7.581140564747289,
+      "rank8_rank9_probability_gap": 0.0003986693332131283,
+      "rank8_rank9_logit_gap": 0.03808804685493065,
+      "selected_weight_sum": 0.9999989297454001
+    },
+    "shared_branch": {
+      "shared_gate": 0.1932832701575266,
+      "routed_output_norm": 0.9451977751461822,
+      "shared_unweighted_norm": 7.188094070741331,
+      "shared_output_norm": 1.3970563235684612,
+      "total_moe_output_norm": 1.8273752499701275,
+      "routed_to_total_norm_ratio": 0.620970738028231,
+      "shared_to_total_norm_ratio": 0.7027059476580254,
+      "shared_branch_norm_fraction": 0.5358127205027156,
+      "routed_projection_share": 0.45344454643899423,
+      "shared_projection_share": 0.5464019299850097,
+      "routed_shared_cosine": 0.05021612902394821,
+      "branch_coherence_ratio": 0.7582164361739915,
+      "total_reconstruction_relative_l2": 0.002367808559508242
+    }
+  },
+  "full_minus_linear": {
+    "selected_rank_weights": [
+      -0.0004898083588363022,
+      -0.0009409764728634251,
+      -0.00044795277119411003,
+      -6.558859876466816e-05,
+      0.0002689350020749631,
+      0.0004513977367906763,
+      0.0005780241768106736,
+      0.0006461370056843191
+    ],
+    "selected_cumulative_shares": [
+      -0.0004898083588363022,
+      -0.0014307848316998384,
+      -0.0018787376028939207,
+      -0.0019443262016585194,
+      -0.001675391199583709,
+      -0.001223993462793005,
+      -0.0006459692859823729,
+      1.6771970234863431e-07
+    ],
+    "router": {
+      "raw_top8_mass": -0.0020764755292899673,
+      "full_entropy": 0.006560461301177156,
+      "full_effective_experts": 1.3820703546489028,
+      "selected_entropy": 0.001203499353453985,
+      "selected_effective_experts": 0.009083177406290943,
+      "rank8_rank9_probability_gap": -1.5053606710796138e-05,
+      "rank8_rank9_logit_gap": -0.0009467613134956712,
+      "selected_weight_sum": 1.67719702237612e-07
+    },
+    "shared_branch": {
+      "shared_gate": 0.021261466139176455,
+      "routed_output_norm": 0.24661346554419683,
+      "shared_unweighted_norm": 2.020250175026458,
+      "shared_output_norm": 0.6305604280418406,
+      "total_moe_output_norm": 0.7085956060553793,
+      "routed_to_total_norm_ratio": -0.04633340058721569,
+      "shared_to_total_norm_ratio": 0.04420312062572884,
+      "shared_branch_norm_fraction": 0.037368406608214555,
+      "routed_projection_share": -0.05509840943156308,
+      "shared_projection_share": 0.05504665267108377,
+      "routed_shared_cosine": -0.006641591961448784,
+      "branch_coherence_ratio": 0.002110660138588183,
+      "total_reconstruction_relative_l2": 8.293917971792259e-05
+    }
+  },
+  "analysis": {
+    "phase": "generated",
+    "weighting": "token",
+    "prompt_counts": null
+  }
+}

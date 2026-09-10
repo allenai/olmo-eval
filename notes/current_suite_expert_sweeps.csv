@@ -1,0 +1,257 @@
+model,routing,k,metric,n,mean,sd
+Qwen3-30B-A3B hybrid thinking,normalized,3,MATH-500 ↑,3,62.130000,0.760000
+Qwen3-30B-A3B hybrid thinking,normalized,3,GPQA Diamond ↑,3,40.070000,5.560000
+Qwen3-30B-A3B hybrid thinking,normalized,3,IFBench macro (32k) ↑,3,27.116128,0.963545
+Qwen3-30B-A3B hybrid thinking,normalized,3,HumanEval pass@1 ↑,3,22.154472,3.967321
+Qwen3-30B-A3B hybrid thinking,normalized,4,MATH-500 ↑,3,94.270000,0.230000
+Qwen3-30B-A3B hybrid thinking,normalized,4,GPQA Diamond ↑,3,56.060000,0.510000
+Qwen3-30B-A3B hybrid thinking,normalized,4,IFBench macro (32k) ↑,3,48.150220,0.349679
+Qwen3-30B-A3B hybrid thinking,normalized,4,HumanEval pass@1 ↑,3,82.317073,1.219512
+Qwen3-30B-A3B hybrid thinking,normalized,5,MATH-500 ↑,3,95.070000,0.700000
+Qwen3-30B-A3B hybrid thinking,normalized,5,GPQA Diamond ↑,3,60.270000,2.540000
+Qwen3-30B-A3B hybrid thinking,normalized,5,IFBench macro (32k) ↑,3,53.973690,0.288566
+Qwen3-30B-A3B hybrid thinking,normalized,5,HumanEval pass@1 ↑,3,88.617886,1.960092
+Qwen3-30B-A3B hybrid thinking,normalized,6,MATH-500 ↑,3,95.070000,0.230000
+Qwen3-30B-A3B hybrid thinking,normalized,6,GPQA Diamond ↑,3,62.460000,1.770000
+Qwen3-30B-A3B hybrid thinking,normalized,6,IFBench macro (32k) ↑,3,56.228064,0.269233
+Qwen3-30B-A3B hybrid thinking,normalized,6,HumanEval pass@1 ↑,3,93.089431,2.141393
+Qwen3-30B-A3B hybrid thinking,normalized,7,MATH-500 ↑,3,95.130000,0.310000
+Qwen3-30B-A3B hybrid thinking,normalized,7,GPQA Diamond ↑,3,62.460000,2.040000
+Qwen3-30B-A3B hybrid thinking,normalized,7,IFBench macro (32k) ↑,3,56.221019,0.564605
+Qwen3-30B-A3B hybrid thinking,normalized,7,HumanEval pass@1 ↑,3,94.105691,1.534519
+Qwen3-30B-A3B hybrid thinking,normalized,8,MATH-500 ↑,3,95.330000,0.120000
+Qwen3-30B-A3B hybrid thinking,normalized,8,GPQA Diamond ↑,3,61.280000,2.040000
+Qwen3-30B-A3B hybrid thinking,normalized,8,IFBench macro (32k) ↑,3,55.956650,0.489769
+Qwen3-30B-A3B hybrid thinking,normalized,8,HumanEval pass@1 ↑,3,93.292683,0.000000
+Qwen3-30B-A3B hybrid thinking,normalized,9,MATH-500 ↑,3,94.400000,0.530000
+Qwen3-30B-A3B hybrid thinking,normalized,9,GPQA Diamond ↑,3,62.460000,1.770000
+Qwen3-30B-A3B hybrid thinking,normalized,9,IFBench macro (32k) ↑,3,56.778334,0.503995
+Qwen3-30B-A3B hybrid thinking,normalized,9,HumanEval pass@1 ↑,3,91.056911,1.862836
+Qwen3-30B-A3B hybrid thinking,normalized,10,MATH-500 ↑,3,94.870000,0.610000
+Qwen3-30B-A3B hybrid thinking,normalized,10,GPQA Diamond ↑,3,62.460000,0.290000
+Qwen3-30B-A3B hybrid thinking,normalized,10,IFBench macro (32k) ↑,3,56.850562,0.400958
+Qwen3-30B-A3B hybrid thinking,normalized,10,HumanEval pass@1 ↑,3,91.869919,0.931418
+Qwen3-30B-A3B hybrid thinking,normalized,11,MATH-500 ↑,3,95.000000,0.350000
+Qwen3-30B-A3B hybrid thinking,normalized,11,GPQA Diamond ↑,3,63.300000,1.270000
+Qwen3-30B-A3B hybrid thinking,normalized,11,IFBench macro (32k) ↑,3,56.649952,0.665267
+Qwen3-30B-A3B hybrid thinking,normalized,11,HumanEval pass@1 ↑,3,91.869919,0.931418
+Qwen3-30B-A3B hybrid thinking,normalized,12,MATH-500 ↑,3,94.470000,0.230000
+Qwen3-30B-A3B hybrid thinking,normalized,12,GPQA Diamond ↑,3,60.940000,0.290000
+Qwen3-30B-A3B hybrid thinking,normalized,12,IFBench macro (32k) ↑,3,56.301053,0.522265
+Qwen3-30B-A3B hybrid thinking,normalized,12,HumanEval pass@1 ↑,3,89.837398,0.352043
+Qwen3-30B-A3B hybrid thinking,normalized,13,MATH-500 ↑,2,93.800000,0.000000
+Qwen3-30B-A3B hybrid thinking,normalized,13,GPQA Diamond ↑,2,60.100000,5.000000
+Qwen3-30B-A3B hybrid thinking,normalized,13,IFBench macro (32k) ↑,3,55.808612,0.217448
+Qwen3-30B-A3B hybrid thinking,normalized,13,HumanEval pass@1 ↑,3,88.211382,1.862836
+Qwen3-30B-A3B hybrid thinking,normalized,14,MATH-500 ↑,2,94.000000,0.280000
+Qwen3-30B-A3B hybrid thinking,normalized,14,GPQA Diamond ↑,2,61.620000,1.430000
+Qwen3-30B-A3B hybrid thinking,normalized,14,IFBench macro (32k) ↑,3,55.216097,0.438573
+Qwen3-30B-A3B hybrid thinking,normalized,14,HumanEval pass@1 ↑,3,86.585366,0.609756
+Qwen3-30B-A3B hybrid thinking,normalized,15,MATH-500 ↑,2,94.400000,0.570000
+Qwen3-30B-A3B hybrid thinking,normalized,15,GPQA Diamond ↑,2,63.380000,2.500000
+Qwen3-30B-A3B hybrid thinking,normalized,15,IFBench macro (32k) ↑,3,55.209725,0.383999
+Qwen3-30B-A3B hybrid thinking,normalized,15,HumanEval pass@1 ↑,3,87.804878,0.609756
+Qwen3-30B-A3B hybrid thinking,normalized,16,MATH-500 ↑,3,93.730000,0.120000
+Qwen3-30B-A3B hybrid thinking,normalized,16,GPQA Diamond ↑,3,58.250000,2.960000
+Qwen3-30B-A3B hybrid thinking,normalized,16,IFBench macro (32k) ↑,3,55.349690,0.197926
+Qwen3-30B-A3B hybrid thinking,normalized,16,HumanEval pass@1 ↑,3,86.991870,2.308499
+Qwen3-30B-A3B hybrid thinking,reference_scaled,3,MATH-500 ↑,3,93.200000,1.000000
+Qwen3-30B-A3B hybrid thinking,reference_scaled,3,GPQA Diamond ↑,3,53.030303,1.515152
+Qwen3-30B-A3B hybrid thinking,reference_scaled,3,IFBench macro (32k) ↑,3,49.029710,0.210092
+Qwen3-30B-A3B hybrid thinking,reference_scaled,3,HumanEval pass@1 ↑,3,76.626016,1.534519
+Qwen3-30B-A3B hybrid thinking,reference_scaled,4,MATH-500 ↑,3,94.866667,0.416333
+Qwen3-30B-A3B hybrid thinking,reference_scaled,4,GPQA Diamond ↑,3,60.774411,1.051346
+Qwen3-30B-A3B hybrid thinking,reference_scaled,4,IFBench macro (32k) ↑,3,54.285696,0.409365
+Qwen3-30B-A3B hybrid thinking,reference_scaled,4,HumanEval pass@1 ↑,3,86.178862,2.464300
+Qwen3-30B-A3B hybrid thinking,reference_scaled,5,MATH-500 ↑,3,95.333333,0.305505
+Qwen3-30B-A3B hybrid thinking,reference_scaled,5,GPQA Diamond ↑,3,59.764310,1.623510
+Qwen3-30B-A3B hybrid thinking,reference_scaled,5,IFBench macro (32k) ↑,3,55.457962,0.390504
+Qwen3-30B-A3B hybrid thinking,reference_scaled,5,HumanEval pass@1 ↑,3,92.682927,2.198507
+Qwen3-30B-A3B hybrid thinking,reference_scaled,6,MATH-500 ↑,3,94.800000,0.200000
+Qwen3-30B-A3B hybrid thinking,reference_scaled,6,GPQA Diamond ↑,3,61.447811,1.271016
+Qwen3-30B-A3B hybrid thinking,reference_scaled,6,IFBench macro (32k) ↑,3,56.642051,0.507317
+Qwen3-30B-A3B hybrid thinking,reference_scaled,6,HumanEval pass@1 ↑,3,92.886179,0.931418
+Qwen3-30B-A3B hybrid thinking,reference_scaled,7,MATH-500 ↑,3,94.666667,0.416333
+Qwen3-30B-A3B hybrid thinking,reference_scaled,7,GPQA Diamond ↑,3,63.468013,2.386776
+Qwen3-30B-A3B hybrid thinking,reference_scaled,7,IFBench macro (32k) ↑,3,56.229663,0.165535
+Qwen3-30B-A3B hybrid thinking,reference_scaled,7,HumanEval pass@1 ↑,3,91.260163,1.269309
+Qwen3-30B-A3B hybrid thinking,reference_scaled,8,MATH-500 ↑,3,95.330000,0.120000
+Qwen3-30B-A3B hybrid thinking,reference_scaled,8,GPQA Diamond ↑,3,61.280000,2.040000
+Qwen3-30B-A3B hybrid thinking,reference_scaled,8,IFBench macro (32k) ↑,3,55.956650,0.489769
+Qwen3-30B-A3B hybrid thinking,reference_scaled,8,HumanEval pass@1 ↑,3,93.292683,0.000000
+Qwen3-30B-A3B hybrid thinking,reference_scaled,9,MATH-500 ↑,3,95.200000,0.346410
+Qwen3-30B-A3B hybrid thinking,reference_scaled,9,GPQA Diamond ↑,3,63.804714,2.915910
+Qwen3-30B-A3B hybrid thinking,reference_scaled,9,IFBench macro (32k) ↑,3,56.149683,0.542168
+Qwen3-30B-A3B hybrid thinking,reference_scaled,9,HumanEval pass@1 ↑,3,92.479675,1.534519
+Qwen3-30B-A3B hybrid thinking,reference_scaled,10,MATH-500 ↑,3,95.000000,0.529150
+Qwen3-30B-A3B hybrid thinking,reference_scaled,10,GPQA Diamond ↑,3,64.646465,0.874773
+Qwen3-30B-A3B hybrid thinking,reference_scaled,10,IFBench macro (32k) ↑,3,56.801888,0.549254
+Qwen3-30B-A3B hybrid thinking,reference_scaled,10,HumanEval pass@1 ↑,3,90.853659,2.112257
+Qwen3-30B-A3B hybrid thinking,reference_scaled,11,MATH-500 ↑,3,95.333333,0.416333
+Qwen3-30B-A3B hybrid thinking,reference_scaled,11,GPQA Diamond ↑,3,62.962963,3.583131
+Qwen3-30B-A3B hybrid thinking,reference_scaled,11,IFBench macro (32k) ↑,3,56.772232,0.574365
+Qwen3-30B-A3B hybrid thinking,reference_scaled,11,HumanEval pass@1 ↑,3,91.869919,0.931418
+Qwen3-30B-A3B hybrid thinking,reference_scaled,12,MATH-500 ↑,3,95.266667,0.503322
+Qwen3-30B-A3B hybrid thinking,reference_scaled,12,GPQA Diamond ↑,3,62.794613,2.102693
+Qwen3-30B-A3B hybrid thinking,reference_scaled,12,IFBench macro (32k) ↑,3,56.803244,0.514950
+Qwen3-30B-A3B hybrid thinking,reference_scaled,12,HumanEval pass@1 ↑,3,91.260163,2.464300
+Qwen3-30B-A3B hybrid thinking,reference_scaled,13,MATH-500 ↑,3,95.000000,0.529150
+Qwen3-30B-A3B hybrid thinking,reference_scaled,13,GPQA Diamond ↑,3,66.329966,2.041137
+Qwen3-30B-A3B hybrid thinking,reference_scaled,13,IFBench macro (32k) ↑,3,57.284197,0.727518
+Qwen3-30B-A3B hybrid thinking,reference_scaled,13,HumanEval pass@1 ↑,3,91.260163,2.464300
+Qwen3-30B-A3B hybrid thinking,reference_scaled,14,MATH-500 ↑,3,94.733333,0.642910
+Qwen3-30B-A3B hybrid thinking,reference_scaled,14,GPQA Diamond ↑,3,62.962963,1.623510
+Qwen3-30B-A3B hybrid thinking,reference_scaled,14,IFBench macro (32k) ↑,3,57.642040,0.123366
+Qwen3-30B-A3B hybrid thinking,reference_scaled,14,HumanEval pass@1 ↑,3,91.056911,1.862836
+Qwen3-30B-A3B hybrid thinking,reference_scaled,15,MATH-500 ↑,3,95.466667,0.115470
+Qwen3-30B-A3B hybrid thinking,reference_scaled,15,GPQA Diamond ↑,3,61.952862,0.771477
+Qwen3-30B-A3B hybrid thinking,reference_scaled,15,IFBench macro (32k) ↑,3,56.388535,0.817973
+Qwen3-30B-A3B hybrid thinking,reference_scaled,15,HumanEval pass@1 ↑,3,90.853659,1.219512
+Qwen3-30B-A3B hybrid thinking,reference_scaled,16,MATH-500 ↑,3,94.333333,0.305505
+Qwen3-30B-A3B hybrid thinking,reference_scaled,16,GPQA Diamond ↑,3,62.121212,0.505051
+Qwen3-30B-A3B hybrid thinking,reference_scaled,16,IFBench macro (32k) ↑,3,56.487163,0.491957
+Qwen3-30B-A3B hybrid thinking,reference_scaled,16,HumanEval pass@1 ↑,3,90.040650,1.534519
+GPT-OSS-120B,normalized,1,MATH-500 ↑,3,42.800000,2.163300
+GPT-OSS-120B,normalized,1,GPQA Diamond ↑,3,29.966300,3.722800
+GPT-OSS-120B,normalized,1,IFBench macro (32k) ↑,3,26.578201,0.919131
+GPT-OSS-120B,normalized,1,HumanEval pass@1 ↑,3,7.926829,2.198507
+GPT-OSS-120B,normalized,2,MATH-500 ↑,3,92.000000,0.529200
+GPT-OSS-120B,normalized,2,GPQA Diamond ↑,3,70.033700,0.291600
+GPT-OSS-120B,normalized,2,IFBench macro (32k) ↑,3,72.194859,0.560719
+GPT-OSS-120B,normalized,2,HumanEval pass@1 ↑,3,98.170732,1.219512
+GPT-OSS-120B,normalized,3,MATH-500 ↑,3,91.866700,1.101500
+GPT-OSS-120B,normalized,3,GPQA Diamond ↑,3,74.579100,1.271000
+GPT-OSS-120B,normalized,3,IFBench macro (32k) ↑,3,71.404472,0.404587
+GPT-OSS-120B,normalized,3,HumanEval pass@1 ↑,3,97.967480,0.704086
+GPT-OSS-120B,normalized,4,MATH-500 ↑,3,92.400000,0.346400
+GPT-OSS-120B,normalized,4,GPQA Diamond ↑,3,70.538700,1.623500
+GPT-OSS-120B,normalized,4,IFBench macro (32k) ↑,3,71.604434,0.357884
+GPT-OSS-120B,normalized,4,HumanEval pass@1 ↑,3,98.373984,0.352043
+GPT-OSS-120B,normalized,5,MATH-500 ↑,3,91.866700,0.901800
+GPT-OSS-120B,normalized,5,GPQA Diamond ↑,3,72.222200,0.874800
+GPT-OSS-120B,normalized,5,IFBench macro (32k) ↑,3,71.986539,0.475522
+GPT-OSS-120B,normalized,5,HumanEval pass@1 ↑,3,97.560976,0.609756
+GPT-OSS-120B,normalized,6,MATH-500 ↑,3,92.466700,0.986600
+GPT-OSS-120B,normalized,6,GPQA Diamond ↑,3,70.538700,1.543000
+GPT-OSS-120B,normalized,6,IFBench macro (32k) ↑,3,71.269658,0.598745
+GPT-OSS-120B,normalized,6,HumanEval pass@1 ↑,3,96.951220,1.219512
+GPT-OSS-120B,normalized,7,MATH-500 ↑,3,92.000000,0.529200
+GPT-OSS-120B,normalized,7,GPQA Diamond ↑,3,70.202000,0.505100
+GPT-OSS-120B,normalized,7,IFBench macro (32k) ↑,3,71.901527,0.499264
+GPT-OSS-120B,normalized,7,HumanEval pass@1 ↑,3,97.764228,0.931418
+GPT-OSS-120B,normalized,8,MATH-500 ↑,3,91.933300,0.757200
+GPT-OSS-120B,normalized,8,GPQA Diamond ↑,3,68.518500,4.113400
+GPT-OSS-120B,normalized,8,IFBench macro (32k) ↑,3,70.412655,0.193689
+GPT-OSS-120B,normalized,8,HumanEval pass@1 ↑,3,97.560976,0.609756
+GPT-OSS-120B,reference_scaled,1,MATH-500 ↑,3,49.933333,1.890326
+GPT-OSS-120B,reference_scaled,1,GPQA Diamond ↑,3,21.717172,1.749546
+GPT-OSS-120B,reference_scaled,1,IFBench macro (32k) ↑,3,32.525856,0.485975
+GPT-OSS-120B,reference_scaled,1,HumanEval pass@1 ↑,3,44.715447,3.872471
+GPT-OSS-120B,reference_scaled,2,MATH-500 ↑,3,91.266667,0.230940
+GPT-OSS-120B,reference_scaled,2,GPQA Diamond ↑,3,67.508418,1.051346
+GPT-OSS-120B,reference_scaled,2,IFBench macro (32k) ↑,3,69.702060,0.503863
+GPT-OSS-120B,reference_scaled,2,HumanEval pass@1 ↑,3,97.154472,1.269309
+GPT-OSS-120B,reference_scaled,3,MATH-500 ↑,3,92.066667,0.832666
+GPT-OSS-120B,reference_scaled,3,GPQA Diamond ↑,3,70.707071,1.820985
+GPT-OSS-120B,reference_scaled,3,IFBench macro (32k) ↑,3,70.590483,0.836535
+GPT-OSS-120B,reference_scaled,3,HumanEval pass@1 ↑,3,97.967480,0.352043
+GPT-OSS-120B,reference_scaled,4,MATH-500 ↑,3,92.400000,0.346400
+GPT-OSS-120B,reference_scaled,4,GPQA Diamond ↑,3,70.538700,1.623500
+GPT-OSS-120B,reference_scaled,4,IFBench macro (32k) ↑,3,71.604434,0.357884
+GPT-OSS-120B,reference_scaled,4,HumanEval pass@1 ↑,3,98.373984,0.352043
+GPT-OSS-120B,reference_scaled,5,MATH-500 ↑,3,92.533333,0.503322
+GPT-OSS-120B,reference_scaled,5,GPQA Diamond ↑,3,74.579125,1.773679
+GPT-OSS-120B,reference_scaled,5,IFBench macro (32k) ↑,3,72.601469,0.596487
+GPT-OSS-120B,reference_scaled,5,HumanEval pass@1 ↑,3,98.373984,0.352043
+GPT-OSS-120B,reference_scaled,6,MATH-500 ↑,3,92.200000,1.249000
+GPT-OSS-120B,reference_scaled,6,GPQA Diamond ↑,3,71.380471,1.542955
+GPT-OSS-120B,reference_scaled,6,IFBench macro (32k) ↑,3,73.483963,0.530415
+GPT-OSS-120B,reference_scaled,6,HumanEval pass@1 ↑,3,97.967480,0.931418
+GPT-OSS-120B,reference_scaled,7,MATH-500 ↑,3,91.866667,0.986577
+GPT-OSS-120B,reference_scaled,7,GPQA Diamond ↑,3,71.717172,4.373866
+GPT-OSS-120B,reference_scaled,7,IFBench macro (32k) ↑,3,71.968041,0.277927
+GPT-OSS-120B,reference_scaled,7,HumanEval pass@1 ↑,3,98.170732,0.609756
+GPT-OSS-120B,reference_scaled,8,MATH-500 ↑,3,91.600000,0.200000
+GPT-OSS-120B,reference_scaled,8,GPQA Diamond ↑,3,72.222222,0.505051
+GPT-OSS-120B,reference_scaled,8,IFBench macro (32k) ↑,3,72.465684,0.700549
+GPT-OSS-120B,reference_scaled,8,HumanEval pass@1 ↑,3,98.170732,0.609756
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,3,MATH-500 ↑,3,82.466667,1.514376
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,3,GPQA Diamond ↑,3,43.265993,1.542955
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,3,IFBench macro (32k) ↑,3,38.932136,0.538702
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,3,HumanEval pass@1 ↑,3,2.439024,1.056129
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,4,MATH-500 ↑,3,91.266667,0.305505
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,4,GPQA Diamond ↑,3,53.198653,1.051346
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,4,IFBench macro (32k) ↑,3,44.667176,0.331528
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,4,HumanEval pass@1 ↑,3,6.300813,2.464300
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,5,MATH-500 ↑,3,93.333333,0.503322
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,5,GPQA Diamond ↑,3,57.070707,2.812002
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,5,IFBench macro (32k) ↑,3,47.531622,0.441863
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,5,HumanEval pass@1 ↑,3,13.211382,1.960092
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,6,MATH-500 ↑,3,93.333333,0.461880
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,6,GPQA Diamond ↑,3,56.060606,1.010101
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,6,IFBench macro (32k) ↑,3,49.257199,0.526751
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,6,HumanEval pass@1 ↑,3,12.601626,2.308499
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,7,MATH-500 ↑,3,93.400000,0.200000
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,7,GPQA Diamond ↑,3,58.249158,1.773679
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,7,IFBench macro (32k) ↑,3,49.303742,0.213104
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,7,HumanEval pass@1 ↑,3,18.292683,1.056129
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,8,MATH-500 ↑,3,93.133333,0.577350
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,8,GPQA Diamond ↑,3,56.228956,2.041137
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,8,IFBench macro (32k) ↑,3,50.816896,0.332704
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,8,HumanEval pass@1 ↑,3,25.406504,3.129025
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,9,MATH-500 ↑,3,93.533333,0.945163
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,9,GPQA Diamond ↑,3,55.892256,1.271016
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,9,IFBench macro (32k) ↑,3,50.494321,0.302897
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,9,HumanEval pass@1 ↑,3,21.544715,2.881595
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,10,MATH-500 ↑,3,92.733333,0.305505
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,10,GPQA Diamond ↑,3,54.208754,1.623510
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,10,IFBench macro (32k) ↑,3,50.478198,0.103292
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,10,HumanEval pass@1 ↑,3,23.577236,1.269309
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,11,MATH-500 ↑,3,92.933333,1.026320
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,11,GPQA Diamond ↑,3,52.356902,0.771477
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,11,IFBench macro (32k) ↑,3,49.503056,0.150573
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,11,HumanEval pass@1 ↑,3,25.000000,3.998438
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,12,MATH-500 ↑,3,92.066667,0.832666
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,12,GPQA Diamond ↑,3,50.673401,2.102693
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,12,IFBench macro (32k) ↑,3,50.076057,0.318541
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,normalized,12,HumanEval pass@1 ↑,3,25.203252,4.150524
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,3,MATH-500 ↑,3,89.933333,1.628906
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,3,GPQA Diamond ↑,3,45.117845,3.583131
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,3,IFBench macro (32k) ↑,3,44.806879,0.214038
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,3,HumanEval pass@1 ↑,3,2.642276,0.931418
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,4,MATH-500 ↑,3,91.533333,1.301281
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,4,GPQA Diamond ↑,3,47.979798,1.336238
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,4,IFBench macro (32k) ↑,3,47.144998,0.258394
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,4,HumanEval pass@1 ↑,3,3.455285,0.352043
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,5,MATH-500 ↑,3,92.933333,0.461880
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,5,GPQA Diamond ↑,3,55.218855,3.085910
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,5,IFBench macro (32k) ↑,3,48.321890,0.720699
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,5,HumanEval pass@1 ↑,3,4.674797,1.960092
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,6,MATH-500 ↑,3,93.400000,0.692820
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,6,GPQA Diamond ↑,3,55.892256,1.542955
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,6,IFBench macro (32k) ↑,3,49.212377,0.529249
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,6,HumanEval pass@1 ↑,3,9.959350,2.308499
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,7,MATH-500 ↑,3,93.266667,0.503322
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,7,GPQA Diamond ↑,3,55.723906,2.542032
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,7,IFBench macro (32k) ↑,3,49.786003,0.145109
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,7,HumanEval pass@1 ↑,3,16.056911,0.931418
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,8,MATH-500 ↑,3,93.200000,0.600000
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,8,GPQA Diamond ↑,3,59.932660,2.041137
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,8,IFBench macro (32k) ↑,3,50.547564,0.292548
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,8,HumanEval pass@1 ↑,3,26.829268,3.226526
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,9,MATH-500 ↑,3,93.733333,0.503322
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,9,GPQA Diamond ↑,3,58.249158,0.771477
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,9,IFBench macro (32k) ↑,3,50.926368,0.393119
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,9,HumanEval pass@1 ↑,3,29.065041,2.141393
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,10,MATH-500 ↑,3,93.933333,0.577350
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,10,GPQA Diamond ↑,3,57.744108,2.386776
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,10,IFBench macro (32k) ↑,3,50.547835,0.186895
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,10,HumanEval pass@1 ↑,3,27.845528,2.308499
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,11,MATH-500 ↑,3,94.066667,0.230940
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,11,GPQA Diamond ↑,3,57.070707,0.874773
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,11,IFBench macro (32k) ↑,3,50.735711,0.254482
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,11,HumanEval pass@1 ↑,3,25.203252,0.352043
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,12,MATH-500 ↑,3,93.866667,0.832666
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,12,GPQA Diamond ↑,3,55.218855,2.542032
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,12,IFBench macro (32k) ↑,3,50.115712,0.498472
+Qwen3-30B-A3B corrected Dolci/OLMo-3 SFT,reference_scaled,12,HumanEval pass@1 ↑,3,24.593496,3.129025

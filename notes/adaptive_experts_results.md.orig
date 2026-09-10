@@ -1,0 +1,159 @@
+# Adaptive expert sweep results
+
+Last updated: 2026-07-11T03:39:47Z
+
+All initial sweep experiments completed successfully. Pretraining reports only OLMoBase suite
+summaries; individual task metrics are intentionally omitted. Accuracy-like metrics are
+higher-is-better (↑), while bits per byte is lower-is-better (↓).
+
+Three-replicate summaries are reported as mean ± sample standard deviation; score standard
+deviations are in percentage points. Non-math OLMoBase suites are deterministic under these
+configs and were run once per K. Downloaded artifacts are stored under
+`results/adaptive_experts/<beaker-experiment-id>/`.
+
+## Pretraining: Qwen3-30B-A3B-Base
+
+### Experiment status
+
+| K | Consolidated Beaker experiment | Status |
+|---:|:-------------------------------|:-------|
+| 1 | [01KX597HRNRSJD6Q028SGR7X1J](https://beaker.org/ex/01KX597HRNRSJD6Q028SGR7X1J) | Succeeded |
+| 2 | [01KX597TE7GSPMXKQAHDKJ0TZG](https://beaker.org/ex/01KX597TE7GSPMXKQAHDKJ0TZG) | Succeeded |
+| 3 | [01KX7GKDS69Y3P61MPTJD9BPWD](https://beaker.org/ex/01KX7GKDS69Y3P61MPTJD9BPWD) | Running |
+| 4 | [01KX598334MGBFC3RN01PR27RH](https://beaker.org/ex/01KX598334MGBFC3RN01PR27RH) | Succeeded |
+| 5 | [01KX6M1VV8H27K4J2CVDV64Y82](https://beaker.org/ex/01KX6M1VV8H27K4J2CVDV64Y82) | Succeeded |
+| 6 | [01KX6M2634H40FR7WZP0WGCSZ9](https://beaker.org/ex/01KX6M2634H40FR7WZP0WGCSZ9) | Succeeded |
+| 7 | [01KX6M2QW5FG1BNH5DHW7F1PM1](https://beaker.org/ex/01KX6M2QW5FG1BNH5DHW7F1PM1) | Succeeded |
+| 8 | [01KX598BVQG62BXW751MJMEZTG](https://beaker.org/ex/01KX598BVQG62BXW751MJMEZTG) | Succeeded |
+| 9 | [01KX7GKR8K19TYT3Z26EA5RVQC](https://beaker.org/ex/01KX7GKR8K19TYT3Z26EA5RVQC) | Running |
+| 10 | [01KX7GM1MGHZYWYG9BWE55JABZ](https://beaker.org/ex/01KX7GM1MGHZYWYG9BWE55JABZ) | Running |
+| 11 | [01KX7GMAB9E6JEZ669XR33CEZA](https://beaker.org/ex/01KX7GMAB9E6JEZ669XR33CEZA) | Queued |
+| 12 | [01KX7GMM4TCFTVA32T7RPTNZHB](https://beaker.org/ex/01KX7GMM4TCFTVA32T7RPTNZHB) | Queued |
+| 16 | [01KX598MHGPFNET048MXHQGX64](https://beaker.org/ex/01KX598MHGPFNET048MXHQGX64) | Succeeded |
+
+### OLMoBase suite summaries
+
+| OLMoBase suite | Summary metric | Direction | K=1 | K=2 | K=4 | K=5 | K=6 | K=7 | K=8 | K=16 |
+|:---------------|:---------------|:---------:|----:|----:|----:|----:|----:|----:|----:|-----:|
+| `olmobase:mcqa_stem` | Primary score | ↑ | 22.70% | 32.34% | 75.22% | 79.71% | 77.13% | 79.52% | 69.69% | 39.60% |
+| `olmobase:mcqa_non_stem` | Primary score | ↑ | 25.37% | 31.63% | 76.96% | 82.26% | 79.95% | 81.91% | 72.30% | 41.72% |
+| `olmobase:gen` | Primary score | ↑ | 10.31% | 20.45% | 62.17% | 64.63% | 62.33% | 65.28% | 59.78% | 36.38% |
+| `olmobase:math` | Primary score | ↑ | 0.57% ± 0.01 pp | 0.95% ± 0.02 pp | 45.62% ± 1.19 pp | 58.93% ± 0.81 pp | 60.19% ± 2.40 pp | 66.15% ± 1.86 pp | 65.02% ± 6.45 pp | 58.47% ± 20.61 pp |
+| `olmobase:easy:qa:rc` | Primary score | ↑ | 24.98% | 40.38% | 69.04% | 74.39% | 71.80% | 74.27% | 65.61% | 38.46% |
+| `olmobase:easy:qa:bpb` | Bits per byte | ↓ | 4.2936 | 1.6105 | 0.7571 | 0.7164 | 0.6904 | 0.6771 | 0.6615 | 0.6071 |
+| `olmobase:easy:math:bpb` | Bits per byte | ↓ | 4.9600 | 0.8427 | 0.3470 | 0.3214 | 0.3120 | 0.3073 | 0.3063 | 0.3139 |
+| `olmobase:easy:code:bpb` | Bits per byte | ↓ | 4.6291 | 0.8391 | 0.3179 | 0.2885 | 0.2754 | 0.2624 | 0.2581 | 0.2552 |
+
+### OLMoBase math replicates
+
+Only the stochastic `olmobase:math` suite was repeated. Replicate 1 was run inside the full
+OLMoBase evaluation, while replicates 2 and 3 were math-only jobs. The large K=8 and K=16 shifts
+may therefore include a suite-scope, batching, or random-stream effect rather than measuring pure
+run-to-run noise; the individual values are preserved here rather than hidden inside the aggregate.
+
+| K | Replicate 1 | Replicate 2 | Replicate 3 | Mean ± sample SD |
+|---:|------------:|------------:|------------:|-----------------:|
+| 1 | 0.57% | 0.57% | 0.58% | 0.57% ± 0.01 pp |
+| 2 | 0.96% | 0.95% | 0.93% | 0.95% ± 0.02 pp |
+| 3 | — | 24.88% | 24.73% | 24.81% ± 0.10 pp (provisional, n=2) |
+| 4 | 44.25% | 46.26% | 46.36% | 45.62% ± 1.19 pp |
+| 5 | 57.99% | 59.36% | 59.43% | 58.93% ± 0.81 pp |
+| 6 | 57.41% | 61.69% | 61.46% | 60.19% ± 2.40 pp |
+| 7 | 64.00% | 67.31% | 67.13% | 66.15% ± 1.86 pp |
+| 8 | 57.57% | 68.78% | 68.71% | 65.02% ± 6.45 pp |
+| 16 | 34.67% | 70.26% | 70.48% | 58.47% ± 20.61 pp |
+
+## Post-training: Qwen3-30B-A3B hybrid thinking
+
+All three evaluations use a 32,768-token generation cap. HumanEval+ is excluded. Accuracy
+percentages use the full dataset as the denominator, so unfinished responses count as incorrect.
+
+### Primary scores
+
+| K | Beaker experiment | Status | MATH-500 accuracy ↑ | GPQA Diamond accuracy ↑ | IFEval OOD loose prompt accuracy ↑ | Macro average ↑ |
+|---:|:------------------|:-------|--------------------:|------------------------:|-----------------------------------:|----------------:|
+| 1 | [01KX56NQMVH3TVZKGAM9DPGF05](https://beaker.org/ex/01KX56NQMVH3TVZKGAM9DPGF05) | 3/3 complete | 0.00% ± 0.00 pp | 0.00% ± 0.00 pp | 0.00% ± 0.00 pp | 0.00% ± 0.00 pp |
+| 2 | [01KX56NZQVWQBKXH6VP6CXV345](https://beaker.org/ex/01KX56NZQVWQBKXH6VP6CXV345) | 3/3 complete | 0.07% ± 0.12 pp | 0.67% ± 0.29 pp | 0.00% ± 0.00 pp | 0.25% ± 0.08 pp |
+| 3 | [01KX7GFW9RCAPT76WTTBRWT0SR](https://beaker.org/ex/01KX7GFW9RCAPT76WTTBRWT0SR) | 0/3 complete; running | — | — | — | — |
+| 4 | [01KX56P8M9TD1MPMCT582AXZ87](https://beaker.org/ex/01KX56P8M9TD1MPMCT582AXZ87) | 3/3 complete | 94.27% ± 0.23 pp | 56.06% ± 0.51 pp | 28.89% ± 1.39 pp | 59.74% ± 0.43 pp |
+| 5 | [01KX6KSNE491THB9DT4Y9PPJ7W](https://beaker.org/ex/01KX6KSNE491THB9DT4Y9PPJ7W) | 3/3 complete | 95.07% ± 0.70 pp | 60.27% ± 2.54 pp | 34.44% ± 0.69 pp | 63.26% ± 0.69 pp |
+| 6 | [01KX6KSYGH7H8RQPEGJFYC3PEW](https://beaker.org/ex/01KX6KSYGH7H8RQPEGJFYC3PEW) | 3/3 complete | 95.07% ± 0.23 pp | 62.46% ± 1.77 pp | 38.11% ± 0.69 pp | 65.21% ± 0.49 pp |
+| 7 | [01KX6KT77JRKJSW67J2NY5BFQQ](https://beaker.org/ex/01KX6KT77JRKJSW67J2NY5BFQQ) | 3/3 complete | 95.13% ± 0.31 pp | 62.46% ± 2.04 pp | 37.78% ± 1.90 pp | 65.12% ± 0.87 pp |
+| 8 | [01KX56PH4KDPVQFSBB3ZHDEMB7](https://beaker.org/ex/01KX56PH4KDPVQFSBB3ZHDEMB7) | 3/3 complete | 95.33% ± 0.12 pp | 61.28% ± 2.04 pp | 37.78% ± 0.51 pp | 64.80% ± 0.79 pp |
+| 9 | [01KX7GG47N7XP7K8NYW9NE7B73](https://beaker.org/ex/01KX7GG47N7XP7K8NYW9NE7B73) | 3/3 complete | 94.40% ± 0.53 pp | 62.46% ± 1.77 pp | 40.56% ± 1.02 pp | 65.80% ± 0.51 pp |
+| 10 | [01KX7GGCK1WZX5XKEW3VHHDCB4](https://beaker.org/ex/01KX7GGCK1WZX5XKEW3VHHDCB4) | 3/3 complete | 94.87% ± 0.61 pp | 62.46% ± 0.29 pp | 42.44% ± 1.26 pp | 66.59% ± 0.50 pp |
+| 11 | [01KX7GGMF6J8VV1YJ8F1REKFQ3](https://beaker.org/ex/01KX7GGMF6J8VV1YJ8F1REKFQ3) | 3/3 complete | 95.00% ± 0.35 pp | 63.30% ± 1.27 pp | 41.11% ± 0.69 pp | 66.47% ± 0.61 pp |
+| 12 | [01KX7GGVVD8NQS8W2RFNAWNWXS](https://beaker.org/ex/01KX7GGVVD8NQS8W2RFNAWNWXS) | 3/3 complete | 94.47% ± 0.23 pp | 60.94% ± 0.29 pp | 40.67% ± 2.00 pp | 65.36% ± 0.69 pp |
+| 16 | [01KX56PSK9WJMQ68BTQ3P54P5D](https://beaker.org/ex/01KX56PSK9WJMQ68BTQ3P54P5D) | 3/3 complete | 93.73% ± 0.12 pp | 58.25% ± 2.96 pp | 42.44% ± 1.71 pp | 64.81% ± 1.11 pp |
+| 32 | [01KX5ACWAEQSRM0E54YFBB4Z8H](https://beaker.org/ex/01KX5ACWAEQSRM0E54YFBB4Z8H) | 3/3 complete | 76.00% ± 1.44 pp | 36.20% ± 1.05 pp | 33.67% ± 1.33 pp | 48.62% ± 0.75 pp |
+
+### Generation diagnostics (replicate 1)
+
+Final-answer and cap-hit counts are independent and are reported against each task's full sample
+count.
+
+| K | MATH finals | MATH cap hits | GPQA finals | GPQA cap hits | IFEval finals | IFEval cap hits |
+|---:|------------:|--------------:|------------:|--------------:|--------------:|----------------:|
+| 1 | 0/500 | 261/500 | 0/198 | 95/198 | 0/300 | 141/300 |
+| 2 | 7/500 | 482/500 | 7/198 | 183/198 | 0/300 | 300/300 |
+| 4 | 494/500 | 3/500 | 198/198 | 0/198 | 248/300 | 32/300 |
+| 5 | 499/500 | 2/500 | 198/198 | 0/198 | 283/300 | 17/300 |
+| 6 | 499/500 | 2/500 | 198/198 | 0/198 | 294/300 | 14/300 |
+| 7 | 500/500 | 0/500 | 198/198 | 0/198 | 292/300 | 12/300 |
+| 8 | 499/500 | 1/500 | 198/198 | 0/198 | 292/300 | 15/300 |
+| 9 | 499/500 | 1/500 | 198/198 | 0/198 | 291/300 | 15/300 |
+| 10 | 500/500 | 0/500 | 198/198 | 0/198 | 287/300 | 21/300 |
+| 11 | 499/500 | 1/500 | 198/198 | 0/198 | 286/300 | 18/300 |
+| 12 | 495/500 | 6/500 | 197/198 | 1/198 | 279/300 | 28/300 |
+| 16 | 496/500 | 4/500 | 196/198 | 2/198 | 269/300 | 37/300 |
+| 32 | 414/500 | 87/500 | 137/198 | 61/198 | 207/300 | 103/300 |
+
+### Mean generated tokens (replicate 1)
+
+These counts include reasoning tokens consumed by the Qwen reasoning parser.
+
+| K | MATH-500 | GPQA Diamond | IFEval OOD |
+|---:|---------:|-------------:|-----------:|
+| 1 | 22,815 | 22,664 | 21,681 |
+| 2 | 31,887 | 30,850 | 32,768 |
+| 4 | 6,234 | 6,611 | 5,339 |
+| 5 | 5,603 | 6,504 | 3,566 |
+| 6 | 5,294 | 6,016 | 3,286 |
+| 7 | 5,043 | 5,924 | 3,018 |
+| 8 | 5,021 | 5,862 | 3,348 |
+| 9 | 4,951 | 5,708 | 3,382 |
+| 10 | 4,835 | 5,722 | 3,945 |
+| 11 | 4,677 | 5,437 | 3,714 |
+| 12 | 4,885 | 5,438 | 4,695 |
+| 16 | 4,668 | 5,363 | 5,729 |
+| 32 | 8,308 | 12,618 | 12,341 |
+
+## Variance launch status
+
+Forty new experiments were submitted from the same source snapshot. All 40 succeeded. Together
+with the 11 original sweep jobs, all 51 final-sweep result bundles are archived locally. The
+archive contains 5,635 files (about 21 GB), and every local file count matches its Beaker dataset
+manifest as of the timestamp above.
+
+| Scope | New experiments | Replicate tags |
+|:------|----------------:|:---------------|
+| Post-training repeats at K=1/2/4/8/16/32 | 12 | `variance-r2-20260710`, `variance-r3-20260710` |
+| Post-training curve at K=5/6/7 | 9 | `curve-r1-20260710`, `curve-r2-20260710`, `curve-r3-20260710` |
+| Base math repeats at K=1/2/4/8/16 | 10 | `variance-r2-20260710`, `variance-r3-20260710` |
+| Full base curve at K=5/6/7 | 3 | `curve-r1-20260710` |
+| Base math curve repeats at K=5/6/7 | 6 | `curve-r2-20260710`, `curve-r3-20260710` |
+
+## Pending curve expansion: K=3/9/10/11/12
+
+Thirty additional experiments were submitted at urgent priority on 2026-07-11 to the
+[Beaker group](https://beaker.org/orgs/ai2/workspaces/olmo-instruct/groups/01KX7GDE76SY8F3KVX8Y55VWJ2).
+At the 2026-07-11T03:39:47Z status check, 14 had succeeded, 11 were running, 4 were queued, and 1
+had failed. The failed K=9 base-math r3 job hit an infrastructure port collision
+(EADDRINUSE) during vLLM startup and produced no score. All experiment IDs and exact commands
+are recorded in `beaker_jobs.jsonl`.
+
+| Scope | Experiments | Replicate tags |
+|:------|------------:|:---------------|
+| Post-training at K=3/9/10/11/12 | 15 | `curve-r1-20260711`, `curve-r2-20260711`, `curve-r3-20260711` |
+| Full base at K=3/9/10/11/12 | 5 | `curve-r1-20260711` |
+| Base math repeats at K=3/9/10/11/12 | 10 | `curve-r2-20260711`, `curve-r3-20260711` |

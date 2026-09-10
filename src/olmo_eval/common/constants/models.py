@@ -58,6 +58,40 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="Qwen/Qwen2.5-7B",
         ),
+        "qwen3-30b-a3b-base": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="Qwen/Qwen3-30B-A3B-Base",
+            max_model_len=32768,
+            kwargs={
+                "gpu_memory_utilization": 0.9,
+                "max_num_seqs": 16,
+            },
+        ),
+        "qwen3-30b-a3b": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="Qwen/Qwen3-30B-A3B",
+            max_model_len=40960,
+            kwargs={
+                "chat_template_kwargs": {"enable_thinking": True},
+                "gpu_memory_utilization": 0.9,
+                "max_num_seqs": 16,
+                "reasoning_parser": "qwen3",
+            },
+        ),
+        "qwen3.5-35b-a3b": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="Qwen/Qwen3.5-35B-A3B",
+            dependencies=("ninja",),
+            max_model_len=40960,
+            kwargs={
+                "chat_template_kwargs": {"enable_thinking": True},
+                "gpu_memory_utilization": 0.9,
+                "language_model_only": True,
+                "max_num_seqs": 16,
+                "reasoning_parser": "qwen3",
+                "startup_timeout": 1800,
+            },
+        ),
         "qwen3-coder-30b": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             model="Qwen/Qwen3-Coder-30B-A3B-Instruct",

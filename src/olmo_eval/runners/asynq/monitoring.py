@@ -12,6 +12,23 @@ from olmo_eval.runners.asynq.types import WORKER_FATAL
 logger = get_logger(__name__)
 
 DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
+PROVIDER_INIT_TIMEOUT_BUFFER_SECONDS = 60.0
+
+
+def resolve_provider_init_timeout(startup_timeout: object | None) -> float:
+    """Keep the parent worker deadline outside the provider's startup deadline."""
+    if startup_timeout is None:
+        return DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS
+
+    try:
+        provider_timeout = float(startup_timeout)
+    except (TypeError, ValueError):
+        return DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS
+
+    return max(
+        DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS,
+        provider_timeout + PROVIDER_INIT_TIMEOUT_BUFFER_SECONDS,
+    )
 
 
 def terminate_workers(
@@ -199,6 +216,8 @@ def wait_for_init_times(
 
 __all__ = [
     "DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS",
+    "PROVIDER_INIT_TIMEOUT_BUFFER_SECONDS",
+    "resolve_provider_init_timeout",
     "terminate_workers",
     "check_workers_alive",
     "wait_for_workers_ready",

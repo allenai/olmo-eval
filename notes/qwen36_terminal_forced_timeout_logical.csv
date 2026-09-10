@@ -1,0 +1,20 @@
+benchmark,expert_count,routing,replicate,expected_tasks,completed_tasks,task_errors,unfinished_as_failures,forced_full_denominator_score,score_status,analysis_inclusion,exclusion_reason,components
+tblite,4,reference-scaled,2,100,99,1,1,0.604890,forced-final,included,,01KZYZ789Z1R9P1QNQ11V55WRW
+tblite,6,reference-scaled,1,100,95,0,5,0.628070,forced-final,included,,01KZYQBHFT49KE26Y1C9SBZHX6;01KZYQBPCYQQKHCH6RHD34T38J
+tblite,6,reference-scaled,2,100,99,2,1,0.638550,forced-final,included,,01KZYZ7C8R8MX2QPZBX8CMH37V
+tblite,8,native,2,100,97,1,3,0.663480,forced-final,included,,01KZYZ7FTTF4QKK6YEBMZP0YX3
+tblite,10,reference-scaled,1,100,97,3,3,0.679070,forced-final,included,,01KZYQBT439J6EWKJ0NB1JJQWK;01KZYQBY4X4T7450C4A23HW399
+tblite,10,reference-scaled,2,100,48,1,52,0.372000,forced-final,excluded,pathological stall left 52 of 100 tasks unfinished,01KZYZ7M7SWVDW39ZDHABSV0Z2
+tb21,12,reference-scaled,1,89,86,3,3,0.359551,forced-final,excluded,forced-final frozen-shard score considered unreliable,01KZYQD780YME3YNPGVVVNR0XN;01KZYQDB49NEA6WF4X9QK1DMMR
+tblite,4,reference-scaled,3,100,86,1,14,0.610600,forced-final,excluded,stalled with no progress for over 3 hours; score is approximate because only the rounded live mean was recoverable,01KZYZ7VRZN18GAMZ6CNNY1EBX
+tblite,12,reference-scaled,2,100,97,2,3,0.689670,forced-final,excluded,stalled with no progress for over 9 hours; score is approximate because only the rounded live mean was recoverable,01KZYZ7QWFR6ZY71C1HWWX9Y9E
+tblite,12,reference-scaled,3,100,98,1,2,0.679140,forced-final,excluded,stalled with no progress for over 4 hours; score is approximate because only the rounded live mean was recoverable,01KZYZ8AWY016GPAS8GBTPJFCV
+tblite,8,native,4,100,49,0,51,0.402780,forced-final,excluded,pathological stall left 51 of 100 tasks unfinished; score is approximate because only the rounded live mean was recoverable,01KZZCYSJZZ0Y39E3GV844SPKD
+tblite,10,reference-scaled,3,100,99,3,1,0.712800,forced-final,excluded,stalled with no progress for over 4 hours; score is approximate because only the rounded live mean was recoverable,01KZYZ86V3A0AKBSBG1J1KGE3X
+tblite,12,reference-scaled,1,100,96,4,4,0.666480,forced-final,excluded,incomplete stopped run; score is approximate because shard B was recovered only from its rounded live mean,01KZYQC20ETC6Q6FJ68AXYV63E;01KZYQC5PYQ5FKSFJP0Z7SKS1A
+tb21,10,reference-scaled,1,89,86,7,3,0.404494,forced-final,excluded,incomplete stopped run; shard B binary score was recovered from its rounded live mean,01KZYQCZVTCJV9NB7V0C6Q98Q0;01KZYQD3F9H8FX88QPKDJSZ2QY
+tblite,6,reference-scaled,3,100,76,2,24,0.528960,forced-final,excluded,manually stopped with 24 unfinished tasks; score is approximate because only the rounded live mean was recoverable,01KZYZ7ZDBS772SQB8Z0E67C17
+tblite,8,native,3,100,98,1,2,0.682080,forced-final,excluded,incomplete stopped run; score is approximate because only the rounded live mean was recoverable,01KZYZ8351AGVGCJRAMPHD464G
+tb21,4,reference-scaled,1,89,86,4,3,0.348315,forced-final,excluded,replacement shard B was judged non-comparable and manually stopped; its binary score was recovered from the rounded live mean,01KZYQCFE24QQVPC8VBQEHJP3P;01KZZ63TZZFYG2TZ1GK1CP162E
+tb21,6,reference-scaled,1,89,68,3,21,0.348315,forced-final,excluded,replacement shard B was judged non-comparable and manually stopped with 20 unfinished shard tasks,01KZYQCQ4T29QFPJT0TC1KKW87;01KZZCYBGKAH707VQZXVWGTK7C
+tb21,8,native,1,89,85,1,4,0.404494,forced-final,excluded,incomplete stopped run; shard A lost its node and both binary component scores were recovered from rounded live means,01KZZCYFDHZZ7HBB8TGP3YXC31;01KZZCYKAEKCM264D122B0KEKY

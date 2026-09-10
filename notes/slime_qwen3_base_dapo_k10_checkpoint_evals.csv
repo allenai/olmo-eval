@@ -1,0 +1,11 @@
+mode,step,math500_accuracy,aime_pass_at_1,aime_pass_at_8,experiment_id,experiment_name
+normalized,20,0.748,0.084375,0.23285257123299394,01KZN85QD28GX8TYF5M9Z09DWH,adaptive-qwen3-base-dapo-k10-normalized-step20-k10-math-aime-v1-20260810
+normalized,40,0.764,0.09791666666666667,0.25290757695318317,01KZN8BD941DPHDPGNGZ8P1N8Z,adaptive-qwen3-base-dapo-k10-normalized-step40-k10-math-aime-v1-20260810
+normalized,60,0.772,0.09895833333333333,0.2435208034251416,01KZN8JGSEM6CAJEW00K39JJQB,adaptive-qwen3-base-dapo-k10-normalized-step60-k10-math-aime-v1-20260810
+normalized,80,0.798,0.10729166666666666,0.2935361988153979,01KZN8TBVAEVQVVVSTWGEEPSY1,adaptive-qwen3-base-dapo-k10-normalized-step80-k10-math-aime-v1-20260810
+normalized,100,0.788,0.12083333333333333,0.27441645196150205,01KZNACP2TR3KQ4Z2KMQVZ925J,adaptive-qwen3-base-dapo-k10-normalized-step100-k10-math-aime-retry1-20260810
+reference-k8,20,0.778,0.09375,0.273997230224149,01KZNAD1AMAZ6Z2E8V8MZQEXFY,adaptive-qwen3-base-dapo-k10-reference-k8-step20-k10-math-aime-retry1-20260810
+reference-k8,40,0.768,0.10104166666666667,0.26835333656579485,01KZNAD8Y42Z4WV6EATT494581,adaptive-qwen3-base-dapo-k10-reference-k8-step40-k10-math-aime-retry1-20260810
+reference-k8,60,0.776,0.13020833333333334,0.29298426551819207,01KZNADFGX89RJ7G2MWGQ6EGNM,adaptive-qwen3-base-dapo-k10-reference-k8-step60-k10-math-aime-retry1-20260810
+reference-k8,80,0.792,0.11666666666666667,0.27324645617637827,01KZNA26ECVCWG1W6QM0FCC6T8,adaptive-qwen3-base-dapo-k10-reference-k8-step80-k10-math-aime-v1-20260810
+reference-k8,100,0.796,0.10208333333333333,0.2762790850232452,01KZNA9960JFCWHWXD0B0TVDQA,adaptive-qwen3-base-dapo-k10-reference-k8-step100-k10-math-aime-v1-20260810
