@@ -57,6 +57,12 @@ hf = [
 olmo_core = [
     "ai2-olmo-core[torchao,transformers]==2.4.0",
 ]
+# The multimodal classes (olmo_core.nn.vision, molmo2_loader) are not in any
+# ai2-olmo-core release yet; pin the vision branch by commit so the declared
+# install supports OlmoCoreVLMProvider. Collapse into `olmo_core` once released.
+olmo_core_vlm = [
+    "ai2-olmo-core[torchao,transformers] @ git+https://github.com/allenai/OLMo-core.git@2dad929acb742faaa566a173f3484ff760c3ca07",
+]
 vllm = [
     # vllm + its companions are Linux/CUDA-only; skip on macOS so the lockfile
     # doesn't resolve GPU wheels for Darwin.
@@ -121,6 +127,10 @@ default-groups = ["dev", "vllm"]
 # These extras/groups have incompatible transitive dependencies and cannot be installed together
 conflicts = [
     [
+        { extra = "olmo_core" },
+        { extra = "olmo_core_vlm" },
+    ],
+    [
         { extra = "agents" },
         { extra = "openhands" },
     ],
@@ -130,6 +140,10 @@ conflicts = [
     ],
     [
         { extra = "olmo_core" },
+        { extra = "openhands" },
+    ],
+    [
+        { extra = "olmo_core_vlm" },
         { extra = "openhands" },
     ],
     [
