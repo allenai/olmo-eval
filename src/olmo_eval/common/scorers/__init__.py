@@ -22,7 +22,12 @@ from .citation import (
     score_citations_for_sections,
 )
 from .code_execution import CodeExecutionScorer, MultiplEScorer
-from .execution import ContextScorer, ExecutionScorer, SandboxRequiredError
+from .execution import (
+    ContextScorer,
+    ExecutionScorer,
+    SandboxRequiredError,
+    ScoringIncompleteError,
+)
 from .ifeval import IFEvalScorer
 from .llm_judge import (
     JudgeFn,
@@ -74,6 +79,7 @@ __all__ = [
     "RubricJudgeScorer",
     "SafetyScorer",
     "SandboxRequiredError",
+    "ScoringIncompleteError",
     "score_citation_group",
     "score_citations_for_sections",
     "Scorer",
