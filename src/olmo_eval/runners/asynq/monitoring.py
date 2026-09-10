@@ -11,7 +11,7 @@ from olmo_eval.runners.asynq.types import WORKER_FATAL
 
 logger = get_logger(__name__)
 
-DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
+DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 1800.0
 
 
 def terminate_workers(
