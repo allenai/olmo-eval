@@ -3,8 +3,8 @@
 Each task puts a corpus of N documents in-prompt and asks a question whose difficulty scales with
 how much of the corpus must be tracked *simultaneously* — from O(N) retrieval, through O(N²)
 relational tasks (find every contradicting pair), to O(NM)/O(N³) structural ones (cluster
-everything, find planted triples). Every task has a context ladder; a rung label is the measured
-median prompt length through the reference prompt path, not a document count.
+everything, find planted triples). Every task has a context ladder; a rung label is a token budget,
+not a document count — see the accuracy caveat below before treating it as a measured length.
 
 ## Quickstart
 
@@ -17,13 +17,35 @@ uv run olmo-eval run -m mock -t ctc_contradiction:r32k --dry-run
 # one task, one rung
 uv run olmo-eval run -m <model> -t ctc_nq:r64k --save-predictions
 
-# suites
-uv run olmo-eval run -m <model> -t ctc:figure     # all 22 tasks, 2k-32k grid (108 runs)
-uv run olmo-eval run -m <model> -t ctc:r128k      # every task at 128k (one x-axis column)
-uv run olmo-eval run -m <model> -t ctc:oolong     # one task's whole ladder
-uv run olmo-eval run -m <model> -t ctc:xlong      # everything above 32k (69 runs)
-uv run olmo-eval run -m <model> -t ctc            # all 177 task x rung combinations
+# suites -- by context length
+uv run olmo-eval run -m <model> -t ctc:figure       # all 22 tasks, 2k-32k grid (108 runs)
+uv run olmo-eval run -m <model> -t ctc:r128k        # every task at 128k (one x-axis column)
+uv run olmo-eval run -m <model> -t ctc:oolong       # one task's whole ladder
+uv run olmo-eval run -m <model> -t ctc:xlong        # everything above 32k (69 runs)
+
+# suites -- by corpus-tracking demand (the axis the suite is named for)
+uv run olmo-eval run -m <model> -t ctc:low          # the 11 O(N) rows, every rung (102 runs)
+uv run olmo-eval run -m <model> -t ctc:high         # the 11 O(N^2)+ rows, every rung (75 runs)
+uv run olmo-eval run -m <model> -t ctc:high:figure  # ... 2k-32k only (53 runs)
+uv run olmo-eval run -m <model> -t ctc:low:xlong    # the two axes compose (47 runs)
+
+uv run olmo-eval run -m <model> -t ctc              # all 177 task x rung combinations
 ```
+
+## low-CTC vs high-CTC
+
+`ctc:low` is the 11 rows where an answer-bearing document exists and the work is finding it --
+O(N) in corpus size, and in principle solvable by a retriever. `ctc:high` is the 11 rows where the
+answer is a *relation over* documents with no single span to retrieve: every contradicting pair
+(O(N^2)), the clustering of everything (O(NM)), the planted triple (O(N^3)). The split is 11/11,
+declared per row as `RosterRow.ctc_class` and pinned by test; the per-row `complexity` field
+records which class of the four it is.
+
+This axis is **orthogonal to context length** -- `ctc:figure`/`ctc:xlong` cut the same 22 tasks by
+rung. `ctc:high:figure` is the cheapest useful probe of the two: it is where a model that merely
+retrieves well separates from one that tracks a corpus, at grid-sized cost. Aggregation is
+DISPLAY_ONLY for these suites too; read low-vs-high per task or as a gap on a shared metric, never
+as one mean against another.
 
 A bare task name (`-t ctc_nq`) evaluates the 32k rung. Suite aggregation is DISPLAY_ONLY on
 purpose: the metrics are heterogeneous (f1, pair f1, kendall tau, ce_pos_recall, partial credit)
@@ -52,6 +74,10 @@ cap is documented on its RosterRow.
 
 ## Numbers that must travel with results
 
+- Small base models often cannot answer in the suite's answer space at all, which floors every
+  row below chance rather than ranking them. Measured on the OLMo hybrid ladder at r2k: the share
+  of generations emitting any `[id]` is 3.5-13.5% at 450M and 5-61% at 810M, reaching ~100% at
+  1.4B. Read `parse_rate` before reading a score from a sub-1B checkpoint.
 - Rungs ≥256k hold **125 examples** (seeded subsample; SE ≈ ±0.041 at f1≈0.7). `ctc_scifact` is
   300 and `ctc_obliq` 126 at every rung. Everything else is 500. Quote sizes inline.
 - **rerank's metric is ce_pos_recall**: the fraction of documents with cross-encoder score > 0
@@ -59,15 +85,35 @@ cap is documented on its RosterRow.
   saturates at ~0.98 and is emitted only as a secondary. Relevance in this data is bimodal
   (nothing between CE −5 and 0), which is also why an NDCG@10 over CE gains would collapse to
   the top-3 — measured before this metric was chosen.
-- `ctc_parse_ok` is stored per output: a parse-rate collapse is a decoding/stopping regression
-  wearing an accuracy drop's clothes. Check it before believing a low score.
+- **A rung label is a build target, not a per-task guarantee.** Labels were set from the reference
+  prompt path, and the xlong rungs were confirmed against it (real 1M rows measure p50 1.03–1.07M
+  tokens). But on the 2k–32k ladder, measurement through the Qwen3.5 tokenizer found two rows
+  systematically short of their label — `ctc_contradiction` ~1.5x and `ctc_niah` ~2.9x, both
+  consistent across that row's rungs — and `ctc_xabsence`'s labels are estimates pending a prefill
+  measure. Trends *within* a task are unaffected, since the scaling is consistent down the row;
+  **a cross-task comparison "at the same rung" is not comparing the same context length.** Quote
+  measured tokens on any absolute-length claim.
+- **Every row reports `parse_rate` alongside its primary metric.** A parse-rate collapse is a
+  decoding/stopping regression wearing an accuracy drop's clothes, so check it before believing a
+  low score. It is in `metrics.json` and in each prediction's `instance_metrics`. (It used to be
+  written only to `output.metadata` as `ctc_parse_ok`, which the predictions writer drops -- the
+  advice was unfollowable from the shipped files.)
+- **A near-zero score is a parser hypothesis until you have read the raw generations.** Measured
+  2026-09-09 on Qwen3.5-4B-Base at r2k: `ctc_textgroups` scores 0.000 with `parse_rate` 0.00
+  because the model never emits a pair list -- it opens with a plan and then repeats
+  "Combination N: ... Invalid" verbatim until the budget ends it. Raising the budget 200 -> 1024
+  was tried and reverted; 8/10 still hit the larger cap. That row is repetition-gated, not
+  truncation-gated.
 - Contexts ≥256k exceed most models' native windows; the serving side (YaRN etc.) is the caller's
   responsibility and belongs next to any reported number.
 
 ## Design and provenance
 
 - Prompt templates, parsers, metrics, gold-index conventions and stop rules are **vendored
-  byte-faithful** under `_vendor/` from the `ctc` package (AI2 OLMo-core branch `prasann/ctc`),
+  byte-faithful** under `_vendor/` from the `ctc` package (AI2 OLMo-core branch `prasann/ctc`,
+  re-vendored 2026-09-09 at `c2b345fba`; every vendored file is byte-identical to it). Only the
+  subtrees this harness reads are vendored -- `format/`, `tasks/`, `eval/stopping.py` and the pure
+  `data/ladders.py` table; the generators, backends and runner are not,
   where they are golden-fixture-tested against the implementation that produced the suite's
   published numbers. Fix upstream and re-vendor; do not edit `_vendor/` (it is ruff-excluded to
   stay diffable).

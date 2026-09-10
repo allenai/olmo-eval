@@ -1,1 +1,1 @@
-"""Vendored subset: only the stop-rule presets. The runner/backends are NOT vendored."""
+"""Evaluation: turn a checkpoint into scores. Backends generate text; tasks parse and score it."""
