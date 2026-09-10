@@ -111,6 +111,7 @@ HARNESS_CONFIG_FIELDS = frozenset(
     }
 )
 
+
 def task_config_fields() -> frozenset[str]:
     """Names accepted as ``-o`` task overrides: every TaskConfig field, plus
     ``priority``, which is extracted for job priority rather than stored."""
