@@ -400,6 +400,11 @@ class TestStripThinking:
         config = TaskConfig(name="test", data_source="test/dataset", strip_thinking=True)
         assert config.to_dict()["strip_thinking"] is True
 
+    def test_to_dict_omits_strip_thinking_when_off(self):
+        """Task hashes of runs that never used the option must not change."""
+        config = TaskConfig(name="test", data_source="test/dataset")
+        assert "strip_thinking" not in config.to_dict()
+
 
 @pytest.mark.anyio
 class TestProcessScoring:

@@ -292,9 +292,12 @@ class TaskConfig:
             "output_score_aggregation": self.output_score_aggregation.value,
             "max_length": self.max_length,
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
-            "strip_thinking": self.strip_thinking,
             "dependencies": self.dependencies,
         }
+        # Emitted only when set so that task hashes of runs without it are
+        # unchanged from before the field existed.
+        if self.strip_thinking:
+            serialized["strip_thinking"] = True
         if any(
             value is not None
             for value in (
@@ -606,11 +609,13 @@ class Task(ABC):
         ``score_responses`` (which tasks may override). Idempotent: a stripped
         output has no ``</think>`` left, so a second pass leaves it alone.
 
-        The text after the trace is kept byte-for-byte, matching the reference
-        harness's ``r1_style`` processing: whitespace-sensitive verifiers (the
-        IFEval loose variants drop the response's first line, and paragraph
-        checks index on blank-line splits) give different verdicts if leading
-        whitespace is trimmed here.
+        Mirrors the reference harness's ``r1_style`` processing: everything
+        through the *last* ``</think>`` goes, the text after it is kept
+        byte-for-byte, and an unterminated trace is left as-is. Whitespace
+        matters — the IFEval loose variants drop the response's first line, and
+        paragraph checks index on blank-line splits — so nothing is trimmed.
+        Only ``outputs[*].text`` is touched; trajectories and request traces
+        keep the trace.
         """
         if not self.config.strip_thinking:
             return
@@ -621,8 +626,6 @@ class Task(ABC):
                 text = output.text or ""
                 if "</think>" not in text:
                     continue
-                if output.metadata is None:
-                    output.metadata = {}
                 output.metadata.setdefault("original_text", text)
                 output.text = extract_think_answer(text) or ""
 
