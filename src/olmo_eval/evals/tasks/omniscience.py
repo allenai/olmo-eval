@@ -190,7 +190,7 @@ class OmniscienceScorer(LLMJudgeScorer):
             model_answer=output.extracted_answer or output.text,
         )
 
-    def parse_judge_response(self, response: str, instance: Instance) -> float:
+    def parse_judge_response(self, response: str, instance: Instance | None = None) -> float:
         """Parse A/B/C/D grade from judge response.
 
         Args:
@@ -199,6 +199,9 @@ class OmniscienceScorer(LLMJudgeScorer):
         Returns:
             1.0 for CORRECT (A), 0.0 for INCORRECT (B), PARTIAL_ANSWER (C), or NOT_ATTEMPTED (D).
         """
+        assert instance is not None, (
+            "The omniscience judge requires the instance metadata to grade the response"
+        )
         response = response.strip().upper()
 
         if response.startswith("A") or "CORRECT" in response and "INCORRECT" not in response:
