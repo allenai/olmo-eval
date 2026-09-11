@@ -56,6 +56,10 @@ hf = [
 ]
 olmo_core = [
     "ai2-olmo-core[torchao,transformers]==2.4.0",
+    # The conflicting olmo_core_vlm extra's git-pinned OLMo-core requires
+    # torchao==0.15.0; without this pin uv unifies both resolution forks on
+    # 0.15.0 and silently downgrades the text provider from main's 0.17.0.
+    "torchao==0.17.0",
 ]
 # The multimodal classes (olmo_core.nn.vision, molmo2_loader) are not in any
 # ai2-olmo-core release yet; pin the vision branch by commit so the declared

@@ -133,6 +133,13 @@ def create_provider(
             from .providers.olmo_core_vlm import is_multimodal_checkpoint
 
             if is_multimodal_checkpoint(model_name):
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "provider.kind=olmo_core detected a multimodal checkpoint and is "
+                    "using OlmoCoreVLMProvider; pass provider.kind=olmo_core_vlm "
+                    "explicitly so remote jobs install the matching olmo_core_vlm extra."
+                )
                 from .providers.olmo_core_vlm import OlmoCoreVLMProvider
 
                 return OlmoCoreVLMProvider(model_name, **kwargs)

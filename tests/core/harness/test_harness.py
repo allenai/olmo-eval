@@ -250,3 +250,51 @@ class TestHarnessRun:
 
         with pytest.raises(RuntimeError, match="No scaffold configured"):
             await harness.run(request)
+
+
+class TestImageRequestRejection:
+    """A provider that cannot render images must reject image requests loudly."""
+
+    def _harness_with(self, provider):
+        harness = Harness(HarnessConfig(name="test"))
+        harness._provider = provider
+        return harness
+
+    def _image_request(self):
+        return LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": "How many cats?"},),
+            images=("/tmp/cat.png",),
+        )
+
+    def test_text_provider_rejects_image_requests(self):
+        class TextOnly:
+            supports_images = False
+
+            def generate(self, requests, sampling_params=None):  # pragma: no cover
+                raise AssertionError("must not be reached")
+
+        harness = self._harness_with(TextOnly())
+        with pytest.raises(ValueError, match="does not support image requests"):
+            harness.generate([self._image_request()])
+
+    def test_multimodal_provider_passes(self):
+        class Vision:
+            supports_images = True
+
+            def generate(self, requests, sampling_params=None):
+                return [[]]
+
+        harness = self._harness_with(Vision())
+        assert harness.generate([self._image_request()]) == [[]]
+
+    def test_text_requests_unaffected(self):
+        class TextOnly:
+            supports_images = False
+
+            def generate(self, requests, sampling_params=None):
+                return [[]]
+
+        harness = self._harness_with(TextOnly())
+        request = LMRequest(request_type=RequestType.CHAT, prompt="2+2?")
+        assert harness.generate([request]) == [[]]

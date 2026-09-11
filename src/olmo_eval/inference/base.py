@@ -19,6 +19,12 @@ class InferenceProvider(ABC):
     and `alogprobs` for better performance in async contexts.
     """
 
+    #: Whether this provider can render ``LMRequest.images``. Providers that
+    #: cannot must not receive image requests: the harness rejects them so a
+    #: vision task on a text provider fails loudly instead of scoring
+    #: text-only completions.
+    supports_images: bool = False
+
     model_name: str
 
     def __init__(self, model_name: str) -> None:
