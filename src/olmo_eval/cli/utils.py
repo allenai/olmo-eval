@@ -112,12 +112,23 @@ HARNESS_CONFIG_FIELDS = frozenset(
 )
 
 
+# TaskConfig fields with no command-line representation: the override parser
+# yields strings, numbers, and JSON containers, and nothing hydrates these into
+# the callable / object their fields require, so accepting them would only defer
+# the failure to scoring.
+_NON_CLI_TASK_FIELDS = frozenset({"answer_extractor", "sandbox_env"})
+
+
 def task_config_fields() -> frozenset[str]:
-    """Names accepted as ``-o`` task overrides: every TaskConfig field, plus
-    ``priority``, which is extracted for job priority rather than stored."""
+    """Names accepted as ``-o`` task overrides.
+
+    Every ``TaskConfig`` field the parser can populate, plus ``priority``, which
+    is extracted for job priority rather than stored on the config.
+    """
     from olmo_eval.evals.tasks.common.base import TaskConfig
 
-    return frozenset(f.name for f in dataclasses.fields(TaskConfig)) | {"priority"}
+    names = {f.name for f in dataclasses.fields(TaskConfig)} - _NON_CLI_TASK_FIELDS
+    return frozenset(names | {"priority"})
 
 
 def _get_override_top_level_key(override: str) -> str:
