@@ -398,6 +398,9 @@ then hygiene and nits. Write the review as described in section 6.
 
 - Do not comment on formatting, import order, or line length. Ruff owns those.
 - Do not block on nits. Label them as nits and approve if nothing else blocks.
+- Do not use GitHub's "Request changes" verdict. It blocks the merge until the
+  requesting reviewer dismisses it, which stalls the PR even after another
+  reviewer is satisfied. Say what must change in a comment instead.
 - Do not request Ai2-specific conveniences in source. The repo is public.
 - Do not ask for a preset or harness config when CLI overrides on the default
   harness are sufficient.
@@ -413,6 +416,18 @@ then hygiene and nits. Write the review as described in section 6.
 ---
 
 ## 6. How to write the review
+
+**Leave the review as comments, never as a change request.** On GitHub, post
+findings either as inline comments on specific lines or as a comment in the PR
+discussion. Do not submit the review with the "Request changes" verdict
+(`gh pr review --request-changes`, or `"event": "REQUEST_CHANGES"` via the
+API): it blocks the merge until that reviewer personally dismisses it, so it
+overrides another reviewer's approval and makes the author wait on the
+reviewer rather than on the work. We are collaborative reviewers, not
+combative ones. A comment saying "these two should be fixed before merge"
+carries the same weight with the author and none of the blocking. This applies
+however severe the findings are; "blocking" throughout this guide describes
+the priority of a finding, not a GitHub verdict.
 
 **Choose the delivery format for the findings.** Three options are available,
 and the reviewing agent decides which fits the PR:
@@ -452,8 +467,8 @@ does not change the tone; it changes who the reader understands is speaking.
 
 **Open with the overall verdict in one line**, warmly and honestly. The house
 style is brief: "Looks good overall! A few things we should address before
-merging." or "lgtm! Two non-blocking questions." A change request still opens
-with what is good.
+merging." or "lgtm! Two non-blocking questions." A review that asks for
+changes still opens with what is good.
 
 **State the ranking explicitly** when there are several findings: "I found four
 issues. The first two affect persisted result correctness and task identity,
