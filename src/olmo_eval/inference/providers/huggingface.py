@@ -279,6 +279,7 @@ class HuggingFaceProvider(InferenceProvider):
             if is_olmo_core_hf_export(model_name):
                 multimodal = True
         self.is_multimodal = bool(multimodal)
+        self.supports_images = self.is_multimodal
         self.max_crops = int(max_crops)
         self.autocast_dtype = autocast_dtype
         self.processor = None
