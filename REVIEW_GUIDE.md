@@ -2,12 +2,8 @@
 
 This guide tells a reviewing agent how to review a pull request against this
 repository. It codifies the standards the original maintainer applied across
-every review from the project's founding through August 2026. Follow it to keep
-the repo well-structured, free of the bug classes that have recurred here, and
-internally consistent.
-
-Read the whole guide once. Then, for each PR, work through the procedure in
-section 2 and write the review using section 6.
+every review from the project's founding through August 2026. For each PR,
+work through the procedure in section 2 and write the review using section 6.
 
 ---
 
@@ -92,7 +88,7 @@ Read every changed file completely. Then open the callers and callees of
 anything new. Many of the worst bugs found in this repo were not in the diff
 but in how the diff interacts with an existing default: a metric inheriting a
 fallback, a config field never reaching `to_dict`, a provider kind missing from
-an allowlist. Reading only the diff will miss them.
+an allowlist.
 
 ### Step 4. Reproduce before asserting
 
@@ -100,7 +96,7 @@ When you believe you have found a bug, confirm it. Run the function twice,
 compute the two hashes, instantiate the metric with the mock provider, count
 the collisions in the dataset. State what you did in the review ("I reproduced
 this with two consecutive calls", "I confirmed both configurations produce the
-same hash"). A reviewer who verifies is trusted; one who speculates is not.
+same hash").
 
 If a claim cannot be verified without a GPU or credentials, say so and ask the
 author for the specific evidence (a side-by-side runtime, a parity table, a
@@ -135,8 +131,9 @@ then hygiene and nits. Write the review as described in section 6.
   changing the field changes the hash.
 - Nothing output-affecting is read from an environment variable at scoring
   time without also being recorded in the config.
-- Judge and model references use a dated snapshot, not a mutable alias.
-- Dataset references pin a revision where the loader supports it.
+- External references are pinned: judge and model references to a dated
+  snapshot, not a mutable alias; datasets to a revision where the loader
+  supports it.
 - Arguments that look like they control something but do not (for example a
   `split=` passed to a `DataSource` that the class-level split always
   overwrites) are removed.
@@ -180,7 +177,6 @@ then hygiene and nits. Write the review as described in section 6.
 
 **Scoring inside the task**
 
-- Custom extraction and parsing logic has a lightweight unit test.
 - Every regex-based extractor is checked for sign stripping, comma handling,
   and thinking-trace leakage (`<think>...</think>` content matched as an
   answer).
@@ -301,7 +297,6 @@ then hygiene and nits. Write the review as described in section 6.
 - Provider type checks unwrap `InstrumentedProvider` before `isinstance`.
 - Sandbox capabilities advertised match what `execute_*` calls need.
 - The sandbox image's Python version is compatible with `requires-python`.
-- Time-budget constants carry a unit suffix (`_SEC`).
 - Fallback URLs do not make API-backed providers look local.
 - Wrappers around upstream configuration do not silently override budgets the
   user set (for example replacing a user's `max_tokens` with a stage default).
@@ -327,8 +322,6 @@ then hygiene and nits. Write the review as described in section 6.
 
 ### 3.7 Documentation or cleanup
 
-- Docstrings stay general. No exact counts ("14 tasks") or implementation
-  details that go stale.
 - No comments describing temporary or in-progress state.
 - README examples still run.
 
@@ -373,7 +366,6 @@ then hygiene and nits. Write the review as described in section 6.
 
 **Naming**
 
-- Task names describe the benchmark; variant names describe the modifier.
 - Names encode units (`_SEC`) and sources (hosting service as a suffix on
   model presets so prefix filtering is predictable).
 - A rename is proposed when a name implies something false (a "long-context"
@@ -382,7 +374,8 @@ then hygiene and nits. Write the review as described in section 6.
 **Comments and docs**
 
 - Non-obvious tricks (`lstrip("0") or "0"`) get a one-line comment saying why.
-- No hard-coded totals in docstrings.
+- Docstrings stay general. No exact counts ("14 tasks") or implementation
+  details that go stale.
 
 **Process**
 
@@ -398,14 +391,7 @@ then hygiene and nits. Write the review as described in section 6.
 
 - Do not comment on formatting, import order, or line length. Ruff owns those.
 - Do not block on nits. Label them as nits and approve if nothing else blocks.
-- Do not use GitHub's "Request changes" verdict. It blocks the merge until the
-  requesting reviewer dismisses it, which stalls the PR even after another
-  reviewer is satisfied. Say what must change in a comment instead.
 - Do not request Ai2-specific conveniences in source. The repo is public.
-- Do not ask for a preset or harness config when CLI overrides on the default
-  harness are sufficient.
-- Do not reintroduce regimes or any other bundled, opaque configuration layer.
-  Everything composes from variants.
 - Do not accept "the numbers look reasonable" as parity evidence. Ask for the
   reference number beside the new one.
 - Do not merge on the author's behalf unless asked. After approval, tell the
@@ -417,29 +403,23 @@ then hygiene and nits. Write the review as described in section 6.
 
 ## 6. How to write the review
 
-**Leave the review as comments, never as a change request.** On GitHub, post
-findings either as inline comments on specific lines or as a comment in the PR
-discussion. Do not submit the review with the "Request changes" verdict
+**Leave the review as comments, never as a change request.** Post findings as
+inline comments on specific lines, as a comment in the PR discussion, or both.
+Never submit the review with the "Request changes" verdict
 (`gh pr review --request-changes`, or `"event": "REQUEST_CHANGES"` via the
-API): it blocks the merge until that reviewer personally dismisses it, so it
-overrides another reviewer's approval and makes the author wait on the
-reviewer rather than on the work. We are collaborative reviewers, not
-combative ones. A comment saying "these two should be fixed before merge"
-carries the same weight with the author and none of the blocking. This applies
-however severe the findings are; "blocking" throughout this guide describes
-the priority of a finding, not a GitHub verdict.
+API): it blocks the merge until that reviewer personally dismisses it,
+overriding another reviewer's approval. A comment saying "these two should be
+fixed before merge" carries the same weight with the author and none of the
+blocking. This applies however severe the findings are; "blocking" throughout
+this guide describes the priority of a finding, not a GitHub verdict.
 
-**Choose the delivery format for the findings.** Three options are available,
-and the reviewing agent decides which fits the PR:
-
-- **One summary comment only.** Best when findings are architectural, span
-  several files, or the author is likely to paste the review into their own
-  agent without a GitHub integration.
-- **Inline review comments only.** Best for a handful of line-specific defects
-  where the diff context is most of the explanation.
-- **Both.** Usually the strongest choice for a substantial PR: a summary
-  comment carrying the verdict, the ranking, and the merge instruction, plus
-  inline comments on the exact lines for findings that benefit from context.
+**Choose the delivery format.** The reviewing agent decides: one summary
+comment (best when findings are architectural, span several files, or the
+author is likely to paste the review into their own agent without a GitHub
+integration); inline comments only (best for a handful of line-specific defects
+where the diff context is most of the explanation); or both (usually strongest
+for a substantial PR, the summary carrying the verdict, the ranking, and the
+merge instruction, the inline comments carrying line context).
 
 Whichever format is chosen, the summary comment (when present) must stand on
 its own: every finding, including ones also left inline, appears in it with a
@@ -461,9 +441,6 @@ without a summary body, begin each inline comment with the short form:
 ```
 > Agent review per `REVIEW_GUIDE.md`.
 ```
-
-The rest of the review can be as friendly as a human review. The disclosure
-does not change the tone; it changes who the reader understands is speaking.
 
 **Open with the overall verdict in one line**, warmly and honestly. The house
 style is brief: "Looks good overall! A few things we should address before
@@ -604,4 +581,3 @@ them explicitly when the change touches the relevant area.
 | Gate error dropped when an instance summary is present | Storage writers |
 | Default image constants not updated on an image bump | `common/constants/infrastructure.py` |
 | `split=` argument overwritten by class-level split | `DataSource` construction |
-| `answer_prefix=""` and other defaults restated explicitly | Formatter construction (nit) |
