@@ -21,6 +21,7 @@ Reference implementation: https://github.com/THUDM/LongBench
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -41,7 +42,11 @@ from olmo_eval.common.types import (
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register
 
+logger = logging.getLogger(__name__)
+
 LONGBENCH_V2_REPO = "zai-org/LongBench-v2"
+#: Dataset revision, pinned so the question set behind a stored result cannot change.
+LONGBENCH_V2_REVISION = "2b48e494f2c7a2f0af81aae178e05c7e1dde0fe9"
 
 #: Domains held back for the development loop. Questions in these domains are
 #: excluded from the held-out score reported by the full task.
@@ -114,7 +119,15 @@ class SplitGroupAccuracyMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         scorer_name = self.scorer().name
         scores = [r.scores.get(scorer_name, 0.0) for r in responses if self._in_group(r)]
-        return sum(scores) / len(scores) if scores else 0.0
+        if not scores:
+            logger.warning(
+                "%s: no instances in split group %r, reporting 0.0. This happens when a "
+                "limited run samples no question from the group; the value is not a score.",
+                self.name,
+                self.split_group,
+            )
+            return 0.0
+        return sum(scores) / len(scores)
 
     def compute_instance(self, response: Response) -> float | None:
         if not self._in_group(response):
@@ -124,6 +137,10 @@ class SplitGroupAccuracyMetric(Metric):
 
     def supports_pairwise_scorer_fallback(self) -> bool:
         return False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize including the group, so differently scoped metrics hash differently."""
+        return {**super().to_dict(), "split_group": self.split_group}
 
 
 _ACCURACY = AccuracyMetric(scorer=MultipleChoiceScorer)
@@ -144,8 +161,8 @@ _SAMPLING = SamplingParams(
 class LongBenchV2Task(Task):
     """Base class for LongBench v2 tasks."""
 
-    data_source = DataSource(path=LONGBENCH_V2_REPO, split="train")
-    split = Split.TRAIN
+    data_source = DataSource(path=LONGBENCH_V2_REPO, revision=LONGBENCH_V2_REVISION)
+    split = Split.TRAIN  # HF dataset only has a train split
     metrics = (_ACCURACY, _HELDOUT_ACCURACY, _DEV_ACCURACY)
     primary_metric = _ACCURACY
     sampling_params = _SAMPLING
@@ -170,6 +187,11 @@ class LongBenchV2Task(Task):
         choices = tuple(str(doc.get(f"choice_{letter}") or "").strip() for letter in _LETTERS)
         answer = str(doc.get("answer") or "").strip().upper()
         if not question or not all(choices) or answer not in _LETTERS:
+            logger.warning(
+                "Skipping malformed LongBench v2 document %r: question, four choices, and an "
+                "A-D answer are all required.",
+                doc.get("_id", index),
+            )
             return None
 
         prompt = _PROMPT_TEMPLATE.format(
