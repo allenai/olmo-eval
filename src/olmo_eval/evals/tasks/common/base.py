@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import logging
 import math
-import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -296,9 +295,12 @@ class TaskConfig:
             "output_score_aggregation": self.output_score_aggregation.value,
             "max_length": self.max_length,
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
-            "strip_thinking": self.strip_thinking,
             "dependencies": self.dependencies,
         }
+        # Emitted only when set so that task hashes of runs without it are
+        # unchanged from before the field existed.
+        if self.strip_thinking:
+            serialized["strip_thinking"] = True
         if any(
             value is not None
             for value in (
@@ -609,18 +611,26 @@ class Task(ABC):
         No-op unless ``config.strip_thinking`` is set. Runners call this before
         ``score_responses`` (which tasks may override). Idempotent: a stripped
         output has no ``</think>`` left, so a second pass leaves it alone.
+
+        Mirrors the reference harness's ``r1_style`` processing: everything
+        through the *last* ``</think>`` goes, the text after it is kept
+        byte-for-byte, and an unterminated trace is left as-is. Whitespace
+        matters — the IFEval loose variants drop the response's first line, and
+        paragraph checks index on blank-line splits — so nothing is trimmed.
+        Only ``outputs[*].text`` is touched; trajectories and request traces
+        keep the trace.
         """
         if not self.config.strip_thinking:
             return
+        from olmo_eval.evals.extract import extract_think_answer
+
         for response in responses:
             for output in response.outputs:
                 text = output.text or ""
                 if "</think>" not in text:
                     continue
-                if output.metadata is None:
-                    output.metadata = {}
                 output.metadata.setdefault("original_text", text)
-                output.text = re.sub(r"(?s).*</think>", "", text).lstrip()
+                output.text = extract_think_answer(text) or ""
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Extract answers from outputs. Override for complex multi-output logic."""
