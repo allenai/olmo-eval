@@ -8,7 +8,9 @@ from olmo_eval.evals.tasks.longbench_v2 import (
     DEV_DOMAINS,
     DEV_GROUP,
     HELDOUT_GROUP,
+    LONGBENCH_V2_REVISION,
     SPLIT_GROUP_KEY,
+    SplitGroupAccuracyMetric,
     extract_answer,
 )
 
@@ -69,6 +71,11 @@ class TestRegistration:
 
     def test_dev_task_reports_accuracy_only(self):
         assert [m.name for m in get_task("longbench_v2_dev").config.metrics] == ["accuracy"]
+
+    def test_dataset_revision_is_pinned(self):
+        assert get_task("longbench_v2").config.to_dict()["data_source"]["revision"] == (
+            LONGBENCH_V2_REVISION
+        )
 
 
 class TestProcessDoc:
@@ -172,3 +179,20 @@ class TestMetrics:
         heldout_metric = task.config.metrics[1]
         response = _response(task, "Code Repository Understanding", "The correct answer is (B)")
         assert heldout_metric.compute_instance(response) is None
+
+
+class TestSplitGroupSerialization:
+    def test_split_group_distinguishes_identically_named_metrics(self):
+        """Two groups under one metric name must not serialize, and so hash, alike."""
+        dev = SplitGroupAccuracyMetric(name="subset_accuracy", split_group=DEV_GROUP)
+        heldout = SplitGroupAccuracyMetric(name="subset_accuracy", split_group=HELDOUT_GROUP)
+        assert dev.to_dict() != heldout.to_dict()
+
+    def test_split_group_reaches_the_task_config(self):
+        serialized = get_task("longbench_v2").config.to_dict()["metrics"]
+        groups = {m["name"]: m.get("split_group") for m in serialized}
+        assert groups == {
+            "accuracy": None,
+            "heldout_accuracy": HELDOUT_GROUP,
+            "dev_accuracy": DEV_GROUP,
+        }
