@@ -98,6 +98,8 @@ class _PreparedBatch:
 class OlmoCoreVLMProvider(InferenceProvider):
     """Provider for multimodal OLMo-core (``MultimodalLM``) checkpoints."""
 
+    supports_images = True
+
     def __init__(
         self,
         model_name: str,
@@ -682,33 +684,21 @@ class OlmoCoreVLMProvider(InferenceProvider):
         # cannot be truncated (that would corrupt the image-token layout), so
         # clamp the generation budget instead and skip requests whose prompt
         # alone exceeds the window.
-        encoded: list[tuple[list[int], Any, Any, int] | None] = []
+        encoded: list[tuple[list[int], Any, Any, int]] = []
         outputs: list[list[LMOutput]] = [[] for _ in requests]
-        for i, request in enumerate(requests):
+        for request in requests:
             token_ids, image_tensor, pooling_tensor = self._encode_request(request)
             if is_debug_requests():
                 logger.info("Prompt:\n%s", self.tokenizer.decode(token_ids))
 
             if len(token_ids) >= self.max_length:
-                logger.warning(
-                    "Skipping request: prompt length (%d) >= max_length (%d)",
-                    len(token_ids),
-                    self.max_length,
+                raise ValueError(
+                    "OLMo-core VLM prompt length "
+                    f"({len(token_ids)}) >= max_length ({self.max_length}); multimodal "
+                    "prompts cannot be truncated without corrupting the image-token "
+                    "layout, so this instance must fail rather than score an empty "
+                    "output. Raise max_model_len if the checkpoint supports it."
                 )
-                outputs[i] = [
-                    LMOutput(
-                        text="",
-                        logprobs=None,
-                        metadata={
-                            "num_tokens": 0,
-                            "num_tokens_all": 0,
-                            "skipped": "prompt_too_long",
-                        },
-                    )
-                    for _ in range(params.num_samples)
-                ]
-                encoded.append(None)
-                continue
             # max_tokens=None means "generate to the model's context limit".
             if params.max_tokens is None:
                 budget = self.max_length - len(token_ids)
@@ -724,8 +714,8 @@ class OlmoCoreVLMProvider(InferenceProvider):
                     )
             encoded.append((token_ids, image_tensor, pooling_tensor, budget))
 
-        active = [i for i, entry in enumerate(encoded) if entry is not None]
-        entries = [entry for entry in encoded if entry is not None]
+        active = list(range(len(encoded)))
+        entries = encoded
         if not entries:
             return outputs
 
@@ -815,8 +805,10 @@ class OlmoCoreVLMProvider(InferenceProvider):
                         text=continuation,
                         logprobs=[
                             {
-                                "token": self.tokenizer.decode([token_id]),
+                                "token": (token_str := self.tokenizer.decode([token_id])),
                                 "logprob": float(logprob),
+                                "token_id": int(token_id),
+                                "bytes": list(token_str.encode("utf-8")),
                             }
                             for token_id, logprob in zip(
                                 continuation_ids, token_log_probs.tolist(), strict=True
