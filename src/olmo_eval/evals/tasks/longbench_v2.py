@@ -140,7 +140,9 @@ class SplitGroupAccuracyMetric(Metric):
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize including the group, so differently scoped metrics hash differently."""
-        return {**super().to_dict(), "split_group": self.split_group}
+        # Named base call, not super(): a slots dataclass is a rebuilt class, so the
+        # zero-argument form resolves against a stale __class__ cell before Python 3.13.
+        return {**Metric.to_dict(self), "split_group": self.split_group}
 
 
 _ACCURACY = AccuracyMetric(scorer=MultipleChoiceScorer)
