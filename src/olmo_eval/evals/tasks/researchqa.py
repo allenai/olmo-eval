@@ -67,25 +67,72 @@ RESEARCHQA_LABEL_SCORES = {
     "Completely": 5,
 }
 
-RESEARCHQA_GENERATION_PROMPT = (
-    "You are answering a scholarly research question. Use the available research tools "
-    "to find reliable sources that support your answer.\n\n"
-    "Available tools:\n"
-    "- semantic_scholar_snippet_search\n"
-    "- serper_google_webpage_search\n"
-    "- serper_fetch_webpage_content\n\n"
-    "Format and length requirements:\n"
-    "- Write a well-organized, citation-supported answer in about 250 words.\n"
-    "- Synthesize the evidence directly around the question and cite the sources you use.\n\n"
-    "{date_cutoff}"
-    "Workflow (follow this order):\n"
-    "1. Search for relevant scholarly sources using semantic_scholar_snippet_search and "
-    "serper_google_webpage_search.\n"
-    "2. Fetch and read promising source content using serper_fetch_webpage_content.\n"
-    "3. Only after searching, fetching, and reading, write the answer.\n"
-    "Search first, then fetch and read, and only then answer. Do not answer from memory.\n\n"
-    "Question: "
+# Tool list the prompt falls back to when the harness reports no tools of its own.
+# It is the set the dr_tulu preset exposes, and keeps non-agentic runs byte-identical
+# to the prompt this task shipped with.
+RESEARCHQA_DEFAULT_TOOLS = (
+    "semantic_scholar_snippet_search",
+    "serper_google_webpage_search",
+    "serper_fetch_webpage_content",
 )
+
+# Tools that retrieve a full document; every other tool is described as a search tool.
+RESEARCHQA_FETCH_TOOLS = frozenset({"serper_fetch_webpage_content", "browse_webpage"})
+
+
+def _join_tool_names(names: Sequence[str]) -> str:
+    """Join tool names as prose: "a", "a and b", "a, b and c"."""
+    if len(names) < 3:
+        return " and ".join(names)
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def build_generation_prompt(tool_names: Sequence[str] = ()) -> str:
+    """Build the generation prompt template for the tools the harness really exposes.
+
+    Naming a tool the harness does not provide makes the model call it, and the
+    scaffold then aborts the episode with a tool-not-found error before any turn
+    runs, so the prompt has to follow the harness rather than a fixed list.
+    ``tool_names`` is that harness list; empty falls back to
+    ``RESEARCHQA_DEFAULT_TOOLS``. The result still carries the ``{date_cutoff}``
+    placeholder for :meth:`ResearchQA.format_request` to fill in.
+    """
+    tools = tuple(tool_names) or RESEARCHQA_DEFAULT_TOOLS
+    fetch_tools = [name for name in tools if name in RESEARCHQA_FETCH_TOOLS]
+    search_tools = [name for name in tools if name not in RESEARCHQA_FETCH_TOOLS]
+    # A harness with fetch tools only still needs a step 1 to point at.
+    if not search_tools:
+        search_tools, fetch_tools = list(tools), []
+
+    workflow = f"1. Search for relevant scholarly sources using {_join_tool_names(search_tools)}.\n"
+    if fetch_tools:
+        workflow += (
+            f"2. Fetch and read promising source content using {_join_tool_names(fetch_tools)}.\n"
+            "3. Only after searching, fetching, and reading, write the answer.\n"
+            "Search first, then fetch and read, and only then answer. Do not answer from memory."
+        )
+    else:
+        workflow += (
+            "2. Only after searching and reading the search results, write the answer.\n"
+            "Search first, and only then answer. Do not answer from memory."
+        )
+
+    tool_list = "".join(f"- {name}\n" for name in tools)
+    return (
+        "You are answering a scholarly research question. Use the available research tools "
+        "to find reliable sources that support your answer.\n\n"
+        f"Available tools:\n{tool_list}\n"
+        "Format and length requirements:\n"
+        "- Write a well-organized, citation-supported answer in about 250 words.\n"
+        "- Synthesize the evidence directly around the question and cite the sources you use.\n\n"
+        "{date_cutoff}"
+        "Workflow (follow this order):\n"
+        f"{workflow}\n\n"
+        "Question: "
+    )
+
+
+RESEARCHQA_GENERATION_PROMPT = build_generation_prompt()
 
 # Verbatim from ResearchQA's official compute_coverage.py:build_prompt().
 RESEARCHQA_COVERAGE_JUDGE_PROMPT = (
@@ -323,7 +370,9 @@ class ResearchQA(Task):
             if isinstance(date, str) and date
             else ""
         )
-        generation_prompt = RESEARCHQA_GENERATION_PROMPT.format(date_cutoff=date_cutoff)
+        generation_prompt = build_generation_prompt(self.config.harness_tool_names).format(
+            date_cutoff=date_cutoff
+        )
         return LMRequest(
             request_type=RequestType.CHAT,
             messages=(

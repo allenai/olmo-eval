@@ -160,6 +160,10 @@ vllm = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Verbatim vendored copies of the pinned DeepScholar-Bench scorer and of
+# lit-agents' export-contract validators; they are fixtures precisely
+# because they are not ours to restyle.
+extend-exclude = ["tests/evals/tasks/fixtures"]
 
 [tool.ruff.lint]
 select = [
@@ -180,6 +184,11 @@ select = [
 # Verbatim prompt templates from asta-bench reference implementation
 "src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
 "src/olmo_eval/common/scorers/citation.py" = ["E501"]
+# Verbatim bilingual prompt templates from DeepResearch Bench
+"src/olmo_eval/evals/tasks/deepresearch_bench.py" = ["E501"]
+# Verbatim prompt template from DeepScholar-Bench, and its golden copy
+"src/olmo_eval/evals/tasks/deepscholar_bench.py" = ["E501"]
+"tests/evals/tasks/test_deepscholar_bench.py" = ["E501"]
 # Verbatim prompt templates and gold snippets from scicode-bench reference implementation
 "src/olmo_eval/evals/external/benchmarks/scicode/prompts.py" = ["E501"]
 # Embedded fewshot data with long string literals

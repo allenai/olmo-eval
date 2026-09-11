@@ -583,6 +583,22 @@ class TestBuildCommandWithTaskPackages:
         ) in install_cmd
         assert "grep -E '^(torch|nvidia-)' > /tmp/cuda-constraints.txt" not in install_cmd
 
+    def test_provider_package_checks_out_git_revision(self):
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        revision = "8b86284be6d18bcb71c7e64032d91fe73a714229"
+        install_cmd = launcher._build_install_cmd(
+            extras=[],
+            env_exports=None,
+            provider_packages=[f"git+https://github.com/allenai/lit-agents.git@{revision}"],
+        )
+
+        assert (
+            f"git -C /tmp/provider-src-0 fetch --quiet --depth=1 origin {revision}" in install_cmd
+        )
+        assert "git -C /tmp/provider-src-0 checkout --quiet --detach FETCH_HEAD" in install_cmd
+
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""
         from olmo_eval.launch import BeakerLauncher
@@ -633,10 +649,12 @@ class TestBuildCommandWithTaskPackages:
             "> /tmp/vllm-lock-constraints.txt"
         ) in install_cmd
         assert "-c /tmp/vllm-lock-constraints.txt -e '.[vllm]'" in install_cmd
+        # A git provider package is cloned to a local checkout first, so the
+        # install names that path rather than the URL it came from.
         assert (
             "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package repo --reinstall-package repo "
-            "'repo @ git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
+            "'repo @ /tmp/provider-src-0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check]" not in install_cmd
 
@@ -679,6 +697,15 @@ class TestBuildCommandWithTaskPackages:
 
         assert "uv venv /opt/vllm-venv" in install_cmd
         assert "export VLLM_PYTHON=/opt/vllm-venv/bin/python" in install_cmd
+        # The runtime image ships no nvcc, so FlashInfer's JIT path can never
+        # succeed; the prebuilt kernel cache is what keeps it off that path.
+        assert (
+            "bash /gantry-runtime/src/olmo_eval/launch/beaker/scripts/"
+            "install_flashinfer_jit_cache /opt/vllm-venv/bin/python"
+        ) in install_cmd
+        # flashinfer's runtime JIT shells out to a bare "ninja" from the venv
+        # vLLM runs in, so the isolated venv must own the binary itself.
+        assert "uv pip install --python /opt/vllm-venv/bin/python ninja" in install_cmd
         assert (
             "cd /gantry-runtime && uv pip install "
             "--python /opt/vllm-venv/bin/python "
@@ -687,7 +714,7 @@ class TestBuildCommandWithTaskPackages:
         assert (
             "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package vllm --reinstall-package vllm "
-            "'vllm @ git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
+            "'vllm @ /tmp/provider-src-0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check]" not in install_cmd
 
@@ -703,6 +730,7 @@ class TestBuildCommandWithTaskPackages:
 
         assert "uv pip install -e '.[olmo_core,beaker]' -c /tmp/cuda-constraints.txt" in install_cmd
         assert "flash-attn" not in install_cmd
+        assert "install_flashinfer_jit_cache" not in install_cmd
         assert "--no-build-isolation-package" not in install_cmd
 
 

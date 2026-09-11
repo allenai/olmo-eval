@@ -8,6 +8,8 @@ Configuration parsing, storage setup, and runner creation are delegated to:
 - options.py: Option decorators for logical grouping
 """
 
+from typing import Any
+
 import click
 
 from olmo_eval.cli.run.options import (
@@ -25,6 +27,21 @@ from olmo_eval.cli.utils import (
     process_ordered_args,
     reconstruct_ordered_args,
 )
+
+
+def _scored_nothing(results: Any) -> bool:
+    """Whether a completed run scored zero instances across every task.
+
+    ``aggregate_results`` omits ``num_instances`` entirely for a task that
+    errored, and sets it to 0 when every instance of a task failed, so a missing
+    key and a zero mean the same thing here. Returns False for anything
+    unexpected: this gates the exit code, and guessing wrong would fail runs
+    that actually produced data.
+    """
+    tasks = results.get("tasks") if isinstance(results, dict) else None
+    if not isinstance(tasks, dict) or not tasks:
+        return False
+    return all(isinstance(task, dict) and not task.get("num_instances") for task in tasks.values())
 
 
 @click.command()
@@ -233,8 +250,21 @@ def run(
         runner.print_config()
     else:
         try:
-            runner.run()
+            results = runner.run()
         except Exception as e:
             console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
             console.print_exception()
             raise SystemExit(1) from None
+
+        # A run that scored nothing is a failure, however calmly it ended. The
+        # per-instance handlers turn every error into a failed instance rather
+        # than an exception, so an inference server that dies mid-run leaves the
+        # process exiting 0 with an empty metrics file, and Beaker reports the
+        # job SUCCEEDED. Results are already written and uploaded by this point,
+        # so exiting non-zero here costs no artifacts.
+        if _scored_nothing(results):
+            console.print(
+                "\n[bold red]Evaluation produced no scored instances.[/bold red] "
+                "Every task failed; see the errors above and in metrics.json."
+            )
+            raise SystemExit(1)

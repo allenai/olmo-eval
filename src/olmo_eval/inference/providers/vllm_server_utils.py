@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -224,6 +225,38 @@ def _get_vllm_python() -> str:
         Path to Python interpreter.
     """
     return os.environ.get("VLLM_PYTHON", sys.executable)
+
+
+def _prepend_interpreter_bin_to_path(env: dict[str, str], python_executable: str) -> str:
+    """Put the vLLM interpreter's bin directory at the front of PATH.
+
+    When vLLM runs from an isolated virtualenv (see VLLM_PYTHON), only the main
+    app venv is on PATH, because that is what the image exports. Console scripts
+    installed next to vLLM are therefore invisible to the server process and to
+    anything it shells out to. Runtime kernel compilation depends on exactly
+    that: flashinfer's JIT runs a bare "ninja", which execvp resolves through
+    PATH. A model whose kernels are compiled on the first forward pass (Mamba /
+    GDN linear attention, for example) then kills the engine with
+    "FileNotFoundError: ninja" after the server has already passed its readiness
+    probe, so every request fails while the job still looks healthy.
+
+    The directory is prepended, never substituted, so the harness keeps every
+    entry it already relies on and the main venv stays reachable as a fallback.
+
+    Args:
+        env: Environment mapping for the child process, mutated in place.
+        python_executable: Interpreter the vLLM server will be launched with.
+
+    Returns:
+        The resulting PATH value.
+    """
+    directory = os.path.dirname(python_executable)
+    if directory:
+        bin_dir = os.path.abspath(directory)
+        entries = [entry for entry in env.get("PATH", "").split(os.pathsep) if entry]
+        if bin_dir not in entries:
+            env["PATH"] = os.pathsep.join([bin_dir, *entries])
+    return env.get("PATH", "")
 
 
 def _get_olmo3_tool_template_path() -> str:
@@ -510,20 +543,25 @@ class VLLMServerProcess:
 
         # Build environment for subprocess (child only, don't mutate parent)
         env = os.environ.copy()
-        # VLLM_PYTHON can point at an isolated environment whose console tools
-        # (for example ninja, used by FlashInfer JIT compilation) are installed
-        # beside its Python executable. Make those tools visible to the child
-        # without changing the launcher's environment.
-        python_bin_dir = os.path.dirname(cmd[0])
-        if python_bin_dir:
-            python_bin_dir = os.path.abspath(python_bin_dir)
-        inherited_path = env.get("PATH")
-        env["PATH"] = os.pathsep.join(part for part in (python_bin_dir, inherited_path) if part)
         # VLLM_PYTHON is our own steering variable for selecting which Python
         # interpreter launches the server. Once the command is built, vLLM
         # itself does not need to see it, and forwarding it triggers a warning
         # because vLLM treats unknown VLLM_* variables as suspicious.
         env.pop("VLLM_PYTHON", None)
+        # vLLM may run from an isolated venv whose bin directory is not on PATH.
+        # Console scripts installed alongside it - notably "ninja", which
+        # flashinfer's JIT shells out to when it compiles a kernel on the first
+        # forward pass - must stay resolvable, otherwise the engine dies on the
+        # first real request even though startup succeeded.
+        search_path = _prepend_interpreter_bin_to_path(env, cmd[0])
+        if shutil.which("ninja", path=search_path) is None:
+            self._log(
+                logging.WARNING,
+                "ninja was not found on the vLLM server's PATH. Models that "
+                "JIT-compile kernels at inference time (e.g. Mamba/GDN linear "
+                "attention) will fail on their first request. Install ninja into "
+                f"the environment of {cmd[0]}.",
+            )
         # vLLM uses VLLM_PORT as the starting point for internal port
         # selection, including torch distributed rendezvous. Give each managed
         # server a low base port so concurrent cold starts do not collide in

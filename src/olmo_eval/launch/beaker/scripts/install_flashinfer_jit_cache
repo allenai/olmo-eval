@@ -1,0 +1,76 @@
+#!/bin/bash
+# Install FlashInfer's prebuilt kernel cache into the isolated vLLM venv.
+#
+# FlashInfer JIT-compiles some kernels on first use and shells out to nvcc. Our
+# base image is a CUDA *runtime* image, which ships no compiler, so that path can
+# never succeed: it dies with "/usr/local/cuda/bin/nvcc: not found" mid-run, long
+# after the server reported ready. The flashinfer-jit-cache package ships those
+# kernels prebuilt; when it is installed, JitSpec.is_aot is true and
+# build_and_load() loads the .so directly without invoking ninja or nvcc.
+#
+# The version must match the installed flashinfer exactly. flashinfer's
+# jit/env.py raises at import when flashinfer_jit_cache.__version__ does not
+# start with the flashinfer version, which would break every model rather than
+# just the ones that JIT. This script therefore derives the version instead of
+# pinning one, and removes the package again if the pair does not match.
+#
+# Never fatal: a missing wheel leaves the job exactly as it was before.
+#
+# Usage: install_flashinfer_jit_cache [VENV_PYTHON]
+
+set -uo pipefail  # deliberately not -e: this must never abort a job
+
+VENV_PYTHON="${1:-${VLLM_PYTHON:-/opt/vllm-venv/bin/python}}"
+
+log() { echo "[flashinfer-jit-cache] $*"; }
+
+if [ ! -x "$VENV_PYTHON" ]; then
+    log "no vLLM interpreter at $VENV_PYTHON, skipping"
+    return 0 2>/dev/null || exit 0
+fi
+
+FI_VERSION=$("$VENV_PYTHON" -c \
+    'from importlib.metadata import version; print(version("flashinfer-python"))' 2>/dev/null)
+if [ -z "$FI_VERSION" ]; then
+    log "flashinfer-python is not installed, nothing to prebuild"
+    return 0 2>/dev/null || exit 0
+fi
+
+# Wheels are published per CUDA minor version, tagged cu128, cu129, ...
+CU_TAG=$("$VENV_PYTHON" -c \
+    'import torch; v=torch.version.cuda or ""; print("cu"+v.replace(".","") if v else "")' 2>/dev/null)
+if [ -z "$CU_TAG" ]; then
+    log "could not determine the CUDA version from torch, skipping"
+    return 0 2>/dev/null || exit 0
+fi
+
+log "flashinfer-python==$FI_VERSION, CUDA $CU_TAG; installing matching kernel cache"
+uv pip install --python "$VENV_PYTHON" \
+    "flashinfer-jit-cache==${FI_VERSION}+${CU_TAG}" \
+    --extra-index-url "https://flashinfer.ai/whl/${CU_TAG}/" \
+    --index-strategy unsafe-best-match
+
+# Verify the pair agrees, because a mismatch is worse than an absence: it makes
+# flashinfer raise at import time for every model, not only ones that JIT.
+CACHE_VERSION=$("$VENV_PYTHON" -c \
+    'from importlib.metadata import version; print(version("flashinfer-jit-cache"))' 2>/dev/null)
+if [ -z "$CACHE_VERSION" ]; then
+    log "WARNING: no prebuilt kernel cache for ${FI_VERSION}+${CU_TAG}."
+    log "WARNING: kernels that are not prebuilt will try to compile and fail on"
+    log "WARNING: this image. Pass gdn_prefill_backend=triton to avoid the GDN one."
+    return 0 2>/dev/null || exit 0
+fi
+
+case "$CACHE_VERSION" in
+    "$FI_VERSION"*)
+        log "installed flashinfer-jit-cache==$CACHE_VERSION"
+        ;;
+    *)
+        log "WARNING: flashinfer-jit-cache==$CACHE_VERSION does not match"
+        log "WARNING: flashinfer-python==$FI_VERSION; removing it, since flashinfer"
+        log "WARNING: refuses to import when the two disagree."
+        uv pip uninstall --python "$VENV_PYTHON" flashinfer-jit-cache
+        ;;
+esac
+
+return 0 2>/dev/null || exit 0
