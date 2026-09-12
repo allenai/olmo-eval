@@ -267,6 +267,7 @@ class VLLMServerProvider(InferenceProvider):
         log_dir: str | None = None,
         chat_template_kwargs: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
+        chat_logprobs: bool = True,
         revision: str | None = None,
         force_download: bool = False,
         add_bos_token: bool | None = None,
@@ -298,6 +299,9 @@ class VLLMServerProvider(InferenceProvider):
             reasoning_effort: Top-level ``reasoning_effort`` for chat completions ("low"/"medium"/"high").
                 gpt-oss is rendered by vLLM's harmony path, which reads this field and ignores
                 ``chat_template_kwargs``.
+            chat_logprobs: Request per-token logprobs on chat completions (default True). Set False for
+                generative tasks that do not use them; gpt-oss returns NaN logprobs for some requests,
+                which vLLM rejects at JSON serialization (400) and which otherwise fail the request.
             revision: HuggingFace revision/commit hash for managed server startup and
                 local tokenizer loading.
             force_download: Force-refresh Hugging Face model/tokenizer cache entries
@@ -326,6 +330,7 @@ class VLLMServerProvider(InferenceProvider):
         self.max_retries = max_retries
         self.chat_template_kwargs = chat_template_kwargs
         self.reasoning_effort = reasoning_effort
+        self.chat_logprobs = chat_logprobs
         self._add_bos_token = add_bos_token
         self._prompt_logprobs = prompt_logprobs if prompt_logprobs is not None else 5
         self._completion_use_prompt_token_ids = bool(completion_use_prompt_token_ids)
@@ -919,10 +924,11 @@ class VLLMServerProvider(InferenceProvider):
             kwargs["stop"] = list(params.stop_sequences)
         if tools:
             kwargs["tools"] = tools
-        # Always request logprobs for metrics computation
-        # Both logprobs=True and top_logprobs are required for chat completions API
-        kwargs["logprobs"] = True
-        kwargs["top_logprobs"] = 1
+        # Request logprobs for metrics computation unless disabled by the provider config
+        # (both logprobs=True and top_logprobs are required for the chat completions API).
+        if self.chat_logprobs:
+            kwargs["logprobs"] = True
+            kwargs["top_logprobs"] = 1
 
         # Pass chat_template_kwargs via extra_body for vLLM
         if self.chat_template_kwargs:
