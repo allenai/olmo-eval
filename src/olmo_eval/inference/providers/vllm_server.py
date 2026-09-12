@@ -266,6 +266,7 @@ class VLLMServerProvider(InferenceProvider):
         trust_remote_code: bool = False,
         log_dir: str | None = None,
         chat_template_kwargs: dict[str, Any] | None = None,
+        reasoning_effort: str | None = None,
         revision: str | None = None,
         force_download: bool = False,
         add_bos_token: bool | None = None,
@@ -294,6 +295,9 @@ class VLLMServerProvider(InferenceProvider):
             trust_remote_code: Trust remote code for model loading (server mode).
             log_dir: Directory to write server logs to (server mode).
             chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false}).
+            reasoning_effort: Top-level ``reasoning_effort`` for chat completions ("low"/"medium"/"high").
+                gpt-oss is rendered by vLLM's harmony path, which reads this field and ignores
+                ``chat_template_kwargs``.
             revision: HuggingFace revision/commit hash for managed server startup and
                 local tokenizer loading.
             force_download: Force-refresh Hugging Face model/tokenizer cache entries
@@ -321,6 +325,7 @@ class VLLMServerProvider(InferenceProvider):
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
         self.chat_template_kwargs = chat_template_kwargs
+        self.reasoning_effort = reasoning_effort
         self._add_bos_token = add_bos_token
         self._prompt_logprobs = prompt_logprobs if prompt_logprobs is not None else 5
         self._completion_use_prompt_token_ids = bool(completion_use_prompt_token_ids)
@@ -922,6 +927,8 @@ class VLLMServerProvider(InferenceProvider):
         # Pass chat_template_kwargs via extra_body for vLLM
         if self.chat_template_kwargs:
             extra_body["chat_template_kwargs"] = self.chat_template_kwargs
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
         if extra_body:
             kwargs["extra_body"] = extra_body
 
