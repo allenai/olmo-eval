@@ -5,7 +5,7 @@ information-seeking questions spanning 17 domains (Politics, Finance, Science,
 Health, History, Geography, Media, ...). Each problem is either a
 ``Single Answer`` (one entity/value) or a ``Set Answer`` (an enumeration or
 composite answer with multiple required items); on HuggingFace both are
-stored as one comma-joined ``answer`` string
+stored as free-form text in the ``answer`` column
 (``google/deepsearchqa``, config ``deepsearchqa``, split ``eval``). A handful
 of ``Set Answer`` rows encode "no items satisfy every constraint" as the
 literal text ``None``, which HuggingFace's CSV loader turns into a null; these
@@ -51,9 +51,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from olmo_eval.common.metrics import Metric
@@ -68,7 +69,7 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,6 @@ DEEPSEARCHQA_REPO = "google/deepsearchqa"
 DEEPSEARCHQA_CONFIG = "deepsearchqa"
 DEEPSEARCHQA_SPLIT = "eval"
 
-DEEPSEARCHQA_DEFAULT_JUDGE_SPEC = "gpt-5.5:medium"
 DEEPSEARCHQA_JUDGE_ATTEMPTS = 3
 
 DEEPSEARCHQA_GENERATION_PROMPT = """\
@@ -115,75 +115,110 @@ def extract_final_answer(text: str) -> str:
     return text[matches[-1].end() :].strip() or text.strip()
 
 
-def split_answer_set(text: str) -> list[str]:
-    """Split a comma-delimited answer string into non-empty, stripped items."""
-    return [item.strip() for item in text.split(",") if item.strip()]
-
-
-def _numbered_list(items: Sequence[str]) -> str:
-    return "\n".join(f"{index}. {item}" for index, item in enumerate(items))
-
-
+# Official starter notebook rubric, with the output format expressed as a JSON template.
 DEEPSEARCHQA_JUDGE_PROMPT = """\
-You are grading a submitted answer against a ground-truth answer for the \
-question below. The answer may be a single item or a set of items. Two \
-items are equivalent if they refer to the same real-world entity, value, or \
-fact, even when worded differently (abbreviations, alternate spellings, \
-reordering, or trivial formatting differences do not matter). Judge \
-semantic equivalence, not surface string similarity.
+Your task is to evaluate whether a given "AI Response" for a specific "User Prompt" arrived at \
+the correct answer.
 
-Question: {question}
+**Answer Correctness Task**
 
-Ground-truth answer set ({num_gold} item(s)):
-{gold_list}
+*   **Purpose:** Assess whether the AI response provides the correct answer(s) based on the \
+provided "Correct Answer" and "Prompt Type".
+*   **Process:**
+    *   Identify the "Prompt Type": "<prompt_type>".
+    *   Refer to the "Correct Answer": "<answer>".
+    *   Based on the "Prompt Type", determine if the "AI Response" contains the expected answer(s).
+        *   **'Single Answer'**: Check if the response provides the answer that addresses the \
+user's question. It does not have to match the exact wording of the provided answer.
+        *   **'Set Answer'**: Check if the response includes *each* item from the provided ground \
+truth answers. The order might not matter unless specified otherwise. The response might include \
+more answers than the list. Determine the correctness *only* based on the list first and then \
+check if the response includes answers not in the list.
+    *   **Explanation:** Provide a brief explanation justifying your assessment of answer \
+correctness, referencing specific parts of the AI response and the correct answer.
+    *   **Correctness Details:** Provide a dictionary, one key for each expected answer part, and \
+value is a boolean indicating whether each expected answer part was found.
+        *   For 'Set Answer', this will be a list of attributes, one for each item/part in the \
+"Correct Answer". Each key will be a string indicating the expected answer part, and the value \
+will be a boolean indicating whether that part was found in the response.
+    *   **Excessive Answers:** Provide a list of strings, each indicating an excessive answer \
+part. If the response provides answers that are **not** in the "Correct Answer" list, add these \
+answers as excessive answers. Return an empty list when there's no excessive answers in the \
+response.
 
-Submitted answer set ({num_pred} item(s)):
-{pred_list}
+**Output Format:**
 
-For every ground-truth item, decide whether it is semantically covered by \
-at least one submitted item. Separately, for every submitted item, decide \
-whether it matches at least one ground-truth item.
+Your evaluation *must* be structured as a nested JSON dictionary with the following top-level \
+keys: `"Answer Correctness"`. Please return NULL if any of "Prompt", "AI Response" or "Correct \
+Answer" is empty.
+The value for `"Answer Correctness"` should be a dictionary containing `"Explanation"` (a \
+string), `"Correctness Details"` (a dictionary where each key is the expected correct answer, and \
+the value is a boolean indicating whether the response contains the correct answer), and \
+`"Excessive Answers"` (a list of strings indicating the excessive answers).
 
-Respond with only a JSON object of exactly this form, and nothing else:
-{{"matched_gold_indices": [...], "matched_submitted_indices": [...]}}
-Both lists hold the 0-based indices (into the lists above) of the items \
-that were matched."""
+Make sure you return a valid JSON object of exactly this form like the example below and nothing \
+else:
+{{
+  "Answer Correctness": {{
+    "Explanation": "The response correctly identified Belgium and France but also includes an \
+excessive answer, Italy.",
+    "Correctness Details": {{
+      "Belgium": true,
+      "France": true
+    }},
+    "Excessive Answers": [ "Italy" ]
+  }}
+}}
 
-_JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+**Now, proceed with the evaluation using the provided User Prompt, AI Response, and Correct \
+Answer.**
+
+User Prompt (Wrapped in <prompt> and </prompt>):
+<prompt>
+{prompt}
+</prompt>
+--------------------
+Correct Answer (Wrapped in <answer> and </answer>):
+Prompt Type: {prompt_type}
+<answer>
+{answer}
+</answer>
+--------------------
+AI assistant response (Wrapped in <response> and </response>):
+<response>
+{response}
+</response>
+--------------------
+Rating:"""
 
 
-def build_deepsearchqa_judge_fn() -> JudgeFn:
-    """Build the task's judge from ``$OLMO_EVAL_JUDGE`` or its own default."""
-    import os
-
-    spec = os.getenv("OLMO_EVAL_JUDGE", DEEPSEARCHQA_DEFAULT_JUDGE_SPEC)
-    model, separator, effort = spec.partition(":")
+def build_deepsearchqa_judge_fn(config: TaskConfig) -> JudgeFn:
+    """Build the task's judge from its recorded configuration."""
+    if config.judge_model is None or config.judge_max_tokens is None:
+        raise ValueError("DeepSearchQA requires a complete judge configuration")
     return build_openai_judge_fn(
-        model=model,
+        model=config.judge_model,
         temperature=0.0,
-        max_tokens=1024,
+        max_tokens=config.judge_max_tokens,
         scorer_name="DeepSearchQA",
-        reasoning_effort=(effort if separator else None),
+        reasoning_effort=config.judge_reasoning_effort,
     )
 
 
 def build_deepsearchqa_judge_prompt(
-    question: str, gold_items: Sequence[str], pred_items: Sequence[str]
+    question: str, answer_type: str, gold_answer: str, pred_answer: str
 ) -> str:
-    """Format the item-matching judge prompt for one instance."""
+    """Format the notebook judge prompt for one instance."""
     return DEEPSEARCHQA_JUDGE_PROMPT.format(
-        question=question,
-        num_gold=len(gold_items),
-        gold_list=_numbered_list(gold_items),
-        num_pred=len(pred_items),
-        pred_list=_numbered_list(pred_items),
+        prompt=question,
+        prompt_type=answer_type or "Set Answer",
+        answer=gold_answer,
+        response=pred_answer,
     )
 
 
-def parse_deepsearchqa_judge_response(
-    raw: str, num_gold: int, num_pred: int
-) -> tuple[set[int], set[int]] | None:
-    """Parse the judge's matched-index JSON, or None if it is unparseable."""
+def parse_deepsearchqa_judge_response(raw: str) -> tuple[int, int, int] | None:
+    """Return the judge's expected, matched, and excessive answer counts."""
     decoder = json.JSONDecoder()
     data: Any | None = None
     for match in re.finditer(r"\{", raw):
@@ -197,26 +232,63 @@ def parse_deepsearchqa_judge_response(
     if data is None:
         return None
 
-    gold_raw, pred_raw = data.get("matched_gold_indices"), data.get("matched_submitted_indices")
-    if not isinstance(gold_raw, list) or not isinstance(pred_raw, list):
+    correctness = data.get("Answer Correctness")
+    if not isinstance(correctness, dict) or not isinstance(correctness.get("Explanation"), str):
         return None
 
-    try:
-        matched_gold = {int(i) for i in gold_raw if 0 <= int(i) < num_gold}
-        matched_pred = {int(i) for i in pred_raw if 0 <= int(i) < num_pred}
-    except (TypeError, ValueError):
+    details = correctness.get("Correctness Details")
+    excessive = correctness.get("Excessive Answers", [])
+    if not isinstance(details, dict) or not isinstance(excessive, list):
         return None
-    return matched_gold, matched_pred
+    if any(not isinstance(value, bool) for value in details.values()):
+        return None
+    if any(not isinstance(item, str) for item in excessive):
+        return None
+
+    return len(details), sum(details.values()), len(excessive)
+
+
+async def call_deepsearchqa_judge[T](
+    judge_fn: JudgeFn,
+    prompt: str,
+    parse: Callable[[str], T | None],
+) -> tuple[T | None, list[dict[str, Any]]]:
+    """Retry unsuccessful judge attempts and retain their diagnostics."""
+    failures: list[dict[str, Any]] = []
+    for attempt in range(1, DEEPSEARCHQA_JUDGE_ATTEMPTS + 1):
+        raw: str | None = None
+        try:
+            raw = await judge_fn(prompt)
+            parsed = parse(raw)
+        except Exception as exc:
+            failure: dict[str, Any] = {
+                "attempt": attempt,
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+            if raw is not None:
+                failure["response"] = raw
+        else:
+            if parsed is not None:
+                return parsed, failures
+            failure = {
+                "attempt": attempt,
+                "type": "InvalidJudgeResponse" if raw else "EmptyJudgeResponse",
+                "message": "Judge returned an invalid or incomplete verdict.",
+                "response": raw,
+            }
+        failures.append(failure)
+        if attempt < DEEPSEARCHQA_JUDGE_ATTEMPTS:
+            await asyncio.sleep(2 ** (attempt - 1))
+    return None, failures
 
 
 def compute_deepsearchqa_scores(
-    num_gold: int, num_pred: int, num_matched_gold: int, num_matched_pred: int
+    num_gold: int, num_matched: int, num_excessive: int
 ) -> dict[str, float]:
-    """Compute precision/recall/F1/exact-match from item-level match counts."""
+    """Compute precision/recall/F1/exact-match from judge answer counts."""
     if num_gold == 0:
-        # Gold answer is the empty set: a correctly-empty prediction is a perfect score,
-        # any predicted item is an unwarranted hallucination.
-        is_correct = num_pred == 0
+        is_correct = num_excessive == 0
         return {
             "deepsearchqa_precision": 1.0 if is_correct else 0.0,
             "deepsearchqa_recall": 1.0,
@@ -224,10 +296,11 @@ def compute_deepsearchqa_scores(
             "deepsearchqa_exact_match": 1.0 if is_correct else 0.0,
         }
 
-    recall = num_matched_gold / num_gold
-    precision = num_matched_pred / num_pred if num_pred else 0.0
+    recall = num_matched / num_gold
+    num_submitted = num_matched + num_excessive
+    precision = num_matched / num_submitted if num_submitted else 0.0
     f1 = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
-    exact_match = 1.0 if (num_pred > 0 and num_matched_pred == num_pred and recall == 1.0) else 0.0
+    exact_match = 1.0 if (num_matched == num_gold and num_excessive == 0) else 0.0
     return {
         "deepsearchqa_precision": precision,
         "deepsearchqa_recall": recall,
@@ -283,7 +356,7 @@ class DeepSearchQABase(Task):
     """Shared data loading for the DeepSearchQA task family.
 
     Subclasses differ only in generation prompt and grading mechanic; the
-    dataset, schema, and empty-gold-set handling are identical across them.
+    dataset, schema, and no-answer reference handling are identical across them.
     """
 
     data_source = DataSource(
@@ -291,6 +364,17 @@ class DeepSearchQABase(Task):
     )
     sampling_params = SamplingParams(temperature=0.0, max_tokens=4096)
     required_secrets = ("OPENAI_API_KEY",)
+    judge_model = "gpt-5.5"
+    judge_reasoning_effort = "medium"
+    judge_max_tokens = 8192
+
+    def __init__(self, config: TaskConfig) -> None:
+        if spec := os.getenv("OLMO_EVAL_JUDGE"):
+            model, _, effort = spec.partition(":")
+            if not model:
+                raise ValueError("OLMO_EVAL_JUDGE must name a judge model")
+            config = replace(config, judge_model=model, judge_reasoning_effort=effort or None)
+        super().__init__(config)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -309,30 +393,62 @@ class DeepSearchQABase(Task):
             return None
 
         if not answer:
-            # The source CSV encodes "no items satisfy every constraint" as the literal
-            # text "None" on Set Answer rows; the HF CSV loader coerces that string to a
-            # null, so it arrives here indistinguishable from a missing field. A missing
-            # answer only makes sense as an intentional empty answer set for Set Answer
-            # rows; treat anything else as a malformed row.
+            # HF converts the source CSV's literal "None" to null. Restore the
+            # no-answer reference for Set Answer rows.
             if answer_type != "Set Answer":
                 return None
-            gold_items: list[str] = []
-        else:
-            gold_items = split_answer_set(answer)
-            if not gold_items:
-                return None
+            answer = "None"
+        elif not isinstance(answer, str) or not answer.strip(" ,"):
+            return None
 
         return Instance(
             question=question,
-            gold_answer=answer or "",
+            gold_answer=answer,
             metadata={
                 "id": f"deepsearchqa_{index}",
                 "index": index,
                 "problem_category": doc.get("problem_category", ""),
                 "answer_type": answer_type,
-                "gold_items": gold_items,
             },
         )
+
+    def _judge_failure_metadata(
+        self, response: Response, failures: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Report exhausted judge attempts and build persistent failure metadata."""
+        instance_id = str(response.instance.metadata.get("id", "unknown"))
+        last_failure = failures[-1]
+        message = (
+            f"Judge failed after {len(failures)} attempts: "
+            f"{last_failure['type']}: {last_failure['message']}"
+        )
+        logger.warning(
+            "%s judge failed for instance %s after %d attempts; "
+            "last failure: %s: %s. Assigned 0.0 across all metrics; "
+            "attempt details are saved in model_output[].judge_result.",
+            self.config.name,
+            instance_id,
+            len(failures),
+            last_failure["type"],
+            last_failure["message"],
+        )
+        return {
+            "judge_result": {
+                "status": "failed",
+                "task": self.config.name,
+                "instance_id": instance_id,
+                "attempts": len(failures),
+                "failures": failures,
+            },
+            "scoring_errors": {
+                metric.name: {
+                    "phase": "judge",
+                    "type": "JudgeAttemptsExhausted",
+                    "message": message,
+                }
+                for metric in self.config.metrics
+            },
+        }
 
 
 @register("deepsearchqa")
@@ -350,7 +466,7 @@ class DeepSearchQA(DeepSearchQABase):
         )
 
     def extract_answer(self, output: LMOutput) -> str:
-        """Keep only the comma-separated list after the ``FINAL ANSWER`` marker."""
+        """Extract the final answer submitted for grading."""
         return extract_final_answer(output.text)
 
     async def score_responses(
@@ -360,7 +476,7 @@ class DeepSearchQA(DeepSearchQABase):
     ) -> Sequence[Response]:
         """Judge each response's answer set against the gold answer set."""
         self._extract_answers(responses)
-        judge_fn = build_deepsearchqa_judge_fn()
+        judge_fn = build_deepsearchqa_judge_fn(self.config)
 
         failed_instances = 0
         for response in responses:
@@ -374,11 +490,12 @@ class DeepSearchQA(DeepSearchQABase):
                 for metric_name, score in scores.items():
                     output.metadata[f"score:{metric_name}"] = score
 
-        if failed_instances:
+        if failed_instances and len(responses) > 1:
             logger.warning(
-                "DeepSearchQA judge returned no parseable verdict for %d instance(s) after "
-                "%d attempts; scored those 0.0 across all metrics.",
+                "DeepSearchQA judge failed for %d/%d instances after %d attempts each; "
+                "failure details were saved and those instances were scored 0.0.",
                 failed_instances,
+                len(responses),
                 DEEPSEARCHQA_JUDGE_ATTEMPTS,
             )
         return responses
@@ -389,47 +506,42 @@ class DeepSearchQA(DeepSearchQABase):
         judge_fn: JudgeFn,
     ) -> tuple[dict[str, float], dict[str, Any], int]:
         """Score one response, returning metrics, judge details, and a failure count."""
-        gold_items = response.instance.metadata.get("gold_items", [])
+        gold_answer = response.instance.gold_answer or ""
+        answer_type = response.instance.metadata.get("answer_type", "")
         output = response.outputs[0] if response.outputs else None
 
         pred_text = ""
         if output is not None:
             extracted = output.extracted_answer
             pred_text = extracted if isinstance(extracted, str) else output.text
-        pred_items = split_answer_set(pred_text)
+        pred_text = pred_text.strip()
 
         base_metadata = {
-            "deepsearchqa_gold_items": gold_items,
-            "deepsearchqa_predicted_items": pred_items,
+            "deepsearchqa_gold_answer": gold_answer,
+            "deepsearchqa_submitted_answer": pred_text,
         }
 
-        if not pred_items or not gold_items:
-            # Nothing to match on one side (an empty prediction, or a gold answer
-            # that is itself the empty set); the outcome is already determined.
-            scores = compute_deepsearchqa_scores(len(gold_items), len(pred_items), 0, 0)
+        if not pred_text:
+            scores = {metric.name: 0.0 for metric in DEEPSEARCHQA_METRICS}
             return scores, base_metadata, 0
 
-        prompt = build_deepsearchqa_judge_prompt(response.instance.question, gold_items, pred_items)
-
-        parsed = None
-        for attempt in range(DEEPSEARCHQA_JUDGE_ATTEMPTS):
-            raw = await judge_fn(prompt)
-            parsed = parse_deepsearchqa_judge_response(raw, len(gold_items), len(pred_items))
-            if parsed is not None:
-                break
-            if attempt < DEEPSEARCHQA_JUDGE_ATTEMPTS - 1:
-                await asyncio.sleep(2**attempt)
-
-        matched_gold, matched_pred = parsed if parsed is not None else (set(), set())
-        scores = compute_deepsearchqa_scores(
-            len(gold_items), len(pred_items), len(matched_gold), len(matched_pred)
+        prompt = build_deepsearchqa_judge_prompt(
+            response.instance.question, answer_type, gold_answer or "None", pred_text
         )
-        metadata = {
-            **base_metadata,
-            "deepsearchqa_matched_gold_indices": sorted(matched_gold),
-            "deepsearchqa_matched_submitted_indices": sorted(matched_pred),
-        }
-        return scores, metadata, 0 if parsed is not None else 1
+
+        def parse(raw: str) -> tuple[int, int, int] | None:
+            parsed = parse_deepsearchqa_judge_response(raw)
+            if parsed is not None and parsed[0] == 0 and gold_answer not in ("", "None"):
+                return None
+            return parsed
+
+        parsed, failures = await call_deepsearchqa_judge(judge_fn, prompt, parse)
+        if parsed is None:
+            metadata = {**base_metadata, **self._judge_failure_metadata(response, failures)}
+            return {metric.name: 0.0 for metric in DEEPSEARCHQA_METRICS}, metadata, 1
+
+        scores = compute_deepsearchqa_scores(*parsed)
+        return scores, base_metadata, 0
 
 
 register_variant("deepsearchqa", "mini", limit=50)

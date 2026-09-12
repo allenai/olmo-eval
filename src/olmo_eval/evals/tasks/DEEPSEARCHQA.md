@@ -12,17 +12,13 @@ question is either a **Single Answer** (one entity/value) or a **Set Answer**
 test whether an agent can plan and execute a search process that returns a
 *complete and precise* answer set, not just a single plausible fact.
 
-There are two registered tasks, sharing the same dataset and data-loading
-code (`DeepSearchQABase` in `deepsearchqa.py`) but with different generation
-prompts and grading mechanics — see "How grading works" below:
+Both registered tasks share the dataset, notebook judge prompt, and verdict
+parser. They differ in the response presented to the judge:
 
-- **`deepsearchqa`** — a discrete `FINAL ANSWER: ...` line, matched against
-  the gold item set by index. This is the default; it's easier to validate
-  programmatically (see below) but is a bigger departure from the official
-  methodology.
-- **`deepsearchqa_official_judge`** — mirrors the official paper prompt
-  (Appendix A): the judge grades the model's raw free-form response
-  directly, no special output format required.
+- **`deepsearchqa`** requests a `FINAL ANSWER: ...` line and grades the
+  extracted answer text.
+- **`deepsearchqa_official_judge`** allows free-form answers and grades the
+  full response.
 
 ## Files
 
@@ -43,17 +39,14 @@ same mechanism every other task in this directory relies on.
 
 - HuggingFace dataset: `google/deepsearchqa`, config `deepsearchqa`, split
   `eval` (900 rows).
-- Columns: `problem` (question), `problem_category` (domain), `answer`
-  (ground truth, comma-joined for multi-item answers), `answer_type`
+- Columns: `problem` (question), `problem_category` (domain), `answer`, `answer_type`
   (`"Single Answer"` or `"Set Answer"`).
-- Both answer types are parsed the same way: the `answer` column is split on
-  `,` into a gold item set (a `"Single Answer"` becomes a one-item set), so
-  scoring treats every instance uniformly as set comparison.
 - 4 `Set Answer` rows encode "no items satisfy every constraint" as the
   literal text `None` in the source CSV; HuggingFace's CSV loader coerces
-  that to a null value. These are treated as an empty gold answer set (not
-  dropped) — a correctly-empty model prediction scores full marks, and any
-  predicted item scores zero. A missing `answer` on a `Single Answer` row is
+  that to a null value. The shared loader restores the reference text `None`.
+  The judge receives that reference and decides whether the model correctly
+  states that no items qualify. Blank or missing model responses always score
+  zero without calling the judge. A missing `answer` on a `Single Answer` row is
   still treated as malformed and dropped, since that combination shouldn't
   occur in valid data.
 
