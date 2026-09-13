@@ -944,7 +944,7 @@ class VLLMServerProvider(InferenceProvider):
         usage = getattr(response, "usage", None)
 
         outputs = []
-        for choice in response.choices:
+        for choice_idx, choice in enumerate(response.choices):
             text = choice.message.content or ""
             tool_calls = None
             if choice.message.tool_calls:
@@ -961,10 +961,14 @@ class VLLMServerProvider(InferenceProvider):
             logprob_entries: list[LogProbEntry] | None = None
             metadata: dict[str, Any] = {}
 
-            # Store token counts from server for accurate metrics
+            # Store token counts from server for accurate metrics. `usage` is per request: for
+            # n > 1 sampling, completion_tokens is the sum over all choices, so attach it to the
+            # first choice only; the metrics collector sums completion_tokens over outputs and
+            # would otherwise count the request n times (32x on pass@32 tasks).
             if usage:
                 metadata["prompt_tokens"] = usage.prompt_tokens
-                metadata["completion_tokens"] = usage.completion_tokens
+                if choice_idx == 0:
+                    metadata["completion_tokens"] = usage.completion_tokens
 
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
