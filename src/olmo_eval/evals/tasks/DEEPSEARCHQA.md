@@ -150,6 +150,9 @@ uv run olmo-eval task inspect deepsearchqa -n 3 --request
 
 # Preview the run config without executing anything
 uv run olmo-eval run -m mock -t deepsearchqa --dry-run
+
+# Increase timeout
+uv run olmo-eval run -m Qwen/Qwen2.5-0.5B-Instruct -t deepsearchqa:mini -o limit=1 --harness dr_tulu -o provider.kwargs.startup_timeout=1800
 ```
 
 Use a different judge model with `OLMO_EVAL_JUDGE`, e.g.:
