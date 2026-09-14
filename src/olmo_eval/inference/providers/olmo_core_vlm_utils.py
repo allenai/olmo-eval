@@ -468,6 +468,41 @@ def _load_mm_olmo_state_dict(checkpoint_dir: str, model_cfg: Any) -> dict[str, t
     return molmo2_hf_state_dict_to_multimodal_lm(hf_state_dict, model_cfg)
 
 
+#: Both vision key-compat helpers land together in allenai/OLMo-core#834, which is not yet
+#: merged to ``vision``. An OLMo-core installed from ``vision`` -- or from the
+#: ``ai2-olmo-core`` release pinned in ``pyproject.toml``, which has no ``olmo_core.nn.vision``
+#: at all -- has neither, and nothing else in this repo records that requirement.
+_OLMO_CORE_VISION_KEYS_HINT = (
+    "This needs an OLMo-core carrying the `vision_backbone.` key-compatibility helpers "
+    "(`MultimodalLM.legacy_vision_key_mapping` and "
+    "`olmo_core.nn.vision.molmo2_loader.canonicalize_vision_keys`), which land in "
+    "allenai/OLMo-core#834 and are absent from the `vision` branch and from the pinned "
+    "ai2-olmo-core release. Install from that branch:\n"
+    "    pip install 'ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git"
+    "@donovan/training-speed-and-image-v10'\n"
+    "or point `-o provider.package=` at a checkout of it."
+)
+
+
+def _legacy_vision_key_mapping(model: Any) -> dict[str, str]:
+    """The current->checkpoint vision key map, or a named error if OLMo-core lacks it.
+
+    Deliberately *not* ``hasattr``-guarded. Falling back to ``None`` leaves the remap
+    silently inert: a pre-rename ``vision.*`` checkpoint then loads with its whole ViT and
+    connector missing, reporting nothing. Since the helper and the rename it compensates
+    for ship in the same OLMo-core change, its absence means the install is simply too old,
+    which is worth saying out loud rather than discovering from a chance-level score.
+    """
+    mapping = getattr(model, "legacy_vision_key_mapping", None)
+    if mapping is None:
+        raise RuntimeError(
+            f"{type(model).__name__} has no `legacy_vision_key_mapping`, so an OLMo-core "
+            f"checkpoint written before the vision_backbone rename cannot be remapped and "
+            f"would load with an empty vision tower. " + _OLMO_CORE_VISION_KEYS_HINT
+        )
+    return mapping()
+
+
 def load_checkpoint_weights(
     info: MultimodalCheckpointInfo, checkpoint_dir: str, model: Any
 ) -> None:
@@ -484,19 +519,24 @@ def load_checkpoint_weights(
         # Passing this unconditionally is safe and needs no format sniffing:
         # `swap_param_keys` skips any entry whose checkpoint-side key is absent from the
         # checkpoint metadata, so a post-rename checkpoint is untouched.
-        key_mapping = (
-            model.legacy_vision_key_mapping()
-            if hasattr(model, "legacy_vision_key_mapping")
-            else None
-        )
+        key_mapping = _legacy_vision_key_mapping(model)
         load_model_and_optim_state(
             str(Path(checkpoint_dir) / "model_and_optim"), model, key_mapping=key_mapping
         )
         return
 
     if info.format == "olmo_core_unsharded":
-        from olmo_core.nn.vision.molmo2_loader import canonicalize_vision_keys
         from safetensors.torch import load_file
+
+        try:
+            from olmo_core.nn.vision.molmo2_loader import canonicalize_vision_keys
+        except ImportError as exc:
+            # Same missing dependency as the DCP path above; raise the same way rather than
+            # letting a bare ImportError name only the symbol.
+            raise RuntimeError(
+                "Cannot load an unsharded OLMo-core export: "
+                "`canonicalize_vision_keys` is not importable. " + _OLMO_CORE_VISION_KEYS_HINT
+            ) from exc
 
         # These come from OLMo-core's scripts/unshard.py, which is key-agnostic: exports
         # taken before the rename carry bare `vision.*`, later ones `vision_backbone.*`.

@@ -14,6 +14,8 @@ weka reads and no real checkpoint.
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -27,6 +29,45 @@ from olmo_eval.inference.providers.olmo_core_vlm_utils import (
 )
 
 torch = pytest.importorskip("torch")
+
+
+#: The unsharded path calls straight into OLMo-core, so those cases need an install that
+#: actually has the helper. It lands in allenai/OLMo-core#834, which is unmerged, and
+#: `pyproject.toml` pins an `ai2-olmo-core` release with no `olmo_core.nn.vision` at all --
+#: so on a clean checkout these would be red for a reason that has nothing to do with the
+#: code under test. Skip with the reason named instead. The DCP cases below need no such
+#: guard: they exercise our own remap logic against a fake model.
+def _has_olmo_core_vision_keys() -> bool:
+    """Whether the installed OLMo-core carries ``canonicalize_vision_keys``.
+
+    Swallows every import error rather than just ``ImportError``: this runs at collection
+    time, where anything raised aborts the whole module instead of skipping one test.
+    """
+    try:
+        module = importlib.import_module("olmo_core.nn.vision.molmo2_loader")
+    except Exception:
+        return False
+    return hasattr(module, "canonicalize_vision_keys")
+
+
+#: The DCP cases monkeypatch `load_model_and_optim_state`, so they need OLMo-core to be
+#: importable even though they never touch the vision helpers. `pyproject.toml` pins a
+#: release without it, so guard separately and more weakly than the unsharded cases.
+_needs_olmo_core = pytest.mark.skipif(
+    importlib.util.find_spec("olmo_core") is None,
+    reason=(
+        "OLMo-core is not installed; `pyproject.toml` pins a release with no olmo_core.nn.vision"
+    ),
+)
+
+
+_needs_olmo_core_vision_keys = pytest.mark.skipif(
+    not _has_olmo_core_vision_keys(),
+    reason=(
+        "installed OLMo-core has no canonicalize_vision_keys; it lands in "
+        "allenai/OLMo-core#834 (branch donovan/training-speed-and-image-v10)"
+    ),
+)
 
 #: What ``MultimodalLM.legacy_vision_key_mapping()`` returns: ``{current: original}``,
 #: already the shape ``swap_param_keys`` expects, so no inversion at the call site.
@@ -62,6 +103,7 @@ def _info(fmt: str) -> MultimodalCheckpointInfo:
 # ---------------------------------------------------------------------------
 
 
+@_needs_olmo_core
 def test_dcp_load_passes_the_legacy_key_mapping(monkeypatch, tmp_path: Path) -> None:
     # Without a key_mapping the loader looks for `vision_backbone.*` in a checkpoint that
     # only has `vision.*`, which is every checkpoint written before the rename.
@@ -82,21 +124,41 @@ def test_dcp_load_passes_the_legacy_key_mapping(monkeypatch, tmp_path: Path) -> 
     assert captured["dir"].endswith("model_and_optim")
 
 
-def test_dcp_load_tolerates_a_model_without_the_helper(monkeypatch, tmp_path: Path) -> None:
-    # legacy_vision_key_mapping only exists on MultimodalLM; the hasattr guard keeps this
-    # path working for anything else that reaches it.
-    captured: dict[str, Any] = {}
-
-    def fake_load(dir_, model, optim=None, **kwargs):
-        captured["kwargs"] = kwargs
+@_needs_olmo_core
+def test_dcp_load_raises_when_olmo_core_lacks_the_helper(monkeypatch, tmp_path: Path) -> None:
+    # This used to be hasattr-guarded and fall back to key_mapping=None. That made the remap
+    # silently inert on any OLMo-core predating the rename: a legacy `vision.*` checkpoint
+    # loaded with an empty vision tower and scored at chance with nothing logged. Fail loudly
+    # instead, and name the OLMo-core that supplies the helper.
+    def fake_load(dir_, model, optim=None, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("load must not be attempted without a key mapping")
 
     monkeypatch.setattr(
         "olmo_core.distributed.checkpoint.load_model_and_optim_state", fake_load, raising=True
     )
 
-    load_checkpoint_weights(_info("olmo_core_dcp"), str(tmp_path), _FakeModel(with_mapping=False))
+    with pytest.raises(RuntimeError, match="legacy_vision_key_mapping"):
+        load_checkpoint_weights(
+            _info("olmo_core_dcp"), str(tmp_path), _FakeModel(with_mapping=False)
+        )
 
-    assert captured["kwargs"]["key_mapping"] is None
+
+@_needs_olmo_core
+def test_dcp_load_error_names_the_olmo_core_branch(monkeypatch, tmp_path: Path) -> None:
+    # The whole point of raising is to shorten the diagnosis, so the message has to say
+    # which OLMo-core to install -- pyproject pins a release with no olmo_core.nn.vision.
+    monkeypatch.setattr(
+        "olmo_core.distributed.checkpoint.load_model_and_optim_state",
+        lambda *a, **k: None,
+        raising=True,
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        load_checkpoint_weights(
+            _info("olmo_core_dcp"), str(tmp_path), _FakeModel(with_mapping=False)
+        )
+
+    assert "OLMo-core#834" in str(excinfo.value)
 
 
 def test_legacy_mapping_is_current_to_original_not_inverted() -> None:
@@ -124,6 +186,7 @@ def _write_export(tmp_path: Path, state_dict: dict[str, Any]) -> Path:
     return out
 
 
+@_needs_olmo_core_vision_keys
 @pytest.mark.parametrize(
     "vision_key",
     [
@@ -152,6 +215,7 @@ def test_unsharded_export_loads_under_either_layout(tmp_path: Path, vision_key: 
     assert "lm.embeddings.weight" in model.loaded
 
 
+@_needs_olmo_core_vision_keys
 def test_unsharded_export_canonicalization_is_idempotent(tmp_path: Path) -> None:
     # A current-layout export must round-trip untouched, not gain a second prefix.
     checkpoint = _write_export(tmp_path, {"vision_backbone.connector.w1.weight": torch.zeros(2, 2)})

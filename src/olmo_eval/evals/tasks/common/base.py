@@ -9,7 +9,6 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, fields
-from dataclasses import replace as dc_replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -203,27 +202,30 @@ class TaskConfig:
                     f"got {self.output_score_aggregation!r}"
                 ) from exc
 
-        # Dotted CLI overrides (`-o sampling_params.max_tokens=64`) arrive as a plain dict.
-        # SamplingParams is frozen and used as a cache key, so an uncoerced dict fails far
-        # from its cause with `unhashable type: 'dict'`. Unknown keys are rejected rather
-        # than silently dropped.
+        # Dotted CLI overrides (`-o sampling_params.max_tokens=64`) are merged onto the
+        # task's declared SamplingParams by the runner, in `preparation.py`, which is the
+        # only place that still holds the pre-override object. Validate here, never merge:
+        # by the time `__post_init__` runs, `self.sampling_params` *is* the override dict
+        # and the original is gone, so there is nothing left to merge against. An earlier
+        # attempt merged onto `type(self).__dict__["sampling_params"]`, but that resolves to
+        # TaskConfig's `None` default rather than the task's own value, so it rebuilt from
+        # the override keys alone and silently dropped the rest -- humaneval's and gsm8k's
+        # `stop_sequences` among them. Rejecting is the honest option: a dict reaching here
+        # means some caller bypassed the runner and its overrides would be applied wrong.
         if isinstance(self.sampling_params, dict):
-            overrides = dict(self.sampling_params)
             valid = {f.name for f in fields(SamplingParams)}
-            unknown = set(overrides) - valid
+            unknown = set(self.sampling_params) - valid
             if unknown:
                 raise ValueError(
                     f"unknown sampling_params field(s): {', '.join(sorted(unknown))}; "
                     f"valid: {', '.join(sorted(valid))}"
                 )
-            # Merge onto whatever the class already declares rather than rebuilding from the
-            # override keys: `SamplingParams(**overrides)` would drop every field the caller
-            # did not mention, e.g. humaneval's stop_sequences. The runner now routes dotted
-            # overrides through sampling_overrides, so this is defence for other callers.
-            base_params = type(self).__dict__.get("sampling_params")
-            if not isinstance(base_params, SamplingParams):
-                base_params = SamplingParams()
-            self.sampling_params = dc_replace(base_params, **overrides)
+            raise TypeError(
+                "sampling_params must be a SamplingParams instance, not a dict. Dotted "
+                "overrides are applied by the runner via sampling_overrides, which merges "
+                "onto the task's own params; building a config with a raw dict here would "
+                "drop every field the dict omits."
+            )
 
         try:
             weight = float(self.sandbox_allocation_weight)

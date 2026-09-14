@@ -206,6 +206,22 @@ def _patch_molmo2_generation_cache_position(model: Any) -> None:
 _VISION_CONFIG_ATTRS = ("vision_config", "vit_config", "vision_tower_config")
 
 
+#: Substrings transformers uses when refusing to execute a repo's custom code. Matching on
+#: the message is unavoidable: the refusal is a bare ``ValueError``, with no dedicated
+#: exception type to catch.
+_REMOTE_CODE_ERROR_MARKERS = (
+    "trust_remote_code",
+    "custom code",
+    "requires you to execute",
+)
+
+
+def _is_remote_code_error(exc: BaseException) -> bool:
+    """Whether ``exc`` is transformers refusing to run a repo's custom code."""
+    message = str(exc)
+    return any(marker in message for marker in _REMOTE_CODE_ERROR_MARKERS)
+
+
 def looks_multimodal_hf(model_name: str, **model_kwargs: Any) -> bool:
     """Whether an HF checkpoint is an image-text-to-text model.
 
@@ -225,8 +241,10 @@ def looks_multimodal_hf(model_name: str, **model_kwargs: Any) -> bool:
     mapping), a vision-tower sub-config under any of its usual names, and membership of
     transformers' image-text-to-text mapping.
 
-    Returns ``False`` rather than raising when the config cannot be read: the caller then
-    takes the text path and fails with its own error, which is no worse than before.
+    Returns ``False`` rather than raising when the config cannot be read, so an unreadable
+    or unrecognised repo still takes the text path and fails with its own error. The one
+    exception is a repo that ships custom code, which is raised with the missing flag named
+    -- see :func:`_is_remote_code_error`.
     """
     try:
         from transformers import AutoConfig
@@ -238,9 +256,24 @@ def looks_multimodal_hf(model_name: str, **model_kwargs: Any) -> bool:
         for key, value in model_kwargs.items()
         if key in HuggingFaceProvider._TOKENIZER_KWARGS
     }
+    # Pin the flag when the caller left it unset. With it unset, transformers prompts on
+    # stdin ("Do you wish to run the custom code? [y/N]") for a remote-code repo; a Beaker
+    # worker has no stdin, so that is log noise at best and a hung job at worst. Pinning it
+    # False turns the prompt into a deterministic raise that the handler below can name.
+    config_kwargs.setdefault("trust_remote_code", False)
     try:
         config = AutoConfig.from_pretrained(model_name, **config_kwargs)
-    except Exception:
+    except Exception as exc:
+        if _is_remote_code_error(exc):
+            # Returning False here sends a Molmo2 checkpoint down the text-only path, where
+            # it dies with `Unrecognized configuration class Molmo2Config ...
+            # AutoModelForCausalLM` -- the exact error this function exists to prevent, and
+            # one that names neither the cause nor the fix.
+            raise ValueError(
+                f"{model_name} ships custom model code, so its config cannot be read "
+                f"without trust_remote_code. Pass `-o provider.trust_remote_code=true`; "
+                f"Molmo2 and other remote-code repos require it."
+            ) from exc
         return False
 
     # Remote-code repos declare the head they load with; this is authoritative and is the
