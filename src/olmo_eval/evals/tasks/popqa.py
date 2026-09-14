@@ -80,6 +80,7 @@ class PopQA(Task):
     split = Split.TEST
     metrics = (_FIRST_LINE_ACCURACY, _CONTAINMENT_ACCURACY)
     primary_metric = _FIRST_LINE_ACCURACY
+    strip_thinking = True
     num_fewshot = 15
     sampling_params = SamplingParams(
         max_tokens=15,
