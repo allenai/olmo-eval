@@ -137,10 +137,10 @@ export SERPER_API_KEY=...   # Google web search
 uv run olmo-eval run -m llama3.1-8b -t deepsearchqa --harness dr_tulu
 
 # Baseline, no search tools (parametric-knowledge reference point only)
-uv run olmo-eval run -m llama3.1-8b -t deepsearchqa
+uv run olmo-eval run -m Qwen/Qwen2.5-7B-Instruct -t deepsearchqa:mini -o limit=5
 
 # Quick iteration on a 50-instance subset
-uv run olmo-eval run -m llama3.1-8b -t deepsearchqa:mini --harness dr_tulu
+uv run olmo-eval run -m llama3.1-8b -t deepsearchqa:mini --harness dr_tulu -o limit=5
 
 # The official-prompt variant works the same way; swap the task name
 uv run olmo-eval run -m llama3.1-8b -t deepsearchqa_official_judge:mini --harness dr_tulu
