@@ -39,6 +39,7 @@ from olmo_eval.evals.extract import (
     OLMO_3_ANSWER_REGEX_TEMPLATES,
     ExtractedAnswer,
     extract_answer_with_format,
+    extract_think_answer,
 )
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
@@ -264,8 +265,14 @@ _COT_SAMPLING = SamplingParams(
 
 
 def _extract_cot_answer(text: str) -> ExtractedAnswer:
+    """Extract the answer letter from a CoT continuation.
+
+    Reasoning enclosed in ``<think>`` tags is dropped first, as the reference
+    harness does for reasoning models, so letters mentioned while thinking
+    cannot be mistaken for the final answer.
+    """
     extracted = extract_answer_with_format(
-        text,
+        extract_think_answer(text) or "",
         answer_format_regex=_COT_ANSWER_FORMAT_REGEX,
         answer_regexes=_COT_ANSWER_REGEXES,
         answer_regexes_templates=OLMO_3_ANSWER_REGEX_TEMPLATES,

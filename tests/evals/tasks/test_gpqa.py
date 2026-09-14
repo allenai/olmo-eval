@@ -411,3 +411,12 @@ class TestCoTVariant:
     def test_extract_answer_strips_parens(self, task):
         output = LMOutput(text="Reasoning. Therefore, the answer is (D)")
         assert task.extract_answer(output) == "D"
+
+    def test_scorer_strips_think_block(self, task):
+        from olmo_eval.evals.tasks.gpqa import GPQACoTExactMatchScorer
+
+        scorer = GPQACoTExactMatchScorer()
+        instance = Instance(question="q", gold_answer="B", metadata={})
+        visible = "Therefore, the answer is (B)"
+        assert scorer.score(instance, LMOutput(text=f"<think>Could be D.</think>{visible}")) == 1.0
+        assert scorer.score(instance, LMOutput(text=f"<think>{visible}</think>")) == 0.0
