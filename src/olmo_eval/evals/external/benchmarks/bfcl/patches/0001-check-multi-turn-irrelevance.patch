@@ -1,0 +1,25 @@
+diff --git a/berkeley-function-call-leaderboard/bfcl_eval/eval_checker/eval_runner.py b/berkeley-function-call-leaderboard/bfcl_eval/eval_checker/eval_runner.py
+index 46d64fe..9721c73 100644
+--- a/berkeley-function-call-leaderboard/bfcl_eval/eval_checker/eval_runner.py
++++ b/berkeley-function-call-leaderboard/bfcl_eval/eval_checker/eval_runner.py
+@@ -237,0 +238,20 @@ def _evaluate_single_multi_turn_entry(
++    # multi_turn_checker executes calls on empty-ground-truth turns for state
++    # accounting, but deliberately leaves the abstention verdict to this
++    # dedicated checker.
++    accuracy_checker_result = multi_turn_irrelevance_checker(
++        multi_turn_model_result_list_decoded,
++        ground_truth_list,
++    )
++    if not accuracy_checker_result["valid"]:
++        return {
++            "id": test_entry_id,
++            "model_name": model_name,
++            "test_category": test_category,
++            "valid": accuracy_checker_result.pop("valid"),
++            "error": accuracy_checker_result,
++            "prompt": prompt_entry,
++            "model_result_raw": model_result_list,
++            "model_result_decoded": multi_turn_model_result_list_decoded,
++            "possible_answer": ground_truth_list,
++        }
++
