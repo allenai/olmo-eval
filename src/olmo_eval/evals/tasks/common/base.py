@@ -8,7 +8,7 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -171,6 +171,23 @@ class TaskConfig:
     prompt_templates: str | None = None
     system_prompt_style: str | None = None
 
+    #: What an image-QA task sends in place of the real image. ``"real"`` is the benchmark
+    #: as published. ``"none"`` drops the image, measuring what the question alone supports.
+    #: ``"caption"`` substitutes a text description from ``caption_source``, so the gap to
+    #: ``"real"`` attributes error to perception rather than knowledge or reasoning.
+    image_mode: str = "real"
+
+    #: JSONL of ``{"example_id": ..., "caption": ...}`` records, required by
+    #: ``image_mode="caption"``.
+    caption_source: str | None = None
+
+    #: Which prompt convention to send. ``"molmo"`` (default) reproduces mm_olmo's SFT
+    #: format -- a ``vqa2:`` / ``chart_qa:`` style tag and no answer-length instruction --
+    #: which is in-distribution for Molmo checkpoints and gibberish to anything else.
+    #: ``"neutral"`` drops the tag and asks for a short answer, the convention published
+    #: VLM numbers are measured under. Only affects how the question is rendered.
+    prompt_style: str = "molmo"
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):
@@ -184,6 +201,31 @@ class TaskConfig:
                     f"output_score_aggregation must be one of: {valid}; "
                     f"got {self.output_score_aggregation!r}"
                 ) from exc
+
+        # Dotted CLI overrides (`-o sampling_params.max_tokens=64`) are merged onto the
+        # task's declared SamplingParams by the runner, in `preparation.py`, which is the
+        # only place that still holds the pre-override object. Validate here, never merge:
+        # by the time `__post_init__` runs, `self.sampling_params` *is* the override dict
+        # and the original is gone, so there is nothing left to merge against. An earlier
+        # attempt merged onto `type(self).__dict__["sampling_params"]`, but that resolves to
+        # TaskConfig's `None` default rather than the task's own value, so it rebuilt from
+        # the override keys alone and silently dropped the rest -- humaneval's and gsm8k's
+        # `stop_sequences` among them. Rejecting is the honest option: a dict reaching here
+        # means some caller bypassed the runner and its overrides would be applied wrong.
+        if isinstance(self.sampling_params, dict):
+            valid = {f.name for f in fields(SamplingParams)}
+            unknown = set(self.sampling_params) - valid
+            if unknown:
+                raise ValueError(
+                    f"unknown sampling_params field(s): {', '.join(sorted(unknown))}; "
+                    f"valid: {', '.join(sorted(valid))}"
+                )
+            raise TypeError(
+                "sampling_params must be a SamplingParams instance, not a dict. Dotted "
+                "overrides are applied by the runner via sampling_overrides, which merges "
+                "onto the task's own params; building a config with a raw dict here would "
+                "drop every field the dict omits."
+            )
 
         try:
             weight = float(self.sandbox_allocation_weight)
@@ -282,6 +324,14 @@ class TaskConfig:
             "max_length": self.max_length,
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
             "dependencies": self.dependencies,
+            # Without these an ablation run serializes identically to the real benchmark
+            # run. prompt_templates/system_prompt_style were already missing -- same class
+            # of bug, pre-existing.
+            "prompt_templates": self.prompt_templates,
+            "system_prompt_style": self.system_prompt_style,
+            "prompt_style": self.prompt_style,
+            "image_mode": self.image_mode,
+            "caption_source": self.caption_source,
         }
 
     def get_primary_metric(self) -> Metric | None:

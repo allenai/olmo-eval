@@ -37,7 +37,10 @@ from olmo_eval.common.types import Instance, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common.base import Task
 
 # Generic (not single-image-QA-specific) data utilities.
-from olmo_eval.evals.tasks.common.image_qa_base import torch_datasets_dir
+from olmo_eval.evals.tasks.common.image_qa_base import (
+    reject_unsupported_prompt_knobs,
+    torch_datasets_dir,
+)
 
 __all__ = [
     "MultiImageCategoryMetric",
@@ -155,6 +158,7 @@ class MultiImageQATask(Task):
         ...
 
     def format_request(self, instance: Instance) -> LMRequest:
+        reject_unsupported_prompt_knobs(self.config, type(self).__name__)
         images = load_instance_images(instance)[: self.max_images]
         return LMRequest(
             request_type=RequestType.CHAT,
