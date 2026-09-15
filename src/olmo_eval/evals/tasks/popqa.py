@@ -39,10 +39,12 @@ class PopQAContainsScorer(Scorer):
 
     A response is correct if any accepted alias appears in it verbatim,
     lowercased, or capitalized — the matching rule used by the reference
-    implementation. With ``first_line`` set, only text up to the first
-    newline is searched: models that ramble past their answer invent
-    follow-up Q/A pairs full of plausible entity names, and whole-output
-    containment credits those accidental hits.
+    implementation. With ``first_line`` set, only the first non-blank line
+    is searched: models that ramble past their answer invent follow-up Q/A
+    pairs full of plausible entity names, and whole-output containment
+    credits those accidental hits. Leading blank lines are skipped rather
+    than treated as the answer — a reasoning model's answer starts on the
+    line after the stripped ``<think>`` trace.
     """
 
     name: str = "popqa_contains"
@@ -51,7 +53,10 @@ class PopQAContainsScorer(Scorer):
     def score(self, instance: Instance, output: LMOutput) -> float:
         response = output.text or ""
         if self.first_line:
-            response = response.split("\n")[0]
+            response = next(
+                (line for line in response.split("\n") if line.strip()),
+                "",
+            )
         aliases = instance.metadata.get("aliases") or []
         if not aliases and instance.gold_answer:
             aliases = [instance.gold_answer]
@@ -80,7 +85,6 @@ class PopQA(Task):
     split = Split.TEST
     metrics = (_FIRST_LINE_ACCURACY, _CONTAINMENT_ACCURACY)
     primary_metric = _FIRST_LINE_ACCURACY
-    strip_thinking = True
     num_fewshot = 15
     sampling_params = SamplingParams(
         max_tokens=15,
@@ -140,11 +144,14 @@ class PopQA(Task):
 
 # Chat variant for instruct and reasoning models. Drops stop sequences and
 # lifts the token cap (None = generate to the model's context limit) so
-# chain-of-thought reasoning is not truncated on any context size.
+# chain-of-thought reasoning is not truncated on any context size. The base
+# task stays untouched: 15 generated tokens of completion cannot carry a
+# reasoning trace, and leaving its config alone keeps its task hash stable.
 register_variant(
     "popqa",
     "chat",
     formatter=ChatFormatter(),
+    strip_thinking=True,
     sampling_params=SamplingParams(
         max_tokens=None,
         temperature=0.6,
