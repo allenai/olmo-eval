@@ -137,10 +137,6 @@ default-groups = ["dev", "vllm"]
 # These extras/groups have incompatible transitive dependencies and cannot be installed together
 conflicts = [
     [
-        { extra = "olmo_core" },
-        { extra = "olmo_core_vlm" },
-    ],
-    [
         { extra = "agents" },
         { extra = "openhands" },
     ],
@@ -153,11 +149,15 @@ conflicts = [
         { extra = "openhands" },
     ],
     [
-        { extra = "olmo_core_vlm" },
+        { extra = "clients" },
         { extra = "openhands" },
     ],
     [
-        { extra = "clients" },
+        { extra = "olmo_core" },
+        { extra = "olmo_core_vlm" },
+    ],
+    [
+        { extra = "olmo_core_vlm" },
         { extra = "openhands" },
     ],
 ]
@@ -181,8 +181,14 @@ dev = [
 ]
 # Mirror of the `vllm` extra as a uv dependency group so it can be enabled by
 # default for GPU/CI workflows while still being installable via pip extras.
+# Listed directly rather than as `olmo-eval[vllm]`: the extra participates in
+# the declared conflicts, and uv gates a conflicting extra's edges behind
+# opt-in markers — routed through the extra, the default group resolved to
+# nothing and `uv sync` silently installed no vllm.
 vllm = [
-    "olmo-eval[vllm]",
+    "vllm[runai]==0.19.1 ; platform_system != 'Darwin'",
+    "opencv-python-headless==4.13.0.92 ; platform_system != 'Darwin'",
+    "torch-c-dlpack-ext ; platform_system != 'Darwin'",
 ]
 
 [tool.ruff]
