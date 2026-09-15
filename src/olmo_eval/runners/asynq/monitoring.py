@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import queue
 import time
 
@@ -11,7 +12,28 @@ from olmo_eval.runners.asynq.types import WORKER_FATAL
 
 logger = get_logger(__name__)
 
+
 DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
+
+
+def provider_init_timeout_seconds() -> float:
+    """How long to wait for a worker's provider to come up.
+
+    Large checkpoints read over shared storage can take most of the default
+    900s, and concurrent runs against the same weights take longer, so
+    ``OLMO_EVAL_PROVIDER_INIT_TIMEOUT`` raises the ceiling without a code
+    change. Read at call time so a bad value fails where the timeout is used,
+    with the variable named.
+    """
+    raw = os.environ.get("OLMO_EVAL_PROVIDER_INIT_TIMEOUT")
+    if raw is None or not raw.strip():
+        return DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(
+            f"OLMO_EVAL_PROVIDER_INIT_TIMEOUT must be a number of seconds, got {raw!r}"
+        ) from None
 
 
 def terminate_workers(
@@ -142,7 +164,7 @@ def wait_for_init_times(
     num_workers: int,
     workers: list[mp.process.BaseProcess] | None = None,
     result_queue: mp.Queue | None = None,
-    timeout: float = DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS,
+    timeout: float | None = None,
     check_interval: float = 1.0,
 ) -> dict[str, float]:
     """Wait for all workers to report their initialization times.
@@ -161,6 +183,8 @@ def wait_for_init_times(
     Raises:
         RuntimeError: If a worker crashes during initialization.
     """
+    if timeout is None:
+        timeout = provider_init_timeout_seconds()
     collected: dict[str, float] = {}
     start_time = time.time()
 
@@ -195,6 +219,7 @@ def wait_for_init_times(
 
 __all__ = [
     "DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS",
+    "provider_init_timeout_seconds",
     "terminate_workers",
     "check_workers_alive",
     "wait_for_workers_ready",
