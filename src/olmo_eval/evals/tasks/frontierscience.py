@@ -7,6 +7,12 @@ Two tracks from the open-sourced gold set of ``openai/frontierscience``:
     compares the attempted answer against the reference answer and returns a
     CORRECT / INCORRECT verdict, so the primary metric is accuracy.
 
+``frontierscience_olympiad:verified``
+    The 83 of those 100 problems whose gold answers survived manual review.
+    Everything else matches ``frontierscience_olympiad`` exactly -- same problem
+    text, same upstream gold answer, same judge -- so a verified score is the
+    full-set score restricted to those problems, not a separate measurement.
+
 ``frontierscience_research``
     60 open-ended PhD-level research sub-tasks. Each carries a rubric totaling
     10 points that credits intermediate derivations as well as the final result.
@@ -15,7 +21,7 @@ Two tracks from the open-sourced gold set of ``openai/frontierscience``:
     fraction of rubric points earned is reported alongside it because it is the
     more sensitive signal on a benchmark where frontier models score around 25%.
 
-Both tracks report the primary metric overall and per subject (biology,
+All tracks report the primary metric overall and per subject (biology,
 chemistry, physics).
 
 The problem statements already end with the benchmark's own answer-format
@@ -42,12 +48,15 @@ scores are the mean over samples rather than the harness default of the max.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, replace
+from functools import cache
+from importlib.resources import files
 from typing import Any
 
 from olmo_eval.common.metrics import Metric
@@ -78,6 +87,9 @@ logger = logging.getLogger(__name__)
 FRONTIERSCIENCE_REPO = "openai/frontierscience"
 # Pinned so a Hub update cannot silently change the gold set mid-comparison.
 FRONTIERSCIENCE_REVISION = "25ed67db7da8f4591484e764008ff585544f5a30"
+FRONTIERSCIENCE_VERIFIED_IDS_FILE = "frontierscience_olympiad_verified_ids.json"
+#: Olympiad problems left after manual review of the published gold answers.
+FRONTIERSCIENCE_VERIFIED_COUNT = 83
 
 FRONTIERSCIENCE_DEFAULT_JUDGE_MODEL = "gpt-5.5-2026-04-23"
 FRONTIERSCIENCE_DEFAULT_JUDGE_REASONING_EFFORT = "high"
@@ -187,6 +199,24 @@ def parse_research_points(raw: str) -> float | None:
         return None
     points = float(matches[-1].group(1))
     return min(max(points, 0.0), FRONTIERSCIENCE_RUBRIC_TOTAL)
+
+
+@cache
+def verified_task_group_ids() -> frozenset[str]:
+    """Return the Olympiad ``task_group_id`` values that passed manual answer review.
+
+    The same 83 ids back the multiple-choice adaptation of this subset, so the two
+    tracks cover identical problems and the file is the single place that changes
+    if a problem is later added back or removed.
+    """
+    resource = files(__package__).joinpath(FRONTIERSCIENCE_VERIFIED_IDS_FILE)
+    ids = frozenset(json.loads(resource.read_text(encoding="utf-8"))["task_group_ids"])
+    if len(ids) != FRONTIERSCIENCE_VERIFIED_COUNT:
+        raise ValueError(
+            f"{FRONTIERSCIENCE_VERIFIED_IDS_FILE} holds {len(ids)} distinct ids, "
+            f"expected {FRONTIERSCIENCE_VERIFIED_COUNT}"
+        )
+    return ids
 
 
 def _parse_judge_spec(spec: str) -> tuple[str, str | None]:
@@ -634,6 +664,21 @@ class FrontierScienceOlympiad(_FrontierScience):
         return scores
 
 
+@register("frontierscience_olympiad:verified")
+class FrontierScienceOlympiadVerified(FrontierScienceOlympiad):
+    """Olympiad restricted to the problems whose published gold answers held up.
+
+    Reviewing all 100 answers to build the multiple-choice adaptation flagged 17 as
+    ambiguously worded or wrong, which the judge scores as model errors. Problems
+    and gold answers are still the upstream ones verbatim; only the row set differs.
+    """
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        if str(doc.get("task_group_id") or "") not in verified_task_group_ids():
+            return None
+        return super().process_doc(doc, index)
+
+
 @register("frontierscience_research")
 class FrontierScienceResearch(_FrontierScience):
     """FrontierScience Research track scored against 10-point model-judged rubrics."""
@@ -693,6 +738,11 @@ class FrontierScienceResearch(_FrontierScience):
 # the models it evaluates and is what makes independent trials differ.
 register_variant(
     "frontierscience_olympiad",
+    "paper",
+    sampling_params=replace(_OLYMPIAD_SAMPLING, temperature=1.0, num_samples=20),
+)
+register_variant(
+    "frontierscience_olympiad:verified",
     "paper",
     sampling_params=replace(_OLYMPIAD_SAMPLING, temperature=1.0, num_samples=20),
 )
