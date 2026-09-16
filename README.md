@@ -660,6 +660,109 @@ See the [Harness](#harness) section above for full documentation on:
 - Defining tools with the `@tool` decorator
 - Programmatic usage
 
+## Function Calling (BFCL)
+
+The Berkeley Function Calling Leaderboard v3 single-turn categories are
+registered as `bfcl_*` tasks. A prediction is graded by BFCL's own checker: the
+predicted calls are compared against a list of accepted values per parameter,
+so an answer is right when it names the right function and supplies values the
+benchmark accepts.
+
+### Three prompting regimes
+
+Every category is registered in three regimes, which differ only in how the
+functions reach the model and how its calls are read back.
+
+| Spec | Regime | Use for |
+|------|--------|---------|
+| `bfcl_simple` | Native function calling — functions go out as tool schemas, calls come back as `tool_calls` | An instruction-tuned model behind an OpenAI-compatible endpoint |
+| `bfcl_simple:prompt` | BFCL's prompting mode — functions in a system prompt, calls as `[func(arg=value)]` text | Any chat endpoint, with no server-side tool parsing |
+| `bfcl_simple:base` | Plain completion with curated exemplars | A base model with no chat template |
+
+**Native function calling requires the server to parse tool calls.** vLLM only
+emits `tool_calls` when it is started with `--enable-auto-tool-choice`; without
+it the server answers in plain text and every instance scores zero:
+
+Provider overrides follow `--harness`, not `-t`:
+
+```bash
+# Serve the model and evaluate its endpoint on the whole single-turn set
+uv run olmo-eval run -m my-model \
+    --harness default -o provider.kwargs.enable_auto_tool_choice=true \
+    -t bfcl
+```
+
+vLLM infers a `--tool-call-parser` from the model name; add
+`-o provider.kwargs.tool_call_parser=<name>` to choose one explicitly.
+
+The prompting regime needs no server flags:
+
+```bash
+uv run olmo-eval run -m my-model -t bfcl:prompt
+```
+
+### Base models
+
+The `:base` regime lays the task out as one block of text — instruction,
+functions, question — that the model continues with its calls. Hand-written
+exemplars teach the answer format; `:0shot` through `:5shot` change how many
+are shown (the default is 5), and each language has its own set:
+
+```bash
+uv run olmo-eval run -m my-base-model -t bfcl:base
+uv run olmo-eval run -m my-base-model -t bfcl_simple:base:2shot
+```
+
+The expected answer format stays BFCL's `[func(arg=value)]` in every regime, so
+numbers are comparable across models and checkpoints. Because a base model has
+never been taught that format, the `:base` decoder also accepts the JSON
+tool-call shapes models pick up during pretraining — a bare list of
+`{"name": ..., "arguments": {...}}` objects, or one wrapped in `<tool_call>`
+tags — so the score reflects which function was chosen rather than which
+surface form the model reached for.
+
+### Categories and suites
+
+```bash
+uv run olmo-eval suite inspect bfcl
+```
+
+| Suite | What it reports |
+|-------|-----------------|
+| `bfcl` | BFCL's single-turn overall, without the executable categories |
+| `bfcl:non_live_ast` | BFCL's non-live AST summary |
+| `bfcl:non_live` | Non-live AST summary with irrelevance |
+| `bfcl:non_live_simple` | Simple AST across Python, Java and JavaScript |
+| `bfcl:categories` | Every category reported separately |
+
+Each suite also exists as `:prompt` and `:base` (for example
+`bfcl:non_live_ast:base`).
+
+BFCL weights its live summaries by how many instances each category holds,
+which a suite average cannot express, so those summaries are tasks that pool
+their categories' instances: `bfcl_live_ast` and `bfcl_live`. The per-category
+tasks are `bfcl_simple`, `bfcl_multiple`, `bfcl_parallel`,
+`bfcl_parallel_multiple`, `bfcl_java`, `bfcl_javascript`, `bfcl_irrelevance`,
+and the six `bfcl_live_*` categories.
+
+`bfcl_java` and `bfcl_javascript` read calls written in those languages, and
+declare the `tree-sitter-java` and `tree-sitter-javascript` grammars as
+task-specific dependencies (see [Task-Specific
+Dependencies](#task-specific-dependencies)). No other category needs them.
+
+### What is not implemented
+
+- **Multi-turn** (`multi_turn_base`, `multi_turn_miss_func`,
+  `multi_turn_miss_param`, `multi_turn_long_context`, `multi_turn_composite`):
+  scoring them needs BFCL's stateful API backend.
+- **Executable and REST** (`exec_*`, `rest`): these grade by running the
+  predicted calls against live third-party APIs.
+
+Because the executable categories are missing, `bfcl:non_live` is BFCL's
+non-live overall with those terms left out and will not match a published
+non-live number, which averages them in. `bfcl:non_live_ast` and the live
+summaries are directly comparable.
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.
