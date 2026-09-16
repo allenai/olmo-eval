@@ -34,6 +34,40 @@ serper_fetch_webpage_content before answering. Quote only text copied from
 fetched page content, and do not invent citations."""
 
 
+# The v3 instrument's whole prompt-side contract, in one string, because the two
+# halves fix two different failures and the agent reads them as one instruction.
+#
+# The first sentence is the search nudge, measured in W0018: Qwen3.5-9B otherwise
+# skips the tool outright on some queries, answering from memory in a single turn,
+# and every such query is unexportable because nothing it cites was ever
+# retrieved. That sentence took 9B's tool-skips from 6/63 to 0/63 and is
+# reproduced here verbatim -- it is a pre-registered string, not prose to edit.
+#
+# The rest is the delimiter contract. The benchmark's user prompt is run verbatim
+# and cannot be edited, and 9B reached its Related Works section only after a
+# median 9.8k characters of planning, all of which the scorer read as the report.
+# Banning deliberation would cost quality, so this buys the split instead: think
+# above the line, deliver below it. The wording is emphatic about where the prose
+# goes because the first version was not, and 9B read it the other way -- writing
+# the whole section while deliberating and leaving only the numbered list below
+# the line. Kept in sync with deepscholar_citations by a test that reads the
+# marker back out of this string.
+ARXIV_PAPER_SEARCH_SYSTEM_PROMPT = """\
+Search for relevant papers with the tool before writing. Base every citation on \
+sources returned by your searches, never on memory.
+
+You may plan and deliberate freely in your reply. When you are ready to deliver,
+write a line containing exactly:
+
+=== FINAL REPORT ===
+
+Your entire report goes after that line, in this order: the complete Related
+Works section first, then the numbered reference list. Do not write any part of
+the Related Works section before the marker, and do not put the reference list
+there on its own. Everything above the marker is discarded and is never
+evaluated, so a report written above it does not count at all."""
+
+
 # TODO(undfined): Remove reference to beaker
 def _get_logs_dir() -> str:
     """Get the logs directory based on environment."""
@@ -157,7 +191,10 @@ class HarnessPresets:
         For literature-search tasks (e.g. litsearch). Exposes a single paper-search
         tool and declares no required secrets, so it runs against the public
         Semantic Scholar API keyless (rate-limited). For higher rate limits, mount
-        a key with `--secret-env <user>_S2_API_KEY:S2_API_KEY`.
+        a key with `--secret-env <user>_S2_API_KEY:S2_API_KEY`. Additional keys
+        mount as `S2_API_KEY_2`, `S2_API_KEY_3`, ... (or a comma-separated list
+        in any one of them); the tool spreads requests across all of them and
+        raises its request rate proportionally.
         """
         from .tools.search import semantic_scholar_search
 
@@ -169,6 +206,54 @@ class HarnessPresets:
             ),
             tools=(semantic_scholar_search,),
             max_turns=10,
+            max_concurrency=4,
+            scaffold="openai_agents",
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def arxiv_paper_search_agent(name: str) -> HarnessConfig:
+        """Agentic harness exposing only arXiv-filtered paper search.
+
+        The system prompt carries a delimiter contract: the model may deliberate
+        in its reply, but its deliverable starts at an exact marker line and
+        everything above that line is discarded before scoring. See
+        ARXIV_PAPER_SEARCH_SYSTEM_PROMPT and
+        deepscholar_citations.split_final_report, which reads the marker back
+        out.
+
+        For tasks whose scorer credits arXiv sources alone (e.g.
+        deepscholar_bench). Kept separate from `paper_search_agent` rather than
+        added to it: which search tools an agent holds changes what it retrieves,
+        so sharing a preset would move litsearch and SAGE numbers that were
+        measured against Semantic Scholar search.
+
+        No secret is declared, so this runs keyless against the public Semantic
+        Scholar API at its shared ~1 request/second. `required_secrets` is a
+        hard launch gate with no optional form, and declaring one here would
+        make a keyless run impossible; mount a key per run instead with
+        `--secret-env <user>_S2_API_KEY:S2_API_KEY`.
+
+        Reasoning effort is deliberately not pinned here, because backbones that
+        reason well on this preset should keep doing so. Models that refuse
+        function tools alongside a reasoning effort -- gpt-5.6-sol on
+        /v1/chat/completions rejects the combination outright -- need it turned
+        off for the run:
+        `-o scaffold_kwargs.model_settings.reasoning_effort=none`.
+        """
+        from .tools.search import arxiv_paper_search
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            tools=(arxiv_paper_search,),
+            system_prompt=ARXIV_PAPER_SEARCH_SYSTEM_PROMPT,
+            # Writing a related-works section takes more searching than a
+            # single-answer lookup, so this doubles paper_search_agent's turns.
+            max_turns=20,
             max_concurrency=4,
             scaffold="openai_agents",
             batching=BatchConfig.streaming(),

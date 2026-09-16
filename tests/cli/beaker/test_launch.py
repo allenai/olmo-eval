@@ -8,6 +8,15 @@ from olmo_eval.common.constants.infrastructure import BEAKER_UV_CACHE_DIR
 from olmo_eval.inference.providers.config import ProviderConfig
 
 
+def test_secret_env_override_satisfies_required_secret():
+    from olmo_eval.cli.beaker.launch import _unsatisfied_required_secrets
+
+    required = {"OPENAI_API_KEY", "S2_API_KEY"}
+    overrides = {"openai_api_key": "OPENAI_API_KEY"}
+
+    assert _unsatisfied_required_secrets(required, overrides) == {"S2_API_KEY"}
+
+
 class TestProviderConfigDependenciesValidation:
     """Tests for ProviderConfig.from_dict dependencies validation."""
 

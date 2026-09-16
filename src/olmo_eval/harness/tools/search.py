@@ -2,6 +2,7 @@
 
 This module provides search tools that can be used with the Harness:
 - semantic_scholar_search: Search academic papers via Semantic Scholar API
+- arxiv_paper_search: Search arXiv papers via Semantic Scholar, filtered to arXiv
 - serper_web_search: Search the web via Serper/Google API
 - serper_fetch_page: Fetch and extract webpage content
 - crawl4ai_browse: Fetch and extract webpage content via crawl4ai
@@ -13,15 +14,17 @@ Import the tool objects and use .name for HarnessConfig.tool_names.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 import os
 import random
 import re
 import time
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit
 
 import httpx
@@ -46,7 +49,9 @@ _WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
 # Semantic Scholar's introductory plan allows ~1 request/second cumulative across
 # all endpoints, which several concurrent agents exhaust immediately. All S2
 # requests pass through a process-global minimum interval (proactive throttle);
-# backoff handles the occasional 429 that still gets through.
+# backoff handles the occasional 429 that still gets through. The limit is
+# enforced per API key, so the interval below is the budget for a single key and
+# _s2_rate_interval() divides it by the number of configured keys.
 _S2_MIN_INTERVAL_S = 1.1  # slightly over 1s for margin
 _s2_rate_lock = asyncio.Lock()
 _s2_last_request_ts = 0.0  # time.monotonic() of the last dispatched S2 request
@@ -105,15 +110,76 @@ def _truncate_webpage_content(text: str) -> str:
     return text
 
 
+def _api_keys_from_env(base_var: str) -> list[str]:
+    """Collect every API key configured for ``base_var``, in a stable order.
+
+    Reads ``<base_var>`` first, then every ``<base_var>_<n>`` in ascending
+    numeric order (so ``_2`` precedes ``_10``). Each variable may hold one key
+    or a comma-separated list, which keeps both deployment shapes usable: one
+    Beaker secret per key, or a single secret holding all of them.
+
+    Blank entries are dropped and duplicates collapse to their first
+    occurrence, so one configured key always yields a one-element list and no
+    key gets a larger share of the request stream than the others.
+    """
+    prefix = f"{base_var}_"
+    numbered: list[tuple[int, str]] = []
+    for name, value in os.environ.items():
+        if not name.startswith(prefix):
+            continue
+        suffix = name[len(prefix) :]
+        if suffix.isdigit():
+            numbered.append((int(suffix), value))
+
+    raw = [os.getenv(base_var, "")]
+    raw.extend(value for _, value in sorted(numbered, key=lambda item: item[0]))
+
+    keys: list[str] = []
+    for value in raw:
+        for candidate in value.split(","):
+            key = candidate.strip()
+            if key and key not in keys:
+                keys.append(key)
+    return keys
+
+
+# Round-robin cursor over the configured keys. The starting offset is random so
+# that independent worker processes sharing a key set do not all open on the
+# same key; within a process the cursor then advances deterministically.
+_api_key_cursor = itertools.count(random.randrange(1 << 16))
+
+
+def _select_api_key(keys: Sequence[str]) -> str:
+    """Pick the key to use for one request, cycling through ``keys``.
+
+    Round-robin rather than random choice: the rate limit is per key, so what
+    matters is that no key receives two requests inside its own interval.
+    Cycling guarantees an exact 1/N share, whereas independent random draws
+    would sometimes land on the same key twice in a row and re-trigger the 429
+    the extra key was added to avoid.
+    """
+    return keys[next(_api_key_cursor) % len(keys)]
+
+
+def _s2_rate_interval() -> float:
+    """Minimum spacing between S2 requests given the configured keys.
+
+    S2 meters per key, so N distinct keys permit N times the aggregate rate
+    while each individual key still sees at most one request per
+    _S2_MIN_INTERVAL_S. Zero or one key keeps the original spacing exactly.
+    """
+    return _S2_MIN_INTERVAL_S / max(1, len(_api_keys_from_env("S2_API_KEY")))
+
+
 async def _s2_rate_gate() -> None:
-    """Block until at least _S2_MIN_INTERVAL_S has elapsed since the last S2 call.
+    """Block until the per-request S2 interval has elapsed since the last call.
 
     Serializes S2 requests across all concurrent agents in this process so the
-    cumulative rate stays under the 1 req/s limit.
+    cumulative rate stays under the limit the configured keys allow.
     """
     global _s2_last_request_ts
     async with _s2_rate_lock:
-        wait = _s2_last_request_ts + _S2_MIN_INTERVAL_S - time.monotonic()
+        wait = _s2_last_request_ts + _s2_rate_interval() - time.monotonic()
         if wait > 0:
             await asyncio.sleep(wait)
         _s2_last_request_ts = time.monotonic()
@@ -198,16 +264,21 @@ async def _get_with_backoff(
 async def semantic_scholar_search(query: str) -> str:
     """Search Semantic Scholar for academic papers and snippets matching a query.
 
+    Authenticates with one of the configured keys (S2_API_KEY and any
+    S2_API_KEY_<n>, each optionally comma-separated), chosen per request so the
+    per-key rate limit is shared across all of them. With no key configured the
+    request is sent unauthenticated, as before.
+
     Args:
         query: Search query for academic papers and snippets.
 
     Returns:
         Formatted search results with paper titles, abstracts, and URLs.
     """
-    api_key = os.getenv("S2_API_KEY")
+    api_keys = _api_keys_from_env("S2_API_KEY")
     headers = {}
-    if api_key:
-        headers["x-api-key"] = api_key
+    if api_keys:
+        headers["x-api-key"] = _select_api_key(api_keys)
 
     sanitized_query = query.strip()
     if not sanitized_query:
@@ -296,6 +367,429 @@ async def semantic_scholar_search(query: str) -> str:
         results.append(result)
 
     return "\n\n---\n\n".join(results)
+
+
+# DeepScholar-Bench only credits sources that carry arXiv provenance and were
+# published strictly before a query's cutoff. The admission test below mirrors
+# lit-agents' shared/retrieval_policy.py so the tool's test is the benchmark
+# exporter's test.
+#
+# S2's search endpoint cannot select on external IDs, and over 200 real recorded
+# queries only 19.4% of returned rows carried one. Widening a single page is not
+# enough at that density: 77 of those queries yielded fewer than ten arXiv
+# candidates and 11 were emptied by the filter alone, having had rows to filter.
+# So the tool pages instead. Three pages of 100 expects around 58 arXiv rows,
+# comfortably past the ten a caller asks for by default, and offset 200 + limit
+# 100 stays inside S2's offset+limit cap of 1000.
+_ARXIV_PAGE_SIZE = 100  # S2 caps `limit` on /paper/search at 100
+_ARXIV_PAGE_BUDGET = 3
+_S2_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+_ARXIV_SEARCH_FIELDS = "title,abstract,url,year,publicationDate,authors,corpusId,externalIds"
+# Hits with no arXiv ID cannot be cited; a couple are worth showing as
+# background, a page of them would crowd out the citable results.
+_ARXIV_CONTEXT_ONLY_LIMIT = 2
+_ARXIV_ABSTRACT_LIMIT = 500
+
+_ARXIV_URL_RE = re.compile(
+    r"https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/([^)\s?#]+)",
+    re.IGNORECASE,
+)
+_ARXIV_MODERN_ID_RE = re.compile(r"^(\d{2})(\d{2})\.\d{4,5}$")
+_ARXIV_LEGACY_ID_RE = re.compile(r"^[a-z-]+/(\d{2})(\d{2})\d{3}$", re.IGNORECASE)
+
+
+def normalize_arxiv_id(value: str) -> str:
+    """Strip the prefix, extension, and version suffix from an arXiv ID."""
+    normalized = value.strip()
+    normalized = re.sub(r"(?i)^arxiv:", "", normalized)
+    normalized = re.sub(r"(?i)\.pdf$", "", normalized)
+    return re.sub(r"v[1-9][0-9]*$", "", normalized)
+
+
+def _arxiv_id_from_url(url: str) -> str:
+    """Return the arXiv ID embedded in an arXiv abs/pdf URL, or ""."""
+    match = _ARXIV_URL_RE.search(url)
+    return normalize_arxiv_id(match.group(1)) if match else ""
+
+
+def _arxiv_id_from_paper(paper: dict) -> str:
+    """Return the arXiv ID of an S2 search hit, or "" when it has none.
+
+    External IDs rather than the `venue` field: an arXiv preprint loses the
+    "arXiv.org" venue once it appears at a conference, while its arXiv external
+    ID stays. The key comparison is case-insensitive because S2 spells the key
+    "ArXiv".
+    """
+    external_ids = paper.get("externalIds") or {}
+    if isinstance(external_ids, dict):
+        for key, value in external_ids.items():
+            if str(key).casefold() == "arxiv" and value is not None:
+                arxiv_id = normalize_arxiv_id(str(value))
+                if arxiv_id:
+                    return arxiv_id
+    return _arxiv_id_from_url(str(paper.get("url") or ""))
+
+
+def date_from_arxiv_id(arxiv_id: str) -> date | None:
+    """Return the month an arXiv ID encodes, or None when it encodes none."""
+    match = _ARXIV_MODERN_ID_RE.match(arxiv_id) or _ARXIV_LEGACY_ID_RE.match(arxiv_id)
+    if match is None:
+        return None
+    year_value, month_value = (int(value) for value in match.groups())
+    year = 1900 + year_value if year_value >= 91 else 2000 + year_value
+    try:
+        return date(year, month_value, 1)
+    except ValueError:
+        return None
+
+
+def _publication_date(paper: dict) -> date | None:
+    """Parse an S2 hit's publicationDate, or None when it reports none."""
+    raw = paper.get("publicationDate")
+    if not raw:
+        return None
+    text = str(raw).strip()
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
+
+
+def _parse_cutoff_date(raw: str | None) -> date | None:
+    """Parse the active search cutoff into a date, or None when unset."""
+    cutoff = _parse_cutoff(raw)
+    return None if cutoff is None else date.fromisoformat(cutoff[2])
+
+
+@dataclass(frozen=True)
+class _ArxivHit:
+    """One search hit in the form DeepScholar-Bench's exporter would keep it."""
+
+    arxiv_id: str
+    title: str
+    snippet: str
+    published: date
+    precision: str
+
+
+def _classify_arxiv_hit(paper: dict, cutoff: date | None) -> tuple[_ArxivHit | None, str]:
+    """Return the citable form of a hit, or None and the reason it is not.
+
+    Mirrors lit-agents' shared/deepscholar.py::_classify_source, so a hit this
+    tool renders as citable is a hit the benchmark's exporter would keep. The
+    reason comes back rather than being logged here so a caller can say which
+    condition emptied a result set.
+
+    This is the LENIENT half of a two-layer design, and mirrors
+    ``RetrievalPolicy.admits`` rather than ``_classify_source``. ``admits``
+    reads a publication date through a parser that returns None for a date that
+    is absent AND for one it cannot read, then falls back to the month the arXiv
+    ID encodes in both cases. Retrieval is deliberately permissive: showing a
+    paper costs a line of context, and the strict test that actually decides
+    what gets scored runs at export, where the row is validated against the
+    cutoff again before anything is written.
+
+    The one addition to ``admits`` is the metadata check. A hit with no title or
+    no abstract can only become a paper.csv row with an empty title or snippet,
+    which fails the contract outright, so it is rejected here rather than shown
+    as citable. The one subtraction is that a hit nothing can date is rejected
+    even with no cutoff active, because the export needs a date for every row.
+    """
+    arxiv_id = _arxiv_id_from_paper(paper)
+    if not arxiv_id:
+        return None, "no_arxiv_provenance"
+
+    title = str(paper.get("title") or "").strip()
+    snippet = str(paper.get("abstract") or "").strip()
+    if not title or not snippet:
+        return None, "missing_metadata"
+
+    published = _publication_date(paper)
+    if published is not None:
+        precision = "day"
+        if cutoff is not None and published >= cutoff:
+            return None, "not_before_cutoff"
+    else:
+        published = date_from_arxiv_id(arxiv_id)
+        precision = "month"
+        if published is None:
+            return None, "undated"
+        if cutoff is not None and (published.year, published.month) >= (
+            cutoff.year,
+            cutoff.month,
+        ):
+            return None, "not_before_cutoff"
+
+    return _ArxivHit(arxiv_id, title, snippet, published, precision), "eligible"
+
+
+def _arxiv_context_only(paper: dict, cutoff: date | None) -> bool:
+    """Whether a hit with no arXiv ID is still worth showing as background.
+
+    It has to be readable -- a title and an abstract -- and, under an active
+    cutoff, dated before it. The arXiv-ID month fallback has nothing to fall
+    back to here, which is the point: nothing can cite this hit anyway.
+    """
+    if _arxiv_id_from_paper(paper):
+        return False
+    if not str(paper.get("title") or "").strip():
+        return False
+    if not str(paper.get("abstract") or "").strip():
+        return False
+    if cutoff is None:
+        return True
+    published = _publication_date(paper)
+    return published is not None and published < cutoff
+
+
+def _arxiv_search_limit() -> int:
+    """Results per arXiv search, overridable via ARXIV_SEARCH_LIMIT (default 10).
+
+    Ten is the page lit-agents' DeepScholar retriever keeps per query.
+    """
+    try:
+        return max(1, int(os.getenv("ARXIV_SEARCH_LIMIT", "10")))
+    except ValueError:
+        return 10
+
+
+async def _arxiv_search_page(
+    client: httpx.AsyncClient,
+    *,
+    query: str,
+    offset: int,
+    cutoff: date | None,
+    api_keys: Sequence[str],
+) -> tuple[list[dict] | None, str]:
+    """Fetch one page of hits, or None and the error to report.
+
+    Every page goes through the shared S2 rate gate, so paging costs throughput
+    rather than spending budget the other tools are also drawing on. The key is
+    selected per page rather than per search: the gate spaces requests for the
+    key set as a whole, so a multi-page search holding one key would put every
+    one of its pages through a single key at the interval meant for all of them.
+    """
+    headers = {}
+    if api_keys:
+        headers["x-api-key"] = _select_api_key(api_keys)
+
+    params = {
+        "query": query,
+        "offset": offset,
+        "limit": _ARXIV_PAGE_SIZE,
+        "fields": _ARXIV_SEARCH_FIELDS,
+    }
+    if cutoff is not None:
+        # publicationDateOrYear ranges are inclusive, so stop one day short of
+        # the cutoff to match the exporter's strict "before the cutoff" test.
+        params["publicationDateOrYear"] = f":{(cutoff - timedelta(days=1)).isoformat()}"
+
+    try:
+        resp = await _get_with_backoff(
+            client,
+            _S2_SEARCH_URL,
+            params=params,
+            headers=headers,
+            rate_gate=_s2_rate_gate,
+        )
+        if resp.status_code != 200:
+            logger.error(
+                f"arXiv paper search API error (after retries): status={resp.status_code}, "
+                f"query={query!r}, offset={offset}, response={resp.text[:500]}"
+            )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            f"arXiv paper search HTTP error: status={e.response.status_code}, "
+            f"query={query!r}, offset={offset}, response={e.response.text[:500]}"
+        )
+        return None, f"Error searching arXiv papers: HTTP {e.response.status_code}"
+    except httpx.RequestError as e:
+        logger.error(f"arXiv paper search request error: {e}, query={query!r}, offset={offset}")
+        return None, f"Error searching arXiv papers: {e}"
+    except ValueError as e:
+        # A body that is not JSON. Returned as an error rather than raised so a
+        # late page cannot discard the pages that already succeeded.
+        logger.error(f"arXiv paper search returned unreadable JSON: {e}, offset={offset}")
+        return None, "Error searching arXiv papers: the response was not readable JSON"
+
+    if not isinstance(data, dict):
+        logger.error(f"arXiv paper search returned {type(data).__name__}, not an object")
+        return None, "Error searching arXiv papers: unexpected response shape"
+    rows = data.get("data")
+    if rows is None:
+        # Semantic Scholar answers a query that matches nothing with
+        # {"total": 0, "offset": 0} and no data array at all -- verified against
+        # the live endpoint. Reading that as a malformed response would tell the
+        # model its search errored when it merely found nothing, which are very
+        # different things to an agent deciding what to do next.
+        logger.debug(
+            f"arXiv paper search returned no data array (keys: {sorted(data)}), offset={offset}"
+        )
+        return [], ""
+    if not isinstance(rows, list):
+        logger.error(f"arXiv paper search data is {type(rows).__name__}, not a list")
+        return None, "Error searching arXiv papers: unexpected response shape"
+    return rows, ""
+
+
+def _format_arxiv_result(paper: dict, hit: _ArxivHit | None) -> str:
+    """Render one hit; ``hit is None`` marks it as uncitable context.
+
+    The abstract is truncated to keep the agent's context affordable. That makes
+    this snippet a preview rather than the abstract, which is why the export
+    re-fetches full text from Semantic Scholar instead of reusing what was
+    rendered here -- paper.csv's snippet column is scored.
+    """
+    title = (hit.title if hit is not None else str(paper.get("title") or "")) or "Unknown"
+    authors = paper.get("authors") or []
+    author_names = ", ".join(a.get("name", "") for a in authors[:3])
+    if len(authors) > 3:
+        author_names += " et al."
+    abstract = hit.snippet if hit is not None else str(paper.get("abstract") or "")
+    if len(abstract) > _ARXIV_ABSTRACT_LIMIT:
+        abstract = abstract[:_ARXIV_ABSTRACT_LIMIT] + "..."
+
+    if hit is not None:
+        lines = [f"**{title}**"]
+    else:
+        lines = [f"**{title}** [context only: no arXiv ID, not citable]"]
+    if author_names:
+        lines.append(f"Authors: {author_names}")
+    year = paper.get("year")
+    if year:
+        lines.append(f"Year: {year}")
+    if hit is not None:
+        if hit.precision == "day":
+            lines.append(f"Published: {hit.published.isoformat()}")
+        else:
+            lines.append(
+                f"Published: {hit.published.year:04d}-{hit.published.month:02d} (month precision)"
+            )
+    if hit is not None:
+        lines.append(f"arXiv: {hit.arxiv_id}")
+        lines.append(f"URL: https://arxiv.org/abs/{hit.arxiv_id}")
+    # The abstract goes last, after every identifying field. It is the only
+    # free-text field here, and a paper whose abstract happens to contain a line
+    # reading "arXiv: 1234.56789" must not be able to change which paper the
+    # export thinks this result is.
+    if abstract:
+        lines.append(f"Abstract: {abstract}")
+    return "\n".join(lines)
+
+
+@registered_tool(
+    name="arxiv_paper_search",
+    description=(
+        "Search arXiv papers by keyword. Returns each paper's title, authors, year, "
+        "publication date, abstract, arXiv ID and arxiv.org URL.\n"
+        "This is a scholarly keyword index, not a web search engine. Do not use "
+        "site: filters, quoted phrases for exact-phrase matching, minus signs to "
+        "exclude terms, or boolean operators such as AND and OR: they are treated "
+        "as ordinary words and usually cause the search to return nothing. Pass "
+        "plain keywords, most discriminating terms first."
+    ),
+)
+async def arxiv_paper_search(query: str) -> str:
+    """Search arXiv papers, backed by Semantic Scholar and filtered to arXiv.
+
+    Shares the Semantic Scholar endpoint, API keys, rate gate and backoff with
+    :func:`semantic_scholar_search`; only the admission test differs. S2's
+    search endpoint cannot select on external IDs, so provenance is decided
+    client-side and, because only about a fifth of returned rows carry one, the
+    tool pages until it has the results the caller asked for or spends
+    ``_ARXIV_PAGE_BUDGET``. Pages are consumed in order and results appended, so
+    S2's relevance order survives paging; filtering skips hits and truncation
+    happens after it.
+
+    The query is sent exactly as the model wrote it. Web-search operators are
+    known to return nothing here, and the tool description says so, but silently
+    rewriting a query would hide what the model actually asked and make the
+    failure unattributable.
+
+    The invariant every rendered arxiv.org URL carries, enforced by
+    :func:`_classify_arxiv_hit`: arXiv provenance, a non-empty title and
+    abstract, and a publication date strictly before the active
+    :func:`search_date_cutoff` -- day-precise when Semantic Scholar supplies
+    one, otherwise the month the arXiv ID encodes. That is
+    DeepScholar-Bench's own admission test, so the model is never invited to
+    cite a source the scorer would discard.
+
+    Args:
+        query: Search query for arXiv papers.
+
+    Returns:
+        Formatted results carrying title, authors, year, publication date, arXiv
+        ID, arxiv.org URL and then the abstract snippet, in that order: every
+        identifying field precedes the one free-text field. A few hits with no
+        arXiv ID follow, marked as context the answer cannot cite.
+    """
+    api_keys = _api_keys_from_env("S2_API_KEY")
+
+    sanitized_query = query.strip()
+    if not sanitized_query:
+        return "Error: Empty search query."
+
+    wanted = _arxiv_search_limit()
+    cutoff = _parse_cutoff_date(_search_date_cutoff.get())
+    client = _get_http_client()
+
+    citable: list[str] = []
+    context_only: list[str] = []
+    rejections: dict[str, int] = {}
+    # S2 can return the same paper on more than one page. Counting it twice
+    # would fill the caller's budget with one paper repeated.
+    seen_ids: set[str] = set()
+    for page in range(_ARXIV_PAGE_BUDGET):
+        rows, error = await _arxiv_search_page(
+            client,
+            query=sanitized_query,
+            offset=page * _ARXIV_PAGE_SIZE,
+            cutoff=cutoff,
+            api_keys=api_keys,
+        )
+        if rows is None:
+            # A later page failing still leaves the earlier pages worth
+            # returning; only an immediate failure has nothing to report.
+            if page == 0:
+                return error
+            logger.warning("arXiv paper search stopped after page %d: %s", page, error)
+            break
+
+        for paper in rows:
+            if len(citable) >= wanted and len(context_only) >= _ARXIV_CONTEXT_ONLY_LIMIT:
+                break
+            hit, reason = _classify_arxiv_hit(paper, cutoff)
+            if hit is not None:
+                if hit.arxiv_id in seen_ids:
+                    continue
+                if len(citable) < wanted:
+                    seen_ids.add(hit.arxiv_id)
+                    citable.append(_format_arxiv_result(paper, hit))
+                continue
+            rejections[reason] = rejections.get(reason, 0) + 1
+            if len(context_only) < _ARXIV_CONTEXT_ONLY_LIMIT and _arxiv_context_only(paper, cutoff):
+                context_only.append(_format_arxiv_result(paper, None))
+
+        if len(citable) >= wanted:
+            break
+        if len(rows) < _ARXIV_PAGE_SIZE:
+            break  # S2 has no further hits for this query
+
+    if not citable and not context_only:
+        breakdown = ", ".join(f"{count} {reason}" for reason, count in sorted(rejections.items()))
+        logger.info(
+            "arXiv paper search kept nothing for %r: %s",
+            sanitized_query,
+            breakdown or "no hits returned",
+        )
+        return "No arXiv papers found for query."
+
+    return "\n\n---\n\n".join(citable + context_only)
 
 
 @registered_tool(

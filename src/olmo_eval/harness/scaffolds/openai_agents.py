@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
-from dataclasses import replace
+from dataclasses import fields, replace
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
@@ -115,6 +115,53 @@ def _make_tool_error_formatter(valid_tool_names: Sequence[str]) -> Any:
         return f"Error: tool '{args.tool_name}' does not exist. {guidance}"
 
     return format_tool_error
+
+
+def build_model_settings(spec: Mapping[str, Any] | None) -> Any | None:
+    """Build the agents SDK's ``ModelSettings`` from a plain dict of settings.
+
+    ``reasoning_effort`` is accepted as a flat key because that is the name of
+    the request field and what an operator types on a command line. The SDK
+    models it as ``ModelSettings.reasoning.effort``, which
+    ``OpenAIChatCompletionsModel`` sends as a top-level ``reasoning_effort``
+    argument -- the supported route. It is deliberately not routed through
+    ``extra_args``: that same call site splats ``extra_args`` into the request
+    next to its own explicit ``reasoning_effort=`` keyword, so the two would
+    collide on exactly this key.
+
+    Any other key must name a ``ModelSettings`` field, and an unknown one raises
+    rather than being dropped. A knob that silently does nothing is the failure
+    this function exists to fix: runs carried ``OLMO_EVAL_REASONING_EFFORT`` for
+    two weeks while nothing read it, and they looked fine because the server
+    default happened to agree.
+
+    Returns None when nothing is configured, which leaves the Agent on the SDK's
+    own defaults rather than pinning them to this function's idea of them.
+    """
+    if not spec:
+        return None
+
+    from agents import ModelSettings  # type: ignore[ty:unresolved-import]
+
+    requested = dict(spec)
+    kwargs: dict[str, Any] = {}
+
+    effort = requested.pop("reasoning_effort", None)
+    if effort is not None:
+        from openai.types.shared import Reasoning
+
+        kwargs["reasoning"] = Reasoning(effort=effort)
+
+    known = {field.name for field in fields(ModelSettings)}
+    unknown = sorted(set(requested) - known)
+    if unknown:
+        raise ValueError(
+            f"Unknown model_settings key(s): {', '.join(unknown)}. Valid keys are "
+            f"'reasoning_effort' or any ModelSettings field: {', '.join(sorted(known))}."
+        )
+    kwargs.update(requested)
+
+    return ModelSettings(**kwargs)
 
 
 @register_scaffold("openai_agents")
@@ -280,23 +327,38 @@ class OpenAIAgentsScaffold(Scaffold):
 
         agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
 
+        agent_kwargs: dict[str, Any] = {
+            "name": self.name,
+            "instructions": config.system_prompt or "",
+            "model": model,
+            "tools": agent_tools,
+        }
+        # Only set model_settings when something was configured: the Agent's own
+        # default is an empty ModelSettings, and passing one built here would
+        # replace the SDK's defaults with this scaffold's idea of them.
+        model_settings = build_model_settings(config.scaffold_kwargs.get("model_settings"))
+        if model_settings is not None:
+            logger.debug(f"Applying model_settings from scaffold_kwargs: {model_settings}")
+
         # This scaffold drives the OpenAI client directly instead of the provider's
         # generate path, so the request body built here is the only place a
-        # chat_template_kwargs setting can actually reach the server.
-        agent_kwargs: dict[str, Any] = {}
+        # chat_template_kwargs setting can actually reach the server. It rides in
+        # extra_body next to whatever the run pinned, and setdefault leaves a
+        # chat_template_kwargs the run set itself alone.
         chat_template_kwargs = _resolve_chat_template_kwargs(provider)
         if chat_template_kwargs is not None:
-            agent_kwargs["model_settings"] = ModelSettings(
-                extra_body={"chat_template_kwargs": chat_template_kwargs}
+            extra_body = dict(getattr(model_settings, "extra_body", None) or {})
+            extra_body.setdefault("chat_template_kwargs", chat_template_kwargs)
+            model_settings = (
+                ModelSettings(extra_body=extra_body)
+                if model_settings is None
+                else replace(model_settings, extra_body=extra_body)
             )
 
-        agent = Agent(
-            name=self.name,
-            instructions=config.system_prompt or "",
-            model=model,
-            tools=agent_tools,
-            **agent_kwargs,
-        )
+        if model_settings is not None:
+            agent_kwargs["model_settings"] = model_settings
+
+        agent = Agent(**agent_kwargs)
 
         return agent
 
@@ -348,6 +410,9 @@ class OpenAIAgentsScaffold(Scaffold):
             trace_metadata: Optional metadata for tracing (e.g., instance_id, task_id).
             **kwargs: Scaffold-specific options:
                 - enable_compaction: Enable context compaction (default: True).
+                - model_settings: Request settings applied when the agent is
+                  built (see :func:`build_model_settings`); accepted here so
+                  that splatting scaffold_kwargs into this call is harmless.
 
         Returns:
             HarnessResult with trajectory from SDK execution.
