@@ -64,7 +64,7 @@ vllm = [
     "torch-c-dlpack-ext ; platform_system != 'Darwin'",  # Required for TVM tensor allocation in vLLM
     # transformers 5.13 nests rope_parameters per layer type; vLLM 0.19.1 reads it flat,
     # so Olmo-3 (mixed sliding/full attention) fails to load with a rope_theta KeyError.
-    "transformers<5.13",
+    "transformers<5.13 ; platform_system != 'Darwin'",
 ]
 litellm = [
     "litellm~=1.80.11",

@@ -20,6 +20,9 @@ Two tracks from the open-sourced gold set of ``openai/frontierscience``:
     It scores the log-likelihood of the labels A--D and therefore needs no judge.
     This recognition task is intended for base-model tracking and is not directly
     comparable with the free-response Olympiad score.
+    Problem and answer notation includes display edits. Distractor provenance
+    preserves the curation text; its zero-based ``choice_index`` identifies the
+    corresponding final displayed choice.
 
 All tracks report the primary metric overall and per subject (biology,
 chemistry, physics).
