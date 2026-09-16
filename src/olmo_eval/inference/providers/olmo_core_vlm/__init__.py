@@ -1,7 +1,6 @@
 """Multimodal (vision-language) OLMo-core inference provider.
 
 Split by responsibility: :mod:`checkpoint` (detect/config/weights),
-:mod:`conversion` (OLMo-core export -> released Molmo2 layout),
 :mod:`preprocessing` (tokenizer and crop hints), :mod:`cache` (KV-cached
 decoding), and :mod:`provider` (the provider itself).
 """
