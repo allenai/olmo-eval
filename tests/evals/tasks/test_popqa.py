@@ -42,6 +42,11 @@ class TestPopQATask(unittest.TestCase):
         self.assertIsNone(task.config.sampling_params.stop_sequences)
         self.assertEqual(task.config.sampling_params.temperature, 0.6)
 
+    def test_both_variants_strip_reasoning(self) -> None:
+        """A completed trace fits even the base task's 15-token budget."""
+        self.assertTrue(get_task("popqa").config.strip_thinking)
+        self.assertTrue(get_task("popqa:chat").config.strip_thinking)
+
     def test_process_doc(self) -> None:
         task = get_task("popqa")
         doc = {
@@ -115,6 +120,12 @@ class TestPopQAContainsScorer(unittest.TestCase):
     def test_first_line_accepts_answer_on_first_line(self) -> None:
         text = "The USA, of course.\nSome elaboration follows."
         self.assertEqual(self.first_line.score(self.instance, LMOutput(text=text)), 1.0)
+
+    def test_first_line_skips_leading_blank_lines(self) -> None:
+        """What a stripped reasoning trace leaves behind: blank lines, then the answer."""
+        text = "\n\nThe USA.\n\nQ: Where is NASA? A: USA"
+        self.assertEqual(self.first_line.score(self.instance, LMOutput(text=text)), 1.0)
+        self.assertEqual(self.first_line.score(self.instance, LMOutput(text="\n\nFrance")), 0.0)
 
     def test_verbatim_match(self) -> None:
         self.assertEqual(self._score(" United States of America"), 1.0)
