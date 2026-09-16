@@ -12,7 +12,7 @@ declare -a SELECTED_SUITES=()
 
 GROUP="${GROUP:-olmo-eval-olmo3-baselines-04272026}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-eval-debug}"
-BUDGET="${BUDGET:-ai2/oe-base}"
+BUDGET="${BUDGET:-ai2/oe-other}"
 CLUSTER="${CLUSTER:-h100}"
 EXEC_HARNESS="${EXEC_HARNESS:-${HARNESS:-codex_universal}}"
 NON_EXEC_HARNESS="${NON_EXEC_HARNESS:-default}"
