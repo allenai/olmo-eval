@@ -243,6 +243,10 @@ class VLLMServerProvider(InferenceProvider):
     This provider can either connect to an existing vLLM server (if base_url
     is provided) or start and manage its own server subprocess.
 
+    Tool schemas are sent to ``/v1/chat/completions``, but the server only
+    returns parsed ``tool_calls`` when it was started with
+    ``--enable-auto-tool-choice``; see :attr:`_tool_calls_parsed`.
+
     Example:
         # Auto-start server (managed lifecycle)
         provider = VLLMServerProvider("meta-llama/Llama-3.1-8B-Instruct")
@@ -250,6 +254,8 @@ class VLLMServerProvider(InferenceProvider):
         # Or connect to existing server
         provider = VLLMServerProvider("model", base_url="http://localhost:8000/v1")
     """
+
+    supports_tools = True
 
     def __init__(
         self,
@@ -349,10 +355,17 @@ class VLLMServerProvider(InferenceProvider):
         if enable_lora and lora_modules:
             self._request_model_name = lora_modules[0].split("=", 1)[0]
 
+        #: Whether replies will carry parsed ``tool_calls``: True for a managed
+        #: server started with tool choice enabled, False for one started
+        #: without it, and None for an external server, whose flags are not
+        #: knowable from here.
+        self._tool_calls_parsed: bool | None = None
+
         if base_url:
             # Connect to existing server
             self.base_url = base_url
         else:
+            self._tool_calls_parsed = bool(enable_auto_tool_choice)
             # Start our own server
             from .vllm_server_utils import VLLMServerProcess
 
@@ -885,6 +898,17 @@ class VLLMServerProvider(InferenceProvider):
         # Build tools if present
         tools = None
         if request.tools:
+            if self._tool_calls_parsed is False:
+                from olmo_eval.inference.errors import ToolCallingUnsupportedError
+
+                raise ToolCallingUnsupportedError(
+                    "This vLLM server was started without --enable-auto-tool-choice, so it "
+                    "answers in plain text and returns no tool_calls. Every instance of a "
+                    "tool-calling task would score as if the model called nothing. Add "
+                    "`--harness default -o provider.kwargs.enable_auto_tool_choice=true` "
+                    "(before -t), or run a task variant that writes the functions into the "
+                    "prompt instead."
+                )
             tools = [t.to_openai() for t in request.tools]
 
         # Build request kwargs

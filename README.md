@@ -681,9 +681,9 @@ functions reach the model and how its calls are read back.
 
 **Native function calling requires the server to parse tool calls.** vLLM only
 emits `tool_calls` when it is started with `--enable-auto-tool-choice`; without
-it the server answers in plain text and every instance scores zero:
-
-Provider overrides follow `--harness`, not `-t`:
+it the server answers in plain text and no tool calls come back. The run stops
+with an error saying so rather than reporting a score of zero. Provider
+overrides follow `--harness`, not `-t`:
 
 ```bash
 # Serve the model and evaluate its endpoint on the whole single-turn set
@@ -744,6 +744,11 @@ their categories' instances: `bfcl_live_ast` and `bfcl_live`. The per-category
 tasks are `bfcl_simple`, `bfcl_multiple`, `bfcl_parallel`,
 `bfcl_parallel_multiple`, `bfcl_java`, `bfcl_javascript`, `bfcl_irrelevance`,
 and the six `bfcl_live_*` categories.
+
+A provider that cannot carry tool schemas at all — the in-process `vllm`
+provider and `litellm` both ignore them — is refused the same way, naming the
+provider and pointing at the prompting regime. Only `vllm_server` (the default)
+and `mock` accept them.
 
 `bfcl_java` and `bfcl_javascript` read calls written in those languages, and
 declare the `tree-sitter-java` and `tree-sitter-javascript` grammars as

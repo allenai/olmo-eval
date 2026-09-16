@@ -7,6 +7,10 @@ from olmo_eval.inference.base import InferenceProvider
 class MockProvider(InferenceProvider):
     """Mock provider that returns fixed responses for testing."""
 
+    # Tools are accepted so that a tool-calling task can still be previewed or
+    # smoke-tested; the fixed reply never calls one.
+    supports_tools = True
+
     def __init__(self, model_name: str = "mock-model") -> None:
         """Initialize the mock provider.
 

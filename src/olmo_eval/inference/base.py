@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 
@@ -20,6 +20,12 @@ class InferenceProvider(ABC):
     """
 
     model_name: str
+
+    #: Whether this provider sends ``LMRequest.tools`` to the model. A provider
+    #: that leaves this False drops them silently, which would score a
+    #: tool-calling task as if the model had been shown no functions at all, so
+    #: the harness refuses such a request instead.
+    supports_tools: ClassVar[bool] = False
 
     def __init__(self, model_name: str) -> None:
         """Initialize the provider.

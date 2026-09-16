@@ -7,6 +7,15 @@ class TerminalProviderError(RuntimeError):
     """A provider failure after which its worker cannot serve more requests."""
 
 
+class ToolCallingUnsupportedError(RuntimeError):
+    """A request carries tool schemas the provider would not send or read back.
+
+    Raised rather than letting the request through, because a model shown no
+    functions answers in prose and every instance of a tool-calling task would
+    score zero, which reads like a weak model rather than a misconfigured run.
+    """
+
+
 # Avoid importing optional GPU-only provider packages just to classify errors.
 _TERMINAL_PROVIDER_ERRORS = {"vllm.v1.engine.exceptions.EngineDeadError"}
 
@@ -32,4 +41,8 @@ def classify_terminal_provider_error(exc: BaseException) -> TerminalProviderErro
     return None
 
 
-__all__ = ["TerminalProviderError", "classify_terminal_provider_error"]
+__all__ = [
+    "classify_terminal_provider_error",
+    "TerminalProviderError",
+    "ToolCallingUnsupportedError",
+]

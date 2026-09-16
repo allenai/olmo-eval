@@ -331,6 +331,9 @@ class Harness:
         """
 
         messages = self._inject_system_prompt(request.messages)
+        tools = self.config.tool_schemas if self.config.has_tools else request.tools
+        if tools:
+            self._require_tool_support()
 
         return LMRequest(
             request_type=request.request_type,
@@ -338,9 +341,30 @@ class Harness:
             prompt=request.prompt,
             continuations=request.continuations,
             continuation_prompts=request.continuation_prompts,
-            tools=self.config.tool_schemas if self.config.has_tools else request.tools,
+            tools=tools,
             system_prompt=self.config.system_prompt or request.system_prompt,
             max_length=request.max_length,
+        )
+
+    def _require_tool_support(self) -> None:
+        """Fail before sending tools to a provider that would drop them.
+
+        A provider that ignores ``tools`` shows the model a question with no
+        functions attached, which it answers in prose. Every instance of a
+        tool-calling task then scores zero, which reads like a weak model
+        rather than a misconfigured run, so the run stops here instead.
+        """
+        if getattr(self.provider, "supports_tools", False):
+            return
+
+        from olmo_eval.inference.errors import ToolCallingUnsupportedError
+
+        raise ToolCallingUnsupportedError(
+            f"{type(self.provider).__name__} does not send tool schemas to the model, "
+            "so this request's functions would be dropped and every instance would "
+            "score as if the model had been shown none. Use an OpenAI-compatible "
+            "provider (`-m <model>` with the default vllm_server kind), or a task "
+            "variant that writes the functions into the prompt text instead."
         )
 
     def _inject_system_prompt(

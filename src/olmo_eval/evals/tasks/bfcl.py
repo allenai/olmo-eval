@@ -22,8 +22,9 @@ functions reach the model and how its calls are read back:
 
     vLLM picks a ``--tool-call-parser`` from the model name; add
     ``-o provider.kwargs.tool_call_parser=<name>`` to choose one. Without
-    ``enable_auto_tool_choice`` the server answers in plain text, no tool calls
-    are parsed, and every instance scores zero.
+    ``enable_auto_tool_choice`` the server answers in plain text and parses no
+    tool calls; the run stops with an error rather than reporting a score of
+    zero, as it does for a provider that cannot carry tool schemas at all.
 
 ``bfcl_simple:prompt``
     BFCL's own prompting mode: the functions are written into a system prompt
