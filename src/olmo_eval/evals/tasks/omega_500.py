@@ -129,6 +129,7 @@ class Omega500(Task):
         AccuracyMetric(name="exact_match_flex", scorer=_FLEX),
     )
     primary_metric = AccuracyMetric(name="exact_match_flex", scorer=_FLEX)
+    strip_thinking = True
     # Defaults mirror oe-eval's ``omega_500:0-shot-chat_deepseek`` — the
     # OLMO_3 suite entry and the config the parity certification ran on.
     # (Plain ``0-shot-chat`` upstream uses temperature 0.7 with no top_p;
