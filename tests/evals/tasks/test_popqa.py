@@ -42,10 +42,10 @@ class TestPopQATask(unittest.TestCase):
         self.assertIsNone(task.config.sampling_params.stop_sequences)
         self.assertEqual(task.config.sampling_params.temperature, 0.6)
 
-    def test_only_the_chat_variant_strips_reasoning(self) -> None:
-        """The base task generates 15 completion tokens; a trace cannot occur."""
+    def test_both_variants_strip_reasoning(self) -> None:
+        """A completed trace fits even the base task's 15-token budget."""
+        self.assertTrue(get_task("popqa").config.strip_thinking)
         self.assertTrue(get_task("popqa:chat").config.strip_thinking)
-        self.assertFalse(get_task("popqa").config.strip_thinking)
 
     def test_process_doc(self) -> None:
         task = get_task("popqa")

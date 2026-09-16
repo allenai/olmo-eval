@@ -85,6 +85,10 @@ class PopQA(Task):
     split = Split.TEST
     metrics = (_FIRST_LINE_ACCURACY, _CONTAINMENT_ACCURACY)
     primary_metric = _FIRST_LINE_ACCURACY
+    # A completed trace fits the 15-token budget (``<think>USA</think>\nFrance``
+    # is 8 tokens), and scoring one credits the reasoning rather than the answer,
+    # so the strip is enabled here as well as on the reasoning variant.
+    strip_thinking = True
     num_fewshot = 15
     sampling_params = SamplingParams(
         max_tokens=15,
@@ -144,14 +148,11 @@ class PopQA(Task):
 
 # Chat variant for instruct and reasoning models. Drops stop sequences and
 # lifts the token cap (None = generate to the model's context limit) so
-# chain-of-thought reasoning is not truncated on any context size. The base
-# task stays untouched: 15 generated tokens of completion cannot carry a
-# reasoning trace, and leaving its config alone keeps its task hash stable.
+# chain-of-thought reasoning is not truncated on any context size.
 register_variant(
     "popqa",
     "chat",
     formatter=ChatFormatter(),
-    strip_thinking=True,
     sampling_params=SamplingParams(
         max_tokens=None,
         temperature=0.6,
