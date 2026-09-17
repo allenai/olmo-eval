@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from itertools import zip_longest
 from typing import Any
 
 import numpy as np
@@ -137,6 +138,7 @@ def _pairwise_model_scope_score(
     result: PairwiseResult,
     task_entries: list[Any],
     task_scores: list[float | None],
+    task_instance_counts: list[int | None],
 ) -> float | None:
     if (
         result.score_unit is None
@@ -151,9 +153,16 @@ def _pairwise_model_scope_score(
             float(task_score) if task_score is not None else None
         )
 
+    task_instance_counts_by_name: dict[str, list[int | None]] = {}
+    for task_entry, instance_count in zip_longest(task_entries, task_instance_counts):
+        if task_entry is None:
+            break
+        task_instance_counts_by_name.setdefault(task_entry.task_name, []).append(instance_count)
+
     if result.suite_name:
         return compute_scope_score(
             task_scores_by_name=task_scores_by_name,
+            task_instance_counts_by_name=task_instance_counts_by_name,
             suite_name=result.suite_name,
         )
 
@@ -210,7 +219,14 @@ def build_pairwise_viewer_payload(
             task_entry.id: task_scores[task_idx] if task_idx < len(task_scores) else None
             for task_idx, task_entry in enumerate(task_entries)
         }
-        scope_score = _pairwise_model_scope_score(result, task_entries, task_scores)
+        task_instance_counts = (
+            list(result.model_task_instance_counts[index])
+            if index < len(result.model_task_instance_counts)
+            else []
+        )
+        scope_score = _pairwise_model_scope_score(
+            result, task_entries, task_scores, task_instance_counts
+        )
         shared_score = (
             result.model_shared_scores[index] if index < len(result.model_shared_scores) else None
         )
