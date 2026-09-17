@@ -129,6 +129,7 @@ Suites support different strategies for combining task results:
 | Strategy | Description |
 |----------|-------------|
 | `AVERAGE` | Simple average of all task scores (default) |
+| `WEIGHTED_AVERAGE` | Average of all task scores, each weighted by the task's instance count |
 | `AVERAGE_OF_AVERAGES` | Average over child suite averages (equal weight per child) |
 | `DISPLAY_ONLY` | Display child results without computing suite average |
 | `NONE` | No aggregation - just collect individual task results |
@@ -163,7 +164,23 @@ register(Suite(
 # vs AVERAGE:          (0.80 + 0.40 + 0.50 + 0.60) / 4 = 0.575
 ```
 
-Note: Currently `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains. Custom weighting may be supported in the future.
+Note: `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains.
+
+**Weighted Average Example:**
+
+```python
+register(Suite(
+    name="mmlu_pro",
+    tasks=("mmlu_pro_math", "mmlu_pro_history"),  # 1351 and 381 questions
+    aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+))
+
+# With scores of 0.30 (math) and 0.45 (history):
+# WEIGHTED_AVERAGE: (0.30 * 1351 + 0.45 * 381) / 1732 = 0.333
+# vs AVERAGE:       (0.30 + 0.45) / 2 = 0.375
+```
+
+`WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored. When any contributing task has no instance count, the suite falls back to the unweighted average rather than mixing the two conventions, and the runner logs which tasks were missing.
 
 ### Formatters
 

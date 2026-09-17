@@ -61,12 +61,15 @@ def _weighted_mean(values: list[float], weights: list[float | None] | None) -> f
     the weights are ignored entirely, so a suite never mixes weighted and
     unweighted terms.
     """
-    if weights is not None:
-        usable = [weight for weight in weights if weight is not None and weight > 0]
-        if len(usable) == len(values) and sum(usable) > 0:
-            return sum(value * weight for value, weight in zip(values, usable, strict=True)) / sum(
-                usable
-            )
+    if (
+        weights is not None
+        and len(weights) == len(values)
+        and all(weight is not None and weight > 0 for weight in weights)
+    ):
+        usable = [float(weight) for weight in weights if weight is not None]
+        return sum(value * weight for value, weight in zip(values, usable, strict=True)) / sum(
+            usable
+        )
     return sum(values) / len(values)
 
 
@@ -133,12 +136,16 @@ def _compute_child_average(
     Returns:
         ChildAverageResult with metrics and task info, or None if no results found.
     """
-    from olmo_eval.evals.suites.registry import Suite
+    from olmo_eval.evals.suites.registry import AggregationStrategy, Suite
 
     if isinstance(child, Suite):
-        # Child is a nested Suite - average all its expanded tasks
+        # Child is a nested Suite - average all its expanded tasks, weighting
+        # each by its instance count when the child asks to be weighted.
+        weighted = child.aggregation == AggregationStrategy.WEIGHTED_AVERAGE
         child_metrics: dict[str, list[float]] = {}
+        child_metric_weights: dict[str, list[float | None]] = {}
         primary_scores: list[float] = []
+        primary_score_weights: list[float | None] = []
         tasks_included = []
 
         for task_spec in child.expand():
@@ -157,21 +164,32 @@ def _compute_child_average(
                 continue
 
             tasks_included.append(full_task_spec)
+            task_weight = _task_weight(task_data)
             for metric_key, value in flat_metrics.items():
                 if metric_key not in child_metrics:
                     child_metrics[metric_key] = []
+                    child_metric_weights[metric_key] = []
                 child_metrics[metric_key].append(value)
+                child_metric_weights[metric_key].append(task_weight)
 
             primary_value = _extract_primary_score(task_data)
             if primary_value is not None:
                 primary_scores.append(primary_value)
+                primary_score_weights.append(task_weight)
 
         if not child_metrics:
             return None
 
-        averaged_flat = {name: sum(vals) / len(vals) for name, vals in child_metrics.items()}
+        averaged_flat = {
+            name: _weighted_mean(vals, child_metric_weights[name] if weighted else None)
+            for name, vals in child_metrics.items()
+        }
         averaged = _unflatten_metrics(averaged_flat)
-        avg_primary = sum(primary_scores) / len(primary_scores) if primary_scores else None
+        avg_primary = (
+            _weighted_mean(primary_scores, primary_score_weights if weighted else None)
+            if primary_scores
+            else None
+        )
         # Build the key for this nested suite (with suffix)
         nested_key = f"{child.name}{priority_suffix}"
         return ChildAverageResult(

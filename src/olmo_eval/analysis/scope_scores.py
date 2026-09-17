@@ -29,9 +29,12 @@ def _task_weight(
     """Instance count to weight one leaf task by, or None when it is unusable.
 
     Task-hash variants of the same task collapse to a single leaf score, so the
-    variants that contributed that score also collapse to a single weight. Every
-    contributing variant must carry a positive count, otherwise the leaf has no
-    weight at all.
+    variants that contributed that score also collapse to a single weight. That
+    collapse is an unweighted mean, matching how the variants' scores collapse:
+    the variants are reruns of one task rather than distinct populations of
+    instances, so a rerun on more instances does not make the task itself count
+    for more in the suite. Every contributing variant must carry a positive
+    count, otherwise the leaf has no weight at all.
     """
     if not task_instance_counts_by_name:
         return None
@@ -81,18 +84,73 @@ def _weighted_mean_over_tasks(
 def _child_scope_score(
     child: str | Any,
     task_scores_by_name: dict[str, list[float | None]],
+    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None,
 ) -> float | None:
-    from olmo_eval.evals.suites.registry import Suite
+    from olmo_eval.evals.suites.registry import AggregationStrategy, Suite
 
     if isinstance(child, Suite):
         # Mirror the current runner behavior for nested children in an
         # average-of-averages parent: collapse the child to the mean of its
         # expanded task leaves before the parent averages across children.
+        if child.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
+            return _weighted_mean_over_tasks(
+                child.expand(),
+                task_scores_by_name,
+                task_instance_counts_by_name,
+            )
         return _mean_numeric(
             [_task_score(task_name, task_scores_by_name) for task_name in child.expand()]
         )
 
     return _task_score(str(child), task_scores_by_name)
+
+
+def weights_are_complete(
+    *,
+    task_scores_by_name: dict[str, list[float | None]],
+    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None = None,
+    suite_name: str | None = None,
+) -> bool:
+    """Whether every scored leaf of a weighted suite carries an instance count.
+
+    A scope score falls back to the unweighted mean when this is False. Callers
+    that render several models side by side ask this of every model first and
+    weight none of them unless all of them qualify, so one comparison column
+    never mixes instance-weighted and unweighted aggregates.
+
+    Always True for suites that do not weight by instance count, and for scopes
+    that are not suites, since those ignore instance counts entirely.
+    """
+    from olmo_eval.evals.suites.registry import (
+        AggregationStrategy,
+        Suite,
+        get_suite,
+        suite_exists,
+    )
+
+    if not suite_name or not suite_exists(suite_name):
+        return True
+
+    suite = get_suite(suite_name)
+    weighted_leaves: tuple[str, ...]
+    if suite.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
+        weighted_leaves = suite.expand()
+    elif suite.aggregation == AggregationStrategy.AVERAGE_OF_AVERAGES:
+        weighted_leaves = tuple(
+            task_name
+            for child in suite.tasks
+            if isinstance(child, Suite)
+            and child.aggregation == AggregationStrategy.WEIGHTED_AVERAGE
+            for task_name in child.expand()
+        )
+    else:
+        return True
+
+    return all(
+        _task_weight(task_name, task_scores_by_name, task_instance_counts_by_name) is not None
+        for task_name in weighted_leaves
+        if _task_score(task_name, task_scores_by_name) is not None
+    )
 
 
 def compute_scope_score(
@@ -121,7 +179,10 @@ def compute_scope_score(
             return None
         if suite.aggregation == AggregationStrategy.AVERAGE_OF_AVERAGES:
             return _mean_numeric(
-                [_child_scope_score(child, task_scores_by_name) for child in suite.tasks]
+                [
+                    _child_scope_score(child, task_scores_by_name, task_instance_counts_by_name)
+                    for child in suite.tasks
+                ]
             )
         if suite.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
             return _weighted_mean_over_tasks(
