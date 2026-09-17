@@ -604,7 +604,7 @@ class TestPairwiseResult:
         finally:
             del _REGISTRY["_test_weighted_payload"]
 
-    def test_html_payload_drops_weighting_when_a_model_lacks_counts(self) -> None:
+    def test_html_payload_has_no_scope_score_when_a_model_lacks_counts(self) -> None:
         from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
 
         weighted_suite = Suite(
@@ -646,10 +646,11 @@ class TestPairwiseResult:
 
             payload = build_pairwise_viewer_payload(result)
 
-            # One model without a complete set of counts drops the whole
-            # comparison back to the unweighted mean.
-            assert payload["models"][0]["scope_score"] == pytest.approx(0.7)
-            assert payload["models"][1]["scope_score"] == pytest.approx(0.7)
+            # The weighted model still reports its weighted mean; the one with a
+            # missing count reports nothing rather than a macro mean that would
+            # sort against it as if the two were the same statistic.
+            assert payload["models"][0]["scope_score"] == pytest.approx(0.6)
+            assert payload["models"][1]["scope_score"] is None
         finally:
             del _REGISTRY["_test_weighted_partial_payload"]
 

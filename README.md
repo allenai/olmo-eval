@@ -180,7 +180,9 @@ register(Suite(
 # vs AVERAGE:       (0.30 + 0.45) / 2 = 0.375
 ```
 
-`WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored. When any contributing task has no instance count, the suite falls back to the unweighted average rather than mixing the two conventions, and the runner logs which tasks were missing.
+`WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored.
+
+A weighted suite reports its weighted mean or no score at all. If a contributing task has no instance count, the suite aggregate is omitted and the runner logs which tasks were missing, rather than publishing an unweighted mean under the same suite name. Instance counts are required when a result is stored, so this only affects results written before that check existed.
 
 ### Formatters
 
