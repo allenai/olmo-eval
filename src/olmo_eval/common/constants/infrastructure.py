@@ -13,7 +13,7 @@ from enum import StrEnum
 BEAKER_DEFAULT_WORKSPACE = "ai2/oe-data"
 """Default Beaker workspace for evaluation jobs."""
 
-BEAKER_DEFAULT_BUDGET = "ai2/oe-base"
+BEAKER_DEFAULT_BUDGET = "ai2/oe-other"
 """Default budget allocation for Beaker jobs."""
 
 BEAKER_DEFAULT_PRIORITY = "normal"
