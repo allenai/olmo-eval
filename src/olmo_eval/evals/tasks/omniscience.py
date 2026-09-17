@@ -193,6 +193,14 @@ class OmniscienceScorer(LLMJudgeScorer):
         default_factory=lambda: build_openai_judge_fn(scorer_name="OmniscienceScorer")
     )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary, recording the judge callable by name."""
+        serialized = super().to_dict()
+        judge_fn = serialized.get("judge_fn")
+        if callable(judge_fn):
+            serialized["judge_fn"] = getattr(judge_fn, "__qualname__", None)
+        return serialized
+
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
         """Format Omniscience-style judge prompt."""
         return JUDGE_FORMAT.format(
