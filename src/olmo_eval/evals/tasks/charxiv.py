@@ -64,6 +64,24 @@ def _load_charxiv_nodecode(split: str):
     return ds.cast_column("image", datasets.Image(decode=False))
 
 
+
+def _parse_templates(raw) -> set[int] | None:
+    """Normalize the `charxiv_templates` override into a set of template ids.
+
+    The CLI override parser type-coerces, so `-o charxiv_templates=17` arrives as the int
+    17, not the string "17" -- calling `.split(",")` on it raised `'int' object has no
+    attribute 'split'` and failed the task during preparation. Accept int, str and
+    sequence forms so the override behaves the same however it is supplied.
+    """
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, int):
+        return {raw}
+    if isinstance(raw, (list, tuple, set)):
+        return {int(t) for t in raw}
+    return {int(t) for t in str(raw).split(",") if t.strip()}
+
+
 def _figure_id(figure_path: str) -> int:
     return int(figure_path.split("/")[-1].split(".")[0])
 
@@ -194,11 +212,7 @@ class CharxivDescriptiveTask(ImageQATask):
 
     def _build_instances(self) -> Iterator[Instance]:
         ds = _load_charxiv_nodecode(self.config.split.value)
-        keep_templates = (
-            {int(t) for t in self.config.charxiv_templates.split(",") if t.strip()}
-            if self.config.charxiv_templates
-            else None
-        )
+        keep_templates = _parse_templates(self.config.charxiv_templates)
         for idx in range(len(ds)):
             ex = ds[idx]
             fid = _figure_id(ex["figure_path"])
