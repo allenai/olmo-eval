@@ -47,7 +47,7 @@ from olmo_eval.analysis.pairwise_viewer.assets import (
     shared_css_text,
 )
 from olmo_eval.analysis.pairwise_viewer_payload import build_pairwise_viewer_payload
-from olmo_eval.analysis.scope_scores import compute_scope_score
+from olmo_eval.analysis.scope_scores import compute_scope_score, weights_are_complete
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -812,12 +812,40 @@ def _group_model_task_instance_counts_by_name(
     return grouped_counts
 
 
+def _scope_weights_are_complete(
+    models: list[dict[str, Any]],
+    columns: list[dict[str, Any]],
+    *,
+    selected_scope_key: str | None,
+    selected_scope_option: dict[str, Any] | None,
+) -> bool:
+    """Whether every model in the scope can be instance-weighted.
+
+    One model missing an instance count drops the whole column back to the
+    unweighted mean, so the aggregates stay comparable against each other.
+    """
+    scope_kind, _ = _parse_scope_key(selected_scope_key)
+    if scope_kind != "suite" or selected_scope_option is None:
+        return True
+
+    suite_name = str(selected_scope_option.get("value") or "")
+    return all(
+        weights_are_complete(
+            task_scores_by_name=_group_model_task_scores_by_name(model, columns),
+            task_instance_counts_by_name=_group_model_task_instance_counts_by_name(model, columns),
+            suite_name=suite_name,
+        )
+        for model in models
+    )
+
+
 def _scoped_model_score(
     model: dict[str, Any],
     columns: list[dict[str, Any]],
     *,
     selected_scope_key: str | None,
     selected_scope_option: dict[str, Any] | None,
+    use_instance_weights: bool = True,
 ) -> float | None:
     if selected_scope_option is None or not _columns_comparable(columns):
         return None
@@ -834,7 +862,11 @@ def _scoped_model_score(
         suite_name = str(selected_scope_option.get("value") or "")
         return compute_scope_score(
             task_scores_by_name=grouped_scores,
-            task_instance_counts_by_name=_group_model_task_instance_counts_by_name(model, columns),
+            task_instance_counts_by_name=(
+                _group_model_task_instance_counts_by_name(model, columns)
+                if use_instance_weights
+                else None
+            ),
             suite_name=suite_name,
         )
     if scope_kind == "task":
@@ -852,6 +884,7 @@ def _scope_score_title(
     *,
     selected_scope_key: str | None,
     selected_scope_option: dict[str, Any] | None,
+    use_instance_weights: bool = True,
 ) -> str:
     from olmo_eval.evals.suites.registry import get_suite, suite_exists
 
@@ -860,7 +893,10 @@ def _scope_score_title(
         suite_name = str(selected_scope_option.get("value") or "")
         if suite_exists(suite_name):
             aggregation = get_suite(suite_name).aggregation.value
-            return f"suite aggregate using {aggregation}"
+            title = f"suite aggregate using {aggregation}"
+            if not use_instance_weights:
+                title += " (unweighted: some runs have no instance counts)"
+            return title
         return "suite aggregate"
     return "selected task score"
 
@@ -888,12 +924,19 @@ def _annotate_results_table_scope_scores(
         return prepared
 
     scope_kind, _ = _parse_scope_key(selected_scope_key)
+    use_instance_weights = _scope_weights_are_complete(
+        prepared["models"],
+        scoped_columns,
+        selected_scope_key=selected_scope_key,
+        selected_scope_option=selected_scope_option,
+    )
     prepared["scope_score_meta"] = scope_score_meta
     prepared["scope_score_label"] = "agg" if scope_kind == "suite" else "score"
     prepared["scope_score_csv_label"] = "aggregate" if scope_kind == "suite" else "score"
     prepared["scope_score_title"] = _scope_score_title(
         selected_scope_key=selected_scope_key,
         selected_scope_option=selected_scope_option,
+        use_instance_weights=use_instance_weights,
     )
     for model in prepared["models"]:
         model["scope_score"] = _scoped_model_score(
@@ -901,6 +944,7 @@ def _annotate_results_table_scope_scores(
             scoped_columns,
             selected_scope_key=selected_scope_key,
             selected_scope_option=selected_scope_option,
+            use_instance_weights=use_instance_weights,
         )
     return prepared
 

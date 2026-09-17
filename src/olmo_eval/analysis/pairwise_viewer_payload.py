@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from itertools import zip_longest
 from typing import Any
 
 import numpy as np
@@ -18,7 +17,7 @@ from olmo_eval.analysis.pairwise_metrics import (
     build_task_metrics,
     build_win_rate_matrix,
 )
-from olmo_eval.analysis.scope_scores import compute_scope_score
+from olmo_eval.analysis.scope_scores import compute_scope_score, weights_are_complete
 
 
 def _default_title(result: PairwiseResult) -> str:
@@ -134,35 +133,77 @@ def _build_matrix_mde80_map(result: PairwiseResult) -> dict[str, float]:
     }
 
 
+def _group_by_task_name(
+    task_entries: list[Any],
+    values: list[Any],
+) -> dict[str, list[Any]]:
+    """Group per-task values by task name, padding short lists with None."""
+    grouped: dict[str, list[Any]] = {}
+    for index, task_entry in enumerate(task_entries):
+        value = values[index] if index < len(values) else None
+        grouped.setdefault(task_entry.task_name, []).append(value)
+    return grouped
+
+
+def _pairwise_scope_is_comparable(result: PairwiseResult) -> bool:
+    return not (
+        result.score_unit is None
+        or result.higher_is_better is None
+        or result.score_display_format == "mixed"
+    )
+
+
+def _pairwise_scope_weights_are_complete(
+    result: PairwiseResult,
+    task_entries: list[Any],
+) -> bool:
+    """Whether every compared model can be instance-weighted.
+
+    One model missing an instance count drops the whole comparison back to the
+    unweighted mean, so the aggregates stay comparable against each other.
+    """
+    if not result.suite_name or not _pairwise_scope_is_comparable(result):
+        return True
+
+    return all(
+        weights_are_complete(
+            task_scores_by_name=_group_by_task_name(task_entries, list(task_scores)),
+            task_instance_counts_by_name=_group_by_task_name(
+                task_entries,
+                list(result.model_task_instance_counts[index])
+                if index < len(result.model_task_instance_counts)
+                else [],
+            ),
+            suite_name=result.suite_name,
+        )
+        for index, task_scores in enumerate(result.model_task_scores)
+    )
+
+
 def _pairwise_model_scope_score(
     result: PairwiseResult,
     task_entries: list[Any],
     task_scores: list[float | None],
     task_instance_counts: list[int | None],
+    *,
+    use_instance_weights: bool = True,
 ) -> float | None:
-    if (
-        result.score_unit is None
-        or result.higher_is_better is None
-        or result.score_display_format == "mixed"
-    ):
+    if not _pairwise_scope_is_comparable(result):
         return None
 
-    task_scores_by_name: dict[str, list[float | None]] = {}
-    for task_entry, task_score in zip(task_entries, task_scores, strict=False):
-        task_scores_by_name.setdefault(task_entry.task_name, []).append(
-            float(task_score) if task_score is not None else None
-        )
-
-    task_instance_counts_by_name: dict[str, list[int | None]] = {}
-    for task_entry, instance_count in zip_longest(task_entries, task_instance_counts):
-        if task_entry is None:
-            break
-        task_instance_counts_by_name.setdefault(task_entry.task_name, []).append(instance_count)
+    task_scores_by_name: dict[str, list[float | None]] = {
+        task_name: [float(score) if score is not None else None for score in scores]
+        for task_name, scores in _group_by_task_name(task_entries, task_scores).items()
+    }
 
     if result.suite_name:
         return compute_scope_score(
             task_scores_by_name=task_scores_by_name,
-            task_instance_counts_by_name=task_instance_counts_by_name,
+            task_instance_counts_by_name=(
+                _group_by_task_name(task_entries, task_instance_counts)
+                if use_instance_weights
+                else None
+            ),
             suite_name=result.suite_name,
         )
 
@@ -210,6 +251,8 @@ def build_pairwise_viewer_payload(
             }
         )
 
+    use_instance_weights = _pairwise_scope_weights_are_complete(result, task_entries)
+
     models: list[dict[str, Any]] = []
     for index, model in enumerate(result.models):
         task_scores = (
@@ -225,7 +268,11 @@ def build_pairwise_viewer_payload(
             else []
         )
         scope_score = _pairwise_model_scope_score(
-            result, task_entries, task_scores, task_instance_counts
+            result,
+            task_entries,
+            task_scores,
+            task_instance_counts,
+            use_instance_weights=use_instance_weights,
         )
         shared_score = (
             result.model_shared_scores[index] if index < len(result.model_shared_scores) else None

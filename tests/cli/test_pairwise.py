@@ -832,7 +832,7 @@ def test_results_table_scope_score_weights_tasks_by_instance_count() -> None:
                     "display_label": "model-b",
                     "avg_score": 0.7,
                     "task_scores": {"task_small": 0.9, "task_large": 0.5},
-                    "task_instance_counts": {"task_small": 100, "task_large": None},
+                    "task_instance_counts": {"task_small": 100, "task_large": 300},
                 },
             ],
             "task_columns": [
@@ -862,10 +862,78 @@ def test_results_table_scope_score_weights_tasks_by_instance_count() -> None:
         assert annotated is not None
         assert annotated["scope_score_title"] == "suite aggregate using weighted_average"
         assert annotated["models"][0]["scope_score"] == pytest.approx(0.6)
-        # A model missing one instance count falls back to the unweighted mean.
-        assert annotated["models"][1]["scope_score"] == pytest.approx(0.7)
+        assert annotated["models"][1]["scope_score"] == pytest.approx(0.6)
     finally:
         del _REGISTRY["_test_weighted_results_table"]
+
+
+def test_results_table_scope_score_drops_weighting_when_a_model_lacks_counts() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+    from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+    weighted_suite = Suite(
+        name="_test_weighted_partial_counts",
+        tasks=("task_small", "task_large"),
+        aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+    )
+    _REGISTRY["_test_weighted_partial_counts"] = weighted_suite
+
+    try:
+        selected_scope_option = {
+            "key": "suite::_test_weighted_partial_counts",
+            "kind": "suite",
+            "value": "_test_weighted_partial_counts",
+            "task_ids": ["task_small", "task_large"],
+        }
+        results_table = {
+            "models": [
+                {
+                    "index": 0,
+                    "display_label": "model-a",
+                    "avg_score": 0.7,
+                    "task_scores": {"task_small": 0.9, "task_large": 0.5},
+                    "task_instance_counts": {"task_small": 100, "task_large": 300},
+                },
+                {
+                    "index": 1,
+                    "display_label": "model-b",
+                    "avg_score": 0.7,
+                    "task_scores": {"task_small": 0.9, "task_large": 0.5},
+                    "task_instance_counts": {"task_small": 100, "task_large": None},
+                },
+            ],
+            "task_columns": [
+                {
+                    "id": "task_small",
+                    "task_name": "task_small",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+                {
+                    "id": "task_large",
+                    "task_name": "task_large",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+            ],
+        }
+
+        annotated = viewer_server._annotate_results_table_scope_scores(
+            results_table,
+            selected_scope_key="suite::_test_weighted_partial_counts",
+            selected_scope_option=selected_scope_option,
+        )
+
+        # One model without a complete set of counts drops the whole column back
+        # to the unweighted mean, so the two aggregates stay comparable.
+        assert annotated is not None
+        assert annotated["models"][0]["scope_score"] == pytest.approx(0.7)
+        assert annotated["models"][1]["scope_score"] == pytest.approx(0.7)
+        assert "unweighted: some runs have no instance counts" in annotated["scope_score_title"]
+    finally:
+        del _REGISTRY["_test_weighted_partial_counts"]
 
 
 def test_build_results_table_exposes_task_instance_counts(monkeypatch) -> None:

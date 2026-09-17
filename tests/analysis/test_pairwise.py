@@ -590,7 +590,7 @@ class TestPairwiseResult:
                 task_hashes=("task-small", "task-large"),
                 task_metric_keys=("accuracy:exact_match",) * 2,
                 model_task_scores=((0.9, 0.5), (0.9, 0.5)),
-                model_task_instance_counts=((100, 300), (100, None)),
+                model_task_instance_counts=((100, 300), (100, 300)),
                 score_display_format="percentage",
                 score_unit="proportion",
                 higher_is_better=True,
@@ -600,10 +600,58 @@ class TestPairwiseResult:
 
             # (0.9 * 100 + 0.5 * 300) / 400 = 0.6, versus 0.7 unweighted.
             assert payload["models"][0]["scope_score"] == pytest.approx(0.6)
-            # A model missing one instance count falls back to the unweighted mean.
-            assert payload["models"][1]["scope_score"] == pytest.approx(0.7)
+            assert payload["models"][1]["scope_score"] == pytest.approx(0.6)
         finally:
             del _REGISTRY["_test_weighted_payload"]
+
+    def test_html_payload_drops_weighting_when_a_model_lacks_counts(self) -> None:
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+        weighted_suite = Suite(
+            name="_test_weighted_partial_payload",
+            tasks=("task_small", "task_large"),
+            aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+        )
+        _REGISTRY["_test_weighted_partial_payload"] = weighted_suite
+
+        try:
+            result = PairwiseResult(
+                task_name="_test_weighted_partial_payload",
+                suite_name="_test_weighted_partial_payload",
+                metric="accuracy:exact_match",
+                margin=0.0,
+                instance_count=400,
+                models=[
+                    ModelMeta(
+                        label="model-a\n(abc12345)",
+                        model_name="model-a",
+                        model_hash="abc12345",
+                    ),
+                    ModelMeta(
+                        label="model-b\n(def67890)",
+                        model_name="model-b",
+                        model_hash="def67890",
+                    ),
+                ],
+                pairs=[PairStats(index_a=0, index_b=1, wins_a=12, wins_b=8, ties=0)],
+                task_names=("task_small", "task_large"),
+                task_hashes=("task-small", "task-large"),
+                task_metric_keys=("accuracy:exact_match",) * 2,
+                model_task_scores=((0.9, 0.5), (0.9, 0.5)),
+                model_task_instance_counts=((100, 300), (100, None)),
+                score_display_format="percentage",
+                score_unit="proportion",
+                higher_is_better=True,
+            )
+
+            payload = build_pairwise_viewer_payload(result)
+
+            # One model without a complete set of counts drops the whole
+            # comparison back to the unweighted mean.
+            assert payload["models"][0]["scope_score"] == pytest.approx(0.7)
+            assert payload["models"][1]["scope_score"] == pytest.approx(0.7)
+        finally:
+            del _REGISTRY["_test_weighted_partial_payload"]
 
 
 class TestComputePairsCompoundKeys:
