@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
+from itertools import zip_longest
 from typing import Any
 
 
@@ -17,6 +19,63 @@ def _task_score(
     task_scores_by_name: dict[str, list[float | None]],
 ) -> float | None:
     return _mean_numeric(task_scores_by_name.get(task_name, []))
+
+
+def _task_weight(
+    task_name: str,
+    task_scores_by_name: dict[str, list[float | None]],
+    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None,
+) -> float | None:
+    """Instance count to weight one leaf task by, or None when it is unusable.
+
+    Task-hash variants of the same task collapse to a single leaf score, so the
+    variants that contributed that score also collapse to a single weight. Every
+    contributing variant must carry a positive count, otherwise the leaf has no
+    weight at all.
+    """
+    if not task_instance_counts_by_name:
+        return None
+
+    scores = task_scores_by_name.get(task_name, [])
+    counts = task_instance_counts_by_name.get(task_name, [])
+    weights = [
+        float(count)
+        for score, count in zip_longest(scores, counts)
+        if score is not None and count is not None and count > 0
+    ]
+    scored_count = sum(1 for score in scores if score is not None)
+    if not weights or len(weights) != scored_count:
+        return None
+    return sum(weights) / len(weights)
+
+
+def _weighted_mean_over_tasks(
+    task_names: Iterable[str],
+    task_scores_by_name: dict[str, list[float | None]],
+    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None,
+) -> float | None:
+    """Instance-weighted mean over leaf tasks, unweighted when any weight is missing.
+
+    Mixing weighted and unweighted terms would produce a number that belongs to
+    neither convention, so a single missing instance count drops the whole suite
+    back to the unweighted mean.
+    """
+    scores: list[float] = []
+    weights: list[float] = []
+    for task_name in task_names:
+        score = _task_score(task_name, task_scores_by_name)
+        if score is None:
+            continue
+        scores.append(score)
+        weight = _task_weight(task_name, task_scores_by_name, task_instance_counts_by_name)
+        if weight is not None:
+            weights.append(weight)
+
+    if not scores:
+        return None
+    if len(weights) != len(scores) or sum(weights) <= 0:
+        return sum(scores) / len(scores)
+    return sum(score * weight for score, weight in zip(scores, weights, strict=True)) / sum(weights)
 
 
 def _child_scope_score(
@@ -39,6 +98,7 @@ def _child_scope_score(
 def compute_scope_score(
     *,
     task_scores_by_name: dict[str, list[float | None]],
+    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None = None,
     suite_name: str | None = None,
     task_name: str | None = None,
 ) -> float | None:
@@ -46,7 +106,9 @@ def compute_scope_score(
 
     ``task_scores_by_name`` is keyed by canonical task name so multiple task-hash
     variants of the same task collapse to a single leaf score before suite
-    aggregation is applied.
+    aggregation is applied. ``task_instance_counts_by_name`` carries the instance
+    count of each of those variants in the same order, and is only read by
+    instance-weighted aggregation strategies.
     """
     from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, suite_exists
 
@@ -60,6 +122,12 @@ def compute_scope_score(
         if suite.aggregation == AggregationStrategy.AVERAGE_OF_AVERAGES:
             return _mean_numeric(
                 [_child_scope_score(child, task_scores_by_name) for child in suite.tasks]
+            )
+        if suite.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
+            return _weighted_mean_over_tasks(
+                suite.expand(),
+                task_scores_by_name,
+                task_instance_counts_by_name,
             )
 
         return _mean_numeric(

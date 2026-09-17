@@ -492,6 +492,7 @@ def _build_results_table(
         TaskResult.task_hash,
         TaskResult.metrics,
         TaskResult.primary_metric,
+        TaskResult.num_instances,
     ).where(TaskResult.experiment_pk.in_(source_pks))
     if scope_task_names:
         tr_stmt = tr_stmt.where(TaskResult.task_name.in_(scope_task_names))
@@ -526,7 +527,8 @@ def _build_results_table(
 
     task_states_by_id: dict[str, TaskColumnState] = {}
     task_scores_by_pk: dict[int, dict[str, float | None]] = {pk: {} for pk in selected_pks}
-    for experiment_pk, task_name, task_hash, metrics, primary_metric in task_rows:
+    task_instance_counts_by_pk: dict[int, dict[str, int | None]] = {pk: {} for pk in selected_pks}
+    for experiment_pk, task_name, task_hash, metrics, primary_metric, num_instances in task_rows:
         task_state = _record_task_column_state(
             task_states_by_id,
             task_name=task_name,
@@ -538,6 +540,9 @@ def _build_results_table(
         metric_key = str(primary_metric) if primary_metric else None
         score = extract_score_from_metrics(metrics, metric_key) if metric_key else None
         task_scores_by_pk.setdefault(experiment_pk, {})[task_id] = score
+        task_instance_counts_by_pk.setdefault(experiment_pk, {})[task_id] = (
+            int(num_instances) if num_instances is not None else None
+        )
         if score is not None:
             task_state.model_count += 1
 
@@ -551,6 +556,7 @@ def _build_results_table(
     models: list[dict[str, Any]] = []
     for index, experiment in enumerate(display_experiments):
         task_scores = task_scores_by_pk.get(experiment.id, {})
+        task_instance_counts = task_instance_counts_by_pk.get(experiment.id, {})
         scored_values = [score for score in task_scores.values() if score is not None]
         avg_score = sum(scored_values) / len(scored_values) if scored_values else None
         models.append(
@@ -562,6 +568,9 @@ def _build_results_table(
                 "timestamp": experiment.timestamp.isoformat(),
                 "avg_score": avg_score,
                 "task_scores": {task_id: task_scores.get(task_id) for task_id in ordered_task_ids},
+                "task_instance_counts": {
+                    task_id: task_instance_counts.get(task_id) for task_id in ordered_task_ids
+                },
             }
         )
 
@@ -593,9 +602,9 @@ def _merge_latest_task_rows(
     *,
     source_experiments: Sequence[Any],
     display_experiments: Sequence[Any],
-) -> list[tuple[int, str, str | None, dict[str, dict[str, Any]], str | None]]:
+) -> list[tuple[int, str, str | None, dict[str, dict[str, Any]], str | None, int | None]]:
     normalized_rows: list[LatestTaskRowInput] = []
-    for experiment_pk, task_name, task_hash, metrics, primary_metric in task_rows:
+    for experiment_pk, task_name, task_hash, metrics, primary_metric, num_instances in task_rows:
         try:
             resolved_pk = int(experiment_pk)
         except (TypeError, ValueError):
@@ -607,6 +616,7 @@ def _merge_latest_task_rows(
                 task_hash=str(task_hash) if task_hash else None,
                 metrics=metrics,
                 primary_metric=str(primary_metric) if primary_metric else None,
+                num_instances=int(num_instances) if num_instances is not None else None,
             )
         )
     merged_rows = _shared_merge_latest_task_rows(
@@ -621,6 +631,7 @@ def _merge_latest_task_rows(
             row.task_hash,
             row.metrics,
             row.primary_metric,
+            row.num_instances,
         )
         for row in merged_rows
     ]
@@ -783,6 +794,24 @@ def _group_model_task_scores_by_name(
     return grouped_scores
 
 
+def _group_model_task_instance_counts_by_name(
+    model: dict[str, Any],
+    columns: list[dict[str, Any]],
+) -> dict[str, list[int | None]]:
+    """Instance counts per task name, ordered to match the grouped task scores."""
+    task_instance_counts = model.get("task_instance_counts", {})
+    grouped_counts: dict[str, list[int | None]] = {}
+    for column in columns:
+        task_name = str(column.get("task_name") or "")
+        if not task_name:
+            continue
+        raw_count = task_instance_counts.get(column.get("id"))
+        grouped_counts.setdefault(task_name, []).append(
+            int(raw_count) if _is_numeric_score(raw_count) else None
+        )
+    return grouped_counts
+
+
 def _scoped_model_score(
     model: dict[str, Any],
     columns: list[dict[str, Any]],
@@ -805,6 +834,7 @@ def _scoped_model_score(
         suite_name = str(selected_scope_option.get("value") or "")
         return compute_scope_score(
             task_scores_by_name=grouped_scores,
+            task_instance_counts_by_name=_group_model_task_instance_counts_by_name(model, columns),
             suite_name=suite_name,
         )
     if scope_kind == "task":
