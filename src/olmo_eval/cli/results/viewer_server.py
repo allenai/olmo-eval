@@ -47,7 +47,7 @@ from olmo_eval.analysis.pairwise_viewer.assets import (
     shared_css_text,
 )
 from olmo_eval.analysis.pairwise_viewer_payload import build_pairwise_viewer_payload
-from olmo_eval.analysis.scope_scores import compute_scope_score, weights_are_complete
+from olmo_eval.analysis.scope_scores import compute_scope_score
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -472,7 +472,7 @@ def _build_results_table(
     scope_task_names: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     from olmo_eval.runners.processing.utils import extract_score_from_metrics
-    from olmo_eval.storage.backends.postgres.models import TaskResult
+    from olmo_eval.storage.backends.postgres.models import InstancePrediction, TaskResult
 
     display_experiments = _group_experiments(session, group_name, keep_all=keep_all)
     if not display_experiments:
@@ -486,14 +486,40 @@ def _build_results_table(
     )
     selected_pks = [experiment.id for experiment in display_experiments]
     source_pks = [experiment.id for experiment in source_experiments]
-    tr_stmt = select(
-        TaskResult.experiment_pk,
-        TaskResult.task_name,
-        TaskResult.task_hash,
-        TaskResult.metrics,
-        TaskResult.primary_metric,
-        TaskResult.num_instances,
-    ).where(TaskResult.experiment_pk.in_(source_pks))
+    # TaskResult.num_instances is nullable, so results written before it was
+    # required carry no count and cannot be instance-weighted. Counting the saved
+    # predictions recovers it. The larger of the two wins, because a run made
+    # with save_predictions=False stores a count but saves no predictions. This
+    # mirrors what the pairwise query already does.
+    saved_instance_counts = (
+        select(
+            InstancePrediction.experiment_pk.label("experiment_pk"),
+            InstancePrediction.task_hash.label("task_hash"),
+            func.count(distinct(InstancePrediction.native_id)).label("num_instances"),
+        )
+        .where(InstancePrediction.experiment_pk.in_(source_pks))
+        .group_by(InstancePrediction.experiment_pk, InstancePrediction.task_hash)
+        .subquery()
+    )
+    tr_stmt = (
+        select(
+            TaskResult.experiment_pk,
+            TaskResult.task_name,
+            TaskResult.task_hash,
+            TaskResult.metrics,
+            TaskResult.primary_metric,
+            func.greatest(
+                func.coalesce(TaskResult.num_instances, 0),
+                func.coalesce(saved_instance_counts.c.num_instances, 0),
+            ).label("num_instances"),
+        )
+        .outerjoin(
+            saved_instance_counts,
+            (saved_instance_counts.c.experiment_pk == TaskResult.experiment_pk)
+            & (saved_instance_counts.c.task_hash == TaskResult.task_hash),
+        )
+        .where(TaskResult.experiment_pk.in_(source_pks))
+    )
     if scope_task_names:
         tr_stmt = tr_stmt.where(TaskResult.task_name.in_(scope_task_names))
     task_rows = session.execute(tr_stmt).all()
@@ -541,7 +567,7 @@ def _build_results_table(
         score = extract_score_from_metrics(metrics, metric_key) if metric_key else None
         task_scores_by_pk.setdefault(experiment_pk, {})[task_id] = score
         task_instance_counts_by_pk.setdefault(experiment_pk, {})[task_id] = (
-            int(num_instances) if num_instances is not None else None
+            int(num_instances) or None if num_instances is not None else None
         )
         if score is not None:
             task_state.model_count += 1
@@ -812,40 +838,12 @@ def _group_model_task_instance_counts_by_name(
     return grouped_counts
 
 
-def _scope_weights_are_complete(
-    models: list[dict[str, Any]],
-    columns: list[dict[str, Any]],
-    *,
-    selected_scope_key: str | None,
-    selected_scope_option: dict[str, Any] | None,
-) -> bool:
-    """Whether every model in the scope can be instance-weighted.
-
-    One model missing an instance count drops the whole column back to the
-    unweighted mean, so the aggregates stay comparable against each other.
-    """
-    scope_kind, _ = _parse_scope_key(selected_scope_key)
-    if scope_kind != "suite" or selected_scope_option is None:
-        return True
-
-    suite_name = str(selected_scope_option.get("value") or "")
-    return all(
-        weights_are_complete(
-            task_scores_by_name=_group_model_task_scores_by_name(model, columns),
-            task_instance_counts_by_name=_group_model_task_instance_counts_by_name(model, columns),
-            suite_name=suite_name,
-        )
-        for model in models
-    )
-
-
 def _scoped_model_score(
     model: dict[str, Any],
     columns: list[dict[str, Any]],
     *,
     selected_scope_key: str | None,
     selected_scope_option: dict[str, Any] | None,
-    use_instance_weights: bool = True,
 ) -> float | None:
     if selected_scope_option is None or not _columns_comparable(columns):
         return None
@@ -862,11 +860,7 @@ def _scoped_model_score(
         suite_name = str(selected_scope_option.get("value") or "")
         return compute_scope_score(
             task_scores_by_name=grouped_scores,
-            task_instance_counts_by_name=(
-                _group_model_task_instance_counts_by_name(model, columns)
-                if use_instance_weights
-                else None
-            ),
+            task_instance_counts_by_name=_group_model_task_instance_counts_by_name(model, columns),
             suite_name=suite_name,
         )
     if scope_kind == "task":
@@ -884,7 +878,6 @@ def _scope_score_title(
     *,
     selected_scope_key: str | None,
     selected_scope_option: dict[str, Any] | None,
-    use_instance_weights: bool = True,
 ) -> str:
     from olmo_eval.evals.suites.registry import get_suite, suite_exists
 
@@ -893,10 +886,7 @@ def _scope_score_title(
         suite_name = str(selected_scope_option.get("value") or "")
         if suite_exists(suite_name):
             aggregation = get_suite(suite_name).aggregation.value
-            title = f"suite aggregate using {aggregation}"
-            if not use_instance_weights:
-                title += " (unweighted: some runs have no instance counts)"
-            return title
+            return f"suite aggregate using {aggregation}"
         return "suite aggregate"
     return "selected task score"
 
@@ -924,19 +914,12 @@ def _annotate_results_table_scope_scores(
         return prepared
 
     scope_kind, _ = _parse_scope_key(selected_scope_key)
-    use_instance_weights = _scope_weights_are_complete(
-        prepared["models"],
-        scoped_columns,
-        selected_scope_key=selected_scope_key,
-        selected_scope_option=selected_scope_option,
-    )
     prepared["scope_score_meta"] = scope_score_meta
     prepared["scope_score_label"] = "agg" if scope_kind == "suite" else "score"
     prepared["scope_score_csv_label"] = "aggregate" if scope_kind == "suite" else "score"
     prepared["scope_score_title"] = _scope_score_title(
         selected_scope_key=selected_scope_key,
         selected_scope_option=selected_scope_option,
-        use_instance_weights=use_instance_weights,
     )
     for model in prepared["models"]:
         model["scope_score"] = _scoped_model_score(
@@ -944,7 +927,6 @@ def _annotate_results_table_scope_scores(
             scoped_columns,
             selected_scope_key=selected_scope_key,
             selected_scope_option=selected_scope_option,
-            use_instance_weights=use_instance_weights,
         )
     return prepared
 

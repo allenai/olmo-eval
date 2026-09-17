@@ -975,7 +975,7 @@ class TestSuiteAggregations:
             del _REGISTRY["_test_weighted"]
 
     def test_suite_aggregation_weighted_average_without_counts(self):
-        """Test WEIGHTED_AVERAGE falls back to the unweighted mean."""
+        """Test WEIGHTED_AVERAGE omits the aggregate when a count is missing."""
         from olmo_eval.evals.suites.registry import (
             _REGISTRY,
             AggregationStrategy,
@@ -1001,9 +1001,9 @@ class TestSuiteAggregations:
 
             result = compute_suite_aggregations(["_test_weighted_no_counts"], task_results)
 
-            assert result["_test_weighted_no_counts"]["metrics"]["accuracy"][
-                "exact_match"
-            ] == pytest.approx(0.7)
+            # An unweighted mean under a weighted suite's name would be a
+            # different statistic wearing the same label.
+            assert "_test_weighted_no_counts" not in result
         finally:
             del _REGISTRY["_test_weighted_no_counts"]
 

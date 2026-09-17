@@ -867,7 +867,7 @@ def test_results_table_scope_score_weights_tasks_by_instance_count() -> None:
         del _REGISTRY["_test_weighted_results_table"]
 
 
-def test_results_table_scope_score_drops_weighting_when_a_model_lacks_counts() -> None:
+def test_results_table_scope_score_is_absent_when_a_model_lacks_counts() -> None:
     viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
     from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
 
@@ -926,12 +926,12 @@ def test_results_table_scope_score_drops_weighting_when_a_model_lacks_counts() -
             selected_scope_option=selected_scope_option,
         )
 
-        # One model without a complete set of counts drops the whole column back
-        # to the unweighted mean, so the two aggregates stay comparable.
+        # The weighted model still reports its weighted mean; the one with a
+        # missing count reports nothing rather than a macro mean that would sort
+        # against it as if the two were the same statistic.
         assert annotated is not None
-        assert annotated["models"][0]["scope_score"] == pytest.approx(0.7)
-        assert annotated["models"][1]["scope_score"] == pytest.approx(0.7)
-        assert "unweighted: some runs have no instance counts" in annotated["scope_score_title"]
+        assert annotated["models"][0]["scope_score"] == pytest.approx(0.6)
+        assert annotated["models"][1]["scope_score"] is None
     finally:
         del _REGISTRY["_test_weighted_partial_counts"]
 

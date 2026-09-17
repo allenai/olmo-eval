@@ -278,6 +278,7 @@ class TestConvertRunnerResults:
                 "mmlu": {
                     "metrics": {"accuracy": {"exact_match": 0.75}},
                     "task_hash": "mmlu-hash-001",
+                    "num_instances": 100,
                 }
             },
         }
@@ -348,6 +349,7 @@ class TestConvertRunnerResults:
                 "mmlu_astronomy:mc:olmo3base": {
                     "metrics": {"accuracy": {"logprob": 0.5}},
                     "task_hash": "abcdef123456",
+                    "num_instances": 100,
                 },
             },
         }

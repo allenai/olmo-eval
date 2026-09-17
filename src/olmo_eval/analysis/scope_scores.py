@@ -57,28 +57,27 @@ def _weighted_mean_over_tasks(
     task_scores_by_name: dict[str, list[float | None]],
     task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None,
 ) -> float | None:
-    """Instance-weighted mean over leaf tasks, unweighted when any weight is missing.
+    """Instance-weighted mean over leaf tasks, or None when a weight is missing.
 
-    Mixing weighted and unweighted terms would produce a number that belongs to
-    neither convention, so a single missing instance count drops the whole suite
-    back to the unweighted mean.
+    A weighted suite reports its instance-weighted mean or no score at all. An
+    unweighted mean published under the same suite name would be a different
+    statistic wearing the same label, and nothing downstream could tell the two
+    apart.
     """
-    scores: list[float] = []
-    weights: list[float] = []
+    weighted_scores: list[tuple[float, float]] = []
     for task_name in task_names:
         score = _task_score(task_name, task_scores_by_name)
         if score is None:
             continue
-        scores.append(score)
         weight = _task_weight(task_name, task_scores_by_name, task_instance_counts_by_name)
-        if weight is not None:
-            weights.append(weight)
+        if weight is None:
+            return None
+        weighted_scores.append((score, weight))
 
-    if not scores:
+    total_weight = sum(weight for _, weight in weighted_scores)
+    if not weighted_scores or total_weight <= 0:
         return None
-    if len(weights) != len(scores) or sum(weights) <= 0:
-        return sum(scores) / len(scores)
-    return sum(score * weight for score, weight in zip(scores, weights, strict=True)) / sum(weights)
+    return sum(score * weight for score, weight in weighted_scores) / total_weight
 
 
 def _child_scope_score(
@@ -105,54 +104,6 @@ def _child_scope_score(
     return _task_score(str(child), task_scores_by_name)
 
 
-def weights_are_complete(
-    *,
-    task_scores_by_name: dict[str, list[float | None]],
-    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None = None,
-    suite_name: str | None = None,
-) -> bool:
-    """Whether every scored leaf of a weighted suite carries an instance count.
-
-    A scope score falls back to the unweighted mean when this is False. Callers
-    that render several models side by side ask this of every model first and
-    weight none of them unless all of them qualify, so one comparison column
-    never mixes instance-weighted and unweighted aggregates.
-
-    Always True for suites that do not weight by instance count, and for scopes
-    that are not suites, since those ignore instance counts entirely.
-    """
-    from olmo_eval.evals.suites.registry import (
-        AggregationStrategy,
-        Suite,
-        get_suite,
-        suite_exists,
-    )
-
-    if not suite_name or not suite_exists(suite_name):
-        return True
-
-    suite = get_suite(suite_name)
-    weighted_leaves: tuple[str, ...]
-    if suite.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
-        weighted_leaves = suite.expand()
-    elif suite.aggregation == AggregationStrategy.AVERAGE_OF_AVERAGES:
-        weighted_leaves = tuple(
-            task_name
-            for child in suite.tasks
-            if isinstance(child, Suite)
-            and child.aggregation == AggregationStrategy.WEIGHTED_AVERAGE
-            for task_name in child.expand()
-        )
-    else:
-        return True
-
-    return all(
-        _task_weight(task_name, task_scores_by_name, task_instance_counts_by_name) is not None
-        for task_name in weighted_leaves
-        if _task_score(task_name, task_scores_by_name) is not None
-    )
-
-
 def compute_scope_score(
     *,
     task_scores_by_name: dict[str, list[float | None]],
@@ -166,7 +117,8 @@ def compute_scope_score(
     variants of the same task collapse to a single leaf score before suite
     aggregation is applied. ``task_instance_counts_by_name`` carries the instance
     count of each of those variants in the same order, and is only read by
-    instance-weighted aggregation strategies.
+    instance-weighted aggregation strategies. Those strategies return None when
+    a contributing task has no instance count.
     """
     from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, suite_exists
 
