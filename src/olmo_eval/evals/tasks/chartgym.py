@@ -169,7 +169,12 @@ def _metrics() -> tuple[Metric, ...]:
 @register("chartgym")
 class ChartGymTask(ImageQATask):
     dependencies = ["pillow"]
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=64)
+    # 256, not 64. A stage-2 Molmo2 checkpoint answers these in prose ("The legend box in
+    # the top right corner of the graph ...") and a 64-token cap truncates before the answer
+    # appears, scoring 0 for verbosity rather than for error. That is the same confound that
+    # made CharXiv template 11 look like a geometry failure when it was an applicability
+    # failure -- measure the model, not the cap.
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=256)
     metrics = _metrics()
     primary_metric = metrics[0]
     split = Split.VALIDATION
