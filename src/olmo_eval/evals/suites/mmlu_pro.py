@@ -7,19 +7,25 @@ MMLU_PRO = make_suite(
     "mmlu_pro",
     tuple(f"mmlu_pro_{s}" for s in _SLUGS),
     aggregation=AggregationStrategy.AVERAGE,
-    description="5-shot multiple-choice MMLU-Pro, averaged over the 14 categories",
+    description=(
+        "5-shot multiple-choice MMLU-Pro, unweighted average over category tasks "
+        "(the reference harness reports an instance-weighted micro average)"
+    ),
 )
 
 MMLU_PRO_BPB = make_suite(
     "mmlu_pro:bpb",
     tuple(f"mmlu_pro_{s}:rc:bpb" for s in _SLUGS),
     aggregation=AggregationStrategy.AVERAGE,
-    description="5-shot cloze MMLU-Pro bits per byte, averaged over the 14 categories",
+    description="5-shot cloze MMLU-Pro bits per byte, unweighted average over category tasks",
 )
 
 MMLU_PRO_COT = make_suite(
     "mmlu_pro:cot",
     tuple(f"mmlu_pro_{s}:cot" for s in _SLUGS),
     aggregation=AggregationStrategy.AVERAGE,
-    description="0-shot chain-of-thought MMLU-Pro, averaged over the 14 categories",
+    description=(
+        "0-shot chain-of-thought MMLU-Pro, unweighted average over category tasks "
+        "(the reference harness reports an instance-weighted micro average)"
+    ),
 )

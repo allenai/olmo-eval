@@ -10,6 +10,7 @@ from olmo_eval.evals.tasks.mmlu_pro import (
     _COT_DESCRIPTION,
     _COT_FINAL_DESCRIPTION,
     MMLU_PRO_CATEGORIES,
+    MMLU_PRO_REVISION,
     MMLUProCoTExactMatchScorer,
     _extract_cot_answer,
     category_slug,
@@ -53,6 +54,11 @@ def test_all_categories_registered() -> None:
         cot = get_task(f"{name}:cot")
         assert cot.request_type == RequestType.CHAT
         assert cot.config.num_fewshot == 0
+        assert cot.config.strip_thinking is True
+
+        for task in (mc, rc, cot):
+            assert task.config.data_source is not None
+            assert task.config.data_source.revision == MMLU_PRO_REVISION
 
 
 def test_computer_science_slug() -> None:
@@ -118,6 +124,7 @@ def test_cot_message() -> None:
     assert instance is not None
     assert instance.gold_answer == "B"
     assert instance.choices == tuple(_OPTIONS)
+    assert instance.metadata == {"id": 7, "index": 0, "category": "math"}
 
     request = task.format_request(instance)
     assert request.request_type == RequestType.CHAT

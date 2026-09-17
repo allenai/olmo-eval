@@ -1,4 +1,4 @@
-"""MMLU-Pro: multiple-choice questions with up to ten options across 14 categories.
+"""MMLU-Pro: multiple-choice questions with up to ten options, one task per category.
 
 The dataset (``TIGER-Lab/MMLU-Pro``) ships as a single configuration with a
 ``category`` column, so each per-category task loads the split and keeps the
@@ -49,6 +49,7 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 from olmo_eval.evals.tasks.mmlu import _format_rc, _make_mcq_prompt
 
 MMLU_PRO_PATH = "TIGER-Lab/MMLU-Pro"
+MMLU_PRO_REVISION = "b189ec765aa7ed75c8acfea42df31fdae71f97be"
 
 MMLU_PRO_CATEGORIES: tuple[str, ...] = (
     "math",
@@ -89,13 +90,17 @@ def _parse_doc(doc: dict[str, Any], category: str) -> tuple[str, list[str], int]
     return question, options, gold_idx
 
 
-def _metadata(doc: dict[str, Any], index: int, category: str, gold_idx: int) -> dict[str, Any]:
-    return {
+def _metadata(
+    doc: dict[str, Any], index: int, category: str, gold_idx: int | None = None
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
         "id": doc.get("question_id", index),
         "index": index,
         "category": category,
-        "gold_idx": gold_idx,
     }
+    if gold_idx is not None:
+        metadata["gold_idx"] = gold_idx
+    return metadata
 
 
 class MMLUProTask(Task):
@@ -262,6 +267,7 @@ class MMLUProCoTTask(MMLUProTask):
     primary_metric = _COT_ACCURACY
     sampling_params = _COT_SAMPLING
     num_fewshot = 0
+    strip_thinking = True
     answer_extractor = _extract_cot_letter
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
@@ -276,7 +282,7 @@ class MMLUProCoTTask(MMLUProTask):
             question=query,
             gold_answer=_CHOICE_LABELS[gold_idx],
             choices=tuple(options),
-            metadata=_metadata(doc, index, self.category, gold_idx),
+            metadata=_metadata(doc, index, self.category),
         )
 
     def extract_answer(self, output: LMOutput) -> str | None:
@@ -292,7 +298,7 @@ class MMLUProCoTTask(MMLUProTask):
 for _category in MMLU_PRO_CATEGORIES:
     _slug = category_slug(_category)
     _name = f"mmlu_pro_{_slug}"
-    _source = DataSource(path=MMLU_PRO_PATH, split="test")
+    _source = DataSource(path=MMLU_PRO_PATH, revision=MMLU_PRO_REVISION)
 
     _mc_cls = type(
         f"MMLUPro_{_slug}",
@@ -309,7 +315,6 @@ for _category in MMLU_PRO_CATEGORIES:
             "__qualname__": f"MMLUPro_{_slug}",
         },
     )
-    globals()[_mc_cls.__name__] = _mc_cls
     register(_name)(_mc_cls)
     register_variant(_name, "mc")
     register_variant(_name, "olmo3base")
@@ -328,7 +333,6 @@ for _category in MMLU_PRO_CATEGORIES:
             "__qualname__": f"MMLUProRC_{_slug}",
         },
     )
-    globals()[_rc_cls.__name__] = _rc_cls
     register(f"{_name}:rc")(_rc_cls)
     register_variant(f"{_name}:rc", "olmo3base")
     register_variant(
@@ -348,5 +352,4 @@ for _category in MMLU_PRO_CATEGORIES:
             "__qualname__": f"MMLUProCoT_{_slug}",
         },
     )
-    globals()[_cot_cls.__name__] = _cot_cls
     register(f"{_name}:cot")(_cot_cls)
