@@ -14,8 +14,8 @@ Two tracks from the open-sourced gold set of ``openai/frontierscience``:
     full-set score restricted to those problems, not a separate measurement.
 
 ``frontierscience_olympiad:mc``
-    A frozen 83-question verified subset with four curated choices per problem.
-    It scores the log-likelihood of the labels A--D and therefore needs no judge.
+    The same verified subset with four curated choices per problem. It scores the
+    log-likelihood of the labels A--D and therefore needs no judge.
     This recognition task is intended for base-model tracking and is not directly
     comparable with the free-response Olympiad score.
     Problem and answer notation includes display edits. Distractor provenance
@@ -769,7 +769,12 @@ class FrontierScienceOlympiadVerified(FrontierScienceOlympiad):
 
 @register("frontierscience_olympiad:mc")
 class FrontierScienceOlympiadMC(Task):
-    """Judge-free multiple-choice adaptation of the verified Olympiad subset."""
+    """Judge-free multiple-choice adaptation of the verified Olympiad subset.
+
+    Choices and display text come from the curated release; which problems appear
+    is decided by the shared verified index, so this track and
+    ``frontierscience_olympiad:verified`` always cover the same problems.
+    """
 
     data_source = DataSource(path=FRONTIERSCIENCE_VERIFIED_MC_FILE, split="test")
     split = Split.TEST
@@ -781,18 +786,39 @@ class FrontierScienceOlympiadMC(Task):
     @property
     def instances(self) -> Iterator[Instance]:
         if self._instances_cache is None:
-            self._instances_cache = []
-            resource = files(__package__).joinpath(FRONTIERSCIENCE_VERIFIED_MC_FILE)
-            with resource.open(encoding="utf-8") as handle:
-                for index, line in enumerate(handle):
-                    if not line.strip():
-                        continue
-                    instance = self.process_doc(json.loads(line), index)
-                    if instance is not None:
-                        self._instances_cache.append(instance)
+            self._instances_cache = self._load_verified_rows()
         yield from self._instances_cache
 
+    def _load_verified_rows(self) -> list[Instance]:
+        """Read the curated release, keeping the rows the verified index names."""
+        instances: list[Instance] = []
+        resource = files(__package__).joinpath(FRONTIERSCIENCE_VERIFIED_MC_FILE)
+        with resource.open(encoding="utf-8") as handle:
+            for index, line in enumerate(handle):
+                if not line.strip():
+                    continue
+                instance = self.process_doc(json.loads(line), index)
+                if instance is not None:
+                    instances.append(instance)
+
+        missing = sorted(
+            verified_task_group_ids()
+            - {instance.metadata["task_group_id"] for instance in instances}
+        )
+        if missing:
+            raise ValueError(
+                f"{FRONTIERSCIENCE_VERIFIED_MC_FILE} has no row for {len(missing)} verified "
+                f"problem(s), starting with {missing[0]}"
+            )
+        return instances
+
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        # Filtering on the index rather than on the file means a problem dropped
+        # from the verified subset leaves both tracks without a release rebuild.
+        task_group_id = str(doc.get("task_group_id") or "")
+        if task_group_id not in verified_task_group_ids():
+            return None
+
         raw_problem = str(doc.get("problem") or "")
         problem, substitutions = _MC_ANSWER_INSTRUCTION.subn("", raw_problem)
         choices = tuple(str(choice).strip() for choice in doc.get("choices", ()))
@@ -815,13 +841,12 @@ class FrontierScienceOlympiadMC(Task):
         subject = str(doc.get("subject") or "").strip().lower()
         if subject not in FRONTIERSCIENCE_SUBJECTS:
             raise ValueError(f"unexpected subject {subject!r} at MC row {index}")
-        task_group_id = str(doc.get("task_group_id") or "")
         return Instance(
             question=problem.strip(),
             choices=choices,
             gold_answer=gold_label,
             metadata={
-                "id": task_group_id or f"{self.config.name}:{index}",
+                "id": task_group_id,
                 "task_group_id": task_group_id,
                 "subject": subject,
                 "index": index,
