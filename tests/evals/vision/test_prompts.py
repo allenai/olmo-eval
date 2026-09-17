@@ -7,6 +7,7 @@ skip otherwise.
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
 
 import numpy as np
@@ -59,7 +60,9 @@ class TestBuildPointingPrompt:
 # parity with mm_olmo (skipped when the reference checkout is absent)
 # ---------------------------------------------------------------------------
 
-_MM_OLMO_FORMATTER = Path("/root/mm_olmo/olmo/data/data_formatter.py")
+_MM_OLMO_FORMATTER = (
+    Path(os.environ.get("MM_OLMO_ROOT", "/root/mm_olmo")) / "olmo" / "data" / "data_formatter.py"
+)
 
 
 def _mm_olmo_pointing_templates() -> list[str]:

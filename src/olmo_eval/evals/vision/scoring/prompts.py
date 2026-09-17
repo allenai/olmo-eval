@@ -79,8 +79,8 @@ EVAL_DATA_SEED = 691203
 _SEED_MULTIPLIER = 195172
 
 _TEMPLATED_STYLES = ("uber_model", "uber_model_v2")
-_NO_PREFIX_STYLES = ("demo_or_style_v2", "demo_or_style_v3")
-_STYLE_PREFIX_STYLES = ("style_and_length", "style_and_length_v2")
+NO_PREFIX_STYLES = ("demo_or_style_v2", "demo_or_style_v3")
+STYLE_PREFIX_STYLES = ("style_and_length", "style_and_length_v2")
 
 #: The formatter's style name for these tasks, used as the system prefix.
 POINTING_STYLE = "pointing"
@@ -104,13 +104,13 @@ def system_prefix(system_prompt: str, style: str = POINTING_STYLE) -> str:
     benchmark supplied a ready-made question, so the pre-built-question benchmarks need the
     prefix just as much as the ``_mp`` ones.
     """
-    if system_prompt in _NO_PREFIX_STYLES:
+    if system_prompt in NO_PREFIX_STYLES:
         return ""
-    if system_prompt in _STYLE_PREFIX_STYLES:
+    if system_prompt in STYLE_PREFIX_STYLES:
         return f"{style}:"
     raise ValueError(
         f"Unsupported system_prompt {system_prompt!r} for {style}; "
-        f"expected one of {_NO_PREFIX_STYLES + _STYLE_PREFIX_STYLES}"
+        f"expected one of {NO_PREFIX_STYLES + STYLE_PREFIX_STYLES}"
     )
 
 
