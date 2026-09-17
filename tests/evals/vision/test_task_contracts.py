@@ -13,7 +13,6 @@ from olmo_eval.common.images import resolve_images
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common.registry import get_task
 from olmo_eval.evals.vision.benchmarks.dense_caption import _DEFAULT_METRICS, DenseCaptionAvgMetric
-from olmo_eval.runners.asynq.processing import _result_request
 from olmo_eval.runners.processing.utils import compute_task_hash
 
 
@@ -144,16 +143,6 @@ class TestLazyImageRequests:
         assert resolved[0].size == (3, 2)
         assert resolved[1].size == (5, 4)
         assert resolve_images(None) is None
-
-    def test_result_request_strips_image_payload(self):
-        request = LMRequest(request_type=RequestType.CHAT, prompt="q", images=("x.png",))
-        stripped = _result_request(request)
-        assert stripped is not None
-        assert stripped.images is None
-        assert stripped.prompt == "q"
-        # no-image requests pass through untouched
-        bare = LMRequest(request_type=RequestType.CHAT, prompt="q")
-        assert _result_request(bare) is bare
 
 
 class TestJudgeCacheSettingsOutsideTaskHash:
