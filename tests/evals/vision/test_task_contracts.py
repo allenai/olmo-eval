@@ -154,3 +154,30 @@ class TestLazyImageRequests:
         # no-image requests pass through untouched
         bare = LMRequest(request_type=RequestType.CHAT, prompt="q")
         assert _result_request(bare) is bare
+
+
+class TestJudgeCacheSettingsOutsideTaskHash:
+    """Cache location and mode are machine-local; only the judge model is output-affecting."""
+
+    def test_hash_independent_of_cache_settings(self, monkeypatch, tmp_path):
+        base = compute_task_hash(get_task("dense_caption").config.to_dict())
+        monkeypatch.setenv("DENSE_CAPTION_EVAL_DIR", str(tmp_path))
+        moved = compute_task_hash(get_task("dense_caption").config.to_dict())
+        assert moved == base
+        from olmo_eval.evals.vision.scoring.judges import DenseCaptionJudgeScorer
+
+        a = DenseCaptionJudgeScorer(cache_dir="/a", cache_only=True).to_dict()
+        b = DenseCaptionJudgeScorer(cache_dir="/b", recompute=True).to_dict()
+        assert a == b
+        assert set(a) == {"type", "name", "model"}
+
+
+class TestLimitLeftToRunner:
+    def test_vision_task_does_not_head_slice(self):
+        task = get_task("dense_caption")
+        task.config = replace(task.config, limit=3)
+        # dense_caption applies its own index-stable limit while building; the
+        # base class must not add a second, first-N slice on top for the family.
+        from olmo_eval.evals.vision.tasks.base import VisionTask
+
+        assert "limit" not in VisionTask.instances.fget.__code__.co_names

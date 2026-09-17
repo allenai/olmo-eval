@@ -25,13 +25,13 @@ from pathlib import Path
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, Response, SamplingParams
-from olmo_eval.evals.tasks.common import register, register_variant
+from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.vision.data.paths import torch_datasets_dir
 from olmo_eval.evals.vision.scoring.judges import DenseCaptionJudgeScorer
 from olmo_eval.evals.vision.scoring.prompt_templates import dense_caption_question
 from olmo_eval.evals.vision.scoring.prompts import (
-    _NO_PREFIX_STYLES,
-    _STYLE_PREFIX_STYLES,
+    NO_PREFIX_STYLES,
+    STYLE_PREFIX_STYLES,
 )
 from olmo_eval.evals.vision.tasks.base import VisionTask
 
@@ -168,8 +168,8 @@ class DenseCaptionEval(VisionTask):
     metrics = _DEFAULT_METRICS
     primary_metric = _AVG_METRIC
     #: Image decoding builds the instances; the GPT judge needs an OpenAI client.
-    #: A missing scorer dependency scores every instance zero rather than failing.
-    dependencies = ["pillow", "openai"]
+    #: The judge needs the OpenAI client on top of the base image decoding.
+    dependencies = [*VisionTask.dependencies, "openai"]
     #: The judge calls OpenAI; beaker mounts this as the user-scoped secret.
     required_secrets = ("OPENAI_API_KEY",)
     # None => decide from the checkpoint's prompt family (see `_question`). Set to a fixed
@@ -201,13 +201,13 @@ class DenseCaptionEval(VisionTask):
         if self.caption_prompt is not None:
             return self.caption_prompt
         style = self.config.system_prompt_style or self.default_system_prompt_style
-        if style in _STYLE_PREFIX_STYLES:
+        if style in STYLE_PREFIX_STYLES:
             return f"long_caption {self.default_inference_len}:"
-        if style in _NO_PREFIX_STYLES:
+        if style in NO_PREFIX_STYLES:
             return dense_caption_question(idx)
         raise ValueError(
             f"Unsupported system_prompt_style {style!r} for dense_caption; "
-            f"expected one of {_NO_PREFIX_STYLES + _STYLE_PREFIX_STYLES}"
+            f"expected one of {NO_PREFIX_STYLES + STYLE_PREFIX_STYLES}"
         )
 
     def _build_instances(self) -> Iterator[Instance]:
@@ -221,6 +221,12 @@ class DenseCaptionEval(VisionTask):
         # so the raw-line index driving the seeded prompt never shifts; the base
         # class's slice then has nothing left to remove.
         eval_dir = Path(os.environ.get("DENSE_CAPTION_EVAL_DIR", _DEFAULT_EVAL_DIR))
+        if not eval_dir.is_dir():
+            raise FileNotFoundError(
+                f"Dense-caption reference data {eval_dir} does not exist; set "
+                "DENSE_CAPTION_EVAL_DIR to the directory holding final-data.json and "
+                "mturk-eval-statements/ (Ai2 default tracked in allenai/olmo-eval#381)."
+            )
         # Same MOLMO_DATA_DIR convention as the 11 image-QA tasks (the mm-olmo parent;
         # `torch_datasets_dir()` appends `torch_datasets`), so one env var covers all tasks.
         data_home = torch_datasets_dir()
@@ -273,10 +279,6 @@ class DenseCaptionEval(VisionTask):
                     },
                 )
                 count += 1
-
-
-# "pixmo_cap" is an alias for "dense_caption" with no overrides.
-register_variant("dense_caption", "pixmo_cap")
 
 
 @register("dense_caption_captioner")

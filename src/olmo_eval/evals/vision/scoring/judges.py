@@ -288,6 +288,11 @@ class DenseCaptionJudgeScorer(ContextScorer):
     recompute: bool = False
     target_metrics: tuple[str, ...] = ("recall", "consistency")
 
+    def to_dict(self) -> dict[str, Any]:
+        """Only the output-affecting settings; cache location and mode must not enter
+        the task hash, or the same eval hashes differently per machine."""
+        return {"type": self.__class__.__name__, "name": self.name, "model": self.model}
+
     async def ascore_with_context(
         self,
         instance: Instance,

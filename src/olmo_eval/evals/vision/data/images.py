@@ -44,12 +44,9 @@ def lazy_hf_image(dataset, index: int, column: str = "image"):
 
 def load_instance_image(instance: Instance):
     """Resolve an instance's image to a PIL image (or None if imageless)."""
-    image = instance.metadata.get("image")
-    if image is not None:
-        return image() if callable(image) else image
-    path = instance.metadata.get("image_path")
-    if path is not None:
-        from PIL import Image
+    from olmo_eval.common.images import resolve_image
 
-        return Image.open(path)
-    return None
+    image = instance.metadata.get("image")
+    if image is None:
+        image = instance.metadata.get("image_path")
+    return resolve_image(image)

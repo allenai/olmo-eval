@@ -1,8 +1,8 @@
 """Shared mechanics for the vision benchmark tasks.
 
-Every vision family caches its instances, applies ``config.limit``, and builds a
-single-turn CHAT request with images attached; only how instances are built and
-which images attach differ. Subclasses implement ``_build_instances`` and, when
+Every vision family caches its instances and builds a single-turn CHAT request
+with images attached; only how instances are built and which images attach
+differ. Subclasses implement ``_build_instances`` and, when
 one image is not the right attachment, override ``_attach_images``.
 """
 
@@ -27,16 +27,14 @@ class VisionTask(Task):
     @property
     def instances(self) -> Iterator[Instance]:
         if self._instances_cache is None:
-            instances = list(self._build_instances())
-            limit = self.config.limit
-            if limit is not None:
-                instances = instances[:limit]
-            self._instances_cache = instances
+            # `config.limit` is left to the runner, which draws a seeded random sample
+            # exactly as it does for the text tasks.
+            self._instances_cache = list(self._build_instances())
         yield from self._instances_cache
 
     @abstractmethod
     def _build_instances(self) -> Iterator[Instance]:
-        """Yield all instances for ``self.config.split`` (before ``limit``)."""
+        """Yield all instances for ``self.config.split``."""
         ...
 
     def _attach_images(self, instance: Instance) -> tuple[Any, ...] | None:
