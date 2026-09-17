@@ -44,6 +44,7 @@ class IFEvalOOD(Task):
         IFEvalInstLooseAccuracy(),
     )
     primary_metric = _PRIMARY_METRIC
+    strip_thinking = True
     sampling_params = SamplingParams(
         max_tokens=2048,
         temperature=0.0,
