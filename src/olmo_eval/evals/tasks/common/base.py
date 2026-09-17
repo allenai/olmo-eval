@@ -171,6 +171,25 @@ class TaskConfig:
     prompt_templates: str | None = None
     system_prompt_style: str | None = None
 
+    #: Appended to each question verbatim. Exists to test whether a checkpoint trained with
+    #: derivation supervision (`--mmfinereason_supervise_cot`) will actually *emit* a
+    #: derivation when asked. Such a checkpoint fits reasoning traces under teacher forcing
+    #: (CE 0.25 vs 0.90) yet answers CharXiv in a single sentence -- median 11 chars, 0%
+    #: truncation -- because a bare question cues the short-answer distribution that 35% v9
+    #: replay reinforces. The cue text must match the supervised target format, which
+    #: `sft_common.extract_reasoning_text` renders as "<derivation>\n\nFinal answer: <x>".
+    #: Any non-empty value changes the published prompt, so cued numbers are NOT comparable
+    #: to the 63.38 / 26.70 baseline -- compare cued-vs-uncued on the same checkpoint.
+    cot_cue: str | None = None
+
+    #: CharXiv descriptive only: restrict to these descriptive template ids (comma-separated,
+    #: e.g. "17" or "11,17"). The benchmark pools 19 templates into 5 leaderboard categories,
+    #: which is too coarse to probe one skill: "Pattern Recognition" mixes template 11 (do
+    #: lines intersect) with template 18 (subplot layout). Restricting the run makes a
+    #: single-template probe cost 224 instances instead of 4000. Restricted runs are NOT
+    #: comparable to the published overall number -- compare template-to-template.
+    charxiv_templates: str | None = None
+
     #: What an image-QA task sends in place of the real image. ``"real"`` is the benchmark
     #: as published. ``"none"`` drops the image, measuring what the question alone supports.
     #: ``"caption"`` substitutes a text description from ``caption_source``, so the gap to
@@ -329,6 +348,7 @@ class TaskConfig:
             # of bug, pre-existing.
             "prompt_templates": self.prompt_templates,
             "system_prompt_style": self.system_prompt_style,
+            "cot_cue": self.cot_cue,
             "prompt_style": self.prompt_style,
             "image_mode": self.image_mode,
             "caption_source": self.caption_source,

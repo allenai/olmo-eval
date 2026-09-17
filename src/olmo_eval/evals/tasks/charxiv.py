@@ -194,16 +194,28 @@ class CharxivDescriptiveTask(ImageQATask):
 
     def _build_instances(self) -> Iterator[Instance]:
         ds = _load_charxiv_nodecode(self.config.split.value)
+        keep_templates = (
+            {int(t) for t in self.config.charxiv_templates.split(",") if t.strip()}
+            if self.config.charxiv_templates
+            else None
+        )
         for idx in range(len(ds)):
             ex = ds[idx]
             fid = _figure_id(ex["figure_path"])
             subplot_loc = _subplot_loc(ex)
             for i in range(4):
                 qid = ex[f"descriptive_q{i + 1}"]
+                if keep_templates is not None and qid not in keep_templates:
+                    continue
                 answer = ex[f"descriptive_a{i + 1}"]
                 resp_key = f"{fid}_{i}"
+                question = descriptive_query_helper(qid, subplot_loc)
+                # Appended after the official CharXiv instruction block, so the published
+                # prompt is byte-identical when `cot_cue` is unset (the default).
+                if self.config.cot_cue:
+                    question = f"{question}\n{self.config.cot_cue}"
                 yield Instance(
-                    question=descriptive_query_helper(qid, subplot_loc),
+                    question=question,
                     gold_answer=answer,
                     metadata={
                         "figure_id": fid,
@@ -270,10 +282,15 @@ class CharxivReasoningTask(ImageQATask):
             ex = ds[idx]
             fid = _figure_id(ex["figure_path"])
             inst_category = ex["reasoning_a_type"]
+            question = build_reasoning_question(
+                ex["reasoning_q"], inst_category, ex["reasoning_a"]
+            )
+            # Appended after the official CharXiv instruction block so the published prompt
+            # is unchanged when `cot_cue` is unset (the default).
+            if self.config.cot_cue:
+                question = f"{question}\n{self.config.cot_cue}"
             yield Instance(
-                question=build_reasoning_question(
-                    ex["reasoning_q"], inst_category, ex["reasoning_a"]
-                ),
+                question=question,
                 gold_answer=ex["reasoning_a"],
                 metadata={
                     "figure_id": fid,
