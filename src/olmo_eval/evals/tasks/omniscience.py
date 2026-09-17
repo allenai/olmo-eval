@@ -10,21 +10,24 @@ Example commands to run:
 """
 
 import logging
-from collections.abc import Iterator
-from dataclasses import field, replace
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import (
     AccuracyMetric,
+    Metric,
     SubsetAccuracyMetric,
 )
+from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.llm_judge import JudgeFn, LLMJudgeScorer, build_openai_judge_fn
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
     LMRequest,
     RequestType,
+    Response,
     SamplingParams,
     ScoringContext,
     Split,
@@ -153,7 +156,7 @@ just trying to grade the answer.
 
 Question: {question}
 Gold target: {gold_answer}
-Predicted answer: {model_response}
+Predicted answer: {model_answer}
 
 Grade the predicted answer of this new question as one of:
 A: CORRECT
@@ -165,11 +168,19 @@ Just return the letters “A”, “B”, “C”, or “D”, with no text arou
 """
 OmniscienceGrade = Literal["CORRECT", "INCORRECT", "NOT_ATTEMPTED", "PARTIAL_ANSWER"]
 
+GRADE_INDEX_POINTS: dict[OmniscienceGrade, float] = {
+    "CORRECT": 1.0,
+    "INCORRECT": -1.0,
+    "PARTIAL_ANSWER": 0.0,
+    "NOT_ATTEMPTED": 0.0,
+}
+
 # =============================================================================
 # Task Scoring and Metrics
 # =============================================================================
 
 
+@dataclass(frozen=True)
 class OmniscienceScorer(LLMJudgeScorer):
     """
     LLM Judge implementing the Omniscience
@@ -190,7 +201,7 @@ class OmniscienceScorer(LLMJudgeScorer):
             model_answer=output.extracted_answer or output.text,
         )
 
-    def parse_judge_response(self, response: str, instance: Instance | None = None) -> float:
+    def parse_judge_response(self, response: str, instance: Instance) -> float:
         """Parse A/B/C/D grade from judge response.
 
         Args:
@@ -199,9 +210,6 @@ class OmniscienceScorer(LLMJudgeScorer):
         Returns:
             1.0 for CORRECT (A), 0.0 for INCORRECT (B), PARTIAL_ANSWER (C), or NOT_ATTEMPTED (D).
         """
-        assert instance is not None, (
-            "The omniscience judge requires the instance metadata to grade the response"
-        )
         response = response.strip().upper()
 
         if response.startswith("A") or "CORRECT" in response and "INCORRECT" not in response:
@@ -216,7 +224,7 @@ class OmniscienceScorer(LLMJudgeScorer):
             judge_result = "NOT_ATTEMPTED"
         else:
             judge_result = "INCORRECT"
-            instance.metadata["is_parsing_error"]
+            instance.metadata["is_parsing_error"] = True
 
         instance.metadata["judge_result"] = judge_result
 
@@ -233,7 +241,7 @@ class OmniscienceScorer(LLMJudgeScorer):
         context: ScoringContext,
     ) -> float:
         """Score using configured provider or judge_fn."""
-        instance.metadata["is _parsing_error"] = False
+        instance.metadata["is_parsing_error"] = False
 
         try:
             self._validate_provider(context)
@@ -249,6 +257,111 @@ class OmniscienceScorer(LLMJudgeScorer):
         except Exception:
             instance.metadata["is_parsing_error"] = True
             raise
+
+
+def _omniscience_metric_helper(
+    responses: Sequence[Response],
+    subset: str,
+    cat: str,
+) -> dict[str, float]:
+    """Derive the paper's aggregate metrics from the judge grades of a subset."""
+    grades = []
+    for r in responses:
+        if subset != "any" and r.instance.metadata.get(subset) != cat:
+            continue
+        grade = r.instance.metadata.get("judge_result")
+        if grade in GRADE_INDEX_POINTS:
+            grades.append(grade)
+
+    if not grades:
+        return {
+            "omniscience_index": 0.0,
+            "hallucination_rate": 0.0,
+        }
+
+    correct = grades.count("CORRECT")
+    incorrect = grades.count("INCORRECT")
+    not_correct = len(grades) - correct
+
+    return {
+        "omniscience_index": 100 * (correct - incorrect) / len(grades),
+        "hallucination_rate": incorrect / not_correct if not_correct else 0.0,
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class OmniscienceIndexMetric(Metric):
+    """
+    Correct answers minus incorrect ones out of the total, scaled to -100 to 100.
+
+    Scores above 0 indicate that the model is correct more than it is incorrect
+    """
+
+    name: str = "any__any__omniscience_index"
+    scorer: type[Scorer] | Scorer = OmniscienceScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        """Compute aggregate metric from scored responses."""
+        subset, cat, metric = self.name.split("__")
+        metrics = _omniscience_metric_helper(responses, subset, cat)
+
+        return metrics[metric]
+
+    def compute_instance(self, response: Response) -> float | None:
+        """
+        Index instances are 1 for correct, -1 for incorrect, and 0 for a partial
+        answer or an abstention
+        """
+        subset, cat, _ = self.name.split("__")
+        if subset != "any" and response.instance.metadata.get(subset) != cat:
+            return None
+
+        return GRADE_INDEX_POINTS.get(response.instance.metadata.get("judge_result"))
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True, slots=True)
+class HallucinationRateMetric(Metric):
+    """
+    Share of the questions a model answered incorrectly out of those it did not
+    get correct
+    """
+
+    name: str = "any__any__hallucination_rate"
+    scorer: type[Scorer] | Scorer = OmniscienceScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        """Compute aggregate metric from scored responses."""
+        subset, cat, metric = self.name.split("__")
+        metrics = _omniscience_metric_helper(responses, subset, cat)
+
+        return metrics[metric]
+
+    def compute_instance(self, response: Response) -> float | None:
+        """
+        Rate instances are 1 for incorrect and 0 for a partial answer or an
+        abstention; correct answers are outside the denominator
+        """
+        subset, cat, metric = self.name.split("__")
+        if subset != "any" and response.instance.metadata.get(subset) != cat:
+            return None
+
+        grade = response.instance.metadata.get("judge_result")
+        if grade not in GRADE_INDEX_POINTS or grade == "CORRECT":
+            return None
+
+        return float(grade == "INCORRECT")
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+    def pairwise_higher_is_better(self) -> bool:
+        return False
+
+    def pairwise_display_format(self) -> str:
+        return "percentage"
 
 
 # =============================================================================
@@ -314,7 +427,7 @@ class Omniscience(Task):
             base,
             system_prompt=SYSTEM_PROMPT.format(
                 topic=instance.metadata["topic"],
-                category=instance.metadata["category"],
+                category=instance.metadata["subtopic"],
             ),
         )
         return formatter.format(instance, self.get_fewshot())
@@ -339,8 +452,11 @@ register_variant(
     "omniscience",
     "judge",
     metrics=(
+        OmniscienceIndexMetric(scorer=scorer),
+        HallucinationRateMetric(scorer=scorer),
         AccuracyMetric(scorer=scorer),
         *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in SUBSET_METRICS),
     ),
+    primary_metric=OmniscienceIndexMetric(scorer=scorer),
     required_secrets=("OPENAI_API_KEY",),
 )
