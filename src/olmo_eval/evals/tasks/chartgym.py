@@ -198,8 +198,14 @@ class ChartGymTask(ImageQATask):
         ds = ds.cast_column("image", datasets.Image(decode=False))
         for idx in range(len(ds)):
             ex = ds[idx]
+            question = ex["question"]
+            # Same hook as charxiv, so the instrument can be read under the exact prompt
+            # that moved CharXiv. A cued ChartGym number is the measured ceiling on what
+            # the checkpoint's existing perception supports, which is the training target.
+            if self.config.cot_cue:
+                question = f"{question}\n{self.config.cot_cue}"
             yield Instance(
-                question=ex["question"],
+                question=question,
                 gold_answer=ex["answer"],
                 metadata={
                     "answer": ex["answer"],
