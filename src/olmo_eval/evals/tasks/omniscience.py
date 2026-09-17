@@ -14,6 +14,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
+from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import (
     AccuracyMetric,
@@ -29,7 +30,6 @@ from olmo_eval.common.types import (
     RequestType,
     Response,
     SamplingParams,
-    ScoringContext,
     Split,
 )
 from olmo_eval.data import DataLoader, DataSource
