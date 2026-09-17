@@ -65,6 +65,15 @@ _MM_OLMO_FORMATTER = (
 )
 
 
+def _mm_olmo_available() -> bool:
+    """Whether the reference checkout is readable; an unreadable ancestor (CI runners
+    cannot stat under ``/root``) counts as absent rather than erroring at collection."""
+    try:
+        return _MM_OLMO_FORMATTER.is_file()
+    except OSError:
+        return False
+
+
 def _mm_olmo_pointing_templates() -> list[str]:
     """Read ``GENERAL_PROMPTS_V1["pointing"]`` out of mm_olmo without importing it.
 
@@ -79,7 +88,7 @@ def _mm_olmo_pointing_templates() -> list[str]:
     raise AssertionError("GENERAL_PROMPTS_V1 not found in mm_olmo")
 
 
-@pytest.mark.skipif(not _MM_OLMO_FORMATTER.exists(), reason="mm_olmo checkout not available")
+@pytest.mark.skipif(not _mm_olmo_available(), reason="mm_olmo checkout not available")
 class TestMmOlmoParity:
     def test_templates_match_verbatim(self) -> None:
         assert list(POINTING_TEMPLATES) == _mm_olmo_pointing_templates()
