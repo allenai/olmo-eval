@@ -2,7 +2,7 @@
 
 OMEGA (https://arxiv.org/abs/2506.18880) evaluates exploratory,
 compositional, and transformative generalization in math. OMEGA-500 is a
-500-problem subset spanning the benchmark's sub-categories. Answers are
+500-problem batch generated from the exploratory templates. Answers are
 extracted from the response via a regex cascade and compared to the ground
 truth, with a strict metric that demotes answers not stated in the
 requested format and a flex metric that accepts them.
@@ -47,12 +47,11 @@ _FORMATTER = ChatFormatter(
 
 _ANSWER_FORMAT_REGEX = r"Therefore, the final answer is \\boxed\{(.*)\}"
 _PREFIX_REGEXES = (
-    r"(?i)Therefore,? the final answer is",
-    r"(?i)Therefore,? the answer is",
-    r"(?i)the final answer is",
-    r"(?i)the answer is",
-    r"(?i)answer is",
-    r"(?i)answer is:",
+    r"(?i)Therefore,? the final answer is\s*:?",
+    r"(?i)Therefore,? the answer is\s*:?",
+    r"(?i)the final answer is\s*:?",
+    r"(?i)the answer is\s*:?",
+    r"(?i)answer is\s*:?",
     r"(?i)answer:",
 )
 _ANSWER_REGEXES = (r"[\s\S]*?\\boxed\{(.*?)\}[\s\S]*?", r"(.*)\.?")
@@ -121,23 +120,20 @@ _FLEX = OmegaExactMatchScorer(flex=True)
 
 @register("omega_500")
 class Omega500(Task):
-    data_source = DataSource(path="saumyamalik/omega-500")
+    data_source = DataSource(
+        path="allenai/omega-500",
+        revision="113a7eb896b8c1f7d781eb5f00713972074bae42",
+    )
     split = Split.TRAIN
     formatter = _FORMATTER
     metrics = (
         AccuracyMetric(name="exact_match", scorer=_STRICT),
         AccuracyMetric(name="exact_match_flex", scorer=_FLEX),
     )
-    primary_metric = AccuracyMetric(name="exact_match_flex", scorer=_FLEX)
+    primary_metric = AccuracyMetric(name="exact_match", scorer=_STRICT)
     strip_thinking = True
-    # Defaults mirror oe-eval's ``omega_500:0-shot-chat_deepseek`` — the
-    # OLMO_3 suite entry and the config the parity certification ran on.
-    # (Plain ``0-shot-chat`` upstream uses temperature 0.7 with no top_p;
-    # register a variant if that regime is ever needed.) max_tokens=None
-    # generates to the model's context limit, matching the reference
-    # regime's effective behavior on any context size.
     sampling_params = SamplingParams(
-        max_tokens=None,
+        max_tokens=32768,
         temperature=0.6,
         top_p=0.95,
     )
@@ -152,7 +148,8 @@ class Omega500(Task):
             question=question,
             gold_answer=str(doc["ground_truth"]),
             metadata={
-                "id": doc.get("index", index),
+                "id": doc.get("id", doc.get("index", index)),
+                "family": doc.get("family", doc.get("setting_key")),
                 "dataset": doc.get("dataset"),
             },
         )
