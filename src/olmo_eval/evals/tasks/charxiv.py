@@ -41,7 +41,7 @@ from olmo_eval.common.scorers.charxiv_judge import (
     grade_reasoning,
 )
 from olmo_eval.common.types import Instance, Response, SamplingParams, Split
-from olmo_eval.evals.tasks.common import register
+from olmo_eval.evals.tasks.common import register, register_variant
 from olmo_eval.evals.tasks.common.image_qa_base import ImageQATask, lazy_hf_image
 
 if TYPE_CHECKING:
@@ -62,6 +62,24 @@ def _load_charxiv_nodecode(split: str):
     with _LOAD_LOCK:
         ds = datasets.load_dataset("princeton-nlp/CharXiv", split=split)
     return ds.cast_column("image", datasets.Image(decode=False))
+
+
+
+def _parse_templates(raw) -> set[int] | None:
+    """Normalize the `charxiv_templates` override into a set of template ids.
+
+    The CLI override parser type-coerces, so `-o charxiv_templates=17` arrives as the int
+    17, not the string "17" -- calling `.split(",")` on it raised `'int' object has no
+    attribute 'split'` and failed the task during preparation. Accept int, str and
+    sequence forms so the override behaves the same however it is supplied.
+    """
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, int):
+        return {raw}
+    if isinstance(raw, (list, tuple, set)):
+        return {int(t) for t in raw}
+    return {int(t) for t in str(raw).split(",") if t.strip()}
 
 
 def _figure_id(figure_path: str) -> int:
@@ -194,16 +212,24 @@ class CharxivDescriptiveTask(ImageQATask):
 
     def _build_instances(self) -> Iterator[Instance]:
         ds = _load_charxiv_nodecode(self.config.split.value)
+        keep_templates = _parse_templates(self.config.charxiv_templates)
         for idx in range(len(ds)):
             ex = ds[idx]
             fid = _figure_id(ex["figure_path"])
             subplot_loc = _subplot_loc(ex)
             for i in range(4):
                 qid = ex[f"descriptive_q{i + 1}"]
+                if keep_templates is not None and qid not in keep_templates:
+                    continue
                 answer = ex[f"descriptive_a{i + 1}"]
                 resp_key = f"{fid}_{i}"
+                question = descriptive_query_helper(qid, subplot_loc)
+                # Appended after the official CharXiv instruction block, so the published
+                # prompt is byte-identical when `cot_cue` is unset (the default).
+                if self.config.cot_cue:
+                    question = f"{question}\n{self.config.cot_cue}"
                 yield Instance(
-                    question=descriptive_query_helper(qid, subplot_loc),
+                    question=question,
                     gold_answer=answer,
                     metadata={
                         "figure_id": fid,
@@ -270,10 +296,15 @@ class CharxivReasoningTask(ImageQATask):
             ex = ds[idx]
             fid = _figure_id(ex["figure_path"])
             inst_category = ex["reasoning_a_type"]
+            question = build_reasoning_question(
+                ex["reasoning_q"], inst_category, ex["reasoning_a"]
+            )
+            # Appended after the official CharXiv instruction block so the published prompt
+            # is unchanged when `cot_cue` is unset (the default).
+            if self.config.cot_cue:
+                question = f"{question}\n{self.config.cot_cue}"
             yield Instance(
-                question=build_reasoning_question(
-                    ex["reasoning_q"], inst_category, ex["reasoning_a"]
-                ),
+                question=question,
                 gold_answer=ex["reasoning_a"],
                 metadata={
                     "figure_id": fid,
@@ -316,3 +347,11 @@ class CharxivReasoningTask(ImageQATask):
                 inst_category=response.instance.metadata["inst_category"],
             )
         return responses
+
+
+# Perception-vs-knowledge ablations; see the note in mmmu.py. CharXiv is where a caption
+# ablation bites hardest, since descriptive questions ask about chart structure that a
+# dense description can largely carry.
+for _task in ("charxiv_descriptive", "charxiv_reasoning"):
+    register_variant(_task, "text_only", image_mode="none")
+    register_variant(_task, "oracle_caption", image_mode="caption")

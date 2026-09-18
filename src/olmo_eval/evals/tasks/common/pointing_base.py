@@ -36,6 +36,7 @@ from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 from olmo_eval.evals.tasks.common.image_qa_base import (
     load_instance_image,
     rebase_data_path,
+    reject_unsupported_prompt_knobs,
     torch_datasets_dir,
 )
 
@@ -76,6 +77,7 @@ class PointingTask(Task):
         ...
 
     def format_request(self, instance: Instance) -> LMRequest:
+        reject_unsupported_prompt_knobs(self.config, type(self).__name__)
         image = load_instance_image(instance)
         return LMRequest(
             request_type=RequestType.CHAT,

@@ -34,8 +34,11 @@ from olmo_eval.common.types import Instance, LMRequest, RequestType, Response, S
 from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.tasks.common.image_qa_base import (
     ImageQATask,
+    apply_caption,
     lazy_hf_image,
     load_instance_image,
+    render_question,
+    resolve_image_mode,
 )
 
 # Short setting key -> HF config name.
@@ -174,7 +177,22 @@ class MmmuProTask(ImageQATask):
 
     def format_request(self, instance: Instance) -> LMRequest:
         meta = instance.metadata
-        if "images" in meta:  # standard: attach all interleaved images, in token order
+        send_image, caption = resolve_image_mode(self.config, instance)
+        if not send_image and meta.get("mmmu_pro_setting") == "vision":
+            # The vision setting renders the question *into* the screenshot, so
+            # instance.question is only the bare answer-format instruction. Removing the
+            # image leaves nothing to answer -- and would still produce a plausible-looking
+            # score, since the parser falls back to a seeded random choice.
+            raise ValueError(
+                "image_mode must be 'real' for the mmmu_pro vision setting: its question "
+                "exists only inside the screenshot. Use the standard settings instead."
+            )
+
+        question = render_question(self.config, instance)
+        question = apply_caption(question, caption) if caption else question
+        if not send_image:
+            images = None
+        elif "images" in meta:  # standard: attach all interleaved images, in token order
             resolved = [c() if callable(c) else c for c in meta["images"]]
             images = tuple(im for im in resolved if im is not None) or None
         else:  # vision: single screenshot
@@ -182,6 +200,6 @@ class MmmuProTask(ImageQATask):
             images = (image,) if image is not None else None
         return LMRequest(
             request_type=RequestType.CHAT,
-            messages=({"role": "user", "content": instance.question},),
+            messages=({"role": "user", "content": question},),
             images=images,
         )

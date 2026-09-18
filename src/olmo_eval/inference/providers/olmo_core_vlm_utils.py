@@ -39,8 +39,9 @@ CheckpointFormat = Literal["olmo_core_dcp", "olmo_core_unsharded", "mm_olmo_dcp"
 _EXPECTED_FORMATS = (
     "expected one of: a raw OLMo-core multimodal checkpoint (config.json with a "
     "MultimodalLMConfig under 'model' + model_and_optim/.metadata), a consolidated "
-    "OLMo-core export (olmo_core_config.json + model.safetensors with lm.*/vision.*/"
-    "connector.* keys), or an mm_olmo/Molmo2-trainer checkpoint (config.yaml + "
+    "OLMo-core export (olmo_core_config.json + model.safetensors with lm.* plus either "
+    "vision_backbone.vision.*/vision_backbone.connector.* or the older bare "
+    "vision.*/connector.* keys), or an mm_olmo/Molmo2-trainer checkpoint (config.yaml + "
     "model_and_optim/.metadata with model.transformer.*/model.vision_backbone.* keys)"
 )
 
@@ -501,6 +502,41 @@ def _verify_lm_head_is_untied(
         )
 
 
+#: Both vision key-compat helpers land together in allenai/OLMo-core#834, which is not yet
+#: merged to ``vision``. An OLMo-core installed from ``vision`` -- or from the
+#: ``ai2-olmo-core`` release pinned in ``pyproject.toml``, which has no ``olmo_core.nn.vision``
+#: at all -- has neither, and nothing else in this repo records that requirement.
+_OLMO_CORE_VISION_KEYS_HINT = (
+    "This needs an OLMo-core carrying the `vision_backbone.` key-compatibility helpers "
+    "(`MultimodalLM.legacy_vision_key_mapping` and "
+    "`olmo_core.nn.vision.molmo2_loader.canonicalize_vision_keys`), which land in "
+    "allenai/OLMo-core#834 and are absent from the `vision` branch and from the pinned "
+    "ai2-olmo-core release. Install from that branch:\n"
+    "    pip install 'ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git"
+    "@donovan/training-speed-and-image-v10'\n"
+    "or point `-o provider.package=` at a checkout of it."
+)
+
+
+def _legacy_vision_key_mapping(model: Any) -> dict[str, str]:
+    """The current->checkpoint vision key map, or a named error if OLMo-core lacks it.
+
+    Deliberately *not* ``hasattr``-guarded. Falling back to ``None`` leaves the remap
+    silently inert: a pre-rename ``vision.*`` checkpoint then loads with its whole ViT and
+    connector missing, reporting nothing. Since the helper and the rename it compensates
+    for ship in the same OLMo-core change, its absence means the install is simply too old,
+    which is worth saying out loud rather than discovering from a chance-level score.
+    """
+    mapping = getattr(model, "legacy_vision_key_mapping", None)
+    if mapping is None:
+        raise RuntimeError(
+            f"{type(model).__name__} has no `legacy_vision_key_mapping`, so an OLMo-core "
+            f"checkpoint written before the vision_backbone rename cannot be remapped and "
+            f"would load with an empty vision tower. " + _OLMO_CORE_VISION_KEYS_HINT
+        )
+    return mapping()
+
+
 def load_checkpoint_weights(
     info: MultimodalCheckpointInfo, checkpoint_dir: str, model: Any
 ) -> None:
@@ -510,13 +546,39 @@ def load_checkpoint_weights(
     if info.format == "olmo_core_dcp":
         from olmo_core.distributed.checkpoint import load_model_and_optim_state
 
-        load_model_and_optim_state(str(Path(checkpoint_dir) / "model_and_optim"), model)
+        # OLMo-core moved the ViT and connector under a `vision_backbone.` submodule, so a
+        # freshly built model reports `vision_backbone.vision.*` while every checkpoint
+        # written before that rename has bare `vision.*`. Remap at the checkpoint layer.
+        #
+        # Passing this unconditionally is safe and needs no format sniffing:
+        # `swap_param_keys` skips any entry whose checkpoint-side key is absent from the
+        # checkpoint metadata, so a post-rename checkpoint is untouched.
+        key_mapping = _legacy_vision_key_mapping(model)
+        load_model_and_optim_state(
+            str(Path(checkpoint_dir) / "model_and_optim"), model, key_mapping=key_mapping
+        )
         return
 
     if info.format == "olmo_core_unsharded":
         from safetensors.torch import load_file
 
-        state_dict = load_file(str(Path(checkpoint_dir) / "model.safetensors"))
+        try:
+            from olmo_core.nn.vision.molmo2_loader import canonicalize_vision_keys
+        except ImportError as exc:
+            # Same missing dependency as the DCP path above; raise the same way rather than
+            # letting a bare ImportError name only the symbol.
+            raise RuntimeError(
+                "Cannot load an unsharded OLMo-core export: "
+                "`canonicalize_vision_keys` is not importable. " + _OLMO_CORE_VISION_KEYS_HINT
+            ) from exc
+
+        # These come from OLMo-core's scripts/unshard.py, which is key-agnostic: exports
+        # taken before the rename carry bare `vision.*`, later ones `vision_backbone.*`.
+        # `load_state_dict` below is strict, so normalize to the canonical layout first.
+        # canonicalize_vision_keys is idempotent, so post-rename exports pass through.
+        state_dict = canonicalize_vision_keys(
+            load_file(str(Path(checkpoint_dir) / "model.safetensors"))
+        )
         model.load_state_dict(state_dict)
         return
 
@@ -615,6 +677,27 @@ def convert_olmo_core_to_molmo2_hf_state_dict(
     import torch
 
     sd = dict(state_dict)
+
+    # OLMo-core registers the ViT and connector under a `vision_backbone.` submodule.
+    # Checkpoints written before that rename (and, for a while after it, checkpoints whose
+    # model keys were rewritten back to the legacy names by a `state_dict()` override on
+    # `MultimodalLM`) use bare `vision.*` / `connector.*`. Every lookup below — including
+    # the `vision.blocks.N` layer-index regex — is written against the legacy names, so
+    # normalize once here and accept either layout.
+    #
+    # Only strip when the remainder is one of the two known vision subtrees, so an
+    # unrelated key that merely starts with `vision_backbone.` is left alone.
+    _VB_PREFIX = "vision_backbone."
+    sd = {
+        (
+            key[len(_VB_PREFIX) :]
+            if key.startswith(_VB_PREFIX)
+            and key[len(_VB_PREFIX) :].startswith(("vision.", "connector."))
+            else key
+        ): value
+        for key, value in sd.items()
+    }
+
     out: dict[str, torch.Tensor] = {}
 
     def take(key: str) -> torch.Tensor:
