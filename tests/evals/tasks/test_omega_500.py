@@ -24,12 +24,16 @@ class TestOmega500Task(unittest.TestCase):
         self.assertEqual(metric_names, {"exact_match", "exact_match_flex"})
         primary = task.config.get_primary_metric()
         assert primary is not None
-        self.assertEqual(primary.name, "exact_match")
-        self.assertEqual(task.config.sampling_params.max_tokens, 32768)
-        self.assertEqual(task.config.data_source.path, "allenai/omega-500")
+        self.assertEqual(primary.name, "exact_match_flex")
+        self.assertIsNone(task.config.sampling_params.max_tokens)
+        self.assertEqual(task.config.data_source.path, "saumyamalik/omega-500")
+        hillclimb = get_task("omega_500:hillclimb")
+        self.assertEqual(hillclimb.config.get_primary_metric().name, "exact_match")
+        self.assertEqual(hillclimb.config.get_data_source().path, "allenai/omega-500")
         self.assertEqual(
-            task.config.data_source.revision, "113a7eb896b8c1f7d781eb5f00713972074bae42"
+            hillclimb.config.get_data_source().revision, "113a7eb896b8c1f7d781eb5f00713972074bae42"
         )
+        self.assertIsNone(hillclimb.config.sampling_params.max_tokens)
 
     def test_process_doc(self) -> None:
         task = get_task("omega_500")
@@ -124,18 +128,7 @@ class TestOmegaScorers(unittest.TestCase):
         self.assertEqual(OmegaExactMatchScorer().name, "exact_match")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestOmegaAnswerPrefixes(unittest.TestCase):
-    def test_colon_does_not_become_part_of_answer(self):
-        for prefix in ("The answer is", "Therefore, the final answer is", "answer is", "Answer"):
-            with self.subTest(prefix=prefix):
-                output = LMOutput(text=f"{prefix}: 42")
-                self.assertEqual(_STRICT.score(_make_instance("42"), output), 1.0)
-                self.assertEqual(_FLEX.score(_make_instance("42"), output), 1.0)
-
     def test_stable_dataset_id(self):
         task = get_task("omega_500")
         instance = task.process_doc(
@@ -149,3 +142,7 @@ class TestOmegaAnswerPrefixes(unittest.TestCase):
         )
         self.assertEqual(instance.metadata["id"], "omega_500_001")
         self.assertEqual(instance.metadata["family"], "arithmetic_gcd")
+
+
+if __name__ == "__main__":
+    unittest.main()

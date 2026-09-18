@@ -388,7 +388,7 @@ class LiveCodeBench(Task):
                 # cases without them travelling on the instance.
                 "row": index,
                 "test_repo": LIVECODEBENCH_REPO,
-                "test_revision": self.config.data_source.revision,
+                "test_revision": self.config.get_data_source().revision,
                 "test_files": self.release_files,
                 "format_instruction": format_instruction,
                 "fn_name": problem_metadata.get("func_name"),

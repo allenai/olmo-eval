@@ -660,14 +660,22 @@ def test_prompt_and_grader_use_same_dataset_revision():
 
 def test_grader_revision_is_part_of_download_url():
     _open_test_case_rows.cache_clear()
-    with mock.patch("datasets.load_dataset", return_value=[]) as load:
-        _open_test_case_rows("org/repo", ("test.jsonl",), "revision-a")
-        _open_test_case_rows("org/repo", ("test.jsonl",), "revision-b")
-    assert load.call_count == 2
-    assert load.call_args_list[0].kwargs["data_files"] == {
-        "train": ["hf://datasets/org/repo@revision-a/test.jsonl"]
-    }
-    assert load.call_args_list[1].kwargs["data_files"] == {
-        "train": ["hf://datasets/org/repo@revision-b/test.jsonl"]
-    }
-    _open_test_case_rows.cache_clear()
+    try:
+        with mock.patch("datasets.load_dataset", return_value=[]) as load:
+            _open_test_case_rows("org/repo", ("test.jsonl",), "revision-a")
+            _open_test_case_rows("org/repo", ("test.jsonl",), "revision-b")
+        assert load.call_count == 2
+        assert load.call_args_list[0].kwargs["data_files"] == {
+            "train": ["hf://datasets/org/repo@revision-a/test.jsonl"]
+        }
+        assert load.call_args_list[1].kwargs["data_files"] == {
+            "train": ["hf://datasets/org/repo@revision-b/test.jsonl"]
+        }
+    finally:
+        _open_test_case_rows.cache_clear()
+
+
+def test_process_doc_accepts_uri_data_source():
+    task = get_task("livecodebench", {"data_source": "hf://livecodebench/code_generation_lite"})
+    instance = task.process_doc(STDIN_DOC)
+    assert instance.metadata["test_revision"] == task.config.get_data_source().revision

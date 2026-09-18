@@ -27,7 +27,7 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.data import DataSource
 from olmo_eval.evals.extract import ExtractedAnswer, extract_answer_with_format
-from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 _BOXED_SUFFIX = "\n\nPresent the answer in LaTex format: \\boxed{Your answer}"
 
@@ -47,11 +47,12 @@ _FORMATTER = ChatFormatter(
 
 _ANSWER_FORMAT_REGEX = r"Therefore, the final answer is \\boxed\{(.*)\}"
 _PREFIX_REGEXES = (
-    r"(?i)Therefore,? the final answer is\s*:?",
-    r"(?i)Therefore,? the answer is\s*:?",
-    r"(?i)the final answer is\s*:?",
-    r"(?i)the answer is\s*:?",
-    r"(?i)answer is\s*:?",
+    r"(?i)Therefore,? the final answer is",
+    r"(?i)Therefore,? the answer is",
+    r"(?i)the final answer is",
+    r"(?i)the answer is",
+    r"(?i)answer is",
+    r"(?i)answer is:",
     r"(?i)answer:",
 )
 _ANSWER_REGEXES = (r"[\s\S]*?\\boxed\{(.*?)\}[\s\S]*?", r"(.*)\.?")
@@ -120,20 +121,23 @@ _FLEX = OmegaExactMatchScorer(flex=True)
 
 @register("omega_500")
 class Omega500(Task):
-    data_source = DataSource(
-        path="allenai/omega-500",
-        revision="113a7eb896b8c1f7d781eb5f00713972074bae42",
-    )
+    data_source = DataSource(path="saumyamalik/omega-500")
     split = Split.TRAIN
     formatter = _FORMATTER
     metrics = (
         AccuracyMetric(name="exact_match", scorer=_STRICT),
         AccuracyMetric(name="exact_match_flex", scorer=_FLEX),
     )
-    primary_metric = AccuracyMetric(name="exact_match", scorer=_STRICT)
+    primary_metric = AccuracyMetric(name="exact_match_flex", scorer=_FLEX)
     strip_thinking = True
+    # Defaults mirror oe-eval's ``omega_500:0-shot-chat_deepseek`` — the
+    # OLMO_3 suite entry and the config the parity certification ran on.
+    # (Plain ``0-shot-chat`` upstream uses temperature 0.7 with no top_p;
+    # register a variant if that regime is ever needed.) max_tokens=None
+    # generates to the model's context limit, matching the reference
+    # regime's effective behavior on any context size.
     sampling_params = SamplingParams(
-        max_tokens=32768,
+        max_tokens=None,
         temperature=0.6,
         top_p=0.95,
     )
@@ -160,3 +164,16 @@ class Omega500(Task):
 
     def extract_answer(self, output: LMOutput) -> str:
         return _extract(output.text or "").answer
+
+
+# Distinct identity: the AllenAI snapshot changes some questions and answers.
+# The hill-climb launcher supplies its 32K cap for the 64K serving context.
+register_variant(
+    "omega_500",
+    "hillclimb",
+    data_source=DataSource(
+        path="allenai/omega-500",
+        revision="113a7eb896b8c1f7d781eb5f00713972074bae42",
+    ),
+    primary_metric=AccuracyMetric(name="exact_match", scorer=_STRICT),
+)

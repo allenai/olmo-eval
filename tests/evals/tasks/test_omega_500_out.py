@@ -21,7 +21,7 @@ def test_manifest_matches_all_500_family_counts():
 
 
 def test_same_scoring_and_inference_budget():
-    anchor = get_task("omega_500")
+    anchor = get_task("omega_500:hillclimb")
     companion = get_task("omega_500_out")
     assert anchor.config.sampling_params == companion.config.sampling_params
     assert anchor.config.metrics == companion.config.metrics
@@ -54,3 +54,37 @@ def test_population_checked_before_yielding(mode):
         else:
             with pytest.raises(ValueError, match="frozen 500-item manifest"):
                 next(task.instances)
+
+
+def test_companion_uses_anchor_family_names():
+    task = get_task("omega_500_out")
+    families = set()
+    for config, ids in IDS_BY_CONFIG.items():
+        instance = task.process_doc(
+            {
+                "id": ids[0],
+                "setting_key": config,
+                "messages": [{"content": "q"}],
+                "ground_truth": "42",
+            }
+        )
+        families.add(instance.metadata["family"])
+    assert families == set(FAMILY_COUNTS)
+
+
+def test_population_error_reports_drift():
+    task = get_task("omega_500_out")
+    ids = sorted(SELECTED_IDS)
+    observed = ids[2:] + [ids[2], "unexpected"]
+    with (
+        mock.patch.object(
+            task,
+            "_load_instances_cached",
+            return_value=iter(Instance(question="q", metadata={"id": i}) for i in observed),
+        ),
+        pytest.raises(ValueError) as error,
+    ):
+        next(task.instances)
+    assert ids[0] in str(error.value)
+    assert "unexpected" in str(error.value)
+    assert "duplicates=1" in str(error.value)

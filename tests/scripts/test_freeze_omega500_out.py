@@ -1,9 +1,9 @@
 """Exercise manifest generation against local snapshots without network access."""
 
 import ast
-import subprocess
-import sys
+import importlib.util
 from pathlib import Path
+from unittest import mock
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -17,16 +17,45 @@ def write_rows(path, rows):
     pq.write_table(pa.Table.from_pylist(rows), path)
 
 
-def generate(root, output):
-    return subprocess.run(
-        [sys.executable, str(SCRIPT), str(root), str(output)],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+@pytest.fixture
+def generator():
+    spec = importlib.util.spec_from_file_location("freeze_omega500_out", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def test_manifest_selection_is_frozen_and_order_independent(tmp_path):
+def generate(generator, root, output):
+    def snapshot(repo_id, **kwargs):
+        if repo_id == "allenai/omega-500":
+            assert kwargs == {
+                "repo_type": "dataset",
+                "revision": generator.OMEGA_REVISION,
+                "allow_patterns": ["train-00000-of-00001.parquet"],
+            }
+            return str(root / "omega-500")
+        assert repo_id == "allenai/omega-explorative"
+        assert kwargs == {
+            "repo_type": "dataset",
+            "revision": generator.EXPLORATIVE_REVISION,
+            "allow_patterns": ["*/test_out-00000-of-00001.parquet"],
+        }
+        return str(root / "omega-explorative")
+
+    with mock.patch.object(generator, "snapshot_download", side_effect=snapshot) as download:
+        generator.main(
+            [
+                str(output),
+                "--omega-revision",
+                generator.OMEGA_REVISION,
+                "--explorative-revision",
+                generator.EXPLORATIVE_REVISION,
+            ]
+        )
+        assert download.call_count == 2
+
+
+def test_manifest_selection_is_frozen_and_order_independent(tmp_path, generator):
     families = ["geometry_rotation", "geometry_rotation", "number_theory_prime_mod", "other"]
     anchor = tmp_path / "omega-500/train-00000-of-00001.parquet"
     candidates = {
@@ -46,10 +75,11 @@ def test_manifest_selection_is_frozen_and_order_independent(tmp_path):
                 [{"id": item_id} for item_id in ordered_ids],
             )
         output = tmp_path / f"manifest-{reverse}.py"
-        result = generate(tmp_path, output)
-        assert result.returncode == 0, result.stderr
+        generate(generator, tmp_path, output)
         outputs.append(output.read_text())
     assert outputs[0] == outputs[1]
+    assert generator.OMEGA_REVISION in outputs[0]
+    assert generator.EXPLORATIVE_REVISION in outputs[0]
     values = {
         node.targets[0].id: ast.literal_eval(node.value)
         for node in ast.parse(outputs[0]).body
@@ -70,7 +100,7 @@ def test_manifest_selection_is_frozen_and_order_independent(tmp_path):
 
 
 @pytest.mark.parametrize("ids", [["a"], ["a", "a", "b"]], ids=["insufficient", "duplicate"])
-def test_invalid_candidate_pool_does_not_write_manifest(tmp_path, ids):
+def test_invalid_candidate_pool_does_not_write_manifest(tmp_path, ids, generator):
     write_rows(
         tmp_path / "omega-500/train-00000-of-00001.parquet",
         [{"family": "other"}, {"family": "other"}],
@@ -80,7 +110,26 @@ def test_invalid_candidate_pool_does_not_write_manifest(tmp_path, ids):
         [{"id": item_id} for item_id in ids],
     )
     output = tmp_path / "manifest.py"
-    result = generate(tmp_path, output)
-    assert result.returncode != 0
-    assert "AssertionError" in result.stderr
+    with pytest.raises(AssertionError):
+        generate(generator, tmp_path, output)
     assert not output.exists()
+
+
+def test_mutable_revision_is_rejected_before_download(tmp_path, generator):
+    with mock.patch.object(generator, "snapshot_download") as download:
+        with pytest.raises(ValueError, match="immutable"):
+            generator.main([str(tmp_path / "out.py"), "--omega-revision", "main"])
+        download.assert_not_called()
+
+
+def test_requested_revisions_are_downloaded_and_recorded(tmp_path, generator):
+    generator.OMEGA_REVISION = "a" * 40
+    generator.EXPLORATIVE_REVISION = "b" * 40
+    write_rows(tmp_path / "omega-500/train-00000-of-00001.parquet", [{"family": "other"}])
+    write_rows(
+        tmp_path / "omega-explorative/other/test_out-00000-of-00001.parquet", [{"id": "one"}]
+    )
+    output = tmp_path / "out.py"
+    generate(generator, tmp_path, output)
+    assert "a" * 40 in output.read_text()
+    assert "b" * 40 in output.read_text()
