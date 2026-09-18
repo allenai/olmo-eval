@@ -175,6 +175,12 @@ def convert_runner_results(
         if not task_hash:
             raise ValueError(f"task_hash is required for task '{spec}'")
 
+        # num_instances is required: suite aggregation weights tasks by it, and a
+        # result stored without one can never be weighted afterwards.
+        num_instances = task_data.get("num_instances")
+        if num_instances is None:
+            raise ValueError(f"num_instances is required for task '{spec}'")
+
         # Get task config if available
         task_config = task_data.get("config")
 
@@ -184,7 +190,7 @@ def convert_runner_results(
                 metrics=metrics,
                 task_hash=task_hash,
                 task_config=task_config,
-                num_instances=task_data.get("num_instances"),
+                num_instances=num_instances,
                 instances_processed=task_data.get("instances_processed"),
                 instances_failed=task_data.get("instances_failed"),
                 error_summary=combine_task_error(task_data),

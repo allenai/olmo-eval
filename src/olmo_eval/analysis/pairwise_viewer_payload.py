@@ -133,27 +133,44 @@ def _build_matrix_mde80_map(result: PairwiseResult) -> dict[str, float]:
     }
 
 
+def _group_by_task_name(
+    task_entries: list[Any],
+    values: list[Any],
+) -> dict[str, list[Any]]:
+    """Group per-task values by task name, padding short lists with None."""
+    grouped: dict[str, list[Any]] = {}
+    for index, task_entry in enumerate(task_entries):
+        value = values[index] if index < len(values) else None
+        grouped.setdefault(task_entry.task_name, []).append(value)
+    return grouped
+
+
+def _pairwise_scope_is_comparable(result: PairwiseResult) -> bool:
+    return not (
+        result.score_unit is None
+        or result.higher_is_better is None
+        or result.score_display_format == "mixed"
+    )
+
+
 def _pairwise_model_scope_score(
     result: PairwiseResult,
     task_entries: list[Any],
     task_scores: list[float | None],
+    task_instance_counts: list[int | None],
 ) -> float | None:
-    if (
-        result.score_unit is None
-        or result.higher_is_better is None
-        or result.score_display_format == "mixed"
-    ):
+    if not _pairwise_scope_is_comparable(result):
         return None
 
-    task_scores_by_name: dict[str, list[float | None]] = {}
-    for task_entry, task_score in zip(task_entries, task_scores, strict=False):
-        task_scores_by_name.setdefault(task_entry.task_name, []).append(
-            float(task_score) if task_score is not None else None
-        )
+    task_scores_by_name: dict[str, list[float | None]] = {
+        task_name: [float(score) if score is not None else None for score in scores]
+        for task_name, scores in _group_by_task_name(task_entries, task_scores).items()
+    }
 
     if result.suite_name:
         return compute_scope_score(
             task_scores_by_name=task_scores_by_name,
+            task_instance_counts_by_name=_group_by_task_name(task_entries, task_instance_counts),
             suite_name=result.suite_name,
         )
 
@@ -210,7 +227,14 @@ def build_pairwise_viewer_payload(
             task_entry.id: task_scores[task_idx] if task_idx < len(task_scores) else None
             for task_idx, task_entry in enumerate(task_entries)
         }
-        scope_score = _pairwise_model_scope_score(result, task_entries, task_scores)
+        task_instance_counts = (
+            list(result.model_task_instance_counts[index])
+            if index < len(result.model_task_instance_counts)
+            else []
+        )
+        scope_score = _pairwise_model_scope_score(
+            result, task_entries, task_scores, task_instance_counts
+        )
         shared_score = (
             result.model_shared_scores[index] if index < len(result.model_shared_scores) else None
         )
