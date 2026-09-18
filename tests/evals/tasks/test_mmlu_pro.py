@@ -136,9 +136,17 @@ def test_cot_message() -> None:
     assert request.messages[0]["content"] == _COT_DESCRIPTION + query + _COT_FINAL_DESCRIPTION
 
     params = task.config.sampling_params
-    assert params.temperature == 0.0
-    assert params.max_tokens == 2048
+    assert params.temperature == 0.6
+    assert params.top_p == 0.95
+    assert params.max_tokens is None
     assert params.stop_sequences is None
+
+
+def test_cot_sampling_matches_mmlu_cot() -> None:
+    assert (
+        get_task("mmlu_pro_math:cot").config.sampling_params
+        == get_task("mmlu_abstract_algebra:cot").config.sampling_params
+    )
 
 
 def test_category_filter_returns_none() -> None:
@@ -183,12 +191,19 @@ def test_cot_skips_fewshot_load(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         ("Therefore, the answer is (C). Wait. Therefore, the answer is (D)", "D", 1.0),
         ("Reasoning.\n\nTherefore, the answer is (B)", "B", 1.0),
-        ("the answer is: b", "b", 0.5),
+        ("Therefore, the answer is (J)", "J", 1.0),
+        ("therefore the answer is: G", "G", 1.0),
+        ("So the answer is H.", "H", 0.5),
+        ("The correct answer is: F", "F", 0.5),
         ("The answer is (B).", "B", 0.5),
         ("Answer: D", "D", 0.5),
-        ("answer: A, no answer: C\nanswer: D", "C", 0.5),
-        ("I pick A or B.", "B", 0.0),
+        ("answer: A, no answer: C\nanswer: D", "D", 0.5),
+        ("Option (E) is correct", "E", 0.5),
+        (r"Final: \boxed{I}", "I", 0.5),
+        ("Choose (J) here", "J", 0.5),
+        ("the answer is: b", "b", 0.5),
         ("Therefore, the answer is (K)", "", 0.0),
+        ("nothing here", "", 0.0),
         ("", "", 0.0),
         ("<think>(A) looks right</think>Therefore, the answer is (B)", "B", 1.0),
     ],

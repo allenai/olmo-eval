@@ -14,10 +14,9 @@ the reference harness:
   extracted letter.
 
 Few-shot exemplars are the dataset's ``validation`` rows for the category, in
-dataset order. The CoT answer extraction follows the reference cascade for
-this benchmark rather than the shared regex templates used by other
-chain-of-thought tasks, because the two differ in match order and format
-scoring.
+dataset order. The CoT recipe samples and extracts answers the same way as the
+MMLU and GPQA chain-of-thought tasks: the shared regex cascade, widened to the
+ten answer letters this benchmark uses.
 """
 
 from __future__ import annotations
@@ -44,7 +43,12 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.extract import ExtractedAnswer, extract_think_answer
+from olmo_eval.evals.extract import (
+    OLMO_3_ANSWER_REGEX_TEMPLATES,
+    ExtractedAnswer,
+    extract_answer_with_format,
+    extract_think_answer,
+)
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 from olmo_eval.evals.tasks.mmlu import _format_rc, _make_mcq_prompt
 
@@ -207,34 +211,33 @@ _COT_FORMATTER = ChatFormatter(
     user_template=_COT_DESCRIPTION + "{question}" + _COT_FINAL_DESCRIPTION,
 )
 
-_COT_SAMPLING = SamplingParams(max_tokens=2048, temperature=0.0)
+# max_tokens=None generates to the model's context limit; temperature and
+# top_p match the MMLU and GPQA chain-of-thought tasks, since greedy decoding
+# degrades reasoning models.
+_COT_SAMPLING = SamplingParams(
+    max_tokens=None,
+    temperature=0.6,
+    top_p=0.95,
+)
 
-_ANSWER_FORMAT_RE = re.compile(r"Therefore, the answer is \(([A-J])\)")
-_ANSWER_IS_RE = re.compile(r"(?i)answer is:?\s*\(?([A-J])\)?")
-_ANSWER_COLON_RE = re.compile(r".*[aA]nswer:\s*([A-J])")
-_STANDALONE_LETTER_RE = re.compile(r".*\b([A-J])\b")
+_COT_ANSWER_FORMAT_REGEX = r"Therefore, the answer is \(([A-J])\)"
+_COT_ANSWER_REGEXES = (r"\(?([A-J])\)?",)
 
 
 def _extract_cot_answer(text: str) -> ExtractedAnswer:
     """Answer letter and format score from a chain-of-thought response.
 
     Reasoning enclosed in ``<think>`` tags is dropped first. The requested
-    phrasing scores 1.0 (last occurrence wins). Looser "answer is" or
-    "Answer:" phrasings score 0.5. A bare trailing letter scores 0.0.
+    phrasing scores 1.0; the shared regex templates score 1.0 or 0.5 by
+    position in the cascade; a bare letter scores 0.2 or lower.
     """
-    text = extract_think_answer(text or "") or ""
-    matches = _ANSWER_FORMAT_RE.findall(text)
-    if matches:
-        return ExtractedAnswer(matches[-1], 1.0)
-    format_correct = 0.5
-    match = _ANSWER_IS_RE.search(text) or _ANSWER_COLON_RE.search(text)
-    if match:
-        answer = match.group(1)
-    else:
-        format_correct = 0.0
-        fallback = _STANDALONE_LETTER_RE.findall(text)
-        answer = fallback[-1] if fallback else ""
-    return ExtractedAnswer(re.sub(r"\(|\)", "", answer), format_correct)
+    extracted = extract_answer_with_format(
+        extract_think_answer(text or "") or "",
+        answer_format_regex=_COT_ANSWER_FORMAT_REGEX,
+        answer_regexes=_COT_ANSWER_REGEXES,
+        answer_regexes_templates=OLMO_3_ANSWER_REGEX_TEMPLATES,
+    )
+    return extracted._replace(answer=re.sub(r"\(|\)", "", extracted.answer))
 
 
 def _extract_cot_letter(text: str) -> str:
