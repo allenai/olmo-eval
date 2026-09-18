@@ -201,3 +201,18 @@ def test_build_predictions_normalizes_logprobs_by_original_text() -> None:
     assert output["num_chars_all"] == len(original)
     assert output["logits_per_char"] == -5.0 / len(original)
     assert output["bits_per_byte"] == 5.0 / (len(original.encode("utf-8")) * math.log(2))
+
+
+def test_build_predictions_includes_answer_format_correct() -> None:
+    response = Response(
+        instance=Instance(question="Q", gold_answer="B"),
+        request=LMRequest(
+            request_type=RequestType.CHAT, messages=({"role": "user", "content": "Q"},)
+        ),
+        outputs=[LMOutput(text="the answer is B", metadata={"answer_format_correct": 0.5})],
+        scores={"exact_match": 1.0},
+    )
+
+    output = build_predictions([response])[0]["model_output"][0]
+
+    assert output["answer_format_correct"] == 0.5
