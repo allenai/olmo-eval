@@ -302,11 +302,12 @@ class TaskConfig:
             "max_length": self.max_length,
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
             "dependencies": self.dependencies,
-            "prompt_templates": self.prompt_templates,
-            "system_prompt_style": self.system_prompt_style,
         }
         # Emitted only when set so that task hashes of runs without it are
         # unchanged from before the field existed.
+        if self.prompt_templates is not None or self.system_prompt_style is not None:
+            serialized["prompt_templates"] = self.prompt_templates
+            serialized["system_prompt_style"] = self.system_prompt_style
         if self.strip_thinking:
             serialized["strip_thinking"] = True
         if any(

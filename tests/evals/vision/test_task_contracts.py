@@ -91,6 +91,24 @@ class TestDenseCaptionPerInstanceMetrics:
         assert DenseCaptionAvgMetric().pairwise_display_format() == "raw"
 
 
+class TestPromptFamilyFieldsAreOptIn:
+    """The prompt-family fields must not perturb the hash of tasks that never set them,
+    or every stored text-task result stops matching new runs of the same config."""
+
+    @pytest.mark.parametrize("name", ["arc_easy", "gsm8k", "hellaswag"])
+    def test_text_task_config_omits_unset_prompt_fields(self, name):
+        config = get_task(name).config.to_dict()
+        assert "prompt_templates" not in config
+        assert "system_prompt_style" not in config
+
+    def test_setting_a_field_adds_it_back(self):
+        # the omission must be conditional, not a removal: opting in still changes identity
+        task = get_task("arc_easy")
+        opted_in = replace(task.config, system_prompt_style="style_and_length_v2").to_dict()
+        assert opted_in["system_prompt_style"] == "style_and_length_v2"
+        assert compute_task_hash(opted_in) != compute_task_hash(task.config.to_dict())
+
+
 class TestPromptFamilyTaskIdentity:
     """The prompt-family fields change the request, so they must change the task hash."""
 
