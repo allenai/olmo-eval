@@ -71,6 +71,13 @@ def _first_number(text: str) -> float | None:
     return float(m[0]) if m else None
 
 
+def _last_number(text: str) -> float | None:
+    import re
+
+    m = re.findall(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", str(text).replace(",", ""))
+    return float(m[-1]) if m else None
+
+
 def _expresses_na(text: str) -> bool:
     low = _norm(text)
     return any(marker in low for marker in _NA_MARKERS)
@@ -92,7 +99,11 @@ class ChartGymScorer(Scorer):
         if _expresses_na(pred) and not _expresses_na(gold):
             return False
         if atype == "int":
-            n = _first_number(pred)
+            # LAST number, not first: a procedure-supervised model answers counting
+            # questions with an enumeration ending in the total ("ticks: 0, 50, 100 (3).
+            # Total: 7."), so the first number is the first tick, not the answer. Bare
+            # answers are unaffected (first == last).
+            n = _last_number(pred)
             return n is not None and abs(n - float(gold)) < 0.5
         if atype == "float":
             n = _first_number(pred)
