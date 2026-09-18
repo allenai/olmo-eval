@@ -28,6 +28,8 @@ Dataset: gorilla-llm/Berkeley-Function-Calling-Leaderboard
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -637,6 +639,33 @@ EXEMPLARS: dict[Language, tuple[Exemplar, ...]] = {
 }
 
 
+def fewshot_source_for(language: Language) -> str:
+    """Name the exemplar set a task prompts with, and the revision of it.
+
+    The exemplars are written here rather than drawn from a dataset, so nothing
+    about them would otherwise reach :class:`TaskConfig`: a run's stored
+    configuration, and the task hash derived from it, would record neither
+    which set produced its prompts nor what that set said. Two languages'
+    exemplars would be indistinguishable, and editing one would leave the hash
+    of every earlier run intact, so results from different prompts would share
+    an identity.
+
+    The name follows ``minerva_math``'s fixed set. The digest extends it,
+    because these exemplars are expected to be revised: it changes whenever
+    their text does, which errs towards giving a run a new identity rather
+    than silently reusing one.
+    """
+    payload = json.dumps(
+        [
+            {"question": e.question, "answer": e.answer, "functions": e.functions}
+            for e in EXEMPLARS[language]
+        ],
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(payload.encode()).hexdigest()[:8]
+    return f"bfcl_fixed_{language}@{digest}"
+
+
 # ---------------------------------------------------------------------------
 # Task
 # ---------------------------------------------------------------------------
@@ -755,7 +784,8 @@ class BFCLTask(Task):
 
         Exemplars taken from the evaluated set would leak its answers, and a
         sample of them would not reliably cover the shapes a category can take
-        — one call, one of several functions, several calls, or none.
+        — one call, one of several functions, several calls, or none. The set
+        in use is named by ``config.fewshot_source``.
         """
         count = self.config.num_fewshot
         if count <= 0:
@@ -839,8 +869,10 @@ def _register_bfcl_tasks() -> None:
 
     for task_name, categories in TASK_CATEGORIES.items():
         class_name = "BFCL" + "".join(part.title() for part in task_name.split("_")[1:])
+        language = language_for_category(categories[0])
         attrs: dict[str, Any] = {
             "categories": categories,
+            "fewshot_source": fewshot_source_for(language),
             "data_source": DataSource(
                 path=BFCL_REPO,
                 data_files=tuple(f"BFCL_v3_{category}.json" for category in categories),

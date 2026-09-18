@@ -17,13 +17,17 @@ from olmo_eval.common.scorers.bfcl import (
     is_function_calling_format,
 )
 from olmo_eval.common.scorers.bfcl.constants import Language
-from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.common.types import Instance, LMOutput, RequestType, compute_task_hash
 from olmo_eval.evals.suites import get_suite
 from olmo_eval.evals.tasks.bfcl import (
     BASE_INSTRUCTION,
+    EXEMPLARS,
+    PYTHON_EXEMPLARS,
     TASK_CATEGORIES,
     BFCLTask,
+    Exemplar,
     category_from_id,
+    fewshot_source_for,
     prepare_function_docs,
 )
 from olmo_eval.evals.tasks.common import get_task
@@ -547,6 +551,48 @@ def test_relevance_rewards_calling_and_punishes_declining() -> None:
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
+
+
+def test_the_exemplar_set_is_named_in_the_task_configuration() -> None:
+    # Nothing about hand-written exemplars reaches TaskConfig on its own, so
+    # the name is what puts them into a run's stored configuration.
+    assert get_task("bfcl_simple").config.fewshot_source == fewshot_source_for(Language.PYTHON)
+    assert get_task("bfcl_live").config.fewshot_source == fewshot_source_for(Language.PYTHON)
+    assert get_task("bfcl_java").config.fewshot_source == fewshot_source_for(Language.JAVA)
+    assert get_task("bfcl_javascript").config.fewshot_source == fewshot_source_for(
+        Language.JAVASCRIPT
+    )
+
+
+def test_each_language_s_exemplars_are_named_distinctly() -> None:
+    names = {fewshot_source_for(language) for language in Language}
+
+    assert len(names) == 3
+    assert all(name.startswith("bfcl_fixed_") for name in names)
+
+
+def test_the_exemplar_name_is_stable_and_reaches_the_task_hash() -> None:
+    config = get_task("bfcl_simple").config
+
+    assert fewshot_source_for(Language.PYTHON) == fewshot_source_for(Language.PYTHON)
+    assert config.to_dict()["fewshot_source"] == config.fewshot_source
+    assert compute_task_hash(config.to_dict()) != compute_task_hash(
+        {**config.to_dict(), "fewshot_source": "something else"}
+    )
+
+
+def test_editing_an_exemplar_changes_the_name_it_is_recorded_under(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Otherwise two runs prompted differently would share a task hash.
+    before = fewshot_source_for(Language.PYTHON)
+    edited = (
+        Exemplar(question="Reworded.", answer="[f(a=1)]", functions=PYTHON_EXEMPLARS[0].functions),
+        *PYTHON_EXEMPLARS[1:],
+    )
+    monkeypatch.setitem(EXEMPLARS, Language.PYTHON, edited)
+
+    assert fewshot_source_for(Language.PYTHON) != before
 
 
 def test_the_category_of_an_entry_comes_from_its_id() -> None:
