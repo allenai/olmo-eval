@@ -660,6 +660,18 @@ See the [Harness](#harness) section above for full documentation on:
 - Defining tools with the `@tool` decorator
 - Programmatic usage
 
+## Function Calling (BFCL)
+
+The Berkeley Function Calling Leaderboard v3 single-turn categories are
+registered as `bfcl_*` tasks, reformulated as a completion so a pretrained
+model with no chat template can be measured on them. See
+[`src/olmo_eval/evals/tasks/bfcl/README.md`](src/olmo_eval/evals/tasks/bfcl/README.md)
+for the task list, suites, exemplar settings, and what is not implemented.
+
+```bash
+uv run olmo-eval run -m my-base-model -t bfcl
+```
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.

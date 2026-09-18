@@ -14,6 +14,7 @@ from .base import (
     Scorer,
     SQuADF1Scorer,
 )
+from .bfcl import BFCLScorer
 from .citation import (
     CITATION_GROUP_PROMPT,
     JUST_HAS_A_TITLE,
@@ -53,6 +54,7 @@ from .trajectory import (
 )
 
 __all__ = [
+    "BFCLScorer",
     "BitsPerByteScorer",
     "build_openai_judge_fn",
     "CITATION_GROUP_PROMPT",
