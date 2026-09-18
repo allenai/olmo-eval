@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.metrics import AccuracyMetric
-from olmo_eval.common.types import Instance
+from olmo_eval.common.types import Instance, SamplingParams
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks._omega_500_out_ids import FAMILY_ALIASES, IDS_BY_CONFIG
 from olmo_eval.evals.tasks.common import register
@@ -23,6 +23,7 @@ class Omega500Out(Omega500):
     """Evaluate 500 fixed test_out items with OMEGA-500's family proportions."""
 
     primary_metric = AccuracyMetric(name="exact_match", scorer=_STRICT)
+    sampling_params = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
 
     data_source = DataSource(
         path="allenai/omega-explorative",

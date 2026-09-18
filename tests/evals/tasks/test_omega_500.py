@@ -33,7 +33,7 @@ class TestOmega500Task(unittest.TestCase):
         self.assertEqual(
             hillclimb.config.get_data_source().revision, "113a7eb896b8c1f7d781eb5f00713972074bae42"
         )
-        self.assertIsNone(hillclimb.config.sampling_params.max_tokens)
+        self.assertEqual(hillclimb.config.sampling_params.max_tokens, 32768)
 
     def test_process_doc(self) -> None:
         task = get_task("omega_500")

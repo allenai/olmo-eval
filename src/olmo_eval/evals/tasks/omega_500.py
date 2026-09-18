@@ -167,10 +167,11 @@ class Omega500(Task):
 
 
 # Distinct identity: the AllenAI snapshot changes some questions and answers.
-# The hill-climb launcher supplies its 32K cap for the 64K serving context.
+# The development protocol caps generations at 32K by default.
 register_variant(
     "omega_500",
     "hillclimb",
+    sampling_params=SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95),
     data_source=DataSource(
         path="allenai/omega-500",
         revision="113a7eb896b8c1f7d781eb5f00713972074bae42",
