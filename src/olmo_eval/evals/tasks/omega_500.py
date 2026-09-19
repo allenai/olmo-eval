@@ -78,10 +78,13 @@ def _extract(continuation: str) -> ExtractedAnswer:
     res = re.sub(r"\.\s*$", "", output).strip()
     for left, right in _DELIMITERS_TO_STRIP:
         res = re.sub(f"{re.escape(left)}(.*){re.escape(right)}", "\\1", res).strip()
+    # The leading wildcard search is quadratic when no boxed opener exists.
+    # Keep its cascade slot (and format score) with an impossible pattern.
+    answer_regexes = _ANSWER_REGEXES if "\\boxed{" in res else (r"(?!)", _ANSWER_REGEXES[1])
     return extract_answer_with_format(
         res,
         answer_format_regex=_ANSWER_FORMAT_REGEX,
-        answer_regexes=_ANSWER_REGEXES,
+        answer_regexes=answer_regexes,
         prefix_regexes=_PREFIX_REGEXES,
     )
 

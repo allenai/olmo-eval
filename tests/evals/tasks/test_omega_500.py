@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.evals.tasks import omega_500
 from olmo_eval.evals.tasks.common import get_task
 from olmo_eval.evals.tasks.omega_500 import _FLEX, _STRICT
 
@@ -142,6 +143,22 @@ class TestOmegaAnswerPrefixes(unittest.TestCase):
         )
         self.assertEqual(instance.metadata["id"], "omega_500_001")
         self.assertEqual(instance.metadata["family"], "arithmetic_gcd")
+
+
+def test_unboxed_fast_path_matches_reference_cascade(monkeypatch):
+    cases = [
+        "reasoning\n" * 200 + ending
+        for ending in ("", "answer: 42", "Therefore, the final answer is 42", "answer is:\n42")
+    ] + [r"\boxed{4}", r"first \boxed{3} then \boxed{4}", r"unfinished \boxed{"]
+    actual = [omega_500._extract(text) for text in cases]
+    original = omega_500.extract_answer_with_format
+
+    def reference(text, **kwargs):
+        kwargs["answer_regexes"] = omega_500._ANSWER_REGEXES
+        return original(text, **kwargs)
+
+    monkeypatch.setattr(omega_500, "extract_answer_with_format", reference)
+    assert actual == [omega_500._extract(text) for text in cases]
 
 
 if __name__ == "__main__":
