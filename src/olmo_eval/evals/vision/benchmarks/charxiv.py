@@ -103,6 +103,13 @@ def _results(responses: Sequence[Response]) -> Iterator[dict]:
                 yield output.metadata["charxiv_result"]
 
 
+def _result_for(response: Response) -> dict | None:
+    for output in response.outputs:
+        if output.metadata and "charxiv_result" in output.metadata:
+            return output.metadata["charxiv_result"]
+    return None
+
+
 def _mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
@@ -130,6 +137,18 @@ class CharxivScoreMetric(Metric):
             values.append(float(result["score"]) if result["score"] in (0, 1) else 0.0)
         return _mean(values)
 
+    def compute_instance(self, response: Response) -> float | None:
+        """The example's own graded score, or ``None`` outside this category."""
+        result = _result_for(response)
+        if result is None:
+            return None
+        if self.category is not None and qnum_to_qtype(result["qid"]) != self.category:
+            return None
+        return float(result["score"]) if result["score"] in (0, 1) else 0.0
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
 
 @dataclass(frozen=True)
 class CharxivInvalidCountMetric(Metric):
@@ -140,6 +159,16 @@ class CharxivInvalidCountMetric(Metric):
 
     def compute(self, responses: Sequence[Response]) -> float:
         return float(sum(1 for r in _results(responses) if r["score"] not in (0, 1)))
+
+    def compute_instance(self, response: Response) -> float | None:
+        """1.0 when this example's grading was invalid, 0.0 when it graded."""
+        result = _result_for(response)
+        if result is None:
+            return None
+        return 0.0 if result["score"] in (0, 1) else 1.0
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
 
 
 _DESC_METRICS: tuple[Metric, ...] = (
@@ -185,8 +214,8 @@ async def _gather_bounded(coros, context: ScoringContext | None):
 
 @register("charxiv_descriptive")
 class CharxivDescriptiveTask(ImageQATask):
-    #: The judge calls OpenAI; without the client every instance scores zero
-    #: instead of failing the run.
+    #: The judge calls OpenAI; a grading failure is recorded as invalid and
+    #: counted by `n_invalid` rather than silently scored as a wrong answer.
     dependencies = ["pillow", "openai"]
     required_secrets = ("OPENAI_API_KEY",)
     sampling_params = SamplingParams(temperature=0.0, max_tokens=1024)
@@ -258,8 +287,8 @@ class CharxivDescriptiveTask(ImageQATask):
 
 @register("charxiv_reasoning")
 class CharxivReasoningTask(ImageQATask):
-    #: The judge calls OpenAI; without the client every instance scores zero
-    #: instead of failing the run.
+    #: The judge calls OpenAI; a grading failure is recorded as invalid and
+    #: counted by `n_invalid` rather than silently scored as a wrong answer.
     dependencies = ["pillow", "openai"]
     required_secrets = ("OPENAI_API_KEY",)
     sampling_params = SamplingParams(temperature=0.0, max_tokens=1024)

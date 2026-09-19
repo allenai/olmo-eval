@@ -16,6 +16,7 @@ import os
 import random
 import re
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,10 @@ from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.execution import ContextScorer
 from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.evals.vision.scoring.charxiv import (
+    build_dummy_output,
+    verify_grading_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -378,13 +383,6 @@ class DenseCaptionJudgeScorer(ContextScorer):
 # CharXiv GPT judge (vendored protocol; grading prompts in `vision.scoring.charxiv`)
 # --------------------------------------------------------------------------------------
 
-from collections.abc import Callable  # noqa: E402
-from dataclasses import field  # noqa: E402
-
-from olmo_eval.evals.vision.scoring.charxiv import (  # noqa: E402
-    build_dummy_output,
-    verify_grading_output,
-)
 
 CHARXIV_JUDGE_MODEL = "gpt-4o-2024-05-13"
 _RETRY_BASE_DELAY = 1.0
@@ -419,6 +417,14 @@ def _get_client(model: str):
             raise ImportError("openai package required: pip install openai") from None
         _ASYNC_CLIENTS[model] = AsyncOpenAI(api_key=api_key)
     return _ASYNC_CLIENTS[model]
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    """Whether the judge call failed because the credentials are unusable."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+    if status in (401, 403):
+        return True
+    return type(exc).__name__ in ("AuthenticationError", "PermissionDeniedError")
 
 
 def _retry_delay(attempt: int) -> float:
@@ -478,6 +484,10 @@ async def _charxiv_chat_json(
             validate(content)
             break
         except Exception as e:  # official: retry on any error; grow tokens on truncation
+            if _is_auth_error(e):
+                # An unusable key cannot succeed on retry, and burning the ladder
+                # would turn the whole run into dummy scores.
+                raise
             logger.warning("CharXiv grading error: %s", e)
             content = None
             if "Unterminated string starting at" in str(e):
@@ -566,6 +576,15 @@ class CharxivJudgeScorer(Scorer):
     cache_dir: str = field(default_factory=default_charxiv_cache_dir)
     cache_only: bool = False
     recompute: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Only the output-affecting settings; the cache location and mode are
+        machine-local and must not enter the task hash."""
+        return {
+            "type": self.__class__.__name__,
+            "name": self.name,
+            "model": CHARXIV_JUDGE_MODEL,
+        }
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         value = (output.metadata or {}).get("score:charxiv", 0.0)

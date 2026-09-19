@@ -50,7 +50,11 @@ class RealWorldQaTask(ImageQATask):
                 first_line = prompt.split("\n")[0]
                 question = f"vqa2: {first_line}"
             else:
-                assert _MC_INSTRUCTION in prompt, prompt
+                if _MC_INSTRUCTION not in prompt:
+                    raise ValueError(
+                        f"RealWorldQA multiple-choice row {idx} lacks the expected "
+                        f"instruction {_MC_INSTRUCTION!r}: {prompt!r}"
+                    )
                 question_type = "multiple_choice"
                 question = prompt
             yield Instance(

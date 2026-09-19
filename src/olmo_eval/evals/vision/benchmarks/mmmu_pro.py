@@ -71,6 +71,16 @@ class MmmuProSettingMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         return _setting_mean(responses, self.scorer().name, self.setting) or 0.0
 
+    def compute_instance(self, response: Response) -> float | None:
+        """This setting's score for the example, or ``None`` for other settings."""
+        if response.instance.metadata.get("mmmu_pro_setting") != self.setting:
+            return None
+        value = response.scores.get(self.scorer().name)
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
 
 @dataclass(frozen=True)
 class MmmuProOverallMetric(Metric):
@@ -87,6 +97,13 @@ class MmmuProOverallMetric(Metric):
         ]
         present = [p for p in parts if p is not None]
         return sum(present) / len(present) if present else 0.0
+
+    def compute_instance(self, response: Response) -> float | None:
+        # An average of two setting means has no exact per-instance value.
+        return None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
 
 
 _OVERALL = MmmuProOverallMetric(name="overall", scorer=_SCORER)

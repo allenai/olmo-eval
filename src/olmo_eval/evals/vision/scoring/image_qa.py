@@ -6,11 +6,12 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.execution import ContextScorer
 from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.evals.vision.scoring.common import response_text
 from olmo_eval.evals.vision.scoring.math_vista_offline import (
     create_test_prompt,
     extract_answer_quick,
@@ -51,7 +52,7 @@ class VqaScoreScorer(Scorer):
     name: str = "vqa_score"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        pred = clean_prediction(_response_text(output))
+        pred = clean_prediction(response_text(output))
         return float(vqa_score(_answers(instance), pred))
 
 
@@ -59,10 +60,11 @@ class VqaScoreScorer(Scorer):
 class AnlsScorer(Scorer):
     """ANLS (DocVQA / InfographicVQA), max over reference answers."""
 
+    #: mm_olmo's metric key, misspelled upstream; kept for result-key parity.
     name: str = "ansl"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        pred = clean_prediction(_response_text(output))
+        pred = clean_prediction(response_text(output))
         answers = _answers(instance)
         if not answers:
             return 0.0
@@ -76,7 +78,7 @@ class EmScorer(Scorer):
     name: str = "em"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        pred = clean_prediction(_response_text(output))
+        pred = clean_prediction(response_text(output))
         return float(pred.lower() in [x.lower() for x in _answers(instance)])
 
 
@@ -87,7 +89,7 @@ class RelaxedCorrectnessScorer(Scorer):
     name: str = "relaxed_correctness"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        pred = clean_prediction(_response_text(output))
+        pred = clean_prediction(response_text(output))
         answers = _answers(instance)
         if not answers:
             return 0.0
@@ -101,7 +103,7 @@ class ScifiRelaxedScorer(Scorer):
     name: str = "scifi_relaxed_correctness"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        pred = clean_prediction(_response_text(output))
+        pred = clean_prediction(response_text(output))
         answers = _answers(instance)
         if not answers:
             return 0.0
@@ -115,7 +117,7 @@ class MmmuScorer(Scorer):
     name: str = "mmmu_score"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        pred = clean_prediction(_response_text(output))
+        pred = clean_prediction(response_text(output))
         meta = instance.metadata
         return mmmu_score(
             _answers(instance),
@@ -133,9 +135,16 @@ class RealWorldQaScorer(Scorer):
     name: str = "real_world_qa_score"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        pred = clean_prediction(_response_text(output))
+        pred = clean_prediction(response_text(output))
         meta = instance.metadata
         return float(real_world_qa_score(meta["answer"], pred, meta["question_type"]))
+
+
+def _mark_extraction_failed(output: LMOutput, exc: Exception) -> None:
+    """Record that a zero came from a failed extraction, not a wrong answer."""
+    if output.metadata is None:
+        output.metadata = {}
+    output.metadata["extraction_failed"] = f"{type(exc).__name__}: {exc}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +154,7 @@ class MathVistaOfflineScorer(Scorer):
     name: str = "score"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        pred = _response_text(output).strip()
+        pred = response_text(output).strip()
         meta = instance.metadata
         try:
             correct = math_vista_score_offline(
@@ -156,10 +165,15 @@ class MathVistaOfflineScorer(Scorer):
                 precision=meta.get("precision"),
                 target=meta["answer"],
             )
-        except Exception as exc:
+        except (ValueError, TypeError, IndexError, KeyError) as exc:
+            # An unparseable prediction is a genuine zero; record that it was a
+            # failed extraction rather than a wrong answer. Anything else (a bug
+            # in the vendored normalizer) propagates so the runner records a
+            # scoring error instead of reporting a run of zeros as Success.
             logger.warning(
-                "MathVista offline scoring failed for %s: %s", meta.get("example_id"), exc
+                "MathVista offline extraction failed for %s: %s", meta.get("example_id"), exc
             )
+            _mark_extraction_failed(output, exc)
             return 0.0
         return float(correct)
 
@@ -176,7 +190,7 @@ class Ai2dScorer(Scorer):
     name: str = "mc_ai2d"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        pred = clean_prediction(_response_text(output))
+        pred = clean_prediction(response_text(output))
         meta = instance.metadata
         options = list(meta["option_names"])
         pred_idx = select_mc_option(pred, options)
@@ -226,6 +240,11 @@ class MathVistaGptScorer(ContextScorer):
     cache_only: bool = False
     recompute: bool = False
 
+    def to_dict(self) -> dict[str, Any]:
+        """Only the output-affecting settings; the cache location and mode are
+        machine-local and must not enter the task hash."""
+        return {"type": self.__class__.__name__, "name": self.name, "model": self.model}
+
     async def ascore_with_context(
         self,
         instance: Instance,
@@ -234,7 +253,7 @@ class MathVistaGptScorer(ContextScorer):
     ) -> float:
         from olmo_eval.evals.vision.scoring.judges import _cached_gpt_call
 
-        pred = _response_text(output).strip()
+        pred = response_text(output).strip()
         meta = instance.metadata
         choices = list(meta.get("choices") or [])
         question_type = meta["question_type"]
@@ -250,10 +269,14 @@ class MathVistaGptScorer(ContextScorer):
                     cache_only=self.cache_only,
                     recompute=self.recompute,
                 )
-            except Exception as exc:
+            except (ValueError, TypeError, KeyError) as exc:
+                # A malformed reply is a failed extraction; an auth error, rate
+                # limit or outage propagates to the runner's scoring_errors
+                # instead of silently zeroing every affected instance.
                 logger.warning(
                     "MathVista GPT extraction failed for %s: %s", meta.get("example_id"), exc
                 )
+                _mark_extraction_failed(output, exc)
                 return 0.0
 
         if output.metadata is None:
@@ -269,7 +292,10 @@ class MathVistaGptScorer(ContextScorer):
                 precision=meta.get("precision"),
                 target=meta["answer"],
             )
-        except Exception as exc:
-            logger.warning("MathVista GPT scoring failed for %s: %s", meta.get("example_id"), exc)
+        except (ValueError, TypeError, IndexError, KeyError) as exc:
+            logger.warning(
+                "MathVista GPT extraction failed for %s: %s", meta.get("example_id"), exc
+            )
+            _mark_extraction_failed(output, exc)
             return 0.0
         return float(correct)

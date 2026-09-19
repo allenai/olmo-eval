@@ -21,6 +21,10 @@ from __future__ import annotations
 import random
 import re
 import zlib
+from dataclasses import dataclass
+
+from olmo_eval.common.scorers.base import Scorer
+from olmo_eval.common.types import Instance, LMOutput
 
 # Direct-mode prompts, verbatim from mmmu-pro/prompts.yaml (CoT mode is not used).
 MMMU_PRO_STANDARD_DIRECT = "Answer with the option letter from the given choices directly."
@@ -145,12 +149,6 @@ def mmmu_pro_score(
     if isinstance(answer, list):
         return float(parsed in answer)
     return float(parsed == answer)
-
-
-from dataclasses import dataclass  # noqa: E402
-
-from olmo_eval.common.scorers.base import Scorer  # noqa: E402
-from olmo_eval.common.types import Instance, LMOutput  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
