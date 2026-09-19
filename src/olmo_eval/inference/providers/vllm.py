@@ -309,6 +309,9 @@ class VLLMProvider(InferenceProvider):
                         "num_tokens_all": num_tokens,
                     }
 
+                metadata["finish_reason"] = completion.finish_reason
+                metadata["completion_tokens"] = len(completion.token_ids)
+
                 request_outputs.append(
                     LMOutput(
                         text=completion.text,
