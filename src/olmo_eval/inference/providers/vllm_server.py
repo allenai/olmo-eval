@@ -781,9 +781,11 @@ class VLLMServerProvider(InferenceProvider):
         logprobs_payload: Any,
         usage: Any,
         stop_sequences: list[str] | None,
+        finish_reason: str | None = None,
     ) -> LMOutput:
         """Create a standardized LMOutput from completion response payloads."""
         metadata = self._completion_usage_metadata(usage)
+        metadata["finish_reason"] = finish_reason
         processed_text = self._postprocess_completion_text(text, stop_sequences)
 
         logprob_entries: list[LogProbEntry] | None = None
@@ -851,6 +853,7 @@ class VLLMServerProvider(InferenceProvider):
             return [
                 self._build_completion_output(
                     text=choice.get("text") or "",
+                    finish_reason=choice.get("finish_reason"),
                     logprobs_payload=choice.get("logprobs"),
                     usage=usage,
                     stop_sequences=stop_sequences,
@@ -865,6 +868,7 @@ class VLLMServerProvider(InferenceProvider):
         return [
             self._build_completion_output(
                 text=choice.text or "",
+                finish_reason=getattr(choice, "finish_reason", None),
                 logprobs_payload=getattr(choice, "logprobs", None),
                 usage=usage,
                 stop_sequences=stop_sequences,
@@ -946,7 +950,7 @@ class VLLMServerProvider(InferenceProvider):
 
             # Convert logprobs to standard format
             logprob_entries: list[LogProbEntry] | None = None
-            metadata: dict[str, Any] = {}
+            metadata: dict[str, Any] = {"finish_reason": getattr(choice, "finish_reason", None)}
 
             # Store token counts from server for accurate metrics
             if usage:
@@ -966,11 +970,13 @@ class VLLMServerProvider(InferenceProvider):
                 # Compute metadata from logprobs
                 sum_logits = sum(entry["logprob"] for entry in logprob_entries)
                 num_tokens = len(logprob_entries)
-                metadata = {
-                    "sum_logits": sum_logits,
-                    "num_tokens": num_tokens,
-                    "num_tokens_all": num_tokens,
-                }
+                metadata.update(
+                    {
+                        "sum_logits": sum_logits,
+                        "num_tokens": num_tokens,
+                        "num_tokens_all": num_tokens,
+                    }
+                )
 
             outputs.append(
                 LMOutput(
