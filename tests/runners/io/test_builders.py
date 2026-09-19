@@ -216,3 +216,18 @@ def test_build_predictions_preserves_termination_without_logprobs() -> None:
     assert output["completion_tokens"] == 32768
     assert output["text"] == ""
     assert "sum_logits" not in output
+
+
+def test_build_predictions_includes_answer_format_correct() -> None:
+    response = Response(
+        instance=Instance(question="Q", gold_answer="B"),
+        request=LMRequest(
+            request_type=RequestType.CHAT, messages=({"role": "user", "content": "Q"},)
+        ),
+        outputs=[LMOutput(text="the answer is B", metadata={"answer_format_correct": 0.5})],
+        scores={"exact_match": 1.0},
+    )
+
+    output = build_predictions([response])[0]["model_output"][0]
+
+    assert output["answer_format_correct"] == 0.5

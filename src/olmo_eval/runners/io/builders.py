@@ -99,6 +99,9 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 out_data["scoring_errors"] = meta["scoring_errors"]
             if "judge_result" in meta:
                 out_data["judge_result"] = meta["judge_result"]
+            # Whether the answer was stated in the requested format (scorer-set).
+            if "answer_format_correct" in meta:
+                out_data["answer_format_correct"] = meta["answer_format_correct"]
 
             model_output.append(out_data)
 
