@@ -16,9 +16,21 @@ import numpy as np
 
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.evals.vision.scoring.common import response_text
 from olmo_eval.evals.vision.scoring.count_parsing import extract_image_points
 
 logger = logging.getLogger(__name__)
+
+
+def require_scoring_dependencies() -> None:
+    """Import the mask-decode and matching backends, raising if either is missing.
+
+    Called when a pointing task builds its instances so an environment without
+    ``pycocotools``/``scipy`` fails before a model is loaded, rather than at the
+    first scored example.
+    """
+    from pycocotools import mask as mask_utils  # noqa: F401
+    from scipy.sparse.csgraph import maximum_bipartite_matching  # noqa: F401
 
 
 def decode_segmentation(seg: Any, height: int, width: int) -> np.ndarray | None:
@@ -114,11 +126,21 @@ class PointingScorer(Scorer):
     name: str = "pointing"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
+        meta = instance.metadata
+        if meta.get("image_size") is None:
+            # Every pointing task records this; its absence is a task bug, not bad
+            # data, so it must fail the run rather than score the example zero.
+            raise KeyError(
+                f"pointing instance {meta.get('example_id', '?')!r} has no image_size; "
+                "the task must record (width, height) in instance.metadata"
+            )
         try:
             return self._score(instance, output)
-        except Exception as exc:  # noqa: BLE001 — per-example zero, run continues
-            # The documented contract: a decoding/scoring failure scores that
-            # example zero (with the error recorded) rather than aborting the run.
+        except (ValueError, KeyError, TypeError, IndexError) as exc:
+            # Malformed ground truth scores that example zero with the error
+            # recorded. Everything else -- a missing pycocotools/scipy, or a bug
+            # in the scorer -- propagates so the runner records a scoring error
+            # instead of reporting a run of zeros as Success.
             logger.warning(
                 "Pointing scoring failed for %s: %s",
                 instance.metadata.get("example_id", "?"),
@@ -143,14 +165,7 @@ class PointingScorer(Scorer):
 
     def _score(self, instance: Instance, output: LMOutput) -> float:
         meta = instance.metadata
-        image_size = meta.get("image_size")
-        if image_size is not None:
-            image_w, image_h = int(image_size[0]), int(image_size[1])
-        else:
-            from PIL import Image
-
-            with Image.open(meta["image_path"]) as im:
-                image_w, image_h = im.size
+        image_w, image_h = (int(v) for v in meta["image_size"])
 
         # Decode the ground-truth masks for each annotator.
         annotator_masks: list[list[np.ndarray]] = []
@@ -164,7 +179,7 @@ class PointingScorer(Scorer):
 
         # Predicted points in image-pixel coordinates.
         points = np.asarray(
-            extract_image_points(_response_text(output), image_w, image_h), dtype=np.float64
+            extract_image_points(response_text(output).strip(), image_w, image_h), dtype=np.float64
         ).reshape(-1, 2)
 
         # Masks rarely live at a higher resolution than the image; rescale the predicted points

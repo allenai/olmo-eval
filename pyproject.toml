@@ -60,6 +60,7 @@ hf = [
     # COCO-RLE instance masks and scipy provides the point↔mask bipartite matching. Both are
     # imported lazily by the pointing scorer, so non-pointing HF runs don't need them at import.
     "pycocotools",
+    # Same pin as the `analysis` extra, so the two resolve together.
     "scipy~=1.17.1",
 ]
 olmo_core = [

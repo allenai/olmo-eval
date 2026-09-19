@@ -23,8 +23,9 @@ from typing import TYPE_CHECKING
 
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.types import Response
+from olmo_eval.common.types import Instance, Response
 from olmo_eval.evals.tasks.common.base import TaskConfig
+from olmo_eval.evals.vision.scoring.pointing import require_scoring_dependencies
 from olmo_eval.evals.vision.scoring.prompts import (
     POINTING_STYLE,
     apply_style_prefix,
@@ -46,9 +47,16 @@ class PointingTask(VisionTask):
 
     #: Image decoding builds the instances; the scorer decodes COCO-RLE masks with
     #: pycocotools and matches points to them with scipy. All three are needed
-    #: whichever provider runs the task, and a missing scorer dependency scores
-    #: every instance zero rather than failing the run.
+    #: whichever provider runs the task.
     dependencies = ["pillow", "pycocotools", "scipy"]
+
+    @property
+    def instances(self) -> Iterator[Instance]:
+        # Probe the scoring backends while preparing instances, so an environment
+        # missing pycocotools/scipy fails before a model is loaded instead of at
+        # the first scored example.
+        require_scoring_dependencies()
+        return super().instances
 
 
 class StylePrefixMixin:
@@ -178,6 +186,33 @@ class PointingMetric(Metric):
         return False
 
 
+@dataclass(frozen=True)
+class PointingErrorCountMetric(Metric):
+    """How many examples failed to score (malformed ground truth).
+
+    Reported alongside the point metrics so a partially unscorable run is visible
+    in ``metrics.json`` instead of only in the logs.
+    """
+
+    name: str  # type: ignore[misc]
+    scorer: Scorer  # type: ignore[misc]
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        return float(sum(1 for result in _pointing_results(responses) if result.get("error")))
+
+    def compute_instance(self, response: Response) -> float | None:
+        result = _pointing_result(response)
+        if result is None:
+            return None
+        return 1.0 if result.get("error") else 0.0
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+    def pairwise_display_format(self) -> str:
+        return "raw"
+
+
 def pointing_metrics(
     scorer: Scorer,
     *,
@@ -199,6 +234,7 @@ def pointing_metrics(
             PointingMetric(name=f"{bucket}_{kind}", scorer=scorer, kind=kind, bucket=bucket)
             for kind in _KINDS
         )
+    metrics.append(PointingErrorCountMetric(name="n_scoring_errors", scorer=scorer))
     return tuple(metrics)
 
 

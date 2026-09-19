@@ -200,11 +200,28 @@ class TestPointingPerInstanceMetrics:
         assert metrics["precision"].supports_pairwise_scorer_fallback() is False
 
     def test_weighted_metrics_store_none(self):
-        from olmo_eval.evals.vision.tasks.pointing import pointing_metrics
+        from olmo_eval.evals.vision.tasks.pointing import PointingMetric, pointing_metrics
 
         metrics = pointing_metrics(PointingScorer(), buckets=(), weighted_primary=True)
         response = self._response(self.RESULT)
-        assert all(m.compute_instance(response) is None for m in metrics)
+        weighted = [m for m in metrics if isinstance(m, PointingMetric)]
+        assert weighted, "expected the weighted precision/recall/f1 family"
+        # a weighted mean is not a mean of per-instance values, so it stores nothing
+        assert all(m.compute_instance(response) is None for m in weighted)
+
+    def test_scoring_error_count_is_reported(self):
+        from olmo_eval.evals.vision.tasks.pointing import pointing_metrics
+
+        metric = next(
+            m
+            for m in pointing_metrics(PointingScorer(), buckets=())
+            if m.name == "n_scoring_errors"
+        )
+        ok = self._response(self.RESULT)
+        failed = self._response({**self.RESULT, "error": "ValueError: bad rle"})
+        assert metric.compute_instance(ok) == 0.0
+        assert metric.compute_instance(failed) == 1.0
+        assert metric.compute([ok, failed, failed]) == 2.0
 
     def test_presence_metrics_store_membership_values(self):
         from olmo_eval.evals.vision.tasks.pointing import presence_metrics
@@ -292,3 +309,44 @@ class TestCountingPromptFamilies:
             task.config, prompt_templates="none", system_prompt_style="style_and_length_v2"
         )
         assert task._question_for("Cats", 3) == "point_count: cats"
+
+
+class TestPointingScoringDependencies:
+    def test_missing_backend_propagates_instead_of_scoring_zero(self, monkeypatch):
+        """A worker without pycocotools/scipy must fail, not score every instance zero."""
+        import builtins
+
+        from olmo_eval.evals.vision.scoring import pointing as pointing_scoring
+
+        real_import = builtins.__import__
+
+        def no_pycocotools(name, *args, **kwargs):
+            if name.startswith("pycocotools"):
+                raise ImportError("No module named 'pycocotools'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", no_pycocotools)
+        with pytest.raises(ImportError, match="pycocotools"):
+            pointing_scoring.require_scoring_dependencies()
+
+        instance = Instance(
+            question="Point to the cat.",
+            gold_answer=None,
+            metadata={
+                "example_id": "x",
+                "image_size": (10, 10),
+                "pointing_annotators": [[{"size": [10, 10], "counts": "abc"}]],
+            },
+        )
+        output = LMOutput(text='<point x="1" y="1" alt="cat">cat</point>')
+        with pytest.raises(ImportError, match="pycocotools"):
+            PointingScorer().score(instance, output)
+
+    def test_missing_image_size_is_a_hard_error(self):
+        instance = Instance(
+            question="Point to the cat.",
+            gold_answer=None,
+            metadata={"example_id": "y", "pointing_annotators": [[]]},
+        )
+        with pytest.raises(KeyError, match="image_size"):
+            PointingScorer().score(instance, LMOutput(text="none"))

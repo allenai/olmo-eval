@@ -11,14 +11,8 @@ from dataclasses import dataclass
 
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.evals.vision.scoring.common import response_text
 from olmo_eval.evals.vision.scoring.count_parsing import parse_count
-
-
-def _response_text(output: LMOutput) -> str:
-    answer = output.extracted_answer
-    if isinstance(answer, str) and answer:
-        return answer
-    return output.text or ""
 
 
 def _answers(instance: Instance) -> list[str]:
@@ -44,7 +38,7 @@ class PointCountScorer(Scorer):
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         gt = int(instance.metadata["count"])
-        pred_count = parse_count(_response_text(output))
+        pred_count = parse_count(response_text(output))
         result = {
             "correct": float(gt == pred_count),
             "close": float(abs(gt - pred_count) <= 1),

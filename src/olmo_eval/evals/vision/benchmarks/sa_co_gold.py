@@ -32,9 +32,7 @@ _METRICS = pointing_metrics(_SCORER, buckets=_BUCKETS, weighted_primary=True)
 
 #: The full gold test set carries no per-example weight, and its abstention behavior is
 #: reported alongside the point metrics.
-_POINT_METRICS = pointing_metrics(
-    _SCORER, buckets=_BUCKETS, weighted_primary=True
-) + presence_metrics(_SCORER)
+_POINT_METRICS = _METRICS + presence_metrics(_SCORER)
 
 
 def _format_query(text_input: str) -> str:
