@@ -64,7 +64,11 @@ def _extract_options(option_string: str) -> list[str]:
     for ix, (_, letter, answer) in enumerate(
         re.findall(r"(^|\n)([A-Z]):\s?([^\n]+)", option_string, flags=re.DOTALL | re.MULTILINE)
     ):
-        assert letter == string.ascii_uppercase[ix]
+        if letter != string.ascii_uppercase[ix]:
+            raise ValueError(
+                f"MMIU options are not in letter order at position {ix}: expected "
+                f"{string.ascii_uppercase[ix]!r}, got {letter!r} in {option_string!r}"
+            )
         matches.append(answer)
     return matches
 
@@ -85,10 +89,15 @@ class MmiuTask(MultiImageQATask):
         for idx in range(len(ds)):
             ex = ds[idx]
             images = tuple(str(images_root / path[len("./") :]) for path in ex["input_image_path"])
-            relationships = list({path.split("/")[1] for path in ex["input_image_path"]})
-            assert len(relationships) == 1, "It should only have one relationship"
-            relationship = relationships[0]
-            assert relationship in MMIU_RELATIONSHIPS, f"Unexpected relationship: {relationship}"
+            relationships = {path.split("/")[1] for path in ex["input_image_path"]}
+            if len(relationships) != 1:
+                raise ValueError(
+                    f"MMIU row {idx} spans multiple relationships {sorted(relationships)}: "
+                    f"{ex['input_image_path']}"
+                )
+            relationship = relationships.pop()
+            if relationship not in MMIU_RELATIONSHIPS:
+                raise ValueError(f"MMIU row {idx} has an unknown relationship {relationship!r}")
             options = _extract_options(ex["options"])
             prompt, _ = format_mc_question(ex["question"], options)
             yield Instance(

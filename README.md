@@ -718,15 +718,19 @@ BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
 
 ### Setup
 
-The multimodal providers live behind the `hf` extra:
+The multimodal providers live behind the `hf` and `olmo_core_vlm` extras, and the
+benchmarks' own scoring dependencies (`pycocotools`, `scipy`) behind `vision`, which
+every provider needs:
 
 ```bash
 # HuggingFace multimodal path
-uv sync --extra hf
+uv sync --extra hf --extra vision
 
 # Also evaluate OLMo-core MultimodalLM checkpoints
-uv sync --extra hf --extra olmo_core_vlm
+uv sync --extra hf --extra olmo_core_vlm --extra vision
 ```
+
+Beaker jobs install each task's scoring dependencies automatically.
 
 Image data is read from a **read-only** tree — loaders raise rather than build
 caches, so the data must already be staged:
@@ -734,6 +738,9 @@ caches, so the data must already be staged:
 ```bash
 export MOLMO_DATA_DIR=/weka/oe-training-default/mm-olmo  # this is the default
 ```
+
+A missing data root fails at task setup with the variable named, rather than
+reading a nonexistent path (the Ai2 defaults are tracked for removal in #381).
 
 Images live under `$MOLMO_DATA_DIR/torch_datasets/`. Manifests that recorded
 absolute paths on another machine are re-anchored under the current root

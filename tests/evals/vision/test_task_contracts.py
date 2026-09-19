@@ -281,3 +281,42 @@ class TestLazyMultiImageRequests:
         resolved = resolve_images((entry,))
         assert resolved is not None
         assert [img.size for img in resolved] == [(2, 2), (3, 2)]
+
+
+class TestMultiImageSubsetMetricsPerInstance:
+    """MuirBench categories, BLINK subtasks and MMIU buckets must not persist the
+    overall scorer value for instances outside their scope."""
+
+    def _response(self, metadata: dict, scorer_name: str):
+        return Response(
+            instance=Instance(question="q", gold_answer=None, metadata=metadata),
+            request=LMRequest(request_type=RequestType.CHAT, prompt="q"),
+            outputs=[LMOutput(text="A")],
+            scores={scorer_name: 1.0},  # poisoned channel
+        )
+
+    def test_category_metric_scopes_to_its_category(self):
+        from olmo_eval.evals.vision.scoring.multi_image import MultiImageMcScorer
+        from olmo_eval.evals.vision.tasks.multi_image import MultiImageCategoryMetric
+
+        scorer = MultiImageMcScorer()
+        ordering = MultiImageCategoryMetric(
+            name="ordering", scorer=scorer, field="task", category="Ordering"
+        )
+        overall = MultiImageCategoryMetric(name="all", scorer=scorer, field="task", category=None)
+        counting = self._response({"task": "Counting"}, scorer.name)
+        assert ordering.compute_instance(counting) is None
+        assert overall.compute_instance(counting) == 1.0
+        assert ordering.supports_pairwise_scorer_fallback() is False
+
+    def test_count_bucket_metric_scopes_to_its_bucket(self):
+        from olmo_eval.evals.vision.scoring.multi_image import MultiImageMcScorer
+        from olmo_eval.evals.vision.tasks.multi_image import MultiImageCountBucketMetric
+
+        scorer = MultiImageMcScorer()
+        small = MultiImageCountBucketMetric(name="le10", scorer=scorer, max_images=10)
+        large = MultiImageCountBucketMetric(name="gt20", scorer=scorer, min_images=20)
+        r = self._response({"num_images": 4}, scorer.name)
+        assert small.compute_instance(r) == 1.0
+        assert large.compute_instance(r) is None
+        assert large.supports_pairwise_scorer_fallback() is False

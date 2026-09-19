@@ -79,30 +79,6 @@ def lazy_hf_image_list(dataset, index: int, column: str):
     return functools.partial(_decode_hf_image_list_cell, dataset, index, column)
 
 
-def load_instance_images(instance: Instance) -> list:
-    """Resolve an instance's image list to PIL images.
-
-    ``instance.metadata["images"]`` may be a zero-arg callable returning the whole
-    list, or a sequence whose items are PIL images, zero-arg callables, or
-    filesystem paths.
-    """
-    images = instance.metadata.get("images")
-    if images is None:
-        return []
-    if callable(images):
-        images = images()
-    resolved = []
-    for image in images:
-        if callable(image):
-            image = image()
-        elif isinstance(image, str):
-            from PIL import Image
-
-            image = Image.open(image)
-        resolved.append(image)
-    return resolved
-
-
 def _capped_image_list(images: Any, max_images: int) -> list:
     """Resolve a metadata ``images`` value and cap it (module-level so it is picklable)."""
     if callable(images):

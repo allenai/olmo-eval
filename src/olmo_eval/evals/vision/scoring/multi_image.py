@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import string
 from collections import Counter
+from dataclasses import dataclass
 
+from olmo_eval.common.scorers.base import Scorer
+from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.evals.vision.scoring.common import response_text
 from olmo_eval.evals.vision.scoring.multiple_choice import parse_multi_choice_response
 
 
@@ -55,19 +59,6 @@ def multi_image_mc_score(
     return float(target == parsed_pred)
 
 
-from dataclasses import dataclass  # noqa: E402
-
-from olmo_eval.common.scorers.base import Scorer  # noqa: E402
-from olmo_eval.common.types import Instance, LMOutput  # noqa: E402
-
-
-def _response_text(output: LMOutput) -> str:
-    answer = output.extracted_answer
-    if isinstance(answer, str) and answer:
-        return answer
-    return output.text or ""
-
-
 @dataclass(frozen=True, slots=True)
 class MultiImageMcScorer(Scorer):
     """Accuracy of the parsed option letter against the gold letter."""
@@ -78,7 +69,7 @@ class MultiImageMcScorer(Scorer):
         meta = instance.metadata
         return multi_image_mc_score(
             meta["answer"],
-            _response_text(output),
+            response_text(output),
             list(meta.get("options") or []),
             stable_id=str(meta.get("example_id", "")),
         )

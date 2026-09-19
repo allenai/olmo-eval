@@ -113,6 +113,19 @@ class MultiImageCategoryMetric(Metric):
         ]
         return sum(vals) / len(vals) if vals else 0.0
 
+    def compute_instance(self, response: Response) -> float | None:
+        """The example's own score, or ``None`` when it is outside this category."""
+        if (
+            self.category is not None
+            and response.instance.metadata.get(self.field) != self.category
+        ):
+            return None
+        value = response.scores.get(self.scorer().name)
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
 
 @dataclass(frozen=True)
 class MultiImageCountBucketMetric(Metric):
@@ -135,6 +148,19 @@ class MultiImageCountBucketMetric(Metric):
                 continue
             vals.append(r.scores.get(scorer_name, 0.0))
         return sum(vals) / len(vals) if vals else 0.0
+
+    def compute_instance(self, response: Response) -> float | None:
+        """The example's own score, or ``None`` when it falls in another bucket."""
+        num_images = int(response.instance.metadata["num_images"])
+        if num_images <= self.min_images:
+            return None
+        if self.max_images is not None and num_images > self.max_images:
+            return None
+        value = response.scores.get(self.scorer().name)
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
 
 
 def multi_image_mc_metrics(
