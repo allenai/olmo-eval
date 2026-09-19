@@ -2,7 +2,7 @@
 
 OMEGA (https://arxiv.org/abs/2506.18880) evaluates exploratory,
 compositional, and transformative generalization in math. OMEGA-500 is a
-500-problem subset spanning the benchmark's sub-categories. Answers are
+500-problem batch generated from the exploratory templates. Answers are
 extracted from the response via a regex cascade and compared to the ground
 truth, with a strict metric that demotes answers not stated in the
 requested format and a flex metric that accepts them.
@@ -27,7 +27,7 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.data import DataSource
 from olmo_eval.evals.extract import ExtractedAnswer, extract_answer_with_format
-from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 _BOXED_SUFFIX = "\n\nPresent the answer in LaTex format: \\boxed{Your answer}"
 
@@ -78,10 +78,13 @@ def _extract(continuation: str) -> ExtractedAnswer:
     res = re.sub(r"\.\s*$", "", output).strip()
     for left, right in _DELIMITERS_TO_STRIP:
         res = re.sub(f"{re.escape(left)}(.*){re.escape(right)}", "\\1", res).strip()
+    # The leading wildcard search is quadratic when no boxed opener exists.
+    # Keep its cascade slot (and format score) with an impossible pattern.
+    answer_regexes = _ANSWER_REGEXES if "\\boxed{" in res else (r"(?!)", _ANSWER_REGEXES[1])
     return extract_answer_with_format(
         res,
         answer_format_regex=_ANSWER_FORMAT_REGEX,
-        answer_regexes=_ANSWER_REGEXES,
+        answer_regexes=answer_regexes,
         prefix_regexes=_PREFIX_REGEXES,
     )
 
@@ -152,7 +155,8 @@ class Omega500(Task):
             question=question,
             gold_answer=str(doc["ground_truth"]),
             metadata={
-                "id": doc.get("index", index),
+                "id": doc.get("id", doc.get("index", index)),
+                "family": doc.get("family", doc.get("setting_key")),
                 "dataset": doc.get("dataset"),
             },
         )
@@ -163,3 +167,17 @@ class Omega500(Task):
 
     def extract_answer(self, output: LMOutput) -> str:
         return _extract(output.text or "").answer
+
+
+# Distinct identity: the AllenAI snapshot changes some questions and answers.
+# The development protocol caps generations at 32K by default.
+register_variant(
+    "omega_500",
+    "hillclimb",
+    sampling_params=SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95),
+    data_source=DataSource(
+        path="allenai/omega-500",
+        revision="113a7eb896b8c1f7d781eb5f00713972074bae42",
+    ),
+    primary_metric=AccuracyMetric(name="exact_match", scorer=_STRICT),
+)

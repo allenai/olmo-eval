@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.evals.tasks import omega_500
 from olmo_eval.evals.tasks.common import get_task
 from olmo_eval.evals.tasks.omega_500 import _FLEX, _STRICT
 
@@ -25,6 +26,15 @@ class TestOmega500Task(unittest.TestCase):
         primary = task.config.get_primary_metric()
         assert primary is not None
         self.assertEqual(primary.name, "exact_match_flex")
+        self.assertIsNone(task.config.sampling_params.max_tokens)
+        self.assertEqual(task.config.data_source.path, "saumyamalik/omega-500")
+        hillclimb = get_task("omega_500:hillclimb")
+        self.assertEqual(hillclimb.config.get_primary_metric().name, "exact_match")
+        self.assertEqual(hillclimb.config.get_data_source().path, "allenai/omega-500")
+        self.assertEqual(
+            hillclimb.config.get_data_source().revision, "113a7eb896b8c1f7d781eb5f00713972074bae42"
+        )
+        self.assertEqual(hillclimb.config.sampling_params.max_tokens, 32768)
 
     def test_process_doc(self) -> None:
         task = get_task("omega_500")
@@ -117,6 +127,38 @@ class TestOmegaScorers(unittest.TestCase):
 
         self.assertEqual(OmegaExactMatchScorer(flex=True).name, "exact_match_flex")
         self.assertEqual(OmegaExactMatchScorer().name, "exact_match")
+
+
+class TestOmegaAnswerPrefixes(unittest.TestCase):
+    def test_stable_dataset_id(self):
+        task = get_task("omega_500")
+        instance = task.process_doc(
+            {
+                "id": "omega_500_001",
+                "ground_truth": "42",
+                "family": "arithmetic_gcd",
+                "messages": [{"role": "user", "content": "q"}],
+            },
+            index=99,
+        )
+        self.assertEqual(instance.metadata["id"], "omega_500_001")
+        self.assertEqual(instance.metadata["family"], "arithmetic_gcd")
+
+
+def test_unboxed_fast_path_matches_reference_cascade(monkeypatch):
+    cases = [
+        "reasoning\n" * 200 + ending
+        for ending in ("", "answer: 42", "Therefore, the final answer is 42", "answer is:\n42")
+    ] + [r"\boxed{4}", r"first \boxed{3} then \boxed{4}", r"unfinished \boxed{"]
+    actual = [omega_500._extract(text) for text in cases]
+    original = omega_500.extract_answer_with_format
+
+    def reference(text, **kwargs):
+        kwargs["answer_regexes"] = omega_500._ANSWER_REGEXES
+        return original(text, **kwargs)
+
+    monkeypatch.setattr(omega_500, "extract_answer_with_format", reference)
+    assert actual == [omega_500._extract(text) for text in cases]
 
 
 if __name__ == "__main__":

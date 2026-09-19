@@ -297,6 +297,27 @@ class TestVLLMServerProviderLogprobs:
         assert "extra_body" not in call_kwargs
 
     @pytest.mark.anyio
+    async def test_chat_logprobs_preserve_termination_and_usage(self, provider):
+        provider.chat_template_kwargs = None
+        response = self._make_chat_response()
+        response.usage = SimpleNamespace(prompt_tokens=12, completion_tokens=1)
+        choice = response.choices[0]
+        choice.finish_reason = "length"
+        choice.logprobs = SimpleNamespace(
+            content=[SimpleNamespace(token="reply", logprob=-0.5, bytes=None)]
+        )
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=response)
+        request = LMRequest(
+            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+        )
+        outputs = await provider._generate_chat(client, request, SamplingParams(max_tokens=1))
+        assert outputs[0].metadata["finish_reason"] == "length"
+        assert outputs[0].metadata["completion_tokens"] == 1
+        assert outputs[0].metadata["prompt_tokens"] == 12
+        assert outputs[0].metadata["sum_logits"] == -0.5
+
+    @pytest.mark.anyio
     async def test_generate_chat_preserves_exact_explicit_truncation(self, provider):
         """Chat generation forwards caller-requested truncation without tightening it."""
         provider.chat_template_kwargs = None
