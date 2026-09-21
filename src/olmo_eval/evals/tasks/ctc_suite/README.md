@@ -24,9 +24,9 @@ uv run olmo-eval run -m <model> -t ctc:oolong       # one task's whole ladder
 uv run olmo-eval run -m <model> -t ctc:xlong        # everything above 32k (69 runs)
 
 # suites -- by corpus-tracking demand (the axis the suite is named for)
-uv run olmo-eval run -m <model> -t ctc:low          # the 11 O(N) rows, every rung (102 runs)
-uv run olmo-eval run -m <model> -t ctc:high         # the 11 O(N^2)+ rows, every rung (75 runs)
-uv run olmo-eval run -m <model> -t ctc:high:figure  # ... 2k-32k only (53 runs)
+uv run olmo-eval run -m <model> -t ctc:low          # the 12 O(N) rows, every rung (106 runs)
+uv run olmo-eval run -m <model> -t ctc:high         # the 10 O(N^2)+ rows, every rung (71 runs)
+uv run olmo-eval run -m <model> -t ctc:high:figure  # ... 2k-32k only (49 runs)
 uv run olmo-eval run -m <model> -t ctc:low:xlong    # the two axes compose (47 runs)
 
 uv run olmo-eval run -m <model> -t ctc              # all 177 task x rung combinations
@@ -34,10 +34,10 @@ uv run olmo-eval run -m <model> -t ctc              # all 177 task x rung combin
 
 ## low-CTC vs high-CTC
 
-`ctc:low` is the 11 rows where an answer-bearing document exists and the work is finding it --
-O(N) in corpus size, and in principle solvable by a retriever. `ctc:high` is the 11 rows where the
+`ctc:low` is the 12 rows where an answer-bearing document exists and the work is finding it --
+O(N) in corpus size, and in principle solvable by a retriever. `ctc:high` is the 10 rows where the
 answer is a *relation over* documents with no single span to retrieve: every contradicting pair
-(O(N^2)), the clustering of everything (O(NM)), the planted triple (O(N^3)). The split is 11/11,
+(O(N^2)), the clustering of everything (O(NM)), the planted triple (O(N^3)). The split is 12/10,
 declared per row as `RosterRow.ctc_class` and pinned by test; the per-row `complexity` field
 records which class of the four it is.
 
@@ -59,10 +59,11 @@ and a cross-task average would be meaningless.
 | ctc_rerank | O(N) | **ce_pos_recall** | 512k | see metric note below |
 | ctc_oolong | O(N) | partial credit | 1M | aggregate questions over a line stream |
 | ctc_outlier_amzn, ctc_outlier_fixedm | O(N) | f1 (set) | 1M / 512k | fixed-K controls |
+| ctc_absence | O(N) | f1 (set) | 16k | deleted sentences, versions aligned and in order |
 | ctc_outlier | O(NM) | f1 (set) | 1M | K grows with N (~n/9) — the scale-K row |
 | ctc_qdmatch_fiqa/nq/hpqa | O(N²) | pair f1 | 512k / 1M / 256k | query↔document matching |
 | ctc_contradiction | O(N²) | f1 (pairs) | 1M | PubMed claims, IID realistic mode |
-| ctc_absence, ctc_xabsence | O(N²) | f1 (set) | 16k / 32k | deletion / exact-copy-orphan detection |
+| ctc_xabsence | O(N²) | f1 (set) | 32k | exact-copy orphans across two unordered corpora |
 | ctc_strmatch | O(N²) | f1 (pairs) | 32k | planted shared word-runs |
 | ctc_reorder | O(N²) | kendall tau | 16k | restore reading order |
 | ctc_grouping | O(NM) | pairwise f1 | 32k | cluster abstracts |
