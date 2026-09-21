@@ -47,14 +47,22 @@ BASELINE_CATEGORY = "baseline"
 _RUNTIME_LOCK = threading.Lock()
 _runtime_ready = False
 
-#: A reference equation that must render for the math tests to be runnable at all.
-_PROBE_EQUATION = r"e^{i\pi} + 1 = 0"
+#: Renders a reference equation, exiting non-zero when the browser cannot be started. It
+#: runs in a fresh interpreter because the renderer keeps one Playwright per pool thread and
+#: a failed launch leaves that thread unusable, so a probe must not share threads with the
+#: retry after installing the browser, or with the scoring that follows.
+_PROBE_SCRIPT = r"""
+import sys
+from olmocr.bench.katex.render import render_equation
+sys.exit(0 if render_equation(r"e^{i\pi} + 1 = 0", use_cache=False) is not None else 1)
+"""
 
 
-def _probe_render() -> bool:
-    from olmocr.bench.katex.render import render_equation
-
-    return render_equation(_PROBE_EQUATION, use_cache=False) is not None
+def _probe_render() -> tuple[bool, str]:
+    proc = subprocess.run(
+        [sys.executable, "-c", _PROBE_SCRIPT], capture_output=True, text=True, timeout=600
+    )
+    return proc.returncode == 0, (proc.stderr or proc.stdout).strip()[-1500:]
 
 
 def ensure_olmocr_bench_runtime() -> None:
@@ -74,28 +82,22 @@ def ensure_olmocr_bench_runtime() -> None:
                 "olmOCR-bench scoring needs the official scorer: pip install 'olmocr[bench]' numpy"
             ) from exc
 
-        try:
-            ready = _probe_render()
-        except Exception as exc:
-            logger.info("KaTeX render probe failed (%s); installing Chromium", exc)
-            ready = False
+        ready, detail = _probe_render()
         if not ready:
+            logger.info("KaTeX render probe failed; installing Chromium. %s", detail)
             for extra in ([], ["--with-deps"]):
                 cmd = [sys.executable, "-m", "playwright", "install", *extra, "chromium"]
                 logger.info("Running: %s", " ".join(cmd))
                 subprocess.run(cmd, check=False)
-                try:
-                    ready = _probe_render()
-                except Exception as exc:
-                    logger.warning("KaTeX render probe still failing: %s", exc)
-                    ready = False
+                ready, detail = _probe_render()
                 if ready:
                     break
+                logger.warning("KaTeX render probe still failing: %s", detail)
         if not ready:
             raise RuntimeError(
                 "olmOCR-bench math tests need a headless Chromium for KaTeX rendering and it "
                 "could not be started. Install it with "
-                "`python -m playwright install --with-deps chromium`."
+                f"`python -m playwright install --with-deps chromium`. Last error:\n{detail}"
             )
         _runtime_ready = True
 
