@@ -207,6 +207,7 @@ class CcOcrTask(OcrTask):
                 gold_answer=row["answer"],
                 metadata={
                     # Image names repeat across sub-datasets; only the triple is unique.
+                    "id": f"{track}/{row['split']}/{row['image_name']}",
                     "example_id": f"{track}/{row['split']}/{row['image_name']}",
                     "track": track,
                     "dataset": row["split"],

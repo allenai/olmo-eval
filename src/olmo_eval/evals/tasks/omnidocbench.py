@@ -197,6 +197,7 @@ class OmniDocBenchTask(OcrTask):
                 question=question,
                 gold_answer=None,
                 metadata={
+                    "id": image_name,
                     "example_id": image_name,
                     "image_name": image_name,
                     "image_path": str(data_dir / "images" / image_name),

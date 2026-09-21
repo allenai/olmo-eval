@@ -150,6 +150,7 @@ class OlmocrBenchTask(OcrTask):
                     question=self._question(BASIC_PROMPT),
                     gold_answer=None,
                     metadata={
+                        "id": pdf,
                         "example_id": pdf,
                         "pdf": pdf,
                         "tests": tests,
