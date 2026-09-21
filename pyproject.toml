@@ -36,6 +36,9 @@ dependencies = [
     # syllapy (transitive via ifbench) imports pkg_resources, which setuptools>=81 removes.
     "setuptools<81",
     "bm25s>=0.3.9",
+    # ruler_loader uses huggingface_hub.utils.silent_tqdm, added in 1.10.0. Without a
+    # floor, an unlocked resolve can drop to transformers 4.x and hub 0.x.
+    "huggingface-hub>=1.10.0",
 ]
 
 [project.urls]
@@ -48,10 +51,24 @@ crawl4ai = [
     "crawl4ai>=0.8",
 ]
 hf = [
-    "transformers>=5.4.0",
+    "transformers>=5.4.0,<5.13",
+    # Required by the released Molmo2 remote code (image_processing_molmo2.py imports both at
+    # module top); not pulled transitively, so declare them here for the HF multimodal path.
+    "einops",
+    "torchvision ; platform_system != 'Darwin'",  # GPU-coupled; skip on macOS like the vllm extra
 ]
 olmo_core = [
     "ai2-olmo-core[torchao,transformers]==2.4.0",
+    # The conflicting olmo_core_vlm extra's git-pinned OLMo-core requires
+    # torchao==0.15.0; without this pin uv unifies both resolution forks on
+    # 0.15.0 and silently downgrades the text provider from main's 0.17.0.
+    "torchao==0.17.0",
+]
+# The multimodal classes (olmo_core.nn.vision, molmo2_loader) are not in any
+# ai2-olmo-core release yet; pin the vision branch by commit so the declared
+# install supports OlmoCoreVLMProvider. Collapse into `olmo_core` once released.
+olmo_core_vlm = [
+    "ai2-olmo-core[torchao,transformers] @ git+https://github.com/allenai/OLMo-core.git@2dad929acb742faaa566a173f3484ff760c3ca07",
 ]
 vllm = [
     # vllm + its companions are Linux/CUDA-only; skip on macOS so the lockfile
@@ -59,6 +76,9 @@ vllm = [
     "vllm[runai]==0.19.1 ; platform_system != 'Darwin'",  # runai extras enable S3 model loading
     "opencv-python-headless==4.13.0.92 ; platform_system != 'Darwin'",  # Required to avoid libxcb import error
     "torch-c-dlpack-ext ; platform_system != 'Darwin'",  # Required for TVM tensor allocation in vLLM
+    # transformers 5.13 nests rope_parameters per layer type; vLLM 0.19.1 reads it flat,
+    # so Olmo-3 (mixed sliding/full attention) fails to load with a rope_theta KeyError.
+    "transformers<5.13 ; platform_system != 'Darwin'",
 ]
 litellm = [
     "litellm~=1.80.11",
@@ -132,11 +152,19 @@ conflicts = [
         { extra = "clients" },
         { extra = "openhands" },
     ],
+    [
+        { extra = "olmo_core" },
+        { extra = "olmo_core_vlm" },
+    ],
+    [
+        { extra = "olmo_core_vlm" },
+        { extra = "openhands" },
+    ],
 ]
 
 [tool.setuptools.package-data]
 "olmo_eval.analysis.pairwise_viewer" = ["static/*.css", "static/*.js", "templates/*.html"]
-"olmo_eval.evals.tasks" = ["*.jsonl"]
+"olmo_eval.evals.tasks" = ["*.jsonl", "*.json"]
 
 [dependency-groups]
 dev = [
@@ -153,8 +181,14 @@ dev = [
 ]
 # Mirror of the `vllm` extra as a uv dependency group so it can be enabled by
 # default for GPU/CI workflows while still being installable via pip extras.
+# Listed directly rather than as `olmo-eval[vllm]`: the extra participates in
+# the declared conflicts, and uv gates a conflicting extra's edges behind
+# opt-in markers — routed through the extra, the default group resolved to
+# nothing and `uv sync` silently installed no vllm.
 vllm = [
-    "olmo-eval[vllm]",
+    "vllm[runai]==0.19.1 ; platform_system != 'Darwin'",
+    "opencv-python-headless==4.13.0.92 ; platform_system != 'Darwin'",
+    "torch-c-dlpack-ext ; platform_system != 'Darwin'",
 ]
 
 [tool.ruff]
@@ -198,6 +232,8 @@ select = [
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
 # Verbatim prompt template from the oe-eval/ZeroEval reference implementation
 "src/olmo_eval/evals/tasks/zebralogic.py" = ["E501", "W291"]
+# Verbatim prompt templates vendored from the mm_olmo reference implementation
+"src/olmo_eval/evals/vision/scoring/prompt_templates.py" = ["E501"]
 [tool.ruff.format]
 docstring-code-format = true
 

@@ -13,4 +13,4 @@
 # Testing
 
 - Adapt tests to match source code, not the reverse
-- Ask before adding or modifying tests alongside functional changes
+- Always add unit tests for new code
