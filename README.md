@@ -666,7 +666,7 @@ olmo-eval evaluates vision-language models on image benchmarks. Tasks attach ima
 to `LMRequest.images` and the provider decides how to render them, so the task
 definition is the same regardless of which multimodal provider runs it.
 
-Four families of image tasks are built in:
+Five families of image tasks are built in:
 
 | Family | Suite | Tasks |
 | --- | --- | --- |
@@ -674,6 +674,7 @@ Four families of image tasks are built in:
 | Dense caption | `molmo2_imageqa_caption` | the image-QA tasks plus `dense_caption` |
 | Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
 | Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
+| Document OCR | `ocr` | `olmocr_bench`, `cc_ocr`, `omnidocbench` |
 
 Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
 `dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
@@ -684,6 +685,28 @@ per instance (capped at 20, matching the mm_olmo eval config) and score multiple
 choice answers by MMMU-style option-letter parsing; besides the primary `all`
 accuracy each task reports per-category breakdowns (MuirBench's 12 task types,
 BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
+
+Document-OCR tasks hand the model one page image and grade the markdown (or JSON)
+it writes back, each with its benchmark's official scoring:
+
+- `olmocr_bench` — [olmOCR-bench](https://huggingface.co/datasets/allenai/olmOCR-bench):
+  1,403 PDF pages and 7,019 unit tests (text presence/absence, reading order, table
+  cells, rendered math). Tests run through the official `olmocr` scorer; `overall` is
+  the mean of the eight category pass rates (0-1). Math tests render with KaTeX in a
+  headless Chromium, which is installed on first use.
+- `cc_ocr` — [CC-OCR](https://huggingface.co/datasets/wulipc/CC-OCR): 7,058 images
+  across four tracks (multi-scene OCR, multilingual OCR, document parsing, key
+  information extraction). `overall` is the mean of the four track scores (0-1);
+  `cc_ocr_<track>` runs a single track.
+- `omnidocbench` — [OmniDocBench](https://github.com/opendatalab/OmniDocBench) v1.6:
+  1,651 pages scored by the pinned official evaluator, which runs in a virtualenv of its
+  own (needs `git` and `uv`). `overall` is the leaderboard's 0-100 number, which is why
+  the `ocr` suite is display-only. Its formula metric (CDM) needs `pdflatex`,
+  ImageMagick 7 and Ghostscript; `omnidocbench_no_cdm` runs without them and reports
+  every other metric.
+
+The OCR datasets are downloaded from the Hugging Face Hub at pinned revisions rather
+than read from `$MOLMO_DATA_DIR`.
 
 ### Setup
 

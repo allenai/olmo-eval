@@ -259,6 +259,12 @@ allowed-unresolved-imports = [
     "instructions_registry.**",
     "instructions.**",
     "crawl4ai.**",
+    "olmocr.**",
+    "pymupdf.**",
+    "rapidfuzz.**",
+    "apted.**",
+    "lxml.**",
+    "zss.**",
 ]
 
 [tool.gantry]
