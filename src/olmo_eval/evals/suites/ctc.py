@@ -11,8 +11,8 @@ Two independent axes cut the suite, and the names keep them separate:
 *Corpus-tracking demand* -- how much of the corpus must be held at once, the axis the suite is
 named for (see :class:`olmo_eval.evals.tasks.ctc_suite.CTCClass`):
 
-* ``ctc:low``      -- the 11 O(N) rows: an answer-bearing document exists and retrieval finds it
-* ``ctc:high``     -- the 11 O(N^2)/O(NM)/O(N^3) rows: the answer is a relation over documents
+* ``ctc:low``      -- the 12 O(N) rows: an answer-bearing document exists and retrieval finds it
+* ``ctc:high``     -- the 10 O(N^2)/O(NM)/O(N^3) rows: the answer is a relation over documents
 
 The two axes compose, so the length-restricted forms are registered as well -- ``ctc:low:figure``,
 ``ctc:high:figure``, ``ctc:low:xlong``, ``ctc:high:xlong``. ``ctc:high:figure`` is the cheap

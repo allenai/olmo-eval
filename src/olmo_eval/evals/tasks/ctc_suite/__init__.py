@@ -121,8 +121,9 @@ class CTCClass(StrEnum):
     :data:`LOW` rows are answerable by finding the right document(s) -- work that scales O(N) in
     corpus size and that a retriever could in principle do -- while :data:`HIGH` rows require
     relating documents to each other (O(N^2) pair-finding, O(NM) clustering, O(N^3) triples) and
-    have no single answer-bearing span. The split is 11/11 and is what ``ctc:low`` / ``ctc:high``
-    select; it is orthogonal to context length, which ``ctc:figure`` / ``ctc:xlong`` select.
+    have no single answer-bearing span. The split is 12 low / 10 high and is what ``ctc:low`` /
+    ``ctc:high`` select; it is orthogonal to context length, which ``ctc:figure`` / ``ctc:xlong``
+    select.
     """
 
     LOW = "low"
@@ -256,12 +257,16 @@ ROSTER: dict[str, RosterRow] = {
         spec="grouping",
     ),
     "ctc_absence": RosterRow(
-        ctc_class=CTCClass.HIGH,
-        complexity="O(N^2)",
+        ctc_class=CTCClass.LOW,
+        complexity="O(N)",
         subset="absence_gutenberg",
         spec="absence",
         rungs=("r2k", "r4k", "r8k", "r16k"),
-        note="corpus is a contiguous Gutenberg passage; rung ceiling is bounded by book length",
+        note="corpus is a contiguous Gutenberg passage; rung ceiling is bounded by book length. "
+        "LOW despite the absence framing: the modified version is the original in the same order "
+        "with whole sentences deleted, so the deletions fall out of a single aligned pass -- O(N). "
+        "Contrast ctc_xabsence, whose two corpora are unordered, so every item has to be checked "
+        "against every item in the other corpus",
     ),
     "ctc_xabsence": RosterRow(
         ctc_class=CTCClass.HIGH,
