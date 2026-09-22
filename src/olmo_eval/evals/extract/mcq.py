@@ -5,6 +5,11 @@ pattern that hits wins.  Priority reflects specificity — explicit
 instruction-following and LaTeX formats are unambiguous, while
 parenthesised or bold letters appear throughout running text and are
 used only as fallbacks.
+
+This is olmo-eval's native extractor (used by BBQ, WMDP, MedQA). Tasks
+ported for parity with oe-eval use ``answer_format.extract_answer_with_format``
+instead, whose cascade and priority order mirror oe-eval's and yield
+different answers on the same text.
 """
 
 import re

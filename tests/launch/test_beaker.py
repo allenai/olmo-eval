@@ -151,14 +151,14 @@ class TestBeakerJobConfig:
             command=["echo", "hello"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
         )
         assert config.name == "test-job"
         assert config.command == ["echo", "hello"]
         assert config.num_gpus == 0
         assert config.cluster == "h100"
         assert config.workspace == "ai2/oe-data"
-        assert config.budget == "ai2/oe-base"
+        assert config.budget == "ai2/oe-other"
         assert config.priority == "normal"
         assert config.preemptible is True
         assert config.timeout == "24h"
@@ -199,7 +199,7 @@ class TestBeakerJobConfig:
             command=["echo"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
         )
         # Just verify defaults exist and have valid mount paths
         assert len(config.weka_buckets) >= 1
@@ -214,7 +214,7 @@ class TestBeakerJobConfig:
             command=["echo"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
         )
         # env_secrets defaults to empty list; secrets are injected during launch
         assert len(config.env_secrets) == 0
@@ -509,7 +509,7 @@ class TestBeakerJobConfigTaskPackages:
             command=["echo"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
         )
         assert config.task_packages is None
 
@@ -520,7 +520,7 @@ class TestBeakerJobConfigTaskPackages:
             command=["echo"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
             task_packages=["special-lib==1.0", "git+https://github.com/user/repo"],
         )
         assert config.task_packages == ["special-lib==1.0", "git+https://github.com/user/repo"]
@@ -560,6 +560,28 @@ class TestBuildCommandWithTaskPackages:
         provider_pos = install_cmd.find("uv pip install 'vllm==0.14.0'")
         task_pos = install_cmd.find("uv pip install 'task-dep==1.0'")
         assert provider_pos < task_pos
+
+    def test_cuda_constraints_exclude_torch_companions_and_cutlass(self):
+        """Only Torch itself and the CUDA packages are pinned to the base image.
+
+        Provider releases pin torchvision/torchaudio alongside their Torch
+        generation, and vLLM pins CUTLASS DSL independently of Torch's CUDA
+        package set, so neither may be frozen to the image's build.
+        """
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=[],
+            env_exports=None,
+            provider_packages=["vllm==0.14.0"],
+        )
+
+        assert (
+            "uv pip freeze -q | grep -E '^(torch(==| @ )|nvidia-)' "
+            "| grep -vE '^nvidia-cutlass-dsl' > /tmp/cuda-constraints.txt"
+        ) in install_cmd
+        assert "grep -E '^(torch|nvidia-)' > /tmp/cuda-constraints.txt" not in install_cmd
 
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""

@@ -18,6 +18,24 @@ WORKER_FATAL = "__WORKER_FATAL__"
 DEFAULT_SCORING_CONCURRENCY = 8
 
 
+def summarize_failed_instances(failed_instances: dict[int, str]) -> str | None:
+    """Summarize hard-failed instances as one human-readable line.
+
+    Args:
+        failed_instances: Dict of instance_idx -> error message.
+
+    Returns:
+        A summary string, or None when nothing failed.
+    """
+    if not failed_instances:
+        return None
+    if len(failed_instances) == 1:
+        idx, err = next(iter(failed_instances.items()))
+        return f"Instance {idx} failed: {err}"
+    first_error = next(iter(failed_instances.values()))
+    return f"{len(failed_instances)} instances failed (first: {first_error})"
+
+
 @dataclass
 class QueueItem:
     """Single instance ready for generation."""
@@ -63,18 +81,6 @@ class TaskTracker:
         self.failed_instances[idx] = error
         return self.is_complete()
 
-    def get_error_summary(self) -> str | None:
-        """Get summary of failures, if any."""
-        if self.error:
-            return self.error
-        if not self.failed_instances:
-            return None
-        if len(self.failed_instances) == 1:
-            idx, err = next(iter(self.failed_instances.items()))
-            return f"Instance {idx} failed: {err}"
-        first_error = next(iter(self.failed_instances.values()))
-        return f"{len(self.failed_instances)} instances failed (first: {first_error})"
-
 
 @dataclass
 class ResultItem:
@@ -97,4 +103,5 @@ __all__ = [
     "QueueItem",
     "TaskTracker",
     "ResultItem",
+    "summarize_failed_instances",
 ]

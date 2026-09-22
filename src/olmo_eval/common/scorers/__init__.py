@@ -14,6 +14,7 @@ from .base import (
     Scorer,
     SQuADF1Scorer,
 )
+from .bfcl import BFCLScorer
 from .citation import (
     CITATION_GROUP_PROMPT,
     JUST_HAS_A_TITLE,
@@ -22,7 +23,12 @@ from .citation import (
     score_citations_for_sections,
 )
 from .code_execution import CodeExecutionScorer, MultiplEScorer
-from .execution import ContextScorer, ExecutionScorer, SandboxRequiredError
+from .execution import (
+    ContextScorer,
+    ExecutionScorer,
+    SandboxRequiredError,
+    ScoringIncompleteError,
+)
 from .ifeval import IFEvalScorer
 from .llm_judge import (
     JudgeFn,
@@ -33,6 +39,7 @@ from .llm_judge import (
     SimpleQAJudgeScorer,
     build_openai_judge_fn,
 )
+from .ngram_copying import NGramCopyingBPBScorer, compute_repeated_ngram_mask
 from .retrieval import NDCGScorer, ndcg_at_k
 from .rouge import RougeLF1Scorer, RougeLRecallScorer
 from .substring import SubstringExactMatchScorer, SubstringRecallScorer
@@ -49,11 +56,13 @@ from .trajectory import (
 )
 
 __all__ = [
+    "BFCLScorer",
     "BitsPerByteScorer",
     "build_openai_judge_fn",
     "CITATION_GROUP_PROMPT",
     "CodeExecutionScorer",
     "compute_citation_scores_from_groups",
+    "compute_repeated_ngram_mask",
     "ContextScorer",
     "ExactMatchFlexScorer",
     "ExactMatchScorer",
@@ -70,6 +79,7 @@ __all__ = [
     "MultiplEScorer",
     "NDCGScorer",
     "ndcg_at_k",
+    "NGramCopyingBPBScorer",
     "PerplexityScorer",
     "ProcessScorer",
     "RougeLF1Scorer",
@@ -77,6 +87,7 @@ __all__ = [
     "RubricJudgeScorer",
     "SafetyScorer",
     "SandboxRequiredError",
+    "ScoringIncompleteError",
     "score_citation_group",
     "score_citations_for_sections",
     "Scorer",

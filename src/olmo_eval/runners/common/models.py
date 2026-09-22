@@ -54,6 +54,11 @@ class TaskMetricsEntry(Serializable):
     config: dict[str, Any] | None = None
     duration_seconds: float | None = None
     task_hash: str | None = None
+    # Saved-vs-processed accounting; see TaskResult for the exact definitions.
+    instances_saved: int | None = None
+    instances_processed: int | None = None
+    instances_failed: int | None = None
+    error_summary: str | None = None
 
 
 @dataclass

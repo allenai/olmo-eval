@@ -7,7 +7,8 @@ updates:
       interval: "weekly"
       day: "monday"
     rebase-strategy: "disabled"
-    open-pull-requests-limit: 10
+    # Temporarily disabled: a limit of 0 stops Dependabot from opening new PRs
+    open-pull-requests-limit: 0
     groups:
       dev-dependencies:
         patterns:
@@ -41,7 +42,8 @@ updates:
       interval: "weekly"
       day: "monday"
     rebase-strategy: "disabled"
-    open-pull-requests-limit: 5
+    # Temporarily disabled: a limit of 0 stops Dependabot from opening new PRs
+    open-pull-requests-limit: 0
     groups:
       actions:
         patterns:
