@@ -23,7 +23,7 @@ make_suite(
     description="Deterministic 10% sample of the long-context StateBench tasks.",
 )
 
-for _complexity in ("aperiodic", "periodic", "r-trivial"):
+for _complexity in ("aperiodic", "periodic", "r-trivial", "solvable"):
     make_suite(
         name=f"state_bench:{_complexity.replace('-', '_')}",
         tasks=tuple(
@@ -50,6 +50,7 @@ for _complexity in ("aperiodic", "periodic", "r-trivial"):
 for _formatter in (
     "cube-painting",
     "integer-code",
+    "integer-code-modular",
     "people-in-rooms",
     "ruler",
     "spreadsheet-cells",

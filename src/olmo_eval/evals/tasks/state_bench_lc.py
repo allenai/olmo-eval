@@ -12,7 +12,17 @@ from olmo_eval.common.types import Instance, LMRequest, RequestType
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register
 
-STATE_BENCH_REPO = "jacksonp-ai2/state-bench-lc"
+STATE_BENCH_REPO = "allenai/state-bench"
+# The solvable family is a separate state-bench build (configs/experiments/solvable.yaml)
+# rendered with the zero-based integer-code-modular formatter; it is published to its
+# own dataset repository with the same config/split layout.
+STATE_BENCH_SOLVABLE_REPO = "jacksonp-ai2/state-bench-solvable"
+
+STATE_BENCH_SOLVABLE_CONFIGS = (
+    "integer-code-modular--aperiodic",
+    "integer-code-modular--r-trivial",
+    "integer-code-modular--solvable",
+)
 
 STATE_BENCH_CONFIGS = (
     "cube-painting--aperiodic",
@@ -33,7 +43,17 @@ STATE_BENCH_CONFIGS = (
     "status-lights--aperiodic",
     "status-lights--periodic",
     "status-lights--r-trivial",
+    *STATE_BENCH_SOLVABLE_CONFIGS,
 )
+
+STATE_BENCH_REPO_BY_CONFIG = {
+    config_name: (
+        STATE_BENCH_SOLVABLE_REPO
+        if config_name in STATE_BENCH_SOLVABLE_CONFIGS
+        else STATE_BENCH_REPO
+    )
+    for config_name in STATE_BENCH_CONFIGS
+}
 
 STATE_BENCH_TOKEN_STRATA = (
     "tokens_under_2k",
@@ -159,7 +179,7 @@ for _config_name in STATE_BENCH_CONFIGS:
             (StateBench,),
             {
                 "data_source": DataSource(
-                    STATE_BENCH_REPO,
+                    STATE_BENCH_REPO_BY_CONFIG[_config_name],
                     subset=_config_name,
                     split=_dataset_split,
                 ),
@@ -177,7 +197,7 @@ for _config_name in STATE_BENCH_CONFIGS:
             (StateBench10Percent,),
             {
                 "data_source": DataSource(
-                    STATE_BENCH_REPO,
+                    STATE_BENCH_REPO_BY_CONFIG[_config_name],
                     subset=_config_name,
                     split=_dataset_split,
                 ),
