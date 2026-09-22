@@ -5,19 +5,18 @@ predicted markdown into text blocks, display formulas and tables, matching them 
 annotated blocks, and measuring text edit distance, table TEDS, formula CDM and
 reading-order edit distance. The matching alone is several thousand lines and changes
 between benchmark versions, so rather than port it this module runs the pinned official
-evaluator: its scores are the leaderboard's by construction.
+evaluator of each version: its scores are that leaderboard's by construction.
 
 The evaluator is not importable as a library — it installs a top-level package named
-``src``, pins old numpy/scipy/pandas and writes to ``./result`` — so it runs as a
-subprocess in a virtualenv of its own, provisioned on first use under
-``$OMNIDOCBENCH_EVAL_DIR`` (default ``~/.cache/olmo_eval/omnidocbench``). Set
-``OMNIDOCBENCH_EVAL_REPO`` and ``OMNIDOCBENCH_EVAL_PYTHON`` to use an existing checkout and
-interpreter instead.
+``src`` (v1.6) or none at all (v1.5), pins old numpy/scipy/pandas and writes to
+``./result`` — so each version runs as a subprocess in a virtualenv of its own,
+provisioned on first use under ``$OMNIDOCBENCH_EVAL_DIR`` (default
+``~/.cache/olmo_eval/omnidocbench``). Set ``OMNIDOCBENCH_EVAL_REPO`` and
+``OMNIDOCBENCH_EVAL_PYTHON`` to use an existing checkout and interpreter instead.
 
-Evaluation is a dataset-level step: every metric is a mean over pages, and tables/formulas
-are zero-filled for annotated pages that produced no scored sample. One call to
+Evaluation is a dataset-level step: every metric is a mean over pages. One call to
 :func:`run_official_evaluation` scores all pages and returns both the evaluator's own
-summary and the per-page values, which the task stores on each response.
+leaderboard numbers and the per-page values, which the task stores on each response.
 """
 
 from __future__ import annotations
@@ -41,12 +40,6 @@ from olmo_eval.common.types import Instance, LMOutput, Response
 logger = logging.getLogger(__name__)
 
 EVAL_REPO_URL = "https://github.com/opendatalab/OmniDocBench.git"
-#: Scoring code of the v1.6 release (later commits on ``main`` touch only docs and tools).
-EVAL_REPO_COMMIT = "f133a71e9e91c3621c7ce8994200a7b394a06eb3"
-EVAL_PYTHON_VERSION = "3.11"
-#: The evaluator forks scoring workers from threads, which newer ``filelock`` releases
-#: break; the failure is swallowed and the sample scored zero.
-EVAL_EXTRA_REQUIREMENTS = ("filelock==3.16.1",)
 
 RESULT_KEY = "omnidocbench_result"
 
@@ -58,12 +51,76 @@ _MATCH_METHOD = "quick_match"
 _SAMPLE_KEY_RE = re.compile(r"^(?P<image>.*)_\[[^\]]*\]$")
 
 
-def cdm_available() -> bool:
-    return all(shutil.which(binary) for binary in CDM_BINARIES)
+@dataclass(frozen=True)
+class EvaluatorVersion:
+    """One release of the official evaluator and how to stand it up."""
+
+    name: str
+    repo_commit: str
+    python_version: str
+    #: ``uv pip install`` arguments; ``{repo}`` is the checkout.
+    install: tuple[str, ...]
+    #: Whether pages annotated with a table / display formula but left without a scored
+    #: sample count as zero in the page average (v1.6 and later).
+    zero_fills_missing_pages: bool
+    #: Extra binaries CDM needs beyond :data:`CDM_BINARIES`.
+    cdm_binaries: tuple[str, ...] = ()
 
 
-def missing_cdm_binaries() -> list[str]:
-    return [binary for binary in CDM_BINARIES if not shutil.which(binary)]
+EVALUATORS: dict[str, EvaluatorVersion] = {
+    # Scoring code of the v1.6 release (later commits on ``main`` touch only docs and tools).
+    # The evaluator forks scoring workers from threads, which newer ``filelock`` releases
+    # break; the failure is swallowed and the sample scored zero, hence the pin.
+    "v1.6": EvaluatorVersion(
+        name="v1.6",
+        repo_commit="f133a71e9e91c3621c7ce8994200a7b394a06eb3",
+        python_version="3.11",
+        install=("-e", "{repo}", "filelock==3.16.1"),
+        zero_fills_missing_pages=True,
+    ),
+    # Head of the ``v1_5`` branch. Its ``requirements.txt`` pins a whole notebook
+    # environment; these are the packages the evaluator imports, at those pins.
+    "v1.5": EvaluatorVersion(
+        name="v1.5",
+        repo_commit="59b103c4b47d3a01fada83491585d6512a40c0bc",
+        python_version="3.10",
+        install=(
+            "apted==1.0.3",
+            "beautifulsoup4==4.11.1",
+            "datasets==3.1.0",
+            "evaluate==0.4.3",
+            "filelock==3.16.1",
+            "func-timeout==4.3.5",
+            "Levenshtein==0.25.1",
+            "loguru==0.7.2",
+            "lxml==4.9.1",
+            "matplotlib==3.7.5",
+            "mmeval==0.2.1",
+            "nltk==3.9.1",
+            "numpy==1.24.4",
+            "pandas==2.0.3",
+            "pillow==10.4.0",
+            "pycocotools==2.0.7",
+            "pylatexenc==3.0a30",
+            "PyYAML==6.0.2",
+            "rapidfuzz==3.9.7",
+            # CDM's RANSAC; imported lazily inside a bare ``except`` that turns a missing
+            # package into a silent zero, and pinned by ``metrics/cdm/requirements.txt``.
+            "scikit-image==0.20.0",
+            "scipy==1.10.1",
+            "tabulate==0.9.0",
+            "tqdm==4.67.1",
+        ),
+        zero_fills_missing_pages=False,
+        # v1.5 tokenizes formulas with the KaTeX parser through Node.js.
+        cdm_binaries=("node",),
+    ),
+}
+
+
+def missing_cdm_binaries(version: str = "v1.6") -> list[str]:
+    binaries = (*CDM_BINARIES, *EVALUATORS[version].cdm_binaries)
+    return [binary for binary in binaries if not shutil.which(binary)]
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +133,9 @@ def _run(cmd: Sequence[str], **kwargs: Any) -> None:
     subprocess.run(list(cmd), check=True, **kwargs)
 
 
-def ensure_evaluator() -> tuple[Path, Path]:
+def ensure_evaluator(version: str = "v1.6") -> tuple[Path, Path]:
     """Return ``(repo_dir, python)`` for the official evaluator, provisioning it if needed."""
+    spec = EVALUATORS[version]
     repo_env, python_env = (
         os.environ.get("OMNIDOCBENCH_EVAL_REPO"),
         os.environ.get("OMNIDOCBENCH_EVAL_PYTHON"),
@@ -89,7 +147,7 @@ def ensure_evaluator() -> tuple[Path, Path]:
         os.environ.get("OMNIDOCBENCH_EVAL_DIR")
         or Path.home() / ".cache" / "olmo_eval" / "omnidocbench"
     )
-    home = root / EVAL_REPO_COMMIT[:12]
+    home = root / spec.repo_commit[:12]
     repo, venv, ready = home / "repo", home / "venv", home / ".ready"
     python = venv / "bin" / "python"
     if ready.exists():
@@ -110,12 +168,10 @@ def ensure_evaluator() -> tuple[Path, Path]:
         shutil.rmtree(repo, ignore_errors=True)
         shutil.rmtree(venv, ignore_errors=True)
         _run(["git", "clone", "--quiet", EVAL_REPO_URL, str(repo)])
-        _run(["git", "-C", str(repo), "checkout", "--quiet", EVAL_REPO_COMMIT])
-        _run([uv, "venv", "--quiet", "--python", EVAL_PYTHON_VERSION, str(venv)])
-        _run(
-            [uv, "pip", "install", "--quiet", "--python", str(python), "-e", str(repo)]
-            + list(EVAL_EXTRA_REQUIREMENTS)
-        )
+        _run(["git", "-C", str(repo), "checkout", "--quiet", spec.repo_commit])
+        _run([uv, "venv", "--quiet", "--python", spec.python_version, str(venv)])
+        packages = [arg.format(repo=repo) for arg in spec.install]
+        _run([uv, "pip", "install", "--quiet", "--python", str(python), *packages])
         ready.touch()
     return repo, python
 
@@ -132,35 +188,42 @@ class OfficialEvaluation:
     #: ``image_name -> {text_edit, read_order_edit, formula_edit, table_teds,
     #: table_teds_s, formula_cdm}``; a key is absent when the page has no such sample.
     per_page: dict[str, dict[str, float]] = field(default_factory=dict)
-    #: The evaluator's own leaderboard summary (``notebook_metric_summary``).
-    summary: dict[str, Any] = field(default_factory=dict)
+    #: The evaluator's own page-averaged numbers, in its raw 0-1 units, under the same keys
+    #: (plus ``overall`` on the leaderboard's 0-100 scale when CDM ran).
+    summary: dict[str, float] = field(default_factory=dict)
     #: Samples the evaluator scored zero because its scoring code crashed or timed out.
     num_scorer_failures: int = 0
 
 
-def _config(gt_path: Path, pred_dir: Path, *, with_cdm: bool, workers: int) -> dict[str, Any]:
+def _config(
+    version: str, gt_path: Path, pred_dir: Path, *, with_cdm: bool, workers: int
+) -> dict[str, Any]:
     formula_metrics = ["Edit_dist", "CDM"] if with_cdm else ["Edit_dist"]
-    return {
-        "end2end_eval": {
-            "metrics": {
-                "text_block": {"metric": ["Edit_dist"]},
-                "display_formula": {"metric": formula_metrics, "cdm_workers": workers},
-                "table": {"metric": ["TEDS", "Edit_dist"], "teds_workers": workers},
-                "reading_order": {"metric": ["Edit_dist"]},
-            },
-            "dataset": {
-                "dataset_name": "end2end_dataset",
-                "ground_truth": {"data_path": str(gt_path)},
-                "prediction": {"data_path": str(pred_dir)},
-                "match_method": _MATCH_METHOD,
+    metrics: dict[str, dict[str, Any]] = {
+        "text_block": {"metric": ["Edit_dist"]},
+        "display_formula": {"metric": formula_metrics},
+        "table": {"metric": ["TEDS", "Edit_dist"]},
+        "reading_order": {"metric": ["Edit_dist"]},
+    }
+    dataset: dict[str, Any] = {
+        "dataset_name": "end2end_dataset",
+        "ground_truth": {"data_path": str(gt_path)},
+        "prediction": {"data_path": str(pred_dir)},
+        "match_method": _MATCH_METHOD,
+    }
+    if version == "v1.6":
+        metrics["display_formula"]["cdm_workers"] = workers
+        metrics["table"]["teds_workers"] = workers
+        dataset.update(
+            {
                 "match_workers": workers,
                 "quick_match_truncated_timeout_sec": 300,
                 "match_timeout_sec": 420,
                 "timeout_fallback_max_chunk_span": 10,
                 "timeout_fallback_order_penalty": 0.10,
-            },
-        }
-    }
+            }
+        )
+    return {"end2end_eval": {"metrics": metrics, "dataset": dataset}}
 
 
 def _load(result_dir: Path, name: str) -> Any:
@@ -182,14 +245,46 @@ def _page_means(per_sample: Mapping[str, Any] | None, field_name: str | None) ->
     return {image: sum(scores) / len(scores) for image, scores in by_page.items()}
 
 
-def _count_failures(metric_result: Mapping[str, Any]) -> int:
+def _summary(metric_result: Mapping[str, Any]) -> dict[str, float]:
+    """The leaderboard numbers as ``tools/generate_result_tables.ipynb`` reads them."""
+
+    def page_avg(element: str, metric: str) -> float | None:
+        value = ((metric_result.get(element) or {}).get("page") or {}).get(metric)
+        return float(value["ALL"]) if value and "ALL" in value else None
+
+    def edit(element: str) -> float | None:
+        value = ((metric_result.get(element) or {}).get("all") or {}).get("Edit_dist") or {}
+        return float(value["ALL_page_avg"]) if "ALL_page_avg" in value else None
+
+    values = {
+        "text_edit": edit("text_block"),
+        "read_order_edit": edit("reading_order"),
+        "table_teds": page_avg("table", "TEDS"),
+        "table_teds_s": page_avg("table", "TEDS_structure_only"),
+        "formula_cdm": page_avg("display_formula", "CDM"),
+    }
+    summary = {k: v for k, v in values.items() if v is not None}
+    if all(k in summary for k in ("text_edit", "table_teds", "formula_cdm")):
+        summary["overall"] = (
+            (1.0 - summary["text_edit"]) * 100
+            + summary["table_teds"] * 100
+            + summary["formula_cdm"] * 100
+        ) / 3.0
+    return summary
+
+
+def _count_failures(metric_result: Mapping[str, Any], log_text: str) -> int:
     count = 0
     for element in ("table", "display_formula"):
         for debug in ((metric_result.get(element) or {}).get("metric_debug") or {}).values():
             for counter in ("error_case_count", "timeout_case_count", "exception_case_count"):
                 count += int(debug.get(counter) or 0)
     fallbacks = (metric_result.get("match_debug") or {}).get("text_match_fallback_counts") or {}
-    return count + sum(int(v or 0) for v in fallbacks.values())
+    count += sum(int(v or 0) for v in fallbacks.values())
+    if count == 0:
+        # Older evaluators only report a zeroed sample on stdout.
+        count = len(re.findall(r"score is set to 0", log_text))
+    return count
 
 
 def run_official_evaluation(
@@ -197,12 +292,13 @@ def run_official_evaluation(
     gt_pages: Sequence[Mapping[str, Any]],
     *,
     with_cdm: bool,
+    version: str = "v1.6",
     workers: int | None = None,
 ) -> OfficialEvaluation:
     """Score ``predictions`` (``image_name -> markdown``) against their annotated pages."""
     import yaml
 
-    repo, python = ensure_evaluator()
+    repo, python = ensure_evaluator(version)
     if workers is None:
         workers = int(os.environ.get("OMNIDOCBENCH_EVAL_WORKERS") or 0) or max(
             1, min(16, (os.cpu_count() or 4) // 4)
@@ -219,8 +315,10 @@ def run_official_evaluation(
         gt_path.write_text(json.dumps(list(gt_pages), ensure_ascii=False), encoding="utf-8")
         config_path = work / "end2end.yaml"
         config_path.write_text(
-            yaml.safe_dump(_config(gt_path, pred_dir, with_cdm=with_cdm, workers=workers))
+            yaml.safe_dump(_config(version, gt_path, pred_dir, with_cdm=with_cdm, workers=workers))
         )
+        result_dir = work / "result"
+        result_dir.mkdir()
 
         log_path = work / "evaluator.log"
         with open(log_path, "w") as log:
@@ -230,12 +328,13 @@ def run_official_evaluation(
                 stdout=log,
                 stderr=subprocess.STDOUT,
             )
-        result_dir = work / "result"
-        summary = (_load(result_dir, "run_summary") or {}).get("notebook_metric_summary")
-        if proc.returncode != 0 or not summary:
-            tail = "\n".join(log_path.read_text(errors="replace").splitlines()[-40:])
+        log_text = log_path.read_text(errors="replace")
+        metric_result = _load(result_dir, "metric_result")
+        if proc.returncode != 0 or not metric_result:
+            tail = "\n".join(log_text.splitlines()[-40:])
             raise RuntimeError(
-                f"OmniDocBench evaluator failed (exit {proc.returncode}). Log tail:\n{tail}"
+                f"OmniDocBench {version} evaluator failed (exit {proc.returncode}). "
+                f"Log tail:\n{tail}"
             )
 
         per_page: dict[str, dict[str, float]] = {}
@@ -254,14 +353,16 @@ def run_official_evaluation(
                 if isinstance(value, (int, float)):
                     per_page.setdefault(image_name, {})[name] = float(value)
 
-        failures = _count_failures(_load(result_dir, "metric_result") or {})
+        failures = _count_failures(metric_result, log_text)
         if failures:
             logger.error(
                 "OmniDocBench evaluator scored %d sample(s) zero after an internal crash, "
                 "timeout or matching fallback; see n_scorer_failures.",
                 failures,
             )
-        return OfficialEvaluation(per_page=per_page, summary=summary, num_scorer_failures=failures)
+        return OfficialEvaluation(
+            per_page=per_page, summary=_summary(metric_result), num_scorer_failures=failures
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +401,8 @@ class OmniDocBenchPageMetric(Metric):
 
     ``zero_fill`` names the instance-metadata flag marking pages annotated with the element
     (``has_table`` / ``has_formula``): such a page counts as zero when no sample was scored
-    for it, as the evaluator does. Without it, only pages that have a value are averaged.
-    ``scale`` converts to the leaderboard's unit (x100 for TEDS and CDM).
+    for it, as the v1.6 evaluator does. Without it, only pages that have a value are
+    averaged. ``scale`` converts to the leaderboard's unit (x100 for TEDS and CDM).
     """
 
     name: str  # type: ignore[misc]
@@ -336,14 +437,24 @@ class OmniDocBenchOverallMetric(Metric):
 
     name: str  # type: ignore[misc]
     scorer: Scorer  # type: ignore[misc]
+    #: Whether missing table / formula pages count as zero (see the page metric).
+    zero_fill: bool = True
 
     def compute(self, responses: Sequence[Response]) -> float:
         text = OmniDocBenchPageMetric("", self.scorer, "text_edit").compute(responses)
         teds = OmniDocBenchPageMetric(
-            "", self.scorer, "table_teds", zero_fill="has_table", scale=100.0
+            "",
+            self.scorer,
+            "table_teds",
+            zero_fill="has_table" if self.zero_fill else None,
+            scale=100.0,
         ).compute(responses)
         cdm = OmniDocBenchPageMetric(
-            "", self.scorer, "formula_cdm", zero_fill="has_formula", scale=100.0
+            "",
+            self.scorer,
+            "formula_cdm",
+            zero_fill="has_formula" if self.zero_fill else None,
+            scale=100.0,
         ).compute(responses)
         return ((1.0 - text) * 100.0 + teds + cdm) / 3.0
 

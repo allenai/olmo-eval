@@ -703,7 +703,9 @@ it writes back, each with its benchmark's official scoring:
   own (needs `git` and `uv`). `overall` is the leaderboard's 0-100 number, which is why
   the `ocr` suite is display-only. Its formula metric (CDM) needs `pdflatex`,
   ImageMagick 7 and Ghostscript; `omnidocbench_no_cdm` runs without them and reports
-  every other metric.
+  every other metric. `omnidocbench_v15` / `omnidocbench_v15_no_cdm` are the 1,355-page
+  v1.5 release with its own evaluator (CDM there also needs `node`); the two leaderboards
+  are not comparable.
 
 The OCR datasets are downloaded from the Hugging Face Hub at pinned revisions rather
 than read from `$MOLMO_DATA_DIR`.
