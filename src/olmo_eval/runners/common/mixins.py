@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.common.console import console
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.common.models import (
     MetricsOutput,
@@ -21,7 +20,6 @@ from olmo_eval.runners.common.models import (
     ScoreSummary,
     TaskMetricsEntry,
 )
-from olmo_eval.runners.common.types import TaskResult
 from olmo_eval.runners.io.formatting import (  # noqa: F401
     build_s3_prefix,
     get_model_display_name,
@@ -274,17 +272,6 @@ class RunnerResultsMixin:
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
-
-    def _report_task_completion(self, model_name: str, result: TaskResult) -> None:
-        """Report when a task completes."""
-        label = f"{model_name}:{result.spec}"
-        if result.error:
-            console.print(f"  [red]✗[/red] {label} (ERROR: {result.error})")
-        else:
-            console.print(
-                f"  [green]✓[/green] {label} ({result.num_instances} instances, "
-                f"{result.duration_seconds:.1f}s)"
-            )
 
     def _write_predictions(
         self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None

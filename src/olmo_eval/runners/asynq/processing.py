@@ -7,6 +7,7 @@ import multiprocessing as mp
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.inference.errors import classify_terminal_provider_error
 from olmo_eval.inference.metrics.core.stats import compute_batch_hash
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
 
@@ -19,6 +20,14 @@ logger = get_logger(__name__)
 def _get_native_ids(items: list[QueueItem]) -> list[str]:
     """Extract native IDs from queue items for batch hashing."""
     return [f"{item.task_id}:{item.instance_idx}" for item in items]
+
+
+def _flush_batch_metrics(harness: Harness, items: list[QueueItem], log: logging.Logger) -> None:
+    """Flush batch metrics without letting telemetry failures interrupt inference."""
+    try:
+        harness.flush_metrics(compute_batch_hash(_get_native_ids(items)))
+    except Exception as e:
+        log.warning(f"Failed to flush batch metrics: {e}")
 
 
 def _format_cause(cause: BaseException) -> str:
@@ -137,6 +146,10 @@ async def process_chat_request(
     except Exception as e:
         import traceback
 
+        terminal_error = classify_terminal_provider_error(e)
+        if terminal_error is not None:
+            raise terminal_error from e
+
         error_detail = _format_error_detail(e)
         full_tb = traceback.format_exc()
         log.error(f"Error on CHAT instance {item.instance_idx}: {error_detail}\n{full_tb}")
@@ -189,6 +202,7 @@ async def process_batch(
         harness.provider.describe_request(request, sampling_params) for request in prepared_requests
     ]
 
+    reported = 0
     try:
         if request_type == RequestType.LOGLIKELIHOOD:
             all_outputs = await harness.provider.alogprobs(prepared_requests, sampling_params)
@@ -212,18 +226,21 @@ async def process_batch(
                     attempt=item.attempt,
                 )
             )
-
-        # Flush metrics after each batch with stable batch hash
-        batch_hash = compute_batch_hash(_get_native_ids(items))
-        harness.flush_metrics(batch_hash)
+            reported += 1
 
     except Exception as e:
-        # Batch failed - report error for all items
+        terminal_error = classify_terminal_provider_error(e)
+        if terminal_error is not None:
+            raise terminal_error from e
+
+        # Batch failed - report errors only for items that never produced a result
         error_detail = _format_error_detail(e)
-        log.error(f"Batch error ({len(items)} items): {error_detail}")
+        log.error(
+            f"Batch error ({len(items) - reported} of {len(items)} items affected): {error_detail}"
+        )
 
         for item, prepared_request, request_trace in zip(
-            items, prepared_requests, request_traces, strict=True
+            items[reported:], prepared_requests[reported:], request_traces[reported:], strict=True
         ):
             result_queue.put(
                 ResultItem(
@@ -238,6 +255,8 @@ async def process_batch(
                     attempt=item.attempt,
                 )
             )
+    else:
+        _flush_batch_metrics(harness, items, log)
 
 
 async def process_items(
@@ -304,13 +323,15 @@ async def process_items(
             def on_progress(done: int, total: int) -> None:
                 progress.update(1)
 
-            await dispatch_concurrent(
-                chat_items,
-                process,
-                max_in_flight=max_concurrency or len(chat_items),
-                on_progress=on_progress,
-            )
-            progress.close()
+            try:
+                await dispatch_concurrent(
+                    chat_items,
+                    process,
+                    max_in_flight=max_concurrency or len(chat_items),
+                    on_progress=on_progress,
+                )
+            finally:
+                progress.close()
         else:
             await dispatch_concurrent(
                 chat_items,
@@ -318,9 +339,7 @@ async def process_items(
                 max_in_flight=max_concurrency or len(chat_items),
             )
 
-        # Flush metrics after chat requests with stable batch hash
-        batch_hash = compute_batch_hash(_get_native_ids(chat_items))
-        harness.flush_metrics(batch_hash)
+        _flush_batch_metrics(harness, chat_items, log)
 
 
 __all__ = [

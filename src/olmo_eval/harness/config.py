@@ -51,6 +51,11 @@ class HarnessConfig:
     metrics: MetricsConfig | None = None
     batching: BatchConfig | None = None
     scorer_startup_timeout: float | None = None
+    # Fraction of a task's instances allowed to hard-fail before the task is marked
+    # failed and the run exits non-zero. None means the runner default (0.05). Set to
+    # 1.0 to never fail a run on partial instance failures; a task that saves zero
+    # instances still fails, since it produced no metrics.
+    max_hard_failure_rate: float | None = None
 
     # Cache for resolved tools
     _resolved_tools_cache: tuple[Tool, ...] | None = field(
@@ -161,6 +166,8 @@ class HarnessConfig:
             d["batching"] = self.batching.to_dict()
         if self.scorer_startup_timeout is not None:
             d["scorer_startup_timeout"] = self.scorer_startup_timeout
+        if self.max_hard_failure_rate is not None:
+            d["max_hard_failure_rate"] = self.max_hard_failure_rate
         return d
 
     @classmethod
@@ -222,6 +229,7 @@ class HarnessConfig:
             metrics=metrics,
             batching=batching,
             scorer_startup_timeout=data.get("scorer_startup_timeout"),
+            max_hard_failure_rate=data.get("max_hard_failure_rate"),
         )
 
     def with_tools(self, *new_tools: Tool | str) -> HarnessConfig:
@@ -305,6 +313,7 @@ def harness_config(
     metrics: MetricsConfig | None = None,
     batching: BatchConfig | None = None,
     scorer_startup_timeout: float | None = None,
+    max_hard_failure_rate: float | None = None,
 ) -> HarnessConfig:
     """Create a HarnessConfig.
 
@@ -329,6 +338,10 @@ def harness_config(
         batching: Batching strategy configuration (None = sequential).
         scorer_startup_timeout: Timeout for scorer worker startup. If None, derived from
             sandbox configs (max startup_timeout + 60s buffer) or defaults to 60s.
+        max_hard_failure_rate: Fraction of a task's instances allowed to hard-fail
+            before the task is marked failed. If None, defaults to 0.05. Set to 1.0 to
+            never fail a run on partial instance failures; a task that saves zero
+            instances still fails.
 
     Returns:
         A new HarnessConfig instance.
@@ -353,4 +366,5 @@ def harness_config(
         metrics=metrics,
         batching=batching,
         scorer_startup_timeout=scorer_startup_timeout,
+        max_hard_failure_rate=max_hard_failure_rate,
     )
