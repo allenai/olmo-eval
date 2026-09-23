@@ -166,3 +166,31 @@ class OlmocrBenchTask(OcrTask):
             for instance in group:
                 if instance is not None:
                     yield instance
+
+
+# ---------------------------------------------------------------------------
+# Prompt ablation (experimental branch only)
+# ---------------------------------------------------------------------------
+
+ABLATION_PROMPTS: dict[str, str] = {
+    "transcribe": (
+        "Transcribe all of the text in this image exactly as it appears, in natural reading "
+        "order. Do not summarize, paraphrase, or add any commentary. Skip page headers and "
+        "footers. Write equations in LaTeX, using \\( \\) for inline and \\[ \\] for display "
+        "math, and tables in Markdown."
+    ),
+    "short": "Read all the text in this image.",
+}
+
+
+def _register_prompt_variant(key: str, prompt: str) -> None:
+    @register(f"olmocr_bench_prompt_{key}")
+    class _Variant(OlmocrBenchTask):
+        def _question(self, instruction: str) -> str:
+            return super()._question(prompt)
+
+    _Variant.__name__ = _Variant.__qualname__ = f"OlmocrBenchPrompt{key.title()}Task"
+
+
+for _key, _prompt in ABLATION_PROMPTS.items():
+    _register_prompt_variant(_key, _prompt)
