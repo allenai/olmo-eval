@@ -36,7 +36,7 @@ GEMINI_PARSING_ERROR_KEY = "gemini_is_parsing_error"
 
 
 def build_gemini_judge_fn(
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-3.6-flash",
     scorer_name: str = "GeminiOmniscienceScorer",
     max_tokens: int = 16384,
     temperature: float = 0.0,
