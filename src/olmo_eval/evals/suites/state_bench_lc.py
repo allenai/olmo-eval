@@ -14,6 +14,12 @@ from olmo_eval.evals.tasks.state_bench_lc import (
 
 logger = logging.getLogger(__name__)
 
+_ALL_STRATA_NOTE = (
+    " Spans every token stratum up to 1m tokens; strata longer than the model's context"
+    " are left-truncated by the provider, so select stratum suites"
+    " (e.g. state_bench:tokens_64k) within the model's context instead."
+)
+
 
 def _coverage_note(tasks: tuple[str, ...], total: int) -> str:
     """Describe partial config coverage so a narrowed suite is visible, not silent."""
@@ -49,14 +55,15 @@ make_suite(
     name="state_bench",
     tasks=STATE_BENCH_TASKS,
     aggregation=AggregationStrategy.AVERAGE,
-    description="Long-context StateBench tasks across all formats and complexity classes.",
+    description="Long-context StateBench tasks across all formats and complexity classes."
+    + _ALL_STRATA_NOTE,
 )
 
 make_suite(
     name="state_bench_10pct",
     tasks=STATE_BENCH_10PCT_TASKS,
     aggregation=AggregationStrategy.AVERAGE,
-    description="Deterministic 10% sample of the long-context StateBench tasks.",
+    description="Deterministic 10% sample of the long-context StateBench tasks." + _ALL_STRATA_NOTE,
 )
 
 for _complexity in ("aperiodic", "periodic", "r-trivial"):
@@ -69,7 +76,8 @@ for _complexity in ("aperiodic", "periodic", "r-trivial"):
             for token_stratum in STATE_BENCH_STRATA_BY_CONFIG[config_name]
         ),
         aggregation=AggregationStrategy.AVERAGE,
-        description=f"Long-context StateBench tasks in the {_complexity} complexity class.",
+        description=f"Long-context StateBench tasks in the {_complexity} complexity class."
+        + _ALL_STRATA_NOTE,
     )
     make_suite(
         name=f"state_bench_10pct:{_complexity.replace('-', '_')}",
@@ -80,7 +88,8 @@ for _complexity in ("aperiodic", "periodic", "r-trivial"):
             for token_stratum in STATE_BENCH_STRATA_BY_CONFIG[config_name]
         ),
         aggregation=AggregationStrategy.AVERAGE,
-        description=f"Deterministic 10% StateBench sample in the {_complexity} complexity class.",
+        description=f"Deterministic 10% StateBench sample in the {_complexity} complexity class."
+        + _ALL_STRATA_NOTE,
     )
 
 for _formatter in (
@@ -100,7 +109,8 @@ for _formatter in (
             for token_stratum in STATE_BENCH_STRATA_BY_CONFIG[config_name]
         ),
         aggregation=AggregationStrategy.AVERAGE,
-        description=f"Long-context StateBench tasks using the {_formatter} format.",
+        description=f"Long-context StateBench tasks using the {_formatter} format."
+        + _ALL_STRATA_NOTE,
     )
     make_suite(
         name=f"state_bench_10pct:{_formatter.replace('-', '_')}",
@@ -111,7 +121,8 @@ for _formatter in (
             for token_stratum in STATE_BENCH_STRATA_BY_CONFIG[config_name]
         ),
         aggregation=AggregationStrategy.AVERAGE,
-        description=f"Deterministic 10% StateBench sample using the {_formatter} format.",
+        description=f"Deterministic 10% StateBench sample using the {_formatter} format."
+        + _ALL_STRATA_NOTE,
     )
     _formatter_configs = tuple(
         config_name

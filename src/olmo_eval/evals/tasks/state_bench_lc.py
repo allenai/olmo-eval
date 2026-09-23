@@ -13,6 +13,7 @@ from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register
 
 STATE_BENCH_REPO = "allenai/state-bench"
+STATE_BENCH_REVISION = "683d249128a0d387eda27c8cfc8c1f9df0389495"
 
 STATE_BENCH_CONFIGS = (
     "cube-painting--aperiodic",
@@ -127,7 +128,13 @@ STATE_BENCH_10PCT_TASKS = tuple(
 
 
 class StateBench(Task):
-    """Rank candidate final states after a long sequence of assignments."""
+    """Rank candidate final states after a long sequence of assignments.
+
+    The initial state appears at the start of the prompt, so a prompt longer than the
+    model's context is unanswerable once the provider left-truncates it. Run only the
+    token strata that fit the model's context; logprob providers record the number of
+    dropped prompt tokens as ``prompt_truncated_tokens`` in each output's metadata.
+    """
 
     metrics = (LogprobPerTokenMCAccuracyMetric(),)
     dataset_split: str
@@ -210,6 +217,7 @@ for _config_name in STATE_BENCH_CONFIGS:
                     STATE_BENCH_REPO,
                     subset=_config_name,
                     split=_dataset_split,
+                    revision=STATE_BENCH_REVISION,
                 ),
                 "dataset_split": _dataset_split,
                 "__module__": __name__,
@@ -228,6 +236,7 @@ for _config_name in STATE_BENCH_CONFIGS:
                     STATE_BENCH_REPO,
                     subset=_config_name,
                     split=_dataset_split,
+                    revision=STATE_BENCH_REVISION,
                 ),
                 "dataset_split": _dataset_split,
                 "__module__": __name__,
