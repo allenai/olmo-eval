@@ -57,6 +57,13 @@ hf = [
     "einops",
     "torchvision ; platform_system != 'Darwin'",  # GPU-coupled; skip on macOS like the vllm extra
 ]
+# Scoring dependencies of the vision benchmarks, needed whichever provider runs the model:
+# pycocotools decodes the COCO-RLE instance masks and scipy matches points to them.
+vision = [
+    "pycocotools",
+    # Same pin as the `analysis` extra, so the two resolve together.
+    "scipy~=1.17.1",
+]
 olmo_core = [
     "ai2-olmo-core[torchao,transformers]==2.4.0",
     # The conflicting olmo_core_vlm extra's git-pinned OLMo-core requires
@@ -174,7 +181,7 @@ dev = [
     "ty==0.0.39",
     "pre-commit>=4.0.0",
     # Unit tests import optional helpers directly, so dev installs need these extras too.
-    "olmo-eval[storage,beaker,hf,analysis,sandbox]",
+    "olmo-eval[storage,beaker,hf,vision,analysis,sandbox]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
     "parameterized>=0.9.0",
