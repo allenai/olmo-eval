@@ -24,7 +24,7 @@ def _task_score(
 def _task_weight(
     task_name: str,
     task_scores_by_name: dict[str, list[float | None]],
-    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None,
+    task_instance_counts_by_name: Mapping[str, Sequence[float | None]] | None,
 ) -> float | None:
     """Instance count to weight one leaf task by, or None when it is unusable.
 
@@ -55,7 +55,7 @@ def _task_weight(
 def _weighted_mean_over_tasks(
     task_names: Iterable[str],
     task_scores_by_name: dict[str, list[float | None]],
-    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None,
+    task_instance_counts_by_name: Mapping[str, Sequence[float | None]] | None,
 ) -> float | None:
     """Instance-weighted mean over leaf tasks, or None when a weight is missing.
 
@@ -83,7 +83,7 @@ def _weighted_mean_over_tasks(
 def _child_scope_score(
     child: str | Any,
     task_scores_by_name: dict[str, list[float | None]],
-    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None,
+    task_instance_counts_by_name: Mapping[str, Sequence[float | None]] | None,
 ) -> float | None:
     from olmo_eval.evals.suites.registry import AggregationStrategy, Suite
 
@@ -107,7 +107,7 @@ def _child_scope_score(
 def compute_scope_score(
     *,
     task_scores_by_name: dict[str, list[float | None]],
-    task_instance_counts_by_name: Mapping[str, Sequence[int | None]] | None = None,
+    task_instance_counts_by_name: Mapping[str, Sequence[float | None]] | None = None,
     suite_name: str | None = None,
     task_name: str | None = None,
 ) -> float | None:

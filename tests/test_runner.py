@@ -1057,6 +1057,54 @@ class TestSuiteAggregations:
         finally:
             del _REGISTRY["_test_weighted_child_runner_parent"]
 
+    def test_weighted_child_without_counts_is_dropped_from_parent(self):
+        """Test a WEIGHTED_AVERAGE child missing a count is left out of its parent."""
+        from olmo_eval.evals.suites.registry import (
+            _REGISTRY,
+            AggregationStrategy,
+            Suite,
+        )
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        child = Suite(
+            name="_test_weighted_child_no_counts",
+            tasks=("task_small", "task_large"),
+            aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+        )
+        parent = Suite(
+            name="_test_weighted_child_no_counts_parent",
+            tasks=("task_standalone", child),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        )
+        _REGISTRY["_test_weighted_child_no_counts_parent"] = parent
+
+        try:
+            task_results = {
+                "task_standalone": {
+                    "metrics": {"accuracy": {"exact_match": 1.0}},
+                    "num_instances": 50,
+                },
+                "task_small": {
+                    "metrics": {"accuracy": {"exact_match": 0.9}},
+                    "num_instances": 100,
+                },
+                "task_large": {"metrics": {"accuracy": {"exact_match": 0.5}}},
+            }
+
+            result = compute_suite_aggregations(
+                ["_test_weighted_child_no_counts_parent"], task_results
+            )
+
+            # The child has no weighted mean, so the parent averages only the
+            # standalone task.
+            assert "_test_weighted_child_no_counts" not in result
+            parent_result = result["_test_weighted_child_no_counts_parent"]
+            assert parent_result["metrics"]["accuracy"]["exact_match"] == pytest.approx(1.0)
+            assert parent_result["num_children"] == 1
+            assert parent_result["nested_suites"] == []
+        finally:
+            del _REGISTRY["_test_weighted_child_no_counts_parent"]
+
     def test_weighted_child_suite_tasks_are_collapsed_in_log_summary(self, capsys):
         """Test a WEIGHTED_AVERAGE child collapses its tasks in log_summary."""
         from olmo_eval.evals.suites.registry import (

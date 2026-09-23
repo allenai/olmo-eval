@@ -32,8 +32,8 @@ class AggregationStrategy(StrEnum):
         AVERAGE: Compute simple average of all task scores.
         WEIGHTED_AVERAGE: Average of all task scores, each weighted by the
             task's instance count. This is the instance-weighted ("micro")
-            average that oe-eval reports for several suites. Falls back to the
-            unweighted average when any contributing task has no instance count.
+            average that oe-eval reports for several suites. The aggregate is
+            omitted when any contributing task has no instance count.
         AVERAGE_OF_AVERAGES: Average over child suite averages.
         DISPLAY_ONLY: Display child results without computing suite average.
     """

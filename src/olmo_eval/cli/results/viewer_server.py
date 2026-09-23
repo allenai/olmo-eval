@@ -567,7 +567,7 @@ def _build_results_table(
         score = extract_score_from_metrics(metrics, metric_key) if metric_key else None
         task_scores_by_pk.setdefault(experiment_pk, {})[task_id] = score
         task_instance_counts_by_pk.setdefault(experiment_pk, {})[task_id] = (
-            int(num_instances) or None if num_instances is not None else None
+            (int(num_instances) or None) if num_instances is not None else None
         )
         if score is not None:
             task_state.model_count += 1
@@ -803,39 +803,21 @@ def _scoped_task_columns(
     return [column for column in task_columns if str(column.get("id") or "") in allowed_task_ids]
 
 
-def _group_model_task_scores_by_name(
-    model: dict[str, Any],
+def _group_model_values_by_name(
+    values_by_task_id: dict[Any, Any],
     columns: list[dict[str, Any]],
 ) -> dict[str, list[float | None]]:
-    task_scores = model.get("task_scores", {})
-    grouped_scores: dict[str, list[float | None]] = {}
+    """Per-task numeric values grouped by task name, in column order."""
+    grouped_values: dict[str, list[float | None]] = {}
     for column in columns:
         task_name = str(column.get("task_name") or "")
         if not task_name:
             continue
-        raw_score = task_scores.get(column.get("id"))
-        grouped_scores.setdefault(task_name, []).append(
-            float(raw_score) if _is_numeric_score(raw_score) else None
+        raw_value = values_by_task_id.get(column.get("id"))
+        grouped_values.setdefault(task_name, []).append(
+            float(raw_value) if _is_numeric_score(raw_value) else None
         )
-    return grouped_scores
-
-
-def _group_model_task_instance_counts_by_name(
-    model: dict[str, Any],
-    columns: list[dict[str, Any]],
-) -> dict[str, list[int | None]]:
-    """Instance counts per task name, ordered to match the grouped task scores."""
-    task_instance_counts = model.get("task_instance_counts", {})
-    grouped_counts: dict[str, list[int | None]] = {}
-    for column in columns:
-        task_name = str(column.get("task_name") or "")
-        if not task_name:
-            continue
-        raw_count = task_instance_counts.get(column.get("id"))
-        grouped_counts.setdefault(task_name, []).append(
-            int(raw_count) if _is_numeric_score(raw_count) else None
-        )
-    return grouped_counts
+    return grouped_values
 
 
 def _scoped_model_score(
@@ -855,12 +837,14 @@ def _scoped_model_score(
         raw_score = task_scores.get(task_id)
         return float(raw_score) if _is_numeric_score(raw_score) else None
 
-    grouped_scores = _group_model_task_scores_by_name(model, columns)
+    grouped_scores = _group_model_values_by_name(task_scores, columns)
     if scope_kind == "suite":
         suite_name = str(selected_scope_option.get("value") or "")
         return compute_scope_score(
             task_scores_by_name=grouped_scores,
-            task_instance_counts_by_name=_group_model_task_instance_counts_by_name(model, columns),
+            task_instance_counts_by_name=_group_model_values_by_name(
+                model.get("task_instance_counts", {}), columns
+            ),
             suite_name=suite_name,
         )
     if scope_kind == "task":
