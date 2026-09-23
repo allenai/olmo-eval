@@ -14,12 +14,14 @@ from olmo_eval.evals.tasks.common import Task, register
 
 STATE_BENCH_REPO = "allenai/state-bench"
 # The solvable family is a separate state-bench build (configs/experiments/solvable.yaml)
-# rendered with the zero-based integer-code-modular formatter; it is published to its
-# own dataset repository with the same config/split layout.
+# of the same periodic sources, rendered in all four complexity classes with the
+# zero-based integer-code-modular formatter; it is published to its own dataset
+# repository with the same config/split layout.
 STATE_BENCH_SOLVABLE_REPO = "jacksonp-ai2/state-bench-solvable"
 
 STATE_BENCH_SOLVABLE_CONFIGS = (
     "integer-code-modular--aperiodic",
+    "integer-code-modular--periodic",
     "integer-code-modular--r-trivial",
     "integer-code-modular--solvable",
 )
