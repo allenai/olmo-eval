@@ -267,8 +267,8 @@ class TestPointCountPerInstanceMetrics:
         )
 
     def test_fields_and_buckets(self):
-        from olmo_eval.evals.vision.scoring.vqa import PointCountScorer
-        from olmo_eval.evals.vision.tasks.single_image import (
+        from olmo_eval.evals.vision.scoring.counting import PointCountScorer
+        from olmo_eval.evals.vision.tasks.image_qa import (
             PointCountCategoryAverageMetric,
             PointCountMetric,
             PointCountPerCountMetric,

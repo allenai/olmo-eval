@@ -5318,8 +5318,6 @@ gpu = [
 ]
 hf = [
     { name = "einops" },
-    { name = "pycocotools" },
-    { name = "scipy" },
     { name = "torchvision", marker = "sys_platform != 'darwin' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-olmo-core-vlm') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-olmo-core-vlm' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
     { name = "transformers" },
 ]
@@ -5355,6 +5353,10 @@ storage = [
     { name = "smart-open", extra = ["s3"] },
     { name = "sqlalchemy" },
 ]
+vision = [
+    { name = "pycocotools" },
+    { name = "scipy" },
+]
 vllm = [
     { name = "opencv-python-headless", marker = "sys_platform != 'darwin' or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-olmo-core-vlm')" },
     { name = "torch-c-dlpack-ext", marker = "sys_platform != 'darwin' or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-olmo-core-vlm')" },
@@ -5366,7 +5368,7 @@ vllm = [
 dev = [
     { name = "google-api-core" },
     { name = "jinja2" },
-    { name = "olmo-eval", extra = ["analysis", "beaker", "hf", "sandbox", "storage"] },
+    { name = "olmo-eval", extra = ["analysis", "beaker", "hf", "sandbox", "storage", "vision"] },
     { name = "parameterized" },
     { name = "pre-commit" },
     { name = "pytest" },
@@ -5409,10 +5411,10 @@ requires-dist = [
     { name = "openhands-ai", marker = "extra == 'openhands'", specifier = "~=1.4.0" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1.0" },
-    { name = "pycocotools", marker = "extra == 'hf'" },
+    { name = "pycocotools", marker = "extra == 'vision'" },
     { name = "rich", specifier = ">=13.7,<15" },
     { name = "scipy", marker = "extra == 'analysis'", specifier = "~=1.17.1" },
-    { name = "scipy", marker = "extra == 'hf'", specifier = "~=1.17.1" },
+    { name = "scipy", marker = "extra == 'vision'", specifier = "~=1.17.1" },
     { name = "seaborn", marker = "extra == 'analysis'", specifier = "~=0.13.2" },
     { name = "setuptools", specifier = "<81" },
     { name = "smart-open", extras = ["s3"], marker = "extra == 's3'", specifier = ">=7.0.0" },
@@ -5429,13 +5431,13 @@ requires-dist = [
     { name = "tree-sitter-python", specifier = ">=0.23.0,<0.25.0" },
     { name = "vllm", extras = ["runai"], marker = "sys_platform != 'darwin' and extra == 'vllm'", specifier = "==0.19.1" },
 ]
-provides-extras = ["crawl4ai", "hf", "olmo-core", "olmo-core-vlm", "vllm", "litellm", "agents", "analysis", "openhands", "sandbox", "beaker", "s3", "postgres", "gpu", "clients", "storage"]
+provides-extras = ["crawl4ai", "hf", "vision", "olmo-core", "olmo-core-vlm", "vllm", "litellm", "agents", "analysis", "openhands", "sandbox", "beaker", "s3", "postgres", "gpu", "clients", "storage"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "google-api-core", specifier = ">=2.0.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "olmo-eval", extras = ["storage", "beaker", "hf", "analysis", "sandbox"] },
+    { name = "olmo-eval", extras = ["storage", "beaker", "hf", "vision", "analysis", "sandbox"] },
     { name = "parameterized", specifier = ">=0.9.0" },
     { name = "pre-commit", specifier = ">=4.0.0" },
     { name = "pytest", specifier = ">=9.0.0" },

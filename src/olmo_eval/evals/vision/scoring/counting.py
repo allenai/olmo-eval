@@ -1,9 +1,4 @@
-"""Answer scoring for the single-image QA and counting benchmarks.
-
-The counting scorer lands with the pointing/counting family; the remaining
-QA scorers join with the image-QA family. Parsers are vendored from mm_olmo
-and behavior-preserving.
-"""
+"""Answer scoring for the counting benchmarks (CountBench QA, PixMo-Count)."""
 
 from __future__ import annotations
 
@@ -13,16 +8,6 @@ from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput
 from olmo_eval.evals.vision.scoring.common import response_text
 from olmo_eval.evals.vision.scoring.count_parsing import parse_count
-
-
-def _answers(instance: Instance) -> list[str]:
-    answers = instance.metadata.get("answers")
-    if answers is None:
-        answer = instance.metadata.get("answer")
-        answers = [] if answer is None else [answer]
-    if isinstance(answers, str):
-        answers = [answers]
-    return list(answers)
 
 
 @dataclass(frozen=True, slots=True)

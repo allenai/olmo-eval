@@ -20,11 +20,11 @@ from collections.abc import Iterator
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register, register_variant
 from olmo_eval.evals.vision.data.paths import rebase_data_path, torch_datasets_dir
+from olmo_eval.evals.vision.scoring.counting import PointCountScorer
 from olmo_eval.evals.vision.scoring.prompt_templates import pixmo_count_question
 from olmo_eval.evals.vision.scoring.prompts import POINT_COUNT_STYLE
-from olmo_eval.evals.vision.scoring.vqa import PointCountScorer
+from olmo_eval.evals.vision.tasks.image_qa import ImageQATask, point_count_metrics
 from olmo_eval.evals.vision.tasks.pointing import StylePrefixMixin
-from olmo_eval.evals.vision.tasks.single_image import ImageQATask, point_count_metrics
 
 _SCORER = PointCountScorer()
 _METRICS = point_count_metrics(_SCORER)

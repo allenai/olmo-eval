@@ -205,7 +205,7 @@ class SaCoGoldPointMpBase(ModelPromptPointingTask):
                 metadata={
                     "pointing_annotators": annotators,
                     "image_size": (int(md["width"]), int(md["height"])),
-                    "image_path": rebase_data_path(ex["image"]),
+                    "image_path": ex["image"],
                     "example_id": md["id"],
                     "subset": md["subset"],
                     "label": ex["text_input"],
