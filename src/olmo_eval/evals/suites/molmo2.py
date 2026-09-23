@@ -1,8 +1,4 @@
-"""Molmo2 multimodal benchmark suites.
-
-Grows with the vision families as they land: captioning now, pointing/counting,
-image QA, and multi-image next.
-"""
+"""Molmo2 multimodal benchmark suites."""
 
 from olmo_eval.evals.suites.registry import AggregationStrategy, make_suite
 

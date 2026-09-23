@@ -108,13 +108,6 @@ def score_pointing_example(
     return max_pr, max_rec, max_f1
 
 
-def _response_text(output: LMOutput) -> str:
-    answer = output.extracted_answer
-    if isinstance(answer, str) and answer:
-        return answer
-    return output.text or ""
-
-
 @dataclass(frozen=True, slots=True)
 class PointingScorer(Scorer):
     """Point-in-mask precision/recall/f1 for one pointing example.
