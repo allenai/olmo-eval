@@ -239,6 +239,8 @@ class VLLMProvider(InferenceProvider):
             kwargs["top_k"] = top_k
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
+        if params.presence_penalty is not None:
+            kwargs["presence_penalty"] = params.presence_penalty
         # Always request logprobs (default to 1) for metrics computation
         kwargs["logprobs"] = params.logprobs if params.logprobs is not None else 1
 
@@ -360,6 +362,8 @@ class VLLMProvider(InferenceProvider):
             trace["generation_kwargs"]["top_p"] = vllm_params.top_p
         if getattr(vllm_params, "top_k", None) is not None:
             trace["generation_kwargs"]["top_k"] = vllm_params.top_k
+        if params.presence_penalty is not None:
+            trace["generation_kwargs"]["presence_penalty"] = vllm_params.presence_penalty
         trace["stop_sequences"] = list(params.stop_sequences or ())
         trace["input_mode"] = "prompt_token_ids" if self._add_bos_token is False else "text"
         return trace

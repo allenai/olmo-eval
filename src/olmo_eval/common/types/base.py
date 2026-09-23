@@ -249,6 +249,8 @@ class SamplingParams:
     do_sample: bool = True
     truncate_prompt_tokens: int | None = None
     truncation_side: Literal["left", "right"] | None = None
+    # OpenAI/vLLM presence penalty; None leaves the backend default (0.0).
+    presence_penalty: float | None = None
 
 
 @dataclass(slots=True)

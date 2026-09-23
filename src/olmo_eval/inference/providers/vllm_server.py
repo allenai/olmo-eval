@@ -638,6 +638,8 @@ class VLLMServerProvider(InferenceProvider):
                 trace["generation_kwargs"]["top_p"] = params.top_p
             if params.do_sample and params.temperature > 0 and params.top_k is not None:
                 trace["generation_kwargs"]["top_k"] = params.top_k
+            if params.presence_penalty is not None:
+                trace["generation_kwargs"]["presence_penalty"] = params.presence_penalty
             truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
             if truncate_prompt_tokens is not None:
                 trace["generation_kwargs"]["truncate_prompt_tokens"] = truncate_prompt_tokens
@@ -663,6 +665,8 @@ class VLLMServerProvider(InferenceProvider):
             generation_kwargs["top_k"] = params.top_k
         if params.top_p is not None:
             generation_kwargs["top_p"] = params.top_p
+        if params.presence_penalty is not None:
+            generation_kwargs["presence_penalty"] = params.presence_penalty
         if self.chat_template_kwargs:
             generation_kwargs["chat_template_kwargs"] = dict(self.chat_template_kwargs)
         truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
@@ -834,6 +838,8 @@ class VLLMServerProvider(InferenceProvider):
             kwargs["top_p"] = params.top_p
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             extra_body["top_k"] = params.top_k
+        if params.presence_penalty is not None:
+            kwargs["presence_penalty"] = params.presence_penalty
         stop_sequences = self._get_completion_stop_sequences(params)
         if stop_sequences:
             kwargs["stop"] = stop_sequences
@@ -917,6 +923,8 @@ class VLLMServerProvider(InferenceProvider):
         extra_body: dict[str, Any] = {}
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             extra_body["top_k"] = params.top_k
+        if params.presence_penalty is not None:
+            kwargs["presence_penalty"] = params.presence_penalty
         truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
         if truncate_prompt_tokens is not None:
             extra_body["truncate_prompt_tokens"] = truncate_prompt_tokens

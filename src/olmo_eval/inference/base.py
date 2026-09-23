@@ -147,6 +147,8 @@ class InferenceProvider(ABC):
             generation_kwargs["num_samples"] = params.num_samples
         if params.logprobs is not None:
             generation_kwargs["logprobs"] = params.logprobs
+        if params.presence_penalty is not None:
+            generation_kwargs["presence_penalty"] = params.presence_penalty
 
         trace["generation_kwargs"] = generation_kwargs
         trace["stop_sequences"] = list(params.stop_sequences or ())
