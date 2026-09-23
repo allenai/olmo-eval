@@ -65,6 +65,12 @@ class EvaluatorVersion:
     zero_fills_missing_pages: bool
     #: Extra binaries CDM needs beyond :data:`CDM_BINARIES`.
     cdm_binaries: tuple[str, ...] = ()
+    #: ``(installed, replacement)`` pairs swapped after installing, for dependencies that
+    #: pull a variant the evaluation host cannot load.
+    replacements: tuple[tuple[str, str], ...] = ()
+    #: Modules the evaluator imports at startup, checked right after provisioning so a
+    #: broken environment fails before inference rather than after it.
+    startup_imports: tuple[str, ...] = ()
 
 
 EVALUATORS: dict[str, EvaluatorVersion] = {
@@ -77,6 +83,7 @@ EVALUATORS: dict[str, EvaluatorVersion] = {
         python_version="3.11",
         install=("-e", "{repo}", "filelock==3.16.1"),
         zero_fills_missing_pages=True,
+        startup_imports=("src.cli",),
     ),
     # Head of the ``v1_5`` branch. Its ``requirements.txt`` pins a whole notebook
     # environment; these are the packages the evaluator imports, at those pins.
@@ -114,6 +121,10 @@ EVALUATORS: dict[str, EvaluatorVersion] = {
         zero_fills_missing_pages=False,
         # v1.5 tokenizes formulas with the KaTeX parser through Node.js.
         cdm_binaries=("node",),
+        # ``mmeval`` requires the GUI OpenCV build, which needs ``libGL`` at import time;
+        # the headless build provides the same ``cv2`` without it.
+        replacements=(("opencv-python", "opencv-python-headless==4.11.0.86"),),
+        startup_imports=("dataset", "metrics", "task", "metrics.cdm_metric"),
     ),
 }
 
@@ -172,8 +183,28 @@ def ensure_evaluator(version: str = "v1.6") -> tuple[Path, Path]:
         _run([uv, "venv", "--quiet", "--python", spec.python_version, str(venv)])
         packages = [arg.format(repo=repo) for arg in spec.install]
         _run([uv, "pip", "install", "--quiet", "--python", str(python), *packages])
+        for installed, replacement in spec.replacements:
+            _run([uv, "pip", "uninstall", "--quiet", "--python", str(python), installed])
+            _run([uv, "pip", "install", "--quiet", "--python", str(python), replacement])
+        _check_startup_imports(spec, repo, python)
         ready.touch()
     return repo, python
+
+
+def _check_startup_imports(spec: EvaluatorVersion, repo: Path, python: Path) -> None:
+    if not spec.startup_imports:
+        return
+    script = "import importlib\n" + "".join(
+        f"importlib.import_module({module!r})\n" for module in spec.startup_imports
+    )
+    proc = subprocess.run(
+        [str(python), "-c", script], cwd=repo, capture_output=True, text=True, timeout=600
+    )
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stderr or proc.stdout).splitlines()[-15:])
+        raise RuntimeError(
+            f"The OmniDocBench {spec.name} evaluator was installed but cannot start:\n{tail}"
+        )
 
 
 # ---------------------------------------------------------------------------
