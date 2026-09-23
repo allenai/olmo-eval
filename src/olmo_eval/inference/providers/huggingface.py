@@ -200,6 +200,27 @@ def _patch_molmo2_generation_cache_position(model: Any) -> None:
     cls.prepare_inputs_for_generation = prepare_inputs_for_generation
 
 
+def _presence_penalty_processor(penalty: float, prompt_len: int):
+    """A logits processor subtracting ``penalty`` from every token generated so far.
+
+    Matches vLLM's and the OpenAI API's ``presence_penalty``: only generated tokens count,
+    not the prompt, and a token is penalized once however often it appeared.
+    """
+    import torch
+    from transformers import LogitsProcessor
+
+    class PresencePenaltyLogitsProcessor(LogitsProcessor):
+        def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.Tensor:
+            generated = input_ids[:, prompt_len:]
+            if generated.shape[1] == 0:
+                return scores
+            seen = torch.zeros_like(scores, dtype=torch.bool)
+            seen.scatter_(1, generated, True)
+            return scores - penalty * seen.to(scores.dtype)
+
+    return PresencePenaltyLogitsProcessor()
+
+
 class HuggingFaceProvider(InferenceProvider):
     """Provider using Hugging Face Transformers for local inference.
 
@@ -435,6 +456,12 @@ class HuggingFaceProvider(InferenceProvider):
                 kwargs["top_p"] = params.top_p
             if params.top_k is not None:
                 kwargs["top_k"] = params.top_k
+        if params.presence_penalty:
+            from transformers import LogitsProcessorList
+
+            kwargs["logits_processor"] = LogitsProcessorList(
+                [_presence_penalty_processor(params.presence_penalty, prompt_len)]
+            )
 
         return kwargs
 

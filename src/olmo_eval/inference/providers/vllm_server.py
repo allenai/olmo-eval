@@ -772,6 +772,8 @@ class VLLMServerProvider(InferenceProvider):
         kwargs["temperature"] = params.temperature
         if params.top_p is not None:
             kwargs["top_p"] = params.top_p
+        if params.presence_penalty is not None:
+            kwargs["presence_penalty"] = params.presence_penalty
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             extra_body["top_k"] = params.top_k
         stop_sequences = self._get_completion_stop_sequences(params)
@@ -848,6 +850,8 @@ class VLLMServerProvider(InferenceProvider):
         kwargs["temperature"] = params.temperature
         if params.top_p is not None:
             kwargs["top_p"] = params.top_p
+        if params.presence_penalty is not None:
+            kwargs["presence_penalty"] = params.presence_penalty
         extra_body: dict[str, Any] = {}
         if params.do_sample and params.temperature > 0 and params.top_k is not None:
             extra_body["top_k"] = params.top_k

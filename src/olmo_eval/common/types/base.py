@@ -242,6 +242,9 @@ class SamplingParams:
     temperature: float = 0.0
     top_p: float | None = None
     top_k: int | None = None
+    #: Subtracted from the logit of every token already present in the generated output
+    #: (vLLM / OpenAI semantics); discourages the repetition loops greedy decoding falls into.
+    presence_penalty: float | None = None
     stop_sequences: tuple[str, ...] | None = None
     num_samples: int = 1
     logprobs: int | None = None
