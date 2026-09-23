@@ -46,6 +46,7 @@ TASK_MODULES: tuple = (
     "xabsence",
     "retrieval",
     "qa",
+    "grouping",
     "grouping_labeled",
     "reorder",
     "outlier",

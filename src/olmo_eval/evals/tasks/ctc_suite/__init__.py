@@ -47,9 +47,7 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 from ._vendor.ctc.eval.stopping import STOP_PRESETS
 from ._vendor.ctc.eval.stopping import apply as _apply_stop
 from ._vendor.ctc.format import registry as _ctc_registry
-from ._vendor.ctc.format.prompts import GROUPING_INSTRUCTION
 from ._vendor.ctc.tasks import load_all as _load_all_specs
-from ._vendor.ctc.tasks._grouping import make_grouping_spec
 
 __all__ = [
     "HF_DATASET",
@@ -72,26 +70,33 @@ DATA_ROOT_ENV = "CTC_SUITE_DATA_ROOT"
 #: (qdmatch, grouping, outlier) ignore this, and declare so via ``honors_query_position``.
 QUERY_POSITION = "both"
 
+#: Env var choosing how a prompt is wrapped. ``alpaca`` (default) is the setting every published
+#: rung was graded with: the Alpaca preamble, sent as a raw completion. ``chat`` renders exactly what
+#: the CTC SFT data trains on -- the same body without the Alpaca preamble, sent as a single user
+#: turn so the provider applies the model's own chat template -- which makes the eval IID with
+#: chat-template SFT checkpoints. The body is byte-identical to the training renderer
+#: (``olmo_core`` ``build_prompt(use_alpaca=False)``) for every roster row; scores under the two
+#: settings are not comparable.
+PROMPT_FORMAT_ENV = "CTC_SUITE_PROMPT_FORMAT"
+PROMPT_FORMATS = ("alpaca", "chat")
+
+
+def prompt_format() -> str:
+    """:returns: The active prompt format, read at request time so a run can set it late."""
+    fmt = os.environ.get(PROMPT_FORMAT_ENV, "alpaca").strip().lower()
+    if fmt not in PROMPT_FORMATS:
+        raise ValueError(f"{PROMPT_FORMAT_ENV}={fmt!r}; expected one of {PROMPT_FORMATS}")
+    return fmt
+
+
 # Import the vendored spec registrations (side-effect: populates the ctc registry).
 _load_all_specs()
 
-# Plain ``grouping`` (OpenAlex, unlabeled clusters) is in the suite roster but not in the vendored
-# canonical set -- register it from the vendored factory, mirroring grouping_labeled minus labels.
-if "grouping" not in _ctc_registry.names():
-    _ctc_registry.register(
-        make_grouping_spec(
-            name="grouping",
-            description="Partition abstracts into their (unnamed) field clusters.",
-            instruction=GROUPING_INSTRUCTION,
-            rungs=("2k", "4k", "8k", "16k", "32k"),
-            query_builder=lambda ex: (
-                f"{GROUPING_INSTRUCTION}\n\n{ex['queries'][0]}"
-                if ex.get("queries")
-                else GROUPING_INSTRUCTION
-            ),
-            sources=("openalex",),
-        )
-    )
+# ``grouping`` is the vendored reference spec (``_vendor/ctc/tasks/grouping``): instruction in the
+# header, documents, then the raw query -- the pre-migration prompt the historical grid and every
+# SFT set use. (A fallback registered here used to append the instruction a second time after the
+# documents, so ctc_grouping prompts matched neither.)
+assert "grouping" in _ctc_registry.names(), "vendored grouping spec failed to register"
 
 
 #: Rung label -> token budget in the local filenames. ``contradiction_iid`` aliases r2k to 2560:
@@ -547,7 +552,13 @@ class CTCSuiteTask(Task):
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
-        prompt = self.spec.build_prompt(instance.metadata["example"], query_position=QUERY_POSITION)
+        example = instance.metadata["example"]
+        if prompt_format() == "chat":
+            body = self.spec.build_prompt(example, query_position=QUERY_POSITION, use_alpaca=False)
+            return LMRequest(
+                request_type=RequestType.CHAT, messages=({"role": "user", "content": body},)
+            )
+        prompt = self.spec.build_prompt(example, query_position=QUERY_POSITION)
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
 
     def get_sampling_params(self, instance: Instance) -> SamplingParams | None:

@@ -18,7 +18,6 @@ Ported verbatim from ``corpus_reasoning/lib/prompts.py``. Document *serializatio
 applies to which task, and how documents are joined) lives in :mod:`ctc.format.documents`.
 """
 
-
 # ── Passage templates ──
 # Used by all data generation and eval scripts to format individual documents.
 # The base template matches HELMET eval format exactly.
@@ -29,9 +28,7 @@ applies to which task, and how documents are joined) lives in :mod:`ctc.format.d
 # textually identical across tasks (e.g. in qafter mode:
 # "<alpaca>{GENERIC_INSTRUCTION}\n\n### Input:\n<docs>\n\n") so a mixed-task
 # dataset shows the model the same structural prefill regardless of task type.
-GENERIC_INSTRUCTION = (
-    "You will be asked to do a long-context processing task for a context."
-)
+GENERIC_INSTRUCTION = "You will be asked to do a long-context processing task for a context."
 
 
 PASSAGE_TEMPLATE = "Document (Title: {title}): {text}"
@@ -155,8 +152,7 @@ def helmet_rerank_prompt(context, question, demos=""):
     so the prompt ends with "Ranking:" and the model/target continues with
     " ID3 > ID1 > ...". `context` = passages joined by "\\n\\n"; `demos` = the
     few-shot block (each demo already ends with "\\n\\n") or "" for zero-shot."""
-    user = HELMET_RERANK_USER_TEMPLATE.format(demos=demos, context=context,
-                                              question=question)
+    user = HELMET_RERANK_USER_TEMPLATE.format(demos=demos, context=context, question=question)
     return user + "\n" + HELMET_RERANK_SYSTEM_TEMPLATE
 
 
@@ -240,6 +236,33 @@ XABSENCE_INSTRUCTION = (
     "are UNMATCHED: they have no paraphrase anywhere in the other corpus. "
     "Identify the unmatched claims.\n"
     "Write your answer in the following format:\nUnmatched: [id1], [id2], ..."
+)
+
+# One-sided variant (``orphan_side == "A"``): verbatim from the reference renderer
+# (olmo_core.data.corpus_reasoning_prompts._prompts), which picks the wording per example.
+XABSENCE_ONESIDED_INSTRUCTION = (
+    "Below are two corpora of numbered claims, A and B. Every claim in corpus A "
+    "appears again, word for word, in corpus B — except for exactly {n} claims. "
+    "Those {n} claims from corpus A are MISSING from corpus B. Find them. "
+    "Only claims from corpus A can be missing; every claim in corpus B also "
+    "appears in corpus A.\n"
+    "Write your answer in the following format:\nMissing: [id1], [id2], ..."
+)
+
+# Prose-corpus flavour of the one-sided variant (e.g. --src-tag gutenberg): the items are
+# narrative PASSAGES, not claims, so calling them "claims" is simply false about the context --
+# the same class of prompt/data mismatch as the "paraphrase" wording that was fixed earlier.
+# Word-for-word identical to XABSENCE_ONESIDED_INSTRUCTION except "claims" -> "passages"; the
+# {n} substitution and the "Missing: [id1], [id2], ..." answer format are unchanged, so the
+# target builder (_build_output, anchored on orphan_side) and the grader (_parse_id_set) are
+# untouched by this variant.
+XABSENCE_ONESIDED_GUTENBERG_INSTRUCTION = (
+    "Below are two corpora of numbered passages, A and B. Every passage in corpus A "
+    "appears again, word for word, in corpus B — except for exactly {n} passages. "
+    "Those {n} passages from corpus A are MISSING from corpus B. Find them. "
+    "Only passages from corpus A can be missing; every passage in corpus B also "
+    "appears in corpus A.\n"
+    "Write your answer in the following format:\nMissing: [id1], [id2], ..."
 )
 
 # ── Cycle-comparison task ──
@@ -356,7 +379,7 @@ GROUPING_LABELED_INSTRUCTION = (
     "You are given a list of scientific paper abstracts. Group them into the "
     "requested number of categories based on what they are about. For each "
     "group, give a short label describing the shared topic, then list the "
-    '1-indexed document IDs. Output a JSON object of the form '
+    "1-indexed document IDs. Output a JSON object of the form "
     '{"groups": [{"label": "<topic>", "doc_ids": [...]}, ...]}. Every '
     "document must appear in exactly one group."
 )
@@ -463,5 +486,3 @@ HELMET_TEMPLATE_QUERY_BOTH = (
     "Write your answer in the following format:\nAnswer: [answer]\n\n"
     "{demos}Question: {question}\n\n{context}\n\nQuestion: {question}"
 )
-
-

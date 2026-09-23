@@ -72,6 +72,12 @@ def score(
     gold_labels = parsing.partition_to_labels(gold_clusters, n)
     pred_labels = parsing.partition_to_labels(list(parsed), n)
     out = dict(metrics.pairwise_metrics(pred_labels, gold_labels))
+    # No co-clustered pair on either side (an all-singleton partition, which is what the finest
+    # level produces when k equals n): pairwise P/R/F1 are 0/0 and the pre-migration grader
+    # (evaluate._eval_grouping) scored a match as 1.0. Without this, an exactly correct answer on
+    # those rows scores 0 -- about 30% of the r2k grouping rows.
+    if all(len(c) <= 1 for c in parsed) and all(len(c) <= 1 for c in gold_clusters):
+        out.update(pairwise_precision=1.0, pairwise_recall=1.0, pairwise_f1=1.0)
 
     # k_exact: did the model produce the requested number of groups? coverage: what fraction of
     # documents it actually placed. A model can score well pairwise while quietly dropping
