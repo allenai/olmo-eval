@@ -77,6 +77,13 @@ QUERY_POSITION = "both"
 #: chat-template SFT checkpoints. The body is byte-identical to the training renderer
 #: (``olmo_core`` ``build_prompt(use_alpaca=False)``) for every roster row; scores under the two
 #: settings are not comparable.
+#: Env var capping rerank's decode budget (tokens). Unset keeps the spec's 512. rerank is scored
+#: on the first 10 DISTINCT in-range ids only (``parsed[:10]``), and an id costs ~7 tokens
+#: (``[2726], `` -- Qwen tokenizes digits singly), so a cap of ~160 is score-identical whenever
+#: those 10 ids fit, while cutting the task's decode time several-fold. Opt-in: a model that
+#: prefixes its ranking with prose, or repeats ids, can be truncated before its tenth id.
+RERANK_DECODE_ENV = "CTC_SUITE_RERANK_DECODE_TOKENS"
+
 PROMPT_FORMAT_ENV = "CTC_SUITE_PROMPT_FORMAT"
 PROMPT_FORMATS = ("alpaca", "chat")
 
@@ -567,10 +574,12 @@ class CTCSuiteTask(Task):
         # cannot honour. The same rules run post-hoc in CTCScorer instead; the only cost is decode
         # tokens on models that never emit EOS, bounded by max_tokens.
         stop = STOP_PRESETS[self.spec.stop]
-        return SamplingParams(
-            max_tokens=max(stop.max_new_tokens, self.spec.max_new_tokens),
-            temperature=0,
-        )
+        max_tokens = max(stop.max_new_tokens, self.spec.max_new_tokens)
+        if self.spec.name == "rerank" and os.environ.get(RERANK_DECODE_ENV):
+            # rerank is graded on the first TOP_K distinct ids only, but a trained model writes the
+            # whole ranking (up to the 512-token budget) -- most of the task's decode time.
+            max_tokens = min(max_tokens, int(os.environ[RERANK_DECODE_ENV]))
+        return SamplingParams(max_tokens=max_tokens, temperature=0)
 
 
 def _make_row_task(task_name: str, row: RosterRow) -> None:
