@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
+from tqdm.auto import tqdm
 
 from olmo_eval.common.configs import expand_tasks
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
@@ -940,6 +941,13 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 return (spec, tracker, [])
 
         from rich.table import Table
+
+        # tqdm creates its class-level lock lazily on first use. When several worker
+        # threads build their first progress bars at once (dataset loading does this),
+        # one can tear a bar down before another has finished initialising the lock and
+        # fail with "type object 'tqdm' has no attribute '_lock'". Initialise it on the
+        # main thread before any worker touches tqdm.
+        tqdm.get_lock()
 
         # Collect prepared tasks in parallel, but accumulate results for deterministic ordering
         prepared_results: dict[str, tuple[TaskTracker, list[QueueItem]]] = {}
