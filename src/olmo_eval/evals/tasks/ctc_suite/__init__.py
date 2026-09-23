@@ -32,7 +32,9 @@ per rung (``r2k`` ... ``r1m``). Set ``CTC_SUITE_DATA_ROOT=/path/to/ladders`` to 
 
 from __future__ import annotations
 
+import json
 import os
+import random
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -83,6 +85,26 @@ QUERY_POSITION = "both"
 #: those 10 ids fit, while cutting the task's decode time several-fold. Opt-in: a model that
 #: prefixes its ranking with prose, or repeats ids, can be truncated before its tenth id.
 RERANK_DECODE_ENV = "CTC_SUITE_RERANK_DECODE_TOKENS"
+
+#: Env var splitting one (subset, rung) cell across several jobs: a JSON map
+#: ``{"<subset>:<rung>": "<index>/<count>"}``. Each shard grades a disjoint slice of the exact rows an
+#: unsharded run with the same ``limit``/``seed`` grades, so shard metrics pool back to the
+#: unsharded number (weighting by instance count). Unset or unnamed cells are not sharded.
+SHARDS_ENV = "CTC_SUITE_SHARDS"
+
+
+def _shard_for(subset: str, rung: str) -> tuple[int, int] | None:
+    raw = os.environ.get(SHARDS_ENV)
+    if not raw:
+        return None
+    spec = json.loads(raw).get(f"{subset}:{rung}")
+    if spec is None:
+        return None
+    index, count = (int(x) for x in str(spec).split("/"))
+    if not 0 <= index < count:
+        raise ValueError(f"{SHARDS_ENV}: bad shard {spec!r} for {subset}:{rung}")
+    return index, count
+
 
 PROMPT_FORMAT_ENV = "CTC_SUITE_PROMPT_FORMAT"
 PROMPT_FORMATS = ("alpaca", "chat")
@@ -521,7 +543,19 @@ class CTCSuiteTask(Task):
 
     @property
     def instances(self) -> Iterator[Instance]:
-        yield from self._load_instances_cached()
+        items = list(self._load_instances_cached())
+        shard = _shard_for(self.row.subset, self.config.data_source.split)
+        if shard is None:
+            yield from items
+            return
+        index, count = shard
+        # Draw the `limit` sample exactly as the runner would (runners/asynq/preparation.py:
+        # random.Random(seed).sample), THEN take every count-th row. The shards of one cell are
+        # therefore a partition of the very rows an unsharded run grades, and each shard is at or
+        # under the limit, so the runner does not sample again.
+        if self.config.limit and len(items) > self.config.limit:
+            items = random.Random(self.config.seed).sample(items, self.config.limit)
+        yield from items[index::count]
 
     def _load_instances(self, split: str | None = None) -> Iterator[Instance]:
         """Same as the base loader, except ``CTC_SUITE_DATA_ROOT`` (read here, at load time)
