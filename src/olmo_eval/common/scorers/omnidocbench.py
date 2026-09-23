@@ -318,6 +318,22 @@ def _count_failures(metric_result: Mapping[str, Any], log_text: str) -> int:
     return count
 
 
+#: Runs ``pdf_validation.py`` with a deeper recursion limit. The v1.6 display-formula
+#: matcher recurses once per predicted formula on a page, so a page with a thousand formulas
+#: (a model stuck repeating one) crashes the whole evaluation at Python's default limit of
+#: 1,000. Its candidate search is capped, so a deeper limit changes no score. Matching runs in
+#: worker threads, which get a larger stack to match.
+_LAUNCH_SCRIPT = """
+import runpy, sys, threading
+sys.setrecursionlimit(100_000)
+threading.stack_size(512 * 1024 * 1024)
+repo, script = sys.argv[1], sys.argv[2]
+sys.path.insert(0, repo)
+sys.argv = [script, *sys.argv[3:]]
+runpy.run_path(script, run_name="__main__")
+"""
+
+
 def run_official_evaluation(
     predictions: Mapping[str, str],
     gt_pages: Sequence[Mapping[str, Any]],
@@ -354,7 +370,15 @@ def run_official_evaluation(
         log_path = work / "evaluator.log"
         with open(log_path, "w") as log:
             proc = subprocess.run(
-                [str(python), str(repo / "pdf_validation.py"), "--config", str(config_path)],
+                [
+                    str(python),
+                    "-c",
+                    _LAUNCH_SCRIPT,
+                    str(repo),
+                    str(repo / "pdf_validation.py"),
+                    "--config",
+                    str(config_path),
+                ],
                 cwd=work,
                 stdout=log,
                 stderr=subprocess.STDOUT,
