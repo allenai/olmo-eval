@@ -50,26 +50,21 @@ def replace_images(question: str, options: list[str], max_images: int | None = N
     """mm_olmo ``academic_datasets.replace_images``: rewrite ``<image>`` placeholders
     to ``"Image n"``, numbering sequentially through the question then the options."""
     all_strings = [question] + options
-    image_counter = 1
-
     total_images = sum(s.count("<image>") for s in all_strings)
     if max_images is not None:
         total_images = min(total_images, max_images)
+    image_counter = 1
 
-    replaced = []
+    def repl(match: re.Match[str]) -> str:
+        # One counter across the question and every option, as mm_olmo numbers them.
+        nonlocal image_counter
+        if image_counter > total_images:
+            return match.group(0)
+        replacement = f"Image {image_counter}"
+        image_counter += 1
+        return replacement
 
-    for s in all_strings:
-
-        def repl(match):
-            nonlocal image_counter
-            if image_counter > total_images:
-                return match.group(0)
-            replacement = f"Image {image_counter}"
-            image_counter += 1
-            return replacement
-
-        replaced.append(re.sub(r"<image>", repl, s))
-
+    replaced = [re.sub(r"<image>", repl, s) for s in all_strings]
     return replaced[0], replaced[1:]
 
 
