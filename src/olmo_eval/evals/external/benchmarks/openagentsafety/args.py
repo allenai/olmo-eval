@@ -59,6 +59,9 @@ class OpenAgentSafetyArgs:
     prompt_path: str | None = None
     repo_path: str | None = None
     repo_ref: str | None = None
+    npc_base_url: str | None = None
+    npc_model: str | None = None
+    dataset_size: int | None = None
     max_iterations: int = 500
     n_critic_runs: int = 1
     max_retries: int = 3
@@ -83,6 +86,9 @@ class OpenAgentSafetyArgs:
             prompt_path=data.get("prompt_path"),
             repo_path=data.get("repo_path"),
             repo_ref=data.get("repo_ref"),
+            npc_base_url=data.get("npc_base_url"),
+            npc_model=data.get("npc_model"),
+            dataset_size=_parse_optional(data, "dataset_size", int),
             max_iterations=int(data.get("max_iterations", 500)),
             n_critic_runs=int(data.get("n_critic_runs", 1)),
             max_retries=int(data.get("max_retries", 3)),

@@ -17,6 +17,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -24,13 +25,20 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.benchmarks.openagentsafety.args import OpenAgentSafetyArgs
 from olmo_eval.evals.external.benchmarks.openagentsafety.repo import (
-    DEFAULT_CACHE_DIR,
     DEFAULT_REF,
+    default_cache_dir,
     ensure_repo,
+    ensure_workspace_image,
+    patch_gateway_host_mapping,
+    sync_repo_env,
 )
 from olmo_eval.evals.external.benchmarks.openagentsafety.result_parser import (
     find_output_jsonl,
     parse_output_jsonl,
+)
+from olmo_eval.evals.external.network import (
+    get_workspace_gateway_ip,
+    rewrite_loopback_url,
 )
 from olmo_eval.evals.external.result import ExternalEvalResult
 
@@ -38,6 +46,28 @@ if TYPE_CHECKING:
     from olmo_eval.inference.base import InferenceProvider
 
 logger = logging.getLogger(__name__)
+
+_OPTIONAL_NPC_SECRETS = ("NPC_BASE_URL", "NPC_MODEL")
+
+
+def _default_run_dir() -> Path:
+    return Path(os.environ.get("TMPDIR", tempfile.gettempdir())) / "olmo-eval-openagentsafety"
+
+
+def _container_info_ok(binary: str) -> tuple[bool, str]:
+    """Return whether ``<binary> info`` succeeds, plus stderr/stdout on failure."""
+    try:
+        result = subprocess.run(
+            [binary, "info"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+    if result.returncode == 0:
+        return True, ""
+    return False, (result.stderr or result.stdout or "").strip()
 
 
 class OpenAgentSafetyExternalEval(ExternalEval):
@@ -51,8 +81,8 @@ class OpenAgentSafetyExternalEval(ExternalEval):
     def description(self) -> str:
         return (
             "Evaluates AI agent safety in workplace scenarios with NPC interactions. "
-            "Requires Docker, TheAgentCompany services (~30GB), NPC_API_KEY, and "
-            "optionally NPC_BASE_URL / NPC_MODEL."
+            "Requires Docker or Podman (`docker` CLI), TheAgentCompany services "
+            "(~30GB), NPC_API_KEY, and optionally NPC_BASE_URL / NPC_MODEL."
         )
 
     @property
@@ -73,8 +103,17 @@ class OpenAgentSafetyExternalEval(ExternalEval):
             "critic": ("OAS critic: pass, finish_with_patch, empty_patch_critic", "pass"),
             "select": ("Instance-ID file path or comma-separated IDs", None),
             "prompt_path": ("Custom Jinja2 prompt template path", None),
-            "repo_path": ("Local OpenHands/benchmarks checkout (default: clone)", None),
+            "repo_path": (
+                f"Local OpenHands/benchmarks checkout (default: clone to {default_cache_dir()})",
+                None,
+            ),
             "repo_ref": ("Git ref of OpenHands/benchmarks to checkout", DEFAULT_REF),
+            "npc_base_url": ("NPC LLM base URL (or NPC_BASE_URL env)", None),
+            "npc_model": ("NPC model name (or NPC_MODEL env)", None),
+            "dataset_size": (
+                "Canonical dataset size for metadata (default: number of parsed records)",
+                None,
+            ),
             "max_iterations": ("Max agent iterations per instance", 500),
             "n_critic_runs": ("Critic retry attempts", 1),
             "max_retries": ("Retries for instances that throw", 3),
@@ -97,19 +136,21 @@ class OpenAgentSafetyExternalEval(ExternalEval):
         output_dir: str | None = None,
         container_runtime: str = "podman",
     ) -> ExternalEvalResult:
-        logger.debug(
-            "[%s] OAS uses host Docker via OpenHands DockerWorkspace; "
-            "ignoring container_runtime=%s",
-            self.name,
-            container_runtime,
-        )
         start_time = time.time()
         oas_args = OpenAgentSafetyArgs.from_dict(args)
-        run_dir = Path(output_dir) if output_dir else Path("/tmp") / "olmo-eval-openagentsafety"
+        # Infer runs with cwd=OpenHands/benchmarks; keep every path absolute.
+        run_dir = (Path(output_dir) if output_dir else _default_run_dir()).expanduser().resolve()
         run_dir.mkdir(parents=True, exist_ok=True)
+        gateway_ip = get_workspace_gateway_ip(container_runtime)
+        logger.info(
+            "[%s] Rewriting loopback URLs and TAC host mapping to %s (runtime=%s)",
+            self.name,
+            gateway_ip,
+            container_runtime,
+        )
 
         try:
-            self._build_env_vars()
+            subprocess_env = self._subprocess_env(oas_args, container_runtime)
         except ValueError as exc:
             return self._error_result(str(exc), start_time)
 
@@ -119,15 +160,18 @@ class OpenAgentSafetyExternalEval(ExternalEval):
 
         try:
             repo_dir = ensure_repo(
-                Path(oas_args.repo_path) if oas_args.repo_path else DEFAULT_CACHE_DIR,
+                Path(oas_args.repo_path) if oas_args.repo_path else default_cache_dir(),
                 oas_args.repo_ref,
             )
+            sync_repo_env(repo_dir)
+            patch_gateway_host_mapping(repo_dir, gateway_ip)
+            ensure_workspace_image(repo_dir, container_runtime=container_runtime)
         except Exception as exc:
             logger.exception("[%s] Failed to prepare OpenHands/benchmarks", self.name)
             return self._error_result(f"Failed to prepare OpenHands/benchmarks: {exc}", start_time)
 
         llm_config_path = run_dir / "oas_llm_config.json"
-        llm_config = self._build_llm_config(provider)
+        llm_config = self._build_llm_config(provider, container_runtime)
         llm_config_path.write_text(json.dumps(llm_config, indent=2))
 
         select_path = self._materialize_select(oas_args.select, run_dir)
@@ -137,7 +181,6 @@ class OpenAgentSafetyExternalEval(ExternalEval):
             return self._error_result(str(exc), start_time)
 
         infer_cmd = self._build_infer_command(
-            repo_dir=repo_dir,
             llm_config_path=llm_config_path,
             oas_args=oas_args,
             output_dir=run_dir,
@@ -146,7 +189,7 @@ class OpenAgentSafetyExternalEval(ExternalEval):
         logger.info("[%s] Running: %s", self.name, " ".join(infer_cmd))
 
         try:
-            returncode, raw_output = await self._run_infer(infer_cmd, repo_dir)
+            returncode, raw_output = await self._run_infer(infer_cmd, repo_dir, subprocess_env)
         except TimeoutError:
             return self._error_result(
                 f"OpenAgentSafety exceeded timeout of {self.timeout_seconds:.0f}s",
@@ -168,10 +211,17 @@ class OpenAgentSafetyExternalEval(ExternalEval):
                 raw_output,
             )
 
-        parsed = parse_output_jsonl(jsonl_path)
+        parsed = parse_output_jsonl(jsonl_path, dataset_size=oas_args.dataset_size)
+        success = returncode == 0 and bool(parsed["metrics"].get("num_instances", 0))
+        if success:
+            error = None
+        elif returncode != 0:
+            error = f"openagentsafety-infer exited with {returncode}"
+        else:
+            error = "OpenAgentSafety produced no scored instances"
         result = ExternalEvalResult(
             name=self.name,
-            success=returncode == 0 and bool(parsed["metrics"].get("num_instances", 0)),
+            success=success,
             metrics=parsed["metrics"],
             metadata={
                 **parsed["metadata"],
@@ -186,14 +236,18 @@ class OpenAgentSafetyExternalEval(ExternalEval):
             },
             predictions=parsed["predictions"],
             raw_output=raw_output,
-            error=None if returncode == 0 else f"openagentsafety-infer exited with {returncode}",
+            error=error,
         )
         result.duration_seconds = time.time() - start_time
         if output_dir:
             self._save_results(result, output_dir)
         return result
 
-    def _build_llm_config(self, provider: InferenceProvider) -> dict[str, str]:
+    def _build_llm_config(
+        self,
+        provider: InferenceProvider,
+        container_runtime: str = "podman",
+    ) -> dict[str, str]:
         """Build the JSON LLM config consumed by ``openagentsafety-infer``."""
         inner = getattr(provider, "base_provider", provider)
         base_url = getattr(inner, "base_url", None) or getattr(provider, "base_url", None)
@@ -227,30 +281,65 @@ class OpenAgentSafetyExternalEval(ExternalEval):
             "api_key": api_key,
         }
         if base_url:
-            config["base_url"] = str(base_url)
+            rewritten = rewrite_loopback_url(str(base_url), runtime=container_runtime)
+            if rewritten != str(base_url):
+                logger.info("[%s] Rewrote LLM base_url: %s -> %s", self.name, base_url, rewritten)
+            config["base_url"] = rewritten
         return config
+
+    def _build_env_vars(self, secrets: tuple[str, ...] | None = None) -> dict[str, str]:
+        env = super()._build_env_vars(secrets)
+        for name in _OPTIONAL_NPC_SECRETS:
+            value = os.environ.get(name)
+            if value:
+                env[name] = value
+        return env
+
+    def _subprocess_env(
+        self,
+        oas_args: OpenAgentSafetyArgs,
+        container_runtime: str = "podman",
+    ) -> dict[str, str]:
+        """Host env plus required/optional NPC secrets for ``openagentsafety-infer``."""
+        env = os.environ.copy()
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        # Parent `uv run olmo-eval` leaks its venv; OAS must use the benchmarks .venv.
+        env.pop("VIRTUAL_ENV", None)
+        env.pop("UV_PROJECT", None)
+        env.update(self._build_env_vars())
+        if oas_args.npc_base_url:
+            env["NPC_BASE_URL"] = oas_args.npc_base_url
+        if oas_args.npc_model:
+            env["NPC_MODEL"] = oas_args.npc_model
+        npc_base_url = env.get("NPC_BASE_URL")
+        if npc_base_url:
+            rewritten = rewrite_loopback_url(npc_base_url, runtime=container_runtime)
+            if rewritten != npc_base_url:
+                logger.info(
+                    "[%s] Rewrote NPC_BASE_URL: %s -> %s", self.name, npc_base_url, rewritten
+                )
+            env["NPC_BASE_URL"] = rewritten
+        return env
 
     def _build_infer_command(
         self,
-        repo_dir: Path,
         llm_config_path: Path,
         oas_args: OpenAgentSafetyArgs,
         output_dir: Path,
         select_path: str | None,
     ) -> list[str]:
         """Build the ``uv run openagentsafety-infer`` command."""
-        del repo_dir
         cmd = [
             "uv",
             "run",
             "openagentsafety-infer",
-            str(llm_config_path),
+            str(llm_config_path.expanduser().resolve()),
             "--dataset",
             oas_args.dataset,
             "--split",
             oas_args.split,
             "--output-dir",
-            str(output_dir),
+            str(output_dir.expanduser().resolve()),
             "--num-workers",
             str(oas_args.num_workers),
             "--critic",
@@ -271,7 +360,13 @@ class OpenAgentSafetyExternalEval(ExternalEval):
         if oas_args.n_limit:
             cmd.extend(["--n-limit", str(oas_args.n_limit)])
         if select_path:
-            cmd.extend(["--select", select_path])
+            select_file = Path(select_path).expanduser()
+            cmd.extend(
+                [
+                    "--select",
+                    str(select_file.resolve()) if select_file.exists() else select_path,
+                ]
+            )
         if oas_args.enable_delegation:
             cmd.append("--enable-delegation")
         return cmd
@@ -305,26 +400,26 @@ class OpenAgentSafetyExternalEval(ExternalEval):
         docker = shutil.which("docker")
         if docker is None:
             return (
-                "OpenAgentSafety requires Docker on the host (TheAgentCompany + "
-                "per-task OpenHands workspaces). Install Docker and retry."
+                "OpenAgentSafety requires a `docker` CLI on PATH (Docker Engine "
+                "or a Podman `docker` symlink). OpenHands DockerWorkspace invokes "
+                "`docker` for inner workspaces. Install Docker or symlink docker "
+                "to podman and retry."
             )
-        try:
-            result = subprocess.run(
-                [docker, "info"],
-                capture_output=True,
-                text=True,
-                timeout=20,
+        ok, detail = _container_info_ok(docker)
+        if ok:
+            return None
+        podman = shutil.which("podman")
+        if podman and _container_info_ok(podman)[0]:
+            logger.info(
+                "[%s] `docker info` failed; accepting working `podman info`",
+                self.name,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return f"Could not query Docker: {exc}"
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "").strip()
-            return f"Docker is installed but not usable: {detail}"
-        return None
+            return None
+        return f"Docker/Podman is installed but not usable: {detail}"
 
-    async def _run_infer(self, command: list[str], repo_dir: Path) -> tuple[int, str]:
-        env = os.environ.copy()
-        env.setdefault("PYTHONUNBUFFERED", "1")
+    async def _run_infer(
+        self, command: list[str], repo_dir: Path, env: dict[str, str]
+    ) -> tuple[int, str]:
         process = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(repo_dir),

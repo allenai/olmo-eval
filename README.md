@@ -907,7 +907,7 @@ uv run olmo-eval external-evals
 # Run a built-in external eval
 uv run olmo-eval run-external -e tau2_bench --model llama3.1-8b -a domain=airline -a num_tasks=1
 
-# OpenAgentSafety smoke run (requires Docker + TheAgentCompany + NPC_* env)
+# OpenAgentSafety smoke run (requires Docker/Podman + TheAgentCompany + NPC_* env)
 uv run olmo-eval run-external -e openagentsafety --model llama3.1-8b \
     -a dataset=mgulavani/openagentsafety_full_updated_v3 -a n_limit=1 -a critic=pass
 ```
@@ -916,31 +916,40 @@ uv run olmo-eval run-external -e openagentsafety --model llama3.1-8b \
 
 OpenAgentSafety evaluates agent safety in workplace scenarios with NPC
 interactions. It does not fit the regular task pipeline: each instance needs a
-Docker workspace, TheAgentCompany services (GitLab, ownCloud, RocketChat, Plane),
+workspace container, TheAgentCompany services (GitLab, ownCloud, RocketChat, Plane),
 and an NPC LLM. olmo-eval therefore wraps the upstream OpenHands infer CLI as
 an external eval named `openagentsafety`.
 
 The agent loop stays in [OpenHands/benchmarks](https://github.com/OpenHands/benchmarks/tree/main/benchmarks/openagentsafety)
-(`openagentsafety-infer`). olmo-eval points that runner at the configured
-inference provider, then parses `output.jsonl` using the same resolve rule as
-upstream `eval_infer.py` (an instance is resolved only when
-`final_score.result > 0` and `final_score.result == final_score.total`).
+(`openagentsafety-infer` / OpenHands `DockerWorkspace`). olmo-eval points that
+runner at the configured inference provider, then parses `output.jsonl` using
+the same resolve rule as upstream `eval_infer.py` (an instance is resolved only
+when `final_score.result > 0` and `final_score.result == final_score.total`).
+swe-rex is not the OAS control plane.
+
+Beaker sandbox jobs run OAS in the outer container. Podman provides the inner
+workspaces via the `docker` symlink; loopback model/NPC URLs are rewritten to
+the pasta host IP (`OLMO_PASTA_HOST_IP`, default `169.254.1.2`) or docker0
+(`172.17.0.1`) so the workspace can reach the host.
 
 **Setup**
 
-1. Docker must be running on the host. TheAgentCompany images are about 30GB
-   and take 15–30 minutes to pull:
+1. A `docker` CLI must be on PATH (Docker Engine, or Podman with a `docker`
+   symlink). TheAgentCompany services (~30GB) must already be running on the
+   host and reachable at `the-agent-company.com` from the workspace:
    ```bash
    curl -fsSL https://github.com/TheAgentCompany/the-agent-company-backup-data/releases/download/setup-script-20241208/setup.sh | sh
    ```
+   Full TAC compose orchestration and image caching on Beaker are not
+   automated yet.
 2. Export NPC credentials used inside the workspace:
    ```bash
    export NPC_API_KEY="sk-..."
    export NPC_BASE_URL="https://api.openai.com/v1"   # optional; falls back to the agent LLM
    export NPC_MODEL="gpt-4o-mini"                   # optional
    ```
-3. Use `--runtime docker` if you also run other sandboxed evals in the same job;
-   OpenAgentSafety itself talks to the host Docker daemon.
+3. Default `--runtime podman` matches Beaker. Pass `--runtime docker` for a
+   local Docker daemon.
 
 **Run**
 
@@ -963,9 +972,6 @@ Preview configuration without executing:
 uv run olmo-eval run-external -e openagentsafety --model <model> -a n_limit=1 --dry-run
 uv run olmo-eval external-evals -f openagentsafety
 ```
-
-Full TheAgentCompany parity on Beaker (privileged Docker, service compose, image
-caching) is not wired yet.
 
 ### ExternalEvalResult
 
