@@ -129,6 +129,7 @@ Suites support different strategies for combining task results:
 | Strategy | Description |
 |----------|-------------|
 | `AVERAGE` | Simple average of all task scores (default) |
+| `WEIGHTED_AVERAGE` | Average of all task scores, each weighted by the task's instance count |
 | `AVERAGE_OF_AVERAGES` | Average over child suite averages (equal weight per child) |
 | `DISPLAY_ONLY` | Display child results without computing suite average |
 | `NONE` | No aggregation - just collect individual task results |
@@ -163,7 +164,25 @@ register(Suite(
 # vs AVERAGE:          (0.80 + 0.40 + 0.50 + 0.60) / 4 = 0.575
 ```
 
-Note: Currently `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains. Custom weighting may be supported in the future.
+Note: `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains.
+
+**Weighted Average Example:**
+
+```python
+register(Suite(
+    name="mmlu_pro",
+    tasks=("mmlu_pro_math", "mmlu_pro_history"),  # 1351 and 381 questions
+    aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+))
+
+# With scores of 0.30 (math) and 0.45 (history):
+# WEIGHTED_AVERAGE: (0.30 * 1351 + 0.45 * 381) / 1732 = 0.333
+# vs AVERAGE:       (0.30 + 0.45) / 2 = 0.375
+```
+
+`WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored.
+
+A weighted suite reports its weighted mean or no score at all. If a contributing task has no instance count, the suite aggregate is omitted and the runner logs which tasks were missing, rather than publishing an unweighted mean under the same suite name. Instance counts are required when a result is stored, so this only affects results written before that check existed.
 
 ### Formatters
 
@@ -660,6 +679,18 @@ See the [Harness](#harness) section above for full documentation on:
 - Defining tools with the `@tool` decorator
 - Programmatic usage
 
+## Function Calling (BFCL)
+
+The Berkeley Function Calling Leaderboard v3 single-turn categories are
+registered as `bfcl_*` tasks, reformulated as a completion so a pretrained
+model with no chat template can be measured on them. See
+[`src/olmo_eval/evals/tasks/bfcl/README.md`](src/olmo_eval/evals/tasks/bfcl/README.md)
+for the task list, suites, exemplar settings, and what is not implemented.
+
+```bash
+uv run olmo-eval run -m my-base-model -t bfcl
+```
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.
@@ -1026,7 +1057,7 @@ Launch an evaluation job:
 uv run olmo-eval beaker launch -n "eval-llama3-mmlu" -m llama3.1-8b -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Multiple tasks
 uv run olmo-eval beaker launch -n "eval-llama3-suite" \
@@ -1034,7 +1065,7 @@ uv run olmo-eval beaker launch -n "eval-llama3-suite" \
     -t mmlu -t gsm8k -t hellaswag \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Large model with multiple GPUs
 uv run olmo-eval beaker launch \
@@ -1043,7 +1074,7 @@ uv run olmo-eval beaker launch \
     --task mmlu --task gsm8k --task arc_easy \
     --cluster h100 \
     --workspace "ai2/olmo-eval-debug" \
-    --budget "ai2/oe-base" \
+    --budget "ai2/oe-other" \
     --gpus 4 \
     --timeout 48h
 
@@ -1051,7 +1082,7 @@ uv run olmo-eval beaker launch \
 uv run olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base" \
+    -B "ai2/oe-other" \
     --dry-run
 
 # With a harness preset for tool-augmented evaluation
@@ -1061,7 +1092,7 @@ uv run olmo-eval beaker launch -n "eval-with-tools" \
     --harness dr_tulu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # With inspection flags for debugging
 uv run olmo-eval beaker launch -n "debug-eval" \
@@ -1071,7 +1102,7 @@ uv run olmo-eval beaker launch -n "debug-eval" \
     --inspect-response \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Run external evaluations
 uv run olmo-eval beaker launch -n "external-eval" \
@@ -1081,7 +1112,7 @@ uv run olmo-eval beaker launch -n "external-eval" \
     -A num_tasks=1 \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 ### Advanced Usage
@@ -1106,7 +1137,7 @@ uv run olmo-eval beaker launch \
     -t "simpleqa:judge@urgent" \
     -o limit=10 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base" \
+    -B "ai2/oe-other" \
     --cluster h100 \
     --inspect \
     --group olmo-eval-local-judge-2 -y
@@ -1125,7 +1156,7 @@ uv run olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
     -t "arc_easy@low" \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Creates 3 experiments:
 #   eval-suite-high:   runs mmlu at high priority
@@ -1136,7 +1167,7 @@ uv run olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
 uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "arc_easy:mc@high" \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Tasks without @priority use the config file priority (default: normal)
 ```
@@ -1152,7 +1183,7 @@ uv run olmo-eval beaker launch -n "benchmark-v1" --group "benchmark-2024" \
     -t mmlu -t gsm8k -t hellaswag \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Creates experiment and adds it to "benchmark-2024" group
 
@@ -1194,7 +1225,7 @@ tasks:
   - mmlu
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 ```
 
 ### CLI Options
@@ -1243,7 +1274,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t gsm8k -o limit=50 \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 The `-o` flag uses OmegaConf dotlist syntax, supporting:
@@ -1273,7 +1304,7 @@ uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t mmlu \
     --secret-env team-openai-key:OPENAI_API_KEY \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Multiple secret overrides
 uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa:judge \
@@ -1283,7 +1314,7 @@ uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa:judge \
     --secret-env shared-s2-key:S2_API_KEY \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 Format: `BEAKER_SECRET_NAME:ENV_VAR_NAME`
@@ -1312,7 +1343,7 @@ tasks:
 
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 1
 priority: normal
 timeout: 24h
@@ -1345,7 +1376,7 @@ tasks:
   - hellaswag
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 1
 ```
 
@@ -1371,7 +1402,7 @@ tasks:
   - arc_easy@low
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 1
 timeout: 24h
 ```
@@ -1396,7 +1427,7 @@ tasks:
   - hellaswag
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 4
 priority: high
 preemptible: false
@@ -1528,7 +1559,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]
@@ -1547,7 +1578,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Override ai2-olmo-core from a GitHub branch
 uv run olmo-eval beaker launch -n "eval" \
@@ -1558,7 +1589,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 The OLMo-core source URL is normalized to install the
@@ -1578,7 +1609,7 @@ uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
     -t humaneval:3shot:bpb -o 'dependencies=["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"]' \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Dependencies from multiple tasks are merged
 uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
@@ -1586,7 +1617,7 @@ uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
     -t mbpp:3shot:bpb -o 'dependencies=["pkg2"]' \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 ## Development

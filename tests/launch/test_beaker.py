@@ -151,14 +151,14 @@ class TestBeakerJobConfig:
             command=["echo", "hello"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
         )
         assert config.name == "test-job"
         assert config.command == ["echo", "hello"]
         assert config.num_gpus == 0
         assert config.cluster == "h100"
         assert config.workspace == "ai2/oe-data"
-        assert config.budget == "ai2/oe-base"
+        assert config.budget == "ai2/oe-other"
         assert config.priority == "normal"
         assert config.preemptible is True
         assert config.timeout == "24h"
@@ -199,7 +199,7 @@ class TestBeakerJobConfig:
             command=["echo"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
         )
         # Just verify defaults exist and have valid mount paths
         assert len(config.weka_buckets) >= 1
@@ -214,7 +214,7 @@ class TestBeakerJobConfig:
             command=["echo"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
         )
         # env_secrets defaults to empty list; secrets are injected during launch
         assert len(config.env_secrets) == 0
@@ -509,7 +509,7 @@ class TestBeakerJobConfigTaskPackages:
             command=["echo"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
         )
         assert config.task_packages is None
 
@@ -520,7 +520,7 @@ class TestBeakerJobConfigTaskPackages:
             command=["echo"],
             cluster="h100",
             workspace="ai2/oe-data",
-            budget="ai2/oe-base",
+            budget="ai2/oe-other",
             task_packages=["special-lib==1.0", "git+https://github.com/user/repo"],
         )
         assert config.task_packages == ["special-lib==1.0", "git+https://github.com/user/repo"]

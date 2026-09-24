@@ -273,6 +273,8 @@ class VLLMServerProvider(InferenceProvider):
         completion_use_prompt_token_ids: bool | None = None,
         completion_client_side_stop_trim: bool | None = None,
         completion_sentencepiece_cleanup: bool | None = None,
+        enable_lora: bool = False,
+        lora_modules: list[str] | None = None,
         **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -307,6 +309,10 @@ class VLLMServerProvider(InferenceProvider):
                 stop sequence client-side after generation.
             completion_sentencepiece_cleanup: If True, replace SentencePiece space markers
                 with actual spaces in completion outputs.
+            enable_lora: Enable LoRA (Low-Rank Adaptation) support for model loading (server mode).
+            lora_modules: List of LoRA module paths to load (format: "module_name=/path/to/lora").
+                Only used if enable_lora is True (server mode). Raises an error if more than one
+                is passed.
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
@@ -335,6 +341,13 @@ class VLLMServerProvider(InferenceProvider):
         self._max_length: int | None = max_model_len
         self._max_length_source: str | None = "configured" if max_model_len is not None else None
         self._max_length_discovery_attempted = max_model_len is not None
+        self._enable_lora = enable_lora
+        self._lora_modules = lora_modules
+        self._request_model_name = model_name
+        if lora_modules and len(lora_modules) > 1:
+            raise ValueError("the vllm server provider can accept only one lora module")
+        if enable_lora and lora_modules:
+            self._request_model_name = lora_modules[0].split("=", 1)[0]
 
         if base_url:
             # Connect to existing server
@@ -367,6 +380,10 @@ class VLLMServerProvider(InferenceProvider):
                     srv_kwargs["tool_call_parser"] = tool_call_parser
             if trust_remote_code:
                 srv_kwargs["trust_remote_code"] = True
+            if enable_lora:
+                srv_kwargs["enable_lora"] = True
+            if lora_modules:
+                srv_kwargs["lora_modules"] = lora_modules
             self._server = VLLMServerProcess(
                 model_name=model_name,
                 tensor_parallel_size=tensor_parallel_size,
@@ -552,7 +569,7 @@ class VLLMServerProvider(InferenceProvider):
 
         # Use remote tokenizer by default (no transformers dependency)
         if self._tokenizer is None:
-            self._tokenizer = RemoteTokenizer(self.base_url, self.model_name)
+            self._tokenizer = RemoteTokenizer(self.base_url, self._request_model_name)
         return self._tokenizer
 
     def get_tokenizer(self) -> Any:
@@ -738,8 +755,12 @@ class VLLMServerProvider(InferenceProvider):
 
         return None
 
-    def _completion_usage_metadata(self, usage: Any) -> dict[str, Any]:
-        """Extract completion usage metadata from SDK or raw JSON responses."""
+    def _completion_usage_metadata(self, usage: Any, num_choices: int = 1) -> dict[str, Any]:
+        """Extract per-output token counts from SDK or raw JSON response usage.
+
+        Response usage sums completion tokens over all choices, so the count
+        describes a single output only when the response has one choice.
+        """
         if not usage:
             return {}
 
@@ -753,7 +774,7 @@ class VLLMServerProvider(InferenceProvider):
         metadata: dict[str, Any] = {}
         if prompt_tokens is not None:
             metadata["prompt_tokens"] = prompt_tokens
-        if completion_tokens is not None:
+        if completion_tokens is not None and num_choices == 1:
             metadata["completion_tokens"] = completion_tokens
         return metadata
 
@@ -764,9 +785,12 @@ class VLLMServerProvider(InferenceProvider):
         logprobs_payload: Any,
         usage: Any,
         stop_sequences: list[str] | None,
+        finish_reason: str | None = None,
+        num_choices: int = 1,
     ) -> LMOutput:
         """Create a standardized LMOutput from completion response payloads."""
-        metadata = self._completion_usage_metadata(usage)
+        metadata = self._completion_usage_metadata(usage, num_choices)
+        metadata["finish_reason"] = finish_reason
         processed_text = self._postprocess_completion_text(text, stop_sequences)
 
         logprob_entries: list[LogProbEntry] | None = None
@@ -793,7 +817,7 @@ class VLLMServerProvider(InferenceProvider):
     ) -> list[LMOutput]:
         """Generate using the /v1/completions endpoint."""
         kwargs: dict[str, Any] = {
-            "model": self.model_name,
+            "model": self._request_model_name,
             "prompt": request.prompt,
             "n": params.num_samples,
             "logprobs": 1,  # Request logprobs for metrics
@@ -802,7 +826,7 @@ class VLLMServerProvider(InferenceProvider):
         # rather than sending null, which some OpenAI-compatible servers reject.
         if params.max_tokens is not None:
             kwargs["max_tokens"] = params.max_tokens
-        extra_body: dict[str, Any] = {"add_special_tokens": False}
+        extra_body: dict[str, Any] = {"add_special_tokens": bool(self._add_bos_token)}
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
@@ -831,14 +855,17 @@ class VLLMServerProvider(InferenceProvider):
             response.raise_for_status()
             data = response.json()
             usage = data.get("usage")
+            choices = data.get("choices", [])
             return [
                 self._build_completion_output(
                     text=choice.get("text") or "",
+                    finish_reason=choice.get("finish_reason"),
                     logprobs_payload=choice.get("logprobs"),
                     usage=usage,
                     stop_sequences=stop_sequences,
+                    num_choices=len(choices),
                 )
-                for choice in data.get("choices", [])
+                for choice in choices
             ]
 
         if extra_body:
@@ -848,9 +875,11 @@ class VLLMServerProvider(InferenceProvider):
         return [
             self._build_completion_output(
                 text=choice.text or "",
+                finish_reason=getattr(choice, "finish_reason", None),
                 logprobs_payload=getattr(choice, "logprobs", None),
                 usage=usage,
                 stop_sequences=stop_sequences,
+                num_choices=len(response.choices),
             )
             for choice in response.choices
         ]
@@ -872,7 +901,7 @@ class VLLMServerProvider(InferenceProvider):
 
         # Build request kwargs
         kwargs: dict[str, Any] = {
-            "model": self.model_name,
+            "model": self._request_model_name,
             "messages": messages,
             "n": params.num_samples,
         }
@@ -929,12 +958,9 @@ class VLLMServerProvider(InferenceProvider):
 
             # Convert logprobs to standard format
             logprob_entries: list[LogProbEntry] | None = None
-            metadata: dict[str, Any] = {}
+            metadata: dict[str, Any] = {"finish_reason": getattr(choice, "finish_reason", None)}
 
-            # Store token counts from server for accurate metrics
-            if usage:
-                metadata["prompt_tokens"] = usage.prompt_tokens
-                metadata["completion_tokens"] = usage.completion_tokens
+            metadata.update(self._completion_usage_metadata(usage, len(response.choices)))
 
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
@@ -949,11 +975,13 @@ class VLLMServerProvider(InferenceProvider):
                 # Compute metadata from logprobs
                 sum_logits = sum(entry["logprob"] for entry in logprob_entries)
                 num_tokens = len(logprob_entries)
-                metadata = {
-                    "sum_logits": sum_logits,
-                    "num_tokens": num_tokens,
-                    "num_tokens_all": num_tokens,
-                }
+                metadata.update(
+                    {
+                        "sum_logits": sum_logits,
+                        "num_tokens": num_tokens,
+                        "num_tokens_all": num_tokens,
+                    }
+                )
 
             outputs.append(
                 LMOutput(
@@ -1088,7 +1116,7 @@ class VLLMServerProvider(InferenceProvider):
             resp = await http_client.post(
                 f"{self.base_url}/completions",
                 json={
-                    "model": self.model_name,
+                    "model": self._request_model_name,
                     "prompt": full_tokens,
                     "max_tokens": 1,
                     "temperature": params.temperature,
