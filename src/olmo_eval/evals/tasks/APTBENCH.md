@@ -76,6 +76,9 @@ uv run olmo-eval run -m mock -t aptbench_env_setup_action -o limit=5 --dry-run
 # One subtask on a real base model (vLLM server, the default harness)
 uv run olmo-eval run -m Qwen/Qwen3-8B-Base -t aptbench_issue_fix_plan:ctx32k
 
+# test with longer timeout
+uv run olmo-eval run -m Qwen/Qwen3-8B-Base -t aptbench_issue_fix_plan:ctx32k --harness default -o provider.kwargs.startup_timeout=900
+
 # Headline SWE + DR suite, 32K context
 uv run olmo-eval run \
     --harness default -o provider.max_model_len=32768 \
