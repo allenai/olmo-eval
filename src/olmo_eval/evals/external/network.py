@@ -12,6 +12,7 @@ from olmo_eval.common.config import get_infra_config
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 DEFAULT_PASTA_HOST_IP = "169.254.1.2"
 DEFAULT_DOCKER0_GATEWAY = "172.17.0.1"
+PODMAN_DNS = "8.8.8.8"
 
 
 def get_docker_network_args(runtime: str | None = None) -> tuple[str, ...]:
@@ -42,6 +43,11 @@ def resolve_container_runtime(runtime: str | None = None) -> str:
     """Resolve docker vs podman, defaulting to podman to match ExternalEval."""
     value = runtime or os.environ.get("OLMO_CONTAINER_RUNTIME") or "podman"
     return value.strip().lower()
+
+
+def podman_pasta_network(gateway_ip: str) -> str:
+    """Pasta network name that maps the host to ``gateway_ip`` inside the guest."""
+    return f"pasta:--map-guest-addr,{gateway_ip}"
 
 
 def get_workspace_gateway_ip(runtime: str | None = None) -> str:

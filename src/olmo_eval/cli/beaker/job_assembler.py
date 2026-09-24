@@ -10,6 +10,11 @@ from olmo_eval.common.constants.infrastructure import (
     BEAKER_RESULT_DIR,
     cluster_has_weka,
 )
+from olmo_eval.evals.external.benchmarks.openagentsafety.tac import (
+    OAS_START_TAC_ENV,
+    OAS_TAC_IMAGE_STORE,
+    OAS_TAC_IMAGE_STORE_ENV,
+)
 from olmo_eval.launch.beaker.constants import BEAKER_INFRA_ENV_VARS
 from olmo_eval.launch.beaker.mirror import log
 
@@ -182,6 +187,25 @@ def collect_install_extras(
     return extras
 
 
+def openagentsafety_beaker_env(external_evals: list[str], cluster: str) -> dict[str, str]:
+    """Env for starting TheAgentCompany on a Weka-backed Beaker job.
+
+    OpenAgentSafety images are about 30GB, so launches on clusters without Weka
+    are rejected before a job is submitted.
+    """
+    if "openagentsafety" not in external_evals:
+        return {}
+    if not cluster_has_weka(cluster):
+        raise ValueError(
+            "OpenAgentSafety on Beaker requires a Weka cluster so TheAgentCompany "
+            "images can be cached. Launch with a Weka cluster such as ai2/jupiter."
+        )
+    return {
+        OAS_START_TAC_ENV: "1",
+        OAS_TAC_IMAGE_STORE_ENV: OAS_TAC_IMAGE_STORE,
+    }
+
+
 def assemble_external_eval_job(
     name: str,
     model: str,
@@ -240,6 +264,8 @@ def assemble_external_eval_job(
         Configured BeakerJobConfig.
     """
     from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig
+
+    oas_env = openagentsafety_beaker_env(external_evals, cluster)
 
     # Build command
     command: list[str] = ["olmo-eval", "run-external"]
@@ -335,6 +361,9 @@ def assemble_external_eval_job(
     # User-supplied env vars win over everything above
     if user_env_vars:
         env_vars.update(user_env_vars)
+    if oas_env:
+        env_vars.update(oas_env)
+        command.extend(["--runtime", "podman"])
 
     # Collect scaffold names from external evals
     # Check eval_args for scaffold override, otherwise use eval's default

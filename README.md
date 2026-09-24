@@ -928,25 +928,34 @@ when `final_score.result > 0` and `final_score.result == final_score.total`).
 swe-rex is not the OAS control plane.
 
 Beaker sandbox jobs run OAS in the outer container. Podman provides the inner
-workspaces via the `docker` symlink; loopback model/NPC URLs are rewritten to
-the pasta host IP (`OLMO_PASTA_HOST_IP`, default `169.254.1.2`) or docker0
-(`172.17.0.1`) so the workspace can reach the host.
+workspaces via the `docker` symlink. TheAgentCompany stays on the job's host
+network so GitLab, ownCloud, RocketChat, and Plane can bind the job's ports.
+Each OAS workspace uses a pasta network (`--map-guest-addr` at
+`OLMO_PASTA_HOST_IP`, default `169.254.1.2`) so published ports still work and
+the workspace can reach those services. Loopback model and NPC URLs are
+rewritten to that pasta address under Podman, or to docker0 (`172.17.0.1`)
+under Docker. Each workspace loads a hook that runs a `chat_npc` tool call as
+the in-container `chat_npc` command, and accepts ownCloud helper arguments with
+the filename and directory in either order.
 
 **Setup**
 
 1. A `docker` CLI must be on PATH (Docker Engine, or Podman with a `docker`
-   symlink). TheAgentCompany services (~30GB) must already be running on the
-   host and reachable at `the-agent-company.com` from the workspace:
+   symlink). TheAgentCompany must be reachable on ports 3000, 8091, 8092, and
+   8929. On a host where those ports are already open, the eval leaves the
+   stack alone. A Beaker launch on a Weka cluster sets `OAS_START_TAC=1` and,
+   when the ports are closed, runs the upstream setup script. Images are stored
+   at `/weka/oe-eval-default/olmo-eval/openagentsafety-tac` under a lock; later
+   jobs reuse that directory as a read-only additional image store. Clusters
+   without Weka are rejected at launch. To start the stack yourself:
    ```bash
    curl -fsSL https://github.com/TheAgentCompany/the-agent-company-backup-data/releases/download/setup-script-20241208/setup.sh | sh
    ```
-   Full TAC compose orchestration and image caching on Beaker are not
-   automated yet.
 2. Export NPC credentials used inside the workspace:
    ```bash
    export NPC_API_KEY="sk-..."
    export NPC_BASE_URL="https://api.openai.com/v1"   # optional; falls back to the agent LLM
-   export NPC_MODEL="gpt-4o-mini"                   # optional
+   export NPC_MODEL="gpt-4o-mini"                   # optional; litellm_proxy/ prefix is stripped
    ```
 3. Default `--runtime podman` matches Beaker. Pass `--runtime docker` for a
    local Docker daemon.
