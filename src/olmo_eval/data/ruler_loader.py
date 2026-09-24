@@ -13,7 +13,11 @@ from typing import Any
 import numpy as np
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import disable_progress_bars as disable_hf_hub_progress_bars
-from huggingface_hub.utils import silent_tqdm
+
+try:
+    from huggingface_hub.utils import silent_tqdm
+except ImportError:
+    from tqdm.auto import tqdm as silent_tqdm
 
 logger = logging.getLogger(__name__)
 
