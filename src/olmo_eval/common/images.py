@@ -27,7 +27,13 @@ def resolve_image(entry: Any) -> Any:
 
 
 def resolve_images(images: tuple[Any, ...] | None) -> tuple[Any, ...] | None:
-    """Resolve a request's images tuple; ``None`` stays ``None``."""
+    """Resolve a request's images tuple, dropping entries that resolve to nothing.
+
+    A benchmark with a variable number of images per example (MMMU-Pro interleaves
+    up to seven) attaches one lazy reference per slot; the unused slots resolve to
+    ``None`` and must not reach the provider as holes in the image list.
+    """
     if not images:
         return None
-    return tuple(resolve_image(entry) for entry in images)
+    resolved = [image for image in map(resolve_image, images) if image is not None]
+    return tuple(resolved) or None
