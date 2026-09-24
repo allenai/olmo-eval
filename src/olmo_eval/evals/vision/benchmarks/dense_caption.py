@@ -211,12 +211,6 @@ class DenseCaptionEval(VisionTask):
         )
 
     def _build_instances(self) -> Iterator[Instance]:
-        params = self.config.sampling_params
-        if params is not None and params.num_samples > 1:
-            raise ValueError(
-                "dense_caption metrics average one judged sample per example; "
-                "num_samples > 1 is not supported"
-            )
         # `config.limit` is applied here rather than left to `VisionTask.instances`
         # so the raw-line index driving the seeded prompt never shifts; the base
         # class's slice then has nothing left to remove.
