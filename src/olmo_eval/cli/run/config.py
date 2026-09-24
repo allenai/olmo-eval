@@ -174,6 +174,32 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
     return base_dict
 
 
+def _apply_harness_overrides(harness_config: HarnessConfig, overrides: list[str]) -> HarnessConfig:
+    """Apply CLI overrides to harness config.
+
+    Args:
+        harness_config: Base HarnessConfig to modify.
+        overrides: List of dotlist override strings (e.g., ["sandbox.mode=docker"]).
+            Supports list indices like "sandboxes.0.mode=modal".
+            Supports JSON values like 'sandboxes.0={"mode":"modal"}'.
+            Supports shared sandbox overrides like
+            'sandboxes={"mode":"modal","instances":64,"min_instances":24}'
+            where non-pool fields are applied to each sandbox config and
+            instances/min_instances set the shared sandbox pool budget/minimum.
+
+    Returns:
+        New HarnessConfig with overrides applied.
+    """
+    # Deep-copied because _apply_dotlist_overrides writes into the dict in
+    # place, and to_dict can share nested containers with the config (e.g.
+    # provider kwargs). Presets are cached for the life of the process, so
+    # without the copy an override would leak into every later use of the
+    # preset.
+    harness_dict = copy.deepcopy(harness_config.to_dict())
+    harness_dict = _apply_dotlist_overrides(harness_dict, overrides)
+    return HarnessConfig.from_dict(harness_dict)
+
+
 @dataclass
 class RunConfig:
     """Parsed and validated configuration for an evaluation run.
@@ -449,9 +475,7 @@ class RunConfigBuilder:
 
         # Apply CLI overrides to harness config
         if self.cli_harness_overrides:
-            harness_dict = harness_config.to_dict()
-            harness_dict = _apply_dotlist_overrides(harness_dict, self.cli_harness_overrides)
-            harness_config = HarnessConfig.from_dict(harness_dict)
+            harness_config = _apply_harness_overrides(harness_config, self.cli_harness_overrides)
 
         from olmo_eval.common.configs import get_provider_config
 

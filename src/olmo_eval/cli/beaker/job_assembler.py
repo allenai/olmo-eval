@@ -444,7 +444,7 @@ class JobConfigAssembler:
 
             preset = get_harness_preset(self.config.harness)
             if self.config.harness_overrides:
-                from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+                from olmo_eval.cli.run.config import _apply_harness_overrides
 
                 preset = _apply_harness_overrides(preset, self.config.harness_overrides)
             scaffold_name = preset.scaffold
