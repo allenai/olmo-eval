@@ -27,7 +27,7 @@ def test_manifest_matches_all_500_family_counts():
 
 
 def test_same_scoring_and_inference_budget():
-    anchor = get_task("omega_500:v2")
+    anchor = get_task("omega_500:hillclimb")
     companion = get_task("omega_500_out")
     assert anchor.config.sampling_params == companion.config.sampling_params
     assert anchor.config.metrics == companion.config.metrics

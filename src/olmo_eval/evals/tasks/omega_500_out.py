@@ -10,7 +10,7 @@ from olmo_eval.common.types import Instance
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.tasks.constants.omega_500_out import FAMILY_ALIASES, IDS_BY_CONFIG
-from olmo_eval.evals.tasks.omega_500 import Omega500V2
+from olmo_eval.evals.tasks.omega_500 import Omega500HillClimb
 
 OMEGA_EXPLORATIVE_REVISION = "b04ae8d4757a2229e8ed65ac6a923e502d0bbb95"
 
@@ -20,7 +20,7 @@ SELECTED_IDS = frozenset(item for items in IDS_BY_CONFIG.values() for item in it
 
 
 @register("omega_500_out")
-class Omega500Out(Omega500V2):
+class Omega500Out(Omega500HillClimb):
     """Evaluate 500 fixed test_out items with OMEGA-500's family proportions."""
 
     data_source = DataSource(

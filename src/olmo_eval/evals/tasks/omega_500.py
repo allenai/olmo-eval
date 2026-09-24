@@ -172,15 +172,16 @@ class Omega500(Task):
         return _extract(output.text or "").answer
 
 
-@register("omega_500:v2")
-class Omega500V2(Omega500):
-    """OMEGA-500 on the corrected AllenAI snapshot, scored strictly.
+@register("omega_500:hillclimb")
+class Omega500HillClimb(Omega500):
+    """OMEGA-500 on the corrected AllenAI snapshot, scored strictly at a 32K budget.
 
     Instances keep the dataset's own IDs, so they stay stable if rows move.
     """
 
     data_source = DataSource(path="allenai/omega-500", revision=OMEGA_500_REVISION)
     primary_metric = AccuracyMetric(name="exact_match", scorer=_STRICT)
+    sampling_params = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         instance = super().process_doc(doc, index)
