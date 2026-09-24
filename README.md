@@ -809,10 +809,16 @@ uv run olmo-eval run \
 `-o` must follow `--harness` or `-t`, so the provider override needs an explicit
 `--harness default` ahead of it.
 
-Images are cropped to the checkpoint's training `max_crops` unless
-`-o provider.max_crops=N` overrides it. mm_olmo's `eval_molmo2.py` evaluates the
-released Molmo2 models at 24, so pass `-o provider.max_crops=24` to compare
-against their published numbers; document tasks are the most sensitive to it.
+Images are cropped to the checkpoint's training `max_crops`, and prompts are
+capped at its training sequence length, unless `-o provider.max_crops=N` and
+`-o provider.max_model_len=N` override them. mm_olmo's `eval_molmo2.py` evaluates
+the released Molmo2 models at 24 crops per single image, 8 per image in
+multi-image prompts, and a 64,000-token sequence. To compare against their
+published numbers, run single-image suites with `-o provider.max_crops=24
+-o provider.max_model_len=64000` (document QA is the most crop-sensitive) and
+multi-image suites with `-o provider.max_model_len=64000` alone: this provider
+applies one `max_crops` to every image. A prompt longer than `max_model_len`
+fails its instance rather than being truncated.
 
 No released `ai2-olmo-core` ships the multimodal classes (`olmo_core.nn.vision`,
 `MultimodalLM`) yet, so the `olmo_core_vlm` extra pins OLMo-core's vision branch
