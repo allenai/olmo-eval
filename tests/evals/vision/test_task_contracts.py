@@ -188,3 +188,80 @@ class TestLimitLeftToRunner:
         from olmo_eval.evals.vision.tasks.base import VisionTask
 
         assert "limit" not in VisionTask.instances.fget.__code__.co_names
+
+
+class TestJudgeScorersOutsideTaskHash:
+    """A per-process cache dir must not make every run of a task a different config."""
+
+    @pytest.mark.parametrize("name", ["charxiv_descriptive", "charxiv_reasoning", "math_vista"])
+    def test_task_hash_is_stable_across_constructions(self, name):
+        first = compute_task_hash(get_task(name).config.to_dict())
+        second = compute_task_hash(get_task(name).config.to_dict())
+        assert first == second
+        serialized = get_task(name).config.to_dict()
+        assert "mkdtemp" not in repr(serialized)
+        assert "/tmp" not in repr(serialized)
+
+    def test_scorer_to_dict_carries_only_output_affecting_settings(self):
+        from olmo_eval.evals.vision.scoring.image_qa import MathVistaGptScorer
+        from olmo_eval.evals.vision.scoring.judges import CharxivJudgeScorer
+
+        for cls in (CharxivJudgeScorer, MathVistaGptScorer):
+            a = cls(cache_dir="/a", cache_only=True).to_dict()
+            b = cls(cache_dir="/b", recompute=True).to_dict()
+            assert a == b, cls.__name__
+            assert set(a) == {"type", "name", "model"}, cls.__name__
+
+
+class TestSubsetMetricsPerInstance:
+    """Subset metrics must not persist the overall scorer value for out-of-scope rows."""
+
+    def _response(self, metadata: dict, scorer_name: str, result: dict | None = None):
+        output = LMOutput(text="A")
+        if result is not None:
+            output.metadata = result
+        return Response(
+            instance=Instance(question="q", gold_answer=None, metadata=metadata),
+            request=LMRequest(request_type=RequestType.CHAT, prompt="q"),
+            outputs=[output],
+            scores={scorer_name: 1.0},  # poisoned channel
+        )
+
+    def test_chartqa_subset(self):
+        from olmo_eval.evals.vision.scoring.image_qa import RelaxedCorrectnessScorer
+        from olmo_eval.evals.vision.tasks.image_qa import ChartQaSubsetMetric
+
+        scorer = RelaxedCorrectnessScorer()
+        human = ChartQaSubsetMetric(name="rc_human", scorer=scorer, subset="human")
+        aug = ChartQaSubsetMetric(name="rc_aug", scorer=scorer, subset="augmented")
+        r = self._response({"is_human": False}, scorer.name)
+        assert human.compute_instance(r) is None  # augmented row, human metric
+        assert aug.compute_instance(r) == 1.0
+        assert human.supports_pairwise_scorer_fallback() is False
+
+    def test_mmmu_pro_setting(self):
+        from olmo_eval.evals.vision.benchmarks.mmmu_pro import MmmuProSettingMetric
+        from olmo_eval.evals.vision.scoring.mmmu_pro import MmmuProScorer
+
+        scorer = MmmuProScorer()
+        std = MmmuProSettingMetric(name="standard_10", scorer=scorer, setting="standard10")
+        r = self._response({"mmmu_pro_setting": "vision"}, scorer.name)
+        assert std.compute_instance(r) is None
+        assert std.supports_pairwise_scorer_fallback() is False
+
+    def test_charxiv_category_and_invalid_flag(self):
+        from olmo_eval.evals.vision.benchmarks.charxiv import (
+            CharxivInvalidCountMetric,
+            CharxivScoreMetric,
+        )
+        from olmo_eval.evals.vision.scoring.judges import CharxivJudgeScorer
+
+        scorer = CharxivJudgeScorer()
+        graded = self._response({}, scorer.name, {"charxiv_result": {"qid": 1, "score": 1}})
+        invalid = self._response({}, scorer.name, {"charxiv_result": {"qid": 1, "score": -1}})
+        n_invalid = CharxivInvalidCountMetric(name="n_invalid", scorer=scorer)
+        assert n_invalid.compute_instance(graded) == 0.0
+        assert n_invalid.compute_instance(invalid) == 1.0
+        overall = CharxivScoreMetric(name="score", scorer=scorer, category=None)
+        assert overall.compute_instance(invalid) == 0.0
+        assert overall.supports_pairwise_scorer_fallback() is False
