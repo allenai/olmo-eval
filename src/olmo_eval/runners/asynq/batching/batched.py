@@ -39,11 +39,14 @@ class BatchedStrategy(BatchingStrategy):
         """Execute batched processing."""
         import math
 
+        from olmo_eval.common.beaker_status import BeakerStatusReporter
         from olmo_eval.runners.asynq.processing import process_items
 
         worker_instances = math.ceil(total_instances / num_workers)
         total_batches = math.ceil(worker_instances / self.config.chunk_size)
         current_batch = 0
+        processed = 0
+        report_progress = BeakerStatusReporter().progress_callback("Processed")
 
         while True:
             # Collect batch
@@ -51,6 +54,7 @@ class BatchedStrategy(BatchingStrategy):
 
             if not batch and saw_shutdown:
                 # Empty batch with shutdown signal - we're done
+                report_progress(processed, worker_instances, force=True)
                 return
 
             if batch:
@@ -71,6 +75,8 @@ class BatchedStrategy(BatchingStrategy):
                     f"Processed batch {current_batch}/{total_batches} ({batch_hash}) "
                     f"in {elapsed:.1f}s ({rate:.1f} items/sec)"
                 )
+                processed += batch_size
+                report_progress(processed, worker_instances, force=saw_shutdown)
 
             if saw_shutdown:
                 # Processed final batch
