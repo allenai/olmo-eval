@@ -10,6 +10,13 @@ eval data pipeline, which depends on the example's **arrow-order index** —
 instances are therefore built strictly in arrow order (verified to reproduce
 all 540 released validation prompts exactly).
 
+The question follows the checkpoint's prompt family, as for the ``_mp`` pointing
+tasks. The default (``uber_model_v2``, instruction-tuned checkpoints) is the
+templated question above. ``-o prompt_templates=none`` (stage-1 checkpoints, with
+``-o system_prompt_style=style_and_length_v2`` for the tag) sends the bare
+lower-cased label, ``point_count: cows``: exactly what those checkpoints train on,
+and what mm_olmo sends them.
+
 Reference (Molmo2-4B ck2000, val): correct=0.9093.
 """
 
@@ -41,6 +48,26 @@ class PixmoCountTask(StylePrefixMixin, ImageQATask):
     metrics = _METRICS
     primary_metric = _METRICS[0]  # correct
     split = Split.VALIDATION
+    #: Prompt family assumed when the run does not say; matches the instruction-tuned
+    #: checkpoints, like :class:`ModelPromptPointingTask`.
+    default_prompt_templates = "uber_model_v2"
+
+    def _question(self, label: str, idx: int) -> str:
+        """The question for ``label`` at arrow position ``idx``, following the prompt family.
+
+        ``"none"`` gives the bare lower-cased label (mm_olmo's ``prompt_templates="none"``
+        branch, and the stage-1 training form); the templated families give
+        :func:`pixmo_count_question`.
+        """
+        family = self.config.prompt_templates or self.default_prompt_templates
+        if family == "none":
+            return label.lower()
+        if family in ("uber_model", "uber_model_v2"):
+            return pixmo_count_question(label, idx)
+        raise ValueError(
+            f"Unsupported prompt_templates {family!r} for pixmo_count; "
+            "expected 'none', 'uber_model' or 'uber_model_v2'"
+        )
 
     def _build_instances(self) -> Iterator[Instance]:
         import datasets
@@ -52,7 +79,7 @@ class PixmoCountTask(StylePrefixMixin, ImageQATask):
         for idx in range(len(ds)):
             ex = ds[idx]
             yield Instance(
-                question=self.apply_family_prefix(pixmo_count_question(ex["label"], idx)),
+                question=self.apply_family_prefix(self._question(ex["label"], idx)),
                 gold_answer=str(ex["count"]),
                 metadata={
                     "count": ex["count"],
