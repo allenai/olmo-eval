@@ -196,12 +196,6 @@ class DenseCaptionEval(Task):
     #: Prompt family assumed when the run does not say. Matches the instruction-tuned
     #: checkpoints, mirroring `ModelPromptPointingTask`'s defaults.
     default_system_prompt_style = "demo_or_style_v2"
-    #: Length number put in the tag under the `style_and_length*` families, mm_olmo's
-    #: `DataFormatter.default_inference_len`. `None` sends the bare tag, which is what
-    #: OLMo-core's stage 1 trains on (its caption tag carries no number); mm_olmo captioner
-    #: checkpoints, and OLMo-core stage-1 checkpoints trained before that change, trained
-    #: with a number and want `dense_caption_captioner_len65`.
-    default_inference_len: int | None = None
 
     def _question(self, idx: int) -> str:
         """The caption prompt for example ``idx``, following the checkpoint's family.
@@ -215,16 +209,14 @@ class DenseCaptionEval(Task):
         and made 3.4% of answers come back as `<points .../>` markup rather than prose.
 
         So `-o system_prompt_style=style_and_length_v2` selects the tag prompt here, the same
-        override that selects it for the pointing tasks. The tag is `long_caption:`, or
-        `long_caption <default_inference_len>:` when a subclass sets a number.
+        override that selects it for the pointing tasks: the bare tag `long_caption:`, with no
+        length number, which is what OLMo-core's stage 1 trains on.
         """
         if self.caption_prompt is not None:
             return self.caption_prompt
         style = self.config.system_prompt_style or self.default_system_prompt_style
         if style in ("style_and_length", "style_and_length_v2"):
-            if self.default_inference_len is None:
-                return "long_caption:"
-            return f"long_caption {self.default_inference_len}:"
+            return "long_caption:"
         return dense_caption_question(idx)
 
     @property
@@ -310,25 +302,7 @@ class DenseCaptionCaptionerEval(DenseCaptionEval):
     nothing after it: ``"long_caption:"``. That is exactly what OLMo-core's
     ``Molmo2-Stage1.py`` trains on, so train and test share one prompt. Use
     ``dense_caption`` for released-Molmo2-family (``uber_model_v2``) checkpoints,
-    which sample a seeded natural-language instruction instead, and
-    ``dense_caption_captioner_len65`` for checkpoints that trained with a length
-    number in the tag.
+    which sample a seeded natural-language instruction instead.
     """
 
     caption_prompt: str | None = "long_caption:"
-
-
-@register("dense_caption_captioner_len65")
-class DenseCaptionCaptionerLen65Eval(DenseCaptionEval):
-    """``dense_caption_captioner`` with mm_olmo's length number in the tag.
-
-    mm_olmo's captioner family puts the caption's length in the tag during training
-    (character count // 15 with noise) and a fixed ``default_inference_len`` of 65 at
-    inference, giving ``"long_caption 65:"``. Verified verbatim against an mm_olmo
-    ``DenseCaptionEval-test`` prediction dump. For mm_olmo captioner checkpoints (e.g. the
-    siglip2-cap-stage1 runs) and for OLMo-core stage-1 checkpoints trained before the
-    number was dropped from the tag; a checkpoint trained on the bare tag saw this form
-    never, so it should use ``dense_caption_captioner``.
-    """
-
-    caption_prompt: str | None = "long_caption 65:"

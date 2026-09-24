@@ -156,9 +156,8 @@ def dense_caption_question(idx: int, seed: int = DENSE_CAPTION_LOADER_SEED) -> s
 
     Checkpoints trained with ``prompt_templates="none"`` + ``system_prompt=
     "style_and_length_v2"`` (the captioner / stage-1 family) do not sample a template at all —
-    their eval prompt is the constant bare tag ``"long_caption:"``, or ``"long_caption 65:"``
-    for checkpoints trained with mm_olmo's length number; see the ``dense_caption_captioner``
-    and ``dense_caption_captioner_len65`` tasks.
+    their eval prompt is the constant bare tag ``"long_caption:"``; see the
+    ``dense_caption_captioner`` task.
     """
     rng = np.random.RandomState((seed * 195172 + idx) % (2**32 - 1))
     return LONG_CAPTION_TEMPLATES[rng.randint(0, len(LONG_CAPTION_TEMPLATES))]
