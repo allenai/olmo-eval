@@ -13,10 +13,18 @@ from olmo_eval.evals.external.benchmarks.openagentsafety.args import (
     OpenAgentSafetyArgs,
 )
 from olmo_eval.evals.external.benchmarks.openagentsafety.eval import OpenAgentSafetyExternalEval
+from olmo_eval.evals.external.benchmarks.openagentsafety.repo import (
+    patch_gateway_host_mapping,
+)
 from olmo_eval.evals.external.benchmarks.openagentsafety.result_parser import (
     find_output_jsonl,
     parse_output_jsonl,
     parse_output_records,
+)
+from olmo_eval.evals.external.network import (
+    DEFAULT_DOCKER0_GATEWAY,
+    DEFAULT_PASTA_HOST_IP,
+    rewrite_loopback_url,
 )
 from olmo_eval.evals.external.registry import get_external_eval, list_external_evals
 
@@ -123,9 +131,12 @@ def test_parse_output_jsonl_and_find(tmp_path: Path) -> None:
 
 def test_parse_empty_records() -> None:
     parsed = parse_output_records([])
+    assert "success" not in parsed
     assert parsed["metrics"]["resolve_rate"] == 0.0
     assert parsed["metrics"]["num_instances"] == 0.0
-    assert parsed["success"] is False
+    assert parsed["metrics"]["num_completed"] == 0.0
+    assert parsed["metrics"]["num_resolved"] == 0.0
+    assert parsed["predictions"] == []
 
 
 def test_build_infer_command_includes_core_flags(tmp_path: Path) -> None:
@@ -135,7 +146,6 @@ def test_build_infer_command_includes_core_flags(tmp_path: Path) -> None:
     )
     select_path = evaluation._materialize_select(args.select, tmp_path)
     command = evaluation._build_infer_command(
-        repo_dir=tmp_path,
         llm_config_path=tmp_path / "llm.json",
         oas_args=args,
         output_dir=tmp_path,
@@ -152,7 +162,8 @@ def test_build_infer_command_includes_core_flags(tmp_path: Path) -> None:
     assert command[command.index("--workspace") + 1] == "docker"
 
 
-def test_build_llm_config_prefixes_local_vllm() -> None:
+def test_build_llm_config_prefixes_local_vllm(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLMO_PASTA_HOST_IP", DEFAULT_PASTA_HOST_IP)
     evaluation = OpenAgentSafetyExternalEval()
     provider = SimpleNamespace(
         model_name="olmo-2",
@@ -163,9 +174,9 @@ def test_build_llm_config_prefixes_local_vllm() -> None:
             base_url="http://localhost:8000/v1",
         ),
     )
-    config = evaluation._build_llm_config(provider)  # type: ignore[arg-type]
+    config = evaluation._build_llm_config(provider, container_runtime="podman")  # type: ignore[arg-type]
     assert config["model"] == "hosted_vllm/olmo-2"
-    assert config["base_url"] == "http://localhost:8000/v1"
+    assert config["base_url"] == f"http://{DEFAULT_PASTA_HOST_IP}:8000/v1"
     assert config["api_key"] == "EMPTY"
 
 
@@ -207,3 +218,89 @@ def test_prompt_override_restores_default(tmp_path: Path) -> None:
     path, original = restore
     path.write_text(original)
     assert default.read_text() == "ORIGINAL"
+
+
+def test_rewrite_loopback_url_uses_pasta_ip_for_podman(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLMO_PASTA_HOST_IP", DEFAULT_PASTA_HOST_IP)
+    assert (
+        rewrite_loopback_url("http://127.0.0.1:11434", runtime="podman")
+        == f"http://{DEFAULT_PASTA_HOST_IP}:11434"
+    )
+    assert (
+        rewrite_loopback_url("http://localhost:8000/v1", runtime="podman")
+        == f"http://{DEFAULT_PASTA_HOST_IP}:8000/v1"
+    )
+    assert (
+        rewrite_loopback_url("http://[::1]:8000/v1", runtime="podman")
+        == f"http://{DEFAULT_PASTA_HOST_IP}:8000/v1"
+    )
+
+
+def test_rewrite_loopback_url_uses_docker0_for_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "olmo_eval.evals.external.network._detect_docker0_gateway",
+        lambda: None,
+    )
+    assert (
+        rewrite_loopback_url("http://127.0.0.1:8000/v1", runtime="docker")
+        == f"http://{DEFAULT_DOCKER0_GATEWAY}:8000/v1"
+    )
+
+
+def test_rewrite_loopback_url_preserves_non_loopback() -> None:
+    remote = "https://ai-gateway.andrew.cmu.edu/v1"
+    assert rewrite_loopback_url(remote, runtime="podman") == remote
+    assert rewrite_loopback_url(remote, runtime="docker") == remote
+
+
+def test_build_llm_config_rewrites_loopback_for_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "olmo_eval.evals.external.network._detect_docker0_gateway",
+        lambda: None,
+    )
+    evaluation = OpenAgentSafetyExternalEval()
+    provider = SimpleNamespace(
+        model_name="olmo-2",
+        base_url="http://127.0.0.1:8000/v1",
+        _server=object(),
+        get_openai_client=lambda: SimpleNamespace(
+            api_key="EMPTY",
+            base_url="http://127.0.0.1:8000/v1",
+        ),
+    )
+    config = evaluation._build_llm_config(provider, container_runtime="docker")  # type: ignore[arg-type]
+    assert config["base_url"] == f"http://{DEFAULT_DOCKER0_GATEWAY}:8000/v1"
+
+
+def test_subprocess_env_rewrites_npc_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NPC_API_KEY", "npc-secret")
+    monkeypatch.setenv("OLMO_PASTA_HOST_IP", DEFAULT_PASTA_HOST_IP)
+    evaluation = OpenAgentSafetyExternalEval()
+    args = OpenAgentSafetyArgs.from_dict({"npc_base_url": "http://127.0.0.1:11434/v1"})
+    env = evaluation._subprocess_env(args, container_runtime="podman")
+    assert env["NPC_BASE_URL"] == f"http://{DEFAULT_PASTA_HOST_IP}:11434/v1"
+
+
+def test_patch_gateway_host_mapping_is_idempotent(tmp_path: Path) -> None:
+    run_infer = tmp_path / "benchmarks" / "openagentsafety" / "run_infer.py"
+    run_infer.parent.mkdir(parents=True)
+    run_infer.write_text('def setup_host_mapping(workspace):\n    gateway_ip = "172.17.0.1"\n')
+    patch_gateway_host_mapping(tmp_path, DEFAULT_PASTA_HOST_IP)
+    patched = run_infer.read_text()
+    assert f'gateway_ip = "{DEFAULT_PASTA_HOST_IP}"' in patched
+    assert "172.17.0.1" not in patched
+    patch_gateway_host_mapping(tmp_path, DEFAULT_PASTA_HOST_IP)
+    assert run_infer.read_text() == patched
+    patch_gateway_host_mapping(tmp_path, DEFAULT_DOCKER0_GATEWAY)
+    assert f'gateway_ip = "{DEFAULT_DOCKER0_GATEWAY}"' in run_infer.read_text()
+
+
+def test_docker_error_requires_docker_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "olmo_eval.evals.external.benchmarks.openagentsafety.eval.shutil.which",
+        lambda _name: None,
+    )
+    error = OpenAgentSafetyExternalEval()._docker_error()
+    assert error is not None
+    assert "docker" in error.lower()
+    assert "podman" in error.lower()

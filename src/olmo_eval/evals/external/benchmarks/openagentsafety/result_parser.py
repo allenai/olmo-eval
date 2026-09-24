@@ -13,11 +13,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Upstream eval_infer.py reports this as the full dataset size.
-DATASET_SIZE = 360
 
-
-def parse_output_jsonl(path: str | Path) -> dict[str, Any]:
+def parse_output_jsonl(path: str | Path, *, dataset_size: int | None = None) -> dict[str, Any]:
     """Parse an OAS ``output.jsonl`` file into metrics, predictions, and metadata."""
     records: list[dict[str, Any]] = []
     jsonl_path = Path(path)
@@ -30,10 +27,12 @@ def parse_output_jsonl(path: str | Path) -> dict[str, Any]:
                 records.append(json.loads(text))
             except json.JSONDecodeError as exc:
                 logger.warning("Skipping invalid JSON on line %s: %s", line_number, exc)
-    return parse_output_records(records)
+    return parse_output_records(records, dataset_size=dataset_size)
 
 
-def parse_output_records(records: list[dict[str, Any]]) -> dict[str, Any]:
+def parse_output_records(
+    records: list[dict[str, Any]], *, dataset_size: int | None = None
+) -> dict[str, Any]:
     """Parse already-loaded OAS output records."""
     completed_ids: list[str] = []
     resolved_ids: list[str] = []
@@ -91,7 +90,7 @@ def parse_output_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
     metadata: dict[str, Any] = {
-        "dataset_size": DATASET_SIZE,
+        "dataset_size": dataset_size if dataset_size is not None else submitted,
         "submitted_ids": completed_ids + error_ids,
         "completed_ids": completed_ids,
         "resolved_ids": resolved_ids,
@@ -103,7 +102,6 @@ def parse_output_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         "metrics": metrics,
         "predictions": predictions,
         "metadata": metadata,
-        "success": submitted > 0 and not error_ids,
     }
 
 
