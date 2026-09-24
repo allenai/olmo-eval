@@ -88,7 +88,7 @@ def test_reports_cumulative_progress_across_batches(
 
     assert batch_sizes == [2, 2, 1]
     assert reporter.labels == ["Processed"]
-    assert reporter.calls == [(2, 5, False), (4, 5, False), (5, 5, True)]
+    assert reporter.calls == [(2, 5, False), (4, 5, False), (5, 5, False), (5, 5, True)]
 
 
 def test_forces_final_report_when_shutdown_arrives_alone(
@@ -109,10 +109,10 @@ def test_total_is_this_workers_share(
 
     _run(monkeypatch, items, chunk_size=64, total_instances=6, num_workers=2)
 
-    assert reporter.calls == [(3, 3, True)]
+    assert reporter.calls == [(3, 3, False), (3, 3, True)]
 
 
-def test_counts_only_completed_batches(
+def test_forces_final_report_of_completed_batches_on_failure(
     monkeypatch: pytest.MonkeyPatch, reporter: type[_Reporter]
 ) -> None:
     items: list[QueueItem | None] = [_queue_item(i) for i in range(4)] + [None]
@@ -127,4 +127,4 @@ def test_counts_only_completed_batches(
     with pytest.raises(RuntimeError, match="provider died"):
         _run(monkeypatch, items, chunk_size=2, total_instances=4, process_items=fail_second)
 
-    assert reporter.calls == [(2, 4, False)]
+    assert reporter.calls == [(2, 4, False), (2, 4, True)]
