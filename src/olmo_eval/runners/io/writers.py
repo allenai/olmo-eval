@@ -76,6 +76,8 @@ def write_requests_jsonl(
 
     with open(filepath, "w") as f:
         for req in requests:
-            f.write(json.dumps(req) + "\n")
+            # Instance metadata may hold lazy image references (paths or callables);
+            # the dump is diagnostic, so render anything non-JSON by its repr.
+            f.write(json.dumps(req, default=repr) + "\n")
 
     logger.info(f"Saved {len(requests)} requests: {spec}")

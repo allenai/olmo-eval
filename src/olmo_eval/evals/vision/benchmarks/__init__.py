@@ -6,5 +6,6 @@ absent task.
 """
 
 from olmo_eval.evals.vision.benchmarks import dense_caption as _dense_caption  # noqa: F401
+from olmo_eval.evals.vision.benchmarks import screenspot as _screenspot  # noqa: F401
 
 __all__: list[str] = []

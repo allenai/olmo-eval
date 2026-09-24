@@ -672,6 +672,24 @@ for the task list, suites, exemplar settings, and what is not implemented.
 uv run olmo-eval run -m my-base-model -t bfcl
 ```
 
+## GUI Grounding (ScreenSpot)
+
+ScreenSpot and ScreenSpot-v2 are registered as the `screenspot` and
+`screenspot_v2` tasks. Each screenshot comes with an instruction naming one UI
+element; the model is asked to point at it, and the answer is correct when the
+point falls inside the element's box. Both tasks report overall accuracy and the
+text / icon and mobile / desktop / web breakdowns from one run.
+
+The prompt follows the checkpoint's pointing prompt family. The default matches
+the instruction-tuned Molmo2 checkpoints; pretrain checkpoints take the terse
+`pointing: <instruction>` form:
+
+```bash
+uv run olmo-eval run -m molmo2-4b -t screenspot_v2
+uv run olmo-eval run -m my-pretrain-ckpt -t screenspot_v2 \
+    -o prompt_templates=none -o system_prompt_style=style_and_length_v2
+```
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.
