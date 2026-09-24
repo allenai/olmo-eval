@@ -17,8 +17,10 @@ from olmo_eval.common.execution import ExecutionResult
 from olmo_eval.common.scorers import SandboxRequiredError, ScoringIncompleteError
 from olmo_eval.common.scorers.code_execution.scripts import get_script
 from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import get_task
 from olmo_eval.evals.tasks.livecodebench import (
+    LIVECODEBENCH_REPO,
     LIVECODEBENCH_REVISION,
     RELEASE_V3_FILES,
     RELEASE_V4_V6_FILES,
@@ -679,3 +681,21 @@ def test_process_doc_accepts_uri_data_source():
     task = get_task("livecodebench", {"data_source": "hf://livecodebench/code_generation_lite"})
     instance = task.process_doc(STDIN_DOC)
     assert instance.metadata["test_revision"] == task.config.get_data_source().revision
+
+
+def test_grader_reads_tests_from_the_configured_repository():
+    mirror = DataSource(
+        path="hf://org/lcb-mirror",
+        revision="mirror-rev",
+        data_files=RELEASE_V3_FILES,
+        split="train",
+    )
+    instance = get_task("livecodebench", {"data_source": mirror}).process_doc(STDIN_DOC)
+    assert instance.metadata["test_repo"] == "org/lcb-mirror"
+    assert instance.metadata["test_revision"] == "mirror-rev"
+
+    uri_task = get_task("livecodebench", {"data_source": "hf://org/lcb-mirror"})
+    assert uri_task.process_doc(STDIN_DOC).metadata["test_repo"] == "org/lcb-mirror"
+
+    instance = get_task("livecodebench").process_doc(STDIN_DOC)
+    assert instance.metadata["test_repo"] == LIVECODEBENCH_REPO

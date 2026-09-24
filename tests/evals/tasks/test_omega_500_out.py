@@ -6,9 +6,15 @@ from unittest import mock
 import pytest
 
 from olmo_eval.common.types import Instance
-from olmo_eval.evals.tasks._omega_500_out_ids import FAMILY_ALIASES, FAMILY_COUNTS, IDS_BY_CONFIG
 from olmo_eval.evals.tasks.common import get_task
-from olmo_eval.evals.tasks.omega_500_out import SELECTED_IDS
+from olmo_eval.evals.tasks.constants import omega_500_out as manifest
+from olmo_eval.evals.tasks.constants.omega_500_out import (
+    FAMILY_ALIASES,
+    FAMILY_COUNTS,
+    IDS_BY_CONFIG,
+)
+from olmo_eval.evals.tasks.omega_500 import OMEGA_500_REVISION
+from olmo_eval.evals.tasks.omega_500_out import OMEGA_EXPLORATIVE_REVISION, SELECTED_IDS
 
 
 def test_manifest_matches_all_500_family_counts():
@@ -21,14 +27,20 @@ def test_manifest_matches_all_500_family_counts():
 
 
 def test_same_scoring_and_inference_budget():
-    anchor = get_task("omega_500:hillclimb")
+    anchor = get_task("omega_500:v2")
     companion = get_task("omega_500_out")
     assert anchor.config.sampling_params == companion.config.sampling_params
     assert anchor.config.metrics == companion.config.metrics
     assert anchor.config.formatter == companion.config.formatter
     assert companion.config.get_primary_metric().name == "exact_match"
-    assert companion.config.data_source.revision == "b04ae8d4757a2229e8ed65ac6a923e502d0bbb95"
+    assert companion.config.data_source.revision == OMEGA_EXPLORATIVE_REVISION
     assert all("test_out-" in f for f in companion.config.data_source.data_files)
+
+
+def test_manifest_records_the_pinned_revisions():
+    assert manifest.__doc__ is not None
+    assert OMEGA_500_REVISION in manifest.__doc__
+    assert OMEGA_EXPLORATIVE_REVISION in manifest.__doc__
 
 
 def test_selection_preserves_native_id():

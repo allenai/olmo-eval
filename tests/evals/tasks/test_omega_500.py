@@ -28,13 +28,17 @@ class TestOmega500Task(unittest.TestCase):
         self.assertEqual(primary.name, "exact_match_flex")
         self.assertIsNone(task.config.sampling_params.max_tokens)
         self.assertEqual(task.config.data_source.path, "saumyamalik/omega-500")
-        hillclimb = get_task("omega_500:hillclimb")
-        self.assertEqual(hillclimb.config.get_primary_metric().name, "exact_match")
-        self.assertEqual(hillclimb.config.get_data_source().path, "allenai/omega-500")
-        self.assertEqual(
-            hillclimb.config.get_data_source().revision, "113a7eb896b8c1f7d781eb5f00713972074bae42"
-        )
-        self.assertEqual(hillclimb.config.sampling_params.max_tokens, 32768)
+
+    def test_v2_registered(self) -> None:
+        base = get_task("omega_500")
+        v2 = get_task("omega_500:v2")
+        self.assertEqual(v2.config.name, "omega_500:v2")
+        self.assertEqual(v2.config.get_primary_metric().name, "exact_match")
+        self.assertEqual(v2.config.get_data_source().path, "allenai/omega-500")
+        self.assertEqual(v2.config.get_data_source().revision, omega_500.OMEGA_500_REVISION)
+        self.assertEqual(v2.config.sampling_params, base.config.sampling_params)
+        self.assertEqual(v2.config.metrics, base.config.metrics)
+        self.assertEqual(v2.config.formatter, base.config.formatter)
 
     def test_process_doc(self) -> None:
         task = get_task("omega_500")
@@ -129,18 +133,22 @@ class TestOmegaScorers(unittest.TestCase):
         self.assertEqual(OmegaExactMatchScorer().name, "exact_match")
 
 
-class TestOmegaAnswerPrefixes(unittest.TestCase):
-    def test_stable_dataset_id(self):
-        task = get_task("omega_500")
-        instance = task.process_doc(
-            {
-                "id": "omega_500_001",
-                "ground_truth": "42",
-                "family": "arithmetic_gcd",
-                "messages": [{"role": "user", "content": "q"}],
-            },
-            index=99,
-        )
+class TestOmegaDocIds(unittest.TestCase):
+    DOC = {
+        "id": "omega_500_001",
+        "ground_truth": "42",
+        "family": "arithmetic_gcd",
+        "messages": [{"role": "user", "content": "q"}],
+    }
+
+    def test_historical_task_keeps_positional_id(self):
+        """Stored omega_500 results pair by (task_hash, native_id); the ID must not drift."""
+        instance = get_task("omega_500").process_doc(dict(self.DOC), index=99)
+        self.assertEqual(instance.metadata["id"], 99)
+        self.assertEqual(instance.metadata["family"], "arithmetic_gcd")
+
+    def test_v2_uses_dataset_id(self):
+        instance = get_task("omega_500:v2").process_doc(dict(self.DOC), index=99)
         self.assertEqual(instance.metadata["id"], "omega_500_001")
         self.assertEqual(instance.metadata["family"], "arithmetic_gcd")
 

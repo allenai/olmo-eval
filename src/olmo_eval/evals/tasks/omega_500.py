@@ -27,7 +27,10 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.data import DataSource
 from olmo_eval.evals.extract import ExtractedAnswer, extract_answer_with_format
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register
+
+#: The AllenAI snapshot, which corrects some of the original questions and answers.
+OMEGA_500_REVISION = "113a7eb896b8c1f7d781eb5f00713972074bae42"
 
 _BOXED_SUFFIX = "\n\nPresent the answer in LaTex format: \\boxed{Your answer}"
 
@@ -155,7 +158,7 @@ class Omega500(Task):
             question=question,
             gold_answer=str(doc["ground_truth"]),
             metadata={
-                "id": doc.get("id", doc.get("index", index)),
+                "id": doc.get("index", index),
                 "family": doc.get("family", doc.get("setting_key")),
                 "dataset": doc.get("dataset"),
             },
@@ -169,15 +172,18 @@ class Omega500(Task):
         return _extract(output.text or "").answer
 
 
-# Distinct identity: the AllenAI snapshot changes some questions and answers.
-# The development protocol caps generations at 32K by default.
-register_variant(
-    "omega_500",
-    "hillclimb",
-    sampling_params=SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95),
-    data_source=DataSource(
-        path="allenai/omega-500",
-        revision="113a7eb896b8c1f7d781eb5f00713972074bae42",
-    ),
-    primary_metric=AccuracyMetric(name="exact_match", scorer=_STRICT),
-)
+@register("omega_500:v2")
+class Omega500V2(Omega500):
+    """OMEGA-500 on the corrected AllenAI snapshot, scored strictly.
+
+    Instances keep the dataset's own IDs, so they stay stable if rows move.
+    """
+
+    data_source = DataSource(path="allenai/omega-500", revision=OMEGA_500_REVISION)
+    primary_metric = AccuracyMetric(name="exact_match", scorer=_STRICT)
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        instance = super().process_doc(doc, index)
+        assert instance is not None
+        instance.metadata["id"] = doc["id"]
+        return instance

@@ -755,8 +755,12 @@ class VLLMServerProvider(InferenceProvider):
 
         return None
 
-    def _completion_usage_metadata(self, usage: Any) -> dict[str, Any]:
-        """Extract completion usage metadata from SDK or raw JSON responses."""
+    def _completion_usage_metadata(self, usage: Any, num_choices: int = 1) -> dict[str, Any]:
+        """Extract per-output token counts from SDK or raw JSON response usage.
+
+        Response usage sums completion tokens over all choices, so the count
+        describes a single output only when the response has one choice.
+        """
         if not usage:
             return {}
 
@@ -770,7 +774,7 @@ class VLLMServerProvider(InferenceProvider):
         metadata: dict[str, Any] = {}
         if prompt_tokens is not None:
             metadata["prompt_tokens"] = prompt_tokens
-        if completion_tokens is not None:
+        if completion_tokens is not None and num_choices == 1:
             metadata["completion_tokens"] = completion_tokens
         return metadata
 
@@ -782,9 +786,10 @@ class VLLMServerProvider(InferenceProvider):
         usage: Any,
         stop_sequences: list[str] | None,
         finish_reason: str | None = None,
+        num_choices: int = 1,
     ) -> LMOutput:
         """Create a standardized LMOutput from completion response payloads."""
-        metadata = self._completion_usage_metadata(usage)
+        metadata = self._completion_usage_metadata(usage, num_choices)
         metadata["finish_reason"] = finish_reason
         processed_text = self._postprocess_completion_text(text, stop_sequences)
 
@@ -850,6 +855,7 @@ class VLLMServerProvider(InferenceProvider):
             response.raise_for_status()
             data = response.json()
             usage = data.get("usage")
+            choices = data.get("choices", [])
             return [
                 self._build_completion_output(
                     text=choice.get("text") or "",
@@ -857,8 +863,9 @@ class VLLMServerProvider(InferenceProvider):
                     logprobs_payload=choice.get("logprobs"),
                     usage=usage,
                     stop_sequences=stop_sequences,
+                    num_choices=len(choices),
                 )
-                for choice in data.get("choices", [])
+                for choice in choices
             ]
 
         if extra_body:
@@ -872,6 +879,7 @@ class VLLMServerProvider(InferenceProvider):
                 logprobs_payload=getattr(choice, "logprobs", None),
                 usage=usage,
                 stop_sequences=stop_sequences,
+                num_choices=len(response.choices),
             )
             for choice in response.choices
         ]
@@ -952,10 +960,7 @@ class VLLMServerProvider(InferenceProvider):
             logprob_entries: list[LogProbEntry] | None = None
             metadata: dict[str, Any] = {"finish_reason": getattr(choice, "finish_reason", None)}
 
-            # Store token counts from server for accurate metrics
-            if usage:
-                metadata["prompt_tokens"] = usage.prompt_tokens
-                metadata["completion_tokens"] = usage.completion_tokens
+            metadata.update(self._completion_usage_metadata(usage, len(response.choices)))
 
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:

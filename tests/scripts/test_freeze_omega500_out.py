@@ -9,7 +9,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts/hillclimb/freeze_omega500_out.py"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts/internal/freeze_omega500_out.py"
 
 
 def write_rows(path, rows):
@@ -30,14 +30,14 @@ def generate(generator, root, output):
         if repo_id == "allenai/omega-500":
             assert kwargs == {
                 "repo_type": "dataset",
-                "revision": generator.OMEGA_REVISION,
+                "revision": generator.OMEGA_500_REVISION,
                 "allow_patterns": ["train-00000-of-00001.parquet"],
             }
             return str(root / "omega-500")
         assert repo_id == "allenai/omega-explorative"
         assert kwargs == {
             "repo_type": "dataset",
-            "revision": generator.EXPLORATIVE_REVISION,
+            "revision": generator.OMEGA_EXPLORATIVE_REVISION,
             "allow_patterns": ["*/test_out-00000-of-00001.parquet"],
         }
         return str(root / "omega-explorative")
@@ -47,9 +47,9 @@ def generate(generator, root, output):
             [
                 str(output),
                 "--omega-revision",
-                generator.OMEGA_REVISION,
+                generator.OMEGA_500_REVISION,
                 "--explorative-revision",
-                generator.EXPLORATIVE_REVISION,
+                generator.OMEGA_EXPLORATIVE_REVISION,
             ]
         )
         assert download.call_count == 2
@@ -78,8 +78,8 @@ def test_manifest_selection_is_frozen_and_order_independent(tmp_path, generator)
         generate(generator, tmp_path, output)
         outputs.append(output.read_text())
     assert outputs[0] == outputs[1]
-    assert generator.OMEGA_REVISION in outputs[0]
-    assert generator.EXPLORATIVE_REVISION in outputs[0]
+    assert generator.OMEGA_500_REVISION in outputs[0]
+    assert generator.OMEGA_EXPLORATIVE_REVISION in outputs[0]
     values = {
         node.targets[0].id: ast.literal_eval(node.value)
         for node in ast.parse(outputs[0]).body
@@ -110,7 +110,7 @@ def test_invalid_candidate_pool_does_not_write_manifest(tmp_path, ids, generator
         [{"id": item_id} for item_id in ids],
     )
     output = tmp_path / "manifest.py"
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="test_out IDs"):
         generate(generator, tmp_path, output)
     assert not output.exists()
 
@@ -123,8 +123,8 @@ def test_mutable_revision_is_rejected_before_download(tmp_path, generator):
 
 
 def test_requested_revisions_are_downloaded_and_recorded(tmp_path, generator):
-    generator.OMEGA_REVISION = "a" * 40
-    generator.EXPLORATIVE_REVISION = "b" * 40
+    generator.OMEGA_500_REVISION = "a" * 40
+    generator.OMEGA_EXPLORATIVE_REVISION = "b" * 40
     write_rows(tmp_path / "omega-500/train-00000-of-00001.parquet", [{"family": "other"}])
     write_rows(
         tmp_path / "omega-explorative/other/test_out-00000-of-00001.parquet", [{"id": "one"}]

@@ -9,8 +9,8 @@ from pathlib import Path
 import pyarrow.parquet as pq
 from huggingface_hub import snapshot_download
 
-OMEGA_REVISION = "113a7eb896b8c1f7d781eb5f00713972074bae42"
-EXPLORATIVE_REVISION = "b04ae8d4757a2229e8ed65ac6a923e502d0bbb95"
+from olmo_eval.evals.tasks.omega_500 import OMEGA_500_REVISION
+from olmo_eval.evals.tasks.omega_500_out import OMEGA_EXPLORATIVE_REVISION
 
 FAMILY_ALIASES = {
     "geometry_rotation": "geometry_polygon_rotation",
@@ -68,7 +68,10 @@ families map by task definition (digit constraints, prime powers, tuple counts).
             explorative_root / config / "test_out-00000-of-00001.parquet"
         ).to_pylist()
         ids = sorted(r["id"] for r in rows)
-        assert len(ids) == len(set(ids)) and len(ids) >= n
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"{config} has duplicate test_out IDs")
+        if len(ids) < n:
+            raise ValueError(f"{config} has {len(ids)} test_out IDs; {n} are required")
         chosen = sorted(
             sorted(
                 ids, key=lambda x: hashlib.sha256(("olmo35-omega-out-v1:" + x).encode()).hexdigest()
@@ -83,8 +86,8 @@ families map by task definition (digit constraints, prime powers, tuple counts).
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="Output Python manifest; format with ruff")
-    parser.add_argument("--omega-revision", default=OMEGA_REVISION)
-    parser.add_argument("--explorative-revision", default=EXPLORATIVE_REVISION)
+    parser.add_argument("--omega-revision", default=OMEGA_500_REVISION)
+    parser.add_argument("--explorative-revision", default=OMEGA_EXPLORATIVE_REVISION)
     args = parser.parse_args(argv)
     freeze_manifest(args.output, args.omega_revision, args.explorative_revision)
 

@@ -380,6 +380,9 @@ class LiveCodeBench(Task):
         if hasattr(contest_date, "isoformat"):
             contest_date = contest_date.isoformat()
 
+        # The grader reads test cases from the same repository and revision
+        # the prompts came from, so an overridden source stays consistent.
+        source = self.config.get_data_source()
         return Instance(
             question=doc["question_content"],
             metadata={
@@ -387,8 +390,8 @@ class LiveCodeBench(Task):
                 # Located by row so the scorer can read this problem's test
                 # cases without them travelling on the instance.
                 "row": index,
-                "test_repo": LIVECODEBENCH_REPO,
-                "test_revision": self.config.get_data_source().revision,
+                "test_repo": source.path.removeprefix("hf://"),
+                "test_revision": source.revision,
                 "test_files": self.release_files,
                 "format_instruction": format_instruction,
                 "fn_name": problem_metadata.get("func_name"),
