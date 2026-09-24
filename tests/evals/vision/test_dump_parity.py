@@ -1,24 +1,24 @@
 """Parity tests against the released mm_olmo Molmo2-4B prediction dumps.
 
-For every image-QA benchmark this re-scores the predictions saved by the
-*original* mm_olmo evaluation (``predictions-ck2000-*``) with the new
-task/scorer/metric stack and asserts:
+For every benchmark with a saved mm_olmo evaluation (``predictions-ck2000-*``) this
+re-scores those predictions with the new task/scorer/metric stack and asserts:
 
 1. **Prompt parity** — the user-turn text of each saved prompt equals the
    ``instance.question`` produced by the new task (style prefixes, MC
-   formatting, and the PixMo-Count RNG templates must all match exactly).
+   formatting, and the seeded prompt templates must all match exactly).
 2. **Metric parity** — the recomputed metrics equal the reference
    ``metrics.json`` values within a small tolerance.
 
 The dumps are reference ground truth and are opened **read-only**; nothing
-in this test writes to them.
+in this test writes to them. The dense-caption test re-judges through the shared
+GPT judge cache with the API key removed, so it never calls the API.
 
 Opt-in:
 
     RUN_DUMP_PARITY_TESTS=1 \
     HF_DATASETS_CACHE=/weka/oe-training-default/mm-olmo/hf_datasets \
     HF_DATASETS_OFFLINE=1 \
-    pytest tests/evals/tasks/test_image_qa_dump_parity.py -v
+    pytest tests/evals/vision/test_dump_parity.py -v
 
 ``MOLMO2_PREDICTIONS_ROOT`` overrides the dump location (default: the
 released Molmo2-4B directory).
@@ -29,10 +29,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import string
 from pathlib import Path
 
 import pytest
 
+from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.types import Instance, LMOutput, Response
 
 if not os.environ.get("RUN_DUMP_PARITY_TESTS"):
@@ -43,12 +45,24 @@ if not os.environ.get("RUN_DUMP_PARITY_TESTS"):
     )
 
 from olmo_eval.evals.tasks.common.registry import get_task  # noqa: E402
+from olmo_eval.evals.vision.scoring.multi_image import (  # noqa: E402
+    strip_multi_image_response,
+)
+from olmo_eval.evals.vision.scoring.multiple_choice import (  # noqa: E402
+    parse_multi_choice_response,
+)
+from olmo_eval.evals.vision.scoring.prompt_templates import (  # noqa: E402
+    DENSE_CAPTION_LOADER_SEED,
+    EVAL_LOADER_SEED,
+    dense_caption_question,
+)
 
 DEFAULT_PREDICTIONS_ROOT = "/weka/oe-training-default/mm-olmo/released-models-molmo2-1225/Molmo2-4B"
 
 # Per-task plumbing: (task spec, dump dir name, join key fn, metric tolerance)
 TOLERANCE_DEFAULT = 2e-4
 TOLERANCE_MMMU = 2e-3
+TOLERANCE_EXACT = 1e-6
 
 
 def _root() -> Path:
@@ -96,6 +110,17 @@ def _assert_metrics(mine: dict[str, float], ref: dict[str, float], tol: float) -
         )
         compared += 1
     assert compared > 0, "no overlapping metric names with the reference"
+
+
+def _assert_prompt_parity(joined: list[tuple[Instance, dict]]) -> None:
+    mismatches = [
+        (instance.metadata.get("example_id"), _user_text(row["prompt"]), instance.question)
+        for instance, row in joined
+        if _user_text(row["prompt"]) != instance.question
+    ]
+    assert not mismatches, (
+        f"{len(mismatches)}/{len(joined)} prompt mismatches; first: {mismatches[0]}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -167,14 +192,7 @@ def test_dump_parity(spec: str, dump_name: str, tol: float) -> None:
         )
 
     # 1. Prompt parity
-    mismatches = [
-        (instance.metadata.get("example_id"), _user_text(row["prompt"]), instance.question)
-        for instance, row in joined
-        if _user_text(row["prompt"]) != instance.question
-    ]
-    assert not mismatches, (
-        f"{len(mismatches)}/{len(joined)} prompt mismatches; first: {mismatches[0]}"
-    )
+    _assert_prompt_parity(joined)
 
     # 2. Metric parity
     mine = _score_against_dump(task, [(inst, row["prediction"]) for inst, row in joined])
@@ -206,14 +224,7 @@ def test_dump_prompt_parity_unlabeled_test_split(spec: str, dump_name: str) -> N
         lambda inst: inst.metadata["example_id"],
         lambda row: row["example_id"],
     )
-    mismatches = [
-        (instance.metadata["example_id"], _user_text(row["prompt"]), instance.question)
-        for instance, row in joined
-        if _user_text(row["prompt"]) != instance.question
-    ]
-    assert not mismatches, (
-        f"{len(mismatches)}/{len(joined)} prompt mismatches; first: {mismatches[0]}"
-    )
+    _assert_prompt_parity(joined)
 
 
 # ---------------------------------------------------------------------------
@@ -280,14 +291,7 @@ def test_dump_parity_math_vista_offline() -> None:
         lambda row: row["example_id"],
     )
 
-    mismatches = [
-        (instance.metadata["example_id"], _user_text(row["prompt"]), instance.question)
-        for instance, row in joined
-        if _user_text(row["prompt"]) != instance.question
-    ]
-    assert not mismatches, (
-        f"{len(mismatches)}/{len(joined)} prompt mismatches; first: {mismatches[0]}"
-    )
+    _assert_prompt_parity(joined)
 
     mine = _score_against_dump(task, [(inst, row["prediction"]) for inst, row in joined])
     # Offline extraction is not the GPT protocol that produced ref["score"];
@@ -312,8 +316,6 @@ def test_dump_parity_math_vista_gpt() -> None:
         lambda row: row["example_id"],
     )
 
-    from olmo_eval.common.execution import ScoringContext
-
     responses = [
         Response(
             instance=instance,
@@ -328,3 +330,204 @@ def test_dump_parity_math_vista_gpt() -> None:
     assert score == pytest.approx(ref["score"], abs=0.01), (
         f"GPT-extraction score {score:.4f} vs reference {ref['score']:.4f}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Multi-image multiple choice. When a response names no option, mm_olmo guesses
+# from the global `random` stream while the port seeds the guess per instance, so
+# guessed rows may differ. Each metric must match exactly on the other rows and
+# stay within the number of guesses; with no guesses (MuirBench) that is exact.
+# ---------------------------------------------------------------------------
+
+
+def _is_guess(instance: Instance, prediction: str) -> bool:
+    """Whether the option parser falls back to a guess (its pick depends on the seed)."""
+    options = [option.strip() for option in instance.metadata["options"]]
+    choices = list(string.ascii_uppercase[: len(options)])
+    index2ans = dict(zip(choices, options, strict=True))
+    response = strip_multi_image_response(prediction)
+    picks = {
+        parse_multi_choice_response(response, choices, index2ans, stable_id=str(seed))
+        for seed in range(32)
+    }
+    return len(picks) > 1
+
+
+@pytest.mark.parametrize(
+    ("spec", "dump_name"),
+    [
+        ("muir_bench", "muir_bench-test"),
+        ("blink", "blink-validation"),
+        ("mmiu", "mmiu-test"),
+    ],
+)
+def test_dump_parity_multi_image(spec: str, dump_name: str) -> None:
+    rows, ref = _load_dump(dump_name)
+    task = get_task(spec)
+    instances = list(task.instances)
+    assert len(instances) == len(rows)
+    joined = _join_by(
+        instances,
+        rows,
+        lambda inst: str(inst.metadata["example_id"]),
+        lambda row: str(row["example_id"]),
+    )
+    _assert_prompt_parity(joined)
+
+    responses = [
+        Response(
+            instance=instance,
+            request=task.format_request(instance),
+            outputs=[LMOutput(text=row["prediction"])],
+        )
+        for instance, row in joined
+    ]
+    responses = asyncio.run(task.score_responses(responses))
+    guessed = [_is_guess(instance, row["prediction"]) for instance, row in joined]
+
+    compared = 0
+    for metric in task.metrics:
+        if metric.name not in ref:
+            continue
+        scored = [
+            (value, guess)
+            for value, guess in zip(
+                (metric.compute_instance(r) for r in responses), guessed, strict=True
+            )
+            if value is not None
+        ]
+        certain = sum(value for value, guess in scored if not guess)
+        guesses = sum(guess for _, guess in scored)
+        ref_correct = ref[metric.name] * len(scored)
+        # The reference is a float32 mean; allow its rounding in the correct count.
+        assert certain - 0.01 <= ref_correct <= certain + guesses + 0.01, (
+            f"{metric.name}: reference {ref_correct:.2f} correct is outside "
+            f"[{certain}, {certain + guesses}] (non-guessed correct, plus {guesses} guesses)"
+        )
+        if guesses == 0:
+            assert certain / len(scored) == pytest.approx(ref[metric.name], abs=TOLERANCE_EXACT)
+        compared += 1
+    assert compared == len(ref), f"compared {compared} of {len(ref)} reference metrics"
+
+
+# ---------------------------------------------------------------------------
+# Pointing. The dumps keep the parsed points rather than the raw text, so each
+# row's points are re-encoded in the model's per-mille ``<points>`` format and
+# scored from that text. Rows join by ``_idx``, the dataset index that also seeds
+# the ``_mp`` prompt; SA-Co example ids repeat across phrasings.
+# ---------------------------------------------------------------------------
+
+
+def _dump_points(row: dict) -> list:
+    points = row["points"]
+    return json.loads(points) if isinstance(points, str) else points
+
+
+def _points_text(points: list, image_size: tuple[int, int]) -> str:
+    """Re-encode a dump's pixel-space points as the model's per-mille ``<points>`` text."""
+    if not points:
+        return "There are none."
+    width, height = image_size
+    triplets = " ".join(
+        f"{k} {round(point[-2] / width * 1000):03d} {round(point[-1] / height * 1000):03d}"
+        for k, point in enumerate(points, start=1)
+    )
+    return f'<points coords="1 {triplets}">object</points>'
+
+
+def _join_by_position(instances: list[Instance], rows: list[dict]):
+    positions = [int(row["_idx"]) for row in rows]
+    assert len(set(positions)) == len(rows) == len(instances), "dump rows do not cover the task"
+    return [(instances[position], row) for position, row in zip(positions, rows, strict=True)]
+
+
+@pytest.mark.parametrize(
+    ("spec", "dump_name", "check_prompts", "tol"),
+    [
+        ("pixmo_points_eval", "pixmo_point_eval_v3.1-test", True, TOLERANCE_EXACT),
+        ("pixmo_points_eval_mp", "pixmo_point_eval_v3.1-test-mp0816", True, TOLERANCE_EXACT),
+        ("sa_co_gold_point_4k_mp", "sa-co-gold-v4-test-mp0816", True, TOLERANCE_EXACT),
+        # A few SA-Co images carry an EXIF rotation. mm_olmo's loader turns them upright
+        # and scales the model's points by the rotated size; this stack (like the vision
+        # branch and OLMo-core) keeps the stored orientation the masks are drawn in.
+        ("sa_co_gold_subset", "sa-co-gold-subset-v3-test", True, 1e-3),
+        # The only dump of the v2 subset was made after mm_olmo changed its plain
+        # "Point to ..." wording, so it checks this task's data and scoring; the `_mp`
+        # wording is the same one checked against the full gold set above.
+        ("sa_co_gold_subset_mp", "sa-co-gold-subset-v4-test", False, 1e-3),
+    ],
+)
+def test_dump_parity_pointing(spec: str, dump_name: str, check_prompts: bool, tol: float) -> None:
+    rows, ref = _load_dump(dump_name)
+    task = get_task(spec)
+    joined = _join_by_position(list(task.instances), rows)
+    assert all(
+        str(instance.metadata["example_id"]) == str(row.get("example_id", row.get("id")))
+        for instance, row in joined
+    )
+    if check_prompts:
+        _assert_prompt_parity(joined)
+
+    texts = [
+        (instance, _points_text(_dump_points(row), instance.metadata["image_size"]))
+        for instance, row in joined
+    ]
+    mine = _score_against_dump(task, texts)
+    assert mine["n_scoring_errors"] == 0
+    _assert_metrics(mine, ref, tol)
+
+
+# ---------------------------------------------------------------------------
+# Dense caption. The mp0816 dump was judged by mm_olmo's gpt_dense_caption_eval.py
+# into the shared gpt4-cache/, so re-judging its captions must hit that cache on
+# every call; with the API key removed, a miss fails the example instead of
+# calling GPT. That dump came from eval_molmo2.py, whose loader seed picks the
+# caption template; the task follows eval_captioner.sh's seed, so the template
+# choice is checked at both seeds against the same dataset index.
+# ---------------------------------------------------------------------------
+
+
+def test_dump_parity_dense_caption(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    dump_dir = _root() / "predictions-ck2000-dense_caption_eval-test-mp0816"
+    if not (dump_dir / "gpt4o_judge_metrics.json").exists():
+        pytest.skip(f"reference dump not found: {dump_dir}")
+    with open(dump_dir / "predictions.json") as f:
+        rows = json.load(f)
+    with open(dump_dir / "gpt4o_judge_metrics.json") as f:
+        ref = json.load(f)
+
+    task = get_task("dense_caption")
+    instances = list(task.instances)
+    assert len(instances) == len(rows) == ref["n"]
+    joined = _join_by(
+        instances, rows, lambda inst: inst.metadata["url"], lambda row: row["image_url"]
+    )
+    for instance, row in joined:
+        idx = int(row["_idx"])
+        assert _user_text(row["prompt"]) == dense_caption_question(idx, seed=EVAL_LOADER_SEED)
+        assert instance.question == dense_caption_question(idx, seed=DENSE_CAPTION_LOADER_SEED)
+
+    responses = [
+        Response(
+            instance=instance,
+            request=task.format_request(instance),
+            outputs=[LMOutput(text=row["prediction"])],
+        )
+        for instance, row in joined
+    ]
+    responses = asyncio.run(task.score_responses(responses, ScoringContext()))
+    unjudged = [
+        r.instance.metadata["url"]
+        for r in responses
+        if not (r.outputs[0].metadata or {}).get("dense_caption_result")
+    ]
+    assert not unjudged, f"{len(unjudged)} captions missed the judge cache; first: {unjudged[0]}"
+
+    nested = task.compute_metrics(responses)
+    mine = {name: next(iter(by_scorer.values())) for name, by_scorer in nested.items()}
+    for name in ("recall", "consistency", "recall_at_10", "num_statements", "avg"):
+        # The reference was saved rounded to two decimals.
+        assert mine[name] == pytest.approx(ref[name], abs=0.006), (
+            f"{name}: recomputed {mine[name]:.4f} != reference {ref[name]}"
+        )
