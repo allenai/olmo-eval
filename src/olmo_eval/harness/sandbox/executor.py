@@ -125,6 +125,9 @@ class SandboxExecutor:
         self.config = config
         self.name = name
         self._modal_app_name = modal_app_name
+        # Modal app this executor created itself and must stop on shutdown.
+        # Apps named by a SandboxManager are stopped by the manager instead.
+        self._owned_modal_app: str | None = None
         self._deployment: Any = None
         self._runtime: Any = None
         self._session_created: bool = False
@@ -174,8 +177,10 @@ class SandboxExecutor:
 
                 import modal
 
-                app_name = self._modal_app_name or _get_modal_app_name()
-                if not self._modal_app_name:
+                app_name = self._modal_app_name
+                if not app_name:
+                    app_name = _get_modal_app_name()
+                    self._owned_modal_app = app_name
                     # Only log if we generated it (manager logs its own)
                     self._log(logging.INFO, f"Using Modal app: {app_name}")
                 original_lookup = modal.App.lookup
@@ -415,6 +420,15 @@ class SandboxExecutor:
                 self._log(logging.DEBUG, f"Failed to stop deployment: {e}")
             self._deployment = None
             self._runtime = None
+
+        if self._owned_modal_app is not None:
+            from .modal_deployment import stop_modal_app
+
+            try:
+                await stop_modal_app(self._owned_modal_app)
+            except Exception as e:
+                self._log(logging.WARNING, f"Failed to stop Modal app {self._owned_modal_app}: {e}")
+            self._owned_modal_app = None
 
         self._log(logging.DEBUG, "Sandbox stopped")
 

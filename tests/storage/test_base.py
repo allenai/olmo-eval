@@ -278,6 +278,7 @@ class TestConvertRunnerResults:
                 "mmlu": {
                     "metrics": {"accuracy": {"exact_match": 0.75}},
                     "task_hash": "mmlu-hash-001",
+                    "num_instances": 100,
                 }
             },
         }
@@ -287,6 +288,23 @@ class TestConvertRunnerResults:
         assert eval_result.model_name == "llama3.1-8b"
         assert eval_result.backend_name == "vllm"
         assert eval_result.experiment_id == "test-123"
+
+    def test_missing_num_instances_raises(self):
+        """Test that a task without an instance count is rejected."""
+        results = {
+            "model": "llama3.1-8b",
+            "provider": "vllm",
+            "timestamp": "2024-01-15T10:30:00",
+            "tasks": {
+                "mmlu": {
+                    "metrics": {"accuracy": {"exact_match": 0.75}},
+                    "task_hash": "mmlu-hash-001",
+                }
+            },
+        }
+
+        with pytest.raises(ValueError, match="num_instances is required for task 'mmlu'"):
+            convert_runner_results(results, experiment_id="test-123")
 
     def test_missing_provider_raises_key_error(self):
         """Test that missing 'provider' field raises KeyError."""
@@ -348,6 +366,7 @@ class TestConvertRunnerResults:
                 "mmlu_astronomy:mc:olmo3base": {
                     "metrics": {"accuracy": {"logprob": 0.5}},
                     "task_hash": "abcdef123456",
+                    "num_instances": 100,
                 },
             },
         }
