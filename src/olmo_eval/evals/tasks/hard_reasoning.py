@@ -4,6 +4,19 @@ Logic puzzles and reasoning tasks that require multi-step constraint satisfactio
 
 Dataset: allenai/hard-reasoning
 
+Scoring uses the ``check()`` verifiers from the ``np-hard-reasoning`` package,
+which is installed at runtime from the task's ``dependencies``.
+
+Differences from the reference harness (``scripts/evaluation/run_model.py`` in
+np-hard-reasoning):
+
+- The reference scores the first JSON value in the response. These tasks score
+  the last one that has the scenario's answer shape, so drafts written while
+  reasoning do not count.
+- The reference parses with ``json5``; these tasks use strict JSON.
+- Text inside a ``<think>`` trace is never scored. An unterminated trace has no
+  answer.
+
 Usage:
     olmo-eval run -m my-model -t hard_reasoning_bringing_toys
     olmo-eval run -m my-model -t hard_reasoning_bringing_toys:chat
@@ -13,7 +26,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,45 +48,67 @@ HARD_REASONING_TASKS: tuple[str, ...] = (
     "wedding_supplies",
 )
 
+#: System prompt used by the reference harness.
+_SYSTEM_PROMPT = "You are a problem solver."
 
-def _extract_last_complete_json(s: str) -> dict | None:
-    """Extract the last complete JSON object from a string."""
-    stack: list[int] = []
-    last_json_start: int | None = None
-    last_json_str: str | None = None
-    for i, char in enumerate(s):
-        if char == "{":
-            stack.append(i)
-            if last_json_start is None:
-                last_json_start = i
-        elif char == "}":
-            if stack:
-                stack.pop()
-                if not stack:
-                    last_json_str = s[last_json_start : i + 1]
-                    last_json_start = None
-    if last_json_str:
-        try:
-            return json.loads(last_json_str.replace("\n", ""))
-        except json.JSONDecodeError:
-            pass
-    return None
+
+def _json_values(text: str) -> list[Any]:
+    """Return every top-level JSON object or array embedded in ``text``, in order."""
+    decoder = json.JSONDecoder()
+    values: list[Any] = []
+    i = 0
+    while i < len(text):
+        if text[i] in "{[":
+            try:
+                value, end = decoder.raw_decode(text, i)
+            except json.JSONDecodeError:
+                i += 1
+                continue
+            values.append(value)
+            i = end
+        else:
+            i += 1
+    return values
+
+
+def _extract_last_valid_json(text: str, is_valid: Callable[[Any], bool]) -> Any | None:
+    """Return the last JSON value in ``text`` that ``is_valid`` accepts.
+
+    Objects are preferred over arrays, as in the reference harness, so a bare
+    list mentioned after a final ``{"solution": ...}`` object is not scored.
+    """
+    values = [v for v in _json_values(text) if is_valid(v)]
+    objects = [v for v in values if isinstance(v, dict)]
+    if objects:
+        return objects[-1]
+    return values[-1] if values else None
+
+
+def _scenario_class(subset: str) -> Any:
+    from np_hard_reasoning.scenarios.registry import SCENARIO_REGISTRY
+
+    try:
+        return SCENARIO_REGISTRY[subset]
+    except KeyError:
+        raise ValueError(f"Unknown hard_reasoning subset: {subset!r}") from None
+
+
+def _has_answer_shape(scenario_cls: Any, value: Any) -> bool:
+    try:
+        scenario_cls.load_answer_from_json(value)
+    except (ValueError, TypeError, KeyError):
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
 class HardReasoningParsedScorer(Scorer):
-    """Score 1.0 if the model output was parsed as valid JSON, else 0.0."""
+    """Score 1.0 if an answer with the scenario's shape was extracted, else 0.0."""
 
     name: str = "parsed"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        if output.extracted_answer is None:
-            return 0.0
-        try:
-            json.loads(output.extracted_answer)
-            return 1.0
-        except (json.JSONDecodeError, TypeError):
-            return 0.0
+        return 0.0 if output.extracted_answer is None else 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,18 +118,16 @@ class HardReasoningScorer(Scorer):
     name: str = "hard_reasoning_check"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        from np_hard_reasoning.scenarios.registry import SCENARIO_REGISTRY
-
         if output.extracted_answer is None:
             return 0.0
-        subset = instance.metadata.get("subset", "")
-        scenario_cls = SCENARIO_REGISTRY.get(subset)
-        if scenario_cls is None:
-            return 0.0
+        scenario_cls = _scenario_class(instance.metadata["subset"])
+        # Errors here come from the dataset row, not the model, so they propagate.
+        scenario = scenario_cls.load_from_json(instance.metadata["scenario_data"])
+        answer = scenario_cls.load_answer_from_json(json.loads(output.extracted_answer))
         try:
-            scenario = scenario_cls.load_from_json(instance.metadata["scenario_data"])
-            return 1.0 if scenario.check_json(str(output.extracted_answer)) else 0.0
-        except Exception:
+            return 1.0 if scenario.check(answer) else 0.0
+        except IndexError:
+            # Some checkers index with the model's values before range-checking them.
             return 0.0
 
 
@@ -108,8 +141,8 @@ class HardReasoningBase(Task):
     subset: str = "bringing_toys"
     dependencies = [
         "git+https://github.com/allenai/np-hard-reasoning.git@fa8bbb2a5554e34a7ce051b71e9357e44dbabd0f",
-        "z3-solver",
-        "networkx",
+        "z3-solver==5.1.0.0",
+        "networkx==3.7",
     ]
     sampling_params = SamplingParams(
         max_tokens=4096,
@@ -120,6 +153,7 @@ class HardReasoningBase(Task):
         AccuracyMetric(scorer=HardReasoningScorer),
         AccuracyMetric(name="parse_rate", scorer=HardReasoningParsedScorer),
     )
+    primary_metric = metrics[0]
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -167,11 +201,18 @@ class HardReasoningBase(Task):
         )
 
     def extract_answer(self, output: LMOutput) -> str | None:
-        """Extract the last complete JSON object from the model's response."""
-        json_obj = _extract_last_complete_json(output.text)
-        if json_obj is not None:
-            return json.dumps(json_obj)
-        return output.text.strip() or None
+        """Extract the last JSON value with the scenario's answer shape."""
+        text = output.text
+        if "</think>" in text:
+            text = text.rsplit("</think>", 1)[1]
+        elif "<think>" in text:
+            # The reasoning never finished, so anything in the trace is a draft.
+            output.metadata["answer_format_correct"] = False
+            return None
+        scenario_cls = _scenario_class(self.subset)
+        answer = _extract_last_valid_json(text, lambda v: _has_answer_shape(scenario_cls, v))
+        output.metadata["answer_format_correct"] = answer is not None
+        return None if answer is None else json.dumps(answer)
 
     def _build_fewshot(self) -> list[Instance]:
         """Build few-shot examples from the dev split."""
@@ -207,8 +248,9 @@ for _subset in HARD_REASONING_TASKS:
     register_variant(
         _task_name,
         "chat",
-        formatter=ChatFormatter(),
+        formatter=ChatFormatter(system_prompt=_SYSTEM_PROMPT),
         sampling_params=SamplingParams(max_tokens=32768, temperature=0.0),
+        strip_thinking=True,
     )
     register_variant(
         _task_name,
