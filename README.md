@@ -809,6 +809,11 @@ uv run olmo-eval run \
 `-o` must follow `--harness` or `-t`, so the provider override needs an explicit
 `--harness default` ahead of it.
 
+Images are cropped to the checkpoint's training `max_crops` unless
+`-o provider.max_crops=N` overrides it. mm_olmo's `eval_molmo2.py` evaluates the
+released Molmo2 models at 24, so pass `-o provider.max_crops=24` to compare
+against their published numbers; document tasks are the most sensitive to it.
+
 No released `ai2-olmo-core` ships the multimodal classes (`olmo_core.nn.vision`,
 `MultimodalLM`) yet, so the `olmo_core_vlm` extra pins OLMo-core's vision branch
 by commit. It is declared conflicting with the text `olmo_core` extra — the two
@@ -827,7 +832,7 @@ the pin goes away.
 
 ### Adding a multimodal task
 
-Image-QA tasks subclass `ImageQATask` (`evals/vision/tasks/single_image.py`),
+Image-QA tasks subclass `ImageQATask` (`evals/vision/tasks/image_qa.py`),
 which resolves images from `instance.metadata["image_path"]` or
 `instance.metadata["image"]` (a PIL image or a zero-arg callable returning one —
 use `load_instance_image` from `evals/vision/data/images.py` for either form) and anchors data reads under
