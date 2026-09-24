@@ -29,15 +29,19 @@ from olmo_eval.evals.external.benchmarks.openagentsafety.repo import (
     default_cache_dir,
     ensure_repo,
     ensure_workspace_image,
+    patch_agent_hook_mount,
     patch_gateway_host_mapping,
+    patch_podman_workspace_network,
     sync_repo_env,
 )
 from olmo_eval.evals.external.benchmarks.openagentsafety.result_parser import (
     find_output_jsonl,
     parse_output_jsonl,
 )
+from olmo_eval.evals.external.benchmarks.openagentsafety.tac import ensure_tac_services
 from olmo_eval.evals.external.network import (
     get_workspace_gateway_ip,
+    resolve_container_runtime,
     rewrite_loopback_url,
 )
 from olmo_eval.evals.external.result import ExternalEvalResult
@@ -48,6 +52,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _OPTIONAL_NPC_SECRETS = ("NPC_BASE_URL", "NPC_MODEL")
+_AGENT_HOOK_DIR = Path(__file__).resolve().parent / "hooks"
+_LITELLM_PROXY_PREFIX = "litellm_proxy/"
+
+
+def npc_model_name(model: str) -> str:
+    """Model id for ``chat_npc``.
+
+    ``chat_npc`` posts this string with the OpenAI client. A ``litellm_proxy/``
+    prefix is only a LiteLLM SDK routing hint, and the proxy rejects it.
+    """
+    if model.startswith(_LITELLM_PROXY_PREFIX):
+        return model[len(_LITELLM_PROXY_PREFIX) :]
+    return model
 
 
 def _default_run_dir() -> Path:
@@ -159,12 +176,23 @@ class OpenAgentSafetyExternalEval(ExternalEval):
             return self._error_result(docker_error, start_time)
 
         try:
+            ensure_tac_services()
+        except RuntimeError as exc:
+            return self._error_result(str(exc), start_time)
+        storage_conf = os.environ.get("CONTAINERS_STORAGE_CONF")
+        if storage_conf:
+            subprocess_env["CONTAINERS_STORAGE_CONF"] = storage_conf
+
+        try:
             repo_dir = ensure_repo(
                 Path(oas_args.repo_path) if oas_args.repo_path else default_cache_dir(),
                 oas_args.repo_ref,
             )
             sync_repo_env(repo_dir)
             patch_gateway_host_mapping(repo_dir, gateway_ip)
+            patch_agent_hook_mount(repo_dir)
+            if resolve_container_runtime(container_runtime) == "podman":
+                patch_podman_workspace_network(repo_dir, gateway_ip)
             ensure_workspace_image(repo_dir, container_runtime=container_runtime)
         except Exception as exc:
             logger.exception("[%s] Failed to prepare OpenHands/benchmarks", self.name)
@@ -307,6 +335,7 @@ class OpenAgentSafetyExternalEval(ExternalEval):
         env.pop("VIRTUAL_ENV", None)
         env.pop("UV_PROJECT", None)
         env.update(self._build_env_vars())
+        env["OAS_AGENT_HOOK_DIR"] = str(_AGENT_HOOK_DIR)
         if oas_args.npc_base_url:
             env["NPC_BASE_URL"] = oas_args.npc_base_url
         if oas_args.npc_model:
@@ -319,6 +348,17 @@ class OpenAgentSafetyExternalEval(ExternalEval):
                     "[%s] Rewrote NPC_BASE_URL: %s -> %s", self.name, npc_base_url, rewritten
                 )
             env["NPC_BASE_URL"] = rewritten
+        npc_model = env.get("NPC_MODEL")
+        if npc_model:
+            rewritten_model = npc_model_name(npc_model)
+            if rewritten_model != npc_model:
+                logger.info(
+                    "[%s] Rewrote NPC_MODEL for the OpenAI client: %s -> %s",
+                    self.name,
+                    npc_model,
+                    rewritten_model,
+                )
+            env["NPC_MODEL"] = rewritten_model
         return env
 
     def _build_infer_command(

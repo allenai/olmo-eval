@@ -3,27 +3,42 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from olmo_eval.evals.external.benchmarks.openagentsafety import tac
 from olmo_eval.evals.external.benchmarks.openagentsafety.args import (
     DEFAULT_DATASET,
     OpenAgentSafetyArgs,
 )
 from olmo_eval.evals.external.benchmarks.openagentsafety.eval import OpenAgentSafetyExternalEval
+from olmo_eval.evals.external.benchmarks.openagentsafety.hooks.agent_hooks import (
+    chat_npc_shell_command,
+    order_owncloud_args,
+    rewrite_tool_call,
+)
 from olmo_eval.evals.external.benchmarks.openagentsafety.repo import (
+    patch_agent_hook_mount,
     patch_gateway_host_mapping,
+    patch_podman_workspace_network,
 )
 from olmo_eval.evals.external.benchmarks.openagentsafety.result_parser import (
     find_output_jsonl,
     parse_output_jsonl,
     parse_output_records,
 )
+from olmo_eval.evals.external.benchmarks.openagentsafety.tac import (
+    OAS_START_TAC_ENV,
+    OAS_TAC_IMAGE_STORE,
+    OAS_TAC_IMAGE_STORE_ENV,
+)
 from olmo_eval.evals.external.network import (
     DEFAULT_DOCKER0_GATEWAY,
     DEFAULT_PASTA_HOST_IP,
+    podman_pasta_network,
     rewrite_loopback_url,
 )
 from olmo_eval.evals.external.registry import get_external_eval, list_external_evals
@@ -272,6 +287,80 @@ def test_build_llm_config_rewrites_loopback_for_docker(monkeypatch: pytest.Monke
     assert config["base_url"] == f"http://{DEFAULT_DOCKER0_GATEWAY}:8000/v1"
 
 
+def test_chat_npc_tool_call_becomes_shell_command() -> None:
+    command = chat_npc_shell_command(
+        "chat_npc",
+        {"npc_name": "David", "message": 'hello "there"'},
+    )
+    assert command == "chat_npc David 'hello \"there\"'"
+    rewritten = rewrite_tool_call(
+        "chat_npc",
+        {"npc_name": "David", "message": "hi", "summary": "ask"},
+        ["terminal", "finish"],
+    )
+    assert rewritten is not None
+    assert rewritten[0] == "terminal"
+    assert rewritten[1]["command"] == "chat_npc David hi"
+    assert rewritten[1]["summary"] == "ask"
+    already_registered = rewrite_tool_call(
+        "chat_npc",
+        {"npc_name": "David", "message": "hi"},
+        ["chat_npc"],
+    )
+    assert already_registered is None
+
+
+def test_owncloud_helper_accepts_directory_first() -> None:
+    assert order_owncloud_args("/Documents/Financials", "TAC_financials.csv") == (
+        "TAC_financials.csv",
+        "/Documents/Financials",
+    )
+    assert order_owncloud_args("TAC_financials.csv", "/Documents/Financials") == (
+        "TAC_financials.csv",
+        "/Documents/Financials",
+    )
+
+
+def test_agent_hook_mount_patch_is_idempotent(tmp_path: Path) -> None:
+    workspace = (
+        tmp_path
+        / "vendor"
+        / "software-agent-sdk"
+        / "openhands-workspace"
+        / "openhands"
+        / "workspace"
+        / "docker"
+        / "workspace.py"
+    )
+    workspace.parent.mkdir(parents=True)
+    workspace.write_text("        # Run container\n        run_cmd = [\n")
+    patch_agent_hook_mount(tmp_path)
+    patched = workspace.read_text()
+    assert "OAS_AGENT_HOOK_DIR" in patched
+    assert "PYTHONPATH=/opt/oas-hooks:/utils:" in patched
+    patch_agent_hook_mount(tmp_path)
+    assert workspace.read_text() == patched
+
+
+def test_subprocess_env_sets_agent_hook_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NPC_API_KEY", "npc-secret")
+    evaluation = OpenAgentSafetyExternalEval()
+    env = evaluation._subprocess_env(OpenAgentSafetyArgs.from_dict({}), container_runtime="docker")
+    assert env["OAS_AGENT_HOOK_DIR"].endswith("openagentsafety/hooks")
+
+
+def test_subprocess_env_strips_litellm_proxy_prefix_from_npc_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NPC_API_KEY", "npc-secret")
+    evaluation = OpenAgentSafetyExternalEval()
+    args = OpenAgentSafetyArgs.from_dict(
+        {"npc_model": "litellm_proxy/gemini/gemini-2.5-flash-lite"}
+    )
+    env = evaluation._subprocess_env(args, container_runtime="docker")
+    assert env["NPC_MODEL"] == "gemini/gemini-2.5-flash-lite"
+
+
 def test_subprocess_env_rewrites_npc_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NPC_API_KEY", "npc-secret")
     monkeypatch.setenv("OLMO_PASTA_HOST_IP", DEFAULT_PASTA_HOST_IP)
@@ -293,6 +382,145 @@ def test_patch_gateway_host_mapping_is_idempotent(tmp_path: Path) -> None:
     assert run_infer.read_text() == patched
     patch_gateway_host_mapping(tmp_path, DEFAULT_DOCKER0_GATEWAY)
     assert f'gateway_ip = "{DEFAULT_DOCKER0_GATEWAY}"' in run_infer.read_text()
+
+
+def _write_workspace_sources(repo_dir: Path) -> tuple[Path, Path]:
+    run_infer = repo_dir / "benchmarks" / "openagentsafety" / "run_infer.py"
+    workspace = (
+        repo_dir
+        / "vendor"
+        / "software-agent-sdk"
+        / "openhands-workspace"
+        / "openhands"
+        / "workspace"
+        / "docker"
+        / "workspace.py"
+    )
+    run_infer.parent.mkdir(parents=True)
+    workspace.parent.mkdir(parents=True)
+    run_infer.write_text(
+        "\n".join(
+            [
+                "        workspace = DockerWorkspace(",
+                "            server_image=server_image,",
+                '            platform="linux/amd64",',
+                "            extra_ports=True,",
+                "            forward_env=forward_env or [],",
+                "        )",
+                "",
+            ]
+        )
+    )
+    workspace.write_text(
+        "\n".join(
+            [
+                "        if self.network:",
+                '            flags += ["--network", self.network]',
+                "",
+                "        # Run container",
+                "",
+            ]
+        )
+    )
+    return run_infer, workspace
+
+
+def test_patch_podman_workspace_network_is_idempotent(tmp_path: Path) -> None:
+    run_infer, workspace = _write_workspace_sources(tmp_path)
+    patch_podman_workspace_network(tmp_path, DEFAULT_PASTA_HOST_IP)
+    network = podman_pasta_network(DEFAULT_PASTA_HOST_IP)
+    infer_text = run_infer.read_text()
+    workspace_text = workspace.read_text()
+    assert f'network="{network}",' in infer_text
+    assert 'flags += ["--dns", "8.8.8.8"]' in workspace_text
+    assert 'startswith("pasta:")' in workspace_text
+    patch_podman_workspace_network(tmp_path, DEFAULT_PASTA_HOST_IP)
+    assert run_infer.read_text() == infer_text
+    assert workspace.read_text() == workspace_text
+    patch_podman_workspace_network(tmp_path, "169.254.1.9")
+    updated = podman_pasta_network("169.254.1.9")
+    assert f'network="{updated}",' in run_infer.read_text()
+    assert network not in run_infer.read_text()
+
+
+def test_ensure_tac_skips_setup_when_ports_are_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tac, "tac_services_ready", lambda: True)
+    monkeypatch.setattr(
+        tac,
+        "_run_tac_setup",
+        lambda: (_ for _ in ()).throw(AssertionError("setup should not run")),
+    )
+    tac.ensure_tac_services()
+
+
+def test_ensure_tac_requires_services_when_start_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(OAS_START_TAC_ENV, raising=False)
+    monkeypatch.setattr(tac, "tac_services_ready", lambda: False)
+    monkeypatch.setattr(
+        tac,
+        "_run_tac_setup",
+        lambda: (_ for _ in ()).throw(AssertionError("setup should not run")),
+    )
+    with pytest.raises(RuntimeError, match="Start them on the host"):
+        tac.ensure_tac_services()
+
+
+def test_ensure_tac_uses_locked_image_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    store = tmp_path / "tac-store"
+    calls: list[str] = []
+    monkeypatch.setenv(OAS_START_TAC_ENV, "1")
+    monkeypatch.setenv(OAS_TAC_IMAGE_STORE_ENV, str(store))
+    monkeypatch.delenv("CONTAINERS_STORAGE_CONF", raising=False)
+    monkeypatch.setattr(tac, "tac_services_ready", lambda: False)
+    monkeypatch.setattr(tac, "compose_available", lambda: True)
+    monkeypatch.setattr(tac, "_run_tac_setup", lambda: calls.append("setup"))
+
+    tac.ensure_tac_services()
+    writer_conf = Path(os.environ["CONTAINERS_STORAGE_CONF"]).read_text()
+    images = store / "images"
+    assert calls == ["setup"]
+    assert (store / ".oas-tac-ready").is_file()
+    assert f'graphroot = "{images}"' in writer_conf
+    assert "additionalimagestores" not in writer_conf
+
+    tac.ensure_tac_services()
+    reader_conf = Path(os.environ["CONTAINERS_STORAGE_CONF"]).read_text()
+    assert calls == ["setup", "setup"]
+    assert "additionalimagestores" in reader_conf
+    assert f'"{images}"' in reader_conf
+
+
+def test_openagentsafety_beaker_env_requires_weka() -> None:
+    from olmo_eval.cli.beaker.job_assembler import openagentsafety_beaker_env
+
+    with pytest.raises(ValueError, match="Weka"):
+        openagentsafety_beaker_env(["openagentsafety"], "ai2/rhea")
+    assert openagentsafety_beaker_env(["tau2_bench"], "ai2/rhea") == {}
+
+
+def test_assemble_openagentsafety_job_sets_tac_bootstrap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from olmo_eval.cli.beaker.job_assembler import assemble_external_eval_job
+
+    monkeypatch.setattr(
+        "olmo_eval.launch.beaker.mirror.get_registry_mirror_url",
+        lambda: (_ for _ in ()).throw(RuntimeError("no mirror")),
+    )
+    job = assemble_external_eval_job(
+        name="oas",
+        model="test-model",
+        external_evals=["openagentsafety"],
+        cluster="ai2/jupiter",
+        num_gpus=1,
+        workspace="ai2/oe-data",
+        beaker_image="test-image",
+    )
+    assert job.env_vars[OAS_START_TAC_ENV] == "1"
+    assert job.env_vars[OAS_TAC_IMAGE_STORE_ENV] == OAS_TAC_IMAGE_STORE
+    assert job.command[job.command.index("--runtime") + 1] == "podman"
 
 
 def test_docker_error_requires_docker_cli(monkeypatch: pytest.MonkeyPatch) -> None:

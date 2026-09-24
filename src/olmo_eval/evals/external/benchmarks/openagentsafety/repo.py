@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from olmo_eval.evals.external.network import PODMAN_DNS, podman_pasta_network
+
 logger = logging.getLogger(__name__)
 
 REPO_URL = "https://github.com/OpenHands/benchmarks.git"
@@ -74,7 +76,37 @@ def docker_build_context(repo_dir: Path) -> Path:
 
 
 _GATEWAY_IP_ASSIGNMENT = re.compile(r'(gateway_ip\s*=\s*)(["\'])([^"\']*)(\2)')
+_PASTA_NETWORK_ARG = re.compile(r'network="pasta:--map-guest-addr,[^"]+"')
+_WORKSPACE_FORWARD_ENV = "forward_env=forward_env or [],\n        )"
+_NETWORK_FLAG_BLOCK = """        if self.network:
+            flags += ["--network", self.network]
+"""
+_PASTA_DNS_BLOCK = f"""        if self.network:
+            flags += ["--network", self.network]
+            if str(self.network).startswith("pasta:"):
+                flags += ["--dns", "{PODMAN_DNS}"]
+"""
 RUN_INFER_RELATIVE = Path("benchmarks") / "openagentsafety" / "run_infer.py"
+_RUN_CONTAINER_ANCHOR = "        # Run container\n"
+_HOOK_MOUNT_BLOCK = """        hook_dir = os.environ.get("OAS_AGENT_HOOK_DIR")
+        if hook_dir:
+            flags += [
+                "-v",
+                f"{hook_dir}:/opt/oas-hooks:ro",
+                "-e",
+                "PYTHONPATH=/opt/oas-hooks:/utils:",
+            ]
+
+"""
+WORKSPACE_RELATIVE = (
+    Path("vendor")
+    / "software-agent-sdk"
+    / "openhands-workspace"
+    / "openhands"
+    / "workspace"
+    / "docker"
+    / "workspace.py"
+)
 
 
 def patch_gateway_host_mapping(repo_dir: Path, gateway_ip: str) -> Path:
@@ -104,6 +136,73 @@ def patch_gateway_host_mapping(repo_dir: Path, gateway_ip: str) -> Path:
     path.write_text(new_text)
     logger.info("Patched OAS gateway_ip to %s in %s", gateway_ip, path)
     return path
+
+
+def patch_agent_hook_mount(repo_dir: Path) -> None:
+    """Mount the OAS agent hooks into each workspace container.
+
+    The agent server imports ``sitecustomize`` from that directory. The mount
+    is read-only and does not change the image tag.
+    """
+    path = repo_dir.expanduser().resolve() / WORKSPACE_RELATIVE
+    if not path.is_file():
+        raise RuntimeError(f"DockerWorkspace source not found at {path}")
+    text = path.read_text()
+    if "OAS_AGENT_HOOK_DIR" in text:
+        logger.info("OAS agent hook mount already present in %s", path)
+        return
+    if _RUN_CONTAINER_ANCHOR not in text:
+        raise RuntimeError(f"Could not find Docker run command in {path}")
+    path.write_text(
+        text.replace(_RUN_CONTAINER_ANCHOR, _HOOK_MOUNT_BLOCK + _RUN_CONTAINER_ANCHOR, 1)
+    )
+    logger.info("Patched OAS agent hook mount in %s", path)
+
+
+def patch_podman_workspace_network(repo_dir: Path, gateway_ip: str) -> None:
+    """Give OAS workspaces a pasta network so published ports survive host netns.
+
+    Beaker's Podman config uses ``netns=host``, which TheAgentCompany needs in
+    order to bind the job's service ports. ``DockerWorkspace`` publishes a host
+    port and then connects to it, so the workspace itself must use pasta.
+    TheAgentCompany containers are left on the default host network.
+    """
+    repo_dir = repo_dir.expanduser().resolve()
+    network = podman_pasta_network(gateway_ip)
+    _patch_workspace_network_arg(repo_dir / RUN_INFER_RELATIVE, network)
+    _patch_workspace_dns(repo_dir / WORKSPACE_RELATIVE)
+
+
+def _patch_workspace_network_arg(path: Path, network: str) -> None:
+    if not path.is_file():
+        raise RuntimeError(f"OAS run_infer.py not found at {path}")
+    desired = f'network="{network}",'
+    text = path.read_text()
+    if desired in text:
+        logger.info("OAS workspace network already set to %s", network)
+        return
+    if _PASTA_NETWORK_ARG.search(text):
+        path.write_text(_PASTA_NETWORK_ARG.sub(desired, text, count=1))
+        logger.info("Updated OAS workspace network to %s", network)
+        return
+    if _WORKSPACE_FORWARD_ENV not in text:
+        raise RuntimeError(f"Could not find DockerWorkspace constructor in {path}")
+    replacement = f"forward_env=forward_env or [],\n            {desired}\n        )"
+    path.write_text(text.replace(_WORKSPACE_FORWARD_ENV, replacement, 1))
+    logger.info("Patched OAS workspace network to %s", network)
+
+
+def _patch_workspace_dns(path: Path) -> None:
+    if not path.is_file():
+        raise RuntimeError(f"DockerWorkspace source not found at {path}")
+    text = path.read_text()
+    if _PASTA_DNS_BLOCK in text:
+        logger.info("OAS workspace DNS patch already present in %s", path)
+        return
+    if _NETWORK_FLAG_BLOCK not in text:
+        raise RuntimeError(f"Could not find Docker network flags in {path}")
+    path.write_text(text.replace(_NETWORK_FLAG_BLOCK, _PASTA_DNS_BLOCK, 1))
+    logger.info("Patched OAS workspace DNS flags in %s", path)
 
 
 def ensure_workspace_image(repo_dir: Path, container_runtime: str = "podman") -> str:
