@@ -39,6 +39,7 @@ from olmo_eval.common.debug import is_debug_requests
 from olmo_eval.common.images import resolve_images
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.errors import REQUEST_ERROR_KEY
 from olmo_eval.inference.providers.olmo_core_vlm import cache, checkpoint, preprocessing
 from olmo_eval.inference.request_utils import chat_messages_for_request
 
@@ -681,25 +682,29 @@ class OlmoCoreVLMProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         import torch
 
-        # Per-request encode plus skip/clamp decisions. Multimodal prompts
+        # Per-request encode plus fail/clamp decisions. Multimodal prompts
         # cannot be truncated (that would corrupt the image-token layout), so
-        # clamp the generation budget instead and skip requests whose prompt
-        # alone exceeds the window.
+        # clamp the generation budget instead, and fail a request whose prompt
+        # alone exceeds the window. Only that request fails: it is marked for
+        # the runner and the rest of the batch still runs.
         encoded: list[tuple[list[int], Any, Any, int]] = []
+        active: list[int] = []
         outputs: list[list[LMOutput]] = [[] for _ in requests]
-        for request in requests:
+        for index, request in enumerate(requests):
             token_ids, image_tensor, pooling_tensor = self._encode_request(request)
             if is_debug_requests():
                 logger.info("Prompt:\n%s", self.tokenizer.decode(token_ids))
 
             if len(token_ids) >= self.max_length:
-                raise ValueError(
+                message = (
                     "OLMo-core VLM prompt length "
                     f"({len(token_ids)}) >= max_length ({self.max_length}); multimodal "
                     "prompts cannot be truncated without corrupting the image-token "
-                    "layout, so this instance must fail rather than score an empty "
+                    "layout, so this instance fails rather than scoring an empty "
                     "output. Raise max_model_len if the checkpoint supports it."
                 )
+                outputs[index] = [LMOutput(text="", metadata={REQUEST_ERROR_KEY: message})]
+                continue
             # max_tokens=None means "generate to the model's context limit".
             if params.max_tokens is None:
                 budget = self.max_length - len(token_ids)
@@ -714,8 +719,8 @@ class OlmoCoreVLMProvider(InferenceProvider):
                         self.max_length,
                     )
             encoded.append((token_ids, image_tensor, pooling_tensor, budget))
+            active.append(index)
 
-        active = list(range(len(encoded)))
         entries = encoded
         if not entries:
             return outputs

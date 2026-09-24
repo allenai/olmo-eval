@@ -749,6 +749,47 @@ class TestVLMLogprobsBoundaries:
             self._provider(max_length=0).logprobs([self._request("!")])
 
 
+class TestVLMOverlongPrompt:
+    """A prompt longer than the window fails its own request, not the whole batch."""
+
+    @pytest.fixture(autouse=True)
+    def _torch(self):
+        self.torch = pytest.importorskip("torch")
+
+    def test_only_the_overlong_request_fails(self) -> None:
+        import contextlib
+        import threading
+
+        from olmo_eval.inference.errors import REQUEST_ERROR_KEY, request_error
+        from olmo_eval.inference.providers.olmo_core_vlm.provider import OlmoCoreVLMProvider
+
+        provider = OlmoCoreVLMProvider.__new__(OlmoCoreVLMProvider)
+        provider.max_length = 5
+        provider.use_cache = True
+        provider._model_lock = threading.Lock()
+        provider._autocast = contextlib.nullcontext
+        provider._encode_request = lambda request: ([1] * len(request.prompt), None, None)
+        batched: list = []
+        provider._build_batch = lambda entries: batched.extend(entries) or entries
+        provider._decode_batch_cached = lambda batch, params: [
+            len(token_ids) for token_ids, *_ in batch
+        ]
+        provider._finalize_output = lambda generated, params: LMOutput(text=f"len {generated}")
+
+        requests = [
+            LMRequest(request_type=RequestType.CHAT, prompt=prompt)
+            for prompt in ("ab", "abcdefgh", "abc")
+        ]
+        outputs = provider._generate_chunk(requests, SamplingParams(max_tokens=2))
+
+        assert [o.text for o in outputs[0]] == ["len 2"]
+        assert [o.text for o in outputs[2]] == ["len 3"]
+        assert "prompt length (8) >= max_length (5)" in outputs[1][0].metadata[REQUEST_ERROR_KEY]
+        assert request_error(outputs[1]) is not None
+        assert request_error(outputs[0]) is None
+        assert len(batched) == 2
+
+
 class TestUntiedLmHeadGuard:
     """A wrong checkpoint read that hands an untied model its embedding table as the
     LM head must fail loudly instead of scoring at chance."""
