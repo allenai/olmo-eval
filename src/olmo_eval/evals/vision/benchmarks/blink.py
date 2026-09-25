@@ -41,6 +41,9 @@ BLINK_SUBTASKS: tuple[str, ...] = (
     "Visual Similarity",
 )
 
+#: Hub revision of BLINK-Benchmark/BLINK the mm_olmo parity checks ran on.
+_REVISION = "a3666eb249237ba3d5eca8db21176cc47967e040"
+
 _SCORER = MultiImageMcScorer()
 _METRICS = multi_image_mc_metrics(_SCORER, BLINK_SUBTASKS, field="sub_task")
 
@@ -77,7 +80,9 @@ class BlinkTask(MultiImageQATask):
 
         split = "val" if self.config.split == Split.VALIDATION else self.config.split.value
         parts = [
-            datasets.load_dataset("BLINK-Benchmark/BLINK", name=name, split=split)
+            datasets.load_dataset(
+                "BLINK-Benchmark/BLINK", name=name, split=split, revision=_REVISION
+            )
             for name in self.NAMES
         ]
         ds = datasets.concatenate_datasets(parts)
@@ -88,7 +93,8 @@ class BlinkTask(MultiImageQATask):
         for idx in range(len(ds_nodecode)):
             ex = ds_nodecode[idx]
             sub_task = ex["sub_task"]
-            assert sub_task in BLINK_SUBTASKS, f"Unexpected sub_task: {sub_task}"
+            if sub_task not in BLINK_SUBTASKS:
+                raise ValueError(f"BLINK row {idx} has an unknown sub_task {sub_task!r}")
             answer = ex["answer"].replace("(", "").replace(")", "")
             images = tuple(
                 lazy_hf_image(ds_nodecode, idx, column)

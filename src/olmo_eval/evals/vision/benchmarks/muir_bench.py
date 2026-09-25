@@ -67,7 +67,8 @@ class MuirBenchTask(MultiImageQATask):
         for idx in range(len(ds_nodecode)):
             ex = ds_nodecode[idx]
             task = ex["task"]
-            assert task in self.TASKS, f"Unexpected task: {task}"
+            if task not in self.TASKS:
+                raise ValueError(f"MuirBench example {ex['idx']} has an unknown task {task!r}")
             question, options = replace_images(ex["question"], list(ex["options"]))
             answer_idx = ord(ex["answer"]) - ord("A")
             if not (0 <= answer_idx < len(options)):

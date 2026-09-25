@@ -44,6 +44,9 @@ MMIU_RELATIONSHIPS: tuple[str, ...] = (
     "Low-level-semantic",
 )
 
+#: Hub revision of FanqingM/MMIU-Benchmark the mm_olmo parity checks ran on.
+_REVISION = "03bf7d143d920e97a757f606b6b7baee161b019b"
+
 _SCORER = MultiImageMcScorer()
 _METRICS: tuple[Metric, ...] = (
     *multi_image_mc_metrics(_SCORER, MMIU_RELATIONSHIPS, field="relationship"),
@@ -73,6 +76,17 @@ def _extract_options(option_string: str) -> list[str]:
     return matches
 
 
+def _split_image_path(path: str, idx: int) -> tuple[str, str]:
+    """``(path under the images root, relationship)`` for one MMIU image path.
+
+    MMIU lists images as ``./<relationship>/<task>/...``; anything else is a data error.
+    """
+    parts = path.split("/")
+    if parts[0] != "." or len(parts) < 3:
+        raise ValueError(f"MMIU row {idx} has an image path outside ./<relationship>/: {path!r}")
+    return "/".join(parts[1:]), parts[1]
+
+
 @register("mmiu")
 class MmiuTask(MultiImageQATask):
     sampling_params = SamplingParams(temperature=0.0, max_tokens=32)
@@ -83,13 +97,16 @@ class MmiuTask(MultiImageQATask):
     def _build_instances(self) -> Iterator[Instance]:
         import datasets
 
-        ds = datasets.load_dataset("FanqingM/MMIU-Benchmark", split=self.config.split.value)
+        ds = datasets.load_dataset(
+            "FanqingM/MMIU-Benchmark", split=self.config.split.value, revision=_REVISION
+        )
         images_root = torch_datasets_dir() / "mmiu"
 
         for idx in range(len(ds)):
             ex = ds[idx]
-            images = tuple(str(images_root / path[len("./") :]) for path in ex["input_image_path"])
-            relationships = {path.split("/")[1] for path in ex["input_image_path"]}
+            paths = [_split_image_path(path, idx) for path in ex["input_image_path"]]
+            images = tuple(str(images_root / relative) for relative, _ in paths)
+            relationships = {relationship for _, relationship in paths}
             if len(relationships) != 1:
                 raise ValueError(
                     f"MMIU row {idx} spans multiple relationships {sorted(relationships)}: "
