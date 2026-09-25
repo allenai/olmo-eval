@@ -147,8 +147,6 @@ class LaunchConfigLoader:
             # Preemption settings come from one source: the CLI if it sets either, else the file.
             if cli_preemptible is not None or cli_min_runtime is not None:
                 preemptible, min_runtime = cli_preemptible, cli_min_runtime
-            elif cfg.min_runtime is not None and cfg.preemptible:
-                preemptible, min_runtime = None, cfg.min_runtime
             else:
                 preemptible, min_runtime = cfg.preemptible, cfg.min_runtime
             timeout = cli_timeout if cli_timeout is not None else cfg.timeout

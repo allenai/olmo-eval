@@ -82,7 +82,11 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     default=None,
     help="Job priority level (low, normal, high, urgent). Can also use @priority suffix on tasks.",
 )
-@click.option("--preemptible/--no-preemptible", default=None, help="Allow preemption")
+@click.option(
+    "--preemptible/--no-preemptible",
+    default=None,
+    help="Allow preemption (deprecated by Beaker; prefer --min-runtime)",
+)
 @click.option(
     "--min-runtime",
     default=None,

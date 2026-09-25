@@ -1266,22 +1266,26 @@ budget: ai2/oe-other
 ### Preemption
 
 By default, Beaker can preempt a job at any time and requeues it afterward. Use
-`--min-runtime` (or `min_runtime:` in a config file) to protect a job from preemption
-for its first stretch of runtime:
+`--min-runtime` (or `min_runtime:` in a config file) to protect a job from preemption:
 
 ```bash
 uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
 ```
 
-- Beaker keeps auto-resume on, so a job preempted after its min runtime is requeued.
-- Each cluster sets the allowed range (by default 5m to 8h). Beaker rejects values
-  outside it when the experiment is created.
+- How long the protection lasts depends on the cluster's scheduling policy. Where the
+  policy makes jobs interruptible after their min runtime, the job is protected for that
+  long, then can be preempted and is requeued. On other clusters, any min runtime
+  protects the job for its whole run.
+- Beaker accepts 5m to 8h, and no more than the cluster's maximum task timeout.
 - Clusters that require an allocation for protected work reject a min runtime unless
   your workspace has an allocation there.
-- `--min-runtime` cannot be combined with `--preemptible/--no-preemptible`. When the
-  CLI sets either flag, it replaces the config file's `preemptible` and `min_runtime`.
+- `min_runtime` cannot be combined with `preemptible` in the CLI or in a config file.
+  When the CLI sets `--min-runtime` or `--preemptible/--no-preemptible`, it replaces
+  both config file fields.
+- External evals (`-E`) take `--min-runtime` from the CLI only; they do not read the
+  config file.
 - `--no-preemptible` still works. Beaker treats it as an 8h min runtime with auto-resume
-  turned off, so a preempted job is not requeued.
+  turned off.
 
 ### Per-Task Overrides
 

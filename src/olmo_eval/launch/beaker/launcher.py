@@ -22,7 +22,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, timedelta
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -132,7 +132,7 @@ def print_experiment_config(
 
         min_runtime_ns = context.get("minRuntime")
         if min_runtime_ns is not None:
-            min_runtime = timedelta(microseconds=min_runtime_ns // 1000)
+            min_runtime = _format_duration(min_runtime_ns // 1_000_000_000)
             header_lines.append(f"[bold blue]Min runtime:[/] {min_runtime}")
         else:
             preemptible = context.get("preemptible", True)
@@ -349,7 +349,8 @@ class BeakerJobConfig:
         num_gpus: Number of GPUs to request.
         shared_memory: Shared memory size (e.g., "10GiB").
         priority: Job priority level.
-        preemptible: Whether the job can be preempted. Set to None when min_runtime is set.
+        preemptible: Whether the job can be preempted. Ignored and set to None when
+            min_runtime is set; combining False with min_runtime raises ValueError.
         min_runtime: Minimum time the job runs before Beaker may preempt it (e.g., "2h").
             Replaces preemptible, which Beaker has deprecated.
         timeout: Job timeout (e.g., "24h", "30m").
@@ -765,14 +766,14 @@ def _parse_timeout(timeout: str) -> int:
     return total_ns if total_ns else 86400_000_000_000  # Default 24h
 
 
-_MIN_RUNTIME_PATTERN = re.compile(r"(?:\d+h)?(?:\d+m)?(?:\d+s)?")
+_MIN_RUNTIME_PATTERN = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
 
 
 def validate_min_runtime(min_runtime: str) -> str:
     """Validate a Beaker min runtime string such as "2h", "30m", or "1h30m".
 
-    Units are required. Beaker checks the value against each cluster's allowed range when
-    the experiment is created.
+    Units are required and the duration must be positive. Beaker checks the allowed range
+    when the experiment is created.
 
     Args:
         min_runtime: Duration string using h, m, and s units.
@@ -781,14 +782,28 @@ def validate_min_runtime(min_runtime: str) -> str:
         The duration string with surrounding whitespace removed.
 
     Raises:
-        ValueError: If the string is not a duration in h, m, and s units.
+        ValueError: If the string is not a positive duration in h, m, and s units.
     """
     value = min_runtime.strip()
-    if not value or not _MIN_RUNTIME_PATTERN.fullmatch(value):
+    match = _MIN_RUNTIME_PATTERN.fullmatch(value)
+    if not value or match is None:
         raise ValueError(
             f"invalid min runtime {min_runtime!r}; expected a duration like '2h', '30m', or '1h30m'"
         )
+    if not any(int(part) for part in match.groups() if part):
+        raise ValueError(
+            f"min runtime {min_runtime!r} must be greater than zero; "
+            "omit it to allow preemption at any time"
+        )
     return value
+
+
+def _format_duration(seconds: int) -> str:
+    """Format a duration in seconds as h/m/s units, such as "1h30m"."""
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    parts = [f"{n}{unit}" for n, unit in ((hours, "h"), (minutes, "m"), (secs, "s")) if n]
+    return "".join(parts) or "0s"
 
 
 class BeakerLauncher:

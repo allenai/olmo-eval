@@ -224,13 +224,18 @@ class TestBeakerJobConfig:
 class TestValidateMinRuntime:
     """Tests for min runtime validation."""
 
-    @pytest.mark.parametrize("value", ["2h", "30m", "90s", "1h30m", "0s", " 4h "])
+    @pytest.mark.parametrize("value", ["2h", "30m", "90s", "1h30m", "0h5m", " 4h "])
     def test_valid_durations(self, value):
         assert validate_min_runtime(value) == value.strip()
 
     @pytest.mark.parametrize("value", ["", "2", "1d", "-1h", "2 hours", "30m1h"])
     def test_invalid_durations(self, value):
         with pytest.raises(ValueError, match="invalid min runtime"):
+            validate_min_runtime(value)
+
+    @pytest.mark.parametrize("value", ["0s", "0h", "0h0m0s"])
+    def test_zero_duration_rejected(self, value):
+        with pytest.raises(ValueError, match="must be greater than zero"):
             validate_min_runtime(value)
 
 
@@ -288,6 +293,59 @@ class TestBeakerJobConfigMinRuntime:
         call_kwargs = mock_launch.call_args.kwargs
         assert call_kwargs["preemptible"] is expected_preemptible
         assert call_kwargs["min_runtime"] == expected_min_runtime
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected_context"),
+        [
+            ({}, {"preemptible": True}),
+            ({"preemptible": False}, {"preemptible": False}),
+            ({"min_runtime": "1h30m"}, {"minRuntime": 90 * 60 * 1_000_000_000}),
+        ],
+    )
+    def test_task_spec_context(self, kwargs, expected_context):
+        """The Beaker spec sends minRuntime without the deprecated preemptible field."""
+        from beaker.types import BeakerTaskSpec
+
+        config = self._config(**kwargs)
+        spec = BeakerTaskSpec.new(
+            "test",
+            beaker_image="test-image",
+            preemptible=config.preemptible,
+            min_runtime=config.min_runtime,
+        )
+
+        context = spec.to_json()["context"]
+        context.pop("priority", None)
+        assert context == expected_context
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected_line"),
+        [
+            ({}, "Preemptible: yes"),
+            ({"preemptible": False}, "Preemptible: no"),
+            ({"min_runtime": "1h30m"}, "Min runtime: 1h30m"),
+        ],
+    )
+    def test_dry_run_header(self, kwargs, expected_line, capsys):
+        from olmo_eval.launch import BeakerLauncher
+
+        BeakerLauncher()._print_dry_run_config(self._config(**kwargs), ["ai2/jupiter"])
+
+        assert expected_line in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        ("context", "expected_line"),
+        [
+            ({"preemptible": True}, "Preemptible: yes"),
+            ({"minRuntime": 90 * 60 * 1_000_000_000}, "Min runtime: 1h30m"),
+        ],
+    )
+    def test_print_experiment_config_header(self, context, expected_line, capsys):
+        from olmo_eval.launch import print_experiment_config
+
+        print_experiment_config({"tasks": [{"context": context}]}, name="test")
+
+        assert expected_line in capsys.readouterr().out
 
 
 class TestBeakerLauncherImport:
@@ -1324,9 +1382,17 @@ class TestLaunchConfigLoaderPreemption:
         assert config.preemptible is None
         assert config.min_runtime == "4h"
 
-    def test_config_file_min_runtime_with_preemptible_false_rejected(self, tmp_path):
+    @pytest.mark.parametrize("preemptible", ["true", "false"])
+    def test_config_file_min_runtime_with_preemptible_rejected(self, preemptible, tmp_path):
         with pytest.raises(SystemExit):
-            self._load(yaml_body="preemptible: false\nmin_runtime: 4h\n", tmp_path=tmp_path)
+            self._load(
+                yaml_body=f"preemptible: {preemptible}\nmin_runtime: 4h\n", tmp_path=tmp_path
+            )
+
+    def test_config_file_preemptible_false(self, tmp_path):
+        config = self._load(yaml_body="preemptible: false\n", tmp_path=tmp_path)
+        assert config.preemptible is False
+        assert config.min_runtime is None
 
     def test_cli_min_runtime_replaces_config_file_preemptible(self, tmp_path):
         config = self._load(
