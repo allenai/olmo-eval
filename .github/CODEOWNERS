@@ -1,3 +1,3 @@
-# Auto-request review from the OE Evals Reviewers team. The team auto-assigns
-# reviewers from its members; approval from an owner is not required to merge.
+# Request review from the OE Evals Reviewers team on every PR. Approval from
+# an owner is not required to merge.
 * @allenai/oe-evals-reviewers
