@@ -4,7 +4,12 @@ import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, get_task, list_tasks
-from olmo_eval.evals.tasks.gsm8k import _clean_short_answer, _extract_last_number
+from olmo_eval.evals.tasks.gsm8k import (
+    GSM8K_PLATINUM_REPO,
+    GSM8K_PLATINUM_REVISION,
+    _clean_short_answer,
+    _extract_last_number,
+)
 
 
 class TestGSMNumberExtraction:
@@ -59,6 +64,38 @@ class TestGSMNumberExtraction:
 def test_gsm8k_olmo3base_uses_first_sample_exact_match() -> None:
     task = get_task("gsm8k:olmo3base")
     assert task.config.output_score_aggregation == OutputScoreAggregation.FIRST
+
+
+def test_gsm8k_platinum_uses_pinned_platinum_data() -> None:
+    task = get_task("gsm8k:platinum")
+    source = task.config.data_source
+    assert source.path == GSM8K_PLATINUM_REPO
+    assert source.subset == "main"
+    assert source.split == "test"
+    assert source.revision == GSM8K_PLATINUM_REVISION
+
+
+def test_gsm8k_platinum_keeps_base_task_settings() -> None:
+    base = get_task("gsm8k").config
+    platinum = get_task("gsm8k:platinum").config
+    assert platinum.num_fewshot == base.num_fewshot
+    assert platinum.sampling_params == base.sampling_params
+    assert platinum.metrics == base.metrics
+
+
+def test_gsm8k_platinum_process_doc_parses_revised_answer() -> None:
+    task = get_task("gsm8k:platinum")
+    doc = {
+        "question": "How many apples?",
+        "answer": "3 + 4 = <<3+4=7>>7\n#### 1,207",
+        "cleaning_status": "revised",
+    }
+
+    instance = task.process_doc(doc, index=5)
+
+    assert instance is not None
+    assert instance.gold_answer == "1207"
+    assert instance.metadata["id"] == 5
 
 
 @pytest.mark.parametrize("num_fewshot", [0, 3, 8])

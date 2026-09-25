@@ -14,6 +14,9 @@ from olmo_eval.evals.tasks.common import (
 )
 from olmo_eval.evals.tasks.constants.gsm_symbolic import GSM8K_FIXED_FEWSHOT
 
+GSM8K_PLATINUM_REPO = "madrylab/gsm8k-platinum"
+GSM8K_PLATINUM_REVISION = "e762492455a1cf7967de89f05b6bef72fc713b66"
+
 _NUMBER_RE = re.compile(r"[-+]?\d*\.\d+|[-+]?\d+")
 _COMMA_IN_NUMBER_RE = re.compile(r"(\d),(\d)")
 
@@ -90,6 +93,18 @@ class GSM8K(Task):
     def extract_answer(self, output: LMOutput) -> str | None:
         return _extract_last_number(output.text)
 
+
+# GSM8K-Platinum is the GSM8K test set with ambiguous or flawed questions
+# removed and mislabeled answers corrected (https://gradientscience.org/gsm8k-platinum/).
+register_variant(
+    "gsm8k",
+    "platinum",
+    data_source=DataSource(
+        path=GSM8K_PLATINUM_REPO,
+        subset="main",
+        revision=GSM8K_PLATINUM_REVISION,
+    ),
+)
 
 register_variant(
     "gsm8k",
