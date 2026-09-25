@@ -8,6 +8,7 @@ from olmo_eval.evals.tasks.gsm8k import (
     GSM8K_PLATINUM_REPO,
     GSM8K_PLATINUM_REVISION,
     _clean_short_answer,
+    _extract_boxed_or_last_number,
     _extract_last_number,
 )
 
@@ -96,6 +97,62 @@ def test_gsm8k_platinum_process_doc_parses_revised_answer() -> None:
     assert instance is not None
     assert instance.gold_answer == "1207"
     assert instance.metadata["id"] == 5
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("So the total is \\boxed{18}.", "18"),
+        ("Step 1 gives 5. Final: \\boxed{\\$1,207} dollars and 3 cents", "1207"),
+        ("First \\boxed{3}, corrected to \\boxed{4}.", "4"),
+        # Falls back to the last number without a boxed answer
+        ("The answer is 42.", "42"),
+        # Falls back when the boxed answer holds no number
+        ("\\boxed{none} but 7 remain", "7"),
+        ("No answer here.", None),
+    ],
+)
+def test_extract_boxed_or_last_number(text: str, expected: str | None) -> None:
+    assert _extract_boxed_or_last_number(text) == expected
+
+
+def test_gsm8k_chat_builds_zero_shot_chat_request() -> None:
+    task = get_task("gsm8k:chat")
+    instance = Instance(question="What is one plus one?", gold_answer="2")
+
+    request = task.format_request(instance)
+
+    assert request.request_type == RequestType.CHAT
+    assert request.messages is not None
+    assert len(request.messages) == 1
+    content = request.messages[0]["content"]
+    assert content.startswith("What is one plus one?")
+    assert "\\boxed{}" in content
+
+
+def test_gsm8k_chat_generation_settings() -> None:
+    config = get_task("gsm8k:chat").config
+    assert config.strip_thinking is True
+    assert config.sampling_params is not None
+    assert config.sampling_params.max_tokens is None
+    assert not config.sampling_params.stop_sequences
+
+
+def test_gsm8k_chat_extracts_boxed_answer_after_thinking() -> None:
+    task = get_task("gsm8k:chat")
+    output = LMOutput(text="<think>Maybe 5? No, 99.</think>\nThe answer is \\boxed{18}. Check: 2")
+    instance = Instance(question="q", gold_answer="18")
+    response = Response(instance=instance, request=task.format_request(instance), outputs=[output])
+
+    task.strip_thinking_traces([response])
+
+    assert task.extract_answer(response.outputs[0]) == "18"
+
+
+def test_gsm8k_chat_composes_with_platinum() -> None:
+    config = get_task("gsm8k:chat:platinum").config
+    assert config.data_source.path == GSM8K_PLATINUM_REPO
+    assert config.strip_thinking is True
 
 
 @pytest.mark.parametrize("num_fewshot", [0, 3, 8])
