@@ -237,6 +237,8 @@ class VLLMProvider(InferenceProvider):
             kwargs["top_p"] = top_p
         if top_k is not None:
             kwargs["top_k"] = top_k
+        if params.presence_penalty is not None:
+            kwargs["presence_penalty"] = params.presence_penalty
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         # Always request logprobs (default to 1) for metrics computation
