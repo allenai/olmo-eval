@@ -58,6 +58,13 @@ hf = [
     "einops",
     "torchvision ; platform_system != 'Darwin'",  # GPU-coupled; skip on macOS like the vllm extra
 ]
+# Scoring dependencies of the vision benchmarks, needed whichever provider runs the model:
+# pycocotools decodes the COCO-RLE instance masks and scipy matches points to them.
+vision = [
+    "pycocotools",
+    # Same pin as the `analysis` extra, so the two resolve together.
+    "scipy~=1.17.1",
+]
 olmo_core = [
     "ai2-olmo-core[torchao,transformers]==2.4.0",
     # The conflicting olmo_core_vlm extra's git-pinned OLMo-core requires
@@ -175,7 +182,7 @@ dev = [
     "ty==0.0.39",
     "pre-commit>=4.0.0",
     # Unit tests import optional helpers directly, so dev installs need these extras too.
-    "olmo-eval[storage,beaker,hf,analysis,sandbox]",
+    "olmo-eval[storage,beaker,hf,vision,analysis,sandbox]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
     "parameterized>=0.9.0",
@@ -232,6 +239,14 @@ select = [
 "src/olmo_eval/evals/tasks/zebralogic.py" = ["E501", "W291"]
 # Verbatim prompt templates vendored from the mm_olmo reference implementation
 "src/olmo_eval/evals/vision/scoring/prompt_templates.py" = ["E501"]
+"src/olmo_eval/evals/vision/scoring/vqa_normalization.py" = ["E501"]
+"src/olmo_eval/evals/vision/scoring/multiple_choice.py" = ["E501"]
+"src/olmo_eval/evals/vision/scoring/math_vista_offline.py" = ["E501"]
+"src/olmo_eval/evals/vision/scoring/mmmu_pro.py" = ["E501"]
+# CharXiv grading prompts are vendored byte-for-byte from the official repo; their trailing
+# whitespace is part of the official prompt bytes and must not be stripped.
+"src/olmo_eval/evals/vision/scoring/charxiv.py" = ["E501", "W291", "W293"]
+"tests/evals/vision/test_image_qa_scorers.py" = ["E501"]
 [tool.ruff.format]
 docstring-code-format = true
 
