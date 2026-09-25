@@ -1,0 +1,3 @@
+# Request review from the OE Evals Reviewers team on every PR. Approval from
+# an owner is not required to merge.
+* @allenai/oe-evals-reviewers
