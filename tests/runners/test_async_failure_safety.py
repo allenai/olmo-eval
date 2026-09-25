@@ -99,6 +99,23 @@ def test_marked_request_fails_alone_in_its_batch() -> None:
     assert results[1].error == "prompt too long" and results[1].outputs == []
 
 
+def test_marked_chat_request_fails_its_instance() -> None:
+    marked = LMOutput(text="", metadata={REQUEST_ERROR_KEY: "prompt too long"})
+    harness = SimpleNamespace(
+        provider=SimpleNamespace(describe_request=Mock(return_value=None)),
+        _apply_config=lambda request: request,
+        run=AsyncMock(
+            return_value=SimpleNamespace(final_output=marked, trajectory=None, error=None)
+        ),
+    )
+    result_queue: queue.Queue[ResultItem] = queue.Queue()
+
+    asyncio.run(process_chat_request(_queue_item(0), harness, result_queue))  # type: ignore[arg-type]
+
+    result = result_queue.get_nowait()
+    assert result.error == "prompt too long" and result.outputs == []
+
+
 def test_streaming_strategy_propagates_fast_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
