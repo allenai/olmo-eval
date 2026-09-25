@@ -268,7 +268,8 @@ async def process_results(
             f"runner expected {total_instances} instance(s), "
             f"task trackers describe {len(pending_instances)}"
         )
-    report_progress = BeakerStatusReporter().progress_callback("Processed")
+    reporter = BeakerStatusReporter()
+    report_progress = reporter.progress_callback("Processed")
     last_health_check = time.time()
     health_check_interval = 5.0
     workers_exited = False
@@ -378,6 +379,7 @@ async def process_results(
     finally:
         scoring_progress.close()
         report_progress(total_instances - len(pending_instances), total_instances, force=True)
+        reporter.flush()
 
     return results
 

@@ -53,6 +53,8 @@ class BeakerStatusReporter:
         )
         self._lock = Lock()
         self._update_in_flight = False
+        self._pending_message: str | None = None
+        self._send_thread: Thread | None = None
         self._last_update: float = float("-inf")
         self._client: Beaker | None = None
         if self._workload is None:
@@ -77,41 +79,61 @@ class BeakerStatusReporter:
             return
 
         now = time.monotonic()
+        full_message = f"{message} {self._git_suffix}"
         with self._lock:
-            if not force and now - self._last_update < self.min_interval:
-                return
             # Status is cosmetic. Never queue more work behind a slow Beaker API
             # request, and never let that request block model startup or evaluation.
+            # A forced message is kept as the single pending update so the final
+            # status is not lost; it is sent when the in-flight request finishes.
             if self._update_in_flight:
+                if force:
+                    self._pending_message = full_message
+                return
+            if not force and now - self._last_update < self.min_interval:
                 return
             self._update_in_flight = True
             self._last_update = now
 
         client = self._client
         workload = self._workload
-        full_message = f"{message} {self._git_suffix}"
 
-        def send_update() -> None:
+        def send_updates() -> None:
+            pending: str | None = full_message
             try:
-                client.workload.update(workload, description=full_message)
+                while pending is not None:
+                    client.workload.update(workload, description=pending)
+                    with self._lock:
+                        pending = self._pending_message
+                        self._pending_message = None
+                        if pending is None:
+                            self._update_in_flight = False
             except Exception as error:
                 logger.warning("Beaker status reporting disabled after update failure: %s", error)
                 self._client = None
-            finally:
                 with self._lock:
+                    self._pending_message = None
                     self._update_in_flight = False
 
         try:
-            Thread(
-                target=send_update,
+            thread = Thread(
+                target=send_updates,
                 name="beaker-status-update",
                 daemon=True,
-            ).start()
+            )
+            self._send_thread = thread
+            thread.start()
         except Exception as error:
             with self._lock:
+                self._pending_message = None
                 self._update_in_flight = False
             self._client = None
             logger.warning("Beaker status reporting disabled after thread failure: %s", error)
+
+    def flush(self, timeout: float = 10.0) -> None:
+        """Wait up to ``timeout`` seconds for in-flight status updates to be sent."""
+        thread = self._send_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout)
 
     def progress_callback(self, label: str, units: str = "items/sec") -> Callable[..., None]:
         """Return a ``(count, total, *, force=False)`` callback bound to a fresh start time.

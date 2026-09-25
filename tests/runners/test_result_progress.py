@@ -39,8 +39,11 @@ class _Reporter:
     instances: list[_Reporter]
 
     def __init__(self) -> None:
-        self.calls: list[tuple[int, int, bool]] = []
+        self.calls: list[tuple] = []
         _Reporter.instances.append(self)
+
+    def flush(self) -> None:
+        self.calls.append(("flush",))
 
     def progress_callback(self, label: str):
         assert label == "Processed"
@@ -107,7 +110,10 @@ def test_reports_one_global_count_for_uneven_worker_results(reporters: list[_Rep
     _process(result_queue, total=100)
 
     assert len(reporters) == 1
-    assert reporters[0].calls == [(n, 100, False) for n in range(1, 101)] + [(100, 100, True)]
+    assert reporters[0].calls == [(n, 100, False) for n in range(1, 101)] + [
+        (100, 100, True),
+        ("flush",),
+    ]
 
 
 def test_forces_final_report_when_a_worker_dies(reporters: list[_Reporter]) -> None:
@@ -130,7 +136,13 @@ def test_forces_final_report_when_a_worker_dies(reporters: list[_Reporter]) -> N
     with pytest.raises(RuntimeError, match="engine died"):
         _process(result_queue, total=10)
 
-    assert reporters[0].calls == [(1, 10, False), (2, 10, False), (3, 10, False), (3, 10, True)]
+    assert reporters[0].calls == [
+        (1, 10, False),
+        (2, 10, False),
+        (3, 10, False),
+        (3, 10, True),
+        ("flush",),
+    ]
 
 
 @pytest.mark.parametrize(
