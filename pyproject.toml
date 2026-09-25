@@ -106,8 +106,8 @@ sandbox = [
     "swe-rex[modal] @ git+https://github.com/jdahm/SWE-ReX.git@johannd/ai2",
 ]
 beaker = [
-    "beaker-py>=2.5.4,<3",
-    "beaker-gantry>=3.2.0,<4",
+    "beaker-py>=2.6.0,<3",
+    "beaker-gantry>=3.7.0,<4",
 ]
 s3 = [
     "boto3>=1.34.0",

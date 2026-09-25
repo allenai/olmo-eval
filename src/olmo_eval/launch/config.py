@@ -132,6 +132,7 @@ class EvalConfig:
 
     priority: str = "normal"
     preemptible: bool = True
+    min_runtime: str | None = None
     timeout: str = "24h"
     retries: int | None = None
 

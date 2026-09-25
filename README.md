@@ -1242,7 +1242,8 @@ budget: ai2/oe-other
 | `--gpus` | `-G` | auto | Number of GPUs (defaults to 1 for GPU providers, 0 otherwise) |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
 | `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
-| `--preemptible` | | `true` | Allow preemption |
+| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`) |
+| `--min-runtime` | | none | Minimum runtime before Beaker may preempt the job (e.g., `2h`) |
 | `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | `-r` | none | Number of retries on failure |
 | `--workspace` | `-w` | required | Beaker workspace |
@@ -1261,6 +1262,26 @@ budget: ai2/oe-other
 | `--aws-credentials` | | auto | Inject AWS credentials (auto-detected from s3:// paths) |
 | `--gcp-credentials` | | auto | Inject GCP credentials (auto-detected from gs:// model paths) |
 | `--store` | | `false` | Persist results to configured database |
+
+### Preemption
+
+By default, Beaker can preempt a job at any time and requeues it afterward. Use
+`--min-runtime` (or `min_runtime:` in a config file) to protect a job from preemption
+for its first stretch of runtime:
+
+```bash
+uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
+```
+
+- Beaker keeps auto-resume on, so a job preempted after its min runtime is requeued.
+- Each cluster sets the allowed range (by default 5m to 8h). Beaker rejects values
+  outside it when the experiment is created.
+- Clusters that require an allocation for protected work reject a min runtime unless
+  your workspace has an allocation there.
+- `--min-runtime` cannot be combined with `--preemptible/--no-preemptible`. When the
+  CLI sets either flag, it replaces the config file's `preemptible` and `min_runtime`.
+- `--no-preemptible` still works. Beaker treats it as an 8h min runtime with auto-resume
+  turned off, so a preempted job is not requeued.
 
 ### Per-Task Overrides
 
@@ -1448,6 +1469,7 @@ description: "Full evaluation suite for Llama 70B"
 | `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
 | `preemptible` | bool | no | Allow preemption (default: `true`) |
+| `min_runtime` | string | no | Minimum runtime before preemption (e.g., `2h`); replaces `preemptible` |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
 | `workspace` | string | yes | Beaker workspace |

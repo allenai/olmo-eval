@@ -15,6 +15,7 @@ from olmo_eval.launch.beaker import (
     parse_install_spec,
     parse_task_with_priority,
     resolve_clusters,
+    validate_min_runtime,
     validate_priority_configuration,
 )
 
@@ -218,6 +219,75 @@ class TestBeakerJobConfig:
         )
         # env_secrets defaults to empty list; secrets are injected during launch
         assert len(config.env_secrets) == 0
+
+
+class TestValidateMinRuntime:
+    """Tests for min runtime validation."""
+
+    @pytest.mark.parametrize("value", ["2h", "30m", "90s", "1h30m", "0s", " 4h "])
+    def test_valid_durations(self, value):
+        assert validate_min_runtime(value) == value.strip()
+
+    @pytest.mark.parametrize("value", ["", "2", "1d", "-1h", "2 hours", "30m1h"])
+    def test_invalid_durations(self, value):
+        with pytest.raises(ValueError, match="invalid min runtime"):
+            validate_min_runtime(value)
+
+
+class TestBeakerJobConfigMinRuntime:
+    """Tests for min runtime handling in BeakerJobConfig."""
+
+    def _config(self, **kwargs):
+        return BeakerJobConfig(
+            name="test",
+            command=["echo"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-other",
+            **kwargs,
+        )
+
+    def test_min_runtime_replaces_preemptible(self):
+        config = self._config(min_runtime="2h")
+        assert config.min_runtime == "2h"
+        assert config.preemptible is None
+
+    def test_preemptible_false_with_min_runtime_rejected(self):
+        with pytest.raises(ValueError, match="cannot be combined with min_runtime"):
+            self._config(preemptible=False, min_runtime="2h")
+
+    def test_invalid_min_runtime_rejected(self):
+        with pytest.raises(ValueError, match="invalid min runtime"):
+            self._config(min_runtime="2")
+
+    def test_preemptible_none_without_min_runtime_defaults_true(self):
+        assert self._config(preemptible=None).preemptible is True
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected_preemptible", "expected_min_runtime"),
+        [
+            ({}, True, None),
+            ({"preemptible": False}, False, None),
+            ({"min_runtime": "2h"}, None, "2h"),
+        ],
+    )
+    def test_launch_passes_preemption_to_gantry(
+        self, kwargs, expected_preemptible, expected_min_runtime
+    ):
+        from unittest.mock import MagicMock, patch
+
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher(workspace="ai2/oe-data")
+        launcher._beaker = MagicMock(user_name="test-user")
+        config = self._config(weka_buckets=[], **kwargs)
+
+        with patch("gantry.api.launch_experiment") as mock_launch:
+            launcher.launch(config)
+
+        call_kwargs = mock_launch.call_args.kwargs
+        assert call_kwargs["preemptible"] is expected_preemptible
+        assert call_kwargs["min_runtime"] == expected_min_runtime
 
 
 class TestBeakerLauncherImport:
@@ -1205,3 +1275,69 @@ class TestLaunchConfigLoaderExperimentNames:
         config = loader.load()
 
         assert config.name == "mimo-7b-base-olmobase_code-and-2-more"
+
+
+class TestLaunchConfigLoaderPreemption:
+    """Tests for resolving preemptible and min_runtime across the CLI and config file."""
+
+    def _load(self, cli_args=None, yaml_body=None, tmp_path=None):
+        base_cli_args = {
+            "model": ("XiaomiMiMo/MiMo-7B-Base",),
+            "task": ("mmlu",),
+            "cluster": "h100",
+            "workspace": "ai2/test-workspace",
+            "budget": "ai2/test-budget",
+            "gpus": 1,
+        }
+        config_path = None
+        if yaml_body is not None:
+            assert tmp_path is not None
+            path = tmp_path / "config.yaml"
+            path.write_text("name: test\nmodels: [m]\ntasks: [mmlu]\n" + yaml_body)
+            config_path = str(path)
+        loader = LaunchConfigLoader(
+            config_path=config_path, cli_args={**base_cli_args, **(cli_args or {})}
+        )
+        return loader.load()
+
+    def test_default_is_preemptible(self):
+        config = self._load()
+        assert config.preemptible is True
+        assert config.min_runtime is None
+
+    def test_cli_min_runtime(self):
+        config = self._load({"min_runtime": "2h"})
+        assert config.preemptible is None
+        assert config.min_runtime == "2h"
+
+    @pytest.mark.parametrize("preemptible", [True, False])
+    def test_cli_min_runtime_with_preemptible_rejected(self, preemptible):
+        with pytest.raises(SystemExit):
+            self._load({"min_runtime": "2h", "preemptible": preemptible})
+
+    def test_cli_invalid_min_runtime_rejected(self):
+        with pytest.raises(SystemExit):
+            self._load({"min_runtime": "two hours"})
+
+    def test_config_file_min_runtime(self, tmp_path):
+        config = self._load(yaml_body="min_runtime: 4h\n", tmp_path=tmp_path)
+        assert config.preemptible is None
+        assert config.min_runtime == "4h"
+
+    def test_config_file_min_runtime_with_preemptible_false_rejected(self, tmp_path):
+        with pytest.raises(SystemExit):
+            self._load(yaml_body="preemptible: false\nmin_runtime: 4h\n", tmp_path=tmp_path)
+
+    def test_cli_min_runtime_replaces_config_file_preemptible(self, tmp_path):
+        config = self._load(
+            {"min_runtime": "2h"}, yaml_body="preemptible: false\n", tmp_path=tmp_path
+        )
+        assert config.preemptible is None
+        assert config.min_runtime == "2h"
+
+    def test_cli_preemptible_replaces_config_file_min_runtime(self, tmp_path):
+        config = self._load(
+            {"preemptible": False}, yaml_body="min_runtime: 4h\n", tmp_path=tmp_path
+        )
+        assert config.preemptible is False
+        assert config.min_runtime is None
