@@ -29,14 +29,22 @@ def _extract_last_number(text: str) -> str | None:
     return numbers[-1] if numbers else None
 
 
+def _strip_trailing_zeros(number: str) -> str:
+    """Drop trailing decimal zeros so ``57.00`` matches a gold answer of ``57``."""
+    if "." not in number:
+        return number
+    return number.rstrip("0").rstrip(".") or "0"
+
+
 def _extract_boxed_or_last_number(text: str) -> str | None:
     """Return the number in the last ``\\boxed{}``, else the last number in the text."""
     boxed = last_boxed_only_string(text)
+    number = None
     if boxed is not None and "{" in boxed:
         number = _extract_last_number(boxed[boxed.index("{") + 1 : -1])
-        if number is not None:
-            return number
-    return _extract_last_number(text)
+    if number is None:
+        number = _extract_last_number(text)
+    return None if number is None else _strip_trailing_zeros(number)
 
 
 def _clean_short_answer(text: str) -> str:

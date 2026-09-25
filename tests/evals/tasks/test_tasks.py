@@ -105,6 +105,11 @@ def test_gsm8k_platinum_process_doc_parses_revised_answer() -> None:
         ("So the total is \\boxed{18}.", "18"),
         ("Step 1 gives 5. Final: \\boxed{\\$1,207} dollars and 3 cents", "1207"),
         ("First \\boxed{3}, corrected to \\boxed{4}.", "4"),
+        # Trailing decimal zeros are dropped so money answers match integer golds
+        ("She pays \\boxed{57.00} dollars.", "57"),
+        ("\\boxed{2.50}", "2.5"),
+        ("\\boxed{0.00}", "0"),
+        ("The total is 12.0", "12"),
         # Falls back to the last number without a boxed answer
         ("The answer is 42.", "42"),
         # Falls back when the boxed answer holds no number
