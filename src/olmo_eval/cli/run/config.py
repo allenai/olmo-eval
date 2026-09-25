@@ -8,6 +8,7 @@ from typing import Any
 
 from rich.console import Console
 
+from olmo_eval.common.types import ProviderKind
 from olmo_eval.evals.suites import get_suite, suite_exists
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 
@@ -172,6 +173,35 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
             )
 
     return base_dict
+
+
+def provider_kind_override(overrides: list[str]) -> str | None:
+    """Return the provider kind set by a CLI override such as ``provider.kind=vllm_server``."""
+    provider_overrides = [o for o in overrides if o.split("=", 1)[0].split(".")[0] == "provider"]
+    if not provider_overrides:
+        return None
+    provider = _apply_dotlist_overrides({"provider": {}}, provider_overrides)["provider"]
+    kind = provider.get("kind") if isinstance(provider, dict) else None
+    return str(kind) if kind else None
+
+
+def merge_model_provider(
+    harness_config: HarnessConfig,
+    provider_config: ProviderConfig,
+    overrides: list[str] | None = None,
+) -> HarnessConfig:
+    """Merge a model's provider into a harness config, honoring a CLI provider.kind override.
+
+    A harness preset's own provider kind yields to the model preset's kind, but an
+    explicit ``provider.kind`` override always wins. Scaffolds talk to the model through
+    an OpenAI client, so a model preset's in-process vllm kind runs as vllm_server under
+    a scaffold.
+    """
+    merged = harness_config.merge_provider(provider_config)
+    kind = provider_kind_override(overrides or [])
+    if kind is None and merged.scaffold and merged.provider.kind == ProviderKind.VLLM:
+        kind = ProviderKind.VLLM_SERVER
+    return merged.with_provider_overrides(kind=kind) if kind else merged
 
 
 @dataclass
@@ -456,7 +486,9 @@ class RunConfigBuilder:
         from olmo_eval.common.configs import get_provider_config
 
         provider_config = get_provider_config(model_name)
-        harness_config = harness_config.merge_provider(provider_config)
+        harness_config = merge_model_provider(
+            harness_config, provider_config, self.cli_harness_overrides
+        )
         if self.force_download_model:
             harness_config = harness_config.with_provider_overrides(force_download=True)
 

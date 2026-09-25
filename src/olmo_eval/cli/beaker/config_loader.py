@@ -309,7 +309,11 @@ class LaunchConfigLoader:
             provider_config = None
 
         if harness_config and provider_config:
-            harness_config = harness_config.merge_provider(provider_config)
+            from olmo_eval.cli.run.config import merge_model_provider
+
+            harness_config = merge_model_provider(
+                harness_config, provider_config, harness_overrides
+            )
 
         # Calculate main provider GPU requirements
         main_instances = 1
