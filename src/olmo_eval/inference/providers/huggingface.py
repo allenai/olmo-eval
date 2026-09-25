@@ -657,10 +657,12 @@ class HuggingFaceProvider(InferenceProvider):
             prompt_len = len(self.tokenizer.encode(request.prompt)) if request.prompt else 0
             trace["provider"] = "HuggingFaceProvider"
             trace["endpoint"] = "transformers.generate"
-            trace["generation_kwargs"] = {
-                "max_gen_toks": params.max_tokens,
-                **self._build_generate_kwargs(params, prompt_len),
-            }
+            generation_kwargs = self._build_generate_kwargs(params, prompt_len)
+            # The trace travels between processes and into the saved requests, so it records
+            # the penalty setting rather than the logits-processor object that applies it.
+            if generation_kwargs.pop("logits_processor", None) is not None:
+                generation_kwargs["presence_penalty"] = params.presence_penalty
+            trace["generation_kwargs"] = {"max_gen_toks": params.max_tokens, **generation_kwargs}
             trace["stop_sequences"] = list(params.stop_sequences or ())
         return trace
 
