@@ -301,6 +301,7 @@ allowed-unresolved-imports = [
     "crawl4ai.**",
     "modal.**",
     "swerex.**",
+    "np_hard_reasoning.**",
 ]
 
 [tool.gantry]
