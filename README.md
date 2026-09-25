@@ -880,9 +880,9 @@ uv run olmo-eval run -m mock -t mmlu --dry-run
 External evals are standalone evaluations that run outside the normal task pipeline.
 Use them when a benchmark already comes with its own harness, verifier, or environment
 and does not fit cleanly into the usual task formatter/scorer flow. They are a good fit
-for agent-style benchmarks like `terminal_bench_2`, `tau2_bench`, and `asta_bench`
-that need sandbox orchestration, benchmark-specific setup, or end-to-end execution
-against an external repo or runner.
+for agent-style benchmarks like `terminal_bench_2`, `tau2_bench`, `asta_bench`,
+and `openagentsafety` that need sandbox orchestration, benchmark-specific setup,
+or end-to-end execution against an external repo or runner.
 
 ### Defining an External Eval
 
@@ -937,6 +937,80 @@ uv run olmo-eval external-evals
 
 # Run a built-in external eval
 uv run olmo-eval run-external -e tau2_bench --model llama3.1-8b -a domain=airline -a num_tasks=1
+
+# OpenAgentSafety smoke run (requires Docker/Podman + TheAgentCompany + NPC_* env)
+uv run olmo-eval run-external -e openagentsafety --model llama3.1-8b \
+    -a dataset=mgulavani/openagentsafety_full_updated_v3 -a n_limit=1 -a critic=pass
+```
+
+### OpenAgentSafety
+
+OpenAgentSafety evaluates agent safety in workplace scenarios with NPC
+interactions. It does not fit the regular task pipeline: each instance needs a
+workspace container, TheAgentCompany services (GitLab, ownCloud, RocketChat, Plane),
+and an NPC LLM. olmo-eval therefore wraps the upstream OpenHands infer CLI as
+an external eval named `openagentsafety`.
+
+The agent loop stays in [OpenHands/benchmarks](https://github.com/OpenHands/benchmarks/tree/main/benchmarks/openagentsafety)
+(`openagentsafety-infer` / OpenHands `DockerWorkspace`). olmo-eval points that
+runner at the configured inference provider, then parses `output.jsonl` using
+the same resolve rule as upstream `eval_infer.py` (an instance is resolved only
+when `final_score.result > 0` and `final_score.result == final_score.total`).
+swe-rex is not the OAS control plane.
+
+Beaker sandbox jobs run OAS in the outer container. Podman provides the inner
+workspaces via the `docker` symlink. TheAgentCompany stays on the job's host
+network so GitLab, ownCloud, RocketChat, and Plane can bind the job's ports.
+Each OAS workspace uses a pasta network (`--map-guest-addr` at
+`OLMO_PASTA_HOST_IP`, default `169.254.1.2`) so published ports still work and
+the workspace can reach those services. Loopback model and NPC URLs are
+rewritten to that pasta address under Podman, or to docker0 (`172.17.0.1`)
+under Docker. Each workspace loads a hook that runs a `chat_npc` tool call as
+the in-container `chat_npc` command, and accepts ownCloud helper arguments with
+the filename and directory in either order.
+
+**Setup**
+
+1. A `docker` CLI must be on PATH (Docker Engine, or Podman with a `docker`
+   symlink). TheAgentCompany must be reachable on ports 3000, 8091, 8092, and
+   8929. On a host where those ports are already open, the eval leaves the
+   stack alone. A Beaker launch on a Weka cluster sets `OAS_START_TAC=1` and,
+   when the ports are closed, runs the upstream setup script. Images are stored
+   at `/weka/oe-eval-default/olmo-eval/openagentsafety-tac` under a lock; later
+   jobs reuse that directory as a read-only additional image store. Clusters
+   without Weka are rejected at launch. To start the stack yourself:
+   ```bash
+   curl -fsSL https://github.com/TheAgentCompany/the-agent-company-backup-data/releases/download/setup-script-20241208/setup.sh | sh
+   ```
+2. Export NPC credentials used inside the workspace:
+   ```bash
+   export NPC_API_KEY="sk-..."
+   export NPC_BASE_URL="https://api.openai.com/v1"   # optional; falls back to the agent LLM
+   export NPC_MODEL="gpt-4o-mini"                   # optional; litellm_proxy/ prefix is stripped
+   ```
+3. Default `--runtime podman` matches Beaker. Pass `--runtime docker` for a
+   local Docker daemon.
+
+**Run**
+
+```bash
+uv run olmo-eval run-external -e openagentsafety --model <model> \
+    -a dataset=mgulavani/openagentsafety_full_updated_v3 \
+    -a split=train \
+    -a n_limit=1 \
+    -a critic=pass
+```
+
+Useful arguments: `select` (instance-ID file or comma-separated IDs),
+`prompt_path` (Jinja2 template copied over the upstream default for the run),
+`num_workers`, `max_iterations`, `repo_path` / `repo_ref` (pin or reuse an
+OpenHands/benchmarks checkout).
+
+Preview configuration without executing:
+
+```bash
+uv run olmo-eval run-external -e openagentsafety --model <model> -a n_limit=1 --dry-run
+uv run olmo-eval external-evals -f openagentsafety
 ```
 
 ### ExternalEvalResult
