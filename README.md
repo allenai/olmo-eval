@@ -704,6 +704,7 @@ Four families of image tasks are built in:
 | Image-QA | `molmo2_imageqa` | `chart_qa`, `vqa2`, `doc_qa`, `info_qa`, `text_vqa`, `real_world_qa`, `mmmu`, `mmmu_pro`, `math_vista`, `countbench_qa`, `pixmo_count`, `ai2d`, `charxiv_descriptive`, `charxiv_reasoning` |
 | Dense caption | `molmo2_imageqa_caption` | the image-QA tasks plus `dense_caption` |
 | Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
+| Pointing (model prompts) | `molmo2_pointing_mp` | `pixmo_points_eval_mp`, `sa_co_gold_subset_mp`, `sa_co_gold_point_4k_mp` |
 | Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
 
 Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
@@ -779,8 +780,8 @@ uv run olmo-eval suite inspect molmo2_imageqa
 ```
 
 The `molmo2-4b` preset runs `allenai/Molmo2-4B` with `dtype=float32`,
-`autocast_dtype=bfloat16` and `max_crops=24`, matching the reference evaluation
-numerics.
+`autocast_dtype=bfloat16` and `max_crops=24` (8 per image in multi-image prompts),
+matching the reference evaluation numerics.
 
 ### Providers
 
@@ -809,16 +810,16 @@ uv run olmo-eval run \
 `-o` must follow `--harness` or `-t`, so the provider override needs an explicit
 `--harness default` ahead of it.
 
-Images are cropped to the checkpoint's training `max_crops`, and prompts are
-capped at its training sequence length, unless `-o provider.max_crops=N` and
-`-o provider.max_model_len=N` override them. mm_olmo's `eval_molmo2.py` evaluates
-the released Molmo2 models at 24 crops per single image, 8 per image in
-multi-image prompts, and a 64,000-token sequence. To compare against their
-published numbers, run single-image suites with `-o provider.max_crops=24
--o provider.max_model_len=64000` (document QA is the most crop-sensitive) and
-multi-image suites with `-o provider.max_model_len=64000` alone: this provider
-applies one `max_crops` to every image. A prompt longer than `max_model_len`
-fails its instance rather than being truncated.
+A single image is cropped to the checkpoint's training `max_crops`
+(`-o provider.max_crops=N`), and each image of a multi-image prompt to its
+`max_multi_image_crops` (8 when the checkpoint names none;
+`-o provider.max_multi_image_crops=N`), as mm_olmo does. The context window is
+64,000 tokens, the length mm_olmo's `eval_molmo2.py` evaluates at, or the
+checkpoint's training window if that is longer (`-o provider.max_model_len=N`); a
+prompt longer than the window fails its instance rather than being truncated.
+mm_olmo evaluates the released Molmo2 models at 24 crops per single image, so pass
+`-o provider.max_crops=24` to compare against their published numbers; document QA
+is the most crop-sensitive.
 
 No released `ai2-olmo-core` ships the multimodal classes (`olmo_core.nn.vision`,
 `MultimodalLM`) yet, so the `olmo_core_vlm` extra pins OLMo-core's vision branch

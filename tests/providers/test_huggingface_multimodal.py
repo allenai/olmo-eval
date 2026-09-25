@@ -67,6 +67,32 @@ def _build_provider(processor, model):
     return provider, fake_transformers
 
 
+def test_multimodal_multi_image_request_uses_multi_image_crops():
+    processor = MagicMock()
+    processor.tokenizer = MagicMock()
+    processor.tokenizer.decode = MagicMock(return_value="A")
+    processor.apply_chat_template = MagicMock(return_value="<formatted-chat>")
+    processor.return_value = {"input_ids": np.array([[1, 2, 3]])}
+    model = MagicMock()
+    model.named_modules.return_value = []
+    model.generate.return_value = np.array([[1, 2, 3, 7]])
+
+    provider, _ = _build_provider(processor, model)
+    images = (SimpleNamespace(mode="RGB"), SimpleNamespace(mode="RGB"))
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "Which image?"},),
+        images=images,
+    )
+    with patch.dict("sys.modules", {"torch": _fake_torch()}):
+        provider.generate([request], SamplingParams(temperature=0.0, max_tokens=4))
+
+    # mm_olmo crops each image of a multi-image prompt to max_multi_image_crops (8),
+    # not the single-image budget the preset raises to 24.
+    _, proc_kwargs = processor.call_args
+    assert proc_kwargs["max_crops"] == 8
+
+
 def test_multimodal_init_uses_processor_and_image_text_model():
     processor = MagicMock()
     processor.tokenizer = MagicMock()

@@ -110,6 +110,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
         dtype: str = "float32",
         autocast_dtype: str | None = "bfloat16",
         max_crops: int | None = None,
+        max_multi_image_crops: int | None = None,
         max_model_len: int | None = None,
         device: str | None = None,
         bidirectional_image_attention: bool = True,
@@ -188,6 +189,9 @@ class OlmoCoreVLMProvider(InferenceProvider):
         self.bidirectional_image_attention = bidirectional_image_attention
         self.batch_size = batch_size
         self.max_crops = preprocessing.resolve_max_crops(self.checkpoint_info, max_crops)
+        self.max_multi_image_crops = preprocessing.resolve_max_multi_image_crops(
+            self.checkpoint_info, max_multi_image_crops
+        )
         self.max_length = preprocessing.resolve_max_length(self.checkpoint_info, max_model_len)
 
         logger.info("Building MultimodalLM and loading weights from %s", model_name)
@@ -297,6 +301,8 @@ class OlmoCoreVLMProvider(InferenceProvider):
         pooling_tensors: list[torch.Tensor] = []
         token_sequences: list[list[int]] = []
         crop_offset = 0
+        # mm_olmo crops every image of a multi-image prompt to a smaller budget.
+        max_crops = self.max_crops if len(images) <= 1 else self.max_multi_image_crops
         for image in images:
             if hasattr(image, "mode") and image.mode != "RGB":
                 image = image.convert("RGB")
@@ -306,7 +312,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
                 self.device,
                 image_size=image_size,
                 patch_size=patch_size,
-                max_crops=self.max_crops,
+                max_crops=max_crops,
             )
             n_patches_per_crop = crops.shape[2]
             offset_pooling = pooling.clone()

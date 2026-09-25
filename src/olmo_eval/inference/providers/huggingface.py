@@ -217,6 +217,7 @@ class HuggingFaceProvider(InferenceProvider):
     device: torch.device
     is_multimodal: bool
     max_crops: int
+    max_multi_image_crops: int
     autocast_dtype: str | None
 
     # kwargs that may be passed by the runner but are not valid for HF from_pretrained
@@ -252,6 +253,7 @@ class HuggingFaceProvider(InferenceProvider):
         *,
         multimodal: bool = False,
         max_crops: int = 24,
+        max_multi_image_crops: int = 8,
         autocast_dtype: str | None = None,
         **model_kwargs,
     ) -> None:
@@ -263,6 +265,8 @@ class HuggingFaceProvider(InferenceProvider):
             multimodal: Load an image-text-to-text model (AutoProcessor +
                 AutoModelForImageTextToText) instead of a text-only causal LM.
             max_crops: Maximum image crops passed to the multimodal processor.
+            max_multi_image_crops: Maximum crops per image when a request carries more
+                than one image (mm_olmo's ``max_multi_image_crops``, 8 for Molmo2).
             autocast_dtype: If set (e.g. ``"bfloat16"``), run multimodal generation under
                 ``torch.autocast`` with this dtype. Pair with fp32 weights (``dtype="float32"``)
                 to match mm_olmo's ``amp_bf16`` eval numerics (fp32 master weights + bf16
@@ -277,6 +281,7 @@ class HuggingFaceProvider(InferenceProvider):
         self.is_multimodal = bool(multimodal)
         self.supports_images = self.is_multimodal
         self.max_crops = int(max_crops)
+        self.max_multi_image_crops = int(max_multi_image_crops)
         self.autocast_dtype = autocast_dtype
         self.processor = None
         self.device = _get_device()
@@ -455,8 +460,9 @@ class HuggingFaceProvider(InferenceProvider):
                 chat, tokenize=False, add_generation_prompt=True
             )
             if pil_images:
+                max_crops = self.max_crops if len(pil_images) == 1 else self.max_multi_image_crops
                 inputs = self.processor(
-                    images=pil_images, text=text, max_crops=self.max_crops, return_tensors="pt"
+                    images=pil_images, text=text, max_crops=max_crops, return_tensors="pt"
                 )
             else:
                 inputs = self.processor(text=text, return_tensors="pt")
