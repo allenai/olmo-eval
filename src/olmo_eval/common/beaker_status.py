@@ -5,7 +5,8 @@ environment. This module wraps that detail and provides a small reporter
 that pushes throttled status messages to the workload description so they
 appear in the Beaker UI while the job is running.
 
-Outside of a Beaker job (env var unset) the reporter is a no-op.
+Outside of a Beaker job (env var unset), or when the optional ``beaker``
+extra is not installed, the reporter is a no-op.
 """
 
 from __future__ import annotations
@@ -16,8 +17,13 @@ import time
 from collections.abc import Callable
 from threading import Lock, Thread
 
-from beaker import Beaker, BeakerExperiment, BeakerWorkload
-from beaker.exceptions import BeakerConfigurationError
+try:
+    from beaker import Beaker, BeakerExperiment, BeakerWorkload
+    from beaker.exceptions import BeakerConfigurationError
+except ImportError:
+    _BEAKER_AVAILABLE = False
+else:
+    _BEAKER_AVAILABLE = True
 
 DEFAULT_MIN_INTERVAL = 10.0
 
@@ -39,6 +45,9 @@ class BeakerStatusReporter:
         self.min_interval = min_interval
         self._git_suffix = _git_suffix()
         workload_id = os.environ.get("BEAKER_WORKLOAD_ID")
+        if workload_id and not _BEAKER_AVAILABLE:
+            logger.warning("Beaker status reporting disabled: beaker-py is not installed")
+            workload_id = None
         self._workload = (
             BeakerWorkload(experiment=BeakerExperiment(id=workload_id)) if workload_id else None
         )

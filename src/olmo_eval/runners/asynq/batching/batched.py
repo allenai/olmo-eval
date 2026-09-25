@@ -39,49 +39,39 @@ class BatchedStrategy(BatchingStrategy):
         """Execute batched processing."""
         import math
 
-        from olmo_eval.common.beaker_status import BeakerStatusReporter
         from olmo_eval.runners.asynq.processing import process_items
 
         worker_instances = math.ceil(total_instances / num_workers)
         total_batches = math.ceil(worker_instances / self.config.chunk_size)
         current_batch = 0
-        processed = 0
-        report_progress = BeakerStatusReporter().progress_callback("Processed")
 
-        try:
-            while True:
-                # Collect batch
-                batch, saw_shutdown = await self.collect_batch(item_queue)
+        while True:
+            # Collect batch
+            batch, saw_shutdown = await self.collect_batch(item_queue)
 
-                if not batch and saw_shutdown:
-                    # Empty batch with shutdown signal - we're done
-                    return
+            if not batch and saw_shutdown:
+                # Empty batch with shutdown signal - we're done
+                return
 
-                if batch:
-                    current_batch += 1
-                    batch_hash = _compute_batch_hash(batch)
-                    batch_size = len(batch)
+            if batch:
+                current_batch += 1
+                batch_hash = _compute_batch_hash(batch)
+                batch_size = len(batch)
 
-                    worker_logger.info(
-                        f"Starting batch {current_batch}/{total_batches} ({batch_hash}) "
-                        f"with {batch_size} item(s)"
-                    )
-                    start_time = time.perf_counter()
-                    await process_items(
-                        batch, harness, result_queue, max_concurrency, worker_logger
-                    )
+                worker_logger.info(
+                    f"Starting batch {current_batch}/{total_batches} ({batch_hash}) "
+                    f"with {batch_size} item(s)"
+                )
+                start_time = time.perf_counter()
+                await process_items(batch, harness, result_queue, max_concurrency, worker_logger)
 
-                    elapsed = time.perf_counter() - start_time
-                    rate = batch_size / elapsed if elapsed > 0 else 0
-                    worker_logger.info(
-                        f"Processed batch {current_batch}/{total_batches} ({batch_hash}) "
-                        f"in {elapsed:.1f}s ({rate:.1f} items/sec)"
-                    )
-                    processed += batch_size
-                    report_progress(processed, worker_instances)
+                elapsed = time.perf_counter() - start_time
+                rate = batch_size / elapsed if elapsed > 0 else 0
+                worker_logger.info(
+                    f"Processed batch {current_batch}/{total_batches} ({batch_hash}) "
+                    f"in {elapsed:.1f}s ({rate:.1f} items/sec)"
+                )
 
-                if saw_shutdown:
-                    # Processed final batch
-                    return
-        finally:
-            report_progress(processed, worker_instances, force=True)
+            if saw_shutdown:
+                # Processed final batch
+                return
