@@ -1242,7 +1242,8 @@ budget: ai2/oe-other
 | `--gpus` | `-G` | auto | Number of GPUs (defaults to 1 for GPU providers, 0 otherwise) |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
 | `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
-| `--preemptible` | | `true` | Allow preemption |
+| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`) |
+| `--min-runtime` | | none | Minimum runtime before Beaker may preempt the job (e.g., `2h`) |
 | `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | `-r` | none | Number of retries on failure |
 | `--workspace` | `-w` | required | Beaker workspace |
@@ -1261,6 +1262,30 @@ budget: ai2/oe-other
 | `--aws-credentials` | | auto | Inject AWS credentials (auto-detected from s3:// paths) |
 | `--gcp-credentials` | | auto | Inject GCP credentials (auto-detected from gs:// model paths) |
 | `--store` | | `false` | Persist results to configured database |
+
+### Preemption
+
+By default, Beaker can preempt a job at any time and requeues it afterward. Use
+`--min-runtime` (or `min_runtime:` in a config file) to protect a job from preemption:
+
+```bash
+uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
+```
+
+- How long the protection lasts depends on the cluster's scheduling policy. Where the
+  policy makes jobs interruptible after their min runtime, the job is protected for that
+  long, then can be preempted and is requeued. On other clusters, any min runtime
+  protects the job for its whole run.
+- Beaker accepts 5m to 8h, and no more than the cluster's maximum task timeout.
+- Clusters that require an allocation for protected work reject a min runtime unless
+  your workspace has an allocation there.
+- `min_runtime` cannot be combined with `preemptible` in the CLI or in a config file.
+  When the CLI sets `--min-runtime` or `--preemptible/--no-preemptible`, it replaces
+  both config file fields.
+- External evals (`-E`) take `--min-runtime` from the CLI only; they do not read the
+  config file.
+- `--no-preemptible` still works. Beaker treats it as an 8h min runtime with auto-resume
+  turned off.
 
 ### Per-Task Overrides
 
@@ -1448,6 +1473,7 @@ description: "Full evaluation suite for Llama 70B"
 | `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
 | `preemptible` | bool | no | Allow preemption (default: `true`) |
+| `min_runtime` | string | no | Minimum runtime before preemption (e.g., `2h`); replaces `preemptible` |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
 | `workspace` | string | yes | Beaker workspace |
