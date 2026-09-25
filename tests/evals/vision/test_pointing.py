@@ -372,6 +372,7 @@ class TestPixmoImageSize:
             {"label": "dog", "segmentation_rles": [], "image": str(image), "example_id": "absent"},
         ]
         monkeypatch.setattr(datasets, "load_from_disk", lambda path: rows)
+        monkeypatch.setattr(pixmo, "torch_datasets_dir", lambda: tmp_path)
         monkeypatch.setattr(pixmo, "rebase_data_path", lambda path: path)
 
         sizes = {
