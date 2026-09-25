@@ -304,6 +304,8 @@ allowed-unresolved-imports = [
     "crawl4ai.**",
     "modal.**",
     "swerex.**",
+    "olmocr.**",
+    "pymupdf.**",
 ]
 
 [tool.gantry]
