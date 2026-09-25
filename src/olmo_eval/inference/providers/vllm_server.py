@@ -1026,7 +1026,6 @@ class VLLMServerProvider(InferenceProvider):
             process,
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
-            on_progress=self._beaker_reporter.progress_callback("vLLM gen", units="req/sec"),
         )
         return [r if r is not None else [] for r in results]
 
