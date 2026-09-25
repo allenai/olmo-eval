@@ -206,7 +206,7 @@ class OmniscienceScorer(LLMJudgeScorer):
         return JUDGE_FORMAT.format(
             question=instance.question,
             gold_answer=instance.gold_answer or "",
-            model_answer=output.extracted_answer or output.text,
+            model_answer=(output.extracted_answer or output.text).strip(),
         )
 
     def parse_judge_response(self, response: str, instance: Instance) -> float:
