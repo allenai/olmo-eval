@@ -62,7 +62,7 @@ def resolve_provider_kind(
     Returns:
         Provider kind string (e.g., "vllm", "vllm_server", "litellm") or None.
     """
-    from olmo_eval.cli.run.config import _provider_kind_override, merge_model_provider
+    from olmo_eval.cli.run.config import merge_model_provider, provider_kind_override
     from olmo_eval.common.configs import get_provider_config
     from olmo_eval.harness import HarnessConfig
 
@@ -70,7 +70,7 @@ def resolve_provider_kind(
         provider_config = get_provider_config(model_spec)
     except Exception:
         fallback = harness_config.provider.kind if harness_config else None
-        kind = _provider_kind_override(harness_overrides or []) or fallback
+        kind = provider_kind_override(harness_overrides or []) or fallback
         return str(kind) if kind else None
 
     base = harness_config or HarnessConfig(name="default")

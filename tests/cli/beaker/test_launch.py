@@ -544,6 +544,10 @@ class TestProviderKindConsistency:
         ("gpt-4o", "default", [], "litellm"),
         ("Qwen/Qwen3-4B", "default", [], "vllm_server"),
         ("Qwen/Qwen3-4B", "default", ["provider.kind=vllm"], "vllm"),
+        ("Qwen/Qwen3-4B", "default", ['provider={"kind":"vllm"}'], "vllm"),
+        # Scaffolds need an OpenAI client, so in-process vllm runs as a server
+        ("llama3.1-8b-instruct", "simple_agent", [], "vllm_server"),
+        ("gpt-4o", "simple_agent", [], "litellm"),
     ]
 
     @staticmethod
@@ -619,3 +623,26 @@ class TestProviderKindConsistency:
 
         assert job_config.vllm_isolated_venv is (expected == "vllm_server")
         assert ("vllm" in job_config.extras) is (expected in ("vllm", "vllm_server"))
+        assert ("litellm" in job_config.extras) is (expected == "litellm")
+
+
+class TestProviderKindOverride:
+    """Tests for extracting an explicit provider.kind from CLI overrides."""
+
+    @pytest.mark.parametrize(
+        ("overrides", "expected"),
+        [
+            ([], None),
+            (["provider.max_model_len=4096"], None),
+            (["provider.kind=vllm_server"], "vllm_server"),
+            (['provider={"kind":"litellm"}'], "litellm"),
+            (["provider.kind=vllm", "provider.kind=vllm_server"], "vllm_server"),
+            (["provider.kwargs.kind=vllm"], None),
+            (["providers.kind=vllm"], None),
+            (["batching.chunk_size=2"], None),
+        ],
+    )
+    def test_provider_kind_override(self, overrides, expected):
+        from olmo_eval.cli.run.config import provider_kind_override
+
+        assert provider_kind_override(overrides) == expected
