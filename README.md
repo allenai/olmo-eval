@@ -674,7 +674,7 @@ Five families of image tasks are built in:
 | Dense caption | `molmo2_imageqa_caption` | the image-QA tasks plus `dense_caption` |
 | Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
 | Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
-| Document OCR | `ocr` | `olmocr_bench`, `cc_ocr`, `omnidocbench` |
+| Document OCR | `ocr` | `olmocr_bench`, `cc_ocr_multi_scene`, `omnidocbench` |
 
 Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
 `dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
@@ -694,10 +694,11 @@ it writes back, each with its benchmark's official scoring:
   cells, rendered math). Tests run through the official `olmocr` scorer; `overall` is
   the mean of the eight category pass rates (0-1). Math tests render with KaTeX in a
   headless Chromium, which is installed on first use.
-- `cc_ocr` — [CC-OCR](https://huggingface.co/datasets/wulipc/CC-OCR): 7,058 images
-  across four tracks (multi-scene OCR, multilingual OCR, document parsing, key
-  information extraction). `overall` is the mean of the four track scores (0-1);
-  `cc_ocr_<track>` runs a single track.
+- `cc_ocr_multi_scene` — the multi-scene OCR track of
+  [CC-OCR](https://huggingface.co/datasets/wulipc/CC-OCR): 2,750 scene-text, document and
+  web images in English and Chinese. The primary `macro_f1` is the official track score
+  (0-1): per-image F1 of the word (Chinese: character) multiset, averaged within and then
+  across the 13 sub-datasets.
 - `omnidocbench` — [OmniDocBench](https://github.com/opendatalab/OmniDocBench) v1.6:
   1,651 pages scored by the pinned official evaluator, which runs in a virtualenv of its
   own (needs `git` and `uv`). `overall` is the leaderboard's 0-100 number, which is why

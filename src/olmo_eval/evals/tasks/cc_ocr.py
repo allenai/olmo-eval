@@ -1,27 +1,19 @@
-"""CC-OCR — a four-track OCR benchmark for multimodal models (https://arxiv.org/abs/2412.02210).
+"""CC-OCR multi-scene OCR (https://arxiv.org/abs/2412.02210).
 
-7,058 images in 39 sub-datasets, grouped into four tracks:
+The multi-scene track of CC-OCR: 2,750 images of scene text, documents and web/UGC images in
+English and Chinese, across 13 sub-datasets. The model transcribes all the text in each image;
+the reference is compared as a multiset of words (characters for the Chinese sub-datasets), so
+reading order does not matter.
 
-* ``multi_scene_ocr`` (2,750) — scene, document and web/UGC text in English and Chinese;
-* ``multi_lan_ocr`` (1,500) — ten languages, 150 images each;
-* ``doc_parsing`` (800) — pages to LaTeX, tables to HTML, handwritten formulas to LaTeX and
-  molecules to SMILES;
-* ``kie`` (2,008) — key information extraction into a given JSON schema.
+Each row of the dataset carries its own prompt, sent verbatim in a single user turn with the
+image. Scoring is the official evaluator's (:mod:`olmo_eval.common.image_qa.cc_ocr` /
+:mod:`olmo_eval.common.scorers.cc_ocr`): the primary ``macro_f1`` is the unweighted mean over
+sub-datasets of each one's mean per-image F1, the track score the paper reports; ``micro_f1``
+and every sub-dataset's score are reported alongside. Metrics are 0-1 (the paper reports x100).
 
-Each row of the dataset carries its own prompt, sent verbatim in a single user turn with
-the image. Scoring is the official evaluator's
-(:mod:`olmo_eval.common.image_qa.cc_ocr` / :mod:`olmo_eval.common.scorers.cc_ocr`): a
-sub-dataset score, a track score that is the unweighted mean of its sub-datasets, and the
-primary ``overall``, the unweighted mean of the four tracks. All metrics are 0-1 (the paper
-reports x100).
-
-``cc_ocr`` runs everything; ``cc_ocr_multi_scene_ocr``, ``cc_ocr_multi_lan_ocr``,
-``cc_ocr_doc_parsing`` and ``cc_ocr_kie`` run one track each, with that track's score as the
-primary metric.
-
-The benchmark prescribes no decoding settings; this task decodes greedily with room for a
-full page of LaTeX. Data is fetched from the Hub at a pinned revision; set ``CC_OCR_DIR`` to
-a local copy of the dataset repository to read it from disk instead.
+The benchmark prescribes no decoding settings; this task decodes greedily. Data is fetched from
+the Hub at a pinned revision; set ``CC_OCR_DIR`` to a local copy of the dataset repository to
+read it from disk instead.
 """
 
 from __future__ import annotations
@@ -37,98 +29,39 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from olmo_eval.common.metrics.base import Metric
-from olmo_eval.common.scorers.cc_ocr import (
-    OCR_TRACKS,
-    TRACKS,
-    CcOcrDatasetMetric,
-    CcOcrJsonParseRateMetric,
-    CcOcrOverallMetric,
-    CcOcrScorer,
-    CcOcrTrackMetric,
-)
+from olmo_eval.common.scorers.cc_ocr import CcOcrDatasetMetric, CcOcrScorer, CcOcrTrackMetric
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.tasks.common.ocr_base import OcrTask
 
 HF_REPO = "wulipc/CC-OCR"
 HF_REVISION = "c64517e92179991d509776064174776700cdd5a2"
+TRACK = "multi_scene_ocr"
 
-#: Track -> its sub-datasets (the ``split`` column), in the official index order.
-SUBSETS: dict[str, tuple[str, ...]] = {
-    "multi_scene_ocr": (
-        "TotalText",
-        "IC15",
-        "InverseText",
-        "Hieragent",
-        "zh_scene",
-        "FUNSD",
-        "CORD",
-        "IAM",
-        "zh_doc",
-        "zh_handwriting",
-        "ugc_laion",
-        "zh_vertical",
-        "zh_dense",
-    ),
-    "multi_lan_ocr": (
-        "Arabic",
-        "French",
-        "German",
-        "Italian",
-        "Japanese",
-        "Korean",
-        "Portuguese",
-        "Russian",
-        "Spanish",
-        "Vietnamese",
-    ),
-    "doc_parsing": (
-        "doc_photo_chn",
-        "doc_photo_eng",
-        "doc_scan_chn",
-        "doc_scan_eng",
-        "table_photo_chn",
-        "table_photo_eng",
-        "table_scan_chn",
-        "table_scan_eng",
-        "molecular_handwriting",
-        "formula_handwriting",
-    ),
-    "kie": ("sroie2019_word", "CORD", "EPHOIE_SCUT", "POIE", "COLD_SIBR", "COLD_CELL"),
-}
+#: The track's sub-datasets (the ``split`` column), in the official index order.
+SUBSETS: tuple[str, ...] = (
+    "TotalText",
+    "IC15",
+    "InverseText",
+    "Hieragent",
+    "zh_scene",
+    "FUNSD",
+    "CORD",
+    "IAM",
+    "zh_doc",
+    "zh_handwriting",
+    "ugc_laion",
+    "zh_vertical",
+    "zh_dense",
+)
 
 _SCORER = CcOcrScorer()
-_OVERALL = CcOcrOverallMetric(name="overall", scorer=_SCORER)
-_TRACK_METRICS = {
-    track: CcOcrTrackMetric(name=track, scorer=_SCORER, track=track) for track in TRACKS
-}
-
-
-def _track_detail_metrics(track: str) -> tuple[Metric, ...]:
-    """A track's secondary statistic(s) and its per-sub-dataset scores."""
-    secondary: tuple[Metric, ...]
-    if track in OCR_TRACKS:
-        secondary = (
-            CcOcrTrackMetric(
-                name=f"{track}_micro_f1", scorer=_SCORER, track=track, kind="micro_f1"
-            ),
-        )
-    elif track == "kie":
-        secondary = (
-            CcOcrTrackMetric(name="kie_acc", scorer=_SCORER, track=track, kind="acc"),
-            CcOcrJsonParseRateMetric(name="kie_json_parse_rate", scorer=_SCORER),
-        )
-    else:
-        secondary = ()
-    return (
-        *secondary,
-        *(
-            CcOcrDatasetMetric(
-                name=f"{track}/{dataset}", scorer=_SCORER, track=track, dataset=dataset
-            )
-            for dataset in SUBSETS[track]
-        ),
-    )
+_MACRO_F1 = CcOcrTrackMetric(name="macro_f1", scorer=_SCORER, kind="macro_f1")
+_METRICS: tuple[Metric, ...] = (
+    _MACRO_F1,
+    CcOcrTrackMetric(name="micro_f1", scorer=_SCORER, kind="micro_f1"),
+    *(CcOcrDatasetMetric(name=dataset, scorer=_SCORER, dataset=dataset) for dataset in SUBSETS),
+)
 
 
 @functools.lru_cache(maxsize=64)
@@ -158,39 +91,27 @@ def _data_dir() -> Path:
             repo_id=HF_REPO,
             repo_type="dataset",
             revision=HF_REVISION,
-            allow_patterns=[f"{track}/**/*.tsv" for track in TRACKS],
+            allow_patterns=[f"{TRACK}/**/*.tsv"],
         )
     )
 
 
-@register("cc_ocr")
-class CcOcrTask(OcrTask):
-    dependencies = ["pillow", "huggingface-hub", "rapidfuzz", "apted", "lxml", "zss"]
+@register("cc_ocr_multi_scene")
+class CcOcrMultiSceneTask(OcrTask):
+    dependencies = ["pillow", "huggingface-hub"]
     sampling_params = SamplingParams(temperature=0.0, max_tokens=4096)
-    metrics = (
-        _OVERALL,
-        *_TRACK_METRICS.values(),
-        *(metric for track in TRACKS for metric in _track_detail_metrics(track)),
-    )
-    primary_metric = _OVERALL
+    metrics = _METRICS
+    primary_metric = _MACRO_F1
     split = Split.TEST
-    #: Tracks this task runs.
-    tracks: tuple[str, ...] = TRACKS
 
     def _build_instances(self) -> Iterator[Instance]:
-        data_dir = _data_dir()
-        per_dataset: list[list[Instance]] = []
-        for track in self.tracks:
-            seen: set[str] = set()
-            for tsv in sorted((data_dir / track).rglob("*.tsv")):
-                instances = list(self._tsv_instances(str(tsv), track))
-                seen.update(i.metadata["dataset"] for i in instances)
-                per_dataset.append(instances)
-            if seen != set(SUBSETS[track]):
-                raise RuntimeError(
-                    f"CC-OCR track {track!r} has sub-datasets {sorted(seen)}, "
-                    f"expected {sorted(SUBSETS[track])}"
-                )
+        tsv_paths = sorted((_data_dir() / TRACK).rglob("*.tsv"))
+        per_dataset = [list(self._tsv_instances(str(path))) for path in tsv_paths]
+        found = {instances[0].metadata["dataset"] for instances in per_dataset if instances}
+        if found != set(SUBSETS):
+            raise RuntimeError(
+                f"CC-OCR {TRACK} has sub-datasets {sorted(found)}, expected {sorted(SUBSETS)}"
+            )
 
         # Round-robin across sub-datasets so a small ``limit`` samples every one of them.
         for group in itertools.zip_longest(*per_dataset):
@@ -198,40 +119,21 @@ class CcOcrTask(OcrTask):
                 if instance is not None:
                     yield instance
 
-    def _tsv_instances(self, tsv_path: str, track: str) -> Iterator[Instance]:
+    def _tsv_instances(self, tsv_path: str) -> Iterator[Instance]:
         for row_index, row in enumerate(_load_tsv(tsv_path)):
-            if row["category"] != track:
-                raise RuntimeError(f"{tsv_path}: row of track {row['category']!r} under {track!r}")
+            if row["category"] != TRACK:
+                raise RuntimeError(f"{tsv_path}: row of track {row['category']!r} under {TRACK!r}")
+            # Image names repeat across sub-datasets; only the pair is unique.
+            key = f"{row['split']}/{row['image_name']}"
             yield Instance(
                 question=self._question(row["question"]),
                 gold_answer=row["answer"],
                 metadata={
-                    # Image names repeat across sub-datasets; only the triple is unique.
-                    "id": f"{track}/{row['split']}/{row['image_name']}",
-                    "example_id": f"{track}/{row['split']}/{row['image_name']}",
-                    "track": track,
+                    "id": key,
+                    "example_id": key,
                     "dataset": row["split"],
-                    "op": row["l2-category"],
                     "image_name": row["image_name"],
                     "answer": row["answer"],
                     "image": functools.partial(_decode_tsv_image, tsv_path, row_index),
                 },
             )
-
-
-def _register_track_task(track: str) -> None:
-    primary = _TRACK_METRICS[track]
-
-    @register(f"cc_ocr_{track}")
-    class _CcOcrTrackTask(CcOcrTask):
-        metrics = (primary, *_track_detail_metrics(track))
-        primary_metric = primary
-        tracks = (track,)
-
-    _CcOcrTrackTask.__name__ = f"CcOcr{track.title().replace('_', '')}Task"
-    _CcOcrTrackTask.__qualname__ = _CcOcrTrackTask.__name__
-    _CcOcrTrackTask.__doc__ = f"The ``{track}`` track of CC-OCR."
-
-
-for _track in TRACKS:
-    _register_track_task(_track)
