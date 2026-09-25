@@ -838,6 +838,7 @@ def _build_experiment_summary(
         output_dir=BEAKER_RESULT_DIR,
     )
 
+    from olmo_eval.cli.run.config import merge_model_provider
     from olmo_eval.common.configs import get_provider_config
     from olmo_eval.harness import get_harness_preset
 
@@ -845,7 +846,7 @@ def _build_experiment_summary(
     if harness_overrides:
         harness_config = _apply_harness_overrides(harness_config, harness_overrides)
     provider_config = get_provider_config(exp.model_spec)
-    harness_config = harness_config.merge_provider(provider_config)
+    harness_config = merge_model_provider(harness_config, provider_config, harness_overrides)
 
     return ExperimentSummary(
         name=exp.name,
