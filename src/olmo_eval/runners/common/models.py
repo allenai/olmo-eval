@@ -59,6 +59,8 @@ class TaskMetricsEntry(Serializable):
     instances_processed: int | None = None
     instances_failed: int | None = None
     error_summary: str | None = None
+    # How the saved generations ended; see TaskResult.generation_counts.
+    generation_counts: dict[str, int] | None = None
 
 
 @dataclass

@@ -194,6 +194,7 @@ def convert_runner_results(
                 instances_processed=task_data.get("instances_processed"),
                 instances_failed=task_data.get("instances_failed"),
                 error_summary=combine_task_error(task_data),
+                generation_counts=task_data.get("generation_counts"),
                 primary_metric=primary_metric,
                 s3_metrics_key=s3_metrics_key,
                 s3_predictions_key=s3_predictions_key,
