@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_NO_OUTPUT_ERROR = "Provider returned no output for this request (see the provider's logged error)"
+
 
 def _get_native_ids(items: list[QueueItem]) -> list[str]:
     """Extract native IDs from queue items for batch hashing."""
@@ -210,11 +212,18 @@ async def process_batch(
         else:
             all_outputs = await harness.provider.agenerate(prepared_requests, sampling_params)
 
-        # Map outputs back to individual items
+        # Map outputs back to individual items. A provider either records why a
+        # request failed (request_error) or, like vllm_server and litellm, returns
+        # no outputs for it; both are failures, not empty responses to score.
         for item, prepared_request, request_trace, outputs in zip(
             items, prepared_requests, request_traces, all_outputs, strict=True
         ):
             error = request_error(outputs)
+            expects_output = request_type != RequestType.LOGLIKELIHOOD or bool(
+                prepared_request.continuations
+            )
+            if error is None and expects_output and not outputs:
+                error = _NO_OUTPUT_ERROR
             if error is not None:
                 log.warning(f"Instance {item.instance_idx} failed: {error}")
             result_queue.put(
