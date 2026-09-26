@@ -707,6 +707,7 @@ Five families of image tasks are built in:
 | Pointing (model prompts) | `molmo2_pointing_mp` | `pixmo_points_eval_mp`, `sa_co_gold_subset_mp`, `sa_co_gold_point_4k_mp` |
 | Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
 | Document OCR | `ocr` | `olmocr_bench`, `cc_ocr_multi_scene`, `omnidocbench` |
+| Document OCR, English only | `ocr_en` | `olmocr_bench`, `cc_ocr_multi_scene_en`, `omnidocbench_en` |
 
 Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
 `dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
@@ -739,6 +740,17 @@ it writes back, each with its benchmark's official scoring:
   every other metric. `omnidocbench_v15` / `omnidocbench_v15_no_cdm` are the 1,355-page
   v1.5 release with its own evaluator (CDM there also needs `node`); the two leaderboards
   are not comparable.
+
+English-only variants keep the benchmarks' official scoring on a subset:
+`cc_ocr_multi_scene_en` runs the 8 English sub-datasets (2,000 images) and averages over
+those, and each OmniDocBench task has an `_en` variant (`omnidocbench_en`,
+`omnidocbench_no_cdm_en`, `omnidocbench_v15_en`, `omnidocbench_v15_no_cdm_en`) that runs and
+scores only the pages annotated `english` (755 of v1.6's pages, 628 of v1.5's).
+
+By default each OCR task sends its benchmark's own instruction, for instruction-tuned
+checkpoints. A stage-1 checkpoint (`-o prompt_templates=none -o
+system_prompt_style=style_and_length_v2`) gets the OCR style tag it was trained on, alone:
+`olmocr:` for `olmocr_bench` and OmniDocBench, `textocr:` for CC-OCR.
 
 The OCR datasets are downloaded from the Hugging Face Hub at pinned revisions rather
 than read from `$MOLMO_DATA_DIR`.
