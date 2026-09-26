@@ -132,7 +132,8 @@ Suites support different strategies for combining task results:
 | `WEIGHTED_AVERAGE` | Average of all task scores, each weighted by the task's instance count |
 | `AVERAGE_OF_AVERAGES` | Average over child suite averages (equal weight per child) |
 | `DISPLAY_ONLY` | Display child results without computing suite average |
-| `NONE` | No aggregation - just collect individual task results |
+| `GAP` | Two tasks, reference then companion: both primary scores and the companion minus the reference |
+| `NONE` | No suite score: tasks report individually, and each nested suite reports its own aggregate |
 
 **Average of Averages Example:**
 
@@ -183,6 +184,21 @@ register(Suite(
 `WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored.
 
 A weighted suite reports its weighted mean or no score at all. If a contributing task has no instance count, the suite aggregate is omitted and the runner logs which tasks were missing, rather than publishing an unweighted mean under the same suite name. Instance counts are required when a result is stored, so this only affects results written before that check existed.
+
+**Gap Example:**
+
+```python
+register(Suite(
+    name="omega:dev",
+    tasks=("omega_500:hillclimb", "omega_500_out"),  # in-distribution, then held-out
+    aggregation=AggregationStrategy.GAP,
+))
+
+# With scores of 0.60 (in) and 0.45 (out):
+# primary_score: reference 0.60, companion 0.45, gap -0.15 (the suite's primary)
+```
+
+A gap suite is omitted unless both tasks scored on the same primary metric. It can be nested only in a `NONE` suite, which reports it under its own name: a gap is not a score to average.
 
 ### Formatters
 
@@ -690,6 +706,54 @@ for the task list, suites, exemplar settings, and what is not implemented.
 ```bash
 uv run olmo-eval run -m my-base-model -t bfcl
 ```
+
+## Post-Training Hill-Climb Dev Pass
+
+`hillclimb:dev` runs the post-training hill-climb dev tiers and their guards on
+one checkpoint, as one job:
+
+```bash
+uv run olmo-eval beaker launch -n "hillclimb-dev-<checkpoint>" \
+    -m <checkpoint> \
+    --harness default -o provider.max_model_len=36864 \
+    -t hillclimb:dev \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-other"
+```
+
+| Role | Task | Items | Generation budget |
+|------|------|-------|-------------------|
+| Dev: code | `livecodebench:lite` (release_v3, one sample) | 612 | model context |
+| Dev: math | `omega:dev` = `omega_500:hillclimb` + `omega_500_out` | 500 + 500 | 32,768 |
+| Guard: instruction following | `ifeval` | 541 | model context |
+| Guard: instruction following | `ifeval_ood` (IFBench) | 300 | model context |
+| Guard: knowledge | `gpqa_main:cot` | 448 | model context |
+
+The suite reports no score of its own, because a mean across code, math,
+instruction following and knowledge would hide which one moved. Each task
+reports its own score, and `omega:dev` reports the in score, the out score and
+their gap. Agents may hill-climb the dev tasks, but not the guards.
+
+Every task except OMEGA generates until it reaches the model's context limit, so
+set `provider.max_model_len` explicitly and use the same value for every
+checkpoint you compare. 36,864 leaves the OMEGA prompts room beside their
+32,768-token cap.
+
+**Cost (an estimate, not a measurement):** about 3.5–9.5 H100-hours per
+checkpoint, where OMEGA accounts for 2–8 of that. The per-task figures below
+are scaled by item count from published measurements on other models:
+
+| Task | H100-hours (estimate) | Basis |
+|------|-----------------------|-------|
+| `livecodebench:lite` | ≈ 0.7 | LiveCodeBench v3 at K=1 |
+| `omega:dev` | 2–8 | omega-500 measured at 50 min (instruct model, 1 H100) to 4 h (thinking model at the 32K cap, 1 A100), per 500 items |
+| `ifeval` + `ifeval_ood` | ≤ 0.5 | GPQA main's rate applied to 841 items |
+| `gpqa_main:cot` | ≈ 0.25 | 15 min on 1 H100 |
+
+The upper bound depends on how often generations hit the cap: every 1% of
+OMEGA items that reach 32,768 tokens adds about 330K generated tokens. The
+first real run on a checkpoint should replace these figures.
 
 ## Querying Results
 
