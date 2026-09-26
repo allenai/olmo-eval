@@ -922,8 +922,8 @@ set `provider.max_model_len` explicitly and use the same value for every
 checkpoint you compare. 36,864 leaves the OMEGA prompts room beside their
 32,768-token cap.
 
-**Cost (measured):** 5.5 H100-hours on one validation checkpoint (a ~1B-active
-MoE), run as one job on 2 H100s for 2.73 h at `batching.chunk_size=512`. Tasks
+**Cost (measured):** 5.5 H100-hours on one validation checkpoint (an MoE SFT
+export), run as one job on 2 H100s for 2.73 h at `batching.chunk_size=512`. Tasks
 interleave within the job, so each task's share is split by its share of the
 generated tokens:
 
