@@ -42,21 +42,7 @@ def test_livecodebench_dev_tier_is_one_sample_per_problem():
     assert config.primary_metric.name == "pass_at_1"
 
 
-@pytest.mark.parametrize(
-    "task",
-    [
-        pytest.param(
-            task,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="ifeval_ood runs at 2048 tokens until reasoning-default-budget (#420)",
-            ),
-        )
-        if task == "ifeval_ood"
-        else task
-        for task in TASKS
-    ],
-)
+@pytest.mark.parametrize("task", TASKS)
 def test_no_task_truncates_reasoning_before_the_omega_cap(task):
     params = get_task(task).config.sampling_params
 
