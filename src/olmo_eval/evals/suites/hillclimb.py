@@ -10,6 +10,9 @@ Launching ``hillclimb:dev`` on a checkpoint evaluates, in one job:
 The suite has no aggregate of its own. A mean over code, math, instruction
 following and knowledge would hide which one moved, so every task reports its
 own score and the OMEGA pair reports its gap.
+
+LiveCodeBench is graded in a sandbox, so launch the suite with a sandboxed
+harness such as ``codex_python``; the README gives the full launch line.
 """
 
 from olmo_eval.evals.suites.math import OMEGA_DEV

@@ -875,12 +875,29 @@ one checkpoint, as one job:
 ```bash
 uv run olmo-eval beaker launch -n "hillclimb-dev-<checkpoint>" \
     -m <checkpoint> \
-    --harness default -o provider.max_model_len=36864 \
     -t hillclimb:dev \
-    --cluster h100 \
+    --harness codex_python \
+    -o provider.kind=vllm -o provider.num_instances=<gpus> \
+    -o provider.max_model_len=36864 \
+    -o batching.chunk_size=512 \
+    -o sandboxes.0.inject_swerex=true -o sandboxes.0.instances=4 \
+    -o sandboxes.0.startup_timeout=900 -o sandboxes.0.command_timeout=900 \
+    --cluster h100 -G <gpus> --min-runtime 8h \
     -w "ai2/olmo-eval-debug" \
     -B "ai2/oe-other"
 ```
+
+- `--harness codex_python` supplies the sandbox that grades LiveCodeBench.
+  Under `--harness default`, every LiveCodeBench item fails grading with
+  `SandboxRequiredError`, yet the task reports 0.0 as a success with no failed
+  instances.
+- `batching.chunk_size=512` is a harness setting, so the suite cannot carry it.
+  Each chunk waits for its slowest generation. At the default of 64, one
+  checkpoint's pass projected to about 32 GPU-hours; at 512 it took 5.5.
+- Keep each job under 8 hours. When the group is over its allocation, Beaker
+  preempts at 8h06m and the retry restarts from zero. `--min-runtime 8h` did
+  not prevent this, because 8 hours is the most it can protect. For a slower
+  model, split the pass into jobs of fewer tasks.
 
 | Role | Task | Items | Generation budget |
 |------|------|-------|-------------------|
@@ -894,6 +911,11 @@ The suite reports no score of its own, because a mean across code, math,
 instruction following and knowledge would hide which one moved. Each task
 reports its own score, and `omega:dev` reports the in score, the out score and
 their gap. Agents may hill-climb the dev tasks, but not the guards.
+
+For each OMEGA half, report the strict score (`exact_match`, the primary)
+beside flex (`exact_match_flex`), and strict minus flex as a format guard.
+Strict stays the primary. A wide gap means the score is measuring answer
+format: on one validation checkpoint, strict was 4.4 and flex 9.8.
 
 Every task except OMEGA generates until it reaches the model's context limit, so
 set `provider.max_model_len` explicitly and use the same value for every
