@@ -118,7 +118,8 @@ def compute_scope_score(
     aggregation is applied. ``task_instance_counts_by_name`` carries the instance
     count of each of those variants in the same order, and is only read by
     instance-weighted aggregation strategies. Those strategies return None when
-    a contributing task has no instance count.
+    a contributing task has no instance count. A gap suite scores its
+    companion task minus its reference task, or None unless both scored.
     """
     from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, suite_exists
 
@@ -136,6 +137,13 @@ def compute_scope_score(
                     for child in suite.tasks
                 ]
             )
+        if suite.aggregation == AggregationStrategy.GAP:
+            reference, companion = (
+                _task_score(task, task_scores_by_name) for task in suite.expand()
+            )
+            if reference is None or companion is None:
+                return None
+            return companion - reference
         if suite.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
             return _weighted_mean_over_tasks(
                 suite.expand(),
