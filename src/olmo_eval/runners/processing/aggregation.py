@@ -132,6 +132,55 @@ def _log_tasks_excluded_from_suite(
         )
 
 
+def _compute_gap(
+    suite_name: str,
+    task_specs: list[str],
+    task_results: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Report a reference task, its companion, and the companion minus the reference.
+
+    Returns None, with a warning, unless both tasks published a primary score
+    on the same primary metric: half of a pair, or a difference between two
+    different statistics, would read as a gap without being one.
+    """
+    reference_spec, companion_spec = task_specs
+    scores: list[float] = []
+    for spec in task_specs:
+        task_data = task_results.get(spec) or {}
+        score = _extract_primary_score(task_data) if task_data.get("metrics") else None
+        if score is None:
+            logger.warning(f"Suite {suite_name}: no primary score for {spec}; omitting the gap.")
+            return None
+        scores.append(score)
+
+    reference_metric = task_results[reference_spec].get("primary_metric")
+    companion_metric = task_results[companion_spec].get("primary_metric")
+    if reference_metric != companion_metric:
+        logger.warning(
+            f"Suite {suite_name}: {reference_spec} reports {reference_metric} but "
+            f"{companion_spec} reports {companion_metric}; omitting the gap."
+        )
+        return None
+
+    reference, companion = scores
+    return {
+        "metrics": {
+            "primary_score": {
+                "reference": reference,
+                "companion": companion,
+                "gap": companion - reference,
+            }
+        },
+        "tasks": list(task_specs),
+        "num_tasks": 2,
+        "aggregation": "gap",
+        "reference_task": reference_spec,
+        "companion_task": companion_spec,
+        "scored_metric": reference_metric,
+        "primary_metric": "primary_score:gap",
+    }
+
+
 def _compute_child_average(
     child: str | Any,  # str or Suite
     priority_suffix: str,
@@ -241,6 +290,7 @@ def compute_suite_aggregations(
       the task's instance count
     - AVERAGE_OF_AVERAGES: Average over children, where nested suites are
       averaged first (each child gets equal weight)
+    - GAP: Both tasks' primary scores and the companion minus the reference
 
     Handles specs with priority suffixes (@priority).
     When a suite has these suffixes, they are propagated to expanded task lookups.
@@ -271,6 +321,16 @@ def compute_suite_aggregations(
 
         suite = get_suite(base_spec)
         if suite.aggregation == AggregationStrategy.NONE:
+            continue
+
+        if suite.aggregation == AggregationStrategy.GAP:
+            gap_result = _compute_gap(
+                spec,
+                [f"{task_spec}{priority_suffix}" for task_spec in suite.expand()],
+                task_results,
+            )
+            if gap_result is not None:
+                suite_aggregations[spec] = gap_result
             continue
 
         _log_tasks_excluded_from_suite(

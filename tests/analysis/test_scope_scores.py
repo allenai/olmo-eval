@@ -175,3 +175,33 @@ def test_weighted_child_of_average_of_averages_is_weighted() -> None:
     # The child collapses to its weighted mean of 0.6, then the parent weights
     # its two children equally: (1.0 + 0.6) / 2.
     assert score == pytest.approx(0.8)
+
+
+@pytest.fixture
+def gap_suite() -> Iterator[Suite]:
+    suite = Suite(
+        name="_test_gap_scope",
+        tasks=("task_in", "task_out"),
+        aggregation=AggregationStrategy.GAP,
+    )
+    _REGISTRY[suite.name] = suite
+    yield suite
+    del _REGISTRY[suite.name]
+
+
+def test_gap_is_companion_minus_reference(gap_suite: Suite) -> None:
+    score = compute_scope_score(
+        task_scores_by_name={"task_in": [0.6], "task_out": [0.45]},
+        suite_name=gap_suite.name,
+    )
+
+    assert score == pytest.approx(-0.15)
+
+
+def test_gap_without_both_tasks_is_none(gap_suite: Suite) -> None:
+    score = compute_scope_score(
+        task_scores_by_name={"task_in": [0.6], "task_out": [None]},
+        suite_name=gap_suite.name,
+    )
+
+    assert score is None
