@@ -320,6 +320,8 @@ class StoredTaskResult:
     instances_processed: int | None = None
     instances_failed: int | None = None
     error_summary: str | None = None
+    # How the saved generations ended (cap-hit, empty, unclosed thinking trace)
+    generation_counts: dict[str, int] | None = None
     # Storage references for detailed data
     s3_metrics_key: str | None = None
     s3_predictions_key: str | None = None

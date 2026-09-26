@@ -138,6 +138,8 @@ class TaskResult(Base):
     instances_processed: Mapped[int | None] = mapped_column(Integer)
     instances_failed: Mapped[int | None] = mapped_column(Integer)
     error_summary: Mapped[str | None] = mapped_column(Text)
+    # How the saved generations ended: {"generations", "cap_hit", "empty", ...}
+    generation_counts: Mapped[dict[str, int] | None] = mapped_column(JSONB)
 
     # S3 keys for detailed task data
     s3_metrics_key: Mapped[str | None] = mapped_column(String(512))
