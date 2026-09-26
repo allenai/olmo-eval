@@ -11,6 +11,11 @@ Two registered variants follow ``IFBENCH_MT_TASKS`` in oe-eval-internal:
   ``wildchat_unused_withRewrite``)
 - ``ifeval_mt_ood_wildchat_unused_withRewrite`` (HF subset
   ``ood_wildchat_unused_withRewrite``)
+
+Defaults follow the post-training reasoning regime shared by this repo's other
+reasoning tasks: sampled decoding (temperature 0.6, top-p 0.95) with generation
+bounded only by the model context. Each task's ``:tulu`` variant keeps the
+``::tulu`` regime (greedy decoding, ``max_gen_toks=2048``).
 """
 
 from __future__ import annotations
@@ -33,11 +38,18 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 _PRIMARY_METRIC = IFEvalPromptLooseAccuracy()
 _DATASET_PATH = "VGraf/ifeval_mt"
+# max_tokens=None generates to the model's context limit, so a reasoning
+# trace is never cut off by a fixed budget below the context size.
 _SAMPLING_PARAMS = SamplingParams(
+    max_tokens=None,
+    temperature=0.6,
+    top_p=0.95,
+)
+_TULU_SAMPLING_PARAMS = SamplingParams(
     max_tokens=2048,
     temperature=0.0,
     do_sample=False,
@@ -103,3 +115,10 @@ class IFEvalMTOODWildchatUnusedWithRewrite(IFEvalMTBase):
     data_source = DataSource(
         path=_DATASET_PATH, subset="ood_wildchat_unused_withRewrite", split="test"
     )
+
+
+for _task_name in (
+    "ifeval_mt_wildchat_unused_withRewrite",
+    "ifeval_mt_ood_wildchat_unused_withRewrite",
+):
+    register_variant(_task_name, "tulu", sampling_params=_TULU_SAMPLING_PARAMS)

@@ -4,8 +4,16 @@ Dataset: ``allenai/IFBench_test`` (300 prompts), each carrying a list of
 instruction IDs and per-instruction kwargs. Verifiers come from the vendored
 registry in :mod:`olmo_eval.common.scorers.ifeval_deps`.
 
-Mirrors the ``ifeval_ood::tulu`` configuration in oe-eval-internal: chat
-format, ``max_gen_toks=2048``, primary metric ``prompt_level_loose_acc``.
+Defaults follow the post-training reasoning regime shared by this repo's other
+reasoning tasks: chat format, sampled decoding (temperature 0.6, top-p 0.95)
+with generation bounded only by the model context, primary metric
+``prompt_level_loose_acc``. Reasoning inside ``<think>`` tags is removed before
+verification. The closest oe-eval-internal configuration is
+``ifeval_ood::tulu-thinker-deepseek``, which uses the same sampling with a
+32768-token cap and a ``</answer>`` stop sequence.
+
+The ``:tulu`` variant keeps the ``ifeval_ood::tulu`` regime (greedy decoding,
+``max_gen_toks=2048``), which leaves no room for a reasoning trace.
 """
 
 from __future__ import annotations
@@ -28,7 +36,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 _PRIMARY_METRIC = IFEvalPromptLooseAccuracy()
 
@@ -45,10 +53,12 @@ class IFEvalOOD(Task):
     )
     primary_metric = _PRIMARY_METRIC
     strip_thinking = True
+    # max_tokens=None generates to the model's context limit, so a reasoning
+    # trace is never cut off by a fixed budget below the context size.
     sampling_params = SamplingParams(
-        max_tokens=2048,
-        temperature=0.0,
-        do_sample=False,
+        max_tokens=None,
+        temperature=0.6,
+        top_p=0.95,
     )
 
     @property
@@ -84,3 +94,10 @@ class IFEvalOOD(Task):
 
     def extract_answer(self, output: LMOutput) -> str:
         return output.text
+
+
+register_variant(
+    "ifeval_ood",
+    "tulu",
+    sampling_params=SamplingParams(max_tokens=2048, temperature=0.0, do_sample=False),
+)
