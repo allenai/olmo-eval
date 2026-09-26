@@ -18,3 +18,20 @@ make_suite(
         "Document OCR and parsing benchmarks (olmOCR-bench, CC-OCR multi-scene, OmniDocBench v1.6)."
     ),
 )
+
+
+OCR_EN_TASKS = (
+    "olmocr_bench",
+    "cc_ocr_multi_scene_en",
+    "omnidocbench_en",
+)
+
+make_suite(
+    "ocr_en",
+    OCR_EN_TASKS,
+    aggregation=AggregationStrategy.DISPLAY_ONLY,
+    description=(
+        "English-only document OCR: olmOCR-bench, CC-OCR's 8 English multi-scene sub-datasets and "
+        "OmniDocBench v1.6's English pages."
+    ),
+)
