@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -56,3 +57,29 @@ def test_dispatch_propagates_terminal_error_and_cancels_siblings() -> None:
         assert sibling_cancelled.is_set()
 
     asyncio.run(run())
+
+
+def test_dispatch_logs_one_summary_naming_the_first_non_terminal_error(caplog) -> None:
+    async def process(item: int) -> int:
+        if item % 2:
+            raise ValueError(f"request {item} rejected")
+        return item
+
+    with caplog.at_level(logging.ERROR, logger="olmo_eval.inference.dispatch"):
+        results = asyncio.run(dispatch_concurrent([0, 1, 2, 3], process, max_in_flight=1))
+
+    assert results == [0, None, 2, None]
+    summaries = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert summaries == [
+        "dispatch: 2/4 requests failed; first error: ValueError: request 1 rejected"
+    ]
+
+
+def test_dispatch_logs_no_summary_when_nothing_failed(caplog) -> None:
+    async def process(item: int) -> int:
+        return item
+
+    with caplog.at_level(logging.ERROR, logger="olmo_eval.inference.dispatch"):
+        asyncio.run(dispatch_concurrent([0, 1], process))
+
+    assert not [r for r in caplog.records if r.levelno == logging.ERROR]

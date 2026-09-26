@@ -72,6 +72,7 @@ class ContinuousBatchDispatcher[T, R]:
 
         # Track in-flight tasks: task -> (index, item, attempt)
         in_flight: dict[asyncio.Task, tuple[int, T, int]] = {}
+        first_error: Exception | None = None
 
         while pending_idx < len(pending) or in_flight:
             # Top up in-flight set to target
@@ -108,6 +109,7 @@ class ContinuousBatchDispatcher[T, R]:
                     self._stats.completed += 1
                     if error is not None:
                         self._stats.failed += 1
+                        first_error = first_error or error
 
                     # Callbacks
                     if self.on_result is not None:
@@ -115,6 +117,14 @@ class ContinuousBatchDispatcher[T, R]:
                     if self.on_progress is not None:
                         self.on_progress(self._stats.completed, total)
 
+        if first_error is not None:
+            logger.error(
+                "dispatch: %d/%d requests failed; first error: %s: %s",
+                self._stats.failed,
+                total,
+                type(first_error).__name__,
+                first_error,
+            )
         return results
 
     async def _safe_process(self, item: T) -> tuple[R | None, Exception | None]:
