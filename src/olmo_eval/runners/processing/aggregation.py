@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.logging import get_logger
+
+if TYPE_CHECKING:
+    from olmo_eval.evals.suites.registry import Suite
 
 logger = get_logger(__name__)
 
@@ -291,6 +294,7 @@ def compute_suite_aggregations(
     - AVERAGE_OF_AVERAGES: Average over children, where nested suites are
       averaged first (each child gets equal weight)
     - GAP: Both tasks' primary scores and the companion minus the reference
+    - NONE: No aggregate for the suite itself; each nested suite reports its own
 
     Handles specs with priority suffixes (@priority).
     When a suite has these suffixes, they are propagated to expanded task lookups.
@@ -303,10 +307,8 @@ def compute_suite_aggregations(
         Dict mapping suite name -> {"metrics": {...}, "tasks": [...], "aggregation": ...}
     """
     from olmo_eval.evals.suites import get_suite, suite_exists
-    from olmo_eval.evals.suites.registry import AggregationStrategy
 
-    suite_aggregations: dict[str, dict[str, Any]] = {}
-
+    suites: list[tuple[str, Suite, str]] = []
     for spec in task_specs:
         # Parse out priority suffix (e.g., "suite@high" -> "suite", "@high")
         priority_suffix = ""
@@ -316,11 +318,32 @@ def compute_suite_aggregations(
             priority_suffix = f"@{priority}"
 
         # Check if the base spec (without priority) is a suite
-        if not suite_exists(base_spec):
-            continue
+        if suite_exists(base_spec):
+            suites.append((spec, get_suite(base_spec), priority_suffix))
 
-        suite = get_suite(base_spec)
+    return _aggregate_suites(suites, task_results)
+
+
+def _aggregate_suites(
+    suites: list[tuple[str, Suite, str]],
+    task_results: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Aggregate each (result key, suite, priority suffix) entry by its strategy."""
+    from olmo_eval.evals.suites.registry import AggregationStrategy, Suite
+
+    suite_aggregations: dict[str, dict[str, Any]] = {}
+
+    for spec, suite, priority_suffix in suites:
         if suite.aggregation == AggregationStrategy.NONE:
+            # No score of its own: each nested suite reports its aggregate under
+            # its own name, recording the suite that contained it.
+            nested = [
+                (f"{child.name}{priority_suffix}", child, priority_suffix)
+                for child in suite.tasks
+                if isinstance(child, Suite)
+            ]
+            for key, result in _aggregate_suites(nested, task_results).items():
+                suite_aggregations.setdefault(key, {**result, "container_suite": spec})
             continue
 
         if suite.aggregation == AggregationStrategy.GAP:

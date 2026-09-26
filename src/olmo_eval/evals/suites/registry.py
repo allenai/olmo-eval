@@ -28,7 +28,8 @@ class AggregationStrategy(StrEnum):
     """How to combine results from tasks in a suite.
 
     Attributes:
-        NONE: No aggregation - just collect individual task results.
+        NONE: No suite aggregate. Tasks are reported individually, and each
+            nested suite reports its own aggregate.
         AVERAGE: Compute simple average of all task scores.
         WEIGHTED_AVERAGE: Average of all task scores, each weighted by the
             task's instance count. This is the instance-weighted ("micro")
@@ -79,10 +80,11 @@ class Suite:
             for child in self.tasks
             if isinstance(child, Suite) and child.aggregation == AggregationStrategy.GAP
         ]
-        if nested_gaps:
+        if nested_gaps and self.aggregation != AggregationStrategy.NONE:
             raise ValueError(
                 f"Suite {self.name!r} nests gap suite(s) {nested_gaps!r}; a gap is not a "
-                f"score to average, so gap suites cannot be children"
+                f"score to average, so gap suites cannot be children of a suite that "
+                f"aggregates (use AggregationStrategy.NONE)"
             )
 
     @property
