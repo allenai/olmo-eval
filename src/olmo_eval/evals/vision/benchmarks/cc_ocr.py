@@ -6,10 +6,16 @@ the reference is compared as a multiset of words (characters for the Chinese sub
 reading order does not matter.
 
 Each row of the dataset carries its own prompt, sent verbatim in a single user turn with the
-image. Scoring is the official evaluator's (:mod:`olmo_eval.evals.vision.scoring.cc_ocr`): the
-primary ``macro_f1`` is the unweighted mean over
-sub-datasets of each one's mean per-image F1, the track score the paper reports; ``micro_f1``
-and every sub-dataset's score are reported alongside. Metrics are 0-1 (the paper reports x100).
+image to an instruction-tuned checkpoint. A stage-1 checkpoint (``-o prompt_templates=none -o
+system_prompt_style=style_and_length_v2``) gets the ``textocr:`` tag alone instead, whose
+trained answer form (every piece of text, joined by spaces) is exactly what this track scores.
+Scoring is the official evaluator's (:mod:`olmo_eval.evals.vision.scoring.cc_ocr`): the primary
+``macro_f1`` is the unweighted mean over sub-datasets of each one's mean per-image F1, the track
+score the paper reports; ``micro_f1`` and every sub-dataset's score are reported alongside.
+Metrics are 0-1 (the paper reports x100).
+
+``cc_ocr_multi_scene_en`` keeps the 8 English sub-datasets (every one without ``zh`` in its
+name, 2,000 images) and averages over those.
 
 The benchmark prescribes no decoding settings; this task decodes greedily. Data is fetched from
 the Hub at a pinned revision; set ``CC_OCR_DIR`` to a local copy of the dataset repository to
@@ -31,7 +37,7 @@ from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.vision.scoring.cc_ocr import CcOcrDatasetMetric, CcOcrScorer, CcOcrTrackMetric
-from olmo_eval.evals.vision.tasks.ocr import OcrTask
+from olmo_eval.evals.vision.tasks.ocr import TEXTOCR_STYLE, OcrTask
 
 HF_REPO = "wulipc/CC-OCR"
 HF_REVISION = "c64517e92179991d509776064174776700cdd5a2"
@@ -54,13 +60,23 @@ SUBSETS: tuple[str, ...] = (
     "zh_dense",
 )
 
+#: The English sub-datasets: every one without ``zh`` in its name.
+ENGLISH_SUBSETS: tuple[str, ...] = tuple(s for s in SUBSETS if "zh" not in s)
+
 _SCORER = CcOcrScorer()
 _MACRO_F1 = CcOcrTrackMetric(name="macro_f1", scorer=_SCORER, kind="macro_f1")
-_METRICS: tuple[Metric, ...] = (
-    _MACRO_F1,
-    CcOcrTrackMetric(name="micro_f1", scorer=_SCORER, kind="micro_f1"),
-    *(CcOcrDatasetMetric(name=dataset, scorer=_SCORER, dataset=dataset) for dataset in SUBSETS),
-)
+
+
+def _metrics(subsets: tuple[str, ...]) -> tuple[Metric, ...]:
+    """The track scores (averaged over whichever sub-datasets ran) and one per sub-dataset."""
+    return (
+        _MACRO_F1,
+        CcOcrTrackMetric(name="micro_f1", scorer=_SCORER, kind="micro_f1"),
+        *(CcOcrDatasetMetric(name=dataset, scorer=_SCORER, dataset=dataset) for dataset in subsets),
+    )
+
+
+_METRICS = _metrics(SUBSETS)
 
 
 @functools.lru_cache(maxsize=64)
@@ -102,6 +118,10 @@ class CcOcrMultiSceneTask(OcrTask):
     metrics = _METRICS
     primary_metric = _MACRO_F1
     split = Split.TEST
+    #: A stage-1 checkpoint is prompted with ``textocr:``; see the module docstring.
+    ocr_style = TEXTOCR_STYLE
+    #: The sub-datasets this task runs and averages over.
+    subsets: tuple[str, ...] = SUBSETS
 
     def _build_instances(self) -> Iterator[Instance]:
         instances = [
@@ -114,7 +134,7 @@ class CcOcrMultiSceneTask(OcrTask):
             raise RuntimeError(
                 f"CC-OCR {TRACK} has sub-datasets {sorted(found)}, expected {sorted(SUBSETS)}"
             )
-        yield from instances
+        yield from (i for i in instances if i.metadata["dataset"] in self.subsets)
 
     def _tsv_instances(self, tsv_path: str) -> Iterator[Instance]:
         for row_index, row in enumerate(_load_tsv(tsv_path)):
@@ -134,3 +154,12 @@ class CcOcrMultiSceneTask(OcrTask):
                     "image": functools.partial(_decode_tsv_image, tsv_path, row_index),
                 },
             )
+
+
+@register("cc_ocr_multi_scene_en")
+class CcOcrMultiSceneEnglishTask(CcOcrMultiSceneTask):
+    """The 8 English sub-datasets of the multi-scene track (2,000 images); ``macro_f1`` is their
+    unweighted mean."""
+
+    metrics = _metrics(ENGLISH_SUBSETS)
+    subsets = ENGLISH_SUBSETS

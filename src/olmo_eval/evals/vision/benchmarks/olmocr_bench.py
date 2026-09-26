@@ -14,7 +14,9 @@ the primary ``overall`` is the unweighted mean of the eight category pass rates.
 Choices the benchmark leaves to the system under test, and what this task does:
 
 * **Prompt** — ``build_basic_prompt`` from ``olmocr/bench/prompts.py``, verbatim; it is the
-  prompt behind the published general-VLM rows (e.g. Qwen2.5-VL).
+  prompt behind the published general-VLM rows (e.g. Qwen2.5-VL). A stage-1 checkpoint
+  (``-o prompt_templates=none -o system_prompt_style=style_and_length_v2``) gets the
+  ``olmocr:`` tag alone instead, the prompt it trained page transcription on.
 * **Page image** — the benchmark ships PDFs only. Pages are rasterized so the longest side
   is ``target_longest_image_dim`` pixels, the official recipe, but with MuPDF instead of
   poppler. 2048 is what the official runners use for API models; each model's own

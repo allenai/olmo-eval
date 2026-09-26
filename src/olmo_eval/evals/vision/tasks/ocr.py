@@ -4,8 +4,9 @@ These benchmarks hand the model one page image and a transcription instruction, 
 the markdown (or JSON) it writes back. :class:`OcrTask` adds the two things they share on
 top of :class:`ImageQATask`:
 
-* the instruction follows the checkpoint's prompt family, like the pointing and captioning
-  tasks (:func:`ocr_question`);
+* the prompt follows the checkpoint's prompt family, like the pointing and captioning tasks
+  (:func:`ocr_question`): a stage-1 checkpoint gets the task's OCR style tag alone, an
+  instruction-tuned one the benchmark's instruction;
 * scoring runs off the event loop, since grading a page is CPU work that can take seconds.
 """
 
@@ -22,20 +23,32 @@ from olmo_eval.evals.vision.tasks.image_qa import ImageQATask
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ScoringContext
 
-#: mm_olmo's formatter style for free-form instructions; the only instruction-following
-#: style the ``style_and_length*`` (pretrain) family is trained on.
-INSTRUCTION_STYLE = "text_sft"
+#: OLMo-core stage-1 OCR styles (OLMo-core #875): the style tag is the whole user turn.
+#: ``olmocr`` is olmOCR's page transcription (reading order, HTML tables, LaTeX math);
+#: ``textocr`` is TextOCR's scene text (every piece of text in the image, joined by spaces).
+OLMOCR_STYLE = "olmocr"
+TEXTOCR_STYLE = "textocr"
 
 
-def ocr_question(instruction: str, system_prompt_style: str) -> str:
-    """``instruction`` as the checkpoint's prompt family expects to read it.
+def ocr_question(
+    instruction: str, *, style: str, prompt_templates: str, system_prompt_style: str
+) -> str:
+    """The user turn for an OCR benchmark, following the checkpoint's prompt family.
 
-    Instruction-tuned checkpoints (``demo_or_style_v*``) take the benchmark's instruction
-    verbatim. The ``style_and_length*`` family was trained with a ``"<style>:"`` prefix on
-    every prompt and has no OCR style, so the instruction is sent under its free-form
-    instruction style.
+    * Instruction-tuned checkpoints (``uber_model_v2`` + ``demo_or_style_v*``, the defaults)
+      get the benchmark's instruction verbatim.
+    * Stage-1 checkpoints (``-o prompt_templates=none -o system_prompt_style=
+      style_and_length_v2``) get the task's OCR style tag alone, e.g. ``"olmocr:"``: under
+      ``prompt_templates="none"`` the question is empty, as it is for a caption, and the
+      ``style_and_length*`` family prefixes the style. That is exactly OLMo-core's stage-1 OCR
+      training prompt, so train and test share one form.
+
+    :param instruction: The benchmark's own instruction.
+    :param style: The OCR style the task's answer form was trained under (:data:`OLMOCR_STYLE`
+        or :data:`TEXTOCR_STYLE`).
     """
-    return apply_style_prefix(instruction, system_prompt_style, INSTRUCTION_STYLE)
+    question = "" if prompt_templates == "none" else instruction
+    return apply_style_prefix(question, system_prompt_style, style)
 
 
 class OcrTask(ImageQATask):
@@ -43,11 +56,18 @@ class OcrTask(ImageQATask):
 
     #: Prompt family assumed when the run does not say; matches the instruction-tuned
     #: checkpoints, mirroring the pointing and captioning tasks.
+    default_prompt_templates = "uber_model_v2"
     default_system_prompt_style = "demo_or_style_v2"
+    #: The stage-1 OCR style whose answer form this benchmark scores (see :func:`ocr_question`).
+    ocr_style: str = OLMOCR_STYLE
 
     def _question(self, instruction: str) -> str:
-        style = self.config.system_prompt_style or self.default_system_prompt_style
-        return ocr_question(instruction, style)
+        return ocr_question(
+            instruction,
+            style=self.ocr_style,
+            prompt_templates=self.config.prompt_templates or self.default_prompt_templates,
+            system_prompt_style=self.config.system_prompt_style or self.default_system_prompt_style,
+        )
 
     async def score_responses(
         self,

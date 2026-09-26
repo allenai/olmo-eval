@@ -31,7 +31,15 @@ and fail before inference without them; the ``_no_cdm`` variants skip CDM, so th
 metric instead.
 
 The prompt is the one the official inference scripts share across general VLMs
-(``tools/model_infer``), sent in a single user turn with the page image as shipped.
+(``tools/model_infer``), sent in a single user turn with the page image as shipped, to an
+instruction-tuned checkpoint. A stage-1 checkpoint (``-o prompt_templates=none -o
+system_prompt_style=style_and_length_v2``) gets the ``olmocr:`` tag alone instead: olmOCR's page
+transcription writes math as ``\\( \\)`` / ``\\[ \\]`` and tables as HTML, which the official
+evaluator reads, and its ``![alt](file)`` figure placeholders are deleted before matching.
+
+Every task has an ``_en`` variant (``omnidocbench_en``, ``omnidocbench_no_cdm_en``,
+``omnidocbench_v15_en``, ``omnidocbench_v15_no_cdm_en``) that runs and scores only the pages the
+annotations mark ``english`` (755 of v1.6's 1,651, 628 of v1.5's 1,355).
 Decoding is greedy. Data is fetched from the Hub at each version's pinned revision; set
 ``OMNIDOCBENCH_DIR`` (v1.6) / ``OMNIDOCBENCH_V15_DIR`` (v1.5) to a local copy
 (``OmniDocBench.json`` + ``images/``) to read from disk.
@@ -216,6 +224,8 @@ class OmniDocBenchTask(OcrTask):
     version: str = "v1.6"
     #: Whether formulas are graded with CDM, which needs a LaTeX toolchain.
     with_cdm: bool = True
+    #: Page languages to run (the ``page_attribute.language`` annotation); ``None`` runs all.
+    languages: tuple[str, ...] | None = None
 
     def _build_instances(self) -> Iterator[Instance]:
         missing = missing_cdm_binaries(self.version) if self.with_cdm else []
@@ -233,6 +243,8 @@ class OmniDocBenchTask(OcrTask):
             info = page["page_info"]
             image_name = os.path.basename(info["image_path"])
             attributes = info.get("page_attribute") or {}
+            if self.languages is not None and attributes.get("language") not in self.languages:
+                continue
             yield Instance(
                 question=question,
                 gold_answer=None,
@@ -347,3 +359,35 @@ class OmniDocBenchV15NoCdmTask(OmniDocBenchV15Task):
     metrics = (_TEXT_SCORE, *_component_metrics("v1.5"))
     primary_metric = _TEXT_SCORE
     with_cdm = False
+
+
+#: The ``page_attribute.language`` value of the English pages.
+_ENGLISH = ("english",)
+
+
+@register("omnidocbench_en")
+class OmniDocBenchEnglishTask(OmniDocBenchTask):
+    """OmniDocBench v1.6, English pages only (755 of 1,651)."""
+
+    languages = _ENGLISH
+
+
+@register("omnidocbench_no_cdm_en")
+class OmniDocBenchNoCdmEnglishTask(OmniDocBenchNoCdmTask):
+    """OmniDocBench v1.6 without CDM, English pages only."""
+
+    languages = _ENGLISH
+
+
+@register("omnidocbench_v15_en")
+class OmniDocBenchV15EnglishTask(OmniDocBenchV15Task):
+    """OmniDocBench v1.5, English pages only (628 of 1,355)."""
+
+    languages = _ENGLISH
+
+
+@register("omnidocbench_v15_no_cdm_en")
+class OmniDocBenchV15NoCdmEnglishTask(OmniDocBenchV15NoCdmTask):
+    """OmniDocBench v1.5 without CDM, English pages only."""
+
+    languages = _ENGLISH
