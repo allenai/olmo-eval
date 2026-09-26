@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_NO_OUTPUT_ERROR = "Provider returned no output for this request (see the provider's logged error)"
+
 
 def _get_native_ids(items: list[QueueItem]) -> list[str]:
     """Extract native IDs from queue items for batch hashing."""
@@ -209,10 +211,15 @@ async def process_batch(
         else:
             all_outputs = await harness.provider.agenerate(prepared_requests, sampling_params)
 
-        # Map outputs back to individual items
+        # Map outputs back to individual items. Providers return no outputs for a
+        # request that failed, so record it as a failure rather than scoring an
+        # empty response.
         for item, prepared_request, request_trace, outputs in zip(
             items, prepared_requests, request_traces, all_outputs, strict=True
         ):
+            expects_output = request_type != RequestType.LOGLIKELIHOOD or bool(
+                prepared_request.continuations
+            )
             result_queue.put(
                 ResultItem(
                     model_name=item.model_name,
@@ -222,7 +229,7 @@ async def process_batch(
                     request=prepared_request,
                     request_trace=request_trace,
                     outputs=outputs,
-                    error=None,
+                    error=_NO_OUTPUT_ERROR if expects_output and not outputs else None,
                     attempt=item.attempt,
                 )
             )
