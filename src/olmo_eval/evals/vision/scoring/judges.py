@@ -402,7 +402,7 @@ def default_charxiv_cache_dir() -> str:
     return _PROCESS_CACHE_DIR[0]
 
 
-def _cache_key(model: str, prompt: str) -> str:
+def _charxiv_cache_key(model: str, prompt: str) -> str:
     return hashlib.sha256(f"{model}\x00{prompt}".encode()).hexdigest()
 
 
@@ -448,7 +448,7 @@ async def _charxiv_chat_json(
     max_retries: int = 10,
 ) -> dict:
     """One official grading call: cached, JSON-mode, with the official retry ladder."""
-    key = _cache_key(CHARXIV_JUDGE_MODEL, prompt)
+    key = _charxiv_cache_key(CHARXIV_JUDGE_MODEL, prompt)
     cache_file = Path(cache_dir) / f"{key}-v1.json"
     if not recompute and cache_file.exists():
         with open(cache_file) as f:
