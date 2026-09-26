@@ -922,20 +922,18 @@ set `provider.max_model_len` explicitly and use the same value for every
 checkpoint you compare. 36,864 leaves the OMEGA prompts room beside their
 32,768-token cap.
 
-**Cost (an estimate, not a measurement):** about 3.5–9.5 H100-hours per
-checkpoint, where OMEGA accounts for 2–8 of that. The per-task figures below
-are scaled by item count from published measurements on other models:
+**Cost (measured):** 5.5 H100-hours on one validation checkpoint (a ~1B-active
+MoE), run as one job on 2 H100s for 2.73 h at `batching.chunk_size=512`. Tasks
+interleave within the job, so each task's share is split by its share of the
+generated tokens:
 
-| Task | H100-hours (estimate) | Basis |
-|------|-----------------------|-------|
-| `livecodebench:lite` | ≈ 0.7 | LiveCodeBench v3 at K=1 |
-| `omega:dev` | 2–8 | omega-500 measured at 50 min (instruct model, 1 H100) to 4 h (thinking model at the 32K cap, 1 A100), per 500 items |
-| `ifeval` + `ifeval_ood` | ≤ 0.5 | GPQA main's rate applied to 841 items |
-| `gpqa_main:cot` | ≈ 0.25 | 15 min on 1 H100 |
-
-The upper bound depends on how often generations hit the cap: every 1% of
-OMEGA items that reach 32,768 tokens adds about 330K generated tokens. The
-first real run on a checkpoint should replace these figures.
+| Task | H100-hours | Cap-hit |
+|------|------------|---------|
+| `livecodebench:lite` | 1.3 | 53% |
+| `omega:dev` | 2.1 | 42% in / 43% out |
+| `ifeval` | 0.5 | 25% |
+| `ifeval_ood` | 0.5 | 44% |
+| `gpqa_main:cot` | 1.0 | 60% |
 
 ## Querying Results
 
