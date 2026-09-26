@@ -1349,6 +1349,101 @@ class TestGapSuiteAggregation:
         assert "-0.1500" in captured
 
 
+class TestUnaggregatedSuiteAggregation:
+    """Tests for NONE suites, which report their nested suites but no score of their own."""
+
+    SUITE = "_test_none_parent"
+
+    @pytest.fixture(autouse=True)
+    def none_suite(self) -> Iterator[None]:
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+        gap = Suite(
+            name="_test_none_gap",
+            tasks=("task_in", "task_out"),
+            aggregation=AggregationStrategy.GAP,
+        )
+        average = Suite(name="_test_none_avg", tasks=("task_a", "task_b"))
+        _REGISTRY[self.SUITE] = Suite(
+            name=self.SUITE,
+            tasks=("task_solo", gap, average),
+            aggregation=AggregationStrategy.NONE,
+        )
+        yield
+        del _REGISTRY[self.SUITE]
+
+    @staticmethod
+    def _task(score: float) -> dict:
+        return {
+            "metrics": {"exact_match": {"exact_match": score}},
+            "primary_metric": "exact_match:exact_match",
+            "num_instances": 100,
+        }
+
+    def _results(self, suffix: str = "") -> dict[str, dict]:
+        scores = {"task_solo": 0.9, "task_in": 0.6, "task_out": 0.45, "task_a": 0.2, "task_b": 0.4}
+        return {f"{name}{suffix}": self._task(score) for name, score in scores.items()}
+
+    def test_reports_each_nested_suite_but_no_parent_score(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        result = compute_suite_aggregations([self.SUITE], self._results())
+
+        assert set(result) == {"_test_none_gap", "_test_none_avg"}
+        gap = result["_test_none_gap"]
+        assert gap["metrics"]["primary_score"]["gap"] == pytest.approx(-0.15)
+        assert gap["container_suite"] == self.SUITE
+        average = result["_test_none_avg"]
+        assert average["metrics"]["primary_score"]["average"] == pytest.approx(0.3)
+        assert average["container_suite"] == self.SUITE
+
+    def test_priority_suffix_propagates_to_nested_suites(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        result = compute_suite_aggregations([f"{self.SUITE}@high"], self._results("@high"))
+
+        assert result["_test_none_gap@high"]["reference_task"] == "task_in@high"
+        assert result["_test_none_gap@high"]["container_suite"] == f"{self.SUITE}@high"
+
+    def test_nested_suite_without_results_is_omitted(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        task_results = self._results()
+        del task_results["task_out"]
+
+        result = compute_suite_aggregations([self.SUITE], task_results)
+
+        assert set(result) == {"_test_none_avg"}
+
+    def test_flat_unaggregated_suite_reports_nothing(self):
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        _REGISTRY["_test_none_flat"] = Suite(
+            name="_test_none_flat",
+            tasks=("task_a", "task_b"),
+            aggregation=AggregationStrategy.NONE,
+        )
+        try:
+            assert compute_suite_aggregations(["_test_none_flat"], self._results()) == {}
+        finally:
+            del _REGISTRY["_test_none_flat"]
+
+    def test_log_summary_keeps_every_task_row(self, capsys):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import log_summary
+
+        task_results = self._results()
+        suites = compute_suite_aggregations([self.SUITE], task_results)
+
+        log_summary({"tasks": task_results, "suites": suites})
+        captured = capsys.readouterr().out
+
+        for name in task_results:
+            assert name in captured
+        assert "-0.1500" in captured
+
+
 class TestGetPrimaryMetric:
     """Tests for get_primary_metric function.
 
