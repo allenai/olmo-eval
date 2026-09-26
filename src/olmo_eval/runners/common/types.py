@@ -42,6 +42,10 @@ class TaskResult:
     instances_processed: int = 0
     instances_failed: int = 0
     hard_failure_rate_exceeded: bool = False
+    # How the saved generations ended (cap-hit, empty, unclosed thinking trace);
+    # see olmo_eval.runners.processing.generation_counts. None for tasks that
+    # generate nothing, such as loglikelihood tasks.
+    generation_counts: dict[str, int] | None = None
 
     @property
     def hard_failure_rate(self) -> float:
@@ -75,6 +79,8 @@ class TaskResult:
             result["error"] = self.error
         if self.error_summary:
             result["error_summary"] = self.error_summary
+        if self.generation_counts is not None:
+            result["generation_counts"] = self.generation_counts
         if include_predictions and self.predictions:
             result["predictions"] = self.predictions
         return result
