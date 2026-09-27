@@ -347,6 +347,11 @@ multiprocessing.set_forkserver_preload(
 )
 """
 
+#: Wall-clock cap on one evaluation, overridable with ``OMNIDOCBENCH_EVAL_TIMEOUT_S``. A hung
+#: evaluator otherwise holds the run until the job's own limit and loses every prediction with
+#: it; past the cap the evaluation is reported as failed and the predictions are kept.
+_DEFAULT_EVAL_TIMEOUT_S = 12 * 3600
+
 
 def run_official_evaluation(
     predictions: Mapping[str, str],
@@ -382,27 +387,33 @@ def run_official_evaluation(
         result_dir.mkdir()
 
         log_path = work / "evaluator.log"
+        timeout_s = float(os.environ.get("OMNIDOCBENCH_EVAL_TIMEOUT_S") or _DEFAULT_EVAL_TIMEOUT_S)
         with open(log_path, "w") as log:
-            proc = subprocess.run(
-                [
-                    str(python),
-                    "-c",
-                    (_FORKSERVER_PRELUDE if version == "v1.6" else "") + _LAUNCH_SCRIPT,
-                    str(repo),
-                    str(repo / "pdf_validation.py"),
-                    "--config",
-                    str(config_path),
-                ],
-                cwd=work,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-            )
+            try:
+                proc = subprocess.run(
+                    [
+                        str(python),
+                        "-c",
+                        (_FORKSERVER_PRELUDE if version == "v1.6" else "") + _LAUNCH_SCRIPT,
+                        str(repo),
+                        str(repo / "pdf_validation.py"),
+                        "--config",
+                        str(config_path),
+                    ],
+                    cwd=work,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    timeout=timeout_s,
+                )
+                failure = f"failed (exit {proc.returncode})" if proc.returncode else None
+            except subprocess.TimeoutExpired:
+                failure = f"did not finish within {timeout_s:.0f}s"
         log_text = log_path.read_text(errors="replace")
-        metric_result = _load(result_dir, "metric_result")
-        if proc.returncode != 0 or not metric_result:
+        metric_result = None if failure else _load(result_dir, "metric_result")
+        if not metric_result:
             tail = "\n".join(log_text.splitlines()[-40:])
             raise RuntimeError(
-                f"OmniDocBench {version} evaluator failed (exit {proc.returncode}). "
+                f"OmniDocBench {version} evaluator {failure or 'wrote no metrics'}. "
                 f"Log tail:\n{tail}"
             )
 
