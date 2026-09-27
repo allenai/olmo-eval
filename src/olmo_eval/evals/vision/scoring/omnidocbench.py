@@ -333,6 +333,20 @@ sys.argv = [script, *sys.argv[3:]]
 runpy.run_path(script, run_name="__main__")
 """
 
+#: Prepended for v1.6, whose matching and TEDS worker threads start a helper process per
+#: LaTeX conversion and table, and abandon threads that pass the page timeout. Forking from
+#: those threads can leave a lock held forever (loguru takes its locks around every fork), which
+#: hangs the evaluation with no output. A fork server starts the helpers from a single-threaded
+#: process instead; they compute the same values. The preload spares each helper a fresh import
+#: of the evaluator.
+_FORKSERVER_PRELUDE = """
+import multiprocessing
+multiprocessing.set_start_method("forkserver")
+multiprocessing.set_forkserver_preload(
+    ["src.cli", "src.core.preprocess.text_postprocess", "src.metrics.cal_metric"]
+)
+"""
+
 
 def run_official_evaluation(
     predictions: Mapping[str, str],
@@ -373,7 +387,7 @@ def run_official_evaluation(
                 [
                     str(python),
                     "-c",
-                    _LAUNCH_SCRIPT,
+                    (_FORKSERVER_PRELUDE if version == "v1.6" else "") + _LAUNCH_SCRIPT,
                     str(repo),
                     str(repo / "pdf_validation.py"),
                     "--config",
