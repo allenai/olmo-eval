@@ -47,8 +47,9 @@ def ocr_question(
     :param style: The OCR style the task's answer form was trained under (:data:`OLMOCR_STYLE`
         or :data:`TEXTOCR_STYLE`).
     """
-    question = "" if prompt_templates == "none" else instruction
-    return apply_style_prefix(question, system_prompt_style, style)
+    # Eval-only: the released Molmo2 checkpoints get the instruction under the text_sft style
+    # whatever the prompt templates, as in their earlier OCR runs.
+    return apply_style_prefix(instruction, system_prompt_style, "text_sft")
 
 
 class OcrTask(ImageQATask):
