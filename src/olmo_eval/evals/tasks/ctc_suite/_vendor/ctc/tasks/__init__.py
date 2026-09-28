@@ -34,24 +34,23 @@ from ..format import registry
 __all__ = ["TASK_MODULES", "load_all", "loaded", "import_errors"]
 
 #: Task packages to import, in registration order. Add a task by adding its name here.
+#:
+#: **Vendored subset.** Upstream also ships ``redundancy``, ``mathmatch``, ``cycle``, ``groups4``,
+#: ``qa``, ``grouping_labeled`` and ``summarization``. None of them is in this harness's roster, so
+#: their packages are not vendored and their names are not listed here -- registering a spec
+#: nothing can run only widens the review surface, and summarization's did so while dragging an
+#: undeclared ``rouge_score`` import into the type check. See ``_vendor/MANIFEST.md``.
 TASK_MODULES: tuple = (
     "contradiction",
-    "redundancy",
     "strmatch",
-    "mathmatch",
-    "cycle",
-    "groups4",
     "textgroups",
     "absence",
     "xabsence",
     "retrieval",
-    "qa",
-    "grouping_labeled",
     "reorder",
     "outlier",
     "rerank",
     "oolong",
-    "summarization",
     "qdmatch",
 )
 

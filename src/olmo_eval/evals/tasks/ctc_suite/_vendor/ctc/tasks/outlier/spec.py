@@ -108,6 +108,10 @@ SPEC = TaskSpec(
     score=score,
     primary_metric="f1",
     max_new_tokens=256,
+    # "outliers", not "newline": OUTLIER_INSTRUCTION mandates a sentence naming the majority and
+    # outlier attributes BEFORE the "Outliers:" line, so a plain newline stop fires at the end of
+    # that mandated sentence and the ids never reach the parser at all -- a correct answer was
+    # recorded as a parse failure. Under this preset a gold-derived perfect answer scores 1.0.
     stop="outliers",
     answer_is_set=False,
     sources=("amazon", "wiki"),

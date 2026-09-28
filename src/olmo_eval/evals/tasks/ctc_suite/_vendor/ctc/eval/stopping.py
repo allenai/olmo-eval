@@ -36,6 +36,7 @@ __all__ = [
     "STOP_PRESETS",
     "OOLONG_ANSWER_MARKERS",
     "strip_think",
+    "in_unclosed_think",
     "apply",
 ]
 
@@ -66,11 +67,12 @@ class StopCondition:
         against the leading formatting newline described in the module docstring, which otherwise
         returns an empty generation for every example.
     :param require_before: Suppress text stops until one of these substrings appears
-        (case-insensitive); the earliest match also becomes the point the stop search starts from.
-        Used where the answer follows a templated marker line, so an earlier newline is part of the
-        preamble rather than the end of the answer: oolong's questions template three different
-        markers (:data:`OOLONG_ANSWER_MARKERS`), and outlier's instruction mandates a sentence
-        *before* the ``Outliers:`` line.
+        (case-insensitive); the **last** match also becomes the point the stop search starts from,
+        matching what the task's parser reads -- see :func:`should_stop`. Used where the answer
+        follows a templated marker line, so an earlier newline is part of the preamble rather than
+        the end of the answer: oolong's questions template three different markers
+        (:data:`OOLONG_ANSWER_MARKERS`), and outlier's instruction mandates a sentence *before* the
+        ``Outliers:`` line.
     :param bracketed_answer: The answer is a bracketed JSON literal. Suppresses text stops
         while a ``[`` is still unclosed, and while a markdown code fence is still open -- models
         routinely pretty-print the literal across lines or wrap it in ```` ```json ````, and a
@@ -178,6 +180,24 @@ def _in_open_bracket(text: str) -> bool:
     return text.count("[") > text.count("]")
 
 
+def in_unclosed_think(text: str) -> bool:
+    """
+    Public wrapper for :func:`_in_unclosed_think`.
+
+    A downstream harness (allenai/olmo-eval vendors this module) needs to ask the same question
+    this module asks internally when deciding whether a stop should fire: is the generation
+    currently truncated mid-reasoning? A harness that hits its own token budget while a ``<think>``
+    block is still open should treat that generation as a parse failure -- there is no concluded
+    answer yet, only the ids and claims the model was *considering* -- rather than handing the
+    truncated reasoning to a parser and scoring whatever it happens to find there.
+
+    :param text: Text generated so far (or the full generation, if decoding already finished).
+
+    :returns: True when the last ``<think>`` has no matching ``</think>`` after it.
+    """
+    return _in_unclosed_think(text)
+
+
 def strip_think(text: str) -> str:
     """
     Drop a reasoning block, keeping what the model concluded.
@@ -209,19 +229,32 @@ def should_stop(text: str, cond: StopCondition) -> Optional[int]:
         return None
     # When a marker gates stopping, the search must also START after it. Gating alone is not
     # enough: the first newline in an oolong generation is in the preamble, so searching from
-    # position 0 would end the answer before it began. With several markers the EARLIEST one wins,
-    # so a question templated 'Label: answer' is not held hostage to an 'answer:' that never comes.
+    # position 0 would end the answer before it began.
+    #
+    # The anchor is the LAST occurrence of any marker, not the earliest. oolong's own parser
+    # (ctc.tasks.oolong.spec.parse) reads the answer after the last marker it finds, precisely so
+    # that a model which reasons aloud and revises itself is graded on its final answer. Anchoring
+    # stopping on the earliest occurrence instead pointed the two at different spans: a preamble
+    # that names the marker word ("Counting each user: there are several.") anchored the search
+    # there, the newline closing that sentence fired the stop, and the real answer on the next line
+    # was truncated away before the parser ever saw it. What gets truncated must be what gets
+    # parsed, so both ends of the pipeline read the last marker.
     search_from = 0
     if cond.require_before:
         hits = []
         for marker in cond.require_before:
-            at = text.lower().find(marker.lower())
+            at = text.lower().rfind(marker.lower())
             if at != -1:
                 hits.append((at, marker))
         if not hits:
             return None
-        marker_at, marker = min(hits)
+        marker_at, marker = max(hits)
         search_from = marker_at + len(marker)
+        # A newline immediately after the marker is formatting ("Answer:\n1"), not the end of the
+        # answer -- skip it, or the empty span between the marker and that newline satisfies a
+        # "\n" stop and the answer is truncated to nothing.
+        if search_from < len(text) and text[search_from] == "\n":
+            search_from += 1
 
     best: Optional[int] = None
     for stop in cond.text_stops:
@@ -234,9 +267,7 @@ def should_stop(text: str, cond: StopCondition) -> Optional[int]:
                 at = text.find(stop, at + 1)
                 continue
             through = text[: at + len(stop)]
-            if cond.bracketed_answer and (
-                _in_open_fence(through) or _in_open_bracket(through)
-            ):
+            if cond.bracketed_answer and (_in_open_fence(through) or _in_open_bracket(through)):
                 # Same idea as the <think> rule, judged on the prefix so the incremental and
                 # whole-string paths agree: a newline in the middle of a pretty-printed literal,
                 # or on the ```json line that opens it, is formatting and not the end of the

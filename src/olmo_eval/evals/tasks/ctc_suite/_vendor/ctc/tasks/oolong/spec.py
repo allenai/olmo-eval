@@ -39,6 +39,19 @@ from .._retrieval import questions_block
 
 __all__ = ["SPEC", "build_query", "build_target", "parse", "score", "normalize"]
 
+# A comma inside a number is a thousands separator ("1,234") only when it groups digits three at a
+# time with no space -- that shape is tried FIRST so "1,234" parses as the whole number 1234 rather
+# than the truncated 234 a plain digit-run regex would leave after the comma. The plain-number
+# alternative is tried second, for everything else ("1234", "-5", "3.5").
+#
+# Deliberately NOT merging separate numbers: a comma-separated list ("3, 5, 7") is spaced and each
+# piece is fewer than the three digits the grouped form requires, so it never matches the grouped
+# alternative and each number is matched on its own. That is the right trade-off here, because a
+# NUMERIC oolong answer is a single number and the LAST match wins (see :func:`score`) -- merging
+# "3, 5, 7" into one number would be actively wrong, while reconstructing a single big number that
+# grouping commas split is exactly what is needed.
+_NUMERIC_RE = re.compile(r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+\.?\d*")
+
 
 def normalize(s: str) -> str:
     """
@@ -112,7 +125,7 @@ def parse(text: str, n_docs: Optional[int] = None) -> Optional[str]:
         if marker in lowered
     ]
     if ends:
-        return text[max(ends):].strip()
+        return text[max(ends) :].strip()
     return text.strip()
 
 
@@ -139,9 +152,9 @@ def score(parsed: Optional[str], gold, answer_type: str = "") -> Dict[str, float
         return {"score": 0.0, "exact_match": 0.0, "parsed": 0.0}
 
     if "NUMERIC" in (answer_type or ""):
-        nums = re.findall(r"-?\d+\.?\d*", parsed)
+        nums = _NUMERIC_RE.findall(parsed)
         try:
-            err = abs(float(gold_list[0]) - float(nums[-1]))
+            err = abs(float(gold_list[0]) - float(nums[-1].replace(",", "")))
             # Geometric decay, not a threshold: off-by-one must score better than off-by-ten, and
             # a hard exact-match would report both as total failure.
             return {"score": 0.75**err, "exact_match": float(err == 0), "parsed": 1.0}
