@@ -30,7 +30,7 @@ LENGTH_NAMES = {
     2097152: "2m",
 }
 
-# Standard HELMET lengths, vs. the tiers added by the long-context extension.
+# Standard HELMET lengths, and the longer tiers that only json_kv supports.
 STANDARD_CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072]
 EXTENDED_CONTEXT_SIZES = [262144, 524288, 1048576, 2097152]
 CONTEXT_SIZES = STANDARD_CONTEXT_SIZES + EXTENDED_CONTEXT_SIZES
@@ -241,7 +241,7 @@ def _generate_helmet_tasks() -> dict:
     tasks = {}
 
     for task_type, base_config in _BASE_TASKS.items():
-        for size in base_config.get("context_sizes", CONTEXT_SIZES):
+        for size in base_config.get("context_sizes", STANDARD_CONTEXT_SIZES):
             task_name = f"{task_type}__{size}"
 
             shots_by_size = base_config.get("shots_by_size")
