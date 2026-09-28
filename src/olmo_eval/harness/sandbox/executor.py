@@ -766,6 +766,40 @@ class SandboxExecutor:
 
         return ExecutionResult(exit_code == 0, full_output, exit_code)
 
+    async def execute_control(self, command: str, timeout: float = 30.0) -> ExecutionResult:
+        """Run a command without going through the sandbox's swe-rex server where possible.
+
+        Local Docker and Podman sandboxes run the command through the container
+        runtime, so it still completes while a long-running command keeps the
+        swe-rex server busy. Other modes fall back to the server.
+
+        Args:
+            command: The bash command to execute.
+            timeout: Timeout in seconds.
+
+        Returns:
+            ExecutionResult with stdout followed by stderr as its output.
+
+        Raises:
+            RuntimeError: If the sandbox is not started.
+        """
+        if self._runtime is None:
+            raise RuntimeError("Sandbox not started. Call start() first or use async context.")
+        try:
+            result = await self._execute_stream_control(command, timeout=timeout)
+        except TimeoutError:
+            return ExecutionResult(
+                success=False,
+                output=f"Command timed out after {timeout}s",
+                exit_code=-1,
+                error="timeout",
+            )
+        return ExecutionResult(
+            success=result.exit_code == 0,
+            output=result.stdout + result.stderr,
+            exit_code=result.exit_code,
+        )
+
     async def _execute_stream_control(self, command: str, timeout: float) -> _ControlCommandResult:
         """Run a short streaming-control command with a real client timeout.
 

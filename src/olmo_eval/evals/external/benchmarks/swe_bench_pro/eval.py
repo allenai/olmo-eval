@@ -477,7 +477,9 @@ class SWEBenchProExternalEval(ExternalEval):
     ) -> str:
         """Return the agent's changes to the repository, relative to ``baseline``, as a diff."""
         executor = sandbox_manager.get_executor(frozenset())
-        result = await executor.execute_command(
+        # A command the agent left running can keep the swe-rex server busy,
+        # so capture through the container runtime instead.
+        result = await executor.execute_control(
             capture_patch_command(task.working_dir, baseline), timeout=300.0
         )
         patch = parse_captured_patch(result.output)

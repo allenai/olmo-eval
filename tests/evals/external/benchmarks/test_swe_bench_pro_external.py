@@ -71,6 +71,7 @@ class FakeExecutor:
     def __init__(self, handler: Callable[[str], ExecutionResult] | None = None) -> None:
         self.handler = handler or (lambda _: ExecutionResult(success=True, output="", exit_code=0))
         self.commands: list[str] = []
+        self.control_commands: list[str] = []
         self.files: dict[str, str] = {}
 
     async def write_files(self, files: dict[str, str], timeout: float | None = None) -> None:
@@ -79,6 +80,10 @@ class FakeExecutor:
     async def execute_command(self, command: str, timeout: float | None = None, **_: Any):
         self.commands.append(command)
         return self.handler(command)
+
+    async def execute_control(self, command: str, timeout: float = 30.0):
+        self.control_commands.append(command)
+        return await self.execute_command(command, timeout)
 
 
 def _result(output: str = "", exit_code: int = 0) -> ExecutionResult:
@@ -523,7 +528,7 @@ class TestExecuteTask(unittest.TestCase):
         self.assertEqual(result.patch, "agent diff")
         self.assertTrue(result.resolved)
         agent_manager, grader = FakeSandboxManager.instances
-        capture = next(c for c in agent_manager.executor.commands if "git diff --cached" in c)
+        (capture,) = agent_manager.executor.control_commands
         self.assertIn(f"git diff --cached --binary {SHA}", capture)
         self.assertTrue(agent_manager.stopped and grader.stopped)
         self.assertIn(sbp_verifier.PATCH_PATH, " ".join(grader.executor.commands))

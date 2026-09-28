@@ -147,5 +147,40 @@ class TestStreamingControlCommand(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.exit_code, 0)
 
 
+class TestExecuteControl(unittest.IsolatedAsyncioTestCase):
+    def _executor(self) -> SandboxExecutor:
+        executor = SandboxExecutor(
+            SandboxConfig(image="test", mode=SandboxMode.DOCKER, container_runtime="podman")
+        )
+        executor._deployment = mock.Mock(container_name="sandbox-name")
+        executor._runtime = mock.Mock()
+        return executor
+
+    async def test_runs_through_container_runtime(self) -> None:
+        executor = self._executor()
+        with mock.patch("asyncio.create_subprocess_exec", return_value=_FakeProcess()):
+            result = await executor.execute_control("echo ok", timeout=2.0)
+
+        executor._runtime.execute.assert_not_called()
+        self.assertTrue(result.success)
+        self.assertEqual(result.output, "control output\n")
+        self.assertEqual(result.exit_code, 0)
+
+    async def test_timeout_returns_failed_result(self) -> None:
+        executor = self._executor()
+        with mock.patch("asyncio.create_subprocess_exec", return_value=_FakeProcess(block=True)):
+            result = await executor.execute_control("blocked", timeout=0.01)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.exit_code, -1)
+        self.assertEqual(result.error, "timeout")
+
+    async def test_requires_started_sandbox(self) -> None:
+        executor = self._executor()
+        executor._runtime = None
+        with self.assertRaises(RuntimeError):
+            await executor.execute_control("echo ok")
+
+
 if __name__ == "__main__":
     unittest.main()
