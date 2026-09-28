@@ -1040,7 +1040,7 @@ uv run olmo-eval run -m mock -t mmlu --dry-run
 External evals are standalone evaluations that run outside the normal task pipeline.
 Use them when a benchmark already comes with its own harness, verifier, or environment
 and does not fit cleanly into the usual task formatter/scorer flow. They are a good fit
-for agent-style benchmarks like `terminal_bench_2`, `tau2_bench`, and `asta_bench`
+for agent-style benchmarks like `terminal_bench_2`, `swe_bench_pro`, `tau2_bench`, and `asta_bench`
 that need sandbox orchestration, benchmark-specific setup, or end-to-end execution
 against an external repo or runner.
 
@@ -1097,7 +1097,17 @@ uv run olmo-eval external-evals
 
 # Run a built-in external eval
 uv run olmo-eval run-external -e tau2_bench --model llama3.1-8b -a domain=airline -a num_tasks=1
+
+# Run SWE-Bench Pro v2 on its HARD subset, four tasks at a time
+uv run olmo-eval run-external -e swe_bench_pro --model qwen3-coder-30b -a subset=hard -a max_concurrency=4
+
+# Check the SWE-Bench Pro grading pipeline with the reference patches
+uv run olmo-eval run-external -e swe_bench_pro --model qwen3-coder-30b -a oracle=true -a limit=5
 ```
+
+`swe_bench_pro` follows the benchmark's grading protocol: the agent works in the task image,
+its diff is captured and applied to a fresh container, and the task's hidden tests decide the
+result. The agent's container keeps network access, unlike the official locked protocol.
 
 ### ExternalEvalResult
 

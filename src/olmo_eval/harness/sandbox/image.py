@@ -63,6 +63,8 @@ def get_swerex_image(
     container_runtime: str = "docker",
     dockerfile_extra: tuple[str, ...] = (),
     require_registry: bool = False,
+    isolated: bool = False,
+    use_registry: bool = True,
 ) -> str:
     """Build a derived image with Python and swe-rex pre-installed.
 
@@ -75,6 +77,11 @@ def get_swerex_image(
         dockerfile_extra: Additional Dockerfile commands to inject.
         require_registry: If True, requires SWEREX_REGISTRY and returns registry URL.
             Use for Modal which needs remote-accessible images.
+        isolated: If True, install swe-rex under /opt/swerex without touching the
+            base image's PATH, packages, or Python. Use for images whose own
+            toolchain must stay first on PATH, such as repository test environments.
+        use_registry: If False, never pull from or push to SWEREX_REGISTRY. Use for
+            large per-task images that are not worth caching remotely.
 
     Returns:
         The derived image name with swe-rex installed. If require_registry=True,
@@ -87,6 +94,8 @@ def get_swerex_image(
     # Deterministic tag from content inputs
     extra_hash = ":".join(dockerfile_extra) if dockerfile_extra else ""
     hash_input = f"{base_image}:{UV_IMAGE}:{SWEREX_IMAGE_VERSION}:{extra_hash}"
+    if isolated:
+        hash_input += ":isolated"
     tag_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
 
     if tag_hash in _resolved_images:
@@ -94,7 +103,13 @@ def get_swerex_image(
         return _resolved_images[tag_hash]
 
     result = _resolve_swerex_image(
-        base_image, container_runtime, dockerfile_extra, require_registry, tag_hash
+        base_image,
+        container_runtime,
+        dockerfile_extra,
+        require_registry,
+        tag_hash,
+        isolated,
+        use_registry,
     )
     _resolved_images[tag_hash] = result
     return result
@@ -106,10 +121,12 @@ def _resolve_swerex_image(
     dockerfile_extra: tuple[str, ...],
     require_registry: bool,
     tag_hash: str,
+    isolated: bool = False,
+    use_registry: bool = True,
 ) -> str:
     """Core image resolution logic — called once per unique image hash."""
     config = get_infra_config()
-    registry = config.swerex_registry
+    registry = config.swerex_registry if use_registry or require_registry else ""
 
     if require_registry and not registry:
         raise ValueError(
@@ -178,28 +195,8 @@ def _resolve_swerex_image(
             stderr = result.stderr.decode() if result.stderr else "unknown error"
             logger.warning(f"Registry pull failed for {registry_image}: {stderr}")
 
-    # Build the image with Python (via uv venv), swe-rex, curl, and git.
-    # Seed pip into the venv because Modal adds a small builder layer on top of
-    # registry images and expects `python -m pip` to work inside the image.
     logger.info(f"Building swerex image from {base_image}...")
-
-    extra_lines = "\n".join(dockerfile_extra) if dockerfile_extra else ""
-
-    dockerfile = f"""\
-FROM {base_image}
-USER root
-# Disable apt sandboxing to avoid setgroups/setegid errors in rootless containers
-RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99-disable-sandbox
-RUN apt-get update && \\
-    apt-get install -y --no-install-recommends curl git ca-certificates && \\
-    rm -rf /var/lib/apt/lists/*
-COPY --from={UV_IMAGE} /uv /uvx /usr/local/bin/
-RUN uv venv /root/venv --python 3.12 --seed && \\
-    uv pip install --python /root/venv/bin/python --no-cache-dir swe-rex
-{extra_lines}
-ENV VIRTUAL_ENV="/root/venv"
-ENV PATH="/root/venv/bin:$PATH"
-"""
+    dockerfile = build_swerex_dockerfile(base_image, dockerfile_extra, isolated)
 
     result = subprocess.run(
         [container_runtime, "build", "-t", local_image, "-"],
@@ -234,6 +231,51 @@ ENV PATH="/root/venv/bin:$PATH"
         raise RuntimeError("Failed to push image to registry (unexpected state)")
 
     return local_image
+
+
+def build_swerex_dockerfile(
+    base_image: str,
+    dockerfile_extra: tuple[str, ...] = (),
+    isolated: bool = False,
+) -> str:
+    """Return the Dockerfile that layers swe-rex on top of ``base_image``.
+
+    The default layout installs Python, swe-rex, curl, and git, and puts the
+    swe-rex venv first on PATH. The isolated layout leaves the base image's
+    environment untouched and only exposes the ``swerex-remote`` entry point.
+    """
+    extra_lines = "\n".join(dockerfile_extra) if dockerfile_extra else ""
+
+    if isolated:
+        return f"""\
+FROM {base_image}
+USER root
+COPY --from={UV_IMAGE} /uv /opt/swerex/bin/uv
+RUN UV_PYTHON_INSTALL_DIR=/opt/swerex/python /opt/swerex/bin/uv venv /opt/swerex/venv \\
+        --python 3.12 --no-config && \\
+    /opt/swerex/bin/uv pip install --python /opt/swerex/venv/bin/python --no-cache \\
+        --no-config swe-rex && \\
+    ln -sf /opt/swerex/venv/bin/swerex-remote /usr/local/bin/swerex-remote
+{extra_lines}
+"""
+
+    # Seed pip into the venv because Modal adds a small builder layer on top of
+    # registry images and expects `python -m pip` to work inside the image.
+    return f"""\
+FROM {base_image}
+USER root
+# Disable apt sandboxing to avoid setgroups/setegid errors in rootless containers
+RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99-disable-sandbox
+RUN apt-get update && \\
+    apt-get install -y --no-install-recommends curl git ca-certificates && \\
+    rm -rf /var/lib/apt/lists/*
+COPY --from={UV_IMAGE} /uv /uvx /usr/local/bin/
+RUN uv venv /root/venv --python 3.12 --seed && \\
+    uv pip install --python /root/venv/bin/python --no-cache-dir swe-rex
+{extra_lines}
+ENV VIRTUAL_ENV="/root/venv"
+ENV PATH="/root/venv/bin:$PATH"
+"""
 
 
 def dependencies_to_dockerfile_extra(dependencies: tuple[str, ...]) -> tuple[str, ...]:
