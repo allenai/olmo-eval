@@ -89,6 +89,7 @@ def _convert_logprobs(
             {
                 "token": token_str,
                 "logprob": logprob_val,
+                "token_id": int(token_id),
                 "bytes": list(token_str.encode("utf-8")),
             }
         )
@@ -308,6 +309,9 @@ class VLLMProvider(InferenceProvider):
                         "num_tokens_all": num_tokens,
                     }
 
+                metadata["finish_reason"] = completion.finish_reason
+                metadata["completion_tokens"] = len(completion.token_ids)
+
                 request_outputs.append(
                     LMOutput(
                         text=completion.text,
@@ -471,6 +475,7 @@ class VLLMProvider(InferenceProvider):
                         {
                             "token": token_str,
                             "logprob": logprob_val,
+                            "token_id": int(token_id),
                             "bytes": list(token_str.encode("utf-8")),
                         }
                     )

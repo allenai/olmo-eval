@@ -78,6 +78,10 @@ def build_single_model_metrics(
             config=task_data.get("config"),
             duration_seconds=task_data.get("duration_seconds"),
             task_hash=task_data.get("task_hash"),
+            instances_saved=task_data.get("instances_saved"),
+            instances_processed=task_data.get("instances_processed"),
+            instances_failed=task_data.get("instances_failed"),
+            error_summary=task_data.get("error_summary"),
         )
         tasks_list.append(entry)
 
@@ -167,6 +171,10 @@ def build_multi_model_metrics(
                 config=task_data.get("config"),
                 duration_seconds=task_data.get("duration_seconds"),
                 task_hash=task_data.get("task_hash"),
+                instances_saved=task_data.get("instances_saved"),
+                instances_processed=task_data.get("instances_processed"),
+                instances_failed=task_data.get("instances_failed"),
+                error_summary=task_data.get("error_summary"),
             )
             tasks_list.append(entry)
 
@@ -281,8 +289,21 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
     table = Table(title="Results Summary")
     table.add_column("Task", style="cyan")
     table.add_column("Status")
+    table.add_column("Instances")
     table.add_column("Metric")
     table.add_column("Result")
+
+    def format_instances(task_data: dict[str, Any]) -> str:
+        """Render saved-vs-processed counts, so a partial task cannot read as whole."""
+        processed = task_data.get("instances_processed")
+        if not processed:
+            return "-"
+        saved = task_data.get("instances_saved", task_data.get("num_instances", 0))
+        failed = task_data.get("instances_failed") or 0
+        instances = f"{saved}/{processed}"
+        if failed:
+            instances += f" ({failed} failed)"
+        return instances
 
     def add_task_row(name: str, task_data: dict[str, Any]) -> None:
         metrics = task_data.get("metrics", {})
@@ -291,24 +312,33 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
         primary = get_primary_metric(metrics, preferred)
 
         metric_name = primary[0] if primary else (preferred or "-")
+        instances = format_instances(task_data)
 
         if error:
-            table.add_row(name, "[red]Failed[/red]", metric_name, str(error))
+            table.add_row(name, "[red]Failed[/red]", instances, metric_name, str(error))
         elif primary:
-            table.add_row(name, "[green]Success[/green]", metric_name, f"{primary[1]:.4f}")
+            table.add_row(
+                name, "[green]Success[/green]", instances, metric_name, f"{primary[1]:.4f}"
+            )
         else:
-            table.add_row(name, "[green]Success[/green]", metric_name, "-")
+            table.add_row(name, "[green]Success[/green]", instances, metric_name, "-")
 
     def _get_collapsed_tasks(suites: dict[str, Any]) -> set[str]:
         """Identify tasks collapsed into a sub-suite average.
 
-        When a parent suite uses AVERAGE_OF_AVERAGES and a child suite uses
-        AVERAGE, the child's individual tasks are represented by the sub-suite
-        row and should not appear separately.
+        When a parent suite uses AVERAGE_OF_AVERAGES and a child suite averages
+        its own tasks, the child's individual tasks are represented by the
+        sub-suite row and should not appear separately.
         """
+        from olmo_eval.evals.suites.registry import AggregationStrategy
+
+        averaging = {
+            AggregationStrategy.AVERAGE.value,
+            AggregationStrategy.WEIGHTED_AVERAGE.value,
+        }
         collapsed: set[str] = set()
         for suite_data in suites.values():
-            if suite_data.get("parent_suite") and suite_data.get("aggregation") == "average":
+            if suite_data.get("parent_suite") and suite_data.get("aggregation") in averaging:
                 collapsed.update(suite_data.get("tasks", []))
         return collapsed
 

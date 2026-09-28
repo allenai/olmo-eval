@@ -86,6 +86,28 @@ class StorageBackend(ABC):
         ...
 
 
+def combine_task_error(task_data: dict[str, Any]) -> str | None:
+    """Combine a task's error with its instance summary for the stored row.
+
+    The stored row has one text field for both, and they answer different
+    questions: the error says why the task was failed (e.g. the hard-failure
+    budget was blown), the summary says which instances failed and how. Preferring
+    one silently drops the other, so keep the classification first and append the
+    detail.
+
+    Args:
+        task_data: One task entry from the runner results dict.
+
+    Returns:
+        The combined string, whichever half is present alone, or None.
+    """
+    error = task_data.get("error")
+    summary = task_data.get("error_summary")
+    if error and summary and error != summary:
+        return f"{error} | {summary}"
+    return error or summary
+
+
 def convert_runner_results(
     results: dict[str, Any],
     experiment_id: str,
@@ -153,6 +175,12 @@ def convert_runner_results(
         if not task_hash:
             raise ValueError(f"task_hash is required for task '{spec}'")
 
+        # num_instances is required: suite aggregation weights tasks by it, and a
+        # result stored without one can never be weighted afterwards.
+        num_instances = task_data.get("num_instances")
+        if num_instances is None:
+            raise ValueError(f"num_instances is required for task '{spec}'")
+
         # Get task config if available
         task_config = task_data.get("config")
 
@@ -162,7 +190,10 @@ def convert_runner_results(
                 metrics=metrics,
                 task_hash=task_hash,
                 task_config=task_config,
-                num_instances=task_data.get("num_instances"),
+                num_instances=num_instances,
+                instances_processed=task_data.get("instances_processed"),
+                instances_failed=task_data.get("instances_failed"),
+                error_summary=combine_task_error(task_data),
                 primary_metric=primary_metric,
                 s3_metrics_key=s3_metrics_key,
                 s3_predictions_key=s3_predictions_key,

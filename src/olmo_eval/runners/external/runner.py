@@ -300,7 +300,7 @@ class ExternalEvalRunner:
                 "metrics": nested_metrics,
                 "task_hash": task_hash,
                 "config": task_config,
-                "num_instances": result.metadata.get("num_tasks"),
+                "num_instances": result.num_instances,
                 "primary_metric": primary_metric,
                 "duration_seconds": result.duration_seconds,
                 "success": result.success,

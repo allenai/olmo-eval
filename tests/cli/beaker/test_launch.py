@@ -296,17 +296,25 @@ class TestHarnessOverridesProviderDependencies:
             "git+https://github.com/allenai/OLMo-core.git@feature-branch"
         ]
 
-    def test_olmo_core_provider_package_accepts_version_shorthand(self):
+    @pytest.mark.parametrize("provider_kind", ["olmo_core", "olmo_core_vlm"])
+    def test_olmo_core_provider_package_accepts_version_shorthand(self, provider_kind):
         """Version-only OLMo-core package overrides should target ai2-olmo-core."""
         from olmo_eval.cli.beaker.job_assembler import normalize_provider_package_for_kind
 
         assert (
-            normalize_provider_package_for_kind("olmo_core", "2.3.0")
+            normalize_provider_package_for_kind(provider_kind, "2.3.0")
             == "ai2-olmo-core[torchao,transformers]==2.3.0"
         )
         assert (
-            normalize_provider_package_for_kind("olmo_core", ">=2.3,<2.4")
+            normalize_provider_package_for_kind(provider_kind, ">=2.3,<2.4")
             == "ai2-olmo-core[torchao,transformers]>=2.3,<2.4"
+        )
+        assert (
+            normalize_provider_package_for_kind(
+                provider_kind, "https://github.com/allenai/OLMo-core.git@feature-branch"
+            )
+            == "ai2-olmo-core[torchao,transformers] @ "
+            "git+https://github.com/allenai/OLMo-core.git@feature-branch"
         )
 
     def test_apply_harness_overrides_with_global_sandbox_override(self):
@@ -426,6 +434,82 @@ class TestJobConfigAssemblerEnvironment:
         command = assembler._build_command(exp)
 
         assert "--force-download-model" in command
+
+
+class TestPreemptionForwarding:
+    """Tests that preemption settings reach the Beaker job config."""
+
+    @pytest.mark.parametrize(
+        ("preemptible", "min_runtime"),
+        [(True, None), (False, None), (None, "2h")],
+    )
+    def test_task_job_forwards_preemption(self, preemptible, min_runtime):
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+        from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+
+        launch_config = LaunchConfig(
+            name="test",
+            model_specs=["test-model"],
+            task_specs=["humaneval"],
+            cluster="h100",
+            workspace="ai2/test",
+            budget="ai2/test",
+            preemptible=preemptible,
+            min_runtime=min_runtime,
+        )
+        exp = ExperimentPlan(
+            name="test",
+            model_spec="test-model",
+            priority="normal",
+            tasks=["humaneval"],
+            original_task_specs=["humaneval"],
+            total_expanded_tasks=1,
+            num_gpus=1,
+        )
+        assembler = JobConfigAssembler(
+            config=launch_config,
+            effective_image="test-image",
+            effective_groups=[],
+            beaker_username="test-user",
+            common_secrets=[],
+            store_secrets=[],
+            task_secrets=[],
+            inject_aws_credentials=False,
+            inject_gcs_credentials=False,
+        )
+
+        job_config = assembler.assemble(exp)
+
+        assert job_config.preemptible is preemptible
+        assert job_config.min_runtime == min_runtime
+
+    def test_external_eval_job_forwards_min_runtime(self):
+        from olmo_eval.cli.beaker.job_assembler import assemble_external_eval_job
+
+        job_config = assemble_external_eval_job(
+            name="test",
+            model="test-model",
+            external_evals=["tau2_bench"],
+            cluster="h100",
+            num_gpus=1,
+            workspace="ai2/test",
+            beaker_image="test-image",
+            preemptible=None,
+            min_runtime="2h",
+        )
+
+        assert job_config.preemptible is None
+        assert job_config.min_runtime == "2h"
+
+    def test_resolve_preemption(self):
+        from olmo_eval.cli.beaker.config_loader import resolve_preemption
+
+        assert resolve_preemption(None, None) == (True, None)
+        assert resolve_preemption(False, None) == (False, None)
+        assert resolve_preemption(None, "2h") == (None, "2h")
+        with pytest.raises(ValueError, match="cannot both be set"):
+            resolve_preemption(True, "2h")
 
 
 class TestTaskExpansionInExperimentSummary:

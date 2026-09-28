@@ -53,6 +53,7 @@ class IFEvalMTBase(Task):
         IFEvalInstLooseAccuracy(),
     )
     primary_metric = _PRIMARY_METRIC
+    strip_thinking = True
     sampling_params = _SAMPLING_PARAMS
 
     @property
