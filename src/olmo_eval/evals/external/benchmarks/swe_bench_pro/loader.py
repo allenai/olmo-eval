@@ -5,8 +5,11 @@ from __future__ import annotations
 import logging
 import subprocess
 import tomllib
+from collections.abc import Iterable, Mapping
 from pathlib import Path
+from typing import Any
 
+from . import v1
 from .task import SWEBenchProTask, repo_from_instance_id
 
 logger = logging.getLogger(__name__)
@@ -130,6 +133,51 @@ class SWEBenchProLoader:
             verifier_timeout=float(verifier_config.get("timeout_sec", DEFAULT_TIMEOUT_SECONDS)),
             hard=hard,
         )
+
+    def load_v1_tasks(
+        self,
+        repo_dir: Path,
+        rows: Iterable[Mapping[str, Any]] | None = None,
+        instance_ids: list[str] | None = None,
+    ) -> list[SWEBenchProTask]:
+        """Load tasks from the original v1 release.
+
+        Args:
+            repo_dir: Path to the harness repository, which holds the v1 run scripts.
+            rows: v1 dataset rows. Fetched from Hugging Face when omitted.
+            instance_ids: Optional instance IDs to keep (default: all).
+
+        Returns:
+            Tasks sorted by instance ID.
+        """
+        run_scripts_dir = repo_dir / "run_scripts"
+        if not run_scripts_dir.is_dir():
+            raise FileNotFoundError(f"No v1 run script directory at {run_scripts_dir}")
+
+        if rows is None:
+            rows = self.fetch_v1_rows()
+        wanted = set(instance_ids) if instance_ids else None
+        selected = [r for r in rows if wanted is None or r["instance_id"] in wanted]
+
+        if wanted is not None:
+            missing = wanted - {r["instance_id"] for r in selected}
+            if missing:
+                logger.warning(f"Unknown SWE-Bench Pro v1 instance IDs: {sorted(missing)}")
+
+        tasks = sorted(
+            (v1.task_from_row(row, run_scripts_dir) for row in selected),
+            key=lambda t: t.instance_id,
+        )
+        logger.info(f"Loaded {len(tasks)} SWE-Bench Pro v1 tasks")
+        return tasks
+
+    @staticmethod
+    def fetch_v1_rows(revision: str = v1.DATASET_REVISION) -> list[dict[str, Any]]:
+        """Download the v1 dataset rows from Hugging Face."""
+        from datasets import load_dataset
+
+        dataset = load_dataset(v1.DATASET_NAME, revision=revision, split="test")
+        return [dict(row) for row in dataset]
 
     @staticmethod
     def _read_id_list(path: Path) -> set[str]:

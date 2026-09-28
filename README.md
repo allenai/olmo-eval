@@ -1103,11 +1103,16 @@ uv run olmo-eval run-external -e swe_bench_pro --model qwen3-coder-30b -a subset
 
 # Check the SWE-Bench Pro grading pipeline with the reference patches
 uv run olmo-eval run-external -e swe_bench_pro --model qwen3-coder-30b -a oracle=true -a limit=5
+
+# Run the original 731-task SWE-Bench Pro release (v1)
+uv run olmo-eval run-external -e swe_bench_pro_v1 --model qwen3-coder-30b -a max_concurrency=4
 ```
 
 `swe_bench_pro` follows the benchmark's grading protocol: the agent works in the task image,
 its diff is captured and applied to a fresh container, and the task's hidden tests decide the
 result. The agent's container keeps network access, unlike the official locked protocol.
+`swe_bench_pro_v1` grades the original release the way its official harness does, including
+the dataset's known defects in some test lists. Prefer v2 for new results.
 
 ### ExternalEvalResult
 

@@ -37,6 +37,7 @@ class SWEBenchProTask:
         agent_timeout: Wall-clock budget for the agent in seconds.
         verifier_timeout: Timeout for the verifier in seconds.
         hard: Whether the task belongs to the HARD subset.
+        dockerfile_extra: Extra Dockerfile lines applied when deriving the sandbox image.
     """
 
     instance_id: str
@@ -49,3 +50,4 @@ class SWEBenchProTask:
     agent_timeout: float
     verifier_timeout: float
     hard: bool = False
+    dockerfile_extra: tuple[str, ...] = ()

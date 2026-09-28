@@ -21,6 +21,7 @@ from parameterized import parameterized
 from olmo_eval.common.execution import ExecutionResult
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.evals.external.benchmarks.swe_bench_pro import eval as sbp_eval
+from olmo_eval.evals.external.benchmarks.swe_bench_pro import v1 as sbp_v1
 from olmo_eval.evals.external.benchmarks.swe_bench_pro import verifier as sbp_verifier
 from olmo_eval.evals.external.benchmarks.swe_bench_pro.loader import SWEBenchProLoader
 from olmo_eval.evals.external.benchmarks.swe_bench_pro.task import (
@@ -596,6 +597,130 @@ class TestRegistration(unittest.TestCase):
         swe_eval = get_external_eval("swe_bench_pro")
         self.assertIsInstance(swe_eval, sbp_eval.SWEBenchProExternalEval)
         self.assertEqual(swe_eval.version, "v2")  # type: ignore[attr-defined]
+
+
+def _v1_row(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "instance_id": INSTANCE_ID,
+        "repo": "element-hq/element-web",
+        "base_commit": "b" * 40,
+        "patch": "gold diff",
+        "problem_statement": '"Fix the \\"thing\\"."',
+        "requirements": "Must not crash.",
+        "interface": "No new interfaces are introduced.",
+        "fail_to_pass": "['test/a.js | works']",
+        "pass_to_pass": '["test/b.js | still works"]',
+        "selected_test_files_to_run": "['test/a.js', 'test/b.js']",
+        "before_repo_set_cmd": (
+            f"git reset --hard {'b' * 40}\ngit clean -fd \n"
+            f"git checkout {SHA} -- test/a.js test/b.js\n"
+        ),
+        "dockerhub_tag": "element-hq.element-web-abc",
+    }
+    row.update(overrides)
+    return row
+
+
+class TestV1Fields(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ('["a", "b"]', ["a", "b"]),
+            ("['a', \"b's\"]", ["a", "b's"]),
+            (["a"], ["a"]),
+            ("", []),
+            (None, []),
+        ]
+    )
+    def test_parse_list_field(self, value: Any, expected: list[str]) -> None:
+        self.assertEqual(sbp_v1.parse_list_field(value), expected)
+
+    def test_parse_list_field_rejects_non_list(self) -> None:
+        with self.assertRaises(ValueError):
+            sbp_v1.parse_list_field('{"a": 1}')
+
+    @parameterized.expand(
+        [
+            ('"line one\\nline two"', "line one\nline two"),
+            ("plain text", "plain text"),
+            ('"unterminated', '"unterminated'),
+            (None, ""),
+        ]
+    )
+    def test_parse_text_field(self, value: Any, expected: str) -> None:
+        self.assertEqual(sbp_v1.parse_text_field(value), expected)
+
+    def test_build_instruction_combines_fields(self) -> None:
+        instruction = sbp_v1.build_instruction(_v1_row())
+        self.assertIn('Fix the "thing".', instruction)
+        self.assertIn("Requirements:\nMust not crash.", instruction)
+        self.assertIn("New interfaces introduced:\nNo new interfaces", instruction)
+        self.assertIn("<uploaded_files>\n/app\n</uploaded_files>", instruction)
+
+    def test_build_test_script_runs_last_setup_line_and_selected_tests(self) -> None:
+        script = sbp_v1.build_test_script(_v1_row())
+        self.assertIn(f"git checkout {SHA} -- test/a.js test/b.js", script)
+        self.assertNotIn("git reset --hard", script)
+        self.assertIn("bash /tests/run_script.sh test/a.js,test/b.js >", script)
+        self.assertIn("/logs/verifier/reward.txt", script)
+        self.assertIn("/logs/verifier/run-script-stdout.txt", script)
+
+
+class TestV1Loader(unittest.TestCase):
+    def setUp(self) -> None:
+        self.repo_dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.repo_dir)
+        self.other_id = f"instance_NodeBB__NodeBB-{SHA}-vnan"
+        for instance_id in (INSTANCE_ID, self.other_id):
+            scripts = self.repo_dir / "run_scripts" / instance_id
+            scripts.mkdir(parents=True)
+            (scripts / "run_script.sh").write_text("#!/bin/bash\n")
+            (scripts / "parser.py").write_text("print('parse')\n")
+
+    def test_task_from_row(self) -> None:
+        task = sbp_v1.task_from_row(_v1_row(), self.repo_dir / "run_scripts")
+        self.assertEqual(task.image, "jefzda/sweap-images:element-hq.element-web-abc")
+        self.assertEqual(task.gold_patch, "gold diff")
+        self.assertEqual(task.dockerfile_extra, ("ENTRYPOINT []",))
+        self.assertEqual(
+            set(task.test_files), {"test.sh", "run_script.sh", "parser.py", "config.json"}
+        )
+        config = json.loads(task.test_files["config.json"])
+        self.assertEqual(config["fail_to_pass"], ["test/a.js | works"])
+        self.assertEqual(config["pass_to_pass"], ["test/b.js | still works"])
+
+    def test_task_without_run_script_is_rejected(self) -> None:
+        row = _v1_row(instance_id=f"instance_owner__repo-{'9' * 40}")
+        with self.assertRaises(FileNotFoundError):
+            sbp_v1.task_from_row(row, self.repo_dir / "run_scripts")
+
+    def test_load_v1_tasks_filters_and_sorts(self) -> None:
+        rows = [_v1_row(), _v1_row(instance_id=self.other_id, repo="NodeBB/NodeBB")]
+        loader = SWEBenchProLoader()
+        tasks = loader.load_v1_tasks(self.repo_dir, rows)
+        self.assertEqual([t.instance_id for t in tasks], sorted([INSTANCE_ID, self.other_id]))
+        tasks = loader.load_v1_tasks(self.repo_dir, rows, instance_ids=[self.other_id])
+        self.assertEqual([t.instance_id for t in tasks], [self.other_id])
+
+    def test_v1_eval_rejects_subsets(self) -> None:
+        swe_eval = sbp_eval.SWEBenchProExternalEval("v1")
+        args = sbp_eval.SWEBenchProArgs.from_dict({"subset": "hard"})
+        with self.assertRaises(ValueError):
+            swe_eval.load_tasks(self.repo_dir, args)
+
+    def test_v1_eval_loads_tasks_with_limit(self) -> None:
+        swe_eval = sbp_eval.SWEBenchProExternalEval("v1")
+        rows = [_v1_row(), _v1_row(instance_id=self.other_id, repo="NodeBB/NodeBB")]
+        args = sbp_eval.SWEBenchProArgs.from_dict({"limit": 1})
+        with mock.patch.object(SWEBenchProLoader, "fetch_v1_rows", return_value=rows):
+            tasks = swe_eval.load_tasks(self.repo_dir, args)
+        self.assertEqual(len(tasks), 1)
+
+
+class TestV1Registration(unittest.TestCase):
+    def test_v1_is_registered(self) -> None:
+        swe_eval = get_external_eval("swe_bench_pro_v1")
+        self.assertIsInstance(swe_eval, sbp_eval.SWEBenchProExternalEval)
+        self.assertEqual(swe_eval.version, "v1")  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":

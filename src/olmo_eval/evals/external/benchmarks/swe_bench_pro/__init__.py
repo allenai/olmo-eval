@@ -11,3 +11,4 @@ from olmo_eval.evals.external.benchmarks.swe_bench_pro.eval import SWEBenchProEx
 from olmo_eval.evals.external.registry import register_external_eval
 
 register_external_eval(SWEBenchProExternalEval("v2"))
+register_external_eval(SWEBenchProExternalEval("v1"))

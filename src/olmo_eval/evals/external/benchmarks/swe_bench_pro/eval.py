@@ -192,11 +192,14 @@ class SWEBenchProExternalEval(ExternalEval):
     def load_tasks(self, repo_dir: Path, args: SWEBenchProArgs) -> list[SWEBenchProTask]:
         """Load and filter the tasks selected by ``args``."""
         loader = SWEBenchProLoader()
-        if self._version != "v2":
-            raise NotImplementedError(f"SWE-Bench Pro {self._version} is not supported yet")
-        tasks = loader.load_v2_tasks(
-            repo_dir, instance_ids=args.instance_ids, hard_only=args.subset == "hard"
-        )
+        if self._version == "v1":
+            if args.subset != "all":
+                raise ValueError("SWE-Bench Pro v1 has no task subsets")
+            tasks = loader.load_v1_tasks(repo_dir, instance_ids=args.instance_ids)
+        else:
+            tasks = loader.load_v2_tasks(
+                repo_dir, instance_ids=args.instance_ids, hard_only=args.subset == "hard"
+            )
         if args.limit is not None:
             tasks = tasks[: args.limit]
         return tasks
@@ -233,7 +236,7 @@ class SWEBenchProExternalEval(ExternalEval):
             repo_dir = Path("/tmp") / "swe-bench-pro-cache"
             await asyncio.to_thread(SWEBenchProLoader().ensure_repo, repo_dir, sbp_args.repo_ref)
 
-        tasks = self.load_tasks(repo_dir, sbp_args)
+        tasks = await asyncio.to_thread(self.load_tasks, repo_dir, sbp_args)
         if not tasks:
             return self._error_result(
                 "No tasks found",
@@ -613,7 +616,9 @@ def _prepare_image(task: SWEBenchProTask, runtime: str) -> str:
     from olmo_eval.harness.sandbox.image import get_swerex_image
 
     with _IMAGE_LOCK:
-        return get_swerex_image(task.image, runtime, isolated=True, use_registry=False)
+        return get_swerex_image(
+            task.image, runtime, task.dockerfile_extra, isolated=True, use_registry=False
+        )
 
 
 def _remove_images(runtime: str, images: list[str | None]) -> None:
