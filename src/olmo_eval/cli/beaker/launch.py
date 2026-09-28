@@ -82,7 +82,19 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     default=None,
     help="Job priority level (low, normal, high, urgent). Can also use @priority suffix on tasks.",
 )
-@click.option("--preemptible/--no-preemptible", default=None, help="Allow preemption")
+@click.option(
+    "--preemptible/--no-preemptible",
+    default=None,
+    help="Allow preemption (deprecated by Beaker; prefer --min-runtime)",
+)
+@click.option(
+    "--min-runtime",
+    default=None,
+    help=(
+        "Minimum runtime before Beaker may preempt the job (e.g., 2h, 30m). "
+        "Replaces --preemptible/--no-preemptible."
+    ),
+)
 @click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
 @click.option("--workspace", "-w", help="Beaker workspace")
@@ -258,6 +270,7 @@ def launch(
     max_gpus_per_node: int | None,
     priority: str | None,
     preemptible: bool | None,
+    min_runtime: str | None,
     timeout: str | None,
     retries: int | None,
     workspace: str | None,
@@ -378,6 +391,7 @@ def launch(
         "max_gpus_per_node": max_gpus_per_node,
         "priority": priority,
         "preemptible": preemptible,
+        "min_runtime": min_runtime,
         "timeout": timeout,
         "retries": retries,
         "workspace": workspace,
@@ -456,6 +470,7 @@ def launch(
             provider_kwargs=parsed_provider_kwargs if parsed_provider_kwargs else None,
             uv_cache_dir=uv_cache_dir,
             preemptible=preemptible,
+            min_runtime=min_runtime,
             retries=retries,
             gpus=gpus,
             force_download_model=force_download_model,
@@ -1023,6 +1038,7 @@ def _launch_external_evals(
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
     preemptible: bool | None = None,
+    min_runtime: str | None = None,
     retries: int | None = None,
     gpus: int | None = None,
     force_download_model: bool = False,
@@ -1032,6 +1048,7 @@ def _launch_external_evals(
     This path mirrors the task-based launch flow but for external evaluations
     that run in sandbox containers with subcontainer support.
     """
+    from olmo_eval.cli.beaker.config_loader import resolve_preemption
     from olmo_eval.cli.beaker.credentials import CredentialManager
     from olmo_eval.cli.beaker.job_assembler import assemble_external_eval_job
     from olmo_eval.common.configs import get_provider_config
@@ -1074,7 +1091,11 @@ def _launch_external_evals(
     effective_priority = priority or "normal"
     effective_timeout = timeout or "24h"
     effective_image = image or BEAKER_SANDBOX_IMAGE
-    effective_preemptible = preemptible if preemptible is not None else True
+    try:
+        effective_preemptible, effective_min_runtime = resolve_preemption(preemptible, min_runtime)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from None
 
     # Create launcher
     launcher = BeakerLauncher(workspace=effective_workspace)
@@ -1207,6 +1228,7 @@ def _launch_external_evals(
             uv_cache_dir=uv_cache_dir,
             beaker_username=beaker_username,
             preemptible=effective_preemptible,
+            min_runtime=effective_min_runtime,
             retries=retries,
             provider_kind=str(provider_config.kind),
             base_url=provider_config.base_url,

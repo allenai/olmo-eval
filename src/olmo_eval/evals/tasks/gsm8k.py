@@ -74,10 +74,7 @@ class GSM8K(Task):
                     },
                 )
             )
-        num = self.config.num_fewshot
-        if num and num < len(instances):
-            instances = instances[:num]
-        return instances
+        return instances[: self.config.num_fewshot]
 
     def format_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
