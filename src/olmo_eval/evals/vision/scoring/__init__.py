@@ -15,6 +15,10 @@ from olmo_eval.evals.vision.scoring.math_vista_offline import (
     normalize_extracted_answer,
     safe_equal,
 )
+from olmo_eval.evals.vision.scoring.multi_image import (
+    multi_image_mc_score,
+    strip_multi_image_response,
+)
 from olmo_eval.evals.vision.scoring.multiple_choice import (
     eval_multi_choice,
     eval_open,
@@ -62,6 +66,7 @@ __all__ = [
     "math_vista_score_from_extraction",
     "math_vista_score_offline",
     "mmmu_score",
+    "multi_image_mc_score",
     "normalize_extracted_answer",
     "parse_count",
     "parse_multi_choice_response",
@@ -73,5 +78,6 @@ __all__ = [
     "relaxed_correctness",
     "scifi_relaxed_correctness",
     "select_mc_option",
+    "strip_multi_image_response",
     "vqa_score",
 ]
