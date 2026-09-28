@@ -350,3 +350,33 @@ class TestPointingScoringDependencies:
         )
         with pytest.raises(KeyError, match="image_size"):
             PointingScorer().score(instance, LMOutput(text="none"))
+
+
+class TestPixmoImageSize:
+    """An absent phrase has no mask, so its size must come from the image itself."""
+
+    def test_absent_phrase_reads_the_image_header(self, tmp_path, monkeypatch):
+        PIL_Image = pytest.importorskip("PIL.Image")
+        datasets = pytest.importorskip("datasets")
+        from olmo_eval.evals.vision.benchmarks import pixmo_points_eval as pixmo
+
+        image = tmp_path / "scene.png"
+        PIL_Image.new("RGB", (40, 30)).save(image)
+        rows = [
+            {
+                "label": "cat",
+                "segmentation_rles": [{"size": [20, 10], "counts": "x"}],
+                "image": str(image),
+                "example_id": "present",
+            },
+            {"label": "dog", "segmentation_rles": [], "image": str(image), "example_id": "absent"},
+        ]
+        monkeypatch.setattr(datasets, "load_from_disk", lambda path: rows)
+        monkeypatch.setattr(pixmo, "torch_datasets_dir", lambda: tmp_path)
+        monkeypatch.setattr(pixmo, "rebase_data_path", lambda path: path)
+
+        sizes = {
+            inst.metadata["example_id"]: inst.metadata["image_size"]
+            for inst in pixmo._build_instances(lambda label, idx: label)
+        }
+        assert sizes == {"present": (10, 20), "absent": (40, 30)}
