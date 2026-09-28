@@ -80,12 +80,35 @@ cap is documented on its RosterRow.
   of generations emitting any `[id]` is 3.5-13.5% at 450M and 5-61% at 810M, reaching ~100% at
   1.4B. Read `parse_rate` before reading a score from a sub-1B checkpoint.
 - Rungs ≥256k hold **125 examples** (seeded subsample; SE ≈ ±0.041 at f1≈0.7). `ctc_scifact` is
-  300 and `ctc_obliq` 126 at every rung. Everything else is 500. Quote sizes inline.
+  300 and `ctc_obliq` 123–126 at every rung. `ctc_absence` r16k is 148 (bounded by book length) and
+  `ctc_oolong` is *larger* than the default at r64k (668) and r128k (669). Everything else is 500.
+  Every exception is recorded in `RosterRow.eval_size` and pinned by test; quote sizes inline.
 - **rerank's metric is ce_pos_recall**: the fraction of documents with cross-encoder score > 0
   (median 3, p90 5 per example) present in the model's first 10 emitted ids. Single-qrel MRR@10
   saturates at ~0.98 and is emitted only as a secondary. Relevance in this data is bimodal
   (nothing between CE −5 and 0), which is also why an NDCG@10 over CE gains would collapse to
-  the top-3 — measured before this metric was chosen.
+  the top-3 — measured before this metric was chosen. **14 of 500 rows at r2k and at r32k have no
+  CE-positive document at all**, so the metric is undefined there rather than zero: those rows are
+  excluded from the mean, and `ce_ref_available` reports what fraction of rows the mean covers.
+  Averaging them in as zeros held a perfect model's ceiling at 0.972.
+- **`ctc_reorder`'s kendall_tau ranges over [-1, 1]**, not [0, 1]: 0.0 is chance, not the floor,
+  and −1.0 is an exactly reversed ordering. Suite aggregation is DISPLAY_ONLY partly for this
+  reason; never average it by hand against the f1-style rows.
+- **`ctc_obliq` decodes with a 512-token budget**, not the retrieval family's 64. Its gold sets
+  reach 64 ids where the rest of the family has at most 3, and the longest perfect answer measures
+  311 Qwen3 tokens at r32k and 404 at r1m — under a 64-token budget 27/126 rows at r32k were
+  truncated into partial credit, capping the row at mean f1 0.953.
+- **`ctc_outlier` and `ctc_outlier_fixedm` are graded under an instruction that says "product
+  reviews"** even though their corpora are Wikipedia topic chunks (only `ctc_outlier_amzn` is
+  reviews). The wording is the reference's and is kept verbatim, because every published number for
+  those rows was produced under it; changing it would reprice the row and invalidate the
+  checkpoints' format fingerprint.
+- **Reasoning models.** A generation whose `<think>` block is never closed is scored as a parse
+  failure, not handed to the parser: the ids in an unfinished trace are the ones the model was
+  still weighing, and crediting them rewards thinking out loud. Give such a model room to finish
+  instead — `config.sampling_params` overrides the suite's budget field by field, so
+  `-o sampling_params.max_tokens=4096` genuinely raises it (it used to change the task hash and
+  nothing else).
 - **A rung label is a build target, not a per-task guarantee.** Labels were set from the reference
   prompt path, and the xlong rungs were confirmed against it (real 1M rows measure p50 1.03–1.07M
   tokens). But on the 2k–32k ladder, measurement through the Qwen3.5 tokenizer found two rows
@@ -108,24 +131,52 @@ cap is documented on its RosterRow.
 - Contexts ≥256k exceed most models' native windows; the serving side (YaRN etc.) is the caller's
   responsibility and belongs next to any reported number.
 
+### Grading changed after the published grid — for four rows
+
+The vendored graders are golden-fixture tested against the pre-migration implementation, but four
+fixes have landed *since* the reference grid was produced, and each one raises a correct answer's
+score. **Numbers for these rows are not comparable across the change**, and where an old number
+exists it came from the old grader:
+
+| Row(s) | What changed | Effect |
+|---|---|---|
+| `ctc_outlier`, `ctc_outlier_amzn`, `ctc_outlier_fixedm` | stop preset `newline` → `outliers`: the instruction mandates a sentence before the `Outliers:` line, so the newline stop fired there and the ids never reached the parser | a gold-derived perfect answer went from a parse failure to 1.0 |
+| `ctc_oolong` | the parser and the stop rule both read the **last** of three templated markers (`Answer:`/`Label:`/`User:`); previously the parser matched only `answer:` and the stop rule anchored on the earliest marker | correct answers that were scored 0 now score correctly |
+| `ctc_grouping` | `pairwise_metrics` scored an all-singleton gold partition 0 even for an exact match | 48/500 r2k rows; the perfect-answer ceiling moves 0.904 → 1.0 |
+| `ctc_obliq` | decode budget 64 → 512 tokens | 27/126 r32k rows were truncated; the ceiling moves 0.953 → 1.0 |
+
+Everything else is unchanged. A parity table of one model's per-row score against the reference
+grid has not been produced for this PR — it needs a GPU run, not a code change.
+
 ## Design and provenance
 
 - Prompt templates, parsers, metrics, gold-index conventions and stop rules are **vendored
-  byte-faithful** under `_vendor/` from the `ctc` package (AI2 OLMo-core branch `prasann/ctc`,
-  re-vendored 2026-09-09 at `c2b345fba`; every vendored file is byte-identical to it). Only the
-  subtrees this harness reads are vendored -- `format/`, `tasks/`, `eval/stopping.py` and the pure
-  `data/ladders.py` table; the generators, backends and runner are not,
-  where they are golden-fixture-tested against the implementation that produced the suite's
-  published numbers. Fix upstream and re-vendor; do not edit `_vendor/` (it is ruff-excluded to
-  stay diffable).
+  byte-faithful** under `_vendor/` from the `ctc` package (AI2 OLMo-core branch `prasann/ctc`, at
+  commit **`a5f6a2729`**, which is also `ctc_suite.UPSTREAM_COMMIT`), where they are
+  golden-fixture-tested against the implementation that produced the suite's published numbers.
+  Only the subtrees this harness reads are vendored; `_vendor/MANIFEST.md` lists exactly what was
+  taken, the one deliberate omission, and the re-vendoring steps. **Fix upstream and re-vendor; do
+  not edit `_vendor/`** (it is ruff-excluded to stay diffable, but `ty check src/` does cover it).
+  This rule was broken once: the stop-rule work in `69729fad` was written straight into the
+  vendored copy, so the copy silently ran ahead of the code it is supposed to mirror and a routine
+  re-vendor would have reverted it. Those changes are upstream now.
 - Scoring mirrors the reference runner call-for-call: stop-rule cleanup →
   `spec.parse(text, n_docs)` → `spec.score(parsed, gold)` with the spec's declared gold field.
 - Gold conventions are pinned by test: the pair family stores 1-based indices, the retrieval
   family 0-based, and answering with the wrong base scores zero silently — the class of bug the
   vendoring exists to prevent (`tests/evals/tasks/test_ctc_suite.py`).
 - Data: `PrasannSinghal/ctc-suite-eval` (public HF; parquet, one config per task, one split per
-  rung). Gold answers included: exclude from pretraining corpora. `CTC_SUITE_DATA_ROOT=/path` substitutes a local `<subset>/rung_<tokens>.jsonl` tree at
-  load time. Hub copies strip builder-metadata keys and serialize the free-form `meta` dict to a
-  JSON string (schema stability across splits); grading reads neither.
+  rung), **pinned at revision `04ab8600…`** (`ctc_suite.HF_REVISION`). The pin is serialized into
+  the task config, so a dataset rebuild — and this one has been rebuilt, for the xabsence
+  exact-copy build and the rerank repricing — produces a new task hash instead of quietly changing
+  what an already-stored number meant. Gold answers included: exclude from pretraining corpora.
+  `CTC_SUITE_DATA_ROOT=/path` substitutes a local `<subset>/rung_<tokens>.jsonl` tree; the local
+  path *replaces* the config's data source, so an unvalidated local ladder also gets its own task
+  hash rather than being filed under the published data's. Hub copies strip builder-metadata keys
+  and serialize the free-form `meta` dict to a JSON string (schema stability across splits);
+  grading reads neither.
+- The namespace is personal for now. If the dataset moves under `allenai/`, that is a new
+  `HF_DATASET` and a new `HF_REVISION`, and therefore new task hashes — better done before a large
+  grid is persisted against it.
 - Data generation, ladder builders, and per-rung realized-token measurements live in the OLMo-core
   working repo (`debug/ctc_1m_ladders/REPORT.md` is the build provenance record).
