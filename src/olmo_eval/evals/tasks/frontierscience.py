@@ -7,6 +7,21 @@ Two tracks from the open-sourced gold set of ``openai/frontierscience``:
     compares the attempted answer against the reference answer and returns a
     CORRECT / INCORRECT verdict, so the primary metric is accuracy.
 
+``frontierscience_olympiad:verified``
+    The 83 of those 100 problems whose gold answers survived manual review.
+    Everything else matches ``frontierscience_olympiad`` exactly -- same problem
+    text, same upstream gold answer, same judge -- so a verified score is the
+    full-set score restricted to those problems, not a separate measurement.
+
+``frontierscience_olympiad:mc``
+    The same verified subset with four curated choices per problem. It scores the
+    log-likelihood of the labels A--D and therefore needs no judge.
+    This recognition task is intended for base-model tracking and is not directly
+    comparable with the free-response Olympiad score.
+    Problem and answer notation includes display edits. Distractor provenance
+    preserves the curation text; its zero-based ``choice_index`` identifies the
+    corresponding final displayed choice.
+
 ``frontierscience_research``
     60 open-ended PhD-level research sub-tasks. Each carries a rubric totaling
     10 points that credits intermediate derivations as well as the final result.
@@ -15,7 +30,7 @@ Two tracks from the open-sourced gold set of ``openai/frontierscience``:
     fraction of rubric points earned is reported alongside it because it is the
     more sensitive signal on a benchmark where frontier models score around 25%.
 
-Both tracks report the primary metric overall and per subject (biology,
+All tracks report the primary metric overall and per subject (biology,
 chemistry, physics).
 
 The problem statements already end with the benchmark's own answer-format
@@ -42,16 +57,20 @@ scores are the mean over samples rather than the harness default of the max.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import math
 import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, replace
+from functools import cache
+from importlib.resources import files
 from typing import Any
 
 from olmo_eval.common.metrics import Metric
-from olmo_eval.common.scorers.base import Scorer
+from olmo_eval.common.scorers.base import LogprobScorer, Scorer
 from olmo_eval.common.scorers.llm_judge import JudgeFn, build_openai_judge_fn
 from olmo_eval.common.types import (
     Instance,
@@ -78,6 +97,10 @@ logger = logging.getLogger(__name__)
 FRONTIERSCIENCE_REPO = "openai/frontierscience"
 # Pinned so a Hub update cannot silently change the gold set mid-comparison.
 FRONTIERSCIENCE_REVISION = "25ed67db7da8f4591484e764008ff585544f5a30"
+FRONTIERSCIENCE_VERIFIED_IDS_FILE = "frontierscience_olympiad_verified_ids.json"
+FRONTIERSCIENCE_VERIFIED_MC_FILE = "frontierscience_olympiad_mc.jsonl"
+#: Olympiad problems left after manual review of the published gold answers.
+FRONTIERSCIENCE_VERIFIED_COUNT = 83
 
 FRONTIERSCIENCE_DEFAULT_JUDGE_MODEL = "gpt-5.5-2026-04-23"
 FRONTIERSCIENCE_DEFAULT_JUDGE_REASONING_EFFORT = "high"
@@ -148,6 +171,11 @@ _RESEARCH_VERDICT = re.compile(r"VERDICT:\s*\**\s*`?\s*(-?\d+(?:\.\d+)?)")
 
 # Tolerates the markdown emphasis and trailing colon models add around the marker.
 _FINAL_ANSWER_MARKER = re.compile(r"\**\s*FINAL\s+ANSWER\s*\**\s*:?\s*", re.IGNORECASE)
+_MC_ANSWER_INSTRUCTION = re.compile(
+    r"\s*Think step by step and solve the problem below\..*?"
+    r"without any extra commentary or providing multiple answer attempts\.\s*$",
+    re.DOTALL,
+)
 
 
 def strip_reasoning(text: str) -> str:
@@ -187,6 +215,24 @@ def parse_research_points(raw: str) -> float | None:
         return None
     points = float(matches[-1].group(1))
     return min(max(points, 0.0), FRONTIERSCIENCE_RUBRIC_TOTAL)
+
+
+@cache
+def verified_task_group_ids() -> frozenset[str]:
+    """Return the Olympiad ``task_group_id`` values that passed manual answer review.
+
+    The same 83 ids back the multiple-choice adaptation of this subset, so the two
+    tracks cover identical problems and the file is the single place that changes
+    if a problem is later added back or removed.
+    """
+    resource = files(__package__).joinpath(FRONTIERSCIENCE_VERIFIED_IDS_FILE)
+    ids = frozenset(json.loads(resource.read_text(encoding="utf-8"))["task_group_ids"])
+    if len(ids) != FRONTIERSCIENCE_VERIFIED_COUNT:
+        raise ValueError(
+            f"{FRONTIERSCIENCE_VERIFIED_IDS_FILE} holds {len(ids)} distinct ids, "
+            f"expected {FRONTIERSCIENCE_VERIFIED_COUNT}"
+        )
+    return ids
 
 
 def _parse_judge_spec(spec: str) -> tuple[str, str | None]:
@@ -318,8 +364,80 @@ def _subject_metrics(score_key: str) -> tuple[FrontierScienceMetric, ...]:
     )
 
 
+@dataclass(frozen=True)
+class FrontierScienceMCMetric(Metric):
+    """A label-logprob metric, optionally restricted to one science subject."""
+
+    name: str = ""
+    scorer: type[Scorer] | Scorer = LogprobScorer
+    metric_kind: str = "accuracy"
+    subject: str | None = None
+
+    def compute_instance(self, response: Response) -> float | None:
+        if self.subject is not None and response.instance.metadata.get("subject") != self.subject:
+            return None
+        gold_idx = response.instance.metadata.get("gold_idx")
+        choices = response.instance.choices or ()
+        if (
+            not isinstance(gold_idx, int)
+            or not response.outputs
+            or len(response.outputs) != len(choices)
+        ):
+            return None
+
+        scorer = self.scorer() if isinstance(self.scorer, type) else self.scorer
+        scores = [scorer.score(response.instance, output) for output in response.outputs]
+        if self.metric_kind == "accuracy":
+            return 1.0 if scores.index(max(scores)) == gold_idx else 0.0
+        if self.metric_kind == "gold_probability":
+            largest = max(scores)
+            weights = [math.exp(score - largest) for score in scores]
+            return weights[gold_idx] / sum(weights)
+        if self.metric_kind == "logprob_margin":
+            return scores[gold_idx] - max(
+                score for index, score in enumerate(scores) if index != gold_idx
+            )
+        raise ValueError(f"unknown FrontierScience MC metric kind: {self.metric_kind}")
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        values = [
+            value
+            for response in responses
+            if (value := self.compute_instance(response)) is not None
+        ]
+        return sum(values) / len(values) if values else 0.0
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+    def pairwise_display_format(self) -> str:
+        return "percentage" if self.metric_kind != "logprob_margin" else "raw"
+
+    def pairwise_unit(self) -> str:
+        return "proportion" if self.metric_kind != "logprob_margin" else "logprob"
+
+
+def _mc_metrics(metric_kind: str, name: str) -> tuple[FrontierScienceMCMetric, ...]:
+    return (
+        FrontierScienceMCMetric(name=name, metric_kind=metric_kind),
+        *(
+            FrontierScienceMCMetric(
+                name=f"{name}_{subject}",
+                metric_kind=metric_kind,
+                subject=subject,
+            )
+            for subject in FRONTIERSCIENCE_SUBJECTS
+        ),
+    )
+
+
 OLYMPIAD_ACCURACY = FrontierScienceMetric(name="accuracy", score_key="accuracy")
 OLYMPIAD_METRICS = (OLYMPIAD_ACCURACY, *_subject_metrics("accuracy"))
+
+MC_ACCURACY = _mc_metrics("accuracy", "accuracy")
+MC_GOLD_PROBABILITY = _mc_metrics("gold_probability", "gold_probability")
+MC_LOGPROB_MARGIN = _mc_metrics("logprob_margin", "logprob_margin")
+MC_METRICS = (*MC_ACCURACY, *MC_GOLD_PROBABILITY, *MC_LOGPROB_MARGIN)
 
 RESEARCH_SUCCESS_RATE = FrontierScienceMetric(name="success_rate", score_key="success_rate")
 RESEARCH_RUBRIC_SCORE = FrontierScienceMetric(name="rubric_score", score_key="rubric_score")
@@ -634,6 +752,125 @@ class FrontierScienceOlympiad(_FrontierScience):
         return scores
 
 
+@register("frontierscience_olympiad:verified")
+class FrontierScienceOlympiadVerified(FrontierScienceOlympiad):
+    """Olympiad restricted to the problems whose published gold answers held up.
+
+    Reviewing all 100 answers to build the multiple-choice adaptation flagged 17 as
+    ambiguously worded or wrong, which the judge scores as model errors. Problems
+    and gold answers are still the upstream ones verbatim; only the row set differs.
+    """
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        if str(doc.get("task_group_id") or "") not in verified_task_group_ids():
+            return None
+        return super().process_doc(doc, index)
+
+
+@register("frontierscience_olympiad:mc")
+class FrontierScienceOlympiadMC(Task):
+    """Judge-free multiple-choice adaptation of the verified Olympiad subset.
+
+    Choices and display text come from the curated release; which problems appear
+    is decided by the shared verified index, so this track and
+    ``frontierscience_olympiad:verified`` always cover the same problems.
+    """
+
+    data_source = DataSource(path=FRONTIERSCIENCE_VERIFIED_MC_FILE, split="test")
+    split = Split.TEST
+    metrics = MC_METRICS
+    primary_metric = MC_ACCURACY[0]
+    num_fewshot = 0
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=1)
+
+    @property
+    def instances(self) -> Iterator[Instance]:
+        if self._instances_cache is None:
+            self._instances_cache = self._load_verified_rows()
+        yield from self._instances_cache
+
+    def _load_verified_rows(self) -> list[Instance]:
+        """Read the curated release, keeping the rows the verified index names."""
+        instances: list[Instance] = []
+        resource = files(__package__).joinpath(FRONTIERSCIENCE_VERIFIED_MC_FILE)
+        with resource.open(encoding="utf-8") as handle:
+            for index, line in enumerate(handle):
+                if not line.strip():
+                    continue
+                instance = self.process_doc(json.loads(line), index)
+                if instance is not None:
+                    instances.append(instance)
+
+        missing = sorted(
+            verified_task_group_ids()
+            - {instance.metadata["task_group_id"] for instance in instances}
+        )
+        if missing:
+            raise ValueError(
+                f"{FRONTIERSCIENCE_VERIFIED_MC_FILE} has no row for {len(missing)} verified "
+                f"problem(s), starting with {missing[0]}"
+            )
+        return instances
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        # Filtering on the index rather than on the file means a problem dropped
+        # from the verified subset leaves both tracks without a release rebuild.
+        task_group_id = str(doc.get("task_group_id") or "")
+        if task_group_id not in verified_task_group_ids():
+            return None
+
+        raw_problem = str(doc.get("problem") or "")
+        problem, substitutions = _MC_ANSWER_INSTRUCTION.subn("", raw_problem)
+        choices = tuple(str(choice).strip() for choice in doc.get("choices", ()))
+        if not problem.strip() or not choices:
+            return None
+        if substitutions != 1:
+            raise ValueError(f"expected one answer-instruction suffix at MC row {index}")
+        if len(choices) != 4 or any(not choice for choice in choices):
+            raise ValueError(f"expected four nonempty choices at MC row {index}")
+
+        gold_idx = doc.get("correct_choice_index")
+        if not isinstance(gold_idx, int) or not 0 <= gold_idx < len(choices):
+            raise ValueError(f"invalid correct_choice_index at MC row {index}")
+        gold_label = chr(ord("A") + gold_idx)
+        if doc.get("correct_choice_label") != gold_label:
+            raise ValueError(f"choice index/label mismatch at MC row {index}")
+        if str(doc.get("reference_answer") or "").strip() != choices[gold_idx]:
+            raise ValueError(f"reference answer/choice mismatch at MC row {index}")
+
+        subject = str(doc.get("subject") or "").strip().lower()
+        if subject not in FRONTIERSCIENCE_SUBJECTS:
+            raise ValueError(f"unexpected subject {subject!r} at MC row {index}")
+        return Instance(
+            question=problem.strip(),
+            choices=choices,
+            gold_answer=gold_label,
+            metadata={
+                "id": task_group_id,
+                "task_group_id": task_group_id,
+                "subject": subject,
+                "index": index,
+                "gold_idx": gold_idx,
+                "gold_text": choices[gold_idx],
+            },
+        )
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        choices = instance.choices or ()
+        rendered_choices = "\n".join(
+            f"{chr(ord('A') + index)}. {choice}" for index, choice in enumerate(choices)
+        )
+        prompt = f"Problem:\n{instance.question}\n\nChoices:\n{rendered_choices}\n\nAnswer:"
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=tuple(f" {chr(ord('A') + index)}" for index in range(len(choices))),
+        )
+
+    def extract_answer(self, output: LMOutput) -> None:
+        return None
+
+
 @register("frontierscience_research")
 class FrontierScienceResearch(_FrontierScience):
     """FrontierScience Research track scored against 10-point model-judged rubrics."""
@@ -697,7 +934,13 @@ register_variant(
     sampling_params=replace(_OLYMPIAD_SAMPLING, temperature=1.0, num_samples=20),
 )
 register_variant(
+    "frontierscience_olympiad:verified",
+    "paper",
+    sampling_params=replace(_OLYMPIAD_SAMPLING, temperature=1.0, num_samples=20),
+)
+register_variant(
     "frontierscience_research",
     "paper",
     sampling_params=replace(_RESEARCH_SAMPLING, temperature=1.0, num_samples=30),
 )
+register_variant("frontierscience_olympiad:mc", "olmo3base")

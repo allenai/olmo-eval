@@ -221,6 +221,7 @@ async def process_results(
         """Score a single response and store the result."""
         async with scoring_semaphore:
             try:
+                task.strip_thinking_traces([response])
                 scored_list = await task.score_responses([response], context=scoring_context)
                 scored = scored_list[0] if scored_list else response
             except Exception as e:

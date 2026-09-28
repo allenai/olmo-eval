@@ -167,6 +167,7 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
                 "max_model_len",
                 "top_k",
                 "num_samples",
+                "truncate_prompt_tokens",
             }:
                 value = int(value_str)
             elif key in {"temperature", "top_p"}:

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from olmo_eval.common.formatters import Formatter
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.repr import hide_unset
-from olmo_eval.common.scorers import Scorer
+from olmo_eval.common.scorers import Scorer, ScoringIncompleteError
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -43,13 +43,16 @@ def _format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
     message = str(exc).strip()
     if message:
         error["message"] = message
-    try:
-        from olmo_eval.harness.sandbox import SandboxInfrastructureError
+    if isinstance(exc, ScoringIncompleteError):
+        error["infrastructure"] = "true"
+    else:
+        try:
+            from olmo_eval.harness.sandbox import SandboxInfrastructureError
 
-        if isinstance(exc, SandboxInfrastructureError):
-            error["infrastructure"] = "true"
-    except ImportError:
-        pass
+            if isinstance(exc, SandboxInfrastructureError):
+                error["infrastructure"] = "true"
+        except ImportError:
+            pass
     return error
 
 
@@ -160,6 +163,9 @@ class TaskConfig:
     max_length: int | None = None
     answer_extractor: Callable[[str], str] | None = None
 
+    #: Drop ``<think>...</think>`` traces before scoring; see :meth:`Task.strip_thinking_traces`.
+    strip_thinking: bool = False
+
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
     dependencies: list[str] | None = None
 
@@ -178,6 +184,12 @@ class TaskConfig:
     judge_model: str | None = None
     judge_reasoning_effort: str | None = None
     judge_max_tokens: int | None = None
+
+    #: How a task that builds its prompt from a bare label should render it. The
+    #: vision tasks read these; they follow the checkpoint, since instruction-tuned
+    #: and pretrain models were trained on different prompt forms.
+    prompt_templates: str | None = None
+    system_prompt_style: str | None = None
 
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
@@ -291,6 +303,13 @@ class TaskConfig:
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
             "dependencies": self.dependencies,
         }
+        # Emitted only when set so that task hashes of runs without it are
+        # unchanged from before the field existed.
+        if self.prompt_templates is not None or self.system_prompt_style is not None:
+            serialized["prompt_templates"] = self.prompt_templates
+            serialized["system_prompt_style"] = self.system_prompt_style
+        if self.strip_thinking:
+            serialized["strip_thinking"] = True
         if any(
             value is not None
             for value in (
@@ -594,6 +613,33 @@ class Task(ABC):
                 for s in self._get_scorers().values()
             )
         return self._has_async_cache
+
+    def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
+        """Drop ``<think>...</think>`` traces so scorers see only the final answer.
+
+        No-op unless ``config.strip_thinking`` is set. Runners call this before
+        ``score_responses`` (which tasks may override). Idempotent: a stripped
+        output has no ``</think>`` left, so a second pass leaves it alone.
+
+        Mirrors the reference harness's ``r1_style`` processing: everything
+        through the *last* ``</think>`` goes, the text after it is kept
+        byte-for-byte, and an unterminated trace is left as-is. Whitespace
+        matters — the IFEval loose variants drop the response's first line, and
+        paragraph checks index on blank-line splits — so nothing is trimmed.
+        Only ``outputs[*].text`` is touched; trajectories and request traces
+        keep the trace.
+        """
+        if not self.config.strip_thinking:
+            return
+        from olmo_eval.evals.extract import extract_think_answer
+
+        for response in responses:
+            for output in response.outputs:
+                text = output.text or ""
+                if "</think>" not in text:
+                    continue
+                output.metadata.setdefault("original_text", text)
+                output.text = extract_think_answer(text) or ""
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Extract answers from outputs. Override for complex multi-output logic."""

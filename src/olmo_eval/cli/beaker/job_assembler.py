@@ -130,7 +130,7 @@ def _normalize_olmo_core_package(package: str) -> str:
 
 def normalize_provider_package_for_kind(provider_kind: str | None, package: str) -> str:
     """Normalize a provider package override for the effective provider kind."""
-    if provider_kind == "olmo_core":
+    if provider_kind in {"olmo_core", "olmo_core_vlm"}:
         return _normalize_olmo_core_package(package)
     return package
 
@@ -206,7 +206,8 @@ def assemble_external_eval_job(
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
     beaker_username: str | None = None,
-    preemptible: bool = True,
+    preemptible: bool | None = True,
+    min_runtime: str | None = None,
     retries: int | None = None,
     provider_kind: str | None = None,
     base_url: str | None = None,
@@ -377,6 +378,7 @@ def assemble_external_eval_job(
         num_gpus=num_gpus,
         priority=priority,
         preemptible=preemptible,
+        min_runtime=min_runtime,
         timeout=timeout,
         shared_memory="10GiB",
         retries=retries,
@@ -476,6 +478,7 @@ class JobConfigAssembler:
         provider_extra_override = (
             {
                 "olmo_core": "olmo_core",
+                "olmo_core_vlm": "olmo_core_vlm",
                 "vllm": "vllm",
                 "vllm_server": "vllm",
             }.get(provider_kind)
@@ -605,6 +608,7 @@ class JobConfigAssembler:
             num_gpus=exp.num_gpus,
             priority=exp.priority,
             preemptible=self.config.preemptible,
+            min_runtime=self.config.min_runtime,
             timeout=self.config.timeout,
             shared_memory="10GiB",
             retries=self.config.retries,

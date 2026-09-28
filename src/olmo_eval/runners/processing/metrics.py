@@ -326,13 +326,19 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
     def _get_collapsed_tasks(suites: dict[str, Any]) -> set[str]:
         """Identify tasks collapsed into a sub-suite average.
 
-        When a parent suite uses AVERAGE_OF_AVERAGES and a child suite uses
-        AVERAGE, the child's individual tasks are represented by the sub-suite
-        row and should not appear separately.
+        When a parent suite uses AVERAGE_OF_AVERAGES and a child suite averages
+        its own tasks, the child's individual tasks are represented by the
+        sub-suite row and should not appear separately.
         """
+        from olmo_eval.evals.suites.registry import AggregationStrategy
+
+        averaging = {
+            AggregationStrategy.AVERAGE.value,
+            AggregationStrategy.WEIGHTED_AVERAGE.value,
+        }
         collapsed: set[str] = set()
         for suite_data in suites.values():
-            if suite_data.get("parent_suite") and suite_data.get("aggregation") == "average":
+            if suite_data.get("parent_suite") and suite_data.get("aggregation") in averaging:
                 collapsed.update(suite_data.get("tasks", []))
         return collapsed
 

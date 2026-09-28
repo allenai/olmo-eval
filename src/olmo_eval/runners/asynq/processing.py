@@ -7,7 +7,7 @@ import multiprocessing as mp
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.inference.errors import classify_terminal_provider_error
+from olmo_eval.inference.errors import classify_terminal_provider_error, request_error
 from olmo_eval.inference.metrics.core.stats import compute_batch_hash
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
 
@@ -129,6 +129,7 @@ async def process_chat_request(
         else:
             output_with_metadata = final_output
 
+        provider_error = request_error([final_output])
         result_queue.put(
             ResultItem(
                 model_name=item.model_name,
@@ -137,8 +138,8 @@ async def process_chat_request(
                 instance=item.instance,
                 request=prepared_request,
                 request_trace=request_trace,
-                outputs=[output_with_metadata],
-                error=harness_result.error,
+                outputs=[] if provider_error is not None else [output_with_metadata],
+                error=provider_error or harness_result.error,
                 attempt=item.attempt,
             )
         )
@@ -213,6 +214,9 @@ async def process_batch(
         for item, prepared_request, request_trace, outputs in zip(
             items, prepared_requests, request_traces, all_outputs, strict=True
         ):
+            error = request_error(outputs)
+            if error is not None:
+                log.warning(f"Instance {item.instance_idx} failed: {error}")
             result_queue.put(
                 ResultItem(
                     model_name=item.model_name,
@@ -221,8 +225,8 @@ async def process_batch(
                     instance=item.instance,
                     request=prepared_request,
                     request_trace=request_trace,
-                    outputs=outputs,
-                    error=None,
+                    outputs=[] if error is not None else outputs,
+                    error=error,
                     attempt=item.attempt,
                 )
             )

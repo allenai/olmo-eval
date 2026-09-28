@@ -350,6 +350,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
                     "task-hash-11",
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
+                    200,
                 )
             ]
         ),
@@ -365,6 +366,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
                     "task-hash-10",
                     {"accuracy": {"exact_match": 0.55}},
                     "accuracy:exact_match",
+                    200,
                 ),
                 (
                     11,
@@ -372,6 +374,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
                     "task-hash-11",
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
+                    200,
                 ),
             ]
         ),
@@ -561,6 +564,7 @@ def test_build_results_table_metric_options_do_not_double_count_primary_metric(
                         "f1": {"exact_match": 0.72},
                     },
                     "accuracy:exact_match",
+                    200,
                 )
             ]
         ),
@@ -611,6 +615,7 @@ def test_build_results_table_latest_mode_merges_partial_runs_by_model_and_task_h
                     "task-hash-a",
                     {"accuracy": {"exact_match": 0.40}},
                     "accuracy:exact_match",
+                    200,
                 ),
                 (
                     11,
@@ -618,6 +623,7 @@ def test_build_results_table_latest_mode_merges_partial_runs_by_model_and_task_h
                     "task-hash-b",
                     {"accuracy": {"exact_match": 0.80}},
                     "accuracy:exact_match",
+                    200,
                 ),
             ]
         ),
@@ -674,6 +680,7 @@ def test_build_results_table_latest_mode_keeps_unique_older_metrics_and_latest_d
                         "f1": {"exact_match": 0.72},
                     },
                     "accuracy:exact_match",
+                    200,
                 ),
                 (
                     11,
@@ -681,6 +688,7 @@ def test_build_results_table_latest_mode_keeps_unique_older_metrics_and_latest_d
                     "task-hash-11",
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
+                    200,
                 ),
             ]
         ),
@@ -722,6 +730,7 @@ def test_build_results_table_splits_same_name_tasks_by_hash(monkeypatch) -> None
                     "task-hash-alpha",
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
+                    200,
                 ),
                 (
                     11,
@@ -729,6 +738,7 @@ def test_build_results_table_splits_same_name_tasks_by_hash(monkeypatch) -> None
                     "task-hash-beta",
                     {"accuracy": {"exact_match": 0.55}},
                     "accuracy:exact_match",
+                    200,
                 ),
             ]
         ),
@@ -788,6 +798,191 @@ def test_model_filter_score_label_uses_selected_scope_columns() -> None:
     scoped_columns = viewer_server._scoped_task_columns(results_table, selected_scope)
 
     assert viewer_server._model_filter_score_label(model, scoped_columns) == "50.0%"
+
+
+def test_results_table_scope_score_weights_tasks_by_instance_count() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+    from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+    weighted_suite = Suite(
+        name="_test_weighted_results_table",
+        tasks=("task_small", "task_large"),
+        aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+    )
+    _REGISTRY["_test_weighted_results_table"] = weighted_suite
+
+    try:
+        selected_scope_option = {
+            "key": "suite::_test_weighted_results_table",
+            "kind": "suite",
+            "value": "_test_weighted_results_table",
+            "task_ids": ["task_small", "task_large"],
+        }
+        results_table = {
+            "models": [
+                {
+                    "index": 0,
+                    "display_label": "model-a",
+                    "avg_score": 0.7,
+                    "task_scores": {"task_small": 0.9, "task_large": 0.5},
+                    "task_instance_counts": {"task_small": 100, "task_large": 300},
+                },
+                {
+                    "index": 1,
+                    "display_label": "model-b",
+                    "avg_score": 0.7,
+                    "task_scores": {"task_small": 0.9, "task_large": 0.5},
+                    "task_instance_counts": {"task_small": 100, "task_large": 300},
+                },
+            ],
+            "task_columns": [
+                {
+                    "id": "task_small",
+                    "task_name": "task_small",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+                {
+                    "id": "task_large",
+                    "task_name": "task_large",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+            ],
+        }
+
+        annotated = viewer_server._annotate_results_table_scope_scores(
+            results_table,
+            selected_scope_key="suite::_test_weighted_results_table",
+            selected_scope_option=selected_scope_option,
+        )
+
+        assert annotated is not None
+        assert annotated["scope_score_title"] == "suite aggregate using weighted_average"
+        assert annotated["models"][0]["scope_score"] == pytest.approx(0.6)
+        assert annotated["models"][1]["scope_score"] == pytest.approx(0.6)
+    finally:
+        del _REGISTRY["_test_weighted_results_table"]
+
+
+def test_results_table_scope_score_is_absent_when_a_model_lacks_counts() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+    from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+    weighted_suite = Suite(
+        name="_test_weighted_partial_counts",
+        tasks=("task_small", "task_large"),
+        aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+    )
+    _REGISTRY["_test_weighted_partial_counts"] = weighted_suite
+
+    try:
+        selected_scope_option = {
+            "key": "suite::_test_weighted_partial_counts",
+            "kind": "suite",
+            "value": "_test_weighted_partial_counts",
+            "task_ids": ["task_small", "task_large"],
+        }
+        results_table = {
+            "models": [
+                {
+                    "index": 0,
+                    "display_label": "model-a",
+                    "avg_score": 0.7,
+                    "task_scores": {"task_small": 0.9, "task_large": 0.5},
+                    "task_instance_counts": {"task_small": 100, "task_large": 300},
+                },
+                {
+                    "index": 1,
+                    "display_label": "model-b",
+                    "avg_score": 0.7,
+                    "task_scores": {"task_small": 0.9, "task_large": 0.5},
+                    "task_instance_counts": {"task_small": 100, "task_large": None},
+                },
+            ],
+            "task_columns": [
+                {
+                    "id": "task_small",
+                    "task_name": "task_small",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+                {
+                    "id": "task_large",
+                    "task_name": "task_large",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+            ],
+        }
+
+        annotated = viewer_server._annotate_results_table_scope_scores(
+            results_table,
+            selected_scope_key="suite::_test_weighted_partial_counts",
+            selected_scope_option=selected_scope_option,
+        )
+
+        # The weighted model still reports its weighted mean; the one with a
+        # missing count reports nothing rather than a macro mean that would sort
+        # against it as if the two were the same statistic.
+        assert annotated is not None
+        assert annotated["models"][0]["scope_score"] == pytest.approx(0.6)
+        assert annotated["models"][1]["scope_score"] is None
+    finally:
+        del _REGISTRY["_test_weighted_partial_counts"]
+
+
+def test_build_results_table_exposes_task_instance_counts(monkeypatch) -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+
+    experiment = SimpleNamespace(
+        id=7,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+    monkeypatch.setattr(
+        viewer_server,
+        "_group_experiments",
+        lambda session, group_name, keep_all: [experiment],
+    )
+
+    results_table = viewer_server._build_results_table(
+        StaticTaskSession(
+            [
+                (
+                    7,
+                    "task-small",
+                    "task-hash-small",
+                    {"accuracy": {"exact_match": 0.90}},
+                    "accuracy:exact_match",
+                    100,
+                ),
+                (
+                    7,
+                    "task-large",
+                    "task-hash-large",
+                    {"accuracy": {"exact_match": 0.50}},
+                    "accuracy:exact_match",
+                    300,
+                ),
+            ]
+        ),
+        "my-group",
+        keep_all=True,
+    )
+
+    column_id_by_name = {
+        column["task_name"]: column["id"] for column in results_table["task_columns"]
+    }
+    instance_counts = results_table["models"][0]["task_instance_counts"]
+
+    assert instance_counts[column_id_by_name["task-small"]] == 100
+    assert instance_counts[column_id_by_name["task-large"]] == 300
 
 
 def test_results_table_scope_score_uses_suite_aggregation_strategy() -> None:

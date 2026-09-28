@@ -61,6 +61,17 @@ def test_gsm8k_olmo3base_uses_first_sample_exact_match() -> None:
     assert task.config.output_score_aggregation == OutputScoreAggregation.FIRST
 
 
+@pytest.mark.parametrize("num_fewshot", [0, 3, 8])
+def test_gsm8k_prompt_honors_num_fewshot(num_fewshot: int) -> None:
+    task = get_task("gsm8k", config_overrides={"num_fewshot": num_fewshot})
+    instance = Instance(question="What is one plus one?", gold_answer="2")
+
+    prompt = task.format_request(instance).prompt
+
+    assert prompt.count("Question:") == num_fewshot + 1
+    assert prompt.endswith("Question: What is one plus one?\nAnswer:")
+
+
 class TestTaskRegistration:
     """Tests for task registration across all modules."""
 
