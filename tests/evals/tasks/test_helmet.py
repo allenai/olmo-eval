@@ -370,6 +370,14 @@ def test_helmet_task_inventory():
     assert len(HELMET_TASKS) == 124
 
 
+def test_only_recall_extends_past_standard_lengths():
+    longest_standard = max(STANDARD_CONTEXT_SIZES)
+    for name, config in HELMET_TASKS.items():
+        size = int(name.rsplit("__", 1)[1])
+        if size > longest_standard:
+            assert config["tag"] == "recall", name
+
+
 def test_helmet_context_budgets_match_helmet():
     # HELMET truncates to `size - reserve - generation`; these are its numbers
     assert HELMET_TASKS["narrativeqa__4096"]["max_context_tokens"] == 4096 - 200 - 100
