@@ -57,6 +57,7 @@ __all__ = [
     "validate_priority_configuration",
     "print_experiment_config",
     "resolve_clusters",
+    "validate_min_runtime",
 ]
 
 # Rich console for pretty printing
@@ -129,9 +130,14 @@ def print_experiment_config(
         if clusters:
             header_lines.append(f"[bold blue]Clusters:[/] {', '.join(clusters)}")
 
-        preemptible = context.get("preemptible", True)
-        preempt_str = "[green]yes[/]" if preemptible else "[red]no[/]"
-        header_lines.append(f"[bold blue]Preemptible:[/] {preempt_str}")
+        min_runtime_ns = context.get("minRuntime")
+        if min_runtime_ns is not None:
+            min_runtime = _format_duration(min_runtime_ns // 1_000_000_000)
+            header_lines.append(f"[bold blue]Min runtime:[/] {min_runtime}")
+        else:
+            preemptible = context.get("preemptible", True)
+            preempt_str = "[green]yes[/]" if preemptible else "[red]no[/]"
+            header_lines.append(f"[bold blue]Preemptible:[/] {preempt_str}")
 
         header_text = Text.from_markup("\n".join(header_lines))
         _console.print(Panel(header_text, title="[bold]Beaker Experiment[/]", border_style="blue"))
@@ -343,7 +349,10 @@ class BeakerJobConfig:
         num_gpus: Number of GPUs to request.
         shared_memory: Shared memory size (e.g., "10GiB").
         priority: Job priority level.
-        preemptible: Whether the job can be preempted.
+        preemptible: Whether the job can be preempted. Ignored and set to None when
+            min_runtime is set; combining False with min_runtime raises ValueError.
+        min_runtime: Minimum time the job runs before Beaker may preempt it (e.g., "2h").
+            Replaces preemptible, which Beaker has deprecated.
         timeout: Job timeout (e.g., "24h", "30m").
         retries: Number of retries on failure.
         beaker_image: Container image to use.
@@ -368,7 +377,8 @@ class BeakerJobConfig:
 
     # Job settings
     priority: str = "normal"
-    preemptible: bool = True
+    preemptible: bool | None = True
+    min_runtime: str | None = None
     timeout: str | None = "24h"
     retries: int | None = None
 
@@ -438,6 +448,17 @@ class BeakerJobConfig:
     # When True, runs setup_modal_gcp_secret script during install.
     # Requires MODAL_GCP_SECRET_NAME env var to be set with the secret name.
     setup_modal_gcp_secret: bool = False
+
+    def __post_init__(self) -> None:
+        if self.min_runtime is not None:
+            if self.preemptible is False:
+                raise ValueError(
+                    "preemptible=False cannot be combined with min_runtime; set min_runtime alone"
+                )
+            self.min_runtime = validate_min_runtime(self.min_runtime)
+            self.preemptible = None
+        elif self.preemptible is None:
+            self.preemptible = True
 
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
@@ -743,6 +764,46 @@ def _parse_timeout(timeout: str) -> int:
             total_ns += int(match.group(1)) * multiplier
 
     return total_ns if total_ns else 86400_000_000_000  # Default 24h
+
+
+_MIN_RUNTIME_PATTERN = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
+
+
+def validate_min_runtime(min_runtime: str) -> str:
+    """Validate a Beaker min runtime string such as "2h", "30m", or "1h30m".
+
+    Units are required and the duration must be positive. Beaker checks the allowed range
+    when the experiment is created.
+
+    Args:
+        min_runtime: Duration string using h, m, and s units.
+
+    Returns:
+        The duration string with surrounding whitespace removed.
+
+    Raises:
+        ValueError: If the string is not a positive duration in h, m, and s units.
+    """
+    value = min_runtime.strip()
+    match = _MIN_RUNTIME_PATTERN.fullmatch(value)
+    if not value or match is None:
+        raise ValueError(
+            f"invalid min runtime {min_runtime!r}; expected a duration like '2h', '30m', or '1h30m'"
+        )
+    if not any(int(part) for part in match.groups() if part):
+        raise ValueError(
+            f"min runtime {min_runtime!r} must be greater than zero; "
+            "omit it to allow preemption at any time"
+        )
+    return value
+
+
+def _format_duration(seconds: int) -> str:
+    """Format a duration in seconds as h/m/s units, such as "1h30m"."""
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    parts = [f"{n}{unit}" for n, unit in ((hours, "h"), (minutes, "m"), (secs, "s")) if n]
+    return "".join(parts) or "0s"
 
 
 class BeakerLauncher:
@@ -1081,6 +1142,7 @@ class BeakerLauncher:
             shared_memory=config.shared_memory,
             priority=config.priority,
             preemptible=config.preemptible,
+            min_runtime=config.min_runtime,
             task_timeout=config.timeout,
             retries=config.retries,
             budget=config.budget,
@@ -1147,8 +1209,11 @@ class BeakerLauncher:
         header_lines.append(f"[bold blue]Clusters:[/] {', '.join(clusters)}")
         header_lines.append(f"[bold blue]Image:[/] {config.beaker_image}")
 
-        preempt_str = "[green]yes[/]" if config.preemptible else "[red]no[/]"
-        header_lines.append(f"[bold blue]Preemptible:[/] {preempt_str}")
+        if config.min_runtime is not None:
+            header_lines.append(f"[bold blue]Min runtime:[/] {config.min_runtime}")
+        else:
+            preempt_str = "[green]yes[/]" if config.preemptible else "[red]no[/]"
+            header_lines.append(f"[bold blue]Preemptible:[/] {preempt_str}")
 
         header_text = Text.from_markup("\n".join(header_lines))
         _console.print(Panel(header_text, title="[bold]Beaker Experiment[/]", border_style="blue"))
