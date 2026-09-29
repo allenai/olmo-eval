@@ -228,11 +228,28 @@ _TEXLIVE_PACKAGES = (
     "standalone",
     "preview",
 )
-_TEXLIVE_INSTALLER_URL = "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz"
+#: TeX Live repositories, tried in order. ``mirror.ctan.org`` redirects to a random mirror,
+#: and some serve certificate chains that do not verify, so a fixed mirror comes first.
+_TEXLIVE_REPOSITORIES = (
+    "https://mirrors.mit.edu/CTAN/systems/texlive/tlnet",
+    "https://mirror.ctan.org/systems/texlive/tlnet",
+)
 #: Distributions ship ImageMagick 6; CDM calls ImageMagick 7's ``magick``.
 _MAGICK_APPIMAGE_URL = (
     "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-31/"
     "ImageMagick-7.1.2-31-gcc-x86_64.AppImage"
+)
+#: System libraries the AppImage links against but does not bundle (Debian/Ubuntu names).
+_MAGICK_SYSTEM_PACKAGES = (
+    "libfontconfig1",
+    "libfreetype6",
+    "libfribidi0",
+    "libharfbuzz0b",
+    "libx11-6",
+    "libxcb1",
+    "libuuid1",
+    "libexpat1",
+    "libstdc++6",
 )
 _NODE_VERSION = "v24.21.0"
 
@@ -270,7 +287,8 @@ def ensure_cdm_toolchain(version: str = "v1.6") -> None:
     Missing pieces are installed under ``$OMNIDOCBENCH_CDM_DIR`` (default
     ``~/.cache/olmo_eval/omnidocbench/cdm``): TeX Live ``scheme-small`` with
     :data:`_TEXLIVE_PACKAGES`, the ImageMagick 7 AppImage, Node.js for versions that tokenize
-    with KaTeX, and Ghostscript from apt. Binaries already on ``PATH`` are used as they are.
+    with KaTeX, and from apt Ghostscript plus the system libraries the AppImage links against.
+    Binaries already on ``PATH`` are used as they are.
     """
     global _cdm_ready
     if _cdm_ready:
@@ -286,8 +304,15 @@ def ensure_cdm_toolchain(version: str = "v1.6") -> None:
         root.mkdir(parents=True, exist_ok=True)
         with FileLock(str(root / ".lock")):
             missing = missing_cdm_binaries(version)
+            packages = []
             if "gs" in missing:
-                _apt_install("ghostscript")
+                packages.append("ghostscript")
+            if "magick" in missing and shutil.which("apt-get"):
+                packages.extend(_MAGICK_SYSTEM_PACKAGES)
+            if "pdflatex" in missing and shutil.which("perl") is None:
+                packages.append("perl")
+            if packages:
+                _apt_install(*packages)
             if "magick" in missing:
                 _install_magick(root)
             if "pdflatex" in missing:
@@ -321,10 +346,20 @@ def _download(url: str, dest: Path) -> Path:
         context = ssl.create_default_context(cafile=certifi.where())
     except ImportError:
         context = ssl.create_default_context()
-    logger.info("Downloading %s", url)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url, context=context) as response, open(dest, "wb") as out:
-        shutil.copyfileobj(response, out)
+    for attempt in range(3):
+        logger.info("Downloading %s", url)
+        try:
+            with (
+                urllib.request.urlopen(url, context=context, timeout=300) as response,
+                open(dest, "wb") as out,
+            ):
+                shutil.copyfileobj(response, out)
+            return dest
+        except OSError:
+            if attempt == 2:
+                raise
+            logger.warning("Download of %s failed; retrying.", url, exc_info=True)
     return dest
 
 
@@ -353,17 +388,27 @@ def _install_magick(root: Path) -> None:
 
 
 def _install_texlive(root: Path) -> None:
+    for repository in _TEXLIVE_REPOSITORIES:
+        try:
+            _install_texlive_from(root, repository)
+            return
+        except (OSError, subprocess.CalledProcessError, StopIteration):
+            if repository == _TEXLIVE_REPOSITORIES[-1]:
+                raise
+            logger.warning("TeX Live install from %s failed; trying the next.", repository)
+
+
+def _install_texlive_from(root: Path, repository: str) -> None:
     import tarfile
 
-    if shutil.which("perl") is None:
-        _apt_install("perl")
     work = root / "install-tl"
+    texdir = root / "texlive"
     shutil.rmtree(work, ignore_errors=True)
-    archive = _download(_TEXLIVE_INSTALLER_URL, work / "install-tl-unx.tar.gz")
+    shutil.rmtree(texdir, ignore_errors=True)
+    archive = _download(f"{repository}/install-tl-unx.tar.gz", work / "install-tl-unx.tar.gz")
     with tarfile.open(archive) as tar:
         tar.extractall(work, filter="data")
     installer = next(work.glob("install-tl-*/install-tl"))
-    texdir = root / "texlive"
     profile = work / "texlive.profile"
     profile.write_text(
         "selected_scheme scheme-small\n"
@@ -379,7 +424,10 @@ def _install_texlive(root: Path) -> None:
         "tlpdbopt_install_docfiles 0\n"
         "tlpdbopt_install_srcfiles 0\n"
     )
-    _run(["perl", str(installer), "--profile", str(profile)], cwd=installer.parent)
+    _run(
+        ["perl", str(installer), "--profile", str(profile), "--repository", repository],
+        cwd=installer.parent,
+    )
     tlmgr = texdir / "bin" / "x86_64-linux" / "tlmgr"
     _run([str(tlmgr), "install", *_TEXLIVE_PACKAGES])
     shutil.rmtree(work, ignore_errors=True)
