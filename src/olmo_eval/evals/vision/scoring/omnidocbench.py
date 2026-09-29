@@ -208,6 +208,225 @@ def _check_startup_imports(spec: EvaluatorVersion, repo: Path, python: Path) -> 
 
 
 # ---------------------------------------------------------------------------
+# CDM toolchain
+# ---------------------------------------------------------------------------
+
+#: What CDM's TeX templates load, on top of TeX Live's ``scheme-small``. ``was`` provides
+#: ``upgreek``; ``cjk`` and ``arphic`` render the Chinese formulas.
+_TEXLIVE_PACKAGES = (
+    "cjk",
+    "cjkutils",
+    "arphic",
+    "arphic-ttf",
+    "was",
+    "booktabs",
+    "multirow",
+    "xcolor",
+    "geometry",
+    "amsmath",
+    "amsfonts",
+    "standalone",
+    "preview",
+)
+_TEXLIVE_INSTALLER_URL = "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz"
+#: Distributions ship ImageMagick 6; CDM calls ImageMagick 7's ``magick``.
+_MAGICK_APPIMAGE_URL = (
+    "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-31/"
+    "ImageMagick-7.1.2-31-gcc-x86_64.AppImage"
+)
+_NODE_VERSION = "v24.21.0"
+
+#: CDM's Chinese formula template with a colored token, rendered once to check the
+#: toolchain. CDM scores every render failure as zero without raising, so a missing
+#: package, a TeX Live older than 2022 (no ``\mathcolor``) or an ImageMagick delegate that
+#: Ghostscript cannot serve would otherwise surface only as low formula scores.
+_CDM_PROBE_TEX = r"""
+\documentclass[12pt]{article}
+\usepackage[landscape]{geometry}
+\geometry{a4paper,scale=0.98}
+\pagestyle{empty}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{upgreek}
+\usepackage{CJK}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\begin{document}
+\begin{CJK}{UTF8}{gkai}
+\begin{displaymath}
+\mathcolor[RGB]{255,0,0}{x}^{2} + \upalpha + \text{中文}
+\end{displaymath}
+\end{CJK}
+\end{document}
+"""
+
+_cdm_ready = False
+
+
+def ensure_cdm_toolchain(version: str = "v1.6") -> None:
+    """Put CDM's binaries on ``PATH``, installing any that are missing, and check they render.
+
+    Missing pieces are installed under ``$OMNIDOCBENCH_CDM_DIR`` (default
+    ``~/.cache/olmo_eval/omnidocbench/cdm``): TeX Live ``scheme-small`` with
+    :data:`_TEXLIVE_PACKAGES`, the ImageMagick 7 AppImage, Node.js for versions that tokenize
+    with KaTeX, and Ghostscript from apt. Binaries already on ``PATH`` are used as they are.
+    """
+    global _cdm_ready
+    if _cdm_ready:
+        return
+    root = Path(
+        os.environ.get("OMNIDOCBENCH_CDM_DIR")
+        or Path.home() / ".cache" / "olmo_eval" / "omnidocbench" / "cdm"
+    )
+    _add_cdm_dirs_to_path(root)
+    if missing_cdm_binaries(version):
+        from filelock import FileLock
+
+        root.mkdir(parents=True, exist_ok=True)
+        with FileLock(str(root / ".lock")):
+            missing = missing_cdm_binaries(version)
+            if "gs" in missing:
+                _apt_install("ghostscript")
+            if "magick" in missing:
+                _install_magick(root)
+            if "pdflatex" in missing:
+                _install_texlive(root)
+            if "node" in missing:
+                _install_node(root)
+        _add_cdm_dirs_to_path(root)
+        missing = missing_cdm_binaries(version)
+        if missing:
+            raise RuntimeError(f"Could not install CDM's {', '.join(missing)}.")
+    _probe_cdm_render()
+    _cdm_ready = True
+
+
+def _add_cdm_dirs_to_path(root: Path) -> None:
+    current = os.environ.get("PATH", "").split(os.pathsep)
+    dirs = [root / "texlive" / "bin" / "x86_64-linux", root / "bin", root / "node" / "bin"]
+    new = [str(d) for d in dirs if d.is_dir() and str(d) not in current]
+    if new:
+        os.environ["PATH"] = os.pathsep.join([*new, *current])
+
+
+def _download(url: str, dest: Path) -> Path:
+    import ssl
+    import urllib.request
+
+    # Interpreters built outside the system (uv, conda) may not find the system CA store.
+    try:
+        import certifi
+
+        context = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        context = ssl.create_default_context()
+    logger.info("Downloading %s", url)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(url, context=context) as response, open(dest, "wb") as out:
+        shutil.copyfileobj(response, out)
+    return dest
+
+
+def _apt_install(*packages: str) -> None:
+    if shutil.which("apt-get") is None:
+        raise RuntimeError(f"CDM needs {', '.join(packages)}, and apt-get is not available.")
+    env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+    _run(["apt-get", "update", "-qq"], env=env)
+    _run(["apt-get", "install", "-y", "-qq", "--no-install-recommends", *packages], env=env)
+
+
+def _install_magick(root: Path) -> None:
+    appimage = _download(_MAGICK_APPIMAGE_URL, root / "magick.AppImage")
+    appimage.chmod(0o755)
+    shutil.rmtree(root / "squashfs-root", ignore_errors=True)
+    # Extracting avoids mounting the AppImage, which needs FUSE.
+    _run([str(appimage), "--appimage-extract"], cwd=root, stdout=subprocess.DEVNULL)
+    delegates = root / "squashfs-root" / "usr" / "etc" / "ImageMagick-7" / "delegates.xml"
+    # The PDF delegate asks Ghostscript for ``png16malpha``, which not every build has;
+    # ``pngalpha`` renders the same page and is always available.
+    delegates.write_text(delegates.read_text().replace("png16malpha", "pngalpha"))
+    (root / "bin").mkdir(exist_ok=True)
+    link = root / "bin" / "magick"
+    link.unlink(missing_ok=True)
+    link.symlink_to(root / "squashfs-root" / "AppRun")
+
+
+def _install_texlive(root: Path) -> None:
+    import tarfile
+
+    if shutil.which("perl") is None:
+        _apt_install("perl")
+    work = root / "install-tl"
+    shutil.rmtree(work, ignore_errors=True)
+    archive = _download(_TEXLIVE_INSTALLER_URL, work / "install-tl-unx.tar.gz")
+    with tarfile.open(archive) as tar:
+        tar.extractall(work, filter="data")
+    installer = next(work.glob("install-tl-*/install-tl"))
+    texdir = root / "texlive"
+    profile = work / "texlive.profile"
+    profile.write_text(
+        "selected_scheme scheme-small\n"
+        f"TEXDIR {texdir}\n"
+        f"TEXMFLOCAL {texdir}/texmf-local\n"
+        f"TEXMFSYSCONFIG {texdir}/texmf-config\n"
+        f"TEXMFSYSVAR {texdir}/texmf-var\n"
+        f"TEXMFHOME {texdir}/texmf-home\n"
+        f"TEXMFCONFIG {texdir}/texmf-config-user\n"
+        f"TEXMFVAR {texdir}/texmf-var-user\n"
+        "instopt_adjustpath 0\n"
+        "tlpdbopt_autobackup 0\n"
+        "tlpdbopt_install_docfiles 0\n"
+        "tlpdbopt_install_srcfiles 0\n"
+    )
+    _run(["perl", str(installer), "--profile", str(profile)], cwd=installer.parent)
+    tlmgr = texdir / "bin" / "x86_64-linux" / "tlmgr"
+    _run([str(tlmgr), "install", *_TEXLIVE_PACKAGES])
+    shutil.rmtree(work, ignore_errors=True)
+
+
+def _install_node(root: Path) -> None:
+    import tarfile
+
+    name = f"node-{_NODE_VERSION}-linux-x64"
+    archive = _download(
+        f"https://nodejs.org/dist/{_NODE_VERSION}/{name}.tar.xz", root / f"{name}.tar.xz"
+    )
+    target = root / "node"
+    shutil.rmtree(target, ignore_errors=True)
+    with tarfile.open(archive) as tar:
+        members = []
+        for member in tar.getmembers():
+            member.name = member.name.partition("/")[2]
+            if member.name:
+                members.append(member)
+        tar.extractall(target, members=members, filter="data")
+    archive.unlink()
+
+
+def _probe_cdm_render() -> None:
+    with tempfile.TemporaryDirectory(prefix="omnidocbench_cdm_probe_") as tmp:
+        work = Path(tmp)
+        (work / "probe.tex").write_text(_CDM_PROBE_TEX, encoding="utf-8")
+        steps = (
+            ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "probe.tex"],
+            ["magick", "-density", "200", "-quality", "100", "probe.pdf", "probe.png"],
+        )
+        for cmd in steps:
+            proc = subprocess.run(
+                cmd, cwd=work, capture_output=True, text=True, errors="replace", timeout=300
+            )
+            if proc.returncode != 0:
+                tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-20:])
+                raise RuntimeError(
+                    f"CDM's toolchain cannot render a formula ({cmd[0]} exited "
+                    f"{proc.returncode}); formulas would all score zero.\n{tail}"
+                )
+        if not (work / "probe.png").exists():
+            raise RuntimeError("CDM's toolchain rendered no image for a test formula.")
+
+
+# ---------------------------------------------------------------------------
 # Running the evaluator
 # ---------------------------------------------------------------------------
 
@@ -365,6 +584,8 @@ def run_official_evaluation(
     import yaml
 
     repo, python = ensure_evaluator(version)
+    if with_cdm:
+        ensure_cdm_toolchain(version)
     if workers is None:
         workers = int(os.environ.get("OMNIDOCBENCH_EVAL_WORKERS") or 0) or max(
             1, min(16, (os.cpu_count() or 4) // 4)
