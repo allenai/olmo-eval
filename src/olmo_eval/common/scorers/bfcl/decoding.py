@@ -1,7 +1,8 @@
 """Turn a model's reply into the list of calls the BFCL checker compares.
 
-A reply is the ``[func(arg=value)]`` text BFCL asks for, and decoding ends at
-the shape the checker compares::
+Whatever regime produced the reply — native tool calls from an OpenAI-style
+endpoint, or the ``[func(arg=value)]`` text BFCL asks a prompted model for —
+decoding ends at the same shape::
 
     [{"function_name": {"param": value, ...}}, ...]
 
@@ -236,6 +237,31 @@ def decode_text_lenient(text: str, language: Language = Language.PYTHON) -> list
             return calls
 
     raise first_error
+
+
+def decode_tool_calls(
+    tool_calls: list[Any] | None,
+    name_map: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Decode native tool calls returned by an OpenAI-compatible endpoint.
+
+    ``name_map`` restores the function names as the dataset spells them, since
+    the schemas sent to the endpoint use names an OpenAI tool name must match.
+    """
+    calls: list[dict[str, Any]] = []
+    for tool_call in tool_calls or []:
+        name = tool_call.function.name or ""
+        raw_arguments = tool_call.function.arguments or "{}"
+        try:
+            arguments = (
+                json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+            )
+        except json.JSONDecodeError as exc:
+            raise DecodeError(f"Arguments for {name!r} are not valid JSON: {exc}") from exc
+        if not isinstance(arguments, dict):
+            raise DecodeError(f"Arguments for {name!r} are not an object.")
+        calls.append({(name_map or {}).get(name, name): arguments})
+    return calls
 
 
 def is_function_calling_format(decoded: Any) -> bool:
