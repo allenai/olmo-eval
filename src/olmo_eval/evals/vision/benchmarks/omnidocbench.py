@@ -25,10 +25,12 @@ The two leaderboards are not comparable (the matching and the page averaging bot
 which is why both are kept.
 
 CDM renders formulas with LaTeX and needs ``pdflatex``, ImageMagick 7 (``magick``) and
-Ghostscript (``gs``) on ``PATH`` (v1.5 also needs ``node``). The CDM tasks require them
-and fail before inference without them; the ``_no_cdm`` variants skip CDM, so they have no
-``overall`` and report the text term ``text_score = (1 - text_edit) * 100`` as their primary
-metric instead.
+Ghostscript (``gs``) on ``PATH`` (v1.5 also needs ``node``). The CDM tasks install whichever
+are missing at job start (TeX Live, the ImageMagick 7 AppImage, Node.js, and Ghostscript from
+apt; see :func:`~olmo_eval.evals.vision.scoring.omnidocbench.ensure_cdm_toolchain`) and check
+that they render a formula, all before inference. The ``_no_cdm`` variants skip CDM, so they
+have no ``overall`` and report the text term ``text_score = (1 - text_edit) * 100`` as their
+primary metric instead.
 
 The prompt is the one the official inference scripts share across general VLMs
 (``tools/model_infer``), sent in a single user turn with the page image as shipped, to an
@@ -66,8 +68,8 @@ from olmo_eval.evals.vision.scoring.omnidocbench import (
     OmniDocBenchScorer,
     OmniDocBenchScorerFailuresMetric,
     OmniDocBenchTextScoreMetric,
+    ensure_cdm_toolchain,
     ensure_evaluator,
-    missing_cdm_binaries,
     run_official_evaluation,
 )
 from olmo_eval.evals.vision.tasks.ocr import OcrTask
@@ -228,14 +230,8 @@ class OmniDocBenchTask(OcrTask):
     languages: tuple[str, ...] | None = None
 
     def _build_instances(self) -> Iterator[Instance]:
-        missing = missing_cdm_binaries(self.version) if self.with_cdm else []
-        if missing:
-            raise RuntimeError(
-                f"{self.config.name} grades formulas with CDM, which needs {', '.join(missing)} "
-                "on PATH (a LaTeX distribution with CJK support, ImageMagick 7 and "
-                f"Ghostscript). Install them, or run {self.config.name}_no_cdm, which reports "
-                "every metric except CDM and overall."
-            )
+        if self.with_cdm:
+            ensure_cdm_toolchain(self.version)
         ensure_evaluator(self.version)
         data_dir = _data_dir(self.version)
         question = self._question(PROMPT)
