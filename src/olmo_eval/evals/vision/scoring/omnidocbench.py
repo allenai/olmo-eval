@@ -51,6 +51,65 @@ _MATCH_METHOD = "quick_match"
 _SAMPLE_KEY_RE = re.compile(r"^(?P<image>.*)_\[[^\]]*\]$")
 
 
+#: CDM scores every render failure as zero without raising, so a missing package or font, a
+#: TeX Live older than 2022 (no ``\mathcolor``) or an ImageMagick delegate Ghostscript cannot
+#: serve would otherwise surface only as low formula scores. Each version's CDM template is
+#: rendered once with a colored token and Chinese text before inference to rule that out.
+_CDM_PROBE_BODY = r"\mathcolor[RGB]{255,0,0}{x}^{2} + \upalpha + \text{中文}"
+
+#: v1.6's Chinese formula template: pdflatex with ``CJK`` and the ``gkai`` font.
+_PDFLATEX_PROBE_TEX = (
+    r"""
+\documentclass[12pt]{article}
+\usepackage[landscape]{geometry}
+\geometry{a4paper,scale=0.98}
+\pagestyle{empty}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{upgreek}
+\usepackage{CJK}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\begin{document}
+\begin{CJK}{UTF8}{gkai}
+\begin{displaymath}
+"""
+    + _CDM_PROBE_BODY
+    + r"""
+\end{displaymath}
+\end{CJK}
+\end{document}
+"""
+)
+
+#: v1.5's formula template: xelatex with ``xeCJK`` and the Source Han Sans SC font.
+_XELATEX_PROBE_TEX = (
+    r"""
+\documentclass[12pt]{article}
+\usepackage[landscape]{geometry}
+\geometry{a4paper,scale=0.98}
+\pagestyle{empty}
+\usepackage{amsmath}
+\usepackage{upgreek}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{xeCJK}
+\setCJKmainfont{Source Han Sans SC}
+\setCJKsansfont{Source Han Sans SC}
+\setCJKmonofont{Source Han Sans SC}
+\xeCJKsetup{CJKmath=true}
+\begin{document}
+\begin{displaymath}
+"""
+    + _CDM_PROBE_BODY
+    + r"""
+\end{displaymath}
+\end{document}
+"""
+)
+
+
 @dataclass(frozen=True)
 class EvaluatorVersion:
     """One release of the official evaluator and how to stand it up."""
@@ -65,6 +124,12 @@ class EvaluatorVersion:
     zero_fills_missing_pages: bool
     #: Extra binaries CDM needs beyond :data:`CDM_BINARIES`.
     cdm_binaries: tuple[str, ...] = ()
+    #: The LaTeX engine CDM renders formulas with, and a document in CDM's own formula
+    #: template (with a colored token and Chinese text) that must render for CDM to work.
+    cdm_latex: str = "pdflatex"
+    cdm_probe_tex: str = ""
+    #: Font families CDM's template names, with the archive each is installed from.
+    cdm_fonts: tuple[tuple[str, str], ...] = ()
     #: ``(installed, replacement)`` pairs swapped after installing, for dependencies that
     #: pull a variant the evaluation host cannot load.
     replacements: tuple[tuple[str, str], ...] = ()
@@ -83,6 +148,7 @@ EVALUATORS: dict[str, EvaluatorVersion] = {
         python_version="3.11",
         install=("-e", "{repo}", "filelock==3.16.1"),
         zero_fills_missing_pages=True,
+        cdm_probe_tex=_PDFLATEX_PROBE_TEX,
         startup_imports=("src.cli",),
     ),
     # Head of the ``v1_5`` branch. Its ``requirements.txt`` pins a whole notebook
@@ -119,8 +185,18 @@ EVALUATORS: dict[str, EvaluatorVersion] = {
             "tqdm==4.67.1",
         ),
         zero_fills_missing_pages=False,
-        # v1.5 tokenizes formulas with the KaTeX parser through Node.js.
-        cdm_binaries=("node",),
+        # v1.5 tokenizes formulas with the KaTeX parser through Node.js, and renders them with
+        # xelatex in Source Han Sans SC (its CDM README).
+        cdm_binaries=("node", "xelatex"),
+        cdm_latex="xelatex",
+        cdm_probe_tex=_XELATEX_PROBE_TEX,
+        cdm_fonts=(
+            (
+                "Source Han Sans SC",
+                "https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/"
+                "09_SourceHanSansSC.zip",
+            ),
+        ),
         # ``mmeval`` requires the GUI OpenCV build, which needs ``libGL`` at import time;
         # the headless build provides the same ``cv2`` without it.
         replacements=(("opencv-python", "opencv-python-headless==4.11.0.86"),),
@@ -212,7 +288,7 @@ def _check_startup_imports(spec: EvaluatorVersion, repo: Path, python: Path) -> 
 # ---------------------------------------------------------------------------
 
 #: What CDM's TeX templates load, on top of TeX Live's ``scheme-small``. ``was`` provides
-#: ``upgreek``; ``cjk`` and ``arphic`` render the Chinese formulas.
+#: ``upgreek``; ``cjk`` and ``arphic`` render v1.6's Chinese formulas, ``xecjk`` v1.5's.
 _TEXLIVE_PACKAGES = (
     "cjk",
     "cjkutils",
@@ -227,20 +303,28 @@ _TEXLIVE_PACKAGES = (
     "amsfonts",
     "standalone",
     "preview",
+    "xecjk",
 )
-#: TeX Live repositories, tried in order. ``mirror.ctan.org`` redirects to a random mirror,
-#: and some serve certificate chains that do not verify, so a fixed mirror comes first.
+#: A style file from each package the templates load, to spot a TeX Live without them.
+_TEXLIVE_STY_FILES = ("CJK.sty", "xeCJK.sty", "upgreek.sty", "booktabs.sty", "multirow.sty")
+#: The CDM runtime OmniDocBench's README lists as verified (its Docker image): TeX Live 2025,
+#: ImageMagick 7.1.1-47 and Ghostscript 9.55.0. Rendering differs between versions and CDM
+#: follows it (Ghostscript 10.02 instead of 9.55 moved a formula score by 0.2 points), so these
+#: exact versions are installed unless the ones on ``PATH`` already match.
+_TEXLIVE_YEAR = "2025"
+#: The frozen final TeX Live 2025 repository, from the historic archive and a mirror of it.
 _TEXLIVE_REPOSITORIES = (
-    "https://mirrors.mit.edu/CTAN/systems/texlive/tlnet",
-    "https://mirror.ctan.org/systems/texlive/tlnet",
+    "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final",
+    "https://mirrors.tuna.tsinghua.edu.cn/tex-historic-archive/systems/texlive/2025/tlnet-final",
 )
-#: Distributions ship ImageMagick 6; CDM calls ImageMagick 7's ``magick``.
+_MAGICK_VERSION = "7.1.1-47"
 _MAGICK_APPIMAGE_URL = (
-    "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-31/"
-    "ImageMagick-7.1.2-31-gcc-x86_64.AppImage"
+    "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.1-47/"
+    "ImageMagick-82572af-gcc-x86_64.AppImage"
 )
 #: System libraries the AppImage links against but does not bundle (Debian/Ubuntu names).
 _MAGICK_SYSTEM_PACKAGES = (
+    "libbrotli1",
     "libfontconfig1",
     "libfreetype6",
     "libfribidi0",
@@ -251,80 +335,94 @@ _MAGICK_SYSTEM_PACKAGES = (
     "libexpat1",
     "libstdc++6",
 )
-_NODE_VERSION = "v24.21.0"
+_GHOSTSCRIPT_VERSION = "9.55.0"
+_GHOSTSCRIPT_URL = (
+    "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs9550/"
+    "ghostscript-9.55.0-linux-x86_64.tgz"
+)
+#: The Node.js release v1.5's CDM README installs.
+_NODE_VERSION = "v16.13.1"
 
-#: CDM's Chinese formula template with a colored token, rendered once to check the
-#: toolchain. CDM scores every render failure as zero without raising, so a missing
-#: package, a TeX Live older than 2022 (no ``\mathcolor``) or an ImageMagick delegate that
-#: Ghostscript cannot serve would otherwise surface only as low formula scores.
-_CDM_PROBE_TEX = r"""
-\documentclass[12pt]{article}
-\usepackage[landscape]{geometry}
-\geometry{a4paper,scale=0.98}
-\pagestyle{empty}
-\usepackage{booktabs}
-\usepackage{multirow}
-\usepackage{amsmath}
-\usepackage{upgreek}
-\usepackage{CJK}
-\usepackage{amssymb}
-\usepackage{xcolor}
-\begin{document}
-\begin{CJK}{UTF8}{gkai}
-\begin{displaymath}
-\mathcolor[RGB]{255,0,0}{x}^{2} + \upalpha + \text{中文}
-\end{displaymath}
-\end{CJK}
-\end{document}
-"""
-
-_cdm_ready = False
+_cdm_ready: set[str] = set()
 
 
 def ensure_cdm_toolchain(version: str = "v1.6") -> None:
-    """Put CDM's binaries on ``PATH``, installing any that are missing, and check they render.
+    """Put CDM's pinned toolchain on ``PATH``, installing what is missing, and check it renders.
 
-    Missing pieces are installed under ``$OMNIDOCBENCH_CDM_DIR`` (default
-    ``~/.cache/olmo_eval/omnidocbench/cdm``): TeX Live ``scheme-small`` with
-    :data:`_TEXLIVE_PACKAGES`, the ImageMagick 7 AppImage, Node.js for versions that tokenize
-    with KaTeX, and from apt Ghostscript plus the system libraries the AppImage links against.
-    Binaries already on ``PATH`` are used as they are.
+    Tools that are missing or at another version are installed under ``$OMNIDOCBENCH_CDM_DIR``
+    (default ``~/.cache/olmo_eval/omnidocbench/cdm``), which goes first on ``PATH``: TeX Live
+    2025 ``scheme-small`` with :data:`_TEXLIVE_PACKAGES`, the ImageMagick 7.1.1-47 AppImage
+    (plus, from apt, the system libraries it links against), Ghostscript 9.55.0, and Node.js
+    for versions that tokenize with KaTeX.
     """
-    global _cdm_ready
-    if _cdm_ready:
+    if version in _cdm_ready:
         return
     root = Path(
         os.environ.get("OMNIDOCBENCH_CDM_DIR")
         or Path.home() / ".cache" / "olmo_eval" / "omnidocbench" / "cdm"
     )
     _add_cdm_dirs_to_path(root)
-    if missing_cdm_binaries(version):
+    if _cdm_tools_to_install(version):
         from filelock import FileLock
 
         root.mkdir(parents=True, exist_ok=True)
         with FileLock(str(root / ".lock")):
-            missing = missing_cdm_binaries(version)
+            tools = _cdm_tools_to_install(version)
             packages = []
-            if "gs" in missing:
-                packages.append("ghostscript")
-            if "magick" in missing and shutil.which("apt-get"):
+            if "magick" in tools and shutil.which("apt-get"):
                 packages.extend(_MAGICK_SYSTEM_PACKAGES)
-            if "pdflatex" in missing and shutil.which("perl") is None:
+            if "pdflatex" in tools and shutil.which("perl") is None:
                 packages.append("perl")
+            if "fonts" in tools and shutil.which("fc-cache") is None:
+                packages.append("fontconfig")
             if packages:
                 _apt_install(*packages)
-            if "magick" in missing:
+            if "gs" in tools:
+                _install_ghostscript(root)
+            if "magick" in tools:
                 _install_magick(root)
-            if "pdflatex" in missing:
+            if "pdflatex" in tools:
                 _install_texlive(root)
-            if "node" in missing:
+            elif "texlive-packages" in tools:
+                _install_texlive_packages(root)
+            if "node" in tools:
                 _install_node(root)
+            if "fonts" in tools:
+                _install_fonts(root, EVALUATORS[version].cdm_fonts)
         _add_cdm_dirs_to_path(root)
-        missing = missing_cdm_binaries(version)
-        if missing:
-            raise RuntimeError(f"Could not install CDM's {', '.join(missing)}.")
-    _probe_cdm_render()
-    _cdm_ready = True
+        tools = _cdm_tools_to_install(version)
+        if tools:
+            raise RuntimeError(f"Could not install CDM's pinned {', '.join(tools)}.")
+    _probe_cdm_render(EVALUATORS[version])
+    _cdm_ready.add(version)
+
+
+def _cdm_tools_to_install(version: str) -> list[str]:
+    """CDM tools missing from ``PATH`` or at a version other than the pinned one."""
+    pinned = {
+        "gs": (["gs", "--version"], _GHOSTSCRIPT_VERSION),
+        "magick": (["magick", "--version"], f"ImageMagick {_MAGICK_VERSION} "),
+        "pdflatex": (["pdflatex", "--version"], f"(TeX Live {_TEXLIVE_YEAR})"),
+    }
+    tools = [tool for tool, (cmd, expected) in pinned.items() if expected not in _run_quiet(cmd)]
+    if "pdflatex" not in tools:
+        found = _run_quiet(["kpsewhich", *_TEXLIVE_STY_FILES]).split()
+        if len(found) < len(_TEXLIVE_STY_FILES):
+            tools.append("texlive-packages")
+    tools += [b for b in EVALUATORS[version].cdm_binaries if not shutil.which(b)]
+    families = _run_quiet(["fc-list", ":", "family"])
+    if any(family not in families for family, _ in EVALUATORS[version].cdm_fonts):
+        tools.append("fonts")
+    return tools
+
+
+def _run_quiet(cmd: Sequence[str]) -> str:
+    if not shutil.which(cmd[0]):
+        return ""
+    try:
+        return subprocess.run(list(cmd), capture_output=True, text=True, timeout=120).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 def _add_cdm_dirs_to_path(root: Path) -> None:
@@ -378,8 +476,9 @@ def _install_magick(root: Path) -> None:
     # Extracting avoids mounting the AppImage, which needs FUSE.
     _run([str(appimage), "--appimage-extract"], cwd=root, stdout=subprocess.DEVNULL)
     delegates = root / "squashfs-root" / "usr" / "etc" / "ImageMagick-7" / "delegates.xml"
-    # The PDF delegate asks Ghostscript for ``png16malpha``, which not every build has;
-    # ``pngalpha`` renders the same page and is always available.
+    # ImageMagick's configure writes the alpha device the local Ghostscript supports into
+    # the PDF delegate. The AppImage was built against one with ``png16malpha``; Ghostscript
+    # 9.55 lacks it, and a source build against 9.55 (the verified runtime) uses ``pngalpha``.
     delegates.write_text(delegates.read_text().replace("png16malpha", "pngalpha"))
     (root / "bin").mkdir(exist_ok=True)
     link = root / "bin" / "magick"
@@ -428,9 +527,49 @@ def _install_texlive_from(root: Path, repository: str) -> None:
         ["perl", str(installer), "--profile", str(profile), "--repository", repository],
         cwd=installer.parent,
     )
-    tlmgr = texdir / "bin" / "x86_64-linux" / "tlmgr"
-    _run([str(tlmgr), "install", *_TEXLIVE_PACKAGES])
+    _run([str(texdir / "bin" / "x86_64-linux" / "tlmgr"), "install", *_TEXLIVE_PACKAGES])
     shutil.rmtree(work, ignore_errors=True)
+
+
+def _install_texlive_packages(root: Path) -> None:
+    tlmgr = root / "texlive" / "bin" / "x86_64-linux" / "tlmgr"
+    if not tlmgr.exists():
+        # A TeX Live 2025 installed elsewhere lacks packages CDM needs; install our own.
+        _install_texlive(root)
+        return
+    _run([str(tlmgr), "install", *_TEXLIVE_PACKAGES])
+
+
+def _install_ghostscript(root: Path) -> None:
+    import tarfile
+
+    archive = _download(_GHOSTSCRIPT_URL, root / "ghostscript.tgz")
+    (root / "bin").mkdir(exist_ok=True)
+    with tarfile.open(archive) as tar:
+        member = next(
+            m for m in tar.getmembers() if m.name.endswith("-linux-x86_64") and m.isfile()
+        )
+        member.name = "gs"
+        tar.extract(member, root / "bin", filter="data")
+    (root / "bin" / "gs").chmod(0o755)
+    archive.unlink()
+
+
+def _install_fonts(root: Path, fonts: Sequence[tuple[str, str]]) -> None:
+    import zipfile
+
+    # A per-user font directory fontconfig reads by default, so xelatex finds the families.
+    target = Path.home() / ".local" / "share" / "fonts" / "omnidocbench"
+    target.mkdir(parents=True, exist_ok=True)
+    for _, url in fonts:
+        archive = _download(url, root / Path(url).name)
+        with zipfile.ZipFile(archive) as zf:
+            for name in zf.namelist():
+                if name.lower().endswith((".otf", ".ttf", ".ttc")):
+                    (target / Path(name).name).write_bytes(zf.read(name))
+        archive.unlink()
+    if shutil.which("fc-cache"):
+        _run(["fc-cache", "-f", str(target)])
 
 
 def _install_node(root: Path) -> None:
@@ -452,12 +591,12 @@ def _install_node(root: Path) -> None:
     archive.unlink()
 
 
-def _probe_cdm_render() -> None:
+def _probe_cdm_render(spec: EvaluatorVersion) -> None:
     with tempfile.TemporaryDirectory(prefix="omnidocbench_cdm_probe_") as tmp:
         work = Path(tmp)
-        (work / "probe.tex").write_text(_CDM_PROBE_TEX, encoding="utf-8")
+        (work / "probe.tex").write_text(spec.cdm_probe_tex, encoding="utf-8")
         steps = (
-            ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "probe.tex"],
+            [spec.cdm_latex, "-interaction=nonstopmode", "-halt-on-error", "probe.tex"],
             ["magick", "-density", "200", "-quality", "100", "probe.pdf", "probe.png"],
         )
         for cmd in steps:
@@ -467,11 +606,11 @@ def _probe_cdm_render() -> None:
             if proc.returncode != 0:
                 tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-20:])
                 raise RuntimeError(
-                    f"CDM's toolchain cannot render a formula ({cmd[0]} exited "
+                    f"CDM's toolchain cannot render a {spec.name} formula ({cmd[0]} exited "
                     f"{proc.returncode}); formulas would all score zero.\n{tail}"
                 )
         if not (work / "probe.png").exists():
-            raise RuntimeError("CDM's toolchain rendered no image for a test formula.")
+            raise RuntimeError(f"CDM's toolchain rendered no image for a {spec.name} formula.")
 
 
 # ---------------------------------------------------------------------------
