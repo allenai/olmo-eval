@@ -735,11 +735,12 @@ it writes back, each with its benchmark's official scoring:
 - `omnidocbench` — [OmniDocBench](https://github.com/opendatalab/OmniDocBench) v1.6:
   1,651 pages scored by the pinned official evaluator, which runs in a virtualenv of its
   own (needs `git` and `uv`). `overall` is the leaderboard's 0-100 number, which is why
-  the `ocr` suite is display-only. Its formula metric (CDM) needs `pdflatex`,
-  ImageMagick 7 and Ghostscript; `omnidocbench_no_cdm` runs without them and reports
-  every other metric. `omnidocbench_v15` / `omnidocbench_v15_no_cdm` are the 1,355-page
-  v1.5 release with its own evaluator (CDM there also needs `node`); the two leaderboards
-  are not comparable.
+  the `ocr` suite is display-only. Its formula metric (CDM) renders LaTeX; the task sets
+  up the toolchain itself at job start, so it runs in one step anywhere (see
+  [OmniDocBench formula scoring](#omnidocbench-formula-scoring-cdm)).
+  `omnidocbench_no_cdm` skips CDM and reports every other metric. `omnidocbench_v15` /
+  `omnidocbench_v15_no_cdm` are the 1,355-page v1.5 release with its own evaluator; the
+  two leaderboards are not comparable.
 
 English-only variants keep the benchmarks' official scoring on a subset:
 `cc_ocr_multi_scene_en` runs the 8 English sub-datasets (2,000 images) and averages over
@@ -820,6 +821,66 @@ uv run olmo-eval suite inspect molmo2_imageqa
 The `molmo2-4b` preset runs `allenai/Molmo2-4B` with `dtype=float32`,
 `autocast_dtype=bfloat16` and `max_crops=24` (8 per image in multi-image prompts),
 matching the reference evaluation numerics.
+
+### OmniDocBench formula scoring (CDM)
+
+`omnidocbench`, `omnidocbench_v15` and their `_en` variants score formulas with CDM,
+which renders every formula through LaTeX and ImageMagick. Before inference each task
+installs whatever part of that toolchain is missing or at another version, then renders
+a test formula through its version's own CDM template. The whole evaluation, CDM
+included, finishes in the same job; no separate rescoring step is needed. Setup takes
+about 5-9 minutes on a fresh machine.
+
+The versions are the ones each release documents, because CDM follows the renderer
+(Ghostscript 10.02 instead of 9.55 moves a formula score by about 0.2 points):
+
+| | v1.6 (`omnidocbench`) | v1.5 (`omnidocbench_v15`) |
+| --- | --- | --- |
+| LaTeX | TeX Live 2025, `pdflatex` + `CJK` | TeX Live 2025, `xelatex` + `xeCJK` |
+| Font | `gkai` (TeX Live `arphic`) | Source Han Sans SC |
+| ImageMagick | 7.1.1-47 | 7.1.1-47 |
+| Ghostscript | 9.55.0 | 9.55.0 |
+| Other | | Node.js 16.13.1 (KaTeX tokenizer) |
+
+What the setup needs:
+
+- **Network access**: TeX Live 2025 comes from the frozen `tlnet-final` repository in the
+  TeX historic archive, ImageMagick and Ghostscript from their GitHub releases, the font
+  from Adobe's release, and Node.js from nodejs.org.
+- **apt** (root, as in Beaker jobs), for the system libraries the ImageMagick AppImage
+  links against and for `fontconfig`.
+- TeX Live, ImageMagick and Ghostscript already on `PATH` at exactly these versions are
+  used as they are, as is any `node`; anything else is installed alongside, first on
+  `PATH` for the evaluation.
+
+If a download fails or the test formula does not render, the task stops before inference
+with the error, rather than scoring every formula zero. On a machine without network
+access or root, run the `_no_cdm` variants.
+
+Environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OMNIDOCBENCH_CDM_DIR` | `~/.cache/olmo_eval/omnidocbench/cdm` | Where the toolchain is installed; point several runs at one shared install to reuse it |
+| `OMNIDOCBENCH_EVAL_DIR` | `~/.cache/olmo_eval/omnidocbench` | Where each version's evaluator checkout and virtualenv are provisioned |
+| `OMNIDOCBENCH_EVAL_WORKERS` | `min(16, cpus / 4)` | Evaluator worker threads (matching, TEDS, CDM); 48 suits a Beaker GPU node |
+| `OMNIDOCBENCH_EVAL_TIMEOUT_S` | `43200` (12 h) | Wall-clock cap on evaluation; past it the task reports NaN metrics with `evaluator_failed` and keeps the predictions |
+| `OMNIDOCBENCH_DIR` / `OMNIDOCBENCH_V15_DIR` | Hub download | Local copy of the dataset (`OmniDocBench.json` + `images/`) |
+
+For example, on Beaker:
+
+```bash
+olmo-eval beaker launch -n molmo2-4b-omnidocbench \
+  -m /weka/oe-training-default/mm-olmo/released-models-molmo2-1225/Molmo2-4B/step2000 \
+  -t omnidocbench \
+  --harness default -o provider.kind=olmo_core_vlm -o provider.max_crops=24 \
+  -o provider.num_instances=2 \
+  --gpus 2 --env OMNIDOCBENCH_EVAL_WORKERS=48 \
+  -c ai2/holmes -p urgent --min-runtime 8h -w <workspace> -B <budget>
+```
+
+The job log shows the toolchain setup (`Running: ...install-tl...`, `tlmgr install ...`),
+then inference, then one `overall` for the task.
 
 ### Providers
 
