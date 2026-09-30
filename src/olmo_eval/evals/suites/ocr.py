@@ -15,24 +15,25 @@ make_suite(
     # cross-task average is computed.
     aggregation=AggregationStrategy.DISPLAY_ONLY,
     description=(
-        "English document OCR (Molmo2 models read English only): olmOCR-bench, CC-OCR's 8 "
-        "English multi-scene sub-datasets and OmniDocBench v1.6's English pages."
+        "Document OCR in every language the benchmarks cover, as their leaderboards score it: "
+        "olmOCR-bench, CC-OCR multi-scene (13 sub-datasets) and OmniDocBench v1.6 (all pages)."
     ),
 )
 
 
-OCR_FULL_TASKS = (
+OCR_EN_TASKS = (
     "olmocr_bench",
-    "cc_ocr_multi_scene_full",
-    "omnidocbench_full",
+    "cc_ocr_multi_scene_en",
+    "omnidocbench_en",
 )
 
 make_suite(
-    "ocr_full",
-    OCR_FULL_TASKS,
+    "ocr_en",
+    OCR_EN_TASKS,
     aggregation=AggregationStrategy.DISPLAY_ONLY,
     description=(
-        "Document OCR in every language the benchmarks cover, as their leaderboards score it: "
-        "olmOCR-bench, CC-OCR multi-scene (13 sub-datasets) and OmniDocBench v1.6 (all pages)."
+        "English document OCR, the default setting for Molmo2 models (which read English only): "
+        "olmOCR-bench, CC-OCR's 8 English multi-scene sub-datasets and OmniDocBench v1.6's English "
+        "pages."
     ),
 )
