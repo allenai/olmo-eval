@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -152,7 +153,7 @@ def _format_result(result: Any) -> str:
     return str(result)
 
 
-def execute_calls(calls: list[Call | str], instances: dict[str, Any]) -> list[str]:
+def execute_calls(calls: Sequence[Call | str], instances: dict[str, Any]) -> list[str]:
     """Run calls in order against ``instances``, returning their results.
 
     A call that raises is recorded as its error rather than stopping the
