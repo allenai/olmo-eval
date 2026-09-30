@@ -268,6 +268,47 @@ class TestAnswerExtraction:
         assert task.extract_answer(LMOutput(text="ASC 606-10-25-15")) == "ASC 606-10-25-15"
 
 
+class TestFinalAnswer:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "<think>maybe 606-10-25-14</think>\n\nASC 606-10-25-15",
+            "maybe 606-10-25-14</think>\n\nASC 606-10-25-15",
+            "ASC 606-10-25-15",
+        ],
+        ids=["closed-trace", "opening-tag-in-prompt", "no-trace"],
+    )
+    def test_answers_are_found(self, task, text):
+        output = LMOutput(text=text)
+        output.extracted_answer = task.extract_answer(output)
+
+        assert OmniscienceScorer(judge_fn=named_judge).final_answer(output) == "ASC 606-10-25-15"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "<think>maybe 606-10-25-14, or maybe",
+            "<think>maybe 606-10-25-14</think>",
+            "maybe 606-10-25-14</think>\n\n  ",
+        ],
+        ids=["unclosed-trace", "closed-trace-no-answer", "whitespace-answer"],
+    )
+    def test_no_final_answer(self, task, text):
+        output = LMOutput(text=text)
+        output.extracted_answer = task.extract_answer(output)
+
+        assert OmniscienceScorer(judge_fn=named_judge).final_answer(output) is None
+
+    def test_uses_the_original_text_when_thinking_was_stripped(self):
+        output = LMOutput(
+            text="",
+            extracted_answer="",
+            metadata={"original_text": "<think>maybe 606-10-25-14</think>"},
+        )
+
+        assert OmniscienceScorer(judge_fn=named_judge).final_answer(output) is None
+
+
 class TestJudgeParsing:
     @pytest.mark.parametrize(
         ("raw", "grade"),
@@ -366,6 +407,28 @@ class TestScorer:
 
         assert instance.metadata["is_parsing_error"] is True
         assert instance.metadata["judge_result"] == "PARSING_ERROR"
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "text",
+        ["<think>still reasoning about 42", "<think>it is 42</think>"],
+        ids=["unclosed-trace", "closed-trace-no-answer"],
+    )
+    async def test_no_final_answer_is_not_attempted_without_a_judge_call(self, text):
+        judge, calls = _replies("A")
+        instance = Instance(
+            question="q", gold_answer="42", metadata={"judge_raw_response": "stale"}
+        )
+
+        score = await OmniscienceScorer(judge_fn=judge).ascore_with_context(
+            instance, LMOutput(text=text, extracted_answer=""), ScoringContext()
+        )
+
+        assert score == 0.0
+        assert calls == []
+        assert instance.metadata["judge_result"] == "NOT_ATTEMPTED"
+        assert instance.metadata["judge_raw_response"] is None
+        assert instance.metadata["is_parsing_error"] is False
 
     def test_to_dict_records_the_judge_by_name(self):
         serialized = OmniscienceScorer(judge_fn=named_judge).to_dict()
@@ -574,6 +637,33 @@ class TestEndToEnd:
         assert metrics["domain__Finance"][judge_name] == pytest.approx(0.5)
         assert metrics["domain__Law"][judge_name] == pytest.approx(0.0)
         assert metrics["judge_parsing_errors"][judge_name] == 1.0
+
+    @pytest.mark.anyio
+    async def test_no_final_answer_counts_as_not_attempted(self, task, patch_judge):
+        responses = [
+            _response(task, text="ASC 606-10-25-15"),
+            _response(task, text="<think>ASC 606-10-25-15 or maybe"),
+            _response(task, text="<think>ASC 606-10-25-15</think>\n\n"),
+        ]
+        judge, calls = _replies_by_answer({"ASC 606-10-25-15": "A"})
+        patch_judge(judge)
+
+        await task.score_responses(responses, ScoringContext())
+
+        assert len(calls) == 1
+        assert [r.instance.metadata["judge_result"] for r in responses] == [
+            "CORRECT",
+            "NOT_ATTEMPTED",
+            "NOT_ATTEMPTED",
+        ]
+
+        metrics = task.compute_metrics(responses)
+        assert metrics["accuracy"]["omniscience_judge"] == pytest.approx(1 / 3)
+        assert metrics["any__any__omniscience_index"]["omniscience_judge"] == pytest.approx(
+            100 / 3
+        )
+        assert metrics["any__any__hallucination_rate"]["omniscience_judge"] == 0.0
+        assert metrics["judge_parsing_errors"]["omniscience_judge"] == 0.0
 
     @pytest.mark.anyio
     async def test_a_failed_judge_call_is_counted_and_excluded(self, task, patch_judge):

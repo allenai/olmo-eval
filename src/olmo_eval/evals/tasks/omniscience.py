@@ -29,7 +29,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.extract import extract_think_answer
+from olmo_eval.evals.extract import extract_think_answer, extract_think_answer_only
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 logger = logging.getLogger(__name__)
@@ -200,12 +200,23 @@ class OmniscienceScorer(LLMJudgeScorer):
             serialized["judge_fn"] = getattr(judge_fn, "__qualname__", None)
         return serialized
 
+    def final_answer(self, output: LMOutput) -> str | None:
+        """Return the model's final answer, or None when it gave none.
+
+        An output with a reasoning trace has a final answer only if the trace is
+        closed and followed by a non-empty answer.
+        """
+        text = (output.metadata or {}).get("original_text", output.text) or ""
+        if "<think>" in text or "</think>" in text:
+            return (extract_think_answer_only(text) or "").strip() or None
+        return (output.extracted_answer or output.text).strip()
+
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
         """Format Omniscience-style judge prompt."""
         return JUDGE_FORMAT.format(
             question=instance.question,
             gold_answer=instance.gold_answer or "",
-            model_answer=(output.extracted_answer or output.text).strip(),
+            model_answer=self.final_answer(output) or "",
         )
 
     def parse_judge_response(self, response: str, instance: Instance) -> float:
@@ -252,6 +263,11 @@ class OmniscienceScorer(LLMJudgeScorer):
     ) -> float:
         """Score using configured provider or judge_fn."""
         instance.metadata["is_parsing_error"] = False
+
+        if self.final_answer(output) is None:
+            instance.metadata["judge_raw_response"] = None
+            instance.metadata["judge_result"] = "NOT_ATTEMPTED"
+            return 0.0
 
         try:
             self._validate_provider(context)
