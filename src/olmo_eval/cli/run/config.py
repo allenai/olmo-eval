@@ -88,12 +88,13 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
       ``sandbox_pool_min_instances`` minimum instead of being applied per sandbox
 
     Args:
-        base_dict: The base dictionary to modify.
+        base_dict: The base dictionary. It is not modified.
         overrides: List of dotlist strings (e.g., ["sandboxes.0.mode=modal"]).
 
     Returns:
-        The modified dictionary.
+        A new dictionary with the overrides applied.
     """
+    base_dict = copy.deepcopy(base_dict)
     for override in overrides:
         if "=" not in override:
             continue
@@ -190,13 +191,7 @@ def _apply_harness_overrides(harness_config: HarnessConfig, overrides: list[str]
     Returns:
         New HarnessConfig with overrides applied.
     """
-    # Deep-copied because _apply_dotlist_overrides writes into the dict in
-    # place, and to_dict can share nested containers with the config (e.g.
-    # provider kwargs). Presets are cached for the life of the process, so
-    # without the copy an override would leak into every later use of the
-    # preset.
-    harness_dict = copy.deepcopy(harness_config.to_dict())
-    harness_dict = _apply_dotlist_overrides(harness_dict, overrides)
+    harness_dict = _apply_dotlist_overrides(harness_config.to_dict(), overrides)
     return HarnessConfig.from_dict(harness_dict)
 
 
@@ -383,9 +378,7 @@ class RunConfigBuilder:
 
         task_overrides: dict[str, dict[str, Any]] = {}
         for task_spec, cli_overrides in resolved_cli_overrides.items():
-            override_dict: dict[str, Any] = {}
-            _apply_dotlist_overrides(override_dict, cli_overrides)
-            task_overrides[task_spec] = override_dict
+            task_overrides[task_spec] = _apply_dotlist_overrides({}, cli_overrides)
 
         # Resolve harness configuration with provider config built in
         harness_config = self._resolve_harness_config(self.model)
