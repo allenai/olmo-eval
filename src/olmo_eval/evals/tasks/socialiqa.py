@@ -21,7 +21,7 @@ from olmo_eval.evals.tasks.constants.socialiqa import SOCIALIQA_FIXED_FEWSHOT
 @register("socialiqa")
 class SocialIQA(Task):
     data_source = DataSource(
-        path="social_i_qa", split="validation", revision="refs/convert/parquet"
+        path="allenai/social_i_qa", split="validation", revision="refs/convert/parquet"
     )
     split = Split.VALIDATION
     metrics = (LogprobPerCharMCAccuracyMetric(),)
@@ -158,7 +158,7 @@ register_variant(
     "mc_olmo3base",
     formatter=MultipleChoiceFormatter(),
     data_source=DataSource(
-        path="social_i_qa", split="train+validation", revision="refs/convert/parquet"
+        path="allenai/social_i_qa", split="train+validation", revision="refs/convert/parquet"
     ),
     num_fewshot=5,
     limit=10000,
@@ -168,7 +168,7 @@ register_variant(
     "socialiqa",
     "xlarge",
     data_source=DataSource(
-        path="social_i_qa", split="train+validation", revision="refs/convert/parquet"
+        path="allenai/social_i_qa", split="train+validation", revision="refs/convert/parquet"
     ),
     num_fewshot=5,
     limit=10000,
