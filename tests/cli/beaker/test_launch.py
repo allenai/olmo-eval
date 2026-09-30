@@ -54,7 +54,7 @@ class TestHarnessOverridesProviderDependencies:
 
     def test_apply_harness_overrides_with_list_dependencies(self):
         """Test that harness overrides with list dependencies work."""
-        from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+        from olmo_eval.cli.run.config import _apply_harness_overrides
         from olmo_eval.harness import get_harness_preset
 
         preset = get_harness_preset("default")
@@ -67,7 +67,7 @@ class TestHarnessOverridesProviderDependencies:
 
     def test_apply_harness_overrides_with_string_dependencies_raises(self):
         """Test that harness overrides with string dependencies raises error."""
-        from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+        from olmo_eval.cli.run.config import _apply_harness_overrides
         from olmo_eval.harness import get_harness_preset
 
         preset = get_harness_preset("default")
@@ -132,7 +132,7 @@ class TestHarnessOverridesProviderDependencies:
 
     def test_provider_package_overrides_vllm_extra(self):
         """Test that provider.package overrides the default vllm extra."""
-        from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+        from olmo_eval.cli.run.config import _apply_harness_overrides
         from olmo_eval.harness import get_harness_preset
 
         preset = get_harness_preset("default")
@@ -319,7 +319,7 @@ class TestHarnessOverridesProviderDependencies:
 
     def test_apply_harness_overrides_with_global_sandbox_override(self):
         """Test that sandboxes={...} sets the shared pool and common sandbox fields."""
-        from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+        from olmo_eval.cli.run.config import _apply_harness_overrides
         from olmo_eval.harness import get_harness_preset
         from olmo_eval.harness.sandbox import SandboxMode
 

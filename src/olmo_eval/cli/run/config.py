@@ -88,12 +88,13 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
       ``sandbox_pool_min_instances`` minimum instead of being applied per sandbox
 
     Args:
-        base_dict: The base dictionary to modify.
+        base_dict: The base dictionary. It is not modified.
         overrides: List of dotlist strings (e.g., ["sandboxes.0.mode=modal"]).
 
     Returns:
-        The modified dictionary.
+        A new dictionary with the overrides applied.
     """
+    base_dict = copy.deepcopy(base_dict)
     for override in overrides:
         if "=" not in override:
             continue
@@ -172,6 +173,26 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
             )
 
     return base_dict
+
+
+def _apply_harness_overrides(harness_config: HarnessConfig, overrides: list[str]) -> HarnessConfig:
+    """Apply CLI overrides to harness config.
+
+    Args:
+        harness_config: Base HarnessConfig to modify.
+        overrides: List of dotlist override strings (e.g., ["sandbox.mode=docker"]).
+            Supports list indices like "sandboxes.0.mode=modal".
+            Supports JSON values like 'sandboxes.0={"mode":"modal"}'.
+            Supports shared sandbox overrides like
+            'sandboxes={"mode":"modal","instances":64,"min_instances":24}'
+            where non-pool fields are applied to each sandbox config and
+            instances/min_instances set the shared sandbox pool budget/minimum.
+
+    Returns:
+        New HarnessConfig with overrides applied.
+    """
+    harness_dict = _apply_dotlist_overrides(harness_config.to_dict(), overrides)
+    return HarnessConfig.from_dict(harness_dict)
 
 
 @dataclass
@@ -357,9 +378,7 @@ class RunConfigBuilder:
 
         task_overrides: dict[str, dict[str, Any]] = {}
         for task_spec, cli_overrides in resolved_cli_overrides.items():
-            override_dict: dict[str, Any] = {}
-            _apply_dotlist_overrides(override_dict, cli_overrides)
-            task_overrides[task_spec] = override_dict
+            task_overrides[task_spec] = _apply_dotlist_overrides({}, cli_overrides)
 
         # Resolve harness configuration with provider config built in
         harness_config = self._resolve_harness_config(self.model)
@@ -449,9 +468,7 @@ class RunConfigBuilder:
 
         # Apply CLI overrides to harness config
         if self.cli_harness_overrides:
-            harness_dict = harness_config.to_dict()
-            harness_dict = _apply_dotlist_overrides(harness_dict, self.cli_harness_overrides)
-            harness_config = HarnessConfig.from_dict(harness_dict)
+            harness_config = _apply_harness_overrides(harness_config, self.cli_harness_overrides)
 
         from olmo_eval.common.configs import get_provider_config
 
