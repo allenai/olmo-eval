@@ -232,6 +232,9 @@ class LMRequest:
     system_prompt: str | None = None
     max_length: int | None = None
     images: tuple[Any, ...] | None = None
+    #: Per-instance payload for a scaffold that needs more than the messages,
+    #: such as the state a multi-turn rollout acts on. Not sent to the model.
+    metadata: dict[str, Any] | None = None
 
 
 @hide_unset()

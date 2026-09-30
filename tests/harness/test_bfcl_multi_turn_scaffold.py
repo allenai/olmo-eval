@@ -1,0 +1,190 @@
+"""Tests for the BFCL multi-turn rollout scaffold."""
+
+from __future__ import annotations
+
+import pytest
+
+from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types.tools import ToolCall
+from olmo_eval.harness.scaffolds import get_scaffold
+from olmo_eval.harness.scaffolds.bfcl_multi_turn import ADDITIONAL_FUNCTION_PROMPT
+from olmo_eval.inference.base import InferenceProvider
+
+FS_CONFIG = {
+    "GorillaFileSystem": {
+        "root": {"workspace": {"type": "directory", "contents": {}}},
+    }
+}
+
+
+class ScriptedProvider(InferenceProvider):
+    """Returns prepared replies in order, recording what it was asked."""
+
+    supports_tools = True
+
+    def __init__(self, replies: list[LMOutput]) -> None:
+        super().__init__("scripted")
+        self.replies = list(replies)
+        self.requests: list[LMRequest] = []
+
+    def generate(self, requests, sampling_params=None):  # pragma: no cover - unused
+        raise NotImplementedError
+
+    def logprobs(self, requests, sampling_params=None):  # pragma: no cover - unused
+        raise NotImplementedError
+
+    async def agenerate(self, requests, sampling_params=None):
+        self.requests.append(requests[0])
+        reply = self.replies.pop(0) if self.replies else LMOutput(text="Nothing further.")
+        return [[reply]]
+
+
+def request_for(turns, **payload) -> LMRequest:
+    base = {
+        "turns": turns,
+        "initial_config": FS_CONFIG,
+        "involved_classes": ["GorillaFileSystem"],
+        "call_source": "text",
+        "language": "python",
+    }
+    base.update(payload)
+    return LMRequest(request_type=RequestType.CHAT, messages=(), metadata=base)
+
+
+async def run(provider, request, **kwargs):
+    return await get_scaffold("bfcl_multi_turn").run(
+        provider, None, request, SamplingParams(), **kwargs
+    )
+
+
+@pytest.mark.anyio
+async def test_a_turn_ends_when_the_model_stops_calling() -> None:
+    provider = ScriptedProvider(
+        [LMOutput(text="[mkdir(dir_name='temp')]"), LMOutput(text="All done.")]
+    )
+
+    result = await run(provider, request_for([[{"role": "user", "content": "Make temp."}]]))
+
+    assert result.final_output.extracted_answer == [[[{"mkdir": {"dir_name": "temp"}}]]]
+    assert len(provider.requests) == 2
+
+
+@pytest.mark.anyio
+async def test_several_steps_in_one_turn_are_kept_separately() -> None:
+    provider = ScriptedProvider(
+        [
+            LMOutput(text="[mkdir(dir_name='temp')]"),
+            LMOutput(text="[cd(folder='temp')]"),
+            LMOutput(text="Done."),
+        ]
+    )
+
+    result = await run(provider, request_for([[{"role": "user", "content": "Go."}]]))
+
+    assert result.final_output.extracted_answer == [
+        [[{"mkdir": {"dir_name": "temp"}}], [{"cd": {"folder": "temp"}}]]
+    ]
+
+
+@pytest.mark.anyio
+async def test_execution_results_come_back_to_the_model() -> None:
+    provider = ScriptedProvider([LMOutput(text="[ls()]"), LMOutput(text="Done.")])
+
+    await run(provider, request_for([[{"role": "user", "content": "List."}]]))
+
+    # The reply after the call carries what the call returned.
+    roles = [m["role"] for m in provider.requests[-1].messages]
+    assert roles[-1] == "user"
+    assert "current_directory_content" in provider.requests[-1].messages[-1]["content"]
+
+
+@pytest.mark.anyio
+async def test_state_carries_from_one_turn_to_the_next() -> None:
+    provider = ScriptedProvider(
+        [
+            LMOutput(text="[mkdir(dir_name='temp')]"),
+            LMOutput(text="Done."),
+            LMOutput(text="[cd(folder='temp')]"),
+            LMOutput(text="Done."),
+        ]
+    )
+
+    await run(
+        provider,
+        request_for(
+            [
+                [{"role": "user", "content": "Make temp."}],
+                [{"role": "user", "content": "Enter it."}],
+            ]
+        ),
+    )
+
+    # cd would fail had the directory not survived the first turn.
+    assert "Error" not in provider.requests[-1].messages[-1]["content"]
+
+
+@pytest.mark.anyio
+async def test_a_turn_the_model_declines_records_no_calls() -> None:
+    provider = ScriptedProvider([LMOutput(text="I need to know which file.")])
+
+    result = await run(provider, request_for([[{"role": "user", "content": "Move one."}]]))
+
+    assert result.final_output.extracted_answer == [[]]
+
+
+@pytest.mark.anyio
+async def test_held_back_functions_are_offered_at_their_turn() -> None:
+    schema = {
+        "type": "function",
+        "function": {"name": "sort", "description": "Sort a file.", "parameters": {}},
+    }
+    provider = ScriptedProvider(
+        [LMOutput(text="Done."), LMOutput(text="[sort(file_name='a.txt')]"), LMOutput(text="ok")]
+    )
+
+    await run(
+        provider,
+        request_for(
+            [[{"role": "user", "content": "Do something."}], []],
+            missed_function={"1": [schema]},
+        ),
+    )
+
+    contents = [m["content"] for r in provider.requests for m in r.messages if m["role"] == "user"]
+    assert any(ADDITIONAL_FUNCTION_PROMPT in c for c in contents)
+    # A prompted model has no tool list, so the offer names the functions.
+    assert any("sort" in c for c in contents)
+
+
+@pytest.mark.anyio
+async def test_the_step_budget_stops_a_model_that_never_finishes() -> None:
+    provider = ScriptedProvider([LMOutput(text="[ls()]") for _ in range(20)])
+
+    result = await run(provider, request_for([[{"role": "user", "content": "Go."}]], max_steps=3))
+
+    assert result.max_turns_reached
+    assert result.final_output.metadata["bfcl_step_budget_exhausted"] is True
+    assert len(provider.requests) == 3
+
+
+@pytest.mark.anyio
+async def test_native_tool_calls_are_read_and_answered_as_tool_messages() -> None:
+    call = ToolCall.create("call_1", "ls", {})
+    provider = ScriptedProvider([LMOutput(text="", tool_calls=[call]), LMOutput(text="Done.")])
+
+    result = await run(
+        provider, request_for([[{"role": "user", "content": "List."}]], call_source="tool_calls")
+    )
+
+    assert result.final_output.extracted_answer == [[[{"ls": {}}]]]
+    last = provider.requests[-1].messages
+    assert last[-1]["role"] == "tool"
+    assert last[-1]["tool_call_id"] == "call_1"
+
+
+@pytest.mark.anyio
+async def test_a_request_without_a_payload_is_refused() -> None:
+    provider = ScriptedProvider([])
+
+    with pytest.raises(ValueError, match="turns"):
+        await run(provider, LMRequest(request_type=RequestType.CHAT, messages=()))

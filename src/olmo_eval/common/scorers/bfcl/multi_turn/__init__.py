@@ -4,6 +4,7 @@ from .checker import multi_turn_checker, response_checker, state_checker
 from .execution import (
     Call,
     build_instances,
+    build_method_table,
     calls_from_decoded,
     execute_calls,
     is_empty_execute_response,
@@ -12,6 +13,7 @@ from .execution import (
 
 __all__ = [
     "build_instances",
+    "build_method_table",
     "Call",
     "calls_from_decoded",
     "execute_calls",
