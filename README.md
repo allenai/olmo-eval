@@ -706,8 +706,8 @@ Five families of image tasks are built in:
 | Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
 | Pointing (model prompts) | `molmo2_pointing_mp` | `pixmo_points_eval_mp`, `sa_co_gold_subset_mp`, `sa_co_gold_point_4k_mp` |
 | Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
-| Document OCR | `ocr` | `olmocr_bench`, `cc_ocr_multi_scene`, `omnidocbench` |
-| Document OCR, English only | `ocr_en` | `olmocr_bench`, `cc_ocr_multi_scene_en`, `omnidocbench_en` |
+| Document OCR (English) | `ocr` | `olmocr_bench`, `cc_ocr_multi_scene`, `omnidocbench` |
+| Document OCR, every language | `ocr_full` | `olmocr_bench`, `cc_ocr_multi_scene_full`, `omnidocbench_full` |
 
 Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
 `dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
@@ -720,7 +720,9 @@ accuracy each task reports per-category breakdowns (MuirBench's 12 task types,
 BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
 
 Document-OCR tasks hand the model one page image and grade the markdown (or JSON)
-it writes back, each with its benchmark's official scoring:
+it writes back, each with its benchmark's official scoring. Molmo2 models read English
+only, so the OCR tasks evaluate the English part of each benchmark by default; the `_full`
+variants run every language, as the benchmarks' leaderboards do:
 
 - `olmocr_bench` — [olmOCR-bench](https://huggingface.co/datasets/allenai/olmOCR-bench):
   1,403 PDF pages and 7,019 unit tests (text presence/absence, reading order, table
@@ -728,25 +730,22 @@ it writes back, each with its benchmark's official scoring:
   the mean of the eight category pass rates (0-1). Math tests render with KaTeX in a
   headless Chromium, which is installed on first use.
 - `cc_ocr_multi_scene` — the multi-scene OCR track of
-  [CC-OCR](https://huggingface.co/datasets/wulipc/CC-OCR): 2,750 scene-text, document and
-  web images in English and Chinese. The primary `macro_f1` is the official track score
-  (0-1): per-image F1 of the word (Chinese: character) multiset, averaged within and then
-  across the 13 sub-datasets.
-- `omnidocbench` — [OmniDocBench](https://github.com/opendatalab/OmniDocBench) v1.6:
-  1,651 pages scored by the pinned official evaluator, which runs in a virtualenv of its
-  own (needs `git` and `uv`). `overall` is the leaderboard's 0-100 number, which is why
-  the `ocr` suite is display-only. Its formula metric (CDM) renders LaTeX; the task sets
-  up the toolchain itself at job start, so it runs in one step anywhere (see
-  [OmniDocBench formula scoring](#omnidocbench-formula-scoring-cdm)).
-  `omnidocbench_no_cdm` skips CDM and reports every other metric. `omnidocbench_v15` /
-  `omnidocbench_v15_no_cdm` are the 1,355-page v1.5 release with its own evaluator; the
-  two leaderboards are not comparable.
-
-English-only variants keep the benchmarks' official scoring on a subset:
-`cc_ocr_multi_scene_en` runs the 8 English sub-datasets (2,000 images) and averages over
-those, and each OmniDocBench task has an `_en` variant (`omnidocbench_en`,
-`omnidocbench_no_cdm_en`, `omnidocbench_v15_en`, `omnidocbench_v15_no_cdm_en`) that runs and
-scores only the pages annotated `english` (755 of v1.6's pages, 628 of v1.5's).
+  [CC-OCR](https://huggingface.co/datasets/wulipc/CC-OCR), scored as the official
+  evaluator does: per-image F1 of the word multiset, averaged within each sub-dataset and
+  then across sub-datasets (`macro_f1`, 0-1). By default it runs the 8 English
+  sub-datasets (2,000 images). `cc_ocr_multi_scene_full` runs all 13 (2,750 images,
+  English and Chinese, characters for Chinese); its `macro_f1` is the paper's track score.
+- `omnidocbench` — [OmniDocBench](https://github.com/opendatalab/OmniDocBench) v1.6,
+  scored by the pinned official evaluator, which runs in a virtualenv of its own (needs
+  `git` and `uv`). `overall` is on the leaderboard's 0-100 scale, which is why the `ocr`
+  suite is display-only. By default it runs the 755 pages annotated `english`;
+  `omnidocbench_full` runs all 1,651, the leaderboard's setting, and also reports text edit
+  by page language. Its formula metric (CDM) renders LaTeX; the task sets up the toolchain
+  itself at job start, so it runs in one step anywhere (see
+  [OmniDocBench formula scoring](#omnidocbench-formula-scoring-cdm)). `omnidocbench_no_cdm`
+  skips CDM and reports every other metric. `omnidocbench_v15` / `omnidocbench_v15_no_cdm`
+  are the v1.5 release with its own evaluator (628 English pages; 1,355 in the `_full`
+  variants); the two leaderboards are not comparable.
 
 By default each OCR task sends its benchmark's own instruction, for instruction-tuned
 checkpoints. A stage-1 checkpoint (`-o prompt_templates=none -o
@@ -824,7 +823,7 @@ matching the reference evaluation numerics.
 
 ### OmniDocBench formula scoring (CDM)
 
-`omnidocbench`, `omnidocbench_v15` and their `_en` variants score formulas with CDM,
+`omnidocbench`, `omnidocbench_v15` and their `_full` variants score formulas with CDM,
 which renders every formula through LaTeX and ImageMagick. Before inference each task
 installs whatever part of that toolchain is missing or at another version, then renders
 a test formula through its version's own CDM template. The whole evaluation, CDM

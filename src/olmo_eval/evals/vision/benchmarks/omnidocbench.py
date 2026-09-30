@@ -16,21 +16,20 @@ Two benchmark versions are registered, each scored by its own pinned official ev
 run out of process (:mod:`olmo_eval.evals.vision.scoring.omnidocbench`), once per task after every
 page is generated:
 
-* ``omnidocbench`` — **v1.6**: 1,651 pages, the 296 hard pages added to v1.5's set plus
+* **v1.6** (``omnidocbench``): 1,651 pages, the 296 hard pages added to v1.5's set plus
   annotation fixes, a new matching algorithm, and zero-filled page averages for tables and
   formulas.
-* ``omnidocbench_v15`` — **v1.5**: the 1,355-page release behind the v1.5 leaderboard.
+* **v1.5** (``omnidocbench_v15``): the 1,355-page release behind the v1.5 leaderboard.
 
 The two leaderboards are not comparable (the matching and the page averaging both changed),
 which is why both are kept.
 
-CDM renders formulas with LaTeX and needs ``pdflatex``, ImageMagick 7 (``magick``) and
-Ghostscript (``gs``) on ``PATH`` (v1.5 also needs ``node``). The CDM tasks install whichever
-are missing at job start (TeX Live, the ImageMagick 7 AppImage, Node.js, and Ghostscript from
-apt; see :func:`~olmo_eval.evals.vision.scoring.omnidocbench.ensure_cdm_toolchain`) and check
-that they render a formula, all before inference. The ``_no_cdm`` variants skip CDM, so they
-have no ``overall`` and report the text term ``text_score = (1 - text_edit) * 100`` as their
-primary metric instead.
+CDM renders formulas through LaTeX, ImageMagick and Ghostscript. The CDM tasks install each
+version's verified toolchain at job start unless it is already on ``PATH`` and check that it
+renders a formula, all before inference
+(:func:`~olmo_eval.evals.vision.scoring.omnidocbench.ensure_cdm_toolchain`; the README lists
+the versions). The ``_no_cdm`` variants skip CDM, so they have no ``overall`` and report the
+text term ``text_score = (1 - text_edit) * 100`` as their primary metric instead.
 
 The prompt is the one the official inference scripts share across general VLMs
 (``tools/model_infer``), sent in a single user turn with the page image as shipped, to an
@@ -39,9 +38,11 @@ system_prompt_style=style_and_length_v2``) gets the ``olmocr:`` tag alone instea
 transcription writes math as ``\\( \\)`` / ``\\[ \\]`` and tables as HTML, which the official
 evaluator reads, and its ``![alt](file)`` figure placeholders are deleted before matching.
 
-Every task has an ``_en`` variant (``omnidocbench_en``, ``omnidocbench_no_cdm_en``,
-``omnidocbench_v15_en``, ``omnidocbench_v15_no_cdm_en``) that runs and scores only the pages the
-annotations mark ``english`` (755 of v1.6's 1,651, 628 of v1.5's 1,355).
+Molmo2 models read English only, so every task runs and scores only the pages the annotations
+mark ``english`` (755 of v1.6's 1,651, 628 of v1.5's 1,355). The ``_full`` variants
+(``omnidocbench_full``, ``omnidocbench_no_cdm_full``, ``omnidocbench_v15_full``,
+``omnidocbench_v15_no_cdm_full``) run every page, the leaderboards' setting, and also report text
+edit by page language.
 Decoding is greedy. Data is fetched from the Hub at each version's pinned revision; set
 ``OMNIDOCBENCH_DIR`` (v1.6) / ``OMNIDOCBENCH_V15_DIR`` (v1.5) to a local copy
 (``OmniDocBench.json`` + ``images/``) to read from disk.
@@ -136,8 +137,12 @@ def _page(name: str, component: str, **kwargs) -> OmniDocBenchPageMetric:
     return OmniDocBenchPageMetric(name=name, scorer=_SCORER, component=component, **kwargs)
 
 
-def _component_metrics(version: str) -> tuple[Metric, ...]:
-    """Every metric except CDM-dependent ones, for one benchmark version."""
+def _component_metrics(version: str, *, by_language: bool = False) -> tuple[Metric, ...]:
+    """Every metric except CDM-dependent ones, for one benchmark version.
+
+    :param by_language: Also slice text edit by page language, for tasks that run every
+        language.
+    """
     zero_fill = EVALUATORS[version].zero_fills_missing_pages
     table_fill = "has_table" if zero_fill else None
     subset_slices: tuple[Metric, ...] = ()
@@ -154,7 +159,7 @@ def _component_metrics(version: str) -> tuple[Metric, ...]:
         _page("read_order_edit", "read_order_edit"),
         *(
             _page(f"text_edit_{key}", "text_edit", attribute="language", attribute_value=value)
-            for key, value in _LANGUAGES.items()
+            for key, value in (_LANGUAGES.items() if by_language else ())
         ),
         *subset_slices,
         OmniDocBenchScorerFailuresMetric(name="n_scorer_failures", scorer=_SCORER),
@@ -214,8 +219,14 @@ def _has_block(page: dict, category_type: str) -> bool:
     )
 
 
+#: The ``page_attribute.language`` value of the English pages.
+_ENGLISH = ("english",)
+
+
 @register("omnidocbench")
 class OmniDocBenchTask(OcrTask):
+    """OmniDocBench v1.6, English pages only (755 of 1,651)."""
+
     #: Provisioning the evaluator also needs `git` and `uv` on PATH.
     dependencies = ["pillow", "huggingface-hub", "pyyaml", "filelock"]
     sampling_params = SamplingParams(temperature=0.0, max_tokens=8192)
@@ -227,7 +238,7 @@ class OmniDocBenchTask(OcrTask):
     #: Whether formulas are graded with CDM, which needs a LaTeX toolchain.
     with_cdm: bool = True
     #: Page languages to run (the ``page_attribute.language`` annotation); ``None`` runs all.
-    languages: tuple[str, ...] | None = None
+    languages: tuple[str, ...] | None = _ENGLISH
 
     def _build_instances(self) -> Iterator[Instance]:
         if self.with_cdm:
@@ -332,7 +343,7 @@ class OmniDocBenchTask(OcrTask):
 
 @register("omnidocbench_no_cdm")
 class OmniDocBenchNoCdmTask(OmniDocBenchTask):
-    """OmniDocBench v1.6 without the CDM formula metric, for hosts without a LaTeX toolchain."""
+    """OmniDocBench v1.6 without the CDM formula metric, English pages only."""
 
     metrics = (_TEXT_SCORE, *_component_metrics("v1.6"))
     primary_metric = _TEXT_SCORE
@@ -341,7 +352,7 @@ class OmniDocBenchNoCdmTask(OmniDocBenchTask):
 
 @register("omnidocbench_v15")
 class OmniDocBenchV15Task(OmniDocBenchTask):
-    """OmniDocBench v1.5: the 1,355-page release, scored by the v1.5 evaluator."""
+    """OmniDocBench v1.5, scored by the v1.5 evaluator, English pages only (628 of 1,355)."""
 
     metrics = (*_cdm_metrics("v1.5"), *_component_metrics("v1.5"))
     primary_metric = metrics[0]
@@ -350,40 +361,44 @@ class OmniDocBenchV15Task(OmniDocBenchTask):
 
 @register("omnidocbench_v15_no_cdm")
 class OmniDocBenchV15NoCdmTask(OmniDocBenchV15Task):
-    """OmniDocBench v1.5 without the CDM formula metric."""
+    """OmniDocBench v1.5 without the CDM formula metric, English pages only."""
 
     metrics = (_TEXT_SCORE, *_component_metrics("v1.5"))
     primary_metric = _TEXT_SCORE
     with_cdm = False
 
 
-#: The ``page_attribute.language`` value of the English pages.
-_ENGLISH = ("english",)
+@register("omnidocbench_full")
+class OmniDocBenchFullTask(OmniDocBenchTask):
+    """OmniDocBench v1.6, every page (1,651, English and Chinese): the leaderboard's setting."""
+
+    metrics = (*_cdm_metrics("v1.6"), *_component_metrics("v1.6", by_language=True))
+    primary_metric = metrics[0]
+    languages = None
 
 
-@register("omnidocbench_en")
-class OmniDocBenchEnglishTask(OmniDocBenchTask):
-    """OmniDocBench v1.6, English pages only (755 of 1,651)."""
+@register("omnidocbench_no_cdm_full")
+class OmniDocBenchNoCdmFullTask(OmniDocBenchNoCdmTask):
+    """OmniDocBench v1.6 without CDM, every page."""
 
-    languages = _ENGLISH
-
-
-@register("omnidocbench_no_cdm_en")
-class OmniDocBenchNoCdmEnglishTask(OmniDocBenchNoCdmTask):
-    """OmniDocBench v1.6 without CDM, English pages only."""
-
-    languages = _ENGLISH
+    metrics = (_TEXT_SCORE, *_component_metrics("v1.6", by_language=True))
+    primary_metric = _TEXT_SCORE
+    languages = None
 
 
-@register("omnidocbench_v15_en")
-class OmniDocBenchV15EnglishTask(OmniDocBenchV15Task):
-    """OmniDocBench v1.5, English pages only (628 of 1,355)."""
+@register("omnidocbench_v15_full")
+class OmniDocBenchV15FullTask(OmniDocBenchV15Task):
+    """OmniDocBench v1.5, every page (1,355): the v1.5 leaderboard's setting."""
 
-    languages = _ENGLISH
+    metrics = (*_cdm_metrics("v1.5"), *_component_metrics("v1.5", by_language=True))
+    primary_metric = metrics[0]
+    languages = None
 
 
-@register("omnidocbench_v15_no_cdm_en")
-class OmniDocBenchV15NoCdmEnglishTask(OmniDocBenchV15NoCdmTask):
-    """OmniDocBench v1.5 without CDM, English pages only."""
+@register("omnidocbench_v15_no_cdm_full")
+class OmniDocBenchV15NoCdmFullTask(OmniDocBenchV15NoCdmTask):
+    """OmniDocBench v1.5 without CDM, every page."""
 
-    languages = _ENGLISH
+    metrics = (_TEXT_SCORE, *_component_metrics("v1.5", by_language=True))
+    primary_metric = _TEXT_SCORE
+    languages = None
