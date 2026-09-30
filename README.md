@@ -684,7 +684,9 @@ See the [Harness](#harness) section above for full documentation on:
 The Berkeley Function Calling Leaderboard v3 single-turn categories are
 registered as `bfcl_*` tasks, in three regimes: native function calling,
 BFCL's prompting mode, and a plain completion for a pretrained model with no
-chat template. See
+chat template. The multi-turn categories are registered too, driven by the
+`bfcl_multi_turn` scaffold and graded on the state their calls leave behind.
+See
 [`src/olmo_eval/evals/tasks/bfcl/README.md`](src/olmo_eval/evals/tasks/bfcl/README.md)
 for the task list, suites, server flags, exemplar settings, and what is not
 implemented.

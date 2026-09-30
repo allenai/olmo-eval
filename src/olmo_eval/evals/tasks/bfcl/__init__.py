@@ -1144,3 +1144,6 @@ def _register_bfcl_tasks() -> None:
 
 
 _register_bfcl_tasks()
+
+# Registered last: the multi-turn tasks build on this module's helpers.
+from . import multi_turn  # noqa: E402,F401
