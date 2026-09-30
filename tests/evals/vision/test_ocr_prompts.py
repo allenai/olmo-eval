@@ -57,9 +57,9 @@ def test_instruction_tuned_ocr_prompt_is_the_instruction() -> None:
     [
         ("olmocr_bench", "olmocr:"),
         ("omnidocbench", "olmocr:"),
-        ("omnidocbench_v15_no_cdm_full", "olmocr:"),
+        ("omnidocbench_v15_no_cdm_en", "olmocr:"),
         ("cc_ocr_multi_scene", "textocr:"),
-        ("cc_ocr_multi_scene_full", "textocr:"),
+        ("cc_ocr_multi_scene_en", "textocr:"),
     ],
 )
 def test_ocr_tasks_send_their_tag_to_stage1_checkpoints(task: str, tag: str) -> None:
@@ -75,7 +75,7 @@ def test_captioner_sends_the_bare_caption_tag() -> None:
 
 
 # ---------------------------------------------------------------------------
-# English by default, every language in the _full variants
+# English-only variants
 # ---------------------------------------------------------------------------
 
 
@@ -103,12 +103,12 @@ def test_cc_ocr_english_runs_the_eight_english_subsets(tmp_path, monkeypatch) ->
     assert len(cc_ocr.ENGLISH_SUBSETS) == 8
     assert not any("zh" in s for s in cc_ocr.ENGLISH_SUBSETS)
 
-    english = get_task("cc_ocr_multi_scene", STAGE1)
+    english = get_task("cc_ocr_multi_scene_en", STAGE1)
     got = {i.metadata["dataset"] for i in english._build_instances()}
     assert got == set(cc_ocr.ENGLISH_SUBSETS)
     assert {m.name for m in english.metrics} == {"macro_f1", "micro_f1", *cc_ocr.ENGLISH_SUBSETS}
 
-    full = get_task("cc_ocr_multi_scene_full")
+    full = get_task("cc_ocr_multi_scene")
     assert {i.metadata["dataset"] for i in full._build_instances()} == set(cc_ocr.SUBSETS)
 
 
@@ -122,10 +122,10 @@ def test_omnidocbench_english_keeps_only_english_pages(tmp_path, monkeypatch) ->
     monkeypatch.setenv("OMNIDOCBENCH_V15_DIR", str(tmp_path))
     monkeypatch.setattr(omnidocbench, "ensure_evaluator", lambda version: None)
 
-    task = get_task("omnidocbench_v15_no_cdm", STAGE1)
+    task = get_task("omnidocbench_v15_no_cdm_en", STAGE1)
     names = [i.metadata["image_name"] for i in task._build_instances()]
     assert names == ["english.jpg", "english2.jpg"]
     assert all(i.question == "olmocr:" for i in task._build_instances())
 
-    full = get_task("omnidocbench_v15_no_cdm_full")
+    full = get_task("omnidocbench_v15_no_cdm")
     assert len(list(full._build_instances())) == 4
