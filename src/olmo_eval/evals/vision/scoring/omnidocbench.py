@@ -948,18 +948,6 @@ class OmniDocBenchOverallMetric(Metric):
 
 
 @dataclass(frozen=True)
-class OmniDocBenchTextScoreMetric(Metric):
-    """``(1 - TextEdit) * 100`` — the text term of the leaderboard Overall."""
-
-    name: str  # type: ignore[misc]
-    scorer: Scorer  # type: ignore[misc]
-
-    def compute(self, responses: Sequence[Response]) -> float:
-        text = OmniDocBenchPageMetric("", self.scorer, "text_edit").compute(responses)
-        return (1.0 - text) * 100.0
-
-
-@dataclass(frozen=True)
 class OmniDocBenchScorerFailuresMetric(Metric):
     """Samples the official evaluator zeroed after an internal crash, timeout or fallback."""
 
