@@ -144,7 +144,9 @@ kept.
    order. The primary metric is `accuracy`, the same number upstream's
    per-category `code/results/<category>/get_results.py` reports (the share of
    lines with `"judge": true`). As upstream does, empty generations are
-   left out of both numerator and denominator.
+   left out of both numerator and denominator. Failed requests (no output at
+   all) count as incorrect. `empty_generation_rate` reports the share of
+   responses that were left out.
 6. **Instance IDs.** Upstream `uuid`s are not unique within some subtasks
    (the `*_api_param` tasks have one row per parameter), so `metadata["id"]`
    is `<task>_<row index>`. The upstream `uuid` is kept in metadata.

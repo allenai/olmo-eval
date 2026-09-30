@@ -47,7 +47,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from olmo_eval.common.metrics import AccuracyMetric
+from olmo_eval.common.metrics import AccuracyMetric, Metric
 from olmo_eval.common.scorers import ExactMatchScorer, Scorer
 from olmo_eval.common.types import (
     Instance,
@@ -148,29 +148,64 @@ class LabelSetMatchScorer(Scorer):
         return 1.0 if predicted == gold else 0.0
 
 
-def _has_generation(response: Response) -> bool:
-    return bool(response.outputs) and bool(response.outputs[0].text)
+def _is_empty_generation(response: Response) -> bool:
+    """Whether the model returned output with empty text.
+
+    A response with no outputs is a failed request, not an empty generation.
+    Only the first output is inspected, since every subtask draws one sample.
+    """
+    return bool(response.outputs) and not response.outputs[0].text
 
 
 @dataclass(frozen=True, slots=True)
 class NonEmptyAccuracyMetric(AccuracyMetric):
-    """Mean accuracy over responses with a non-empty generation.
+    """Mean accuracy over responses, excluding empty generations.
 
     The reference implementation discards empty generations before scoring,
-    so they count toward neither the numerator nor the denominator.
+    so they count toward neither the numerator nor the denominator. Failed
+    requests (no outputs) still count as incorrect.
     """
 
     def compute(self, responses: Sequence[Response]) -> float:
-        return AccuracyMetric.compute(self, [r for r in responses if _has_generation(r)])
+        return AccuracyMetric.compute(self, [r for r in responses if not _is_empty_generation(r)])
 
     def compute_instance(self, response: Response) -> float | None:
-        if not _has_generation(response):
+        if _is_empty_generation(response):
             return None
-        return AccuracyMetric.compute_instance(self, response)
+        return float(response.scores.get(self.scorer().name, 0.0))
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        # Excluded instances carry a scorer value that is not part of the mean.
+        return False
 
 
-_EXACT_MATCH_ACCURACY = NonEmptyAccuracyMetric(scorer=ExactMatchScorer(case_sensitive=True))
-_LABEL_SET_ACCURACY = NonEmptyAccuracyMetric(scorer=LabelSetMatchScorer())
+@dataclass(frozen=True, slots=True)
+class EmptyGenerationRateMetric(Metric):
+    """Fraction of responses excluded from accuracy as empty generations."""
+
+    name: str = "empty_generation_rate"
+    scorer: type[Scorer] | Scorer = ExactMatchScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        return sum(_is_empty_generation(r) for r in responses) / len(responses)
+
+    def compute_instance(self, response: Response) -> float | None:
+        return 1.0 if _is_empty_generation(response) else 0.0
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+    def pairwise_higher_is_better(self) -> bool:
+        return False
+
+    def pairwise_display_format(self) -> str:
+        return "percentage"
+
+
+_EXACT_MATCH_SCORER = ExactMatchScorer(case_sensitive=True)
+_LABEL_SET_SCORER = LabelSetMatchScorer()
 
 
 # -- Prompt templates -----------------------------------------------------------
@@ -490,13 +525,16 @@ def _register_subtask(subtask: APTBenchSubtask) -> None:
         part.title() for part in f"{subtask.category}_{subtask.name}".split("_")
     )
     sampling_params = SamplingParams(max_tokens=subtask.max_tokens, temperature=0.0)
+    scorer = _LABEL_SET_SCORER if subtask.set_match else _EXACT_MATCH_SCORER
+    accuracy = NonEmptyAccuracyMetric(scorer=scorer)
     cls = type(
         class_name,
         (APTBenchTask,),
         {
             "subtask": subtask,
             "data_source": DataSource(path="json", data_files=subtask.data_url, split="train"),
-            "metrics": (_LABEL_SET_ACCURACY if subtask.set_match else _EXACT_MATCH_ACCURACY,),
+            "metrics": (accuracy, EmptyGenerationRateMetric(scorer=scorer)),
+            "primary_metric": accuracy,
             "sampling_params": sampling_params,
             "__module__": __name__,
             "__qualname__": class_name,

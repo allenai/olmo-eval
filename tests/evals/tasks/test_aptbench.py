@@ -194,6 +194,14 @@ class TestExactMatchScoring:
         assert scorer.score(_instance("B"), _output(task, "b)")) == 0.0
 
 
+def _failed_response(gold: str) -> Response:
+    return Response(
+        instance=_instance(gold),
+        request=LMRequest(request_type=RequestType.COMPLETION, prompt="p"),
+        outputs=[],
+    )
+
+
 class TestNonEmptyAccuracyMetric:
     """Tests that empty generations are excluded, as upstream does."""
 
@@ -209,9 +217,82 @@ class TestNonEmptyAccuracyMetric:
         assert metric.compute(responses) == pytest.approx(1 / 3)
         assert [metric.compute_instance(r) for r in responses] == [1.0, 0.0, None, 0.0]
 
+    def test_failed_requests_count_as_incorrect(self):
+        task = get_task("aptbench_issue_fix_plan")
+        metric = task.metrics[0]
+        responses = [_response(task, "B)", "B"), _failed_response("B")]
+        assert metric.compute(responses) == pytest.approx(0.5)
+        assert metric.compute_instance(responses[1]) == 0.0
+
     def test_all_empty(self):
         task = get_task("aptbench_issue_fix_plan")
         assert task.metrics[0].compute([_response(task, "", "B")]) == 0.0
+
+    def test_primary_metric_is_accuracy(self):
+        task = get_task("aptbench_issue_fix_plan")
+        assert task.config.get_primary_metric() is task.metrics[0]
+
+
+class TestEmptyGenerationRateMetric:
+    """Tests that the excluded-generation rate is reported."""
+
+    def test_rate_counts_only_empty_generations(self):
+        task = get_task("aptbench_issue_fix_plan")
+        metric = task.metrics[1]
+        assert metric.name == "empty_generation_rate"
+        responses = [
+            _response(task, "B)", "B"),
+            _response(task, "", "B"),
+            _failed_response("B"),
+            _response(task, "", "B"),
+        ]
+        assert metric.compute(responses) == pytest.approx(0.5)
+        assert [metric.compute_instance(r) for r in responses] == [0.0, 1.0, 0.0, 1.0]
+
+    def test_no_responses(self):
+        task = get_task("aptbench_issue_fix_plan")
+        assert task.metrics[1].compute([]) == 0.0
+
+
+class TestPersistedInstanceMetrics:
+    """Tests that persisted per-instance values agree with the aggregates."""
+
+    @pytest.mark.parametrize(
+        "task_name", ["aptbench_issue_fix_plan", "aptbench_deepresearch_openend_citation_en"]
+    )
+    def test_build_predictions_matches_aggregate(self, task_name):
+        from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
+        from olmo_eval.runners.io.builders import build_predictions
+
+        task = get_task(task_name)
+        gold, correct, wrong = (
+            ("A,C", "A,C)", "B)") if "citation" in task_name else ("B", "B)", "A)")
+        )
+        responses = [
+            _response(task, correct, gold),
+            _response(task, wrong, gold),
+            _response(task, "", gold),
+            _failed_response(gold),
+        ]
+        predictions = build_predictions(responses, task.metrics)
+
+        for metric in task.metrics:
+            scorer_name = metric.scorer().name
+            values = [
+                p["instance_metrics"][metric.name][scorer_name]
+                for p in predictions
+                if scorer_name in p["instance_metrics"].get(metric.name, {})
+            ]
+            assert sum(values) / len(values) == pytest.approx(metric.compute(responses))
+
+        # Re-augmenting without the response (as DB ingestion does) keeps the exclusion.
+        for prediction in predictions:
+            augment_prediction_instance_metrics(prediction, task.metrics)
+        accuracy = task.metrics[0]
+        assert [
+            p["instance_metrics"].get(accuracy.name, {}).get(accuracy.scorer().name)
+            for p in predictions
+        ] == [1.0, 0.0, None, 0.0]
 
 
 class TestSplitTemplate:
