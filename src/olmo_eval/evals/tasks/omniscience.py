@@ -266,6 +266,7 @@ class OmniscienceScorer(LLMJudgeScorer):
 
         except Exception:
             instance.metadata["is_parsing_error"] = True
+            instance.metadata["judge_result"] = "PARSING_ERROR"
             raise
 
 
@@ -414,7 +415,7 @@ class OmniscienceAccuracyMetric(Metric):
 
 @dataclass(frozen=True, slots=True)
 class JudgeParsingErrorMetric(Metric):
-    """Number of responses whose judge output could not be parsed into a grade."""
+    """Number of responses the judge failed to grade, from a failed call or unparseable output."""
 
     name: str = "judge_parsing_errors"
     scorer: type[Scorer] | Scorer = OmniscienceScorer
