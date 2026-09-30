@@ -749,6 +749,115 @@ class TestVLMLogprobsBoundaries:
             self._provider(max_length=0).logprobs([self._request("!")])
 
 
+class TestVLMOverlongPrompt:
+    """A prompt longer than the window fails its own request, not the whole batch."""
+
+    @pytest.fixture(autouse=True)
+    def _torch(self):
+        self.torch = pytest.importorskip("torch")
+
+    def test_only_the_overlong_request_fails(self) -> None:
+        import contextlib
+        import threading
+
+        from olmo_eval.inference.errors import REQUEST_ERROR_KEY, request_error
+        from olmo_eval.inference.providers.olmo_core_vlm.provider import OlmoCoreVLMProvider
+
+        provider = OlmoCoreVLMProvider.__new__(OlmoCoreVLMProvider)
+        provider.max_length = 5
+        provider.use_cache = True
+        provider._model_lock = threading.Lock()
+        provider._autocast = contextlib.nullcontext
+        provider._encode_request = lambda request: ([1] * len(request.prompt), None, None)
+        batched: list = []
+        provider._build_batch = lambda entries: batched.extend(entries) or entries
+        provider._decode_batch_cached = lambda batch, params: [
+            len(token_ids) for token_ids, *_ in batch
+        ]
+        provider._finalize_output = lambda generated, params: LMOutput(text=f"len {generated}")
+
+        requests = [
+            LMRequest(request_type=RequestType.CHAT, prompt=prompt)
+            for prompt in ("ab", "abcdefgh", "abc")
+        ]
+        outputs = provider._generate_chunk(requests, SamplingParams(max_tokens=2))
+
+        assert [o.text for o in outputs[0]] == ["len 2"]
+        assert [o.text for o in outputs[2]] == ["len 3"]
+        assert "prompt length (8) >= max_length (5)" in outputs[1][0].metadata[REQUEST_ERROR_KEY]
+        assert request_error(outputs[1]) is not None
+        assert request_error(outputs[0]) is None
+        assert len(batched) == 2
+
+
+class TestVLMContextAndCrops:
+    """Defaults follow mm_olmo's eval: a 64k window and 8 crops per multi-image image."""
+
+    @staticmethod
+    def _info(fmt: str = "mm_olmo_dcp", *, llm=None, image=None, dataset=None):
+        from olmo_eval.inference.providers.olmo_core_vlm.checkpoint import (
+            MultimodalCheckpointInfo,
+        )
+
+        model_config = {"llm": llm or {}, "mm_preprocessor": {"image": image or {}}}
+        config = {"dataset": dataset} if dataset is not None else {}
+        return MultimodalCheckpointInfo(format=fmt, config=config, model_config=model_config)
+
+    def test_max_length_floors_at_the_eval_length(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import preprocessing
+
+        short = self._info(llm={"max_sequence_length": 16384})
+        long = self._info(llm={"max_sequence_length": 131072})
+        assert preprocessing.resolve_max_length(short, None) == 64_000
+        assert preprocessing.resolve_max_length(long, None) == 131072
+        assert preprocessing.resolve_max_length(short, 2048) == 2048
+        assert preprocessing.resolve_max_length(self._info("olmo_core_dcp"), None) == 64_000
+
+    def test_multi_image_crops(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import preprocessing
+
+        resolve = preprocessing.resolve_max_multi_image_crops
+        assert resolve(self._info(image={"max_multi_image_crops": 6}), None) == 6
+        assert resolve(self._info(image={"max_crops": 24}), None) == 8
+        assert resolve(self._info(image={"max_multi_image_crops": 6}), 3) == 3
+        core = self._info("olmo_core_dcp", dataset={"max_multi_image_crops": 5})
+        assert resolve(core, None) == 5
+
+    def test_multi_image_requests_use_the_multi_image_budget(self, monkeypatch) -> None:
+        torch = pytest.importorskip("torch")
+        from olmo_eval.inference.providers.olmo_core_vlm.provider import OlmoCoreVLMProvider
+
+        seen: list[int] = []
+
+        def preprocess(image, dtype, device, *, image_size, patch_size, max_crops):
+            seen.append(max_crops)
+            return torch.zeros(1, 2, 3, 4), torch.zeros(1, 2, 3, dtype=torch.long), (1, 1, 1, 1)
+
+        monkeypatch.setitem(
+            sys.modules,
+            "olmo_core.nn.vision.molmo2_image_processor",
+            SimpleNamespace(preprocess_image_molmo2=preprocess),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "olmo_core.nn.vision.molmo2_tokens",
+            SimpleNamespace(build_image_token_ids=lambda *grid: [0]),
+        )
+        provider = OlmoCoreVLMProvider.__new__(OlmoCoreVLMProvider)
+        provider.model_config = SimpleNamespace(
+            vision=SimpleNamespace(image_default_input_size=(378, 378), image_patch_size=14)
+        )
+        provider.param_dtype = torch.float32
+        provider.device = torch.device("cpu")
+        provider.max_crops = 24
+        provider.max_multi_image_crops = 8
+
+        image = SimpleNamespace(mode="RGB")
+        provider._preprocess_images((image,))
+        provider._preprocess_images((image, image))
+        assert seen == [24, 8, 8]
+
+
 class TestUntiedLmHeadGuard:
     """A wrong checkpoint read that hands an untied model its embedding table as the
     LM head must fail loudly instead of scoring at chance."""

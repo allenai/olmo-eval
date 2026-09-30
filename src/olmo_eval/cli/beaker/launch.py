@@ -82,7 +82,19 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     default=None,
     help="Job priority level (low, normal, high, urgent). Can also use @priority suffix on tasks.",
 )
-@click.option("--preemptible/--no-preemptible", default=None, help="Allow preemption")
+@click.option(
+    "--preemptible/--no-preemptible",
+    default=None,
+    help="Allow preemption (deprecated by Beaker; prefer --min-runtime)",
+)
+@click.option(
+    "--min-runtime",
+    default=None,
+    help=(
+        "Minimum runtime before Beaker may preempt the job (e.g., 2h, 30m). "
+        "Replaces --preemptible/--no-preemptible."
+    ),
+)
 @click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
 @click.option("--workspace", "-w", help="Beaker workspace")
@@ -258,6 +270,7 @@ def launch(
     max_gpus_per_node: int | None,
     priority: str | None,
     preemptible: bool | None,
+    min_runtime: str | None,
     timeout: str | None,
     retries: int | None,
     workspace: str | None,
@@ -378,6 +391,7 @@ def launch(
         "max_gpus_per_node": max_gpus_per_node,
         "priority": priority,
         "preemptible": preemptible,
+        "min_runtime": min_runtime,
         "timeout": timeout,
         "retries": retries,
         "workspace": workspace,
@@ -456,6 +470,7 @@ def launch(
             provider_kwargs=parsed_provider_kwargs if parsed_provider_kwargs else None,
             uv_cache_dir=uv_cache_dir,
             preemptible=preemptible,
+            min_runtime=min_runtime,
             retries=retries,
             gpus=gpus,
             force_download_model=force_download_model,
@@ -518,6 +533,7 @@ def launch(
     harness_needs_sandbox = False
     harness_preset = None
     if launch_config.harness:
+        from olmo_eval.cli.run.config import _apply_harness_overrides
         from olmo_eval.harness import get_harness_preset
 
         harness_preset = get_harness_preset(launch_config.harness)
@@ -838,7 +854,7 @@ def _build_experiment_summary(
         output_dir=BEAKER_RESULT_DIR,
     )
 
-    from olmo_eval.cli.run.config import merge_model_provider
+    from olmo_eval.cli.run.config import _apply_harness_overrides, merge_model_provider
     from olmo_eval.common.configs import get_provider_config
     from olmo_eval.harness import get_harness_preset
 
@@ -974,30 +990,6 @@ def _launch_jobs(
     return launched_experiments
 
 
-def _apply_harness_overrides(harness_config, overrides: list[str]):
-    """Apply CLI overrides to harness config.
-
-    Args:
-        harness_config: Base HarnessConfig to modify.
-        overrides: List of dotlist override strings (e.g., ["sandbox.mode=docker"]).
-            Supports list indices like "sandboxes.0.mode=modal".
-            Supports JSON values like 'sandboxes.0={"mode":"modal"}'.
-            Supports shared sandbox overrides like
-            'sandboxes={"mode":"modal","instances":64,"min_instances":24}'
-            where non-pool fields are applied to each sandbox config and
-            instances/min_instances set the shared sandbox pool budget/minimum.
-
-    Returns:
-        New HarnessConfig with overrides applied.
-    """
-    from olmo_eval.cli.run.config import _apply_dotlist_overrides
-    from olmo_eval.harness import HarnessConfig
-
-    harness_dict = harness_config.to_dict()
-    harness_dict = _apply_dotlist_overrides(harness_dict, overrides)
-    return HarnessConfig.from_dict(harness_dict)
-
-
 def _launch_external_evals(
     external_evals: list[str],
     model: tuple[str, ...],
@@ -1024,6 +1016,7 @@ def _launch_external_evals(
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
     preemptible: bool | None = None,
+    min_runtime: str | None = None,
     retries: int | None = None,
     gpus: int | None = None,
     force_download_model: bool = False,
@@ -1033,6 +1026,7 @@ def _launch_external_evals(
     This path mirrors the task-based launch flow but for external evaluations
     that run in sandbox containers with subcontainer support.
     """
+    from olmo_eval.cli.beaker.config_loader import resolve_preemption
     from olmo_eval.cli.beaker.credentials import CredentialManager
     from olmo_eval.cli.beaker.job_assembler import assemble_external_eval_job
     from olmo_eval.common.configs import get_provider_config
@@ -1075,7 +1069,11 @@ def _launch_external_evals(
     effective_priority = priority or "normal"
     effective_timeout = timeout or "24h"
     effective_image = image or BEAKER_SANDBOX_IMAGE
-    effective_preemptible = preemptible if preemptible is not None else True
+    try:
+        effective_preemptible, effective_min_runtime = resolve_preemption(preemptible, min_runtime)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from None
 
     # Create launcher
     launcher = BeakerLauncher(workspace=effective_workspace)
@@ -1208,6 +1206,7 @@ def _launch_external_evals(
             uv_cache_dir=uv_cache_dir,
             beaker_username=beaker_username,
             preemptible=effective_preemptible,
+            min_runtime=effective_min_runtime,
             retries=retries,
             provider_kind=str(provider_config.kind),
             base_url=provider_config.base_url,

@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from olmo_eval.common.types import LMOutput
+
 
 class TerminalProviderError(RuntimeError):
     """A provider failure after which its worker cannot serve more requests."""
@@ -32,4 +38,22 @@ def classify_terminal_provider_error(exc: BaseException) -> TerminalProviderErro
     return None
 
 
-__all__ = ["TerminalProviderError", "classify_terminal_provider_error"]
+#: ``LMOutput.metadata`` key a provider sets when it cannot serve one request of a
+#: batch. Raising instead would fail every request in the batch; the runner records
+#: the marked request as a failed instance rather than scoring its output.
+REQUEST_ERROR_KEY = "request_error"
+
+
+def request_error(outputs: Sequence[LMOutput]) -> str | None:
+    """The failure a provider recorded for a request it could not serve, if any."""
+    if outputs and all(REQUEST_ERROR_KEY in (output.metadata or {}) for output in outputs):
+        return str(outputs[0].metadata[REQUEST_ERROR_KEY])
+    return None
+
+
+__all__ = [
+    "REQUEST_ERROR_KEY",
+    "TerminalProviderError",
+    "classify_terminal_provider_error",
+    "request_error",
+]

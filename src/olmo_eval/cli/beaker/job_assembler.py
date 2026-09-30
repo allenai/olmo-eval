@@ -241,7 +241,8 @@ def assemble_external_eval_job(
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
     beaker_username: str | None = None,
-    preemptible: bool = True,
+    preemptible: bool | None = True,
+    min_runtime: str | None = None,
     retries: int | None = None,
     provider_kind: str | None = None,
     base_url: str | None = None,
@@ -412,6 +413,7 @@ def assemble_external_eval_job(
         num_gpus=num_gpus,
         priority=priority,
         preemptible=preemptible,
+        min_runtime=min_runtime,
         timeout=timeout,
         shared_memory="10GiB",
         retries=retries,
@@ -479,7 +481,7 @@ class JobConfigAssembler:
 
             preset = get_harness_preset(self.config.harness)
             if self.config.harness_overrides:
-                from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+                from olmo_eval.cli.run.config import _apply_harness_overrides
 
                 preset = _apply_harness_overrides(preset, self.config.harness_overrides)
             scaffold_name = preset.scaffold
@@ -639,6 +641,7 @@ class JobConfigAssembler:
             num_gpus=exp.num_gpus,
             priority=exp.priority,
             preemptible=self.config.preemptible,
+            min_runtime=self.config.min_runtime,
             timeout=self.config.timeout,
             shared_memory="10GiB",
             retries=self.config.retries,
