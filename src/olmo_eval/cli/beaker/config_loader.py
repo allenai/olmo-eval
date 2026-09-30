@@ -29,7 +29,8 @@ class LaunchConfig:
 
     max_gpus_per_node: int = 8
     priority: str = "normal"
-    preemptible: bool = True
+    preemptible: bool | None = True
+    min_runtime: str | None = None
     timeout: str = "6h"
     retries: int | None = None
     image: str | None = None
@@ -68,6 +69,26 @@ class LaunchConfig:
     env_vars: dict[str, str] = field(default_factory=dict)
 
 
+def resolve_preemption(
+    preemptible: bool | None, min_runtime: str | None
+) -> tuple[bool | None, str | None]:
+    """Resolve the preemption settings from one source into (preemptible, min_runtime).
+
+    A min runtime replaces preemptible, so the returned preemptible is None when a min
+    runtime is set. Without either setting, jobs are preemptible.
+
+    Raises:
+        ValueError: If both are set, or the min runtime is not a valid duration.
+    """
+    from olmo_eval.launch.beaker import validate_min_runtime
+
+    if min_runtime is None:
+        return (True if preemptible is None else preemptible), None
+    if preemptible is not None:
+        raise ValueError("preemptible and min_runtime cannot both be set; set min_runtime alone")
+    return None, validate_min_runtime(min_runtime)
+
+
 class LaunchConfigLoader:
     """Loads and merges configuration from YAML file and CLI arguments."""
 
@@ -100,6 +121,7 @@ class LaunchConfigLoader:
         cli_max_gpus_per_node = self.cli_args.get("max_gpus_per_node")
         cli_priority = self.cli_args.get("priority")
         cli_preemptible = self.cli_args.get("preemptible")
+        cli_min_runtime = self.cli_args.get("min_runtime")
         cli_timeout = self.cli_args.get("timeout")
         cli_retries = self.cli_args.get("retries")
         cli_workspace = self.cli_args.get("workspace")
@@ -122,7 +144,11 @@ class LaunchConfigLoader:
                 else cfg.max_gpus_per_node
             )
             priority = cli_priority if cli_priority is not None else cfg.priority
-            preemptible = cli_preemptible if cli_preemptible is not None else cfg.preemptible
+            # Preemption settings come from one source: the CLI if it sets either, else the file.
+            if cli_preemptible is not None or cli_min_runtime is not None:
+                preemptible, min_runtime = cli_preemptible, cli_min_runtime
+            else:
+                preemptible, min_runtime = cfg.preemptible, cfg.min_runtime
             timeout = cli_timeout if cli_timeout is not None else cfg.timeout
             gpus = cli_gpus if cli_gpus is not None else cfg.gpus
             image = cli_image or cfg.beaker_image
@@ -137,6 +163,7 @@ class LaunchConfigLoader:
             max_gpus_per_node = cli_max_gpus_per_node
             priority = cli_priority
             preemptible = cli_preemptible
+            min_runtime = cli_min_runtime
             timeout = cli_timeout
             gpus = cli_gpus  # None means auto-detect from provider
             image = cli_image
@@ -160,7 +187,11 @@ class LaunchConfigLoader:
             max_gpus_per_node if max_gpus_per_node is not None else DEFAULT_MAX_GPUS_PER_NODE
         )
         priority = priority or "normal"
-        preemptible = preemptible if preemptible is not None else True
+        try:
+            preemptible, min_runtime = resolve_preemption(preemptible, min_runtime)
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise SystemExit(1) from None
         timeout = timeout or "24h"
 
         self._validate_required(model_specs, task_specs, cluster, workspace, budget)
@@ -195,6 +226,7 @@ class LaunchConfigLoader:
             max_gpus_per_node=max_gpus_per_node,
             priority=priority,
             preemptible=preemptible,
+            min_runtime=min_runtime,
             timeout=timeout,
             retries=retries,
             image=image,
