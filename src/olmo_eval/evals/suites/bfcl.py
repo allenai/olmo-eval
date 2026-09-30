@@ -97,5 +97,38 @@ def _register_regime(suffix: str, description: str) -> None:
     )
 
 
+#: The categories the v3 multi-turn summary averages, as equals.
+MULTI_TURN_CATEGORIES: tuple[str, ...] = (
+    "base",
+    "miss_func",
+    "miss_param",
+    "long_context",
+)
+
+
+def _register_multi_turn(suffix: str, description: str) -> None:
+    """Register the multi-turn summary for one regime.
+
+    These run under a harness carrying the bfcl_multi_turn scaffold, so they
+    are kept apart from the single-turn suites rather than folded in.
+    """
+    register(
+        Suite(
+            name=f"bfcl:multi_turn{suffix}",
+            tasks=tuple(
+                f"bfcl_multi_turn_{category}{suffix}" for category in MULTI_TURN_CATEGORIES
+            ),
+            aggregation=AggregationStrategy.AVERAGE,
+            description=f"BFCL v3 multi-turn summary ({description})",
+        )
+    )
+
+
 for _suffix, _description in REGIMES:
     _register_regime(_suffix, _description)
+
+for _suffix, _description in REGIMES:
+    if _suffix == ":base":
+        # A pretrained model is not asked to drive a stateful rollout.
+        continue
+    _register_multi_turn(_suffix, _description)
