@@ -178,7 +178,9 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
 
 def provider_kind_override(overrides: list[str]) -> str | None:
     """Return the provider kind set by a CLI override such as ``provider.kind=vllm_server``."""
-    provider_overrides = [o for o in overrides if o.split("=", 1)[0].split(".")[0] == "provider"]
+    provider_overrides = [
+        o for o in overrides if o.split("=", 1)[0].strip() in ("provider", "provider.kind")
+    ]
     if not provider_overrides:
         return None
     provider = _apply_dotlist_overrides({"provider": {}}, provider_overrides)["provider"]

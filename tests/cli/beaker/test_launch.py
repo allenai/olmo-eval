@@ -716,9 +716,28 @@ class TestProviderKindOverride:
             (["provider.kwargs.kind=vllm"], None),
             (["providers.kind=vllm"], None),
             (["batching.chunk_size=2"], None),
+            (["provider.dependencies.0=example-package==2"], None),
+            (
+                ["provider.dependencies.0=example-package==2", "provider.kind=vllm_server"],
+                "vllm_server",
+            ),
         ],
     )
     def test_provider_kind_override(self, overrides, expected):
         from olmo_eval.cli.run.config import provider_kind_override
 
         assert provider_kind_override(overrides) == expected
+
+    def test_indexed_provider_override_with_harness_config(self):
+        from olmo_eval.cli.run.config import _apply_harness_overrides, merge_model_provider
+        from olmo_eval.common.configs import get_provider_config
+        from olmo_eval.harness import get_harness_preset
+
+        overrides = ["provider.dependencies.0=example-package==2"]
+        preset = get_harness_preset("default").with_provider_overrides(
+            dependencies=["example-package==1"]
+        )
+        preset = _apply_harness_overrides(preset, overrides)
+        merged = merge_model_provider(preset, get_provider_config("olmo-3-1025-7b"), overrides)
+
+        assert list(merged.provider.dependencies) == ["example-package==2"]
