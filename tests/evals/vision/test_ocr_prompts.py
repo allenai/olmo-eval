@@ -57,7 +57,7 @@ def test_instruction_tuned_ocr_prompt_is_the_instruction() -> None:
     [
         ("olmocr_bench", "olmocr:"),
         ("omnidocbench", "olmocr:"),
-        ("omnidocbench_v15_no_cdm_en", "olmocr:"),
+        ("omnidocbench_v15_en", "olmocr:"),
         ("cc_ocr_multi_scene", "textocr:"),
         ("cc_ocr_multi_scene_en", "textocr:"),
     ],
@@ -121,11 +121,12 @@ def test_omnidocbench_english_keeps_only_english_pages(tmp_path, monkeypatch) ->
     (tmp_path / "OmniDocBench.json").write_text(json.dumps(pages), encoding="utf-8")
     monkeypatch.setenv("OMNIDOCBENCH_V15_DIR", str(tmp_path))
     monkeypatch.setattr(omnidocbench, "ensure_evaluator", lambda version: None)
+    monkeypatch.setattr(omnidocbench, "ensure_cdm_toolchain", lambda version: None)
 
-    task = get_task("omnidocbench_v15_no_cdm_en", STAGE1)
+    task = get_task("omnidocbench_v15_en", STAGE1)
     names = [i.metadata["image_name"] for i in task._build_instances()]
     assert names == ["english.jpg", "english2.jpg"]
     assert all(i.question == "olmocr:" for i in task._build_instances())
 
-    full = get_task("omnidocbench_v15_no_cdm")
+    full = get_task("omnidocbench_v15")
     assert len(list(full._build_instances())) == 4

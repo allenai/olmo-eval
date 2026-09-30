@@ -737,19 +737,18 @@ it writes back, each with its benchmark's official scoring:
   own (needs `git` and `uv`). `overall` is the leaderboard's 0-100 number, which is why
   the `ocr` suite is display-only. Its formula metric (CDM) renders LaTeX; the task sets
   up the toolchain itself at job start, so it runs in one step anywhere (see
-  [OmniDocBench formula scoring](#omnidocbench-formula-scoring-cdm)).
-  `omnidocbench_no_cdm` skips CDM and reports every other metric. `omnidocbench_v15` /
-  `omnidocbench_v15_no_cdm` are the 1,355-page v1.5 release with its own evaluator; the
-  two leaderboards are not comparable.
+  [OmniDocBench formula scoring](#omnidocbench-formula-scoring-cdm)). `omnidocbench_v15`
+  is the 1,355-page v1.5 release with its own evaluator; the two leaderboards are not
+  comparable.
 
 English-only variants keep the benchmarks' official scoring on a subset:
 `cc_ocr_multi_scene_en` runs the 8 English sub-datasets (2,000 images) and averages over
-those, and each OmniDocBench task has an `_en` variant (`omnidocbench_en`,
-`omnidocbench_no_cdm_en`, `omnidocbench_v15_en`, `omnidocbench_v15_no_cdm_en`) that runs and
-scores only the pages annotated `english` (755 of v1.6's pages, 628 of v1.5's). Molmo2
-models read English only, so the `_en` variants (suite `ocr_en`) are the default setting for
-evaluating them. The plain names run every language, as the leaderboards do, for
-multilingual models; `olmocr_bench` is English throughout and has no variant.
+those, and each OmniDocBench version has an `_en` variant (`omnidocbench_en`,
+`omnidocbench_v15_en`) that runs and scores only the pages annotated `english` (755 of
+v1.6's pages, 628 of v1.5's). Molmo2 models read English only, so the `_en` variants (suite
+`ocr_en`) are the default setting for evaluating them. The plain names run every language,
+as the leaderboards do, for multilingual models; `olmocr_bench` is English throughout and
+has no variant.
 
 By default each OCR task sends its benchmark's own instruction, for instruction-tuned
 checkpoints. A stage-1 checkpoint (`-o prompt_templates=none -o
@@ -858,7 +857,8 @@ What the setup needs:
 
 If a download fails or the test formula does not render, the task stops before inference
 with the error, rather than scoring every formula zero. On a machine without network
-access or root, run the `_no_cdm` variants.
+access or root, put the pinned versions on `PATH` first (the task then uses them as they
+are) or point `OMNIDOCBENCH_CDM_DIR` at a toolchain installed elsewhere.
 
 Environment variables:
 
