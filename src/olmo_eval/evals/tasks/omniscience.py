@@ -5,8 +5,17 @@ This module implements the AA-Omniscience public split
 
 Paper: https://arxiv.org/abs/2511.13029v1
 
-Example commands to run:
+Example command to run:
 
+olmo-eval beaker launch \
+  --harness default \
+  -o 'metrics.collect_gpu=true' \
+  -m allenai/Olmo-3-7B-Instruct \
+  -t "omniscience:judge@high" \
+  -w "ai2/olmo-eval-debug" \
+  -B "ai2/oe-other" \
+  --cluster h100 \
+  --inspect
 """
 
 import logging
