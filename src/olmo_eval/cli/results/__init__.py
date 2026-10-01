@@ -3,6 +3,7 @@
 import click
 
 from olmo_eval.cli.results.discover import group, groups, suites
+from olmo_eval.cli.results.ingest import ingest
 from olmo_eval.cli.results.query import query
 from olmo_eval.cli.results.viewer import viewer
 
@@ -18,6 +19,7 @@ results.add_command(viewer)
 results.add_command(suites)
 results.add_command(groups)
 results.add_command(group)
+results.add_command(ingest)
 
 __all__ = [
     "results",
@@ -26,4 +28,5 @@ __all__ = [
     "suites",
     "groups",
     "group",
+    "ingest",
 ]

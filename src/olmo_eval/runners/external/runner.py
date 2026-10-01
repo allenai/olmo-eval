@@ -384,6 +384,7 @@ class ExternalEvalRunner:
             experiment_id=experiment_id,
             experiment_name=self.experiment_name,
             experiment_group=self.experiment_group,
+            model_name=runner_results["model"],
             experiment_duration_seconds=total_duration,
         )
 

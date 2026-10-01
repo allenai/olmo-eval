@@ -5,7 +5,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ARRAY, TIMESTAMP, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    ARRAY,
+    TIMESTAMP,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -19,12 +28,22 @@ class Base(DeclarativeBase):
 class Experiment(Base):
     """ORM model for evaluation experiments.
 
-    Note: experiment_id is NOT unique - a single experiment launch can run
+    Note: experiment_id alone is NOT unique - a single experiment launch can run
     multiple models, each as a separate row sharing the same experiment_id.
-    The auto-increment `id` is the true primary key.
+    A row is identified by (experiment_id, model_name, model_hash), so saving
+    the same result again updates the existing row. The auto-increment `id` is
+    the primary key that child tables reference.
     """
 
     __tablename__ = "experiments"
+    __table_args__ = (
+        UniqueConstraint(
+            "experiment_id",
+            "model_name",
+            "model_hash",
+            name="uq_experiments_identity",
+        ),
+    )
 
     # Primary key - auto-increment ID
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -106,9 +125,13 @@ class TaskResult(Base):
     """ORM model for task-level aggregated results.
 
     Contains task config/metadata, top-level task metrics, and file paths.
+    An experiment has at most one row per task name.
     """
 
     __tablename__ = "task_results"
+    __table_args__ = (
+        UniqueConstraint("experiment_pk", "task_name", name="uq_task_results_experiment_task"),
+    )
 
     # Primary key
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

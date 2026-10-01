@@ -86,6 +86,8 @@ class MetricsOutput(Serializable):
     experiment_id: str | None = None
     experiment_name: str | None = None
     experiment_group: str | None = None
+    # Name results are stored under (the alias when one is set); single-model only
+    model_name: str | None = None
     # Duration metrics
     experiment_duration_seconds: float | None = None
     provider_init_seconds: dict[str, float] | None = None  # model_name -> init_time
