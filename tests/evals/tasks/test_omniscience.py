@@ -198,8 +198,7 @@ class TestPrompts:
         assert request.request_type == RequestType.CHAT
         assert request.system_prompt == expected
         assert expected.startswith(
-            "You are answering questions about Accounting, "
-            "and in particular Revenue Recognition."
+            "You are answering questions about Accounting, and in particular Revenue Recognition."
         )
         assert request.messages[0] == {"role": "system", "content": expected}
 
@@ -584,9 +583,7 @@ class TestInstanceMetrics:
             is None
         )
         assert (
-            OmniscienceIndexMetric(name=f"{finance}__omniscience_index").compute_instance(
-                response
-            )
+            OmniscienceIndexMetric(name=f"{finance}__omniscience_index").compute_instance(response)
             is None
         )
         assert (
@@ -673,9 +670,7 @@ class TestEndToEnd:
 
         metrics = task.compute_metrics(responses)
         assert metrics["any__any__accuracy"]["omniscience_judge"] == pytest.approx(1 / 3)
-        assert metrics["any__any__omniscience_index"]["omniscience_judge"] == pytest.approx(
-            100 / 3
-        )
+        assert metrics["any__any__omniscience_index"]["omniscience_judge"] == pytest.approx(100 / 3)
         assert metrics["any__any__hallucination_rate"]["omniscience_judge"] == 0.0
         assert metrics["judge_parsing_errors"]["omniscience_judge"] == 0.0
 
