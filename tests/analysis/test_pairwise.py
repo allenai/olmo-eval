@@ -21,6 +21,7 @@ from olmo_eval.analysis.pairwise import (
     _compute_pairs,
     _equivalent_scope_task_names,
     _extract_pairwise_instance_score,
+    _latest_source_experiment_pks_subquery,
     _merge_latest_instance_key_rows,
     _merge_latest_instance_score_rows,
     _merge_latest_task_count_rows,
@@ -667,6 +668,32 @@ class TestComputePairsCompoundKeys:
         pairs = _compute_pairs(scores, 2, shared, margin=0.0)
         assert pairs[0].wins_a == 2
         assert pairs[0].wins_b == 0
+
+
+class TestLatestSourceExperimentPksSubquery:
+    """Latest-run selection ranks runs by completeness before recency."""
+
+    @pytest.mark.parametrize("data_table_name", ["TaskResult", "InstancePrediction"])
+    def test_orders_by_completeness_before_timestamp(self, data_table_name: str) -> None:
+        from sqlalchemy import select
+
+        from olmo_eval.storage.backends.postgres import models
+
+        subquery = _latest_source_experiment_pks_subquery(
+            data_table=getattr(models, data_table_name),
+            source_pks=[1, 2],
+            extra_filters=[],
+        )
+        sql = str(
+            select(subquery).compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            )
+        )
+
+        assert "task_results.metrics = CAST('{}' AS JSONB)) THEN 2" in sql
+        assert "coalesce(task_results.instances_failed, 0) > 0) THEN 1 ELSE 0" in sql
+        order_by = sql.split("ORDER BY", 1)[1]
+        assert order_by.index(".rank, 0) ASC") < order_by.index(".timestamp DESC")
 
 
 class TestLatestRunMergeHelpers:

@@ -212,6 +212,7 @@ jobs:
           AWS_DEFAULT_REGION: "us-east-1"
         run: |
           uv run --frozen --no-group vllm pytest tests/integration/test_storage.py \
+            tests/integration/test_latest_run_selection.py \
             -v \
             --tb=short
 
