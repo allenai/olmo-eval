@@ -351,6 +351,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
                     200,
+                    0,
                 )
             ]
         ),
@@ -367,6 +368,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
                     {"accuracy": {"exact_match": 0.55}},
                     "accuracy:exact_match",
                     200,
+                    0,
                 ),
                 (
                     11,
@@ -375,6 +377,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
                     200,
+                    0,
                 ),
             ]
         ),
@@ -565,6 +568,7 @@ def test_build_results_table_metric_options_do_not_double_count_primary_metric(
                     },
                     "accuracy:exact_match",
                     200,
+                    0,
                 )
             ]
         ),
@@ -616,6 +620,7 @@ def test_build_results_table_latest_mode_merges_partial_runs_by_model_and_task_h
                     {"accuracy": {"exact_match": 0.40}},
                     "accuracy:exact_match",
                     200,
+                    0,
                 ),
                 (
                     11,
@@ -624,6 +629,7 @@ def test_build_results_table_latest_mode_merges_partial_runs_by_model_and_task_h
                     {"accuracy": {"exact_match": 0.80}},
                     "accuracy:exact_match",
                     200,
+                    0,
                 ),
             ]
         ),
@@ -681,6 +687,7 @@ def test_build_results_table_latest_mode_keeps_unique_older_metrics_and_latest_d
                     },
                     "accuracy:exact_match",
                     200,
+                    0,
                 ),
                 (
                     11,
@@ -689,6 +696,7 @@ def test_build_results_table_latest_mode_keeps_unique_older_metrics_and_latest_d
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
                     200,
+                    0,
                 ),
             ]
         ),
@@ -703,6 +711,69 @@ def test_build_results_table_latest_mode_keeps_unique_older_metrics_and_latest_d
     assert metric_option_by_value["accuracy:exact_match"]["model_count"] == 1
     assert metric_option_by_value["f1:exact_match"]["model_count"] == 1
     assert results_table["models"][0]["task_scores"][task_column["id"]] == pytest.approx(0.65)
+
+
+@pytest.mark.parametrize(
+    ("newer_metrics", "newer_instances_failed"),
+    [({"accuracy": {"exact_match": 0.90}}, 1), ({}, 3)],
+    ids=["partial", "failed"],
+)
+def test_build_results_table_latest_mode_prefers_older_complete_run(
+    monkeypatch, newer_metrics, newer_instances_failed
+) -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+
+    latest_experiment = SimpleNamespace(
+        id=11,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+    older_experiment = SimpleNamespace(
+        id=10,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 8, 0, tzinfo=UTC),
+    )
+
+    monkeypatch.setattr(
+        viewer_server,
+        "_group_experiments",
+        lambda session, group_name, keep_all: (
+            [latest_experiment, older_experiment] if keep_all else [latest_experiment]
+        ),
+    )
+
+    results_table = viewer_server._build_results_table(
+        StaticTaskSession(
+            [
+                (
+                    10,
+                    "task-a",
+                    "task-hash-a",
+                    {"accuracy": {"exact_match": 0.50}},
+                    "accuracy:exact_match",
+                    3,
+                    0,
+                ),
+                (
+                    11,
+                    "task-a",
+                    "task-hash-a",
+                    newer_metrics,
+                    "accuracy:exact_match",
+                    3,
+                    newer_instances_failed,
+                ),
+            ]
+        ),
+        "my-group",
+        keep_all=False,
+    )
+
+    task_column = results_table["task_columns"][0]
+    score = results_table["models"][0]["task_scores"][task_column["id"]]
+    assert score == pytest.approx(0.50)
 
 
 def test_build_results_table_splits_same_name_tasks_by_hash(monkeypatch) -> None:
@@ -731,6 +802,7 @@ def test_build_results_table_splits_same_name_tasks_by_hash(monkeypatch) -> None
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
                     200,
+                    0,
                 ),
                 (
                     11,
@@ -739,6 +811,7 @@ def test_build_results_table_splits_same_name_tasks_by_hash(monkeypatch) -> None
                     {"accuracy": {"exact_match": 0.55}},
                     "accuracy:exact_match",
                     200,
+                    0,
                 ),
             ]
         ),
@@ -961,6 +1034,7 @@ def test_build_results_table_exposes_task_instance_counts(monkeypatch) -> None:
                     {"accuracy": {"exact_match": 0.90}},
                     "accuracy:exact_match",
                     100,
+                    0,
                 ),
                 (
                     7,
@@ -969,6 +1043,7 @@ def test_build_results_table_exposes_task_instance_counts(monkeypatch) -> None:
                     {"accuracy": {"exact_match": 0.50}},
                     "accuracy:exact_match",
                     300,
+                    0,
                 ),
             ]
         ),

@@ -7,6 +7,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+COMPLETE_RUN_RANK = 0
+PARTIAL_RUN_RANK = 1
+FAILED_RUN_RANK = 2
+
 
 @dataclass(frozen=True, slots=True)
 class LatestTaskRowInput:
@@ -18,6 +22,7 @@ class LatestTaskRowInput:
     metrics: Any
     primary_metric: str | None
     num_instances: int | None = None
+    instances_failed: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +35,19 @@ class LatestMergedTaskRow:
     metrics: dict[str, dict[str, Any]]
     primary_metric: str | None
     num_instances: int | None = None
+
+
+def completeness_rank(metrics: Any, instances_failed: int | None) -> int:
+    """Rank a task row by how much of the task it covers; lower ranks are preferred.
+
+    A row with no metrics is a failed task. A row with metrics but hard-failed
+    instances was scored on a subset. Rows without a failure count rank as complete.
+    """
+    if not metrics:
+        return FAILED_RUN_RANK
+    if (instances_failed or 0) > 0:
+        return PARTIAL_RUN_RANK
+    return COMPLETE_RUN_RANK
 
 
 def merge_metric_values(
@@ -55,7 +73,10 @@ def merge_latest_task_rows(
     source_experiments: Sequence[Any],
     display_experiments: Sequence[Any],
 ) -> list[LatestMergedTaskRow]:
-    """Collapse repeated runs to the latest compatible task row per model hash/task."""
+    """Collapse repeated runs to the latest compatible task row per model hash/task.
+
+    Values from more complete runs take precedence, then values from newer runs.
+    """
     from olmo_eval.runners.processing.utils import extract_score_from_metrics
 
     source_experiment_by_pk = {
@@ -72,7 +93,7 @@ def merge_latest_task_rows(
         int(experiment.id): index for index, experiment in enumerate(display_experiments)
     }
 
-    enriched_rows: list[tuple[int, str, str, float, int, LatestTaskRowInput]] = []
+    enriched_rows: list[tuple[int, str, str, int, float, int, LatestTaskRowInput]] = []
     for row in task_rows:
         source_experiment = source_experiment_by_pk.get(int(row.experiment_pk))
         if source_experiment is None:
@@ -92,6 +113,7 @@ def merge_latest_task_rows(
                 int(display_experiment.id),
                 resolved_name,
                 str(resolved_hash or ""),
+                completeness_rank(row.metrics, row.instances_failed),
                 -timestamp_value,
                 -int(row.experiment_pk),
                 LatestTaskRowInput(
@@ -108,7 +130,7 @@ def merge_latest_task_rows(
     enriched_rows.sort()
 
     merged_rows_by_key: dict[tuple[int, str], dict[str, Any]] = {}
-    for display_pk, task_name, _, _, _, row in enriched_rows:
+    for display_pk, task_name, _, _, _, _, row in enriched_rows:
         task_id = str(row.task_hash or task_name or "")
         merged_row = merged_rows_by_key.setdefault(
             (display_pk, task_id),

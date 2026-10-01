@@ -10,6 +10,9 @@ from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.analysis.latest_run_merge import (
+    COMPLETE_RUN_RANK,
+    FAILED_RUN_RANK,
+    PARTIAL_RUN_RANK,
     LatestTaskRowInput,
 )
 from olmo_eval.analysis.latest_run_merge import (
@@ -554,17 +557,10 @@ def _latest_merge_context(
     return source_experiment_by_pk, display_experiment_by_hash, display_order
 
 
-COMPLETE_RUN_RANK = 0
-PARTIAL_RUN_RANK = 1
-FAILED_RUN_RANK = 2
-
-
 def _task_result_completeness_rank(task_result: Any):
     """SQL expression ranking a task-result row by how much of the task it covers.
 
-    A row with no metrics is a failed task. A row with metrics but hard-failed
-    instances was scored on a subset. Rows written before failure accounting
-    existed have no failure count and rank as complete.
+    Mirrors :func:`completeness_rank` for rows still in the database.
     """
     from sqlalchemy import case, cast, func, literal
     from sqlalchemy.dialects.postgresql import JSONB

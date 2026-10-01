@@ -512,6 +512,7 @@ def _build_results_table(
                 func.coalesce(TaskResult.num_instances, 0),
                 func.coalesce(saved_instance_counts.c.num_instances, 0),
             ).label("num_instances"),
+            TaskResult.instances_failed,
         )
         .outerjoin(
             saved_instance_counts,
@@ -554,7 +555,15 @@ def _build_results_table(
     task_states_by_id: dict[str, TaskColumnState] = {}
     task_scores_by_pk: dict[int, dict[str, float | None]] = {pk: {} for pk in selected_pks}
     task_instance_counts_by_pk: dict[int, dict[str, int | None]] = {pk: {} for pk in selected_pks}
-    for experiment_pk, task_name, task_hash, metrics, primary_metric, num_instances in task_rows:
+    for (
+        experiment_pk,
+        task_name,
+        task_hash,
+        metrics,
+        primary_metric,
+        num_instances,
+        *_,
+    ) in task_rows:
         task_state = _record_task_column_state(
             task_states_by_id,
             task_name=task_name,
@@ -630,7 +639,15 @@ def _merge_latest_task_rows(
     display_experiments: Sequence[Any],
 ) -> list[tuple[int, str, str | None, dict[str, dict[str, Any]], str | None, int | None]]:
     normalized_rows: list[LatestTaskRowInput] = []
-    for experiment_pk, task_name, task_hash, metrics, primary_metric, num_instances in task_rows:
+    for (
+        experiment_pk,
+        task_name,
+        task_hash,
+        metrics,
+        primary_metric,
+        num_instances,
+        instances_failed,
+    ) in task_rows:
         try:
             resolved_pk = int(experiment_pk)
         except (TypeError, ValueError):
@@ -643,6 +660,7 @@ def _merge_latest_task_rows(
                 metrics=metrics,
                 primary_metric=str(primary_metric) if primary_metric else None,
                 num_instances=int(num_instances) if num_instances is not None else None,
+                instances_failed=instances_failed,
             )
         )
     merged_rows = _shared_merge_latest_task_rows(
