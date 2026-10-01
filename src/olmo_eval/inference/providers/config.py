@@ -61,7 +61,9 @@ class ProviderConfig:
     kwargs: Mapping[str, Any] = field(default_factory=dict)
 
     # Providers that require GPU resources for local inference
-    _GPU_PROVIDERS: ClassVar[frozenset[str]] = frozenset({"vllm", "vllm_server", "hf", "olmo_core"})
+    _GPU_PROVIDERS: ClassVar[frozenset[str]] = frozenset(
+        {"vllm", "vllm_server", "hf", "olmo_core", "olmo_core_vlm"}
+    )
 
     @property
     def requires_gpu(self) -> bool:
@@ -108,6 +110,14 @@ class ProviderConfig:
         "litellm": ("base_url", "api_base", "max_concurrency"),
         "hf": ("tokenizer", "revision", "force_download", "trust_remote_code", "dtype"),
         "olmo_core": (
+            "tokenizer",
+            "revision",
+            "force_download",
+            "trust_remote_code",
+            "dtype",
+            "max_model_len",
+        ),
+        "olmo_core_vlm": (
             "tokenizer",
             "revision",
             "force_download",
@@ -222,6 +232,14 @@ class ProviderConfig:
                 f"provider.dependencies must be a list, not a string: {deps!r}. "
                 "Use provider.dependencies=[url1,url2] syntax."
             )
+        # Unknown keys flow into kwargs (same semantics as with_overrides), so
+        # dotted CLI overrides like `-o provider.batch_size=8` reach the provider
+        # constructor instead of being silently dropped.
+        from dataclasses import fields as dc_fields
+
+        known = {f.name for f in dc_fields(cls)} | {"model_name"}
+        extra_kwargs = {k: v for k, v in data.items() if k not in known}
+        merged_kwargs = {**data.get("kwargs", {}), **extra_kwargs}
         return cls(
             kind=data.get("kind", ProviderKind.VLLM),
             model=data.get("model", data.get("model_name", "")),
@@ -238,7 +256,7 @@ class ProviderConfig:
             required_secrets=tuple(data.get("required_secrets", [])),
             package=data.get("package"),
             dependencies=tuple(deps),
-            kwargs=data.get("kwargs", {}),
+            kwargs=merged_kwargs,
         )
 
     def with_overrides(self, **overrides: Any) -> ProviderConfig:

@@ -315,6 +315,14 @@ class SandboxManager:
         self._active_operations.clear()
         self._logger.info("All sandboxes stopped")
 
+        if self._modal_app_name is not None:
+            from .modal_deployment import stop_modal_app
+
+            try:
+                await stop_modal_app(self._modal_app_name)
+            except Exception as e:
+                self._logger.warning(f"Failed to stop Modal app {self._modal_app_name}: {e}")
+
         with contextlib.suppress(Exception):
             atexit.unregister(self._atexit_cleanup)
 

@@ -111,26 +111,24 @@ HARNESS_CONFIG_FIELDS = frozenset(
     }
 )
 
-TASK_CONFIG_FIELDS = frozenset(
-    {
-        "name",
-        "data_source",
-        "fewshot_source",
-        "formatter",
-        "metrics",
-        "num_fewshot",
-        "fewshot_seed",
-        "limit",
-        "seed",
-        "split",
-        "primary_metric",
-        "sampling_params",
-        "dependencies",
-        "sandbox_allocation_weight",
-        "strip_thinking",
-        "priority",  # Special: extracted for job priority, not a real TaskConfig field
-    }
-)
+
+# TaskConfig fields with no command-line representation: the override parser
+# yields strings, numbers, and JSON containers, and nothing hydrates these into
+# the callable / object their fields require, so accepting them would only defer
+# the failure to scoring.
+_NON_CLI_TASK_FIELDS = frozenset({"answer_extractor", "sandbox_env"})
+
+
+def task_config_fields() -> frozenset[str]:
+    """Names accepted as ``-o`` task overrides.
+
+    Every ``TaskConfig`` field the parser can populate, plus ``priority``, which
+    is extracted for job priority rather than stored on the config.
+    """
+    from olmo_eval.evals.tasks.common.base import TaskConfig
+
+    names = {f.name for f in dataclasses.fields(TaskConfig)} - _NON_CLI_TASK_FIELDS
+    return frozenset(names | {"priority"})
 
 
 def _get_override_top_level_key(override: str) -> str:
@@ -177,7 +175,7 @@ def process_ordered_args(
             # Apply to task or harness with validation
             if last_flag == "t" and current_task:
                 sampling_fields = {f.name for f in dataclasses.fields(types.SamplingParams)}
-                if top_key not in TASK_CONFIG_FIELDS and top_key not in sampling_fields:
+                if top_key not in task_config_fields() and top_key not in sampling_fields:
                     raise click.UsageError(
                         f"Invalid task override: '{top_key}' is not a TaskConfig or "
                         f"SamplingParams field. Did you mean to put this after --harness "

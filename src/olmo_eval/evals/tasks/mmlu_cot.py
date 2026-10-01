@@ -92,6 +92,7 @@ class MMLUCoTTask(Task):
     sampling_params = _COT_SAMPLING
     num_fewshot = 0
     answer_extractor = _extract_letter
+    strip_thinking = True
 
     subject: str
 

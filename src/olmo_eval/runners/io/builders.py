@@ -71,6 +71,10 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 if num_bytes > 0:
                     out_data["bits_per_byte"] = -sum_logits / (num_bytes * math.log(2))
 
+            for key in ("finish_reason", "completion_tokens"):
+                if key in meta:
+                    out_data[key] = meta[key]
+
             out_data["num_chars"] = num_chars
             if "original_text" in meta:
                 out_data["num_chars_all"] = num_chars_all
@@ -95,6 +99,9 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 out_data["scoring_errors"] = meta["scoring_errors"]
             if "judge_result" in meta:
                 out_data["judge_result"] = meta["judge_result"]
+            # Whether the answer was stated in the requested format (scorer-set).
+            if "answer_format_correct" in meta:
+                out_data["answer_format_correct"] = meta["answer_format_correct"]
 
             model_output.append(out_data)
 
