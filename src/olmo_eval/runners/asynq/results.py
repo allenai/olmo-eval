@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.common.beaker_status import BeakerStatusReporter
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.progress import ProgressLogger
 from olmo_eval.common.types import Response
@@ -267,6 +268,8 @@ async def process_results(
             f"runner expected {total_instances} instance(s), "
             f"task trackers describe {len(pending_instances)}"
         )
+    reporter = BeakerStatusReporter()
+    report_progress = reporter.progress_callback("Processed")
     last_health_check = time.time()
     health_check_interval = 5.0
     workers_exited = False
@@ -307,6 +310,7 @@ async def process_results(
                 raise RuntimeError(fatal_message)
 
             _consume_pending_instance(pending_instances, result_item)
+            report_progress(total_instances - len(pending_instances), total_instances)
             tracker = trackers[result_item.task_id]
 
             if tracker.error:
@@ -374,6 +378,8 @@ async def process_results(
                     check_task_completion(spec)
     finally:
         scoring_progress.close()
+        report_progress(total_instances - len(pending_instances), total_instances, force=True)
+        reporter.flush()
 
     return results
 
