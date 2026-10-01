@@ -876,9 +876,9 @@ trained on. Two `TaskConfig` fields change what is sent:
   short-answer image-QA tasks and `mmmu`, and as `mmmu:cot`, which also extracts the last
   `Answer:` line and raises `max_tokens` to 2048.
 - `image_mode`: `real` (default), `none` (drop the image), or `caption` (substitute a text
-  description from `caption_source`, a JSONL of `{"example_id", "caption"}` records that
-  `tools/oracle_captions/generate.py` produces). `real - none` and `caption - real` split
-  error between knowledge and perception. Registered as `:text_only` and
+  description from `caption_source`, a JSONL of `{"example_id", "caption"}` records with
+  one entry per instance). `real - none` and `caption - real` split error between
+  knowledge and perception. Registered as `:text_only` and
   `:oracle_caption` on `mmmu`, `charxiv_descriptive` and `charxiv_reasoning`.
 
 ```bash

@@ -206,7 +206,7 @@ class TaskConfig:
     image_mode: str = "real"
 
     #: JSONL of ``{"example_id": ..., "caption": ...}`` records, required by
-    #: ``image_mode="caption"`` (see ``tools/oracle_captions``).
+    #: ``image_mode="caption"``; every instance's ``example_id`` must have an entry.
     caption_source: str | None = None
 
     #: Appended verbatim to each question by the tasks that support it (CharXiv). Tests
