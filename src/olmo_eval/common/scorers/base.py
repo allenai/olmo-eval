@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import functools
+import logging
 import math
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
 from olmo_eval.common.types import Instance, LMOutput
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -366,6 +370,19 @@ class MinervaMathScorer(ProcessScorer):
         return 0.0
 
 
+@functools.cache
+def _warn_math_verify_unavailable() -> None:
+    logger.warning(
+        "math_verify is not installed; MathVerifyScorer is using is_equiv "
+        "(sympy + Hendrycks normalization) instead"
+    )
+
+
+def _as_latex_math(text: str) -> str:
+    """Wrap a bare answer in inline math delimiters so math_verify parses it as LaTeX."""
+    return text if "$" in text else f"${text}$"
+
+
 @dataclass(frozen=True, slots=True)
 class MathVerifyScorer(Scorer):
     """Score math answers using symbolic verification via math_verify library.
@@ -374,39 +391,42 @@ class MathVerifyScorer(Scorer):
     is mathematically equivalent to the gold answer, handling various
     representations of mathematical expressions.
 
-    Falls back to exact string matching if math_verify is not available.
+    Falls back to ``is_equiv`` when math_verify is not installed, cannot parse an
+    answer, or raises on an instance; the missing-package case is logged once per
+    process.
     """
 
     name: str = "math_verify"
     timeout: float = 5.0
 
     def score(self, instance: Instance, output: LMOutput) -> float:
+        from olmo_eval.evals.extract.math import is_equiv
+
         if instance.gold_answer is None or output.extracted_answer is None:
             return 0.0
 
         gold = str(instance.gold_answer)
         pred = str(output.extracted_answer)
 
-        # Try using math_verify first (optional dependency)
         try:
-            from math_verify import verify
-
-            result = verify(gold, pred)
-            return 1.0 if result else 0.0
+            from math_verify import parse, verify
         except ImportError:
-            pass
-        except Exception:
-            pass
+            _warn_math_verify_unavailable()
+        else:
+            try:
+                gold_parsed = parse(_as_latex_math(gold))
+                pred_parsed = parse(_as_latex_math(pred))
+                if gold_parsed and pred_parsed:
+                    return 1.0 if verify(gold_parsed, pred_parsed) else 0.0
+                logger.debug(
+                    "math_verify could not parse gold=%r pred=%r; using is_equiv", gold, pred
+                )
+            except Exception as e:
+                logger.debug(
+                    "math_verify failed on gold=%r pred=%r (%s); using is_equiv",
+                    gold,
+                    pred,
+                    e,
+                )
 
-        # Fall back to our internal equivalence check
-        try:
-            from olmo_eval.evals.extract.math import is_equiv
-
-            return 1.0 if is_equiv(pred, gold) else 0.0
-        except ImportError:
-            pass
-
-        # Last resort: exact string match (normalized)
-        gold_norm = "".join(gold.lower().split())
-        pred_norm = "".join(pred.lower().split())
-        return 1.0 if gold_norm == pred_norm else 0.0
+        return 1.0 if is_equiv(pred, gold) else 0.0

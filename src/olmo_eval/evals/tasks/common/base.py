@@ -538,10 +538,29 @@ class Task(ABC):
                 ]
                 if all_instances:
                     break
-            except Exception:
-                continue
+                logger.warning(
+                    "Few-shot split %r for task %s produced no instances",
+                    try_split,
+                    self.config.name,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to load few-shot split %r for task %s: %s: %s",
+                    try_split,
+                    self.config.name,
+                    type(e).__name__,
+                    e,
+                )
 
         if not all_instances:
+            if self.config.num_fewshot:
+                logger.warning(
+                    "Task %s requested %d few-shot examples but none could be loaded "
+                    "from splits %s; running zero-shot",
+                    self.config.name,
+                    self.config.num_fewshot,
+                    splits_to_try,
+                )
             return []
 
         if sample and self.config.num_fewshot:

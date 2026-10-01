@@ -969,3 +969,66 @@ class TestMixedWorkloadScoring:
         assert scored[0].outputs[0].metadata["score:timed_process"] == 1.0
         assert scored[0].outputs[0].metadata["score:tracked_context"] == 1.0
         assert scored[0].outputs[0].metadata["score:tracked_exec"] == 1.0
+
+
+class TestFewshotLoading:
+    """Few-shot loading reports failures instead of silently running zero-shot."""
+
+    @staticmethod
+    def _task(monkeypatch: pytest.MonkeyPatch, load, num_fewshot: int = 2) -> ConcreteTask:
+        from olmo_eval.data import DataLoader, DataSource
+
+        monkeypatch.setattr(DataLoader, "load", lambda self, source, **kwargs: load(source))
+        task = ConcreteTask(TaskConfig(name="fewshot_task", num_fewshot=num_fewshot))
+        monkeypatch.setattr(
+            task, "_get_source_for_split", lambda split: DataSource(path="x", split=split)
+        )
+        monkeypatch.setattr(
+            task,
+            "process_doc",
+            lambda doc, index=0: Instance(question=doc["q"], gold_answer=doc["a"]),
+        )
+        return task
+
+    def test_load_error_warns_and_runs_zero_shot(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ):
+        def _load(source):
+            raise ConnectionError("hub unreachable")
+
+        task = self._task(monkeypatch, _load)
+        with caplog.at_level("WARNING"):
+            assert task._build_fewshot_from_source(split="dev", fallback_splits=["train"]) == []
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("'dev'" in m and "ConnectionError: hub unreachable" in m for m in messages)
+        assert any("'train'" in m and "ConnectionError" in m for m in messages)
+        assert any("running zero-shot" in m and "fewshot_task" in m for m in messages)
+
+    def test_empty_split_warns_then_uses_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ):
+        docs = {"dev": [], "train": [{"q": f"q{i}", "a": str(i)} for i in range(3)]}
+        task = self._task(monkeypatch, lambda source: iter(docs[source.split]))
+        with caplog.at_level("WARNING"):
+            fewshot = task._build_fewshot_from_source(split="dev", fallback_splits=["train"])
+
+        assert len(fewshot) == 2
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("'dev'" in m and "no instances" in m for m in messages)
+        assert not any("running zero-shot" in m for m in messages)
+
+    def test_successful_load_does_not_warn(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ):
+        task = self._task(monkeypatch, lambda source: iter([{"q": "q", "a": "a"}] * 3))
+        with caplog.at_level("WARNING"):
+            assert len(task._build_fewshot_from_source(split="dev")) == 2
+        assert caplog.records == []
+
+    def test_zero_shot_config_skips_loading(self, monkeypatch: pytest.MonkeyPatch):
+        def _load(source):
+            raise AssertionError("zero-shot task should not load few-shot data")
+
+        task = self._task(monkeypatch, _load, num_fewshot=0)
+        assert task._build_fewshot_from_source(split="dev") == []
