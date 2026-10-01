@@ -8,7 +8,7 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -204,6 +204,28 @@ class TaskConfig:
                     f"output_score_aggregation must be one of: {valid}; "
                     f"got {self.output_score_aggregation!r}"
                 ) from exc
+
+        # Dotted CLI overrides (`-o sampling_params.max_tokens=64`) are merged onto the
+        # task's declared SamplingParams by the runner (`_build_task_overrides` routes them
+        # to sampling_overrides, which `preparation.py` applies with `replace`). By the time
+        # `__post_init__` runs, a dict here *is* the override and the task's own params are
+        # gone, so there is nothing left to merge against -- building SamplingParams from
+        # the dict would silently drop every field it omits, e.g. gsm8k's stop_sequences.
+        # Reject rather than guess.
+        if isinstance(self.sampling_params, dict):
+            valid = {f.name for f in fields(SamplingParams)}
+            unknown = set(self.sampling_params) - valid
+            if unknown:
+                raise ValueError(
+                    f"unknown sampling_params field(s): {', '.join(sorted(unknown))}; "
+                    f"valid: {', '.join(sorted(valid))}"
+                )
+            raise TypeError(
+                "sampling_params must be a SamplingParams instance, not a dict. Dotted "
+                "overrides are applied by the runner via sampling_overrides, which merges "
+                "onto the task's own params; building a config with a raw dict here would "
+                "drop every field the dict omits."
+            )
 
         try:
             weight = float(self.sandbox_allocation_weight)
