@@ -33,7 +33,7 @@ def count_generations(responses: Sequence[Response]) -> dict[str, int] | None:
     - ``generations``: generated outputs counted (the denominator).
     - ``cap_hit``: the provider stopped at the token limit
       (``finish_reason == "length"``).
-    - ``empty``: no non-whitespace text left to score.
+    - ``empty``: no non-whitespace text and no tool calls left to score.
     - ``unclosed_think``: the generation opened a ``<think>`` block and never
       closed it. A block opened by the chat template instead leaves no opening
       tag in the output; when such a trace is cut off it shows up as ``cap_hit``.
@@ -59,7 +59,7 @@ def count_generations(responses: Sequence[Response]) -> dict[str, int] | None:
                 counts["finish_reason_unknown"] += 1
             elif finish_reason == "length":
                 counts["cap_hit"] += 1
-            if not text.strip():
+            if not text.strip() and not output.has_tool_calls:
                 counts["empty"] += 1
             if raw.rfind(_THINK_OPEN) > raw.rfind(_THINK_CLOSE):
                 counts["unclosed_think"] += 1

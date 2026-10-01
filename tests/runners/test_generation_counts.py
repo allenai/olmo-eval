@@ -14,7 +14,15 @@ from types import SimpleNamespace
 from typing import Any
 
 from olmo_eval.common.metrics import AccuracyMetric
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
+from olmo_eval.common.types import (
+    Function,
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+    ToolCall,
+)
 from olmo_eval.evals.tasks.common import TaskConfig, get_task
 from olmo_eval.runners.asynq.preparation import compute_task_metrics, finalize_task
 from olmo_eval.runners.asynq.results import _report_task_completion, aggregate_results
@@ -151,6 +159,19 @@ def test_every_sample_of_a_multi_sample_request_is_counted() -> None:
     assert counts is not None
     assert counts["generations"] == 3
     assert counts["cap_hit"] == 2
+
+
+def test_tool_call_output_with_no_text_is_not_empty() -> None:
+    """Native tool calling returns text="" beside the structured calls it scores."""
+    response = _response(("", "tool_calls"))
+    response.outputs[0].tool_calls = [
+        ToolCall(id="call_0", function=Function(name="get_weather", arguments='{"city": "Paris"}'))
+    ]
+
+    counts = count_generations([response])
+
+    assert counts is not None
+    assert counts["empty"] == 0
 
 
 def test_loglikelihood_tasks_have_no_counts() -> None:
