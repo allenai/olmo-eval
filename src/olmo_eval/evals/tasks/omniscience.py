@@ -177,7 +177,7 @@ OmniscienceGrade = Literal[
 ]
 
 # judge parsing failures are excluded
-GRADE_INDEX_POINTS: dict[OmniscienceGrade, float] = {
+GRADE_INDEX_POINTS: dict[str, float] = {
     "CORRECT": 1.0,
     "INCORRECT": -1.0,
     "PARTIAL_ANSWER": 0.0,
@@ -244,8 +244,8 @@ class OmniscienceScorer(LLMJudgeScorer):
             model_answer=self.final_answer(output) or "",
         )
 
-    def parse_judge_response(self, response: str, instance: Instance) -> float:
-        """Parse an A/B/C/D grade from the judge response and record it on the instance.
+    def parse_judge_response(self, response: str, instance: Instance | None = None) -> float:
+        """Parse an A/B/C/D grade from the judge response, recording it on the instance if given.
 
         A leading grade letter takes precedence, then a single grade name, then a
         grade letter labelled as the grade or answer (e.g. "Grade: B"). Anything else,
@@ -254,17 +254,18 @@ class OmniscienceScorer(LLMJudgeScorer):
 
         Args:
             response: The judge's response.
-            instance: The graded instance; the raw response and grade are stored
-                in its metadata.
+            instance: The graded instance; when given, the raw response and grade
+                are stored in its metadata.
 
         Returns:
             1.0 for CORRECT, otherwise 0.0.
         """
-        instance.metadata["judge_raw_response"] = response
         judge_result = self.get_grade(response)
-        if judge_result == "PARSING_ERROR":
-            instance.metadata["is_parsing_error"] = True
-        instance.metadata["judge_result"] = judge_result
+        if instance is not None:
+            instance.metadata["judge_raw_response"] = response
+            if judge_result == "PARSING_ERROR":
+                instance.metadata["is_parsing_error"] = True
+            instance.metadata["judge_result"] = judge_result
 
         return 1.0 if judge_result == "CORRECT" else 0.0
 
