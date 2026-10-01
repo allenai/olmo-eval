@@ -130,6 +130,7 @@ class BFCLMultiTurnFormatter(Formatter):
                 "initial_config": metadata["initial_config"],
                 "involved_classes": metadata["involved_classes"],
                 "missed_function": metadata["missed_function"],
+                "missed_function_docs": metadata["missed_function_docs"],
                 "name_map": metadata["name_map"],
                 "language": metadata["language"],
                 "long_context": metadata["long_context"],
