@@ -50,6 +50,17 @@ class AggregationStrategy(StrEnum):
     GAP = "gap"
 
 
+def _gap_descendants(suite: Suite) -> list[str]:
+    """Names of the gap suites nested anywhere below ``suite``."""
+    found: list[str] = []
+    for child in suite.tasks:
+        if isinstance(child, Suite):
+            if child.aggregation == AggregationStrategy.GAP:
+                found.append(child.name)
+            found.extend(_gap_descendants(child))
+    return found
+
+
 @dataclass(frozen=True, slots=True)
 class Suite:
     """A named collection of evaluation tasks.
@@ -75,16 +86,12 @@ class Suite:
                 f"Gap suite {self.name!r} needs exactly two tasks (reference, companion), "
                 f"got {len(self.expanded_tasks)}"
             )
-        nested_gaps = [
-            child.name
-            for child in self.tasks
-            if isinstance(child, Suite) and child.aggregation == AggregationStrategy.GAP
-        ]
+        nested_gaps = _gap_descendants(self)
         if nested_gaps and self.aggregation != AggregationStrategy.NONE:
             raise ValueError(
                 f"Suite {self.name!r} nests gap suite(s) {nested_gaps!r}; a gap is not a "
-                f"score to average, so gap suites cannot be children of a suite that "
-                f"aggregates (use AggregationStrategy.NONE)"
+                f"score to average, so gap suites cannot sit anywhere below a suite "
+                f"that aggregates (use AggregationStrategy.NONE)"
             )
 
     @property
