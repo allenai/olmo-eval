@@ -1,0 +1,42 @@
+name: Skiff2 Plan
+on:
+    pull_request:
+        branches:
+            - main
+        paths:
+            - dashboard/**
+            - skiff2.json
+            - .github/workflows/skiff2-*.yml
+
+# needed to authenticate with google
+permissions:
+    contents: read
+    id-token: write
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    plan:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Skiff2 Setup
+              id: setup
+              uses: allenai/skiff2-actions/shared-actions/setup@main
+              with:
+                  workload_identity_provider: ${{ vars.SKIFF2_WORKLOAD_IDENTITY_PROVIDER }}
+                  service_account: ${{ vars.SKIFF2_SERVICE_ACCOUNT }}
+                  project_id: ${{ vars.SKIFF2_PROJECT_ID }}
+
+            - name: Skiff2 Plan Infra
+              uses: allenai/skiff2-actions/shared-actions/deploy-infra@main
+              with:
+                  project_id: ${{ vars.SKIFF2_PROJECT_ID }}
+                  command: plan
+
+            - name: Skiff2 Plan Services
+              uses: allenai/skiff2-actions/shared-actions/deploy-services@main
+              with:
+                  project_id: ${{ vars.SKIFF2_PROJECT_ID }}
+                  command: plan

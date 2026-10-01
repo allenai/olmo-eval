@@ -1,0 +1,20 @@
+{
+    "$schema": "https://storage.googleapis.com/skiff2-general/skiff2-config.schema.json",
+    "services": [
+        {
+            "name": "ui",
+            "cwd": "./dashboard/ui",
+            "isRootService": true,
+            "sidecars": [
+                {
+                    "name": "api",
+                    "cwd": "./dashboard/api",
+                    "startup": {
+                        "path": "/health",
+                        "port": 8000
+                    }
+                }
+            ]
+        }
+    ]
+}
