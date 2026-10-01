@@ -556,6 +556,53 @@ class TestPairwiseResult:
         finally:
             del _REGISTRY["_test_aoa_payload"]
 
+    @pytest.mark.parametrize(
+        ("out_metric", "expected"),
+        [("accuracy:exact_match", (-0.3, -0.02)), ("accuracy:exact_match_flex", (None, None))],
+        ids=["same-metric", "mixed-metric"],
+    )
+    def test_html_payload_gap_scope_score_needs_one_metric(
+        self, out_metric: str, expected: tuple[float | None, float | None]
+    ) -> None:
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+        _REGISTRY["_test_gap_payload"] = Suite(
+            name="_test_gap_payload",
+            tasks=("task_in", "task_out"),
+            aggregation=AggregationStrategy.GAP,
+        )
+        try:
+            result = PairwiseResult(
+                task_name="_test_gap_payload",
+                suite_name="_test_gap_payload",
+                metric="accuracy:exact_match",
+                margin=0.0,
+                instance_count=20,
+                models=[
+                    ModelMeta(
+                        label="model-a\n(abc12345)", model_name="model-a", model_hash="abc12345"
+                    ),
+                    ModelMeta(
+                        label="model-b\n(def67890)", model_name="model-b", model_hash="def67890"
+                    ),
+                ],
+                pairs=[PairStats(index_a=0, index_b=1, wins_a=12, wins_b=8, ties=0)],
+                task_names=("task_in", "task_out"),
+                task_hashes=("task-in", "task-out"),
+                task_metric_keys=("accuracy:exact_match", out_metric),
+                model_task_scores=((0.8, 0.5), (0.4, 0.38)),
+                score_display_format="percentage",
+                score_unit="proportion",
+                higher_is_better=True,
+            )
+
+            payload = build_pairwise_viewer_payload(result)
+        finally:
+            del _REGISTRY["_test_gap_payload"]
+
+        for model, gap in zip(payload["models"], expected, strict=True):
+            assert model["scope_score"] == (pytest.approx(gap) if gap is not None else None)
+
     def test_html_payload_scope_score_weights_tasks_by_instance_count(self) -> None:
         from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
 

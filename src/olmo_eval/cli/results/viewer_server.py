@@ -916,6 +916,10 @@ def _annotate_results_table_scope_scores(
         selected_scope_key=selected_scope_key,
         selected_scope_option=selected_scope_option,
     )
+    exact = _scope_score_is_exact(
+        selected_scope_key=selected_scope_key,
+        selected_scope_option=selected_scope_option,
+    )
     for model in prepared["models"]:
         model["scope_score"] = _scoped_model_score(
             model,
@@ -923,6 +927,8 @@ def _annotate_results_table_scope_scores(
             selected_scope_key=selected_scope_key,
             selected_scope_option=selected_scope_option,
         )
+        if exact:
+            model["scope_score_exact"] = True
     return prepared
 
 
@@ -943,6 +949,25 @@ def _average_model_scope_score(
     return sum(scores) / len(scores)
 
 
+def _scope_score_is_exact(
+    *,
+    selected_scope_key: str | None,
+    selected_scope_option: dict[str, Any] | None,
+) -> bool:
+    """Whether a missing scope score must stay missing rather than fall back to a mean.
+
+    A gap suite's score is a difference, so the mean of its visible columns
+    would read as a gap without being one.
+    """
+    from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, suite_exists
+
+    scope_kind, _ = _parse_scope_key(selected_scope_key)
+    if scope_kind != "suite" or selected_scope_option is None:
+        return False
+    suite_name = str(selected_scope_option.get("value") or "")
+    return suite_exists(suite_name) and get_suite(suite_name).aggregation == AggregationStrategy.GAP
+
+
 def _model_scope_score(
     model: dict[str, Any],
     columns: list[dict[str, Any]],
@@ -950,6 +975,8 @@ def _model_scope_score(
     raw_scope_score = model.get("scope_score")
     if _is_numeric_score(raw_scope_score):
         return float(raw_scope_score)
+    if model.get("scope_score_exact"):
+        return None
     return _average_model_scope_score(model, columns)
 
 
