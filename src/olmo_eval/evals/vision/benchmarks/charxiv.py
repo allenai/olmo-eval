@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, Response, SamplingParams, Split
-from olmo_eval.evals.tasks.common import register
+from olmo_eval.evals.tasks.common import register, register_variant
 from olmo_eval.evals.vision.data.images import lazy_hf_image
 from olmo_eval.evals.vision.scoring.charxiv import (
     IDX2ANSTYPE,
@@ -63,6 +63,30 @@ def _load_charxiv_nodecode(split: str):
     with _LOAD_LOCK:
         ds = datasets.load_dataset("princeton-nlp/CharXiv", split=split)
     return ds.cast_column("image", datasets.Image(decode=False))
+
+
+def _parse_templates(raw) -> set[int] | None:
+    """Normalize the ``charxiv_templates`` override into a set of template ids.
+
+    The CLI override parser type-coerces, so ``-o charxiv_templates=17`` arrives as the int
+    17, not the string "17". Accept int, str and sequence forms so the override behaves the
+    same however it is supplied.
+    """
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, int):
+        return {raw}
+    if isinstance(raw, (list, tuple, set)):
+        return {int(t) for t in raw}
+    return {int(t) for t in str(raw).split(",") if t.strip()}
+
+
+def _with_cot_cue(question: str, cot_cue: str | None) -> str:
+    """Append ``cot_cue`` after the official CharXiv instruction block.
+
+    The published prompt is byte-identical when ``cot_cue`` is unset (the default).
+    """
+    return f"{question}\n{cot_cue}" if cot_cue else question
 
 
 def _figure_id(figure_path: str) -> int:
@@ -225,16 +249,21 @@ class CharxivDescriptiveTask(ImageQATask):
 
     def _build_instances(self) -> Iterator[Instance]:
         ds = _load_charxiv_nodecode(self.config.split.value)
+        keep_templates = _parse_templates(self.config.charxiv_templates)
         for idx in range(len(ds)):
             ex = ds[idx]
             fid = _figure_id(ex["figure_path"])
             subplot_loc = _subplot_loc(ex)
             for i in range(4):
                 qid = ex[f"descriptive_q{i + 1}"]
+                if keep_templates is not None and qid not in keep_templates:
+                    continue
                 answer = ex[f"descriptive_a{i + 1}"]
                 resp_key = f"{fid}_{i}"
                 yield Instance(
-                    question=descriptive_query_helper(qid, subplot_loc),
+                    question=_with_cot_cue(
+                        descriptive_query_helper(qid, subplot_loc), self.config.cot_cue
+                    ),
                     gold_answer=answer,
                     metadata={
                         "figure_id": fid,
@@ -303,8 +332,9 @@ class CharxivReasoningTask(ImageQATask):
             fid = _figure_id(ex["figure_path"])
             inst_category = ex["reasoning_a_type"]
             yield Instance(
-                question=build_reasoning_question(
-                    ex["reasoning_q"], inst_category, ex["reasoning_a"]
+                question=_with_cot_cue(
+                    build_reasoning_question(ex["reasoning_q"], inst_category, ex["reasoning_a"]),
+                    self.config.cot_cue,
                 ),
                 gold_answer=ex["reasoning_a"],
                 metadata={
@@ -348,3 +378,11 @@ class CharxivReasoningTask(ImageQATask):
                 inst_category=response.instance.metadata["inst_category"],
             )
         return responses
+
+
+# Perception-vs-knowledge ablations; see the note in mmmu.py. CharXiv is where a caption
+# ablation bites hardest, since descriptive questions ask about chart structure that a
+# dense description can largely carry.
+for _task in ("charxiv_descriptive", "charxiv_reasoning"):
+    register_variant(_task, "text_only", image_mode="none")
+    register_variant(_task, "oracle_caption", image_mode="caption")

@@ -191,6 +191,36 @@ class TaskConfig:
     prompt_templates: str | None = None
     system_prompt_style: str | None = None
 
+    #: Which prompt convention the image-QA tasks send. ``"molmo"`` (default) reproduces
+    #: mm_olmo's SFT format -- a ``vqa2:`` / ``chart_qa:`` style tag and no answer-length
+    #: instruction -- which is in-distribution for Molmo checkpoints and gibberish to
+    #: anything else. ``"neutral"`` drops the tag and asks for a short answer, the
+    #: convention published VLM numbers are measured under. ``"cot"`` asks for step-by-step
+    #: reasoning ending in an ``Answer:`` line. Only affects how the question is rendered.
+    prompt_style: str = "molmo"
+
+    #: What an image-QA task sends in place of the real image. ``"real"`` is the benchmark
+    #: as published. ``"none"`` drops the image, measuring what the question alone supports.
+    #: ``"caption"`` substitutes a text description from ``caption_source``, so the gap to
+    #: ``"real"`` attributes error to perception rather than knowledge or reasoning.
+    image_mode: str = "real"
+
+    #: JSONL of ``{"example_id": ..., "caption": ...}`` records, required by
+    #: ``image_mode="caption"`` (see ``tools/oracle_captions``).
+    caption_source: str | None = None
+
+    #: Appended verbatim to each question by the tasks that support it (CharXiv). Tests
+    #: whether a checkpoint will emit a derivation when cued to. Any non-empty value
+    #: changes the published prompt, so cued numbers are not comparable to uncued ones --
+    #: compare cued-vs-uncued on the same checkpoint.
+    cot_cue: str | None = None
+
+    #: CharXiv descriptive only: restrict to these descriptive template ids (e.g. ``17`` or
+    #: ``"11,17"``). The benchmark pools 19 templates into 5 leaderboard categories, which
+    #: is too coarse to probe one skill. Restricted runs are not comparable to the
+    #: published overall number -- compare template-to-template.
+    charxiv_templates: str | int | None = None
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):
@@ -332,6 +362,19 @@ class TaskConfig:
             serialized["system_prompt_style"] = self.system_prompt_style
         if self.strip_thinking:
             serialized["strip_thinking"] = True
+        # Prompt/image ablation knobs, emitted only when they differ from the published
+        # benchmark: an ablation run must not serialize (and hash) identically to the real
+        # one, and the real one must keep the hash it had before these fields existed.
+        for key, default in (
+            ("prompt_style", "molmo"),
+            ("image_mode", "real"),
+            ("caption_source", None),
+            ("cot_cue", None),
+            ("charxiv_templates", None),
+        ):
+            value = getattr(self, key)
+            if value != default:
+                serialized[key] = value
         if any(
             value is not None
             for value in (
