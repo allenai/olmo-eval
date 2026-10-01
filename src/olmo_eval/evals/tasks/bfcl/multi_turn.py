@@ -115,10 +115,15 @@ class BFCLMultiTurnFormatter(Formatter):
                 functions=render_function_docs(metadata["prepared_functions"])
             )
 
+        # A regime that writes the functions into the prompt must not also send
+        # them as schemas: the model would be given them twice, and its calls
+        # would come back in a form this regime does not read.
+        sends_schemas = type(self).call_source == CallSource.TOOL_CALLS
+
         return LMRequest(
             request_type=RequestType.CHAT,
             messages=(({"role": "system", "content": system_prompt},) if system_prompt else ()),
-            tools=instance.tools,
+            tools=instance.tools if sends_schemas else None,
             system_prompt=system_prompt,
             metadata={
                 "turns": metadata["turns"],
