@@ -43,7 +43,7 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
+DEFAULT_SAMPLING = SamplingParams(max_tokens=None, temperature=0.6, top_p=0.95)
 SYSTEM_PROMPT = """\
 You are answering questions about {topic}, and in particular {category}. \
 You will be given a question, answer with JUST the answer (no explanation). \
@@ -409,14 +409,13 @@ class HallucinationRateMetric(Metric):
 class OmniscienceAccuracyMetric(Metric):
     """Share of graded questions judged correct, optionally within a subset."""
 
-    name: str = "accuracy"
+    name: str = "any__any__accuracy"
     scorer: type[Scorer] | Scorer = OmniscienceScorer
-    subset: str = "any"
-    category: str = "any"
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
-        metrics = _omniscience_metric_helper(responses, self.subset, self.category)
+        subset, cat, metric = self.name.split("__")
+        metrics = _omniscience_metric_helper(responses, subset, cat)
 
         return metrics["accuracy"]
 
@@ -425,7 +424,8 @@ class OmniscienceAccuracyMetric(Metric):
         Accuracy instances are 1 for correct and 0 otherwise; ungraded
         responses are excluded
         """
-        if self.subset != "any" and response.instance.metadata.get(self.subset) != self.category:
+        subset, cat, metric = self.name.split("__")
+        if subset != "any" and response.instance.metadata.get(subset) != cat:
             return None
 
         grade = response.instance.metadata.get("judge_result")
@@ -557,8 +557,6 @@ register_variant(
             OmniscienceAccuracyMetric(
                 name=name,
                 scorer=scorer,
-                subset=name.split("__")[0],
-                category=name.split("__")[1],
             )
             for name in SUBSET_METRICS
         ),
