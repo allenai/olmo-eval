@@ -820,6 +820,16 @@ def _group_model_values_by_name(
     return grouped_values
 
 
+def _group_column_metrics_by_name(columns: list[dict[str, Any]]) -> dict[str, list[str | None]]:
+    """Each column's metric grouped by task name, in column order."""
+    grouped: dict[str, list[str | None]] = {}
+    for column in columns:
+        task_name = str(column.get("task_name") or "")
+        if task_name:
+            grouped.setdefault(task_name, []).append(column.get("metric") or None)
+    return grouped
+
+
 def _scoped_model_score(
     model: dict[str, Any],
     columns: list[dict[str, Any]],
@@ -845,6 +855,7 @@ def _scoped_model_score(
             task_instance_counts_by_name=_group_model_values_by_name(
                 model.get("task_instance_counts", {}), columns
             ),
+            task_metrics_by_name=_group_column_metrics_by_name(columns),
             suite_name=suite_name,
         )
     if scope_kind == "task":

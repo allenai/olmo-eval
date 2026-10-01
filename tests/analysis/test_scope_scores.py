@@ -189,9 +189,13 @@ def gap_suite() -> Iterator[Suite]:
     del _REGISTRY[suite.name]
 
 
+_SAME_METRIC = {"task_in": ["exact_match"], "task_out": ["exact_match"]}
+
+
 def test_gap_is_companion_minus_reference(gap_suite: Suite) -> None:
     score = compute_scope_score(
         task_scores_by_name={"task_in": [0.6], "task_out": [0.45]},
+        task_metrics_by_name=_SAME_METRIC,
         suite_name=gap_suite.name,
     )
 
@@ -201,6 +205,29 @@ def test_gap_is_companion_minus_reference(gap_suite: Suite) -> None:
 def test_gap_without_both_tasks_is_none(gap_suite: Suite) -> None:
     score = compute_scope_score(
         task_scores_by_name={"task_in": [0.6], "task_out": [None]},
+        task_metrics_by_name=_SAME_METRIC,
+        suite_name=gap_suite.name,
+    )
+
+    assert score is None
+
+
+@pytest.mark.parametrize(
+    "task_metrics_by_name",
+    [
+        None,
+        {"task_in": ["exact_match"], "task_out": ["exact_match_flex"]},
+        {"task_in": ["exact_match"], "task_out": [None]},
+        {"task_in": ["exact_match", "exact_match_flex"], "task_out": ["exact_match"]},
+    ],
+    ids=["unknown", "different", "missing", "mixed-variants"],
+)
+def test_gap_needs_one_shared_metric(
+    gap_suite: Suite, task_metrics_by_name: dict[str, list[str | None]] | None
+) -> None:
+    score = compute_scope_score(
+        task_scores_by_name={"task_in": [0.6], "task_out": [0.45]},
+        task_metrics_by_name=task_metrics_by_name,
         suite_name=gap_suite.name,
     )
 

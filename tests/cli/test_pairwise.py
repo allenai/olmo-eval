@@ -1171,6 +1171,60 @@ def test_timed_value_cache_reuses_fresh_entries_and_expires_stale_ones() -> None
     assert calls["count"] == 2
 
 
+@pytest.mark.parametrize(
+    ("out_metric", "expected"),
+    [("exact_match", -0.15), ("exact_match_flex", None)],
+    ids=["same-metric", "mixed-metric"],
+)
+def test_results_table_gap_scope_score_needs_one_metric(
+    out_metric: str, expected: float | None
+) -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+    from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+    _REGISTRY["_test_gap_results_table"] = Suite(
+        name="_test_gap_results_table",
+        tasks=("task_in", "task_out"),
+        aggregation=AggregationStrategy.GAP,
+    )
+    try:
+        column = {
+            "score_display_format": "percentage",
+            "score_unit": "proportion",
+            "higher_is_better": True,
+        }
+        results_table = {
+            "models": [
+                {
+                    "index": 0,
+                    "display_label": "model-a",
+                    "task_scores": {"task_in": 0.6, "task_out": 0.45},
+                }
+            ],
+            "task_columns": [
+                {**column, "id": "task_in", "task_name": "task_in", "metric": "exact_match"},
+                {**column, "id": "task_out", "task_name": "task_out", "metric": out_metric},
+            ],
+        }
+
+        annotated = viewer_server._annotate_results_table_scope_scores(
+            results_table,
+            selected_scope_key="suite::_test_gap_results_table",
+            selected_scope_option={
+                "key": "suite::_test_gap_results_table",
+                "kind": "suite",
+                "value": "_test_gap_results_table",
+                "task_ids": ["task_in", "task_out"],
+            },
+        )
+    finally:
+        del _REGISTRY["_test_gap_results_table"]
+
+    assert annotated is not None
+    score = annotated["models"][0]["scope_score"]
+    assert score == (pytest.approx(expected) if expected is not None else None)
+
+
 def test_viewer_scope_pickers_require_explicit_selection() -> None:
     viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
