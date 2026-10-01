@@ -15,9 +15,8 @@ pre-migration implementation. That implementation produced the suite's published
 rows have been re-graded since -- the README's "Grading changed after the published grid" table
 says which, and an old number for one of those rows came from the old grader. Do not edit the
 vendored files here; fix upstream and re-vendor. Only the subtrees this harness actually calls are
-vendored
--- see ``_vendor/MANIFEST.md`` for what was taken and what was deliberately left behind. One spec
-(plain ``grouping``) is registered locally below from the vendored factory.
+vendored -- see ``_vendor/MANIFEST.md`` for what was taken and what was deliberately left behind.
+One spec (plain ``grouping``) is registered locally below from the vendored factory.
 
 **Data.** Public HF dataset ``PrasannSinghal/ctc-suite-eval``, pinned at :data:`HF_REVISION`: one
 config per task, one split per rung (``r2k`` ... ``r1m``). The pin is part of the task config and
@@ -41,15 +40,16 @@ own task hash rather than being stored under the published data's.
 * **Reasoning models.** A generation whose ``<think>`` block is never closed is counted as a parse
   failure rather than being handed to the parser: the ids inside an unfinished trace are the ones
   the model was *considering*, and scoring them credits a model for thinking out loud. Give such a
-  model room to finish instead, by overriding the decode budget (see
-  :meth:`CTCSuiteTask.get_sampling_params`); the suite's own budgets are sized for a direct answer.
+  model room to finish instead by overriding ``max_tokens``: the suite's budget is the config's
+  ``sampling_params``, the runner applies overrides on top of it field by field, and the result is
+  both what is sent and what is hashed. The suite's own budgets are sized for a direct answer.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
@@ -72,6 +72,7 @@ __all__ = [
     "HF_REVISION",
     "UPSTREAM_COMMIT",
     "ROSTER",
+    "RUNG_TOKENS",
     "CTCClass",
     "CTCScorer",
     "CTCParseScorer",
@@ -90,8 +91,9 @@ HF_DATASET = "PrasannSinghal/ctc-suite-eval"
 HF_REVISION = "04ab86006124b3f34c566f44bbc82d4fec98fcda"
 
 #: The ``ctc`` upstream commit ``_vendor/`` was taken from (AI2 OLMo-core branch ``prasann/ctc``).
-#: Stated here and in the README; both must move together with a re-vendor.
-UPSTREAM_COMMIT = "a5f6a2729"
+#: Also named in the README and in ``_vendor/MANIFEST.md`` -- a test checks the three agree -- and
+#: carried as a field on every CTC scorer, so a re-vendor changes the task hash.
+UPSTREAM_COMMIT = "40a5c60d143b427b8c2cd276fa5009b809be6be3"
 
 #: Env var pointing at a local ladder tree (``<subset>/rung_<tokens>.jsonl``) for offline runs.
 DATA_ROOT_ENV = "CTC_SUITE_DATA_ROOT"
@@ -466,6 +468,15 @@ def _local_data_source(row: RosterRow, rung: str, root: str) -> DataSource:
     return DataSource(path=os.path.join(root, row.subset, f"rung_{tokens}.jsonl"), split="train")
 
 
+def _decode_budget(row: RosterRow, spec) -> int:
+    """The row's ``max_tokens``: its own override, else the larger of the stop preset's and the
+    spec's budgets. Too small truncates a correct answer into a parse failure, which reads as a
+    capability limit rather than as a config mistake."""
+    if row.max_new_tokens is not None:
+        return row.max_new_tokens
+    return max(STOP_PRESETS[spec.stop].max_new_tokens, spec.max_new_tokens)
+
+
 def _score_output(spec, instance: Instance, output: LMOutput) -> tuple[Any, dict[str, float]]:
     """Run the spec's stop rules, parser and metric on one generation, once.
 
@@ -512,14 +523,34 @@ def _score_output(spec, instance: Instance, output: LMOutput) -> tuple[Any, dict
     # `score:`-prefixed metadata keys are persisted per output as ``sample_metrics`` by the
     # predictions writer, which is the only route a sub-metric has into the shipped files --
     # ``output.metadata`` itself is dropped. These are the diagnostics (k_exact, coverage,
-    # ce_ref_available, recall@k) someone reading a low score needs.
+    # ce_ref_available, recall@k) someone reading a low score needs. The spec's own ``parsed`` flag
+    # is skipped: it is already persisted as ``ctc_parse_ok``, and one flag under two names is a
+    # question nobody should have to ask of a predictions file.
     for key, value in scored.items():
-        output.metadata[f"score:ctc_{key}"] = value
+        if key != "parsed":
+            output.metadata[f"score:ctc_{key}"] = value
     return parsed, scored
 
 
 @dataclass(frozen=True)
-class CTCScorer(Scorer):
+class _CTCScorer(Scorer):
+    """What the three CTC scorers share.
+
+    ``upstream`` and ``query_position`` take no part in scoring. They are here because a scorer's
+    fields are serialized into the task config and so into the task hash, and these two *are* the
+    grader's identity: which vendored commit parsed and scored the generation, and which prompt
+    layout it was answering. Without them a re-vendor that changes a parser, a prompt or a stop
+    rule keeps the old hash -- which is how the rows in the README's "Grading changed" table ended
+    up stored beside numbers from the old grader.
+    """
+
+    spec_name: str = ""
+    upstream: str = UPSTREAM_COMMIT
+    query_position: str = QUERY_POSITION
+
+
+@dataclass(frozen=True)
+class CTCScorer(_CTCScorer):
     """Score a generation with the task's own parser and metric.
 
     A ``None`` parse scores 0 on every metric, which is the reference behaviour -- but parse *rate*
@@ -528,7 +559,6 @@ class CTCScorer(Scorer):
     """
 
     name: str = "ctc"
-    spec_name: str = ""
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         spec = _resolve_spec(self.spec_name)
@@ -537,7 +567,7 @@ class CTCScorer(Scorer):
 
 
 @dataclass(frozen=True)
-class CTCParseScorer(Scorer):
+class CTCParseScorer(_CTCScorer):
     """1.0 when the task's own parser got a usable answer out of the generation, else 0.0.
 
     Exists because a parse-rate collapse is a decoding/stopping regression wearing an accuracy
@@ -548,7 +578,6 @@ class CTCParseScorer(Scorer):
     """
 
     name: str = "ctc_parse_ok"
-    spec_name: str = ""
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         parsed, _ = _score_output(_resolve_spec(self.spec_name), instance, output)
@@ -556,7 +585,7 @@ class CTCParseScorer(Scorer):
 
 
 @dataclass(frozen=True)
-class CTCSubMetricScorer(Scorer):
+class CTCSubMetricScorer(_CTCScorer):
     """One named key out of the spec's metric dict, promoted to a metric of its own.
 
     Used where a sub-metric is not a diagnostic but a precondition for reading the primary number
@@ -565,7 +594,6 @@ class CTCSubMetricScorer(Scorer):
     """
 
     name: str = "ctc_sub"
-    spec_name: str = ""
     key: str = ""
 
     def score(self, instance: Instance, output: LMOutput) -> float:
@@ -581,7 +609,11 @@ class CTCMeanMetric(Metric):
         is 0 are left out entirely rather than averaged in as zeros, for the case where the metric
         is *undefined* on that example rather than failed -- rerank's ``ce_pos_recall`` needs at
         least one CE-positive document, and 14 of 500 rows have none, so counting them as zeros put
-        the ceiling a perfect model could reach at 0.972.
+        the ceiling a perfect model could reach at 0.972. A row left out of the mean has no
+        per-instance value either (:meth:`compute_instance`), so the predictions file cannot
+        disagree with ``metrics.json``. When no row at all counts -- a ``limit`` run that drew only
+        CE-less rows -- the mean is 0.0 and so is the ``ce_ref_available`` metric reported beside
+        it; read the pair as "nothing here was gradable", not as a model that scored zero.
     """
 
     name: str = "ctc"
@@ -604,6 +636,25 @@ class CTCMeanMetric(Metric):
         scorer_name = self.scorer().name
         total = sum(r.scores.get(scorer_name, 0.0) for r in counted)
         return total / len(counted)
+
+    def compute_instance(self, response) -> float | None:
+        # A row the mean excluded gets no value: the scorer channel still holds its 0.0, and
+        # persisting that would make a pairwise analysis over the predictions average rows the
+        # aggregate never saw.
+        if not self._counts(response):
+            return None
+        value = response.scores.get(self.scorer().name)
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        # With a gate, the scorer channel is NOT a per-instance view of this metric -- it has
+        # values for the excluded rows -- so a reader must not fall back to it.
+        return self.skip_when_zero is None
+
+    def to_dict(self) -> dict[str, Any]:
+        # The gate changes what the aggregate means, so it has to change the task hash. (Explicit
+        # base call: zero-argument super() does not work in a slots dataclass.)
+        return {**Metric.to_dict(self), "skip_when_zero": self.skip_when_zero}
 
 
 class CTCSuiteTask(Task):
@@ -637,21 +688,37 @@ class CTCSuiteTask(Task):
             )
             for key in _EXTRA_METRIC_KEYS.get(row.spec, ())
         ]
+        # Task._get_scorers() dedups by scorer name and silently keeps the first, so a sub-metric
+        # whose key collided with a fixed scorer name would quietly report that scorer's value.
+        names = [m.scorer().name for m in metrics]
+        if len(set(names)) != len(names):
+            raise ValueError(f"{cls.row_name}: scorer names must be unique, got {names}")
         cls.__doc__ = f"CTC suite row {row.subset!r} ({row.spec} spec). {row.note}".strip()
         cls.data_source = _data_source(
             row, DEFAULT_RUNG if DEFAULT_RUNG in row.rungs else row.rungs[-1]
         )
         cls.metrics = tuple(metrics)
         cls.primary_metric = metrics[0]
+        # The decode budget is config, not a per-instance decision, so it is declared here where
+        # `register` serializes it into the task hash and the runner lays overrides over it field
+        # by field -- what is sent is what is stored. No decode-time text stops on purpose: the
+        # reference stop rules suppress text stops inside an unclosed <think> block and before
+        # first content, which a stop string cannot honour, so the same rules run post-hoc in
+        # CTCScorer. The only cost is decode tokens on models that never emit EOS, bounded by
+        # max_tokens.
+        cls.sampling_params = SamplingParams(max_tokens=_decode_budget(row, spec), temperature=0)
 
     def __init__(self, config: TaskConfig) -> None:
         # CTC_SUITE_DATA_ROOT is resolved HERE, into the config, rather than at load time: the
         # local tree is a different dataset and must produce a different task hash. Read at
-        # construction (not at import) so the env var still works the way an env var should.
+        # construction (not at import) so the env var still works the way an env var should. It
+        # stands in for the published dataset only: a source that is already local, or that a
+        # caller pointed somewhere else on purpose, is left alone -- which also keeps construction
+        # idempotent, since the split of an already-local source is not a rung label.
         root = os.environ.get(DATA_ROOT_ENV)
-        if root and isinstance(config.data_source, DataSource):
-            rung = config.data_source.split  # the split label IS the rung label
-            config = replace(config, data_source=_local_data_source(self.row, rung, root))
+        source = config.data_source
+        if root and isinstance(source, DataSource) and source.path == HF_DATASET:
+            config = replace(config, data_source=_local_data_source(self.row, source.split, root))
         super().__init__(config)
 
     @property
@@ -694,41 +761,6 @@ class CTCSuiteTask(Task):
     def format_request(self, instance: Instance) -> LMRequest:
         prompt = self.spec.build_prompt(instance.metadata["example"], query_position=QUERY_POSITION)
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
-
-    def decode_budget(self) -> int:
-        """The row's ``max_tokens``: its own override, else the larger of the stop preset's and the
-        spec's budgets. Too small truncates a correct answer into a parse failure, which reads as a
-        capability limit rather than as a config mistake."""
-        if self.row.max_new_tokens is not None:
-            return self.row.max_new_tokens
-        return max(STOP_PRESETS[self.spec.stop].max_new_tokens, self.spec.max_new_tokens)
-
-    def get_sampling_params(self, instance: Instance) -> SamplingParams | None:
-        """The suite's decode settings, with any field the caller set explicitly winning.
-
-        No decode-time text stops on purpose: the reference stop rules suppress text stops inside
-        unclosed ``<think>`` blocks and before first content, which a decode-time stop string
-        cannot honour. The same rules run post-hoc in :class:`CTCScorer` instead; the only cost is
-        decode tokens on models that never emit EOS, bounded by ``max_tokens``.
-
-        ``config.sampling_params`` used to be ignored entirely, so ``-o
-        sampling_params.max_tokens=1024`` changed the task hash and nothing else -- which also
-        meant a reasoning model could not be given room to close its trace. "Set explicitly" is
-        read as "differs from the :class:`SamplingParams` field default"; a caller who passes a
-        value that happens to equal the default gets the suite's own setting, which is the only
-        ambiguity a dataclass without sentinels allows.
-        """
-        params = SamplingParams(max_tokens=self.decode_budget(), temperature=0)
-        override = self.config.sampling_params
-        if override is None:
-            return params
-        factory_default = SamplingParams()
-        explicit = {
-            f.name: getattr(override, f.name)
-            for f in fields(SamplingParams)
-            if getattr(override, f.name) != getattr(factory_default, f.name)
-        }
-        return replace(params, **explicit)
 
 
 @register("ctc_fiqa")

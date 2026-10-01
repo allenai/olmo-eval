@@ -6,6 +6,7 @@ No network and no dataset downloads: examples are written to tmp_path as JSONL a
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -83,10 +84,10 @@ def test_low_and_high_suites_partition_the_suite() -> None:
         )
 
 
-def _write_ladder(tmp_path, subset: str, rung_tokens: int, example: dict) -> None:
+def _write_ladder(tmp_path, subset: str, rung_tokens: int, *examples: dict) -> None:
     d = tmp_path / subset
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"rung_{rung_tokens}.jsonl").write_text(json.dumps(example) + "\n")
+    (d / f"rung_{rung_tokens}.jsonl").write_text("".join(json.dumps(e) + "\n" for e in examples))
 
 
 #: Minimal but structurally faithful examples for three representative families.
@@ -126,8 +127,7 @@ QDMATCH_EXAMPLE = {
         {"type": "document", "text": "paris is the capital of france"},
         {"type": "document", "text": "unrelated filler text"},
     ],
-    "gold_pairs": [[1, 3]],  # 1-based, ordered (query, document)
-    "gold_doc_indices": [],
+    "gold_pairs": [[1, 3]],  # 1-based (query, document); real rows have no gold_doc_indices
 }
 
 #: A rerank row with no cross-encoder-positive document -- the shape 14 of 500 real rows have at
@@ -140,6 +140,25 @@ RERANK_EXAMPLE_NO_CE = {
     "documents": [{"text": "paris is the capital of france"}, {"text": "unrelated filler"}],
     "gold_doc_indices": [0],  # 0-based
     "ce_scores": [-1.5, -4.0],  # nothing above 0
+}
+
+#: The same row with a CE-positive document, so ``ce_pos_recall`` is defined and the row counts.
+RERANK_EXAMPLE_WITH_CE = {**RERANK_EXAMPLE_NO_CE, "ce_scores": [2.5, -4.0]}
+
+#: An oolong row: one context block of ``||``-separated labelled lines and a NUMERIC question whose
+#: gold lives in ``_meta.gold_list``. Every real oolong corpus line carries ``User:``, which is
+#: also one of the templated answer markers -- the shape that made an echoed corpus line look like
+#: an answer line.
+OOLONG_EXAMPLE = {
+    "source": "oolong",
+    "queries": ["How many posts are by user 28461? Give your final answer in the form 'Answer: N'"],
+    "answers": ["1"],
+    "documents": [
+        {"text": "Date: Apr 27, 2025 || User: 28461 || Instance: first post"},
+        {"text": "Date: Apr 28, 2025 || User: 11111 || Instance: second post"},
+    ],
+    "gold_doc_indices": [],
+    "_meta": {"answer_type": "NUMERIC", "gold_list": ["1"], "dataset": "oolong"},
 }
 
 #: A plain-grouping row: unlabeled clusters over short abstracts, with the requested K in the query.
@@ -354,10 +373,56 @@ def test_a_truncated_reasoning_trace_is_a_parse_failure(tmp_path, monkeypatch) -
     assert scorers["ctc"].score(instance, LMOutput(text=closed)) == 1.0
 
 
-def test_rerank_rows_without_a_ce_reference_leave_the_mean(tmp_path, monkeypatch) -> None:
+def test_rerank_rows_without_a_ce_reference_leave_the_mean_and_the_predictions(
+    tmp_path, monkeypatch
+) -> None:
     """14 of 500 rerank rows at r2k and at r32k have no document with CE > 0. ``ce_pos_recall`` is
     undefined there -- a perfect qrel-first ranking still scores 0 -- so averaging them in as zeros
-    put the ceiling a perfect model could reach at 0.972."""
+    put the ceiling a perfect model could reach at 0.972.
+
+    Run through the same path the runner takes (synchronous scorers, then ``compute_metrics`` and
+    ``build_predictions``) because the first version of this exclusion only dropped the rows from
+    the aggregate: the per-instance channel still persisted 0.0 for them, so a pairwise analysis
+    over the predictions file averaged 0.5 against a ``metrics.json`` of 1.0.
+    """
+    from olmo_eval.common.types import Response
+    from olmo_eval.runners.io.builders import build_predictions
+
+    row = ROSTER["ctc_rerank"]
+    rung = row.rungs[0]
+    _write_ladder(
+        tmp_path, row.subset, RUNG_TOKENS[rung], RERANK_EXAMPLE_NO_CE, RERANK_EXAMPLE_WITH_CE
+    )
+    monkeypatch.setenv("CTC_SUITE_DATA_ROOT", str(tmp_path))
+
+    task = get_task(f"ctc_rerank:{rung}")
+    responses = [
+        Response(instance=inst, request=task.format_request(inst), outputs=[LMOutput(text="[1]")])
+        for inst in task.instances  # a perfect answer on both rows
+    ]
+    asyncio.run(task.score_responses(responses))
+    no_ce, with_ce = responses
+
+    # Aggregate: the CE-less row is left out, so a perfect model reaches 1.0.
+    assert task.compute_metrics(responses)["ce_pos_recall"]["ctc"] == 1.0
+    assert task.compute_metrics(responses)["ce_ref_available"]["ctc_ce_ref_available"] == 0.5
+    # Per instance: the excluded row has no ce_pos_recall value at all, rather than a 0.0 the
+    # aggregate never saw.
+    predictions = build_predictions(responses, metrics=task.config.metrics)
+    assert "ce_pos_recall" not in predictions[0]["instance_metrics"]
+    assert predictions[1]["instance_metrics"]["ce_pos_recall"] == {"ctc": 1.0}
+    assert no_ce.outputs[0].metadata["ctc_all_metrics"]["ce_ref_available"] == 0.0
+    assert with_ce.outputs[0].metadata["ctc_all_metrics"]["ce_ref_available"] == 1.0
+    # The gate is part of what the metric means, so it is serialized into the task hash.
+    primary = task.config.primary_metric
+    assert primary.to_dict()["skip_when_zero"] == "ce_ref_available"
+    assert not primary.supports_pairwise_scorer_fallback()
+
+
+def test_a_rerank_run_with_no_gradable_row_reports_zero_coverage(tmp_path, monkeypatch) -> None:
+    """A ``limit`` run can draw only CE-less rows. The mean is then 0.0 and so is
+    ``ce_ref_available``; the two together say "nothing here was gradable", which is the honest
+    reading, and neither is NaN, which ``metrics.json`` readers do not expect."""
     from olmo_eval.common.types import Response
 
     row = ROSTER["ctc_rerank"]
@@ -366,19 +431,14 @@ def test_rerank_rows_without_a_ce_reference_leave_the_mean(tmp_path, monkeypatch
     monkeypatch.setenv("CTC_SUITE_DATA_ROOT", str(tmp_path))
 
     task = get_task(f"ctc_rerank:{rung}")
-    instance = list(task.instances)[0]
-    primary = task.config.primary_metric
-    scorer = primary.scorer()
-
-    output = LMOutput(text="[2], [1]")
-    response = Response(instance=instance, request=task.format_request(instance), outputs=[output])
-    response.scores[scorer.name] = scorer.score(instance, output)
-
-    assert output.metadata["ctc_all_metrics"]["ce_ref_available"] == 0.0
-    # No countable row -> the mean is not a 0.0 that reads as a model failure.
-    assert primary.compute([response]) == 0.0
-    assert primary.skip_when_zero == "ce_ref_available"
-    assert "ce_ref_available" in {m.name for m in task.config.metrics}
+    inst = list(task.instances)[0]
+    responses = [
+        Response(instance=inst, request=task.format_request(inst), outputs=[LMOutput("[1]")])
+    ]
+    asyncio.run(task.score_responses(responses))
+    metrics = task.compute_metrics(responses)
+    assert metrics["ce_pos_recall"]["ctc"] == 0.0
+    assert metrics["ce_ref_available"]["ctc_ce_ref_available"] == 0.0
 
 
 # ── Decode budgets ──────────────────────────────────────────────────────────────────────────────
@@ -390,31 +450,42 @@ def test_obliq_gets_a_budget_its_own_gold_fits() -> None:
     tokens at r32k, 404 at r1m -- was truncated into partial credit for 27/126 rows at r32k."""
     from olmo_eval.evals.tasks.common import get_task
 
-    obliq = get_task("ctc_obliq:r32k")
-    assert obliq.decode_budget() == 512
+    assert get_task("ctc_obliq:r32k").config.sampling_params.max_tokens == 512
     # The rest of the retrieval family keeps the spec's own budget.
-    assert get_task("ctc_nq:r32k").decode_budget() == 64
-    assert obliq.get_sampling_params(None).max_tokens == 512
+    assert get_task("ctc_nq:r32k").config.sampling_params.max_tokens == 64
 
 
-def test_an_explicit_sampling_override_reaches_the_request() -> None:
-    """``config.sampling_params`` was ignored, so an override changed the task hash and nothing
-    else -- and a reasoning model could not be given room to close its trace."""
-    from olmo_eval.common.types import SamplingParams
-    from olmo_eval.evals.tasks.common import get_task
+@pytest.mark.parametrize(
+    ("sampling_overrides", "expected_max_tokens"),
+    [(None, 64), ({"max_tokens": 512}, 512), ({"max_tokens": 1024}, 1024)],
+)
+def test_the_stored_budget_is_the_budget_that_was_sent(
+    tmp_path, monkeypatch, sampling_overrides, expected_max_tokens
+) -> None:
+    """Through the runner's own preparation step, not ``get_task``: the runner writes a complete
+    ``SamplingParams`` into the config before building requests, and the first version of this
+    suite's override handling read that back as "nothing set" and sent its own budget -- so every
+    stored config said 512 while 64 went out, and an explicit 512 was indistinguishable from no
+    override at all. The suite's budget is now the config's ``sampling_params``, overrides are laid
+    over it field by field, and the number sent is the number stored and hashed."""
+    from olmo_eval.common.types import compute_task_hash
+    from olmo_eval.runners.asynq.preparation import prepare_task_items
 
-    task = get_task(
-        "ctc_nq:r2k",
-        config_overrides={"sampling_params": SamplingParams(max_tokens=4096, temperature=0.7)},
+    row = ROSTER["ctc_nq"]
+    _write_ladder(tmp_path, row.subset, RUNG_TOKENS["r2k"], RETRIEVAL_EXAMPLE)
+    monkeypatch.setenv("CTC_SUITE_DATA_ROOT", str(tmp_path))
+
+    task, items = prepare_task_items("ctc_nq:r2k", "mock", None, sampling_overrides)
+    assert task.config.sampling_params.max_tokens == expected_max_tokens
+    assert items[0].sampling_params.max_tokens == expected_max_tokens
+    assert items[0].sampling_params.temperature == 0
+
+    # A different budget is a different task.
+    baseline, _ = prepare_task_items("ctc_nq:r2k", "mock", None, None)
+    same_hash = compute_task_hash(task.config.to_dict()) == compute_task_hash(
+        baseline.config.to_dict()
     )
-    params = task.get_sampling_params(None)
-    assert params.max_tokens == 4096
-    assert params.temperature == 0.7
-    # A field the caller left at its default still gets the suite's setting.
-    partial = get_task(
-        "ctc_nq:r2k", config_overrides={"sampling_params": SamplingParams(temperature=0.7)}
-    )
-    assert partial.get_sampling_params(None).max_tokens == 64
+    assert same_hash == (expected_max_tokens == 64)
 
 
 # ── Roster bookkeeping ──────────────────────────────────────────────────────────────────────────
@@ -498,7 +569,155 @@ def test_the_sub_metrics_reach_the_predictions_file(tmp_path, monkeypatch) -> No
     sub = output.metadata["ctc_all_metrics"]
     assert {"exact_match", "recall", "precision", "f1"} <= set(sub)
     for key, value in sub.items():
-        assert output.metadata[f"score:ctc_{key}"] == value
+        if key != "parsed":  # the spec's parse flag already ships as ctc_parse_ok
+            assert output.metadata[f"score:ctc_{key}"] == value
+    assert "score:ctc_parsed" not in output.metadata
 
     persisted = build_predictions([response], "ctc_nq")[0]["model_output"][0]["sample_metrics"]
     assert persisted["ctc_f1"]["ctc_f1"] == 1.0
+
+
+# ── Task identity, continued ────────────────────────────────────────────────────────────────────
+
+
+def test_the_grader_commit_is_part_of_the_task_hash() -> None:
+    """A re-vendor that changes a parser, a prompt or a stop rule must produce a new task hash, or
+    its numbers land beside the old grader's under one name -- the README's "Grading changed" table
+    is the record of that having happened once. The scorers carry the vendored commit and the
+    prompt layout, and scorer fields serialize into the config."""
+    from dataclasses import replace
+
+    from olmo_eval.common.types import compute_task_hash
+    from olmo_eval.evals.tasks.ctc_suite import QUERY_POSITION, UPSTREAM_COMMIT
+
+    config = get_task("ctc_nq:r2k").config
+    serialized = json.dumps(config.to_dict())
+    assert UPSTREAM_COMMIT in serialized
+    assert QUERY_POSITION in serialized
+
+    other_grader = replace(
+        config,
+        metrics=tuple(
+            replace(m, scorer=replace(m.scorer, upstream="0000000")) for m in config.metrics
+        ),
+    )
+    assert compute_task_hash(config.to_dict()) != compute_task_hash(other_grader.to_dict())
+
+
+def test_the_data_root_only_stands_in_for_the_published_dataset(tmp_path, monkeypatch) -> None:
+    """Construction must be idempotent with the env var set -- an already-local source has no rung
+    label for a split, so re-resolving it raised ``KeyError('train')`` -- and must not quietly
+    replace a source a caller pointed elsewhere on purpose."""
+    from olmo_eval.data import DataSource
+
+    row = ROSTER["ctc_nq"]
+    _write_ladder(tmp_path, row.subset, RUNG_TOKENS["r2k"], RETRIEVAL_EXAMPLE)
+    monkeypatch.setenv("CTC_SUITE_DATA_ROOT", str(tmp_path))
+
+    task = get_task("ctc_nq:r2k")
+    again = type(task)(task.config)
+    assert again.config.data_source == task.config.data_source
+
+    elsewhere = DataSource(path="someone/else", subset="nq", split="r2k")
+    overridden = get_task("ctc_nq:r2k", config_overrides={"data_source": elsewhere})
+    assert overridden.config.data_source == elsewhere
+
+
+# ── Stop rules, through the scorer ──────────────────────────────────────────────────────────────
+
+
+def test_a_corpus_line_echoed_after_the_answer_is_not_graded(tmp_path, monkeypatch) -> None:
+    """Every oolong corpus line carries ``User:``, one of the templated answer markers. A no-cot
+    checkpoint that answers and keeps going echoes such a line, and with the stop rules judged on
+    the whole finished string the echo was the LAST marker and so the graded span -- a correct
+    answer scored 0.0. The vendored ``apply`` now replays the decode loop, which stopped at the
+    newline after the answer. Through :class:`CTCScorer`, on a NUMERIC row with gold 1."""
+    row = ROSTER["ctc_oolong"]
+    rung = row.rungs[0]
+    _write_ladder(tmp_path, row.subset, RUNG_TOKENS[rung], OOLONG_EXAMPLE)
+    monkeypatch.setenv("CTC_SUITE_DATA_ROOT", str(tmp_path))
+
+    task = get_task(f"ctc_oolong:{rung}")
+    inst = list(task.instances)[0]
+    scorer = task.config.primary_metric.scorer()
+    for text in (
+        "Answer: 1",
+        "Answer: 1\nDate: Apr 27, 2025 || User: 28461 || Instance: first post",
+        "Answer: 1\n\nFor the following question, give a number.\nAnswer: 7\n",
+    ):
+        assert scorer.score(inst, LMOutput(text=text)) == 1.0, text
+
+
+def test_the_upstream_commit_is_named_identically_everywhere() -> None:
+    """``UPSTREAM_COMMIT``, the README and the vendor manifest must name the same commit. The
+    second re-vendor in this PR's history updated two of the three and left the README on the old
+    one, which is exactly the drift the pin exists to make visible."""
+    from pathlib import Path
+
+    import olmo_eval.evals.tasks.ctc_suite as suite
+
+    root = Path(suite.__file__).parent
+    for doc in (root / "README.md", root / "_vendor" / "MANIFEST.md"):
+        assert suite.UPSTREAM_COMMIT in doc.read_text(), f"{doc.name} names a different commit"
+
+
+# ── The other two "Grading changed" rows, through the harness ───────────────────────────────────
+
+#: An outlier row: Wikipedia-style topic chunks with one odd one out. Gold is 0-based.
+OUTLIER_EXAMPLE = {
+    "source": "wiki",
+    "queries": ["Which documents are about a different topic from the rest?"],
+    "answers": [],
+    "documents": [
+        {"text": "the history of the roman republic"},
+        {"text": "the senate of the roman republic"},
+        {"text": "how to bake sourdough bread"},
+        {"text": "roman republican coinage"},
+    ],
+    "gold_doc_indices": [2],
+}
+
+#: A grouping row whose gold partition is all singletons (k == n), the shape 48 of 500 real r2k
+#: rows have.
+GROUPING_SINGLETONS_EXAMPLE = {
+    **GROUPING_EXAMPLE,
+    "queries": ["Partition the 4 documents into 4 groups."],
+    "gold_doc_indices": [[0], [1], [2], [3]],
+}
+
+
+def test_outlier_is_graded_after_its_mandated_sentence(tmp_path, monkeypatch) -> None:
+    """The outlier instruction mandates a sentence naming the majority and outlier topics BEFORE
+    the ``Outliers:`` line. Under the retrieval family's plain newline stop, the stop fired at the
+    end of that sentence and the ids never reached the parser -- a perfect answer was a parse
+    failure. The row uses the ``outliers`` preset; this pins it through the harness, since a
+    revert to ``newline`` would otherwise show up only as a worse score."""
+    row = ROSTER["ctc_outlier"]
+    rung = row.rungs[0]
+    _write_ladder(tmp_path, row.subset, RUNG_TOKENS[rung], OUTLIER_EXAMPLE)
+    monkeypatch.setenv("CTC_SUITE_DATA_ROOT", str(tmp_path))
+
+    task = get_task(f"ctc_outlier:{rung}")
+    inst = list(task.instances)[0]
+    scorers = {m.scorer().name: m.scorer() for m in task.config.metrics}
+    generation = "Most documents are about the roman republic; one is about baking.\nOutliers: [3]"
+    assert scorers["ctc_parse_ok"].score(inst, LMOutput(text=generation)) == 1.0
+    assert scorers["ctc"].score(inst, LMOutput(text=generation)) == 1.0
+    assert scorers["ctc"].score(inst, LMOutput(text="Most are roman.\nOutliers: [1]")) == 0.0
+
+
+def test_an_all_singleton_grouping_scores_one_through_the_task(tmp_path, monkeypatch) -> None:
+    """Same case as the direct ``pairwise_metrics`` test above, but through ``ctc_grouping``'s own
+    parser and scorer, so the fix is pinned where a run would actually feel its absence."""
+    row = ROSTER["ctc_grouping"]
+    rung = row.rungs[0]
+    _write_ladder(tmp_path, row.subset, RUNG_TOKENS[rung], GROUPING_SINGLETONS_EXAMPLE)
+    monkeypatch.setenv("CTC_SUITE_DATA_ROOT", str(tmp_path))
+
+    task = get_task(f"ctc_grouping:{rung}")
+    inst = list(task.instances)[0]
+    scorer = task.config.primary_metric.scorer()
+    perfect = '{"groups": [{"doc_ids": [1]}, {"doc_ids": [2]}, {"doc_ids": [3]}, {"doc_ids": [4]}]}'
+    assert scorer.score(inst, LMOutput(text=perfect)) == 1.0
+    one_cluster = '{"groups": [{"doc_ids": [1, 2, 3, 4]}]}'
+    assert scorer.score(inst, LMOutput(text=one_cluster)) == 0.0
