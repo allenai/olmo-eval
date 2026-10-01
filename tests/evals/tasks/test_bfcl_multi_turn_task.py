@@ -94,8 +94,11 @@ def test_a_held_back_function_is_written_out_the_way_the_prompt_writes_the_rest(
     instance = task.process_doc(entry)
     assert instance is not None
 
-    offered = instance.metadata["missed_function_docs"]["1"]
-    system_prompt = task.format_request(instance).system_prompt or ""
+    request = task.format_request(instance)
+    assert request.metadata is not None
+    # Read it off the request, because that is what reaches the scaffold.
+    offered = request.metadata["missed_function_docs"]["1"]
+    system_prompt = request.system_prompt or ""
 
     # Both describe a function the same way, so the offer does not switch
     # dialects on the model partway through the conversation.
