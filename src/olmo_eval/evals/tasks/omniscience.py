@@ -381,7 +381,11 @@ class OmniscienceIndexMetric(Metric):
         if subset != "any" and response.instance.metadata.get(subset) != cat:
             return None
 
-        return GRADE_INDEX_POINTS.get(response.instance.metadata["judge_result"])
+        grade = response.instance.metadata.get("judge_result")
+        if grade is None:
+            return None
+
+        return GRADE_INDEX_POINTS.get(grade)
 
     def supports_pairwise_scorer_fallback(self) -> bool:
         return False
