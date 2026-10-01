@@ -86,11 +86,12 @@ class BFCLMultiTurnScaffold(Scaffold):
         for turn_index, turn_messages in enumerate(turns):
             if str(turn_index) in held_back:
                 offered = held_back[str(turn_index)]
-                tools.extend(ToolSchema.from_openai(schema) for schema in offered)
                 # A prompted model reads its functions from the conversation, so
                 # the ones being offered have to appear in the message itself.
                 announcement = ADDITIONAL_FUNCTION_PROMPT
-                if not from_tool_calls:
+                if from_tool_calls:
+                    tools.extend(ToolSchema.from_openai(schema) for schema in offered)
+                else:
                     announcement = f"{offered}\n{announcement}"
                 turn_messages = [{"role": "user", "content": announcement}]
 

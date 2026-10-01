@@ -154,6 +154,30 @@ async def test_held_back_functions_are_offered_at_their_turn() -> None:
     assert any(ADDITIONAL_FUNCTION_PROMPT in c for c in contents)
     # A prompted model has no tool list, so the offer names the functions.
     assert any("sort" in c for c in contents)
+    # Sending schemas would also reach a server started for plain prompting,
+    # which rejects a request carrying tools.
+    assert all(r.tools is None for r in provider.requests)
+
+
+@pytest.mark.anyio
+async def test_a_held_back_function_reaches_the_tool_list_when_calling_natively() -> None:
+    schema = {
+        "type": "function",
+        "function": {"name": "sort", "description": "Sort a file.", "parameters": {}},
+    }
+    provider = ScriptedProvider([LMOutput(text="Done."), LMOutput(text="ok"), LMOutput(text="ok")])
+
+    await run(
+        provider,
+        request_for(
+            [[{"role": "user", "content": "Do something."}], []],
+            call_source="tool_calls",
+            missed_function={"1": [schema]},
+        ),
+    )
+
+    assert provider.requests[0].tools is None
+    assert [t.name for t in provider.requests[-1].tools or ()] == ["sort"]
 
 
 @pytest.mark.anyio
