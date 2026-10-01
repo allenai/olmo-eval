@@ -248,7 +248,7 @@ class OmniscienceScorer(LLMJudgeScorer):
         """Parse an A/B/C/D grade from the judge response and record it on the instance.
 
         A leading grade letter takes precedence, then a single grade name, then a
-        single standalone grade letter anywhere in the response. Anything else,
+        grade letter labelled as the grade or answer (e.g. "Grade: B"). Anything else,
         including a response naming more than one grade, is graded PARSING_ERROR
         and excluded from the Omniscience metrics.
 
@@ -282,9 +282,9 @@ class OmniscienceScorer(LLMJudgeScorer):
         if named:
             return "PARSING_ERROR"
 
-        letters = set(re.findall(r"\b([ABCD])\b", text))
-        if len(letters) == 1:
-            return GRADE_LETTERS[letters.pop()]
+        labelled = re.search(r"\b(?:GRADE|ANSWER)\s*:\s*([ABCD])\b", text)
+        if labelled:
+            return GRADE_LETTERS[labelled.group(1)]
         return "PARSING_ERROR"
 
     async def ascore_with_context(
@@ -545,12 +545,12 @@ class Omniscience(Task):
 
 
 SUBSET_METRICS = (
-    "domain__Finance",
-    "domain__Health",
-    "domain__Humanities and Social Sciences",
-    "domain__Law",
-    "domain__Science Engineering and Mathematics",
-    "domain__Software Engineering",
+    "domain__Finance__accuracy",
+    "domain__Health__accuracy",
+    "domain__Humanities and Social Sciences__accuracy",
+    "domain__Law__accuracy",
+    "domain__Science Engineering and Mathematics__accuracy",
+    "domain__Software Engineering__accuracy",
 )
 
 # =============================================================================

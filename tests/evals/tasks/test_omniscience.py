@@ -128,7 +128,7 @@ class TestRegistration:
 
     def test_sampling_settings(self, task):
         params = task.config.sampling_params
-        assert params.max_tokens == 32768
+        assert params.max_tokens is None
         assert params.temperature == 0.6
         assert params.top_p == 0.95
 
@@ -139,7 +139,7 @@ class TestRegistration:
         assert {metric.name for metric in task.config.metrics} == {
             "any__any__omniscience_index",
             "any__any__hallucination_rate",
-            "accuracy",
+            "any__any__accuracy",
             "judge_parsing_errors",
             *SUBSET_METRICS,
         }
@@ -151,11 +151,10 @@ class TestRegistration:
             for metric in task.config.metrics
             if metric.name.startswith("domain__")
         }
-        assert set(domain_metrics) == {f"domain__{domain}" for domain in DOMAINS}
-        for domain in DOMAINS:
-            metric = domain_metrics[f"domain__{domain}"]
+        assert set(domain_metrics) == {f"domain__{domain}__accuracy" for domain in DOMAINS}
+        for metric in domain_metrics.values():
             assert isinstance(metric, OmniscienceAccuracyMetric)
-            assert (metric.subset, metric.category) == ("domain", domain)
+            assert metric.pairwise_display_format() == "percentage"
 
     def test_every_metric_shares_one_judge(self, task):
         scorers = {id(metric.scorer()) for metric in task.config.metrics}
@@ -329,6 +328,14 @@ class TestJudgeParsing:
             ("PARTIAL_ANSWER", "PARTIAL_ANSWER"),
             ("NOT ATTEMPTED", "NOT_ATTEMPTED"),
             ("not_attempted", "NOT_ATTEMPTED"),
+            ("“A”", "CORRECT"),
+            ('"B"', "INCORRECT"),
+            ("**C**", "PARTIAL_ANSWER"),
+            ("(D)", "NOT_ATTEMPTED"),
+            ("A.", "CORRECT"),
+            ("ANSWER: B", "INCORRECT"),
+            ("Grade: D", "NOT_ATTEMPTED"),
+            ("This is a correct answer", "CORRECT"),
         ],
     )
     def test_recognized_grades(self, raw, grade):
@@ -347,7 +354,20 @@ class TestJudgeParsing:
 
         assert instance.metadata["judge_result"] == "INCORRECT"
 
-    @pytest.mark.parametrize("raw", ["", "   ", "garbage", "E", "I cannot grade this"])
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "",
+            "   ",
+            "garbage",
+            "E",
+            "I cannot grade this",
+            "CANNOT GRADE",
+            "not a grade",
+            "correct or incorrect",
+            "partial answer, not attempted",
+        ],
+    )
     def test_unparseable_replies_are_a_parsing_error(self, raw):
         instance = Instance(question="q", gold_answer="g")
 
@@ -479,15 +499,13 @@ class TestMetrics:
             OmniscienceIndexMetric(),
             HallucinationRateMetric(),
             OmniscienceAccuracyMetric(),
-            OmniscienceAccuracyMetric(name="domain__Law", subset="domain", category="Law"),
+            OmniscienceAccuracyMetric(name="domain__Law__accuracy"),
         ):
             assert metric.compute(responses) == metric.compute(graded_only)
 
     def test_domain_accuracy_uses_only_its_domain(self, responses):
-        finance = OmniscienceAccuracyMetric(
-            name="domain__Finance", subset="domain", category="Finance"
-        )
-        law = OmniscienceAccuracyMetric(name="domain__Law", subset="domain", category="Law")
+        finance = OmniscienceAccuracyMetric(name="domain__Finance__accuracy")
+        law = OmniscienceAccuracyMetric(name="domain__Law__accuracy")
 
         assert finance.compute(responses) == pytest.approx(2 / 4)
         assert law.compute(responses) == pytest.approx(1 / 4)
@@ -530,9 +548,7 @@ class TestMetrics:
         assert OmniscienceAccuracyMetric().compute(responses) == 0.0
 
     def test_empty_domain_scores_zero(self, responses):
-        health = OmniscienceAccuracyMetric(
-            name="domain__Health", subset="domain", category="Health"
-        )
+        health = OmniscienceAccuracyMetric(name="domain__Health__accuracy")
         assert health.compute(responses) == 0.0
 
     def test_responses_never_judged_are_not_parsing_errors(self):
@@ -564,9 +580,7 @@ class TestInstanceMetrics:
         finance = "domain__Finance"
 
         assert (
-            OmniscienceAccuracyMetric(
-                name=finance, subset="domain", category="Finance"
-            ).compute_instance(response)
+            OmniscienceAccuracyMetric(name=f"{finance}__accuracy").compute_instance(response)
             is None
         )
         assert (
@@ -633,9 +647,9 @@ class TestEndToEnd:
         judge_name = "omniscience_judge"
         assert metrics["any__any__omniscience_index"][judge_name] == pytest.approx(0.0)
         assert metrics["any__any__hallucination_rate"][judge_name] == pytest.approx(0.5)
-        assert metrics["accuracy"][judge_name] == pytest.approx(1 / 3)
-        assert metrics["domain__Finance"][judge_name] == pytest.approx(0.5)
-        assert metrics["domain__Law"][judge_name] == pytest.approx(0.0)
+        assert metrics["any__any__accuracy"][judge_name] == pytest.approx(1 / 3)
+        assert metrics["domain__Finance__accuracy"][judge_name] == pytest.approx(0.5)
+        assert metrics["domain__Law__accuracy"][judge_name] == pytest.approx(0.0)
         assert metrics["judge_parsing_errors"][judge_name] == 1.0
 
     @pytest.mark.anyio
@@ -658,7 +672,7 @@ class TestEndToEnd:
         ]
 
         metrics = task.compute_metrics(responses)
-        assert metrics["accuracy"]["omniscience_judge"] == pytest.approx(1 / 3)
+        assert metrics["any__any__accuracy"]["omniscience_judge"] == pytest.approx(1 / 3)
         assert metrics["any__any__omniscience_index"]["omniscience_judge"] == pytest.approx(
             100 / 3
         )
@@ -679,7 +693,7 @@ class TestEndToEnd:
         assert failed.instance.metadata["judge_result"] == "PARSING_ERROR"
 
         metrics = task.compute_metrics(responses)
-        assert metrics["accuracy"]["omniscience_judge"] == 1.0
+        assert metrics["any__any__accuracy"]["omniscience_judge"] == 1.0
         assert metrics["any__any__omniscience_index"]["omniscience_judge"] == 100.0
         assert metrics["judge_parsing_errors"]["omniscience_judge"] == 1.0
 
