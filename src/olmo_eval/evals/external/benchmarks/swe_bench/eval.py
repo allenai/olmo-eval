@@ -83,6 +83,12 @@ def _as_bool(value: Any) -> bool:
     return value in (True, "true", "True", "1", 1)
 
 
+def _as_optional_int(value: Any) -> int | None:
+    if value in (None, "", "none", "None"):
+        return None
+    return int(value)
+
+
 def _as_list(value: Any) -> list[str] | None:
     if value is None:
         return None
@@ -105,6 +111,7 @@ class SWEBenchArgs:
     max_concurrency: int = 4
     max_turns: int = 100
     command_timeout: float = 300.0
+    max_tool_output_chars: int | None = 10000
     eval_timeout: float = 1800.0
     include_hints: bool = False
     oracle: bool = False
@@ -114,16 +121,16 @@ class SWEBenchArgs:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SWEBenchArgs:
-        limit = data.get("limit")
         return cls(
             instance_ids=_as_list(data.get("instance_ids")),
             repos=_as_list(data.get("repos")),
-            limit=int(limit) if limit not in (None, "") else None,
+            limit=_as_optional_int(data.get("limit")),
             dataset=data.get("dataset", DATASET_PATH),
             revision=data.get("revision", DATASET_REVISION) or None,
             max_concurrency=int(data.get("max_concurrency", 4)),
             max_turns=int(data.get("max_turns", 100)),
             command_timeout=float(data.get("command_timeout", 300.0)),
+            max_tool_output_chars=_as_optional_int(data.get("max_tool_output_chars", 10000)),
             eval_timeout=float(data.get("eval_timeout", 1800.0)),
             include_hints=_as_bool(data.get("include_hints", False)),
             oracle=_as_bool(data.get("oracle", False)),
@@ -151,6 +158,12 @@ class InstanceResult:
     @property
     def resolved(self) -> bool:
         return self.grade.resolved
+
+
+def is_context_length_error(error: BaseException) -> bool:
+    """Whether an error reports that the conversation outgrew the model's context window."""
+    message = str(error).lower()
+    return "maximum context length" in message or "context_length_exceeded" in message
 
 
 def build_prompt(instance: SWEBenchInstance, include_hints: bool = False) -> str:
@@ -221,6 +234,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             "max_concurrency": ("Max instances in flight at once", 4),
             "max_turns": ("Max agent turns per instance", 100),
             "command_timeout": ("Timeout in seconds for each agent command", 300.0),
+            "max_tool_output_chars": ("Truncate each tool output to this many characters", 10000),
             "eval_timeout": ("Timeout in seconds for running the tests", 1800.0),
             "include_hints": ("Show the issue's hints to the agent", False),
             "oracle": ("Grade the reference patch instead of running an agent", False),
@@ -353,8 +367,12 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 try:
                     await self._run_agent(manager, instance, provider, swe_args, result)
                 except Exception as e:
-                    logger.exception(f"[{instance.instance_id}] Agent run failed")
-                    result.error = f"agent_error: {e}"
+                    if is_context_length_error(e):
+                        logger.info(f"[{instance.instance_id}] Agent ran out of context")
+                        result.completion_reason = "context_exceeded"
+                    else:
+                        logger.exception(f"[{instance.instance_id}] Agent run failed")
+                        result.error = f"agent_error: {e}"
                 # Changes made before an agent failure still count toward the result.
                 result.patch = await extract_patch(
                     manager.get_executor(frozenset()), instance.base_commit
@@ -436,6 +454,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             request,
             trace_metadata={"task_id": instance.instance_id},
             enable_compaction=swe_args.enable_compaction,
+            max_tool_output_chars=swe_args.max_tool_output_chars,
         )
         result.trajectory = harness_result.trajectory or AgentTrajectory(turns=())
         result.completion_reason = "max_turns" if harness_result.max_turns_reached else "complete"

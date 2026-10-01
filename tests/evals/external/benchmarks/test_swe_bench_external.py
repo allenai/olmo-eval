@@ -158,6 +158,21 @@ class TestArgsAndPrompt(unittest.TestCase):
         self.assertIsNone(args.limit)
         self.assertEqual(args.revision, swe_eval.DATASET_REVISION)
 
+    def test_from_dict_max_tool_output_chars(self) -> None:
+        self.assertEqual(swe_eval.SWEBenchArgs.from_dict({}).max_tool_output_chars, 10000)
+        args = swe_eval.SWEBenchArgs.from_dict({"max_tool_output_chars": "none"})
+        self.assertIsNone(args.max_tool_output_chars)
+
+    @parameterized.expand(
+        [
+            ("vllm", "This model's maximum context length is 40960 tokens.", True),
+            ("openai", "Error code: 400 - context_length_exceeded", True),
+            ("other", "Connection reset by peer", False),
+        ]
+    )
+    def test_is_context_length_error(self, _name: str, message: str, expected: bool) -> None:
+        self.assertEqual(swe_eval.is_context_length_error(RuntimeError(message)), expected)
+
     @parameterized.expand([(True,), (False,)])
     def test_build_prompt_hints(self, include_hints: bool) -> None:
         prompt = swe_eval.build_prompt(_instance(), include_hints=include_hints)
@@ -341,6 +356,47 @@ class TestExecuteOracle(unittest.TestCase):
                 swe_eval.SWEBenchVerifiedExternalEval().execute(provider, {"oracle": True})
             )
         self.assertFalse(result.success)
+
+
+class TestRunInstanceAgent(unittest.TestCase):
+    def _run(self, agent_error: Exception) -> swe_eval.InstanceResult:
+        manager = mock.MagicMock()
+        manager.start = mock.AsyncMock()
+        manager.stop = mock.AsyncMock()
+        grade = swe_grader.GradeResult(resolved=False, patch_applied=True)
+        with (
+            mock.patch(
+                "olmo_eval.harness.sandbox.image.get_swerex_image", return_value="derived:latest"
+            ),
+            mock.patch("olmo_eval.harness.sandbox.SandboxManager", return_value=manager),
+            mock.patch.object(
+                swe_eval.SWEBenchVerifiedExternalEval,
+                "_run_agent",
+                mock.AsyncMock(side_effect=agent_error),
+            ),
+            mock.patch.object(swe_eval, "extract_patch", mock.AsyncMock(return_value=GOLD_PATCH)),
+            mock.patch.object(swe_eval, "grade_in_sandbox", mock.AsyncMock(return_value=grade)),
+        ):
+            return asyncio.run(
+                swe_eval.SWEBenchVerifiedExternalEval()._run_instance(
+                    _instance(),
+                    mock.MagicMock(),
+                    swe_eval.SWEBenchArgs(),
+                    "docker",
+                )
+            )
+
+    def test_context_overflow_still_grades_partial_patch(self) -> None:
+        result = self._run(RuntimeError("maximum context length is 40960 tokens"))
+        self.assertEqual(result.completion_reason, "context_exceeded")
+        self.assertIsNone(result.error)
+        self.assertEqual(result.patch, GOLD_PATCH)
+        self.assertTrue(result.grade.patch_applied)
+
+    def test_other_agent_failure_is_recorded_as_error(self) -> None:
+        result = self._run(RuntimeError("connection reset"))
+        self.assertEqual(result.error, "agent_error: connection reset")
+        self.assertTrue(result.grade.patch_applied)
 
 
 class TestRegistration(unittest.TestCase):
