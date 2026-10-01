@@ -1405,6 +1405,26 @@ class TestUnaggregatedSuiteAggregation:
         assert result["_test_none_gap@high"]["reference_task"] == "task_in@high"
         assert result["_test_none_gap@high"]["container_suite"] == f"{self.SUITE}@high"
 
+    def test_container_is_the_innermost_unaggregated_suite(self):
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        gap = Suite(
+            name="_test_deep_gap",
+            tasks=("task_in", "task_out"),
+            aggregation=AggregationStrategy.GAP,
+        )
+        inner = Suite(name="_test_inner", tasks=(gap,), aggregation=AggregationStrategy.NONE)
+        _REGISTRY["_test_outer"] = Suite(
+            name="_test_outer", tasks=(inner,), aggregation=AggregationStrategy.NONE
+        )
+        try:
+            result = compute_suite_aggregations(["_test_outer"], self._results())
+        finally:
+            del _REGISTRY["_test_outer"]
+
+        assert result["_test_deep_gap"]["container_suite"] == "_test_inner"
+
     def test_nested_suite_without_results_is_omitted(self):
         from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
 

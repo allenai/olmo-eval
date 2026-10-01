@@ -336,14 +336,14 @@ def _aggregate_suites(
     for spec, suite, priority_suffix in suites:
         if suite.aggregation == AggregationStrategy.NONE:
             # No score of its own: each nested suite reports its aggregate under
-            # its own name, recording the suite that contained it.
+            # its own name, recording the innermost suite that contained it.
             nested = [
                 (f"{child.name}{priority_suffix}", child, priority_suffix)
                 for child in suite.tasks
                 if isinstance(child, Suite)
             ]
             for key, result in _aggregate_suites(nested, task_results).items():
-                suite_aggregations.setdefault(key, {**result, "container_suite": spec})
+                suite_aggregations.setdefault(key, {"container_suite": spec, **result})
             continue
 
         if suite.aggregation == AggregationStrategy.GAP:
