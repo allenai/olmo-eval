@@ -67,6 +67,7 @@ class BFCLMultiTurnScaffold(Scaffold):
 
         turns: list[list[dict[str, Any]]] = payload["turns"]
         held_back: dict[str, list[dict[str, Any]]] = payload.get("missed_function") or {}
+        held_back_docs: dict[str, str] = payload.get("missed_function_docs") or {}
         language = Language(payload.get("language", Language.PYTHON))
         from_tool_calls = payload.get("call_source") == "tool_calls"
         max_steps = int(payload.get("max_steps", MAXIMUM_STEP_LIMIT))
@@ -86,13 +87,21 @@ class BFCLMultiTurnScaffold(Scaffold):
         for turn_index, turn_messages in enumerate(turns):
             if str(turn_index) in held_back:
                 offered = held_back[str(turn_index)]
-                # A prompted model reads its functions from the conversation, so
-                # the ones being offered have to appear in the message itself.
                 announcement = ADDITIONAL_FUNCTION_PROMPT
                 if from_tool_calls:
                     tools.extend(ToolSchema.from_openai(schema) for schema in offered)
                 else:
-                    announcement = f"{offered}\n{announcement}"
+                    # A prompted model reads its functions from the conversation,
+                    # so the ones being offered have to appear in the message, in
+                    # the form the rest of them were written in.
+                    docs = held_back_docs.get(str(turn_index))
+                    if docs is None:
+                        raise ValueError(
+                            "A prompted rollout needs the offered functions written out: "
+                            f"turn {turn_index} holds functions back but carries no "
+                            "'missed_function_docs' entry for them."
+                        )
+                    announcement = f"{docs}\n{announcement}"
                 turn_messages = [{"role": "user", "content": announcement}]
 
             messages.extend(dict(m) for m in turn_messages)

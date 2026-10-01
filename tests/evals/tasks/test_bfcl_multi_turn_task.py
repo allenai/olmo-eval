@@ -88,6 +88,23 @@ def test_a_held_back_function_is_kept_out_of_the_visible_tools() -> None:
     assert [schema["function"]["name"] for schema in offered] == ["sort"]
 
 
+def test_a_held_back_function_is_written_out_the_way_the_prompt_writes_the_rest() -> None:
+    entry = {**ENTRY, "missed_function": {"1": ["sort"]}}
+    task = task_with_stubbed_data("bfcl_multi_turn_miss_func:prompt")
+    instance = task.process_doc(entry)
+    assert instance is not None
+
+    offered = instance.metadata["missed_function_docs"]["1"]
+    system_prompt = task.format_request(instance).system_prompt or ""
+
+    # Both describe a function the same way, so the offer does not switch
+    # dialects on the model partway through the conversation.
+    assert "'name': 'sort'" in offered
+    assert "'name': 'mkdir'" in system_prompt
+    assert "'type': 'function'" not in offered
+    assert "'type': 'function'" not in system_prompt
+
+
 def test_a_held_back_name_still_maps_back_to_the_dataset_spelling() -> None:
     entry = {**ENTRY, "missed_function": {"1": ["sort"]}}
     instance = task_with_stubbed_data().process_doc(entry)
