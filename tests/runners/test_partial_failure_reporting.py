@@ -437,8 +437,8 @@ def test_batched_clean_run_stays_green() -> None:
     check_hard_failure_gate({SPEC: result})
 
 
-def test_batched_loglikelihood_without_continuations_is_not_a_failure() -> None:
-    """A request with nothing to score legitimately yields no outputs."""
+def _run_empty_loglikelihood(continuations: tuple[str, ...]) -> ResultItem:
+    """One loglikelihood request through a provider that returns no outputs for it."""
 
     async def alogprobs(requests, sampling_params):
         return [[] for _ in requests]
@@ -453,12 +453,23 @@ def test_batched_loglikelihood_without_continuations_is_not_a_failure() -> None:
         task_id=SPEC,
         instance_idx=0,
         instance=Instance(question="q0", gold_answer="a"),
-        request=LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt="q0"),
+        request=LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD, prompt="q0", continuations=continuations
+        ),
     )
     result_queue: queue.Queue[ResultItem] = queue.Queue()
     asyncio.run(process_batch([item], harness, result_queue))  # type: ignore[arg-type]
+    return result_queue.get_nowait()
 
-    assert result_queue.get_nowait().error is None
+
+def test_batched_loglikelihood_without_continuations_is_not_a_failure() -> None:
+    """A request with nothing to score legitimately yields no outputs."""
+    assert _run_empty_loglikelihood(continuations=()).error is None
+
+
+def test_batched_loglikelihood_with_continuations_and_no_outputs_is_a_failure() -> None:
+    """vllm_server's alogprobs returns [] for a request it could not serve."""
+    assert is_hard_failure(_run_empty_loglikelihood(continuations=(" a", " b")))
 
 
 # ---------------------------------------------------------------------------
