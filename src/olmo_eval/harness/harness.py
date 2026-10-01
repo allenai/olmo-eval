@@ -94,6 +94,18 @@ class Harness:
     # Single-turn interface (same as Provider, but with config)
     # ─────────────────────────────────────────────────────────
 
+    def _check_images_supported(self, requests: list[LMRequest]) -> None:
+        if getattr(self.provider, "supports_images", False):
+            return
+        n = sum(1 for r in requests if r.images)
+        if n:
+            raise ValueError(
+                f"{type(self.provider).__name__} does not support image requests, but "
+                f"{n} of {len(requests)} requests carry images. Run this task with a "
+                "multimodal provider (e.g. provider.kind=olmo_core_vlm or an hf "
+                "multimodal preset)."
+            )
+
     def generate(
         self,
         requests: list[LMRequest],
@@ -112,6 +124,7 @@ class Harness:
             List of output lists, one per request.
         """
         transformed = [self._apply_config(r) for r in requests]
+        self._check_images_supported(transformed)
         return self.provider.generate(transformed, sampling_params)
 
     def logprobs(
@@ -128,6 +141,7 @@ class Harness:
             List of output lists with logprobs populated.
         """
         transformed = [self._apply_config(r) for r in requests]
+        self._check_images_supported(transformed)
         return self.provider.logprobs(transformed, sampling_params)
 
     async def agenerate(
@@ -137,6 +151,7 @@ class Harness:
     ) -> list[list[LMOutput]]:
         """Async single-turn generation with config injected."""
         transformed = [self._apply_config(r) for r in requests]
+        self._check_images_supported(transformed)
         return await self.provider.agenerate(transformed, sampling_params)
 
     async def alogprobs(
@@ -146,6 +161,7 @@ class Harness:
     ) -> list[list[LMOutput]]:
         """Async log probability computation."""
         transformed = [self._apply_config(r) for r in requests]
+        self._check_images_supported(transformed)
         return await self.provider.alogprobs(transformed, sampling_params)
 
     # ─────────────────────────────────────────────────────────
@@ -341,6 +357,7 @@ class Harness:
             tools=self.config.tool_schemas if self.config.has_tools else request.tools,
             system_prompt=self.config.system_prompt or request.system_prompt,
             max_length=request.max_length,
+            images=request.images,
         )
 
     def _inject_system_prompt(

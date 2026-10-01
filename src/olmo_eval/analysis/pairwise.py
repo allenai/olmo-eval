@@ -224,6 +224,7 @@ class PairwiseResult:
     model_costs: tuple[float | None, ...] = ()
     task_metric_keys: tuple[str | None, ...] = ()
     model_task_scores: tuple[tuple[float | None, ...], ...] = ()
+    model_task_instance_counts: tuple[tuple[int | None, ...], ...] = ()
     model_shared_scores: tuple[float | None, ...] = ()
     score_display_format: str = "percentage"
     score_unit: str | None = "proportion"
@@ -2159,9 +2160,14 @@ def compute_pairwise(
     raw_scores_by_pk: dict[int, dict[tuple[str, str], float]] = {pk: {} for pk in pks}
     comparison_scores_by_pk: dict[int, dict[tuple[str, str], float]] = {pk: {} for pk in pks}
     task_score_by_pk: dict[int, dict[str, float]] = {pk: {} for pk in pks}
+    task_instances_by_pk: dict[int, dict[str, int]] = {pk: {} for pk in pks}
     for task_row in task_rows:
         if task_row.experiment_pk not in task_score_by_pk:
             continue
+        if task_row.num_instances is not None:
+            task_instances_by_pk[task_row.experiment_pk][task_row.task_hash] = int(
+                task_row.num_instances
+            )
         task_metric = task_hash_to_metric.get(task_row.task_hash)
         if task_metric is None:
             continue
@@ -2295,6 +2301,13 @@ def compute_pairwise(
         tuple(task_score_by_pk.get(pk, {}).get(task_hash) for task_hash in contributing_task_hashes)
         for pk, _ in active
     ]
+    model_task_instance_counts = [
+        tuple(
+            task_instances_by_pk.get(pk, {}).get(task_hash)
+            for task_hash in contributing_task_hashes
+        )
+        for pk, _ in active
+    ]
     task_metric_keys = tuple(
         task_hash_to_metric.get(task_hash) for task_hash in contributing_task_hashes
     )
@@ -2321,11 +2334,19 @@ def compute_pairwise(
     )
 
     pairs = _compute_pairs(scores_by_idx, len(active), shared_ids, margin)
-    models, pairs, model_costs, model_task_scores, model_shared_scores = _order_by_overall_win_rate(
+    (
+        models,
+        pairs,
+        model_costs,
+        model_task_scores,
+        model_task_instance_counts,
+        model_shared_scores,
+    ) = _order_by_overall_win_rate(
         models,
         pairs,
         model_costs=model_costs,
         model_task_scores=model_task_scores,
+        model_task_instance_counts=model_task_instance_counts,
         model_shared_scores=model_shared_scores,
     )
 
@@ -2353,6 +2374,7 @@ def compute_pairwise(
         model_costs=tuple(model_costs),
         task_metric_keys=task_metric_keys,
         model_task_scores=tuple(model_task_scores),
+        model_task_instance_counts=tuple(model_task_instance_counts),
         model_shared_scores=tuple(model_shared_scores),
         score_display_format=score_display_format,
         score_unit=score_unit,
@@ -2365,12 +2387,14 @@ def _order_by_overall_win_rate(
     pairs: list[PairStats],
     model_costs: list[float | None] | None = None,
     model_task_scores: list[tuple[float | None, ...]] | None = None,
+    model_task_instance_counts: list[tuple[int | None, ...]] | None = None,
     model_shared_scores: list[float | None] | None = None,
 ) -> tuple[
     list[ModelMeta],
     list[PairStats],
     list[float | None],
     list[tuple[float | None, ...]],
+    list[tuple[int | None, ...]],
     list[float | None],
 ]:
     """Order rows by overall win rate and remap pair indices."""
@@ -2424,6 +2448,11 @@ def _order_by_overall_win_rate(
     reordered_task_scores = (
         [model_task_scores[old] for old in order] if model_task_scores is not None else []
     )
+    reordered_task_instance_counts = (
+        [model_task_instance_counts[old] for old in order]
+        if model_task_instance_counts is not None
+        else []
+    )
     reordered_shared_scores = (
         [model_shared_scores[old] for old in order] if model_shared_scores is not None else []
     )
@@ -2432,5 +2461,6 @@ def _order_by_overall_win_rate(
         reordered_pairs,
         reordered_costs,
         reordered_task_scores,
+        reordered_task_instance_counts,
         reordered_shared_scores,
     )

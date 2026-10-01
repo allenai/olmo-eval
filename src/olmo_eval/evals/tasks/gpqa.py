@@ -313,6 +313,7 @@ class GPQACoTTask(GPQATask):
     metrics = (_COT_ACCURACY,)
     primary_metric = _COT_ACCURACY
     sampling_params = _COT_SAMPLING
+    strip_thinking = True
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         question = doc.get("Question", "")
