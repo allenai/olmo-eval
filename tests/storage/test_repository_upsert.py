@@ -95,6 +95,16 @@ def test_experiment_save_upserts_on_identity_key() -> None:
         assert f" {key} = " not in updated
 
 
+def test_experiment_save_keeps_stored_s3_location_when_new_one_is_null() -> None:
+    session = RecordingSession()
+
+    ExperimentRepository(session).save(_result([]))  # type: ignore[arg-type]
+
+    updated = _set_clause(_sql(session.statements[0]))
+    assert "s3_location = coalesce(excluded.s3_location, experiments.s3_location)" in updated
+    assert "model_path = excluded.model_path" in updated
+
+
 def test_task_results_upsert_on_experiment_and_task_name() -> None:
     session = RecordingSession()
 

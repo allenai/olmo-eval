@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Table, UniqueConstraint, and_, delete, exists, insert, or_, select
+from sqlalchemy import Table, UniqueConstraint, and_, delete, exists, func, insert, or_, select
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import Insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -27,7 +27,12 @@ from olmo_eval.storage.backends.postgres.models import (
 )
 
 
-def _upsert(model: type[Base], rows: list[dict[str, Any]], constraint: str) -> Insert:
+def _upsert(
+    model: type[Base],
+    rows: list[dict[str, Any]],
+    constraint: str,
+    keep_when_null: frozenset[str] = frozenset(),
+) -> Insert:
     """Build an INSERT that updates the existing row when ``constraint`` conflicts.
 
     Every column given in ``rows`` is overwritten except the ones that make up
@@ -37,6 +42,7 @@ def _upsert(model: type[Base], rows: list[dict[str, Any]], constraint: str) -> I
         model: ORM model to insert into.
         rows: Column values keyed by ORM attribute name, one dict per row.
         constraint: Name of the unique constraint that identifies a row.
+        keep_when_null: Columns whose stored value is kept when the new value is NULL.
 
     Returns:
         The insert statement.
@@ -53,7 +59,13 @@ def _upsert(model: type[Base], rows: list[dict[str, Any]], constraint: str) -> I
     ]
     stmt = pg_insert(table).values(column_rows)
     update_columns = {
-        name: stmt.excluded[name] for name in column_rows[0] if name not in key_columns
+        name: (
+            func.coalesce(stmt.excluded[name], table.c[name])
+            if name in keep_when_null
+            else stmt.excluded[name]
+        )
+        for name in column_rows[0]
+        if name not in key_columns
     }
     return stmt.on_conflict_do_update(constraint=constraint, set_=update_columns)
 
@@ -148,7 +160,8 @@ class ExperimentRepository:
         An experiment is identified by (experiment_id, model_name, model_hash) and
         a task result by (experiment, task_name). Saving the same result again
         updates those rows in place rather than adding new ones. Task results
-        already stored for tasks not in ``eval_result`` are kept.
+        already stored for tasks not in ``eval_result`` are kept, as is a stored
+        S3 location when the new save has none.
 
         Args:
             eval_result: EvalResult dataclass containing experiment data.
@@ -182,9 +195,12 @@ class ExperimentRepository:
             "provider_init_seconds": eval_result.provider_init_seconds,
         }
         experiment_pk = self.session.execute(
-            _upsert(Experiment, [experiment_values], "uq_experiments_identity").returning(
-                Experiment.id
-            )
+            _upsert(
+                Experiment,
+                [experiment_values],
+                "uq_experiments_identity",
+                keep_when_null=frozenset({"s3_location"}),
+            ).returning(Experiment.id)
         ).scalar_one()
 
         task_values = [

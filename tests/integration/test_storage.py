@@ -320,3 +320,20 @@ class TestIdempotentSaves:
         postgres_backend.save(replace(sample_eval_result, model_hash="other-hash"))
 
         assert self._counts(postgres_backend) == (2, 4, 0)
+
+    @pytest.mark.integration
+    def test_resave_without_s3_location_keeps_the_stored_one(
+        self, postgres_backend, sample_eval_result
+    ):
+        from dataclasses import replace
+
+        postgres_backend.save(replace(sample_eval_result, s3_location="s3://bucket/run"))
+        postgres_backend.save(replace(sample_eval_result, s3_location=None))
+        assert postgres_backend.get(sample_eval_result.experiment_id).s3_location == (
+            "s3://bucket/run"
+        )
+
+        postgres_backend.save(replace(sample_eval_result, s3_location="s3://bucket/moved"))
+        assert postgres_backend.get(sample_eval_result.experiment_id).s3_location == (
+            "s3://bucket/moved"
+        )
