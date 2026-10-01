@@ -209,18 +209,6 @@ class TaskConfig:
     #: ``image_mode="caption"``; every instance's ``example_id`` must have an entry.
     caption_source: str | None = None
 
-    #: Appended verbatim to each question by the tasks that support it (CharXiv). Tests
-    #: whether a checkpoint will emit a derivation when cued to. Any non-empty value
-    #: changes the published prompt, so cued numbers are not comparable to uncued ones --
-    #: compare cued-vs-uncued on the same checkpoint.
-    cot_cue: str | None = None
-
-    #: CharXiv descriptive only: restrict to these descriptive template ids (e.g. ``17`` or
-    #: ``"11,17"``). The benchmark pools 19 templates into 5 leaderboard categories, which
-    #: is too coarse to probe one skill. Restricted runs are not comparable to the
-    #: published overall number -- compare template-to-template.
-    charxiv_templates: str | int | None = None
-
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):
@@ -369,8 +357,6 @@ class TaskConfig:
             ("prompt_style", "molmo"),
             ("image_mode", "real"),
             ("caption_source", None),
-            ("cot_cue", None),
-            ("charxiv_templates", None),
         ):
             value = getattr(self, key)
             if value != default:

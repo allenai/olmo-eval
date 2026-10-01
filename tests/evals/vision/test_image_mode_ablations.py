@@ -374,7 +374,7 @@ def test_to_dict_omits_the_knobs_at_their_defaults():
     # Emitted only when changed, so the published benchmarks keep the task hash they had
     # before these fields existed.
     d = TaskConfig(name="t").to_dict()
-    for key in ("prompt_style", "image_mode", "caption_source", "cot_cue", "charxiv_templates"):
+    for key in ("prompt_style", "image_mode", "caption_source"):
         assert key not in d
 
 
@@ -391,26 +391,3 @@ def test_non_image_qa_families_refuse_the_knobs(spec: str, knob: dict):
 
     with pytest.raises(ValueError, match="does not implement image_mode/prompt_style"):
         task.format_request(instance)
-
-
-# ---------------------------------------------------------------------------
-# CharXiv: cot_cue and charxiv_templates
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "raw,expected",
-    [(None, None), ("", None), (17, {17}), ("17", {17}), ("11,17", {11, 17}), ([11, 17], {11, 17})],
-)
-def test_charxiv_templates_accepts_every_override_form(raw, expected):
-    # The CLI coerces `-o charxiv_templates=17` to the int 17, not "17".
-    from olmo_eval.evals.vision.benchmarks.charxiv import _parse_templates
-
-    assert _parse_templates(raw) == expected
-
-
-def test_cot_cue_leaves_the_published_prompt_unchanged_when_unset():
-    from olmo_eval.evals.vision.benchmarks.charxiv import _with_cot_cue
-
-    assert _with_cot_cue("Q", None) == "Q"
-    assert _with_cot_cue("Q", "Think step by step.") == "Q\nThink step by step."
