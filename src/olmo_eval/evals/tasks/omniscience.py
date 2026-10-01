@@ -19,6 +19,7 @@ olmo-eval beaker launch \
 """
 
 import logging
+import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
@@ -37,7 +38,7 @@ from olmo_eval.common.types import (
     SamplingParams,
     Split,
 )
-from olmo_eval.data import DataLoader, DataSource
+from olmo_eval.data import DataSource
 from olmo_eval.evals.extract import extract_think_answer, extract_think_answer_only
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
@@ -183,6 +184,21 @@ GRADE_INDEX_POINTS: dict[OmniscienceGrade, float] = {
     "NOT_ATTEMPTED": 0.0,
 }
 
+GRADE_LETTERS: dict[str, OmniscienceGrade] = {
+    "A": "CORRECT",
+    "B": "INCORRECT",
+    "C": "PARTIAL_ANSWER",
+    "D": "NOT_ATTEMPTED",
+}
+GRADE_KEYWORDS: dict[OmniscienceGrade, re.Pattern[str]] = {
+    "CORRECT": re.compile(r"\bCORRECT\b"),
+    "INCORRECT": re.compile(r"\bINCORRECT\b"),
+    "PARTIAL_ANSWER": re.compile(r"\bPARTIAL[ _]ANSWER\b"),
+    "NOT_ATTEMPTED": re.compile(r"\bNOT[ _]ATTEMPTED\b"),
+}
+# Quotes, emphasis and brackets a judge may wrap around its grade
+GRADE_DECORATION = re.compile(r"[\"'`*()\[\]“”‘’]")
+
 # =============================================================================
 # Task Scoring and Metrics
 # =============================================================================
@@ -229,40 +245,47 @@ class OmniscienceScorer(LLMJudgeScorer):
         )
 
     def parse_judge_response(self, response: str, instance: Instance) -> float:
-        """Parse A/B/C/D grade from judge response.
+        """Parse an A/B/C/D grade from the judge response and record it on the instance.
+
+        A leading grade letter takes precedence, then a single grade name, then a
+        single standalone grade letter anywhere in the response. Anything else,
+        including a response naming more than one grade, is graded PARSING_ERROR
+        and excluded from the Omniscience metrics.
 
         Args:
             response: The judge's response.
+            instance: The graded instance; the raw response and grade are stored
+                in its metadata.
 
         Returns:
-            1.0 for CORRECT (A), 0.0 for INCORRECT (B), PARTIAL_ANSWER (C), NOT_ATTEMPTED (D),
-            or an unparseable response. Unparseable responses are graded PARSING_ERROR and
-            excluded from the Omniscience metrics.
+            1.0 for CORRECT, otherwise 0.0.
         """
         instance.metadata["judge_raw_response"] = response
-        response = response.strip().upper()
-
-        if response.startswith("A") or "CORRECT" in response and "INCORRECT" not in response:
-            judge_result = "CORRECT"
-        elif response.startswith("B") or "INCORRECT" in response:
-            judge_result = "INCORRECT"
-        elif (
-            response.startswith("C") or "PARTIAL_ANSWER" in response or "PARTIAL ANSWER" in response
-        ):
-            judge_result = "PARTIAL_ANSWER"
-        elif response.startswith("D") or "NOT_ATTEMPTED" in response or "NOT ATTEMPTED" in response:
-            judge_result = "NOT_ATTEMPTED"
-        else:
-            judge_result = "PARSING_ERROR"
+        judge_result = self.get_grade(response)
+        if judge_result == "PARSING_ERROR":
             instance.metadata["is_parsing_error"] = True
-
         instance.metadata["judge_result"] = judge_result
 
-        # Look for letter grade
-        if judge_result == "CORRECT":
-            return 1.0
-        else:
-            return 0.0
+        return 1.0 if judge_result == "CORRECT" else 0.0
+
+    def get_grade(self, response: str) -> OmniscienceGrade:
+        """Map a judge response to its grade, or PARSING_ERROR if it is ambiguous."""
+        text = GRADE_DECORATION.sub("", response).strip().upper()
+
+        leading = re.match(r"([ABCD])\b", text)
+        if leading:
+            return GRADE_LETTERS[leading.group(1)]
+
+        named = {grade for grade, pattern in GRADE_KEYWORDS.items() if pattern.search(text)}
+        if len(named) == 1:
+            return named.pop()
+        if named:
+            return "PARSING_ERROR"
+
+        letters = set(re.findall(r"\b([ABCD])\b", text))
+        if len(letters) == 1:
+            return GRADE_LETTERS[letters.pop()]
+        return "PARSING_ERROR"
 
     async def ascore_with_context(
         self,
@@ -385,7 +408,7 @@ class HallucinationRateMetric(Metric):
         Rate instances are 1 for incorrect and 0 for a partial answer or an
         abstention; correct answers are outside the denominator
         """
-        subset, cat, metric = self.name.split("__")
+        subset, cat, _ = self.name.split("__")
         if subset != "any" and response.instance.metadata.get(subset) != cat:
             return None
 
@@ -414,7 +437,7 @@ class OmniscienceAccuracyMetric(Metric):
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
-        subset, cat, metric = self.name.split("__")
+        subset, cat, _ = self.name.split("__")
         metrics = _omniscience_metric_helper(responses, subset, cat)
 
         return metrics["accuracy"]
@@ -424,7 +447,7 @@ class OmniscienceAccuracyMetric(Metric):
         Accuracy instances are 1 for correct and 0 otherwise; ungraded
         responses are excluded
         """
-        subset, cat, metric = self.name.split("__")
+        subset, cat, _ = self.name.split("__")
         if subset != "any" and response.instance.metadata.get(subset) != cat:
             return None
 
@@ -482,17 +505,7 @@ class Omniscience(Task):
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the dataset."""
-        if self._instances_cache is None:
-            self._instances_cache = []
-            loader = DataLoader()
-            source = self.config.get_data_source()
-
-            for idx, doc in enumerate(loader.load(source)):
-                instance = self.process_doc(doc, idx)
-                if instance is not None:
-                    self._instances_cache.append(instance)
-
-        yield from self._instances_cache
+        yield from self._load_instances_cached()
 
     @property
     def request_type(self) -> RequestType:
