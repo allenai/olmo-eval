@@ -108,6 +108,10 @@ openhands = [
 sandbox = [
     "swe-rex[modal] @ git+https://github.com/jdahm/SWE-ReX.git@johannd/ai2",
 ]
+# Test log parsers and grading for SWE-bench external evals.
+swebench = [
+    "swebench~=5.0",
+]
 beaker = [
     "beaker-py>=2.6.0,<3",
     "beaker-gantry>=3.7.0,<4",
@@ -184,7 +188,7 @@ dev = [
     "ty==0.0.39",
     "pre-commit>=4.0.0",
     # Unit tests import optional helpers directly, so dev installs need these extras too.
-    "olmo-eval[storage,beaker,hf,vision,analysis,sandbox]",
+    "olmo-eval[storage,beaker,hf,vision,analysis,sandbox,swebench]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
     "parameterized>=0.9.0",
