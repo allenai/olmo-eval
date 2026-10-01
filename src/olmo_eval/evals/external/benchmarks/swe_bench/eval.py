@@ -22,7 +22,13 @@ from olmo_eval.harness.sandbox.config import (
     SandboxMode,
 )
 
-from .grader import TESTBED_DIR, GradeResult, extract_patch, grade_in_sandbox
+from .grader import (
+    TESTBED_DIR,
+    GradeResult,
+    extract_patch,
+    grade_in_sandbox,
+    snapshot_worktree,
+)
 from .loader import DATASET_PATH, DATASET_REVISION, load_instances, select_instances
 from .task import SWEBenchInstance
 
@@ -364,6 +370,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             )
             try:
                 await manager.start()
+                baseline = await snapshot_worktree(manager.get_executor(frozenset()))
                 try:
                     await self._run_agent(manager, instance, provider, swe_args, result)
                 except Exception as e:
@@ -374,9 +381,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                         logger.exception(f"[{instance.instance_id}] Agent run failed")
                         result.error = f"agent_error: {e}"
                 # Changes made before an agent failure still count toward the result.
-                result.patch = await extract_patch(
-                    manager.get_executor(frozenset()), instance.base_commit
-                )
+                result.patch = await extract_patch(manager.get_executor(frozenset()), baseline)
             except Exception as e:
                 logger.exception(f"[{instance.instance_id}] Agent sandbox failed")
                 result.error = result.error or f"sandbox_error: {e}"

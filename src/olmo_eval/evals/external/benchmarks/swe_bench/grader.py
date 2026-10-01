@@ -104,13 +104,42 @@ def grade_log(
     )
 
 
-async def extract_patch(executor: SandboxExecutor, base_commit: str) -> str:
-    """Return every change in the working tree relative to ``base_commit``."""
-    out = "/tmp/_model.patch"
-    commit = shlex.quote(base_commit)
+def _with_scratch_index(index_path: str) -> str:
+    """Shell prefix that stages into a copy of the index, leaving the real one untouched."""
+    return (
+        f'cd {TESTBED_DIR} && cp "$(git rev-parse --git-path index)" {index_path} && '
+        f"export GIT_INDEX_FILE={index_path} && git add -A"
+    )
+
+
+async def snapshot_worktree(executor: SandboxExecutor) -> str:
+    """Record the current working tree as a git tree object and return its hash.
+
+    Instance images can carry uncommitted environment changes and build
+    artifacts. Diffing against this snapshot, instead of the base commit, keeps
+    those out of the agent's patch. HEAD and the index are not modified.
+    """
     result = await executor.execute_command(
-        f"cd {TESTBED_DIR} && git add -A && git diff --cached --binary {commit} > {out}",
-        timeout=120.0,
+        f"{_with_scratch_index('/tmp/_snapshot.index')} && git write-tree", timeout=300.0
+    )
+    lines = result.output.strip().splitlines()
+    if not result.success or not lines:
+        raise RuntimeError(f"Failed to snapshot working tree: {result.output[-2000:]}")
+    return lines[-1].strip()
+
+
+async def extract_patch(executor: SandboxExecutor, baseline: str) -> str:
+    """Return every change in the working tree relative to ``baseline``.
+
+    Args:
+        executor: Executor for the container the agent worked in.
+        baseline: Tree or commit to diff against, usually from ``snapshot_worktree``.
+    """
+    out = "/tmp/_model.patch"
+    result = await executor.execute_command(
+        f"{_with_scratch_index('/tmp/_extract.index')} && "
+        f"git diff --cached --binary {shlex.quote(baseline)} > {out}",
+        timeout=300.0,
     )
     if not result.success:
         raise RuntimeError(f"Failed to extract patch: {result.output[-2000:]}")

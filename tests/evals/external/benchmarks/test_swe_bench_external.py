@@ -298,11 +298,23 @@ class TestGradeInSandbox(unittest.TestCase):
 
 
 class TestExtractPatch(unittest.TestCase):
-    def test_extract_patch_diffs_against_base_commit(self) -> None:
+    def test_extract_patch_diffs_against_baseline(self) -> None:
         executor = FakeExecutor([("cat /tmp/_model.patch", _ok(GOLD_PATCH.rstrip("\n")))])
-        patch = asyncio.run(swe_grader.extract_patch(executor, "abc123"))  # type: ignore[arg-type]
+        patch = asyncio.run(swe_grader.extract_patch(executor, "tree123"))  # type: ignore[arg-type]
         self.assertEqual(patch, GOLD_PATCH)
-        self.assertIn("git diff --cached --binary abc123", executor.commands[0])
+        self.assertIn("GIT_INDEX_FILE=/tmp/_extract.index", executor.commands[0])
+        self.assertIn("git diff --cached --binary tree123", executor.commands[0])
+
+    def test_snapshot_returns_tree_hash(self) -> None:
+        executor = FakeExecutor([("git write-tree", _ok("warning: CRLF\n8ef914fe\n"))])
+        tree = asyncio.run(swe_grader.snapshot_worktree(executor))  # type: ignore[arg-type]
+        self.assertEqual(tree, "8ef914fe")
+        self.assertIn("GIT_INDEX_FILE=/tmp/_snapshot.index", executor.commands[0])
+
+    def test_snapshot_failure_raises(self) -> None:
+        executor = FakeExecutor([("git write-tree", _fail("fatal: not a git repository"))])
+        with self.assertRaisesRegex(RuntimeError, "not a git repository"):
+            asyncio.run(swe_grader.snapshot_worktree(executor))  # type: ignore[arg-type]
 
     def test_extract_patch_raises_on_git_failure(self) -> None:
         executor = FakeExecutor([("git add -A", _fail("not a git repository"))])
@@ -374,6 +386,7 @@ class TestRunInstanceAgent(unittest.TestCase):
                 "_run_agent",
                 mock.AsyncMock(side_effect=agent_error),
             ),
+            mock.patch.object(swe_eval, "snapshot_worktree", mock.AsyncMock(return_value="tree")),
             mock.patch.object(swe_eval, "extract_patch", mock.AsyncMock(return_value=GOLD_PATCH)),
             mock.patch.object(swe_eval, "grade_in_sandbox", mock.AsyncMock(return_value=grade)),
         ):
