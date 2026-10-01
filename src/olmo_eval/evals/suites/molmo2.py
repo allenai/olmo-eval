@@ -81,3 +81,20 @@ make_suite(
     aggregation=AggregationStrategy.AVERAGE,
     description="Molmo2's multi-image benchmarks (primary metrics are accuracy, 0-1).",
 )
+
+
+# MolmoPoint's grounding benchmarks: Point-Bench (natural images) and GUI click grounding.
+# All primary metrics are 0-1 success rates.
+MOLMOPOINT_TASKS = (
+    "point_bench",
+    "screen_spot_v2",
+    "screen_spot_pro",
+    "os_world_g",
+)
+
+make_suite(
+    "molmopoint",
+    MOLMOPOINT_TASKS,
+    aggregation=AggregationStrategy.AVERAGE,
+    description="MolmoPoint's pointing benchmarks: Point-Bench, ScreenSpot-v2/-Pro, OSWorld-G.",
+)

@@ -697,7 +697,7 @@ olmo-eval evaluates vision-language models on image benchmarks. Tasks attach ima
 to `LMRequest.images` and the provider decides how to render them, so the task
 definition is the same regardless of which multimodal provider runs it.
 
-Four families of image tasks are built in:
+Five families of image tasks are built in:
 
 | Family | Suite | Tasks |
 | --- | --- | --- |
@@ -706,6 +706,7 @@ Four families of image tasks are built in:
 | Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
 | Pointing (model prompts) | `molmo2_pointing_mp` | `pixmo_points_eval_mp`, `sa_co_gold_subset_mp`, `sa_co_gold_point_4k_mp` |
 | Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
+| Grounding (MolmoPoint) | `molmopoint` | `point_bench`, `screen_spot_v2`, `screen_spot_pro`, `os_world_g` (and `os_world_g_refined`) |
 
 Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
 `dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
@@ -716,6 +717,15 @@ per instance (capped at 20, matching the mm_olmo eval config) and score multiple
 choice answers by MMMU-style option-letter parsing; besides the primary `all`
 accuracy each task reports per-category breakdowns (MuirBench's 12 task types,
 BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
+The grounding tasks follow each benchmark's official scoring: the GUI tasks count a click
+correct when the first predicted point lands in the target (a box, an OSWorld-G polygon, or
+no point at all for OSWorld-G's refusals) and report accuracy over all instances; Point-Bench
+scores the first point (every point, plus the expected count, for `counting`) against the
+mask and reports the mean of its five category success rates. OSWorld-G reads the official
+annotations and screenshots from xlang-ai/OSWorld-G at a pinned commit (downloaded once to
+`$OLMO_EVAL_DOWNLOAD_CACHE`, default `$HF_HOME/olmo-eval-downloads`); its `accuracy_no_refusal`
+is the number closest to mm_olmo's 510-instance cut. Under the stage-1 prompt family the
+GUI instruction is sent as `gui_point: <instruction>`.
 
 ### Setup
 
