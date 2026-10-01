@@ -207,7 +207,12 @@ class Omega500(Task):
         return self.config.formatter.format(instance, self.get_fewshot())
 
     def extract_answer(self, output: LMOutput) -> str:
-        return _extract(output.text or "").answer
+        # Read the answer the way the primary scorer does, so the displayed
+        # answer is the one that was scored.
+        metric = self.config.get_primary_metric()
+        scorer = getattr(metric, "scorer", None)
+        assert isinstance(scorer, OmegaExactMatchScorer)
+        return scorer.extract(output.text or "").answer
 
 
 @register("omega_500:hillclimb")
@@ -232,6 +237,3 @@ class Omega500HillClimb(Omega500):
         assert instance is not None
         instance.metadata["id"] = doc["id"]
         return instance
-
-    def extract_answer(self, output: LMOutput) -> str:
-        return _extract_repaired(output.text or "").answer
