@@ -124,6 +124,26 @@ def test_the_prompt_regime_writes_the_functions_into_a_system_prompt() -> None:
     assert request.metadata["call_source"] == "text"
 
 
+def test_the_prompt_regime_sends_no_tool_schemas() -> None:
+    # The functions are in the prompt; sending them again as schemas would
+    # give the model them twice and invite calls this regime cannot read.
+    task = task_with_stubbed_data("bfcl_multi_turn_base:prompt")
+    instance = task.process_doc(ENTRY)
+    assert instance is not None
+
+    assert task.format_request(instance).tools is None
+
+
+def test_the_tool_regime_sends_schemas_and_no_system_prompt() -> None:
+    task = task_with_stubbed_data()
+    instance = task.process_doc(ENTRY)
+    assert instance is not None
+    request = task.format_request(instance)
+
+    assert request.tools is not None
+    assert request.system_prompt is None
+
+
 def test_a_rollout_matching_the_ground_truth_scores_one() -> None:
     task = task_with_stubbed_data()
     instance = task.process_doc(ENTRY)
