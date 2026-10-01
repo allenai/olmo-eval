@@ -23,6 +23,22 @@ class TestExtractMcqAnswer:
     def test_answer_colon_last_wins(self):
         assert extract_mcq_answer("ANSWER: A\nActually ANSWER: C") == "C"
 
+    def test_answer_bold_label(self):
+        assert extract_mcq_answer("**Answer:** B") == "B"
+
+    def test_answer_bold_letter(self):
+        assert extract_mcq_answer("Answer: **(C)**") == "C"
+
+    def test_answer_bold_wraps_label_and_letter(self):
+        assert extract_mcq_answer("**ANSWER: D**") == "D"
+
+    def test_answer_colon_followed_by_word_does_not_capture_first_letter(self):
+        """'ANSWER: the ...' must not capture T from 'the'."""
+        assert extract_mcq_answer("ANSWER: the correct choice is C") is None
+
+    def test_answer_colon_followed_by_word_falls_back_to_later_pattern(self):
+        assert extract_mcq_answer("ANSWER: the correct choice is (C)") == "C"
+
     # --- \boxed{X} ---
 
     def test_boxed_letter(self):

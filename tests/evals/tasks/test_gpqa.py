@@ -269,6 +269,14 @@ class TestExtractAnswer:
         output = LMOutput(text="ANSWER:A")
         assert task.extract_answer(output) == "A"
 
+    def test_answer_pattern_bold_label(self, task):
+        output = LMOutput(text="**Answer:** B")
+        assert task.extract_answer(output) == "B"
+
+    def test_answer_pattern_followed_by_word_falls_back(self, task):
+        output = LMOutput(text="ANSWER: the correct choice is C")
+        assert task.extract_answer(output) == "C"
+
     def test_last_answer_pattern_wins(self, task):
         output = LMOutput(text="ANSWER: A\nWait, actually ANSWER: C")
         assert task.extract_answer(output) == "C"
