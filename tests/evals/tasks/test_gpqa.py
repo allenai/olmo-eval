@@ -277,8 +277,8 @@ class TestExtractAnswer:
         output = LMOutput(text="ANSWER: the correct choice is C")
         assert task.extract_answer(output) == "C"
 
-    def test_answer_pattern_letter_on_next_line_falls_back(self, task):
-        output = LMOutput(text="ANSWER:\nC")
+    def test_answer_pattern_letter_on_next_line(self, task):
+        output = LMOutput(text="ANSWER:\nC\n\nOption A was close.")
         assert task.extract_answer(output) == "C"
 
     def test_last_answer_pattern_wins(self, task):

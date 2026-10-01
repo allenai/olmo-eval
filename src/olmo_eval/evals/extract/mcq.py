@@ -18,10 +18,15 @@ import re
 # emphasis and parentheses around the label and letter ("**Answer:** B",
 # "Answer: **(C)**", "Answer: _B_"). The letter must not be followed by another
 # letter or digit, so "ANSWER: the ..." does not capture the "t" of "the".
-# Same-line only ([^\S\n] = whitespace excluding newline) to avoid
-# "Answer:\n\nThe ..." matching the next line.
+# The letter may also start the next non-blank line ("**Answer:**\n\nC"), but
+# only when it stands alone there or labels an option ("B)", "(B) Paris", "B."),
+# so "Answer:\n\nA good approach ..." does not capture the article "A".
+# [^\S\n] = whitespace excluding newline.
 ANSWER_LINE_PATTERN: re.Pattern[str] = re.compile(
-    r"ANSWER[*_]*[^\S\n]*:[*_]*[^\S\n]*[*_(]*([A-Z])(?![A-Z0-9])", re.IGNORECASE
+    r"ANSWER[*_]*[^\S\n]*:[*_]*"
+    r"(?:[^\S\n]*|[^\S\n]*\n\s*(?=[*_(]*[A-Z](?:[*_]*[).:]|[*_]*[^\S\n]*$)))"
+    r"[*_(]*([A-Z])(?![A-Z0-9])",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # Ordered from most specific → least specific.  Each regex must have

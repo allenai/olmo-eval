@@ -39,6 +39,20 @@ class TestExtractMcqAnswer:
     def test_answer_bold_label_closed_before_colon(self):
         assert extract_mcq_answer("**Answer**: B") == "B"
 
+    def test_answer_letter_on_next_line(self):
+        assert extract_mcq_answer("ANSWER:\nC") == "C"
+        assert extract_mcq_answer("**Answer:**\n\n**B**") == "B"
+        assert extract_mcq_answer("Answer:\n  D.") == "D"
+
+    def test_answer_option_label_on_next_line(self):
+        assert extract_mcq_answer("Answer:\nB) Paris") == "B"
+        assert extract_mcq_answer("Answer:\n(C) Paris") == "C"
+
+    def test_answer_sentence_on_next_line_does_not_capture_word(self):
+        assert extract_mcq_answer("Answer:\n\nThe correct choice is B.") is None
+        assert extract_mcq_answer("Answer:\nA good approach is to compare options") is None
+        assert extract_mcq_answer("Answer:\nI think so") is None
+
     def test_answer_colon_followed_by_word_does_not_capture_first_letter(self):
         """'ANSWER: the ...' must not capture T from 'the'."""
         assert extract_mcq_answer("ANSWER: the correct choice is C") is None
