@@ -12,10 +12,9 @@ Two registered variants follow ``IFBENCH_MT_TASKS`` in oe-eval-internal:
 - ``ifeval_mt_ood_wildchat_unused_withRewrite`` (HF subset
   ``ood_wildchat_unused_withRewrite``)
 
-Defaults follow the post-training reasoning regime shared by this repo's other
-reasoning tasks: sampled decoding (temperature 0.6, top-p 0.95) with generation
-bounded only by the model context. Each task's ``:tulu`` variant keeps the
-``::tulu`` regime (greedy decoding, ``max_gen_toks=2048``).
+Defaults follow the post-training reasoning regime shared by this repo's
+other reasoning tasks. Each task's ``:tulu`` variant keeps the ``::tulu``
+regime from oe-eval-internal.
 """
 
 from __future__ import annotations

@@ -4,16 +4,10 @@ Dataset: ``allenai/IFBench_test`` (300 prompts), each carrying a list of
 instruction IDs and per-instruction kwargs. Verifiers come from the vendored
 registry in :mod:`olmo_eval.common.scorers.ifeval_deps`.
 
-Defaults follow the post-training reasoning regime shared by this repo's other
-reasoning tasks: chat format, sampled decoding (temperature 0.6, top-p 0.95)
-with generation bounded only by the model context, primary metric
-``prompt_level_loose_acc``. Reasoning inside ``<think>`` tags is removed before
-verification. The closest oe-eval-internal configuration is
-``ifeval_ood::tulu-thinker-deepseek``, which uses the same sampling with a
-32768-token cap and a ``</answer>`` stop sequence.
-
-The ``:tulu`` variant keeps the ``ifeval_ood::tulu`` regime (greedy decoding,
-``max_gen_toks=2048``), which leaves no room for a reasoning trace.
+Defaults follow the post-training reasoning regime shared by this repo's
+other reasoning tasks, and reasoning inside ``<think>`` tags is removed
+before verification. The ``:tulu`` variant keeps the ``ifeval_ood::tulu``
+regime from oe-eval-internal.
 """
 
 from __future__ import annotations
