@@ -276,10 +276,15 @@ class BFCLMultiTurnTask(Task):
         # join the same map, so a call made after they are offered still reads
         # back under the name the dataset gives it.
         held_schemas: dict[str, list[dict[str, Any]]] = {}
+        held_docs: dict[str, str] = {}
         for turn_index, docs in held_back.items():
-            schemas, held_map = build_tool_schemas(prepare_function_docs(docs, Language.PYTHON))
+            prepared_held = prepare_function_docs(docs, Language.PYTHON)
+            schemas, held_map = build_tool_schemas(prepared_held)
             name_map.update(held_map)
             held_schemas[turn_index] = [schema.to_openai() for schema in schemas]
+            # A prompted model reads the functions it is offered in the form the
+            # system prompt used for the rest, not in the schema the tool API takes.
+            held_docs[turn_index] = render_function_docs(prepared_held)
 
         turns: list[list[dict[str, Any]]] = [
             [dict(message) for message in turn] for turn in doc["question"]
@@ -299,6 +304,7 @@ class BFCLMultiTurnTask(Task):
                 "initial_config": doc["initial_config"],
                 "involved_classes": list(doc["involved_classes"]),
                 "missed_function": held_schemas,
+                "missed_function_docs": held_docs,
                 "functions": visible,
                 "prepared_functions": prepared,
                 "name_map": name_map,

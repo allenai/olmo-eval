@@ -147,13 +147,16 @@ async def test_held_back_functions_are_offered_at_their_turn() -> None:
         request_for(
             [[{"role": "user", "content": "Do something."}], []],
             missed_function={"1": [schema]},
+            missed_function_docs={"1": "[{'name': 'sort', 'description': 'Sort a file.'}]"},
         ),
     )
 
     contents = [m["content"] for r in provider.requests for m in r.messages if m["role"] == "user"]
     assert any(ADDITIONAL_FUNCTION_PROMPT in c for c in contents)
-    # A prompted model has no tool list, so the offer names the functions.
-    assert any("sort" in c for c in contents)
+    # A prompted model has no tool list, so the offer writes the functions out
+    # the way the system prompt wrote the rest, not as tool-API schemas.
+    assert any("{'name': 'sort'" in c for c in contents)
+    assert not any("'type': 'function'" in c for c in contents)
     # Sending schemas would also reach a server started for plain prompting,
     # which rejects a request carrying tools.
     assert all(r.tools is None for r in provider.requests)
@@ -212,3 +215,21 @@ async def test_a_request_without_a_payload_is_refused() -> None:
 
     with pytest.raises(ValueError, match="turns"):
         await run(provider, LMRequest(request_type=RequestType.CHAT, messages=()))
+
+
+@pytest.mark.anyio
+async def test_a_prompted_offer_without_written_out_functions_is_refused() -> None:
+    schema = {
+        "type": "function",
+        "function": {"name": "sort", "description": "Sort a file.", "parameters": {}},
+    }
+    provider = ScriptedProvider([LMOutput(text="Done.")])
+
+    with pytest.raises(ValueError, match="missed_function_docs"):
+        await run(
+            provider,
+            request_for(
+                [[{"role": "user", "content": "Do something."}], []],
+                missed_function={"1": [schema]},
+            ),
+        )
