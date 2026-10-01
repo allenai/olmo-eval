@@ -36,13 +36,13 @@ class StreamingStrategy(BatchingStrategy):
         """Execute streaming to provider."""
         import math
 
-        from olmo_eval.common.beaker_status import BeakerStatusReporter
         from olmo_eval.common.progress import ProgressLogger
         from olmo_eval.runners.asynq.processing import process_items
 
         concurrency = max_concurrency or 64
         semaphore = asyncio.Semaphore(concurrency)
-        in_flight: set[asyncio.Task] = set()
+        in_flight: set[asyncio.Task[None]] = set()
+        failure: BaseException | None = None
 
         worker_instances = math.ceil(total_instances / num_workers)
         progress = ProgressLogger(
@@ -51,8 +51,6 @@ class StreamingStrategy(BatchingStrategy):
             logger=worker_logger,
             color="green",
         )
-        reporter = BeakerStatusReporter()
-        report_progress = reporter.progress_callback("Processed")
 
         async def process_single(item: QueueItem) -> None:
             async with semaphore:
@@ -60,7 +58,14 @@ class StreamingStrategy(BatchingStrategy):
                     [item], harness, result_queue, 1, worker_logger, show_progress=False
                 )
                 progress.update(1)
-                report_progress(progress.count, progress.total)
+
+        def task_done(task: asyncio.Task[None]) -> None:
+            nonlocal failure
+            in_flight.discard(task)
+            if not task.cancelled():
+                error = task.exception()
+                if failure is None:
+                    failure = error
 
         async def get_item() -> QueueItem | None:
             """Get next item from queue asynchronously."""
@@ -69,27 +74,37 @@ class StreamingStrategy(BatchingStrategy):
                 try:
                     return await loop.run_in_executor(None, lambda: item_queue.get(timeout=0.1))
                 except queue.Empty:
-                    if not in_flight:
-                        try:
-                            return await loop.run_in_executor(
-                                None, lambda: item_queue.get(timeout=1.0)
-                            )
-                        except queue.Empty:
-                            return None
-                    await asyncio.sleep(0.01)
+                    pass
+                if failure is not None:
+                    raise failure
+                if not in_flight:
+                    try:
+                        return await loop.run_in_executor(None, lambda: item_queue.get(timeout=1.0))
+                    except queue.Empty:
+                        return None
+                await asyncio.sleep(0.01)
 
-        while True:
-            item = await get_item()
+        try:
+            while True:
+                item = await get_item()
+                if failure is not None:
+                    raise failure
 
-            if item is None:
-                break
+                if item is None:
+                    break
 
-            task = asyncio.create_task(process_single(item))
-            in_flight.add(task)
-            task.add_done_callback(in_flight.discard)
+                task = asyncio.create_task(process_single(item))
+                in_flight.add(task)
+                task.add_done_callback(task_done)
 
-        if in_flight:
-            await asyncio.gather(*in_flight)
+            if in_flight:
+                await asyncio.gather(*in_flight)
+            if failure is not None:
+                raise failure
+        finally:
+            for task in in_flight:
+                task.cancel()
+            if in_flight:
+                await asyncio.gather(*in_flight, return_exceptions=True)
 
-        progress.close()
-        report_progress(progress.count, progress.total, force=True)
+            progress.close()

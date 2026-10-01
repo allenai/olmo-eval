@@ -1,5 +1,9 @@
 """Tests for olmo_eval.core.llm_judge_scorer module."""
 
+import asyncio
+import sys
+import types
+
 import pytest
 
 from olmo_eval.common.execution import ScoringContext
@@ -7,7 +11,96 @@ from olmo_eval.common.scorers import (
     RubricJudgeScorer,
     SimpleQAJudgeScorer,
 )
+from olmo_eval.common.scorers.llm_judge import build_openai_judge_fn
 from olmo_eval.common.types import Instance, LMOutput
+
+_MAX_TOKENS_REJECTION = (
+    "Unsupported parameter: 'max_tokens' is not supported with this model. "
+    "Use 'max_completion_tokens' instead."
+)
+
+
+def _stub_openai(monkeypatch, create):
+    """Install a stub ``openai`` module whose completions call is ``create``."""
+    calls: list[dict] = []
+
+    async def recording_create(**kwargs):
+        calls.append(dict(kwargs))
+        return await create(**kwargs)
+
+    def make_message(content):
+        message = types.SimpleNamespace(content=content)
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+    class FakeAsyncOpenAI:
+        def __init__(self, api_key=None):
+            self.chat = types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=recording_create)
+            )
+
+    module = types.ModuleType("openai")
+    module.AsyncOpenAI = FakeAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    return calls, make_message
+
+
+class TestBuildOpenAIJudgeFn:
+    """Tests for the adaptive request shape in build_openai_judge_fn."""
+
+    @pytest.mark.anyio
+    async def test_switches_to_max_completion_tokens_on_rejection(self, monkeypatch):
+        reply = []
+
+        async def create(**kwargs):
+            if "max_tokens" in kwargs:
+                raise RuntimeError(_MAX_TOKENS_REJECTION)
+            return reply[0]
+
+        calls, make_message = _stub_openai(monkeypatch, create)
+        reply.append(make_message("VERDICT: CORRECT"))
+
+        judge = build_openai_judge_fn(model="gpt-5", max_tokens=64)
+
+        assert await judge("grade this") == "VERDICT: CORRECT"
+        assert [set(call) & {"max_tokens", "max_completion_tokens"} for call in calls] == [
+            {"max_tokens"},
+            {"max_completion_tokens"},
+        ]
+
+    @pytest.mark.anyio
+    async def test_concurrent_first_calls_both_adapt(self, monkeypatch):
+        """A call that loses the adaptation race must retry, not surface the error."""
+        reply = []
+        barrier = asyncio.Barrier(2)
+
+        async def create(**kwargs):
+            if "max_tokens" in kwargs:
+                # Hold both first attempts in flight so they race on one fix.
+                await barrier.wait()
+                raise RuntimeError(_MAX_TOKENS_REJECTION)
+            return reply[0]
+
+        calls, make_message = _stub_openai(monkeypatch, create)
+        reply.append(make_message("VERDICT: INCORRECT"))
+
+        judge = build_openai_judge_fn(model="gpt-5", max_tokens=64)
+        results = await asyncio.gather(judge("first"), judge("second"))
+
+        assert results == ["VERDICT: INCORRECT", "VERDICT: INCORRECT"]
+        assert sum("max_tokens" in call for call in calls) == 2
+        assert sum("max_completion_tokens" in call for call in calls) == 2
+
+    @pytest.mark.anyio
+    async def test_unrelated_errors_still_surface(self, monkeypatch):
+        async def create(**kwargs):
+            raise RuntimeError("rate limit exceeded")
+
+        _stub_openai(monkeypatch, create)
+        judge = build_openai_judge_fn(model="gpt-5", max_tokens=64)
+
+        with pytest.raises(RuntimeError, match="rate limit exceeded"):
+            await judge("grade this")
 
 
 class TestSimpleQAJudgeScorer:

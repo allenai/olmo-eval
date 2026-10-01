@@ -66,6 +66,7 @@ def no_retry_delays(monkeypatch: pytest.MonkeyPatch) -> None:
         pass
 
     monkeypatch.setattr("olmo_eval.harness.sandbox.executor.asyncio.sleep", no_sleep)
+    monkeypatch.setattr("olmo_eval.harness.sandbox.executor.random.uniform", lambda _low, _high: 0)
 
 
 @pytest.mark.anyio
@@ -97,7 +98,7 @@ async def test_healthy_probe_prevents_quarantine_after_retries() -> None:
     with pytest.raises(SandboxTransportError):
         await executor.execute_command("true")
 
-    assert executor._runtime.calls == 2
+    assert executor._runtime.calls == 4
     assert executor._deployment.calls == 1
     assert executor.is_running is True
 
@@ -117,29 +118,39 @@ async def test_repeated_transport_and_health_failures_quarantine(
     with pytest.raises(SandboxTransportError):
         await executor.execute_command("true")
 
-    assert executor._runtime.calls == 2
+    assert executor._runtime.calls == 4
     assert executor._deployment.calls == 4
     assert executor.is_running is False
-    assert delays == [0.25, 0.5, 1.0, 2.0]
+    assert delays == [0.25, 0.5, 1.0, 0.5, 1.0, 2.0]
 
 
 @pytest.mark.anyio
-async def test_transport_retry_uses_backoff(
+async def test_transport_retry_uses_backoff_with_jitter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     delays: list[float] = []
+    jitter_ranges: list[tuple[float, float]] = []
 
     async def record_sleep(delay: float) -> None:
         delays.append(delay)
 
+    def midpoint_jitter(low: float, high: float) -> float:
+        jitter_ranges.append((low, high))
+        return high / 2
+
     monkeypatch.setattr("olmo_eval.harness.sandbox.executor.asyncio.sleep", record_sleep)
+    monkeypatch.setattr(
+        "olmo_eval.harness.sandbox.executor.random.uniform",
+        midpoint_jitter,
+    )
     executor = _executor(runtime_failures=1, health=[True])
 
     result = await executor.execute_command("true")
 
     assert result.success is True
     assert executor._runtime.calls == 2
-    assert delays == [0.25]
+    assert delays == [0.375]
+    assert jitter_ranges == [(0.0, 0.25)]
 
 
 @pytest.mark.anyio

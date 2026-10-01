@@ -1,15 +1,19 @@
 """Tests for the OpenAI Agents scaffold (requires the optional agents deps)."""
 
 import contextlib
+import logging
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from olmo_eval.common.types import LMRequest, RequestType
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.scaffolds.openai_agents import (
+    DEFAULT_CHAT_TEMPLATE_KWARGS,
     FORCED_FINAL_ANSWER_INSTRUCTION,
     OpenAIAgentsScaffold,
+    _make_tool_error_formatter,
 )
 
 pytest.importorskip("agents")
@@ -201,3 +205,369 @@ class TestOpenAIAgentsMaxTurns:
         assert result.trajectory.total_tool_calls == 1
         assert result.trajectory.tool_result_sequence[0].content == "Normal tool result"
         assert len(run_calls) == 1
+
+
+def _stub_openai_client():
+    return SimpleNamespace(base_url="http://localhost:8000/v1")
+
+
+def _self_hosted_provider(chat_template_kwargs=None, client=None):
+    """Provider shaped like VLLMServerProvider: exposes ``chat_template_kwargs``."""
+    openai_client = client if client is not None else _stub_openai_client()
+    return SimpleNamespace(
+        model_name="test-model",
+        chat_template_kwargs=chat_template_kwargs,
+        get_openai_client=lambda: openai_client,
+    )
+
+
+def _managed_api_provider():
+    """Provider shaped like an OpenAI-compatible managed API: no such attribute."""
+    openai_client = SimpleNamespace(base_url="https://api.openai.com/v1")
+    return SimpleNamespace(
+        model_name="gpt-4o",
+        get_openai_client=lambda: openai_client,
+    )
+
+
+_SCAFFOLD_LOGGER = "olmo_eval.harness.scaffolds.openai_agents"
+
+
+def _build_agent(provider):
+    return OpenAIAgentsScaffold()._create_agent(provider, HarnessConfig(name="test"))
+
+
+def _scaffold_records(caplog):
+    return [record for record in caplog.records if record.name == _SCAFFOLD_LOGGER]
+
+
+def _sent_chat_template_kwargs(agent):
+    extra_body = agent.model_settings.extra_body
+    return None if not extra_body else extra_body.get("chat_template_kwargs")
+
+
+class _CapturingChatCompletions:
+    def __init__(self):
+        self.create_kwargs: dict[str, Any] | None = None
+
+    async def create(self, **kwargs):
+        from openai.types.chat import ChatCompletion, ChatCompletionMessage
+        from openai.types.chat.chat_completion import Choice
+
+        self.create_kwargs = kwargs
+        return ChatCompletion(
+            id="chatcmpl-test",
+            created=0,
+            model="test-model",
+            object="chat.completion",
+            choices=[
+                Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="done"),
+                )
+            ],
+        )
+
+
+class _CapturingClient:
+    """Minimal AsyncOpenAI stand-in that records the request body the SDK builds."""
+
+    def __init__(self):
+        self.base_url = "http://localhost:8000/v1"
+        self.completions = _CapturingChatCompletions()
+        self.chat = SimpleNamespace(completions=self.completions)
+
+
+class TestChatTemplateKwargs:
+    def test_self_hosted_provider_disables_thinking_by_default(self):
+        agent = _build_agent(_self_hosted_provider())
+
+        assert _sent_chat_template_kwargs(agent) == {"enable_thinking": False}
+
+    def test_explicit_enable_thinking_wins_over_the_default(self):
+        agent = _build_agent(_self_hosted_provider({"enable_thinking": True}))
+
+        assert _sent_chat_template_kwargs(agent) == {"enable_thinking": True}
+
+    def test_other_configured_kwargs_are_kept_alongside_the_default(self):
+        agent = _build_agent(_self_hosted_provider({"custom_flag": "on"}))
+
+        assert _sent_chat_template_kwargs(agent) == {
+            "enable_thinking": False,
+            "custom_flag": "on",
+        }
+
+    def test_managed_api_provider_gets_no_chat_template_kwargs(self):
+        agent = _build_agent(_managed_api_provider())
+
+        assert agent.model_settings.extra_body is None
+
+    def test_metrics_wrapped_provider_still_gets_the_default(self):
+        from olmo_eval.inference.metrics.core.collector import InstrumentedProvider
+
+        agent = _build_agent(InstrumentedProvider(_self_hosted_provider()))
+
+        assert _sent_chat_template_kwargs(agent) == {"enable_thinking": False}
+
+    def test_default_never_leaks_into_provider_or_module_state(self):
+        configured: dict[str, Any] = {}
+        provider = _self_hosted_provider(configured)
+
+        first = _sent_chat_template_kwargs(_build_agent(provider))
+        assert first == {"enable_thinking": False}
+
+        # Mutating what we sent must not reach the provider config, the module
+        # default, or any later agent built from the same provider.
+        assert first is not configured
+        assert first is not DEFAULT_CHAT_TEMPLATE_KWARGS
+        first["enable_thinking"] = True
+        first["injected"] = "leak"
+
+        assert configured == {}
+        assert provider.chat_template_kwargs == {}
+        assert DEFAULT_CHAT_TEMPLATE_KWARGS == {"enable_thinking": False}
+        assert _sent_chat_template_kwargs(_build_agent(provider)) == {"enable_thinking": False}
+
+    def test_applying_the_default_is_logged_at_info(self, caplog):
+        with caplog.at_level(logging.DEBUG, logger=_SCAFFOLD_LOGGER):
+            _build_agent(_self_hosted_provider())
+
+        info = [r.message for r in _scaffold_records(caplog) if r.levelno == logging.INFO]
+        assert len(info) == 1
+        assert "Defaulted chat_template_kwargs" in info[0]
+        assert "enable_thinking" in info[0]
+
+    def test_explicit_config_is_not_logged_at_info(self, caplog):
+        with caplog.at_level(logging.DEBUG, logger=_SCAFFOLD_LOGGER):
+            _build_agent(_self_hosted_provider({"enable_thinking": True}))
+
+        records = _scaffold_records(caplog)
+        assert not [r for r in records if r.levelno >= logging.INFO]
+        assert any("explicitly configured chat_template_kwargs" in r.message for r in records)
+
+    @pytest.mark.anyio
+    async def test_default_reaches_the_chat_completions_request_body(self):
+        from agents import ModelTracing
+
+        client = _CapturingClient()
+        agent = _build_agent(_self_hosted_provider(client=client))
+
+        await agent.model.get_response(
+            system_instructions=None,
+            input="hello",
+            model_settings=agent.model_settings,
+            tools=[],
+            output_schema=None,
+            handoffs=[],
+            tracing=ModelTracing.DISABLED,
+        )
+
+        assert client.completions.create_kwargs is not None
+        assert client.completions.create_kwargs["extra_body"] == {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
+
+
+def _named_tool(name: str):
+    from olmo_eval.harness.tools import Tool
+
+    async def _execute(query: str = "") -> str:
+        return "ok"
+
+    return Tool(
+        name=name,
+        description=f"{name} description",
+        execute=_execute,
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
+    )
+
+
+class TestToolErrorFormatter:
+    def test_message_names_the_bad_tool_and_lists_the_valid_ones(self):
+        formatter = _make_tool_error_formatter(["paper_search", "snippet_search"])
+
+        message = formatter(
+            SimpleNamespace(kind="tool_not_found", tool_name="web_search", call_id="c1")
+        )
+
+        assert message == (
+            "Error: tool 'web_search' does not exist. "
+            "Available tools: paper_search, snippet_search. Call one of these exact names."
+        )
+
+    def test_defers_to_sdk_default_for_other_error_kinds(self):
+        formatter = _make_tool_error_formatter(["paper_search"])
+
+        rejected = formatter(
+            SimpleNamespace(kind="approval_rejected", tool_name="paper_search", call_id="c1")
+        )
+
+        assert rejected is None
+
+    def test_handles_an_empty_tool_inventory(self):
+        formatter = _make_tool_error_formatter([])
+
+        message = formatter(
+            SimpleNamespace(kind="tool_not_found", tool_name="web_search", call_id="c1")
+        )
+
+        assert message == "Error: tool 'web_search' does not exist. No tools are available."
+
+
+class TestNativeUnknownToolRecovery:
+    @pytest.mark.anyio
+    async def test_run_opts_into_native_recovery_with_the_real_tool_names(self, monkeypatch):
+        from agents import Agent, Runner
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+        run_calls = []
+
+        async def fake_run(**kwargs):
+            run_calls.append(kwargs)
+            return SimpleNamespace(final_output="done", new_items=[])
+
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+
+        await OpenAIAgentsScaffold().run(
+            provider=SimpleNamespace(),
+            config=HarnessConfig(
+                name="test",
+                max_turns=3,
+                tools=(_named_tool("paper_search"), _named_tool("snippet_search")),
+            ),
+            request=_agent_request(),
+            enable_compaction=False,
+        )
+
+        run_config = run_calls[0]["run_config"]
+        assert run_config.tool_not_found_behavior == "return_error_to_model"
+
+        message = run_config.tool_error_formatter(
+            SimpleNamespace(kind="tool_not_found", tool_name="web_search", call_id="c1")
+        )
+        assert "paper_search" in message
+        assert "snippet_search" in message
+
+    @pytest.mark.anyio
+    async def test_unknown_tool_recovers_against_the_real_sdk_dispatch(self):
+        """Pin the opt-in against the SDK's own dispatch, not a mock of it.
+
+        Scripts a chat-completions endpoint that calls a tool that was never registered,
+        then answers normally, and asserts the SDK fed our message back as a tool result
+        instead of raising ModelBehaviorError.
+        """
+        import json
+
+        import httpx
+        from agents import (
+            Agent,
+            OpenAIChatCompletionsModel,
+            RunConfig,
+            Runner,
+            function_tool,
+        )
+        from openai import AsyncOpenAI
+
+        requests: list[dict] = []
+
+        def completion(message: dict, finish: str) -> dict:
+            return {
+                "id": "chatcmpl-test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test-model",
+                "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(json.loads(request.content.decode()))
+            if len(requests) == 1:
+                return httpx.Response(
+                    200,
+                    json=completion(
+                        {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_bogus",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "web_search",
+                                        "arguments": '{"query":"olmo"}',
+                                    },
+                                }
+                            ],
+                        },
+                        "tool_calls",
+                    ),
+                )
+            return httpx.Response(
+                200, json=completion({"role": "assistant", "content": "recovered"}, "stop")
+            )
+
+        @function_tool(strict_mode=False)
+        async def paper_search(query: str) -> str:
+            """Search papers."""
+            return "results"
+
+        client = AsyncOpenAI(
+            api_key="test-key-not-real",
+            base_url="http://test.invalid/v1",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        agent = Agent(
+            name="test-agent",
+            instructions="Use tools.",
+            model=OpenAIChatCompletionsModel(openai_client=client, model="test-model"),
+            tools=[paper_search],
+        )
+
+        result = await Runner.run(
+            starting_agent=agent,
+            input="find something",
+            max_turns=5,
+            run_config=RunConfig(
+                tool_not_found_behavior="return_error_to_model",
+                tool_error_formatter=_make_tool_error_formatter(["paper_search"]),
+            ),
+        )
+
+        assert result.final_output == "recovered"
+        tool_messages = [m for m in requests[1]["messages"] if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        assert tool_messages[0]["content"] == (
+            "Error: tool 'web_search' does not exist. "
+            "Available tools: paper_search. Call one of these exact names."
+        )
+
+
+class TestModelRefusal:
+    @pytest.mark.anyio
+    async def test_refusal_is_reported_instead_of_taking_down_the_run(self, monkeypatch):
+        from agents import Agent, Runner
+        from agents.exceptions import ModelRefusalError
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+
+        async def fake_run(**kwargs):
+            raise ModelRefusalError("I cannot help with that.")
+
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+
+        result = await OpenAIAgentsScaffold().run(
+            provider=SimpleNamespace(),
+            config=HarnessConfig(name="test", max_turns=3),
+            request=_agent_request(),
+            enable_compaction=False,
+        )
+
+        assert "I cannot help with that." in result.final_output.text
+        assert result.error is not None

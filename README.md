@@ -129,6 +129,7 @@ Suites support different strategies for combining task results:
 | Strategy | Description |
 |----------|-------------|
 | `AVERAGE` | Simple average of all task scores (default) |
+| `WEIGHTED_AVERAGE` | Average of all task scores, each weighted by the task's instance count |
 | `AVERAGE_OF_AVERAGES` | Average over child suite averages (equal weight per child) |
 | `DISPLAY_ONLY` | Display child results without computing suite average |
 | `NONE` | No aggregation - just collect individual task results |
@@ -163,7 +164,25 @@ register(Suite(
 # vs AVERAGE:          (0.80 + 0.40 + 0.50 + 0.60) / 4 = 0.575
 ```
 
-Note: Currently `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains. Custom weighting may be supported in the future.
+Note: `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains.
+
+**Weighted Average Example:**
+
+```python
+register(Suite(
+    name="mmlu_pro",
+    tasks=("mmlu_pro_math", "mmlu_pro_history"),  # 1351 and 381 questions
+    aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+))
+
+# With scores of 0.30 (math) and 0.45 (history):
+# WEIGHTED_AVERAGE: (0.30 * 1351 + 0.45 * 381) / 1732 = 0.333
+# vs AVERAGE:       (0.30 + 0.45) / 2 = 0.375
+```
+
+`WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored.
+
+A weighted suite reports its weighted mean or no score at all. If a contributing task has no instance count, the suite aggregate is omitted and the runner logs which tasks were missing, rather than publishing an unweighted mean under the same suite name. Instance counts are required when a result is stored, so this only affects results written before that check existed.
 
 ### Formatters
 
@@ -286,6 +305,7 @@ config = HarnessConfig(
 | `scaffold_kwargs` | `dict[str, Any]` | `{}` | Scaffold-specific options (e.g., `enable_compaction`) |
 | `metrics` | `MetricsConfig \| None` | `None` | Inference metrics collection config |
 | `batching` | `BatchConfig \| None` | `None` | Batching strategy configuration |
+| `max_hard_failure_rate` | `float \| None` | `None` | Fraction of a task's instances allowed to hard-fail before the task is marked failed and the run exits non-zero (default `0.05`). `1.0` never fails a run on partial instance failures; a task that saves zero instances still fails |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
 
 #### Scaffolds
@@ -659,6 +679,178 @@ See the [Harness](#harness) section above for full documentation on:
 - Defining tools with the `@tool` decorator
 - Programmatic usage
 
+## Function Calling (BFCL)
+
+The Berkeley Function Calling Leaderboard v3 single-turn categories are
+registered as `bfcl_*` tasks, reformulated as a completion so a pretrained
+model with no chat template can be measured on them. See
+[`src/olmo_eval/evals/tasks/bfcl/README.md`](src/olmo_eval/evals/tasks/bfcl/README.md)
+for the task list, suites, exemplar settings, and what is not implemented.
+
+```bash
+uv run olmo-eval run -m my-base-model -t bfcl
+```
+
+## Multimodal Evaluation
+
+olmo-eval evaluates vision-language models on image benchmarks. Tasks attach images
+to `LMRequest.images` and the provider decides how to render them, so the task
+definition is the same regardless of which multimodal provider runs it.
+
+Four families of image tasks are built in:
+
+| Family | Suite | Tasks |
+| --- | --- | --- |
+| Image-QA | `molmo2_imageqa` | `chart_qa`, `vqa2`, `doc_qa`, `info_qa`, `text_vqa`, `real_world_qa`, `mmmu`, `mmmu_pro`, `math_vista`, `countbench_qa`, `pixmo_count`, `ai2d`, `charxiv_descriptive`, `charxiv_reasoning` |
+| Dense caption | `molmo2_imageqa_caption` | the image-QA tasks plus `dense_caption` |
+| Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
+| Pointing (model prompts) | `molmo2_pointing_mp` | `pixmo_points_eval_mp`, `sa_co_gold_subset_mp`, `sa_co_gold_point_4k_mp` |
+| Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
+
+Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
+`dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
+and computes no cross-task average. Pointing tasks score point-in-mask
+precision/recall/f1 by maximum bipartite matching rather than VQA-style answers,
+which is why they are a separate suite. Multi-image tasks attach a *list* of images
+per instance (capped at 20, matching the mm_olmo eval config) and score multiple
+choice answers by MMMU-style option-letter parsing; besides the primary `all`
+accuracy each task reports per-category breakdowns (MuirBench's 12 task types,
+BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
+
+### Setup
+
+The multimodal providers live behind the `hf` and `olmo_core_vlm` extras, and the
+benchmarks' own scoring dependencies (`pycocotools`, `scipy`) behind `vision`, which
+every provider needs:
+
+```bash
+# HuggingFace multimodal path
+uv sync --extra hf --extra vision
+
+# Also evaluate OLMo-core MultimodalLM checkpoints
+uv sync --extra hf --extra olmo_core_vlm --extra vision
+```
+
+Beaker jobs install each task's scoring dependencies automatically.
+
+Image data is read from a **read-only** tree — loaders raise rather than build
+caches, so the data must already be staged:
+
+```bash
+export MOLMO_DATA_DIR=/weka/oe-training-default/mm-olmo  # this is the default
+```
+
+A missing data root fails at task setup with the variable named, rather than
+reading a nonexistent path (the Ai2 defaults are tracked for removal in #381).
+
+Images live under `$MOLMO_DATA_DIR/torch_datasets/`. Manifests that recorded
+absolute paths on another machine are re-anchored under the current root
+automatically.
+
+Four tasks call the OpenAI API and need `OPENAI_API_KEY`, so the
+`molmo2_imageqa` suite needs it as a whole:
+
+- `math_vista` defaults to the official `gpt-4-0613` answer extraction. Use the
+  `math_vista:offline` variant for an API-free heuristic instead.
+- `charxiv_descriptive` and `charxiv_reasoning` run the official `gpt-4o` grader.
+- `dense_caption` runs a `gpt-4o` recall+consistency judge. Judge responses are
+  cached, so the key is only needed on a cache miss.
+
+The launcher resolves the key as the user-scoped beaker secret
+`{beaker-username}_OPENAI_API_KEY`; if it is missing, the launch fails up front
+and prints the `beaker secret write` command to run.
+
+### Running
+
+```bash
+# Released HuggingFace checkpoint, full image-QA suite
+uv run olmo-eval run -m molmo2-4b -t molmo2_imageqa
+
+# A single benchmark
+uv run olmo-eval run -m molmo2-4b -t mmmu_pro
+
+# Pointing benchmarks
+uv run olmo-eval run -m molmo2-4b -t molmo2_pointing
+
+# Multi-image benchmarks
+uv run olmo-eval run -m molmo2-4b -t molmo2_multiimage
+
+# Inspect the suite without loading a model
+uv run olmo-eval suite inspect molmo2_imageqa
+```
+
+The `molmo2-4b` preset runs `allenai/Molmo2-4B` with `dtype=float32`,
+`autocast_dtype=bfloat16` and `max_crops=24` (8 per image in multi-image prompts),
+matching the reference evaluation numerics.
+
+### Providers
+
+**`huggingface`** handles image-text-to-text models via `AutoProcessor` and
+`AutoModelForImageTextToText`. Pass `multimodal=True` in the provider kwargs (the
+`molmo2-4b` preset does this for you).
+
+**`olmo_core_vlm`** runs OLMo-core `MultimodalLM` checkpoints in three on-disk
+formats: raw trainer saves (`config.json` + `model_and_optim/`), consolidated
+safetensors exports, and mm_olmo trainer checkpoints, which are config-translated
+and key-remapped at load time. It drives its own decode loop because OLMo-core's
+vision branch has no multimodal generation module.
+
+Prefer `provider.kind=olmo_core_vlm` explicitly — remote jobs then install the
+matching `olmo_core_vlm` extra. `provider.kind=olmo_core` also detects
+multimodal checkpoints and reroutes (with a warning), but on Beaker that route
+installs the text extra and fails at worker init:
+
+```bash
+uv run olmo-eval run \
+    --harness default -o provider.kind=olmo_core \
+    -m /weka/path/to/multimodal-checkpoint \
+    -t molmo2_imageqa
+```
+
+`-o` must follow `--harness` or `-t`, so the provider override needs an explicit
+`--harness default` ahead of it.
+
+A single image is cropped to the checkpoint's training `max_crops`
+(`-o provider.max_crops=N`), and each image of a multi-image prompt to its
+`max_multi_image_crops` (8 when the checkpoint names none;
+`-o provider.max_multi_image_crops=N`), as mm_olmo does. The context window is
+64,000 tokens, the length mm_olmo's `eval_molmo2.py` evaluates at, or the
+checkpoint's training window if that is longer (`-o provider.max_model_len=N`); a
+prompt longer than the window fails its instance rather than being truncated.
+mm_olmo evaluates the released Molmo2 models at 24 crops per single image, so pass
+`-o provider.max_crops=24` to compare against their published numbers; document QA
+is the most crop-sensitive.
+
+No released `ai2-olmo-core` ships the multimodal classes (`olmo_core.nn.vision`,
+`MultimodalLM`) yet, so the `olmo_core_vlm` extra pins OLMo-core's vision branch
+by commit. It is declared conflicting with the text `olmo_core` extra — the two
+cannot be installed together — and beaker jobs install it automatically for
+`provider.kind=olmo_core_vlm`, so no package override is needed:
+
+```bash
+uv run olmo-eval beaker launch \
+    --harness default -o provider.kind=olmo_core_vlm \
+    -m /weka/path/to/multimodal-checkpoint \
+    -t molmo2_imageqa
+```
+
+Once a release includes the multimodal classes, the extras collapse into one and
+the pin goes away.
+
+### Adding a multimodal task
+
+Image-QA tasks subclass `ImageQATask` (`evals/vision/tasks/image_qa.py`),
+which resolves images from `instance.metadata["image_path"]` or
+`instance.metadata["image"]` (a PIL image or a zero-arg callable returning one —
+use `load_instance_image` from `evals/vision/data/images.py` for either form) and anchors data reads under
+`$MOLMO_DATA_DIR`. Pointing tasks subclass `PointingTask`
+(`evals/vision/tasks/pointing.py`). Multi-image tasks subclass
+`MultiImageQATask` (`evals/vision/tasks/multi_image.py`), which resolves
+`instance.metadata["images"]` — a callable returning the image list, or a sequence
+of PIL images / zero-arg callables / file paths — and sends them all on one
+request. Registration and variants work exactly as described in
+[Adding New Tasks](#adding-new-tasks).
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.
@@ -1025,7 +1217,7 @@ Launch an evaluation job:
 uv run olmo-eval beaker launch -n "eval-llama3-mmlu" -m llama3.1-8b -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Multiple tasks
 uv run olmo-eval beaker launch -n "eval-llama3-suite" \
@@ -1033,7 +1225,7 @@ uv run olmo-eval beaker launch -n "eval-llama3-suite" \
     -t mmlu -t gsm8k -t hellaswag \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Large model with multiple GPUs
 uv run olmo-eval beaker launch \
@@ -1042,7 +1234,7 @@ uv run olmo-eval beaker launch \
     --task mmlu --task gsm8k --task arc_easy \
     --cluster h100 \
     --workspace "ai2/olmo-eval-debug" \
-    --budget "ai2/oe-base" \
+    --budget "ai2/oe-other" \
     --gpus 4 \
     --timeout 48h
 
@@ -1050,7 +1242,7 @@ uv run olmo-eval beaker launch \
 uv run olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base" \
+    -B "ai2/oe-other" \
     --dry-run
 
 # With a harness preset for tool-augmented evaluation
@@ -1060,7 +1252,7 @@ uv run olmo-eval beaker launch -n "eval-with-tools" \
     --harness dr_tulu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # With inspection flags for debugging
 uv run olmo-eval beaker launch -n "debug-eval" \
@@ -1070,7 +1262,7 @@ uv run olmo-eval beaker launch -n "debug-eval" \
     --inspect-response \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Run external evaluations
 uv run olmo-eval beaker launch -n "external-eval" \
@@ -1080,7 +1272,7 @@ uv run olmo-eval beaker launch -n "external-eval" \
     -A num_tasks=1 \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 ### Advanced Usage
@@ -1105,7 +1297,7 @@ uv run olmo-eval beaker launch \
     -t "simpleqa:judge@urgent" \
     -o limit=10 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base" \
+    -B "ai2/oe-other" \
     --cluster h100 \
     --inspect \
     --group olmo-eval-local-judge-2 -y
@@ -1124,7 +1316,7 @@ uv run olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
     -t "arc_easy@low" \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Creates 3 experiments:
 #   eval-suite-high:   runs mmlu at high priority
@@ -1135,7 +1327,7 @@ uv run olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
 uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "arc_easy:mc@high" \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Tasks without @priority use the config file priority (default: normal)
 ```
@@ -1151,7 +1343,7 @@ uv run olmo-eval beaker launch -n "benchmark-v1" --group "benchmark-2024" \
     -t mmlu -t gsm8k -t hellaswag \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Creates experiment and adds it to "benchmark-2024" group
 
@@ -1193,7 +1385,7 @@ tasks:
   - mmlu
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 ```
 
 ### CLI Options
@@ -1210,7 +1402,8 @@ budget: ai2/oe-base
 | `--gpus` | `-G` | auto | Number of GPUs (defaults to 1 for GPU providers, 0 otherwise) |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
 | `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
-| `--preemptible` | | `true` | Allow preemption |
+| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`) |
+| `--min-runtime` | | none | Minimum runtime before Beaker may preempt the job (e.g., `2h`) |
 | `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | `-r` | none | Number of retries on failure |
 | `--workspace` | `-w` | required | Beaker workspace |
@@ -1230,6 +1423,30 @@ budget: ai2/oe-base
 | `--gcp-credentials` | | auto | Inject GCP credentials (auto-detected from gs:// model paths) |
 | `--store` | | `false` | Persist results to configured database |
 
+### Preemption
+
+By default, Beaker can preempt a job at any time and requeues it afterward. Use
+`--min-runtime` (or `min_runtime:` in a config file) to protect a job from preemption:
+
+```bash
+uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
+```
+
+- How long the protection lasts depends on the cluster's scheduling policy. Where the
+  policy makes jobs interruptible after their min runtime, the job is protected for that
+  long, then can be preempted and is requeued. On other clusters, any min runtime
+  protects the job for its whole run.
+- Beaker accepts 5m to 8h, and no more than the cluster's maximum task timeout.
+- Clusters that require an allocation for protected work reject a min runtime unless
+  your workspace has an allocation there.
+- `min_runtime` cannot be combined with `preemptible` in the CLI or in a config file.
+  When the CLI sets `--min-runtime` or `--preemptible/--no-preemptible`, it replaces
+  both config file fields.
+- External evals (`-E`) take `--min-runtime` from the CLI only; they do not read the
+  config file.
+- `--no-preemptible` still works. Beaker treats it as an 8h min runtime with auto-resume
+  turned off.
+
 ### Per-Task Overrides
 
 Use the `-o/--override` flag to apply configuration overrides to the preceding `-t`:
@@ -1242,7 +1459,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t gsm8k -o limit=50 \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 The `-o` flag uses OmegaConf dotlist syntax, supporting:
@@ -1272,7 +1489,7 @@ uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t mmlu \
     --secret-env team-openai-key:OPENAI_API_KEY \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Multiple secret overrides
 uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa:judge \
@@ -1282,7 +1499,7 @@ uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa:judge \
     --secret-env shared-s2-key:S2_API_KEY \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 Format: `BEAKER_SECRET_NAME:ENV_VAR_NAME`
@@ -1311,7 +1528,7 @@ tasks:
 
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 1
 priority: normal
 timeout: 24h
@@ -1344,7 +1561,7 @@ tasks:
   - hellaswag
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 1
 ```
 
@@ -1370,7 +1587,7 @@ tasks:
   - arc_easy@low
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 1
 timeout: 24h
 ```
@@ -1395,7 +1612,7 @@ tasks:
   - hellaswag
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 4
 priority: high
 preemptible: false
@@ -1416,6 +1633,7 @@ description: "Full evaluation suite for Llama 70B"
 | `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
 | `preemptible` | bool | no | Allow preemption (default: `true`) |
+| `min_runtime` | string | no | Minimum runtime before preemption (e.g., `2h`); replaces `preemptible` |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
 | `workspace` | string | yes | Beaker workspace |
@@ -1527,7 +1745,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]
@@ -1546,7 +1764,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Override ai2-olmo-core from a GitHub branch
 uv run olmo-eval beaker launch -n "eval" \
@@ -1557,7 +1775,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 The OLMo-core source URL is normalized to install the
@@ -1577,7 +1795,7 @@ uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
     -t humaneval:3shot:bpb -o 'dependencies=["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"]' \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Dependencies from multiple tasks are merged
 uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
@@ -1585,7 +1803,7 @@ uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
     -t mbpp:3shot:bpb -o 'dependencies=["pkg2"]' \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 ## Development
