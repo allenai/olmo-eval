@@ -101,19 +101,37 @@ async def judge(
     prompt: str,
     *,
     model: str,
-    max_tokens: int,
+    max_tokens: int | None,
     temperature: float = 0.0,
     image_path: str | None = None,
     image_first: bool = False,
+    system: str | None = None,
+    response_format: dict[str, Any] | None = None,
+    top_p: float | None = None,
+    seed: int | None = None,
     cache_dir: str | None = None,
     max_attempts: int = 5,
 ) -> str | None:
     """One judge call; the reply text, or ``None`` when every attempt failed.
 
     ``image_path`` attaches that file to the user turn, after the prompt text
-    unless ``image_first`` is set.
+    unless ``image_first`` is set. ``system`` adds a system turn, and
+    ``response_format`` is passed through (a JSON schema for structured output,
+    whose reply text is then the JSON). ``max_tokens=None`` leaves the cap to the API.
     """
-    params = {"max_tokens": max_tokens, "temperature": temperature, "image_first": image_first}
+    params: dict[str, Any] = {
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "image_first": image_first,
+    }
+    for name, value in (
+        ("system", system),
+        ("response_format", response_format),
+        ("top_p", top_p),
+        ("seed", seed),
+    ):
+        if value is not None:
+            params[name] = value
     cache_dir = cache_dir or default_cache_dir()
     key = _cache_key(model, prompt, image_path, params)
     cache_file = Path(cache_dir) / f"{key}-v1.json"
@@ -130,15 +148,23 @@ async def judge(
     else:
         content = prompt
 
+    messages: list[dict[str, Any]] = []
+    if system is not None:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": content})
+    kwargs: dict[str, Any] = {"temperature": temperature}
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    for name in ("response_format", "top_p", "seed"):
+        if name in params:
+            kwargs[name] = params[name]
+
     client = _get_client()
     last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
             completion = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": content}],
-                max_tokens=max_tokens,
-                temperature=temperature,
+                model=model, messages=messages, **kwargs
             )
             text = completion.choices[0].message.content
             if text and text.strip():

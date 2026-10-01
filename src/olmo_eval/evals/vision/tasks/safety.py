@@ -102,21 +102,63 @@ class SafetyRateMetric(Metric):
 
 
 @dataclass(frozen=True)
+class MacroRateMetric(Metric):
+    """Unweighted mean, over the values of metadata field ``group``, of each group's rate.
+
+    ``where`` restricts the examples first, as in :class:`SafetyRateMetric`.
+    """
+
+    name: str  # type: ignore[misc]
+    scorer: Scorer  # type: ignore[misc]
+    key: str = "unsafe"
+    group: str = "category"
+    where: tuple[tuple[str, Any], ...] = field(default=())
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        by_group: dict[Any, list[float]] = {}
+        for response, result in _results(responses):
+            meta = response.instance.metadata
+            if result.get(self.key) is None:
+                continue
+            if not all(meta.get(name) == value for name, value in self.where):
+                continue
+            by_group.setdefault(meta.get(self.group), []).append(float(result[self.key]))
+        if not by_group:
+            return 0.0
+        rates = [sum(values) / len(values) for values in by_group.values()]
+        return sum(rates) / len(rates)
+
+    def compute_instance(self, response: Response) -> float | None:
+        # A mean of group rates has no exact per-instance decomposition.
+        return None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True)
 class JudgeErrorCountMetric(Metric):
-    """Number of examples left ungraded for one verdict (judge error or unparsable reply)."""
+    """Number of examples that take a verdict but were left ungraded (judge error or
+    unparsable reply)."""
 
     name: str  # type: ignore[misc]
     scorer: Scorer  # type: ignore[misc]
     key: str = "unsafe"
 
     def compute(self, responses: Sequence[Response]) -> float:
-        return float(sum(1 for _, result in _results(responses) if result.get(self.key) is None))
+        return float(
+            sum(
+                1
+                for _, result in _results(responses)
+                if self.key in result and result[self.key] is None
+            )
+        )
 
     def compute_instance(self, response: Response) -> float | None:
         result = _result_for(response)
-        if result is None:
+        if result is None or self.key not in result:
             return None
-        return 1.0 if result.get(self.key) is None else 0.0
+        return 1.0 if result[self.key] is None else 0.0
 
     def supports_pairwise_scorer_fallback(self) -> bool:
         return False
