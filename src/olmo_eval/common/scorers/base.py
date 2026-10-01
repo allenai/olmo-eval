@@ -391,8 +391,9 @@ class MathVerifyScorer(Scorer):
     is mathematically equivalent to the gold answer, handling various
     representations of mathematical expressions.
 
-    Falls back to ``is_equiv`` when math_verify is not installed or fails on an
-    instance; the missing-package case is logged once per process.
+    Falls back to ``is_equiv`` when math_verify is not installed, cannot parse an
+    answer, or raises on an instance; the missing-package case is logged once per
+    process.
     """
 
     name: str = "math_verify"
@@ -413,8 +414,13 @@ class MathVerifyScorer(Scorer):
             _warn_math_verify_unavailable()
         else:
             try:
-                result = verify(parse(_as_latex_math(gold)), parse(_as_latex_math(pred)))
-                return 1.0 if result else 0.0
+                gold_parsed = parse(_as_latex_math(gold))
+                pred_parsed = parse(_as_latex_math(pred))
+                if gold_parsed and pred_parsed:
+                    return 1.0 if verify(gold_parsed, pred_parsed) else 0.0
+                logger.debug(
+                    "math_verify could not parse gold=%r pred=%r; using is_equiv", gold, pred
+                )
             except Exception as e:
                 logger.debug(
                     "math_verify failed on gold=%r pred=%r (%s); using is_equiv",

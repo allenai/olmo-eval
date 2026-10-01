@@ -113,6 +113,23 @@ class TestMathVerifyScorer:
         monkeypatch.setitem(sys.modules, "math_verify", fake)
         assert MathVerifyScorer().score(_instance("2(x+1)"), _output("2x+2")) == 1.0
 
+    def test_falls_back_to_is_equiv_when_parse_returns_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        fake = types.ModuleType("math_verify")
+
+        def _parse(text: str) -> list[str]:
+            return []
+
+        def _verify(gold: list[str], pred: list[str]) -> bool:
+            return False
+
+        fake.parse = _parse  # type: ignore[attr-defined]
+        fake.verify = _verify  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "math_verify", fake)
+        assert MathVerifyScorer().score(_instance("2(x+1)"), _output("2x+2")) == 1.0
+        assert MathVerifyScorer().score(_instance("3"), _output("4")) == 0.0
+
     def test_parses_answers_as_latex_before_verifying(self, monkeypatch: pytest.MonkeyPatch):
         fake = types.ModuleType("math_verify")
         seen: list[str] = []
