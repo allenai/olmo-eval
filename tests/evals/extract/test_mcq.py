@@ -32,6 +32,13 @@ class TestExtractMcqAnswer:
     def test_answer_bold_wraps_label_and_letter(self):
         assert extract_mcq_answer("**ANSWER: D**") == "D"
 
+    def test_answer_underscore_emphasis(self):
+        assert extract_mcq_answer("Answer: _B_") == "B"
+        assert extract_mcq_answer("Answer: __C__") == "C"
+
+    def test_answer_bold_label_closed_before_colon(self):
+        assert extract_mcq_answer("**Answer**: B") == "B"
+
     def test_answer_colon_followed_by_word_does_not_capture_first_letter(self):
         """'ANSWER: the ...' must not capture T from 'the'."""
         assert extract_mcq_answer("ANSWER: the correct choice is C") is None

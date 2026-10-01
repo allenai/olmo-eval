@@ -16,11 +16,12 @@ import re
 
 # "ANSWER: X" — the explicit instruction-following format. Tolerates markdown
 # emphasis and parentheses around the label and letter ("**Answer:** B",
-# "Answer: **(C)**"). The letter must stand alone, so "ANSWER: the ..." does
-# not capture the "t" of "the". Same-line only ([^\S\n] = whitespace excluding
-# newline) to avoid "Answer:\n\nThe ..." matching the next line.
+# "Answer: **(C)**", "Answer: _B_"). The letter must not be followed by another
+# letter or digit, so "ANSWER: the ..." does not capture the "t" of "the".
+# Same-line only ([^\S\n] = whitespace excluding newline) to avoid
+# "Answer:\n\nThe ..." matching the next line.
 ANSWER_LINE_PATTERN: re.Pattern[str] = re.compile(
-    r"ANSWER[*_]*[^\S\n]*:[*_]*[^\S\n]*[*_(]*([A-Z])(?!\w)", re.IGNORECASE
+    r"ANSWER[*_]*[^\S\n]*:[*_]*[^\S\n]*[*_(]*([A-Z])(?![A-Z0-9])", re.IGNORECASE
 )
 
 # Ordered from most specific → least specific.  Each regex must have
