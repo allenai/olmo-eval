@@ -724,8 +724,9 @@ scores the first point (every point, plus the expected count, for `counting`) ag
 mask and reports the mean of its five category success rates. OSWorld-G reads the official
 annotations and screenshots from xlang-ai/OSWorld-G at a pinned commit (downloaded once to
 `$OLMO_EVAL_DOWNLOAD_CACHE`, default `$HF_HOME/olmo-eval-downloads`); its `accuracy_no_refusal`
-is the number closest to mm_olmo's 510-instance cut. Under the stage-1 prompt family the
-GUI instruction is sent as `gui_point: <instruction>`.
+is the number closest to mm_olmo's 510-instance cut. GUI instructions are sent as
+`Click <instruction>`, the prompt of the MolmoPoint paper's runs, and as
+`gui_point: <instruction>` under the stage-1 prompt family.
 
 ### Setup
 

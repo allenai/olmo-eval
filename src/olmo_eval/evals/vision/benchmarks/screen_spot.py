@@ -10,8 +10,9 @@ The data is read from ``$MOLMO_DATA_DIR/torch_datasets`` (the copies mm_olmo's
 ``ScreenSpotV2Config`` / ``ScreenSpotProConfig`` use): ``ScreenSpot-v2`` (OS-Copilot/ScreenSpot-v2,
 1,272 instructions) and ``ScreenSpotPro`` (likaixin/ScreenSpot-Pro, 1,581).
 
-The question is the instruction alone (mm_olmo's default ``prompt="none"``). Under
-``-o system_prompt_style=style_and_length_v2`` it becomes ``gui_point: <instruction>``, the tag
+For instruction-tuned checkpoints the question is ``Click <instruction>``: mm_olmo's ``click``
+prompt, which the MolmoPoint paper's runs used (``screen_spot_v2_click`` and friends). Under
+``-o system_prompt_style=style_and_length_v2`` it is ``gui_point: <instruction>`` instead, the tag
 OLMo-core's stage 1 trains GUI instructions under.
 """
 
@@ -32,7 +33,7 @@ from olmo_eval.evals.vision.scoring.gui_grounding import (
     PointCountRateMetric,
     rect_from_xywh,
 )
-from olmo_eval.evals.vision.scoring.prompts import GUI_POINT_STYLE
+from olmo_eval.evals.vision.scoring.prompts import GUI_POINT_STYLE, STYLE_PREFIX_STYLES
 from olmo_eval.evals.vision.tasks.base import VisionTask
 from olmo_eval.evals.vision.tasks.pointing import StylePrefixMixin
 
@@ -60,6 +61,15 @@ class GuiGroundingTask(StylePrefixMixin, VisionTask):
     style = GUI_POINT_STYLE
     sampling_params = SamplingParams(temperature=0.0, max_tokens=128)
     split = Split.TEST
+    #: mm_olmo's ``click`` prompt (``_get_prompt``), prepended to the instruction verbatim.
+    click_prefix = "Click "
+
+    def gui_question(self, instruction: str) -> str:
+        """``gui_point: <instruction>`` for the stage-1 family, else ``Click <instruction>``."""
+        family = self.config.system_prompt_style or self.default_system_prompt_style
+        if family in STYLE_PREFIX_STYLES:
+            return self.apply_family_prefix(instruction)
+        return self.click_prefix + instruction
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +109,7 @@ class ScreenSpotV2Task(GuiGroundingTask):
             for idx, ex in enumerate(rows):
                 image_path = str(root / "screenspotv2_image" / ex["img_filename"])
                 yield Instance(
-                    question=self.apply_family_prefix(ex["instruction"]),
+                    question=self.gui_question(ex["instruction"]),
                     gold_answer=None,
                     metadata={
                         "image_path": image_path,
@@ -152,7 +162,7 @@ class ScreenSpotProTask(GuiGroundingTask):
             for ex in rows:
                 width, height = ex["img_size"]
                 yield Instance(
-                    question=self.apply_family_prefix(ex["instruction"]),
+                    question=self.gui_question(ex["instruction"]),
                     gold_answer=None,
                     metadata={
                         "image_path": str(root / "images" / ex["img_filename"]),

@@ -213,11 +213,8 @@ class TestPromptsAndRegistration:
         "name", ["screen_spot_v2", "screen_spot_pro", "os_world_g", "os_world_g_refined"]
     )
     def test_gui_tasks_follow_the_prompt_family(self, name):
-        assert get_task(name).apply_family_prefix("open the menu") == "open the menu"
-        assert (
-            get_task(name, STAGE1).apply_family_prefix("open the menu")
-            == "gui_point: open the menu"
-        )
+        assert get_task(name).gui_question("open the menu") == "Click open the menu"
+        assert get_task(name, STAGE1).gui_question("open the menu") == "gui_point: open the menu"
 
     def test_point_bench_uses_the_pointing_style(self):
         assert (
@@ -280,7 +277,7 @@ class TestInstances:
         (root / "annotations" / "vscode.json").write_text(json.dumps([row]))
         monkeypatch.setattr(screen_spot, "torch_datasets_dir", lambda: tmp_path)
         (inst,) = list(get_task("screen_spot_pro").instances)
-        assert inst.question == "do" and inst.metadata["image_size"] == (3840, 2160)
+        assert inst.question == "Click do" and inst.metadata["image_size"] == (3840, 2160)
         assert inst.metadata["target"]["xyxy"] == [1.0, 2.0, 3.0, 4.0]
         assert inst.metadata["group_type"] == "Dev_text"
 

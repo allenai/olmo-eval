@@ -16,8 +16,9 @@ cut: it drops the 54 refusals and replaces each polygon with its bounding box, a
 evaluator then reads those boxes as ``[x, y, w, h]``. ``accuracy_no_refusal`` (the 510 non-refusal
 instances, polygons intact) is the closest number to results produced that way.
 
-The question is the instruction alone; under ``-o system_prompt_style=style_and_length_v2`` it is
-``gui_point: <instruction>``, as for ScreenSpot.
+The question is ``Click <instruction>`` (``gui_point: <instruction>`` under the stage-1 family), as
+for ScreenSpot. The instructions are sent verbatim, so one already starting with "Click" reads
+``Click Click ...``, as in mm_olmo.
 """
 
 from __future__ import annotations
@@ -96,7 +97,7 @@ class _OSWorldGTask(GuiGroundingTask):
             image_paths = dict(zip(names, pool.map(_download, names), strict=True))
         for item in items:
             yield Instance(
-                question=self.apply_family_prefix(item["instruction"]),
+                question=self.gui_question(item["instruction"]),
                 gold_answer=None,
                 metadata={
                     "image_path": image_paths[f"images/{item['image_path']}"],
