@@ -106,9 +106,10 @@ cap is documented on its RosterRow.
 - **Reasoning models.** A generation whose `<think>` block is never closed is scored as a parse
   failure, not handed to the parser: the ids in an unfinished trace are the ones the model was
   still weighing, and crediting them rewards thinking out loud. Give such a model room to finish
-  instead — `config.sampling_params` overrides the suite's budget field by field, so
-  `-o sampling_params.max_tokens=4096` genuinely raises it (it used to change the task hash and
-  nothing else).
+  instead: the suite's budget is the config's `sampling_params`, the runner lays `-o` overrides
+  over it field by field, and the result is both what is sent and what is hashed — so
+  `-t ctc_nq:r2k -o max_tokens=4096` genuinely raises it and genuinely changes the task hash. (An
+  earlier version of this suite stored one budget and sent another.)
 - **A rung label is a build target, not a per-task guarantee.** Labels were set from the reference
   prompt path, and the xlong rungs were confirmed against it (real 1M rows measure p50 1.03–1.07M
   tokens). But on the 2k–32k ladder, measurement through the Qwen3.5 tokenizer found two rows
@@ -130,6 +131,13 @@ cap is documented on its RosterRow.
   truncation-gated.
 - Contexts ≥256k exceed most models' native windows; the serving side (YaRN etc.) is the caller's
   responsibility and belongs next to any reported number.
+- **`--save-requests` (on by default) writes each corpus twice.** The raw example travels whole in
+  `Instance.metadata` -- the prompt builder, parser and scorer all read different parts of it, and
+  slicing it is how field conventions historically drifted -- and `requests.jsonl` serializes that
+  metadata next to the rendered prompt that already contains the same documents. Measured at r2k
+  the two are ~1:1 (7.3 KB each per row); at 1M tokens that is ~8 MB per row and roughly 1 GB per
+  task×rung, half of it duplication. Pass `--no-save-requests` on xlong runs unless you need the
+  prompts on disk; predictions are unaffected.
 
 ### Grading changed after the published grid — for four rows
 
@@ -141,19 +149,25 @@ exists it came from the old grader:
 | Row(s) | What changed | Effect |
 |---|---|---|
 | `ctc_outlier`, `ctc_outlier_amzn`, `ctc_outlier_fixedm` | stop preset `newline` → `outliers`: the instruction mandates a sentence before the `Outliers:` line, so the newline stop fired there and the ids never reached the parser | a gold-derived perfect answer went from a parse failure to 1.0 |
-| `ctc_oolong` | the parser and the stop rule both read the **last** of three templated markers (`Answer:`/`Label:`/`User:`); previously the parser matched only `answer:` and the stop rule anchored on the earliest marker | correct answers that were scored 0 now score correctly |
+| `ctc_oolong` | the parser and the stop rule both read the **last** of three templated markers (`Answer:`/`Label:`/`User:`) seen *so far*; previously the parser matched only `answer:` and the stop rule anchored on the earliest marker. The whole-string stop rule now replays the decode loop prefix by prefix, so a corpus line echoed after the answer (every oolong line carries `User:`) can no longer become the graded span | correct answers that were scored 0 now score correctly |
 | `ctc_grouping` | `pairwise_metrics` scored an all-singleton gold partition 0 even for an exact match | 48/500 r2k rows; the perfect-answer ceiling moves 0.904 → 1.0 |
 | `ctc_obliq` | decode budget 64 → 512 tokens | 27/126 r32k rows were truncated; the ceiling moves 0.953 → 1.0 |
 
-Everything else is unchanged. A parity table of one model's per-row score against the reference
-grid has not been produced for this PR — it needs a GPU run, not a code change.
+Everything else is unchanged in code — but **parity with the reference grid has not been measured
+for any row.** No per-row comparison of one model's scores through this harness against the
+reference grid's numbers exists yet, for the 18 rows whose graders did not change any more than
+for the four that did. Until that run happens (tracked in the follow-up issue linked from the PR),
+treat numbers from this harness as internally consistent and comparable to each other, not as
+reproductions of the published grid.
 
 ## Design and provenance
 
 - Prompt templates, parsers, metrics, gold-index conventions and stop rules are **vendored
   byte-faithful** under `_vendor/` from the `ctc` package (AI2 OLMo-core branch `prasann/ctc`, at
-  commit **`a5f6a2729`**, which is also `ctc_suite.UPSTREAM_COMMIT`), where they are
-  golden-fixture-tested against the implementation that produced the suite's published numbers.
+  commit **`40a5c60d143b427b8c2cd276fa5009b809be6be3`**), where they are golden-fixture-tested
+  against the implementation that produced the suite's published numbers. That commit is also
+  `ctc_suite.UPSTREAM_COMMIT` and a field on every CTC scorer, so a re-vendor changes the task hash;
+  a test checks the three places that name it agree.
   Only the subtrees this harness reads are vendored; `_vendor/MANIFEST.md` lists exactly what was
   taken, the one deliberate omission, and the re-vendoring steps. **Fix upstream and re-vendor; do
   not edit `_vendor/`** (it is ruff-excluded to stay diffable, but `ty check src/` does cover it).
@@ -172,9 +186,10 @@ grid has not been produced for this PR — it needs a GPU run, not a code change
   what an already-stored number meant. Gold answers included: exclude from pretraining corpora.
   `CTC_SUITE_DATA_ROOT=/path` substitutes a local `<subset>/rung_<tokens>.jsonl` tree; the local
   path *replaces* the config's data source, so an unvalidated local ladder also gets its own task
-  hash rather than being filed under the published data's. Hub copies strip builder-metadata keys
-  and serialize the free-form `meta` dict to a JSON string (schema stability across splits);
-  grading reads neither.
+  hash rather than being filed under the published data's. Two metadata fields differ in kind:
+  `absence_gutenberg` carries a builder-side `meta` serialized to a JSON string (schema stability
+  across splits), which grading never reads; `oolong` carries a structured `_meta` whose
+  `gold_list` and `answer_type` *are* the gold, and the scorer reads them.
 - The namespace is personal for now. If the dataset moves under `allenai/`, that is a new
   `HF_DATASET` and a new `HF_REVISION`, and therefore new task hashes — better done before a large
   grid is persisted against it.
