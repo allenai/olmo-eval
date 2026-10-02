@@ -258,7 +258,7 @@ export function HomePage() {
             {me.data ? `, ${me.data.username}` : ""}
           </h1>
           <p className="muted" style={{ marginTop: 2 }}>
-            Evaluation results from olmo-eval runs on Beaker and laptops.
+            Evaluation results from olmo-eval runs.
           </p>
         </div>
         <Kpis />
