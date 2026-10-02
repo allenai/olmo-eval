@@ -401,6 +401,10 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
 
         if not result.patch.strip():
             result.grade = GradeResult(empty_patch=True)
+            logger.info(
+                f"[{instance.instance_id}] empty patch reason={result.completion_reason} "
+                f"error={result.error}"
+            )
             return result
 
         eval_start = time.time()
