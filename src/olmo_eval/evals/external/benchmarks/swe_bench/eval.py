@@ -30,7 +30,7 @@ from .grader import (
     snapshot_worktree,
 )
 from .loader import DATASET_PATH, DATASET_REVISION, load_instances, select_instances
-from .task import SWEBenchInstance
+from .task import IMAGE_SOURCES, SWEBenchInstance
 
 if TYPE_CHECKING:
     from olmo_eval.harness.sandbox import SandboxManager
@@ -129,6 +129,8 @@ class SWEBenchArgs:
     agent_timeout: float = 3600.0
     max_tool_output_chars: int | None = 10000
     eval_timeout: float = 1800.0
+    image_source: str = "ghcr"
+    cleanup_images: bool = True
     include_hints: bool = False
     oracle: bool = False
     sandbox_mode: str = "docker"
@@ -154,6 +156,8 @@ class SWEBenchArgs:
             agent_timeout=float(data.get("agent_timeout", 3600.0)),
             max_tool_output_chars=_as_optional_int(data.get("max_tool_output_chars", 10000)),
             eval_timeout=float(data.get("eval_timeout", 1800.0)),
+            image_source=str(data.get("image_source", "ghcr")),
+            cleanup_images=_as_bool(data.get("cleanup_images", True)),
             include_hints=_as_bool(data.get("include_hints", False)),
             oracle=_as_bool(data.get("oracle", False)),
             sandbox_mode=data.get("sandbox_mode", "docker"),
@@ -260,6 +264,11 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             "agent_timeout": ("Wall-clock budget in seconds for the agent on one instance", 3600.0),
             "max_tool_output_chars": ("Truncate each tool output to this many characters", 10000),
             "eval_timeout": ("Timeout in seconds for running the tests", 1800.0),
+            "image_source": (
+                "Where to pull instance images: ghcr (no login needed) or dataset (Docker Hub)",
+                "ghcr",
+            ),
+            "cleanup_images": ("Delete each instance's images after grading it", True),
             "include_hints": ("Show the issue's hints to the agent", False),
             "oracle": ("Grade the reference patch instead of running an agent", False),
             "sandbox_mode": ("Sandbox mode: docker, modal", "docker"),
@@ -295,6 +304,11 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         )
         if not instances:
             return self._error_result("No instances selected", start_time)
+        if swe_args.image_source not in IMAGE_SOURCES:
+            return self._error_result(
+                f"Unknown image_source {swe_args.image_source!r}; expected one of {IMAGE_SOURCES}",
+                start_time,
+            )
 
         semaphore = asyncio.Semaphore(swe_args.max_concurrency)
 
@@ -350,8 +364,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         container_runtime: str,
     ) -> InstanceResult:
         """Produce a patch for one instance, then grade it in a fresh container."""
-        from olmo_eval.harness.sandbox import SandboxManager
-        from olmo_eval.harness.sandbox.image import get_swerex_image
+        from olmo_eval.harness.sandbox.image import remove_swerex_image
 
         result = InstanceResult(
             instance_id=instance.instance_id,
@@ -365,18 +378,42 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             return result
         runtime = cast(ContainerRuntime, container_runtime)
 
+        base_image = instance.image_for(swe_args.image_source)
+        try:
+            await self._solve_and_grade(
+                instance, base_image, provider, swe_args, mode, runtime, result
+            )
+        finally:
+            if swe_args.cleanup_images and mode == SandboxMode.DOCKER:
+                await asyncio.to_thread(remove_swerex_image, base_image, runtime)
+        return result
+
+    async def _solve_and_grade(
+        self,
+        instance: SWEBenchInstance,
+        base_image: str,
+        provider: InferenceProvider,
+        swe_args: SWEBenchArgs,
+        mode: SandboxMode,
+        runtime: ContainerRuntime,
+        result: InstanceResult,
+    ) -> None:
+        """Run the agent (or take the gold patch) and grade the patch, filling in ``result``."""
+        from olmo_eval.harness.sandbox import SandboxManager
+        from olmo_eval.harness.sandbox.image import get_swerex_image
+
         try:
             # Image builds and pulls block, so keep them off the event loop.
             image = await asyncio.to_thread(
                 get_swerex_image,
-                instance.image,
+                base_image,
                 runtime,
                 require_registry=mode == SandboxMode.MODAL,
             )
         except Exception as e:
             logger.exception(f"[{instance.instance_id}] Failed to prepare image")
             result.error = f"image_error: {e}"
-            return result
+            return
 
         agent_start = time.time()
         if swe_args.oracle:
@@ -420,7 +457,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 f"[{instance.instance_id}] empty patch reason={result.completion_reason} "
                 f"error={result.error}"
             )
-            return result
+            return
 
         eval_start = time.time()
         grader = SandboxManager(
@@ -447,7 +484,6 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             f"applied={result.grade.patch_applied} tests_ran={result.grade.tests_ran} "
             f"reason={result.completion_reason} error={result.error or result.grade.error}"
         )
-        return result
 
     async def _run_agent(
         self,

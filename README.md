@@ -1107,6 +1107,14 @@ container with the upstream `swebench` log parsers. The primary metric is
 `resolve_rate`. Set `oracle=true` to grade the reference patches instead, which
 checks the grading setup without a model.
 
+Instance images come from Epoch AI's mirror on the GitHub Container Registry
+(`ghcr.io/epoch-research/swe-bench.eval.x86_64.<instance_id>`), which needs no
+login. Docker Hub, where the dataset's own image names point, rate-limits
+anonymous pulls, so a full run from there stalls after about 100 images; set
+`image_source=dataset` to use it anyway. Each instance's images are deleted
+after it is graded, which keeps disk use flat over a full run; set
+`cleanup_images=false` to keep them.
+
 ```bash
 # A few instances on Beaker
 uv run olmo-eval beaker launch -E swe_bench_verified -m qwen3-coder-30b -c ai2/jupiter \

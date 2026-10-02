@@ -6,6 +6,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+# Mirror of the SWE-bench evaluation images that can be pulled without logging in,
+# unlike Docker Hub, whose anonymous pull limit is shared across a cluster.
+GHCR_IMAGE_TEMPLATE = "ghcr.io/epoch-research/swe-bench.eval.x86_64.{instance_id}:latest"
+IMAGE_SOURCES = ("ghcr", "dataset")
+
 
 def _as_test_list(value: Any) -> tuple[str, ...]:
     """Normalize a test list that the dataset may store as a JSON string."""
@@ -69,6 +74,22 @@ class SWEBenchInstance:
             gold_patch=str(row.get("patch") or ""),
             difficulty=str(row.get("difficulty") or "unknown"),
         )
+
+    def image_for(self, source: str) -> str:
+        """Return the instance's evaluation image from the given source.
+
+        Args:
+            source: ``"ghcr"`` for the GitHub Container Registry mirror, or
+                ``"dataset"`` for the image named in the dataset (Docker Hub).
+
+        Raises:
+            ValueError: If the source is unknown.
+        """
+        if source == "ghcr":
+            return GHCR_IMAGE_TEMPLATE.format(instance_id=self.instance_id)
+        if source == "dataset":
+            return self.image
+        raise ValueError(f"Unknown image source {source!r}; expected one of {IMAGE_SOURCES}")
 
     def to_swebench_dict(self) -> dict[str, Any]:
         """Return the fields the upstream ``swebench`` grader expects."""

@@ -120,6 +120,26 @@ class TestInstance(unittest.TestCase):
         self.assertIn("pytest -rA", spec.eval_script)
 
 
+class TestImageSource(unittest.TestCase):
+    def test_ghcr_and_dataset_sources(self) -> None:
+        inst = _instance()
+        self.assertEqual(
+            inst.image_for("ghcr"),
+            "ghcr.io/epoch-research/swe-bench.eval.x86_64.owner__repo-1:latest",
+        )
+        self.assertEqual(inst.image_for("dataset"), inst.image)
+        with self.assertRaisesRegex(ValueError, "Unknown image source"):
+            inst.image_for("quay")
+
+    def test_args_default_to_ghcr_with_cleanup(self) -> None:
+        args = swe_eval.SWEBenchArgs.from_dict({})
+        self.assertEqual(args.image_source, "ghcr")
+        self.assertTrue(args.cleanup_images)
+        self.assertFalse(
+            swe_eval.SWEBenchArgs.from_dict({"cleanup_images": "false"}).cleanup_images
+        )
+
+
 class TestSelectInstances(unittest.TestCase):
     def setUp(self) -> None:
         self.instances = [
@@ -409,6 +429,7 @@ class TestExecuteOracle(unittest.TestCase):
         with (
             mock.patch.object(swe_eval, "load_instances", return_value=instances),
             mock.patch.object(swe_eval, "grade_in_sandbox", side_effect=fake_grade),
+            mock.patch("olmo_eval.harness.sandbox.image.remove_swerex_image") as remove,
             mock.patch(
                 "olmo_eval.harness.sandbox.image.get_swerex_image", return_value="derived:latest"
             ),
@@ -425,6 +446,13 @@ class TestExecuteOracle(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(graded, ["owner__repo-1"])
+        self.assertEqual(
+            sorted(c.args[0] for c in remove.call_args_list),
+            [
+                "ghcr.io/epoch-research/swe-bench.eval.x86_64.owner__repo-1:latest",
+                "ghcr.io/epoch-research/swe-bench.eval.x86_64.owner__repo-2:latest",
+            ],
+        )
         self.assertEqual(result.metrics["resolve_rate"], 0.5)
         self.assertEqual(result.metrics["empty_patch_rate"], 0.5)
         self.assertEqual(len(details), 2)
@@ -438,6 +466,7 @@ class TestExecuteOracle(unittest.TestCase):
         provider = mock.MagicMock(model_name="test-model")
         with (
             mock.patch.object(swe_eval, "load_instances", return_value=[_instance()]),
+            mock.patch("olmo_eval.harness.sandbox.image.remove_swerex_image"),
             mock.patch(
                 "olmo_eval.harness.sandbox.image.get_swerex_image",
                 side_effect=RuntimeError("toomanyrequests"),
@@ -449,6 +478,17 @@ class TestExecuteOracle(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error, "All 1 instances failed")
         self.assertEqual(result.metrics["error_rate"], 1.0)
+
+    def test_unknown_image_source_is_error(self) -> None:
+        provider = mock.MagicMock(model_name="test-model")
+        with mock.patch.object(swe_eval, "load_instances", return_value=[_instance()]):
+            result = asyncio.run(
+                swe_eval.SWEBenchVerifiedExternalEval().execute(
+                    provider, {"oracle": True, "image_source": "quay"}
+                )
+            )
+        self.assertFalse(result.success)
+        self.assertIn("quay", result.error or "")
 
     def test_no_instances_is_error(self) -> None:
         provider = mock.MagicMock(model_name="test-model")
@@ -466,6 +506,7 @@ class TestRunInstanceAgent(unittest.TestCase):
         manager.stop = mock.AsyncMock()
         grade = swe_grader.GradeResult(resolved=False, patch_applied=True)
         with (
+            mock.patch("olmo_eval.harness.sandbox.image.remove_swerex_image"),
             mock.patch(
                 "olmo_eval.harness.sandbox.image.get_swerex_image", return_value="derived:latest"
             ),

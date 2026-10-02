@@ -58,6 +58,42 @@ def _remote_image_exists(container_runtime: str, image: str) -> bool:
     return result.returncode == 0
 
 
+def _swerex_tag_hash(base_image: str, dockerfile_extra: tuple[str, ...] = ()) -> str:
+    """Deterministic tag for the derived image, from its content inputs."""
+    extra_hash = ":".join(dockerfile_extra) if dockerfile_extra else ""
+    hash_input = f"{base_image}:{UV_IMAGE}:{SWEREX_IMAGE_VERSION}:{extra_hash}"
+    return hashlib.sha256(hash_input.encode()).hexdigest()[:12]
+
+
+def remove_swerex_image(
+    base_image: str,
+    container_runtime: str = "docker",
+    dockerfile_extra: tuple[str, ...] = (),
+) -> None:
+    """Remove a derived swe-rex image and its base image from local storage.
+
+    Use this to free disk when many single-use images pass through one host.
+    Registry copies are left alone, and failures are logged rather than raised.
+    """
+    tag_hash = _swerex_tag_hash(base_image, dockerfile_extra)
+    resolved = _resolved_images.pop(tag_hash, None)
+    names = {f"swerex-{tag_hash}:latest", base_image}
+    if resolved:
+        names.add(resolved)
+    # One name per call, so a name that is already gone does not block the others.
+    for name in sorted(names):
+        try:
+            result = subprocess.run(
+                [container_runtime, "rmi", "--force", name], capture_output=True
+            )
+        except OSError as e:
+            logger.debug(f"Could not remove image {name}: {e}")
+            continue
+        if result.returncode != 0:
+            stderr = result.stderr.decode() if result.stderr else ""
+            logger.debug(f"Could not remove image {name}: {stderr.strip()}")
+
+
 def get_swerex_image(
     base_image: str,
     container_runtime: str = "docker",
@@ -84,10 +120,7 @@ def get_swerex_image(
         ValueError: If require_registry=True but SWEREX_REGISTRY is not set.
         RuntimeError: If image build or push fails.
     """
-    # Deterministic tag from content inputs
-    extra_hash = ":".join(dockerfile_extra) if dockerfile_extra else ""
-    hash_input = f"{base_image}:{UV_IMAGE}:{SWEREX_IMAGE_VERSION}:{extra_hash}"
-    tag_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
+    tag_hash = _swerex_tag_hash(base_image, dockerfile_extra)
 
     if tag_hash in _resolved_images:
         logger.debug(f"Using cached resolution for swerex-{tag_hash}")
