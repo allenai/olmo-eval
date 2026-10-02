@@ -132,7 +132,8 @@ Suites support different strategies for combining task results:
 | `WEIGHTED_AVERAGE` | Average of all task scores, each weighted by the task's instance count |
 | `AVERAGE_OF_AVERAGES` | Average over child suite averages (equal weight per child) |
 | `DISPLAY_ONLY` | Display child results without computing suite average |
-| `NONE` | No aggregation - just collect individual task results |
+| `GAP` | Two tasks, reference then companion: both primary scores and the companion minus the reference |
+| `NONE` | No suite score: tasks report individually, and each nested suite reports its own aggregate |
 
 **Average of Averages Example:**
 
@@ -183,6 +184,21 @@ register(Suite(
 `WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored.
 
 A weighted suite reports its weighted mean or no score at all. If a contributing task has no instance count, the suite aggregate is omitted and the runner logs which tasks were missing, rather than publishing an unweighted mean under the same suite name. Instance counts are required when a result is stored, so this only affects results written before that check existed.
+
+**Gap Example:**
+
+```python
+register(Suite(
+    name="omega:dev",
+    tasks=("omega_500:hillclimb", "omega_500_out"),  # in-distribution, then held-out
+    aggregation=AggregationStrategy.GAP,
+))
+
+# With scores of 0.60 (in) and 0.45 (out):
+# primary_score: reference 0.60, companion 0.45, gap -0.15 (the suite's primary)
+```
+
+A gap suite is omitted unless both tasks scored on the same primary metric. It can be nested only in a `NONE` suite, which reports it under its own name: a gap is not a score to average.
 
 ### Formatters
 
@@ -955,6 +971,74 @@ use `load_instance_image` from `evals/vision/data/images.py` for either form) an
 of PIL images / zero-arg callables / file paths — and sends them all on one
 request. Registration and variants work exactly as described in
 [Adding New Tasks](#adding-new-tasks).
+
+## Post-Training Hill-Climb Dev Pass
+
+`hillclimb:dev` runs the post-training hill-climb dev tiers and their guards on
+one checkpoint, as one job:
+
+```bash
+uv run olmo-eval beaker launch -n "hillclimb-dev-<checkpoint>" \
+    -m <checkpoint> \
+    -t hillclimb:dev \
+    --harness codex_python \
+    -o provider.kind=vllm -o provider.num_instances=<gpus> \
+    -o provider.max_model_len=36864 \
+    -o batching.chunk_size=512 \
+    -o sandboxes.0.inject_swerex=true -o sandboxes.0.instances=4 \
+    -o sandboxes.0.startup_timeout=900 -o sandboxes.0.command_timeout=900 \
+    --cluster h100 -G <gpus> --min-runtime 8h \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-other"
+```
+
+- `--harness codex_python` supplies the sandbox that grades LiveCodeBench.
+  Under `--harness default`, every LiveCodeBench item fails grading with
+  `SandboxRequiredError`, yet the task reports 0.0 as a success with no failed
+  instances.
+- `batching.chunk_size=512` is a harness setting, so the suite cannot carry it.
+  Each chunk waits for its slowest generation. At the default of 64, one
+  checkpoint's pass projected to about 32 GPU-hours; at 512 it took 5.5.
+- Keep each job under 8 hours. When the group is over its allocation, Beaker
+  preempts at 8h06m and the retry restarts from zero. `--min-runtime 8h` did
+  not prevent this, because 8 hours is the most it can protect. For a slower
+  model, split the pass into jobs of fewer tasks.
+
+| Role | Task | Items | Generation budget |
+|------|------|-------|-------------------|
+| Dev: code | `livecodebench:lite` (release_v3, one sample) | 612 | model context |
+| Dev: math | `omega:dev` = `omega_500:hillclimb` + `omega_500_out` | 500 + 500 | 32,768 |
+| Guard: instruction following | `ifeval` | 541 | model context |
+| Guard: instruction following | `ifeval_ood` (IFBench) | 300 | model context |
+| Guard: knowledge | `gpqa_main:cot` | 448 | model context |
+
+The suite reports no score of its own, because a mean across code, math,
+instruction following and knowledge would hide which one moved. Each task
+reports its own score, and `omega:dev` reports the in score, the out score and
+their gap. Agents may hill-climb the dev tasks, but not the guards.
+
+For each OMEGA half, report the strict score (`exact_match`, the primary)
+beside flex (`exact_match_flex`), and strict minus flex as a format guard.
+Strict stays the primary. A wide gap means the score is measuring answer
+format: on one validation checkpoint, strict was 4.4 and flex 9.8.
+
+Every task except OMEGA generates until it reaches the model's context limit, so
+set `provider.max_model_len` explicitly and use the same value for every
+checkpoint you compare. 36,864 leaves the OMEGA prompts room beside their
+32,768-token cap.
+
+**Cost (measured):** 5.5 H100-hours on one validation checkpoint (an MoE SFT
+export), run as one job on 2 H100s for 2.73 h at `batching.chunk_size=512`. Tasks
+interleave within the job, so each task's share is split by its share of the
+generated tokens:
+
+| Task | H100-hours | Cap-hit |
+|------|------------|---------|
+| `livecodebench:lite` | 1.3 | 53% |
+| `omega:dev` | 2.1 | 42% in / 43% out |
+| `ifeval` | 0.5 | 25% |
+| `ifeval_ood` | 0.5 | 44% |
+| `gpqa_main:cot` | 1.0 | 60% |
 
 ## Querying Results
 
