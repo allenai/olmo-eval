@@ -32,8 +32,9 @@ class CredentialManager:
     def detect_and_setup(self, launcher: BeakerLauncher) -> tuple[bool, bool]:
         """Decide which credentials to inject into the job.
 
-        Google credentials are always injected when results upload is on, because the
-        job authenticates to the dashboard's ingest service as the launching user.
+        Google credentials are injected when results upload is on, because the job
+        authenticates to the dashboard's ingest service as the launching user. Passing
+        ``--no-gcp-credentials`` with upload on is an error: the job could not upload.
         """
         from olmo_eval.launch.beaker.aws import is_s3_path
         from olmo_eval.launch.beaker.gcs import get_local_gcs_credentials, is_gcs_path
@@ -48,6 +49,12 @@ class CredentialManager:
         if inject_gcs is None:
             inject_gcs = bool(gcs_models)
         if self.upload:
+            if self.gcs_credentials is False:
+                console.print(
+                    "[red]Error:[/red] --no-gcp-credentials leaves the job without credentials "
+                    "to upload results. Add --no-upload as well, or drop --no-gcp-credentials."
+                )
+                raise SystemExit(1)
             inject_gcs = True
 
         if inject_gcs:
@@ -75,6 +82,14 @@ class CredentialManager:
                 gcs_table.add_row("Project", local_gcs_creds.project_id)
             gcs_table.add_row("Beaker user", beaker_user)
             gcs_table.add_row("Beaker secret", f"{beaker_user}_GOOGLE_CREDENTIALS")
+            if local_gcs_creds.credential_type == "authorized_user":
+                workspace = getattr(launcher, "_workspace", None) or "the job's workspace"
+                gcs_table.add_row(
+                    "Warning",
+                    "[yellow]This secret holds your gcloud refresh token, which can act as "
+                    f"you on Google Cloud. Anyone with write access to {workspace} can read "
+                    "it. Use a workspace only you can write to, or pass --no-upload.[/yellow]",
+                )
         else:
             gcs_table.add_row(
                 "Credentials",

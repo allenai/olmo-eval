@@ -163,3 +163,29 @@ def test_launch_cli_resolves_upload_from_env(monkeypatch) -> None:
     assert captured["upload"] is False
     assert captured["api_url"] == "https://dev-ingest.example"
     assert captured["tags"] == ["x"]
+
+
+def test_no_gcp_credentials_with_upload_is_an_error() -> None:
+    from olmo_eval.cli.beaker.credentials import CredentialManager
+
+    launcher = SimpleNamespace(beaker=SimpleNamespace(user_name="test-user"))
+    with patch("olmo_eval.launch.beaker.gcs.get_local_gcs_credentials", return_value=None):
+        manager = CredentialManager(["Qwen/Qwen2-0.5B"], None, False, upload=True)
+        with pytest.raises(SystemExit):
+            manager.detect_and_setup(launcher)
+
+        manager = CredentialManager(["Qwen/Qwen2-0.5B"], None, False, upload=False)
+        assert manager.detect_and_setup(launcher) == (False, False)
+
+
+def test_user_credentials_warn_about_workspace_exposure(capsys) -> None:
+    from olmo_eval.cli.beaker.credentials import CredentialManager
+    from olmo_eval.launch.beaker.gcs import GCSCredentials
+
+    creds = GCSCredentials(json_key="{}", credential_type="authorized_user")
+    launcher = SimpleNamespace(beaker=SimpleNamespace(user_name="test-user"), _workspace="ai2/x")
+    with patch("olmo_eval.launch.beaker.gcs.get_local_gcs_credentials", return_value=creds):
+        CredentialManager(["m"], None, None, upload=True).detect_and_setup(launcher)
+    out = " ".join(capsys.readouterr().out.split())
+    assert "refresh token" in out
+    assert "ai2/x" in out
