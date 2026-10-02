@@ -9,6 +9,7 @@ from olmo_eval.evals.vision.benchmarks import ai2d as _ai2d  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import blink as _blink  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import cc_ocr as _cc_ocr  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import chart_qa as _chart_qa  # noqa: F401
+from olmo_eval.evals.vision.benchmarks import chartmuseum as _chartmuseum  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import charxiv as _charxiv  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import countbench_qa as _countbench_qa  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import dense_caption as _dense_caption  # noqa: F401
