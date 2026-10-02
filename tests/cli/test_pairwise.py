@@ -1231,6 +1231,54 @@ def test_results_table_gap_scope_score_needs_one_metric(
     assert viewer_server._model_filter_score_label(model, annotated["task_columns"]) == label
 
 
+def test_results_table_none_suite_has_no_scope_score() -> None:
+    """A suite without an aggregate shows none, not the mean of its columns."""
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+    from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+    _REGISTRY["_test_none_results_table"] = Suite(
+        name="_test_none_results_table",
+        tasks=("task_a", "task_b"),
+        aggregation=AggregationStrategy.NONE,
+    )
+    try:
+        column = {
+            "score_display_format": "percentage",
+            "score_unit": "proportion",
+            "higher_is_better": True,
+            "metric": "exact_match",
+        }
+        annotated = viewer_server._annotate_results_table_scope_scores(
+            {
+                "models": [
+                    {
+                        "index": 0,
+                        "display_label": "model-a",
+                        "task_scores": {"task_a": 0.6, "task_b": 0.4},
+                    }
+                ],
+                "task_columns": [
+                    {**column, "id": "task_a", "task_name": "task_a"},
+                    {**column, "id": "task_b", "task_name": "task_b"},
+                ],
+            },
+            selected_scope_key="suite::_test_none_results_table",
+            selected_scope_option={
+                "key": "suite::_test_none_results_table",
+                "kind": "suite",
+                "value": "_test_none_results_table",
+                "task_ids": ["task_a", "task_b"],
+            },
+        )
+    finally:
+        del _REGISTRY["_test_none_results_table"]
+
+    assert annotated is not None
+    model = annotated["models"][0]
+    assert model["scope_score"] is None
+    assert viewer_server._model_filter_score_label(model, annotated["task_columns"]) == "—"
+
+
 def test_viewer_scope_pickers_require_explicit_selection() -> None:
     viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 

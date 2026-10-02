@@ -954,14 +954,17 @@ def _scope_score_is_exact(
     selected_scope_key: str | None,
     selected_scope_option: dict[str, Any] | None,
 ) -> bool:
-    """Whether a missing scope score stays missing: a gap suite's column mean is no gap."""
+    """Whether a missing scope score stays missing, as for gap and NONE suites."""
     from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, suite_exists
 
     scope_kind, _ = _parse_scope_key(selected_scope_key)
     if scope_kind != "suite" or selected_scope_option is None:
         return False
     suite_name = str(selected_scope_option.get("value") or "")
-    return suite_exists(suite_name) and get_suite(suite_name).aggregation == AggregationStrategy.GAP
+    return suite_exists(suite_name) and get_suite(suite_name).aggregation in (
+        AggregationStrategy.GAP,
+        AggregationStrategy.NONE,
+    )
 
 
 def _model_scope_score(
