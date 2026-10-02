@@ -98,6 +98,7 @@ _LOOSE_TAG = re.compile(r"<\s*answer\s*>\s*\[?\s*\(?((?-i:[A-E]))\b", re.IGNOREC
 _LOOSE_PHRASE = re.compile(
     r"answer\W{0,3}(?:is\W{0,3})?\(?((?-i:[A-E]))\b(?![A-Za-z'])", re.IGNORECASE
 )
+_ANGLE_LETTER = re.compile(r"<\s*([A-E])\s*>")
 _BARE_LETTER = re.compile(r"^\s*\(?\[?([A-E])\]?\)?\s*(?:[.:)]|$)")
 
 
@@ -136,9 +137,10 @@ def extract_lenient_answer(text: str) -> str | None:
         bare = _BARE_LETTER.match(official)
         if bare:
             return bare.group(1).upper()
-    found = _LOOSE_TAG.search(text)
-    if found:
-        return found.group(1).upper()
+    for pattern in (_LOOSE_TAG, _ANGLE_LETTER):
+        found = pattern.search(text)
+        if found:
+            return found.group(1).upper()
     phrases = _LOOSE_PHRASE.findall(text)
     if phrases:
         return phrases[-1].upper()
