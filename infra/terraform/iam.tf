@@ -1,13 +1,23 @@
-# Runtime identity for both Cloud Run services (ui with its api sidecar, and ingest).
+# Runtime identity for the ingest Cloud Run service. Its database user owns the schema and runs
+# the migrations, and it writes and deletes run artifacts in the results bucket.
 resource "google_service_account" "api" {
   account_id   = "olmo-eval-api"
   display_name = "olmo-eval dashboard API"
 }
 
-locals {
-  api_member = "serviceAccount:${google_service_account.api.email}"
+# Runtime identity for the ui Cloud Run service and its api sidecar (dashboard mode). It reads
+# the database and the results bucket, and writes only the few tables the dashboard edits (see
+# scripts/grant_db.py).
+resource "google_service_account" "dashboard" {
+  account_id   = "olmo-eval-dashboard"
+  display_name = "olmo-eval dashboard (read-only UI)"
+}
 
-  api_project_roles = [
+locals {
+  api_member       = "serviceAccount:${google_service_account.api.email}"
+  dashboard_member = "serviceAccount:${google_service_account.dashboard.email}"
+
+  runtime_project_roles = [
     "roles/cloudsql.client",
     "roles/cloudsql.instanceUser",
     "roles/logging.logWriter",
@@ -24,38 +34,61 @@ locals {
   }
 }
 
-# The API reads no Secret Manager secrets. If a service later needs one, grant
+# Neither service reads Secret Manager secrets. If a service later needs one, grant
 # roles/secretmanager.secretAccessor on that secret only.
 resource "google_project_iam_member" "api" {
-  for_each = toset(local.api_project_roles)
+  for_each = toset(local.runtime_project_roles)
   project  = var.project_id
   role     = each.value
   member   = local.api_member
 }
 
-# Lets the API sign V4 upload/download URLs through IAM signBlob as itself.
+resource "google_project_iam_member" "dashboard" {
+  for_each = toset(local.runtime_project_roles)
+  project  = var.project_id
+  role     = each.value
+  member   = local.dashboard_member
+}
+
+# Lets ingest sign V4 upload URLs through IAM signBlob as itself.
 resource "google_service_account_iam_member" "api_self_token_creator" {
   service_account_id = google_service_account.api.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = local.api_member
 }
 
-resource "google_storage_bucket_iam_member" "api_results_object_admin" {
+# Lets the dashboard sign V4 download URLs through IAM signBlob as itself.
+resource "google_service_account_iam_member" "dashboard_self_token_creator" {
+  service_account_id = google_service_account.dashboard.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = local.dashboard_member
+}
+
+# Ingest lists and reads objects, signs uploads (create and overwrite), and deletes a run's
+# prefix. objectUser covers that without objectAdmin's object IAM permissions.
+resource "google_storage_bucket_iam_member" "api_results_object_user" {
   bucket = google_storage_bucket.results.name
-  role   = "roles/storage.objectAdmin"
+  role   = "roles/storage.objectUser"
   member = local.api_member
 }
 
-resource "google_storage_bucket_iam_member" "api_results_bucket_reader" {
+resource "google_storage_bucket_iam_member" "dashboard_results_object_viewer" {
   bucket = google_storage_bucket.results.name
-  role   = "roles/storage.legacyBucketReader"
-  member = local.api_member
+  role   = "roles/storage.objectViewer"
+  member = local.dashboard_member
 }
 
-# Impersonation of the API service account, for debugging and verification.
+# Impersonation of the runtime service accounts, for debugging and verification.
 resource "google_service_account_iam_member" "debug_token_creator" {
   for_each           = toset(var.debug_iam_users)
   service_account_id = google_service_account.api.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "user:${each.value}"
+}
+
+resource "google_service_account_iam_member" "debug_dashboard_token_creator" {
+  for_each           = toset(var.debug_iam_users)
+  service_account_id = google_service_account.dashboard.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "user:${each.value}"
 }

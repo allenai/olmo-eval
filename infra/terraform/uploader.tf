@@ -50,11 +50,7 @@ resource "google_secret_manager_secret_iam_member" "uploader_key_readers" {
   member    = each.value
 }
 
-# The launch bills its Secret Manager call to this project (quota project), which needs
-# serviceusage.services.use here regardless of the user's own quota project.
-resource "google_project_iam_member" "uploader_key_readers_quota" {
-  for_each = toset(var.uploader_key_readers)
-  project  = var.project_id
-  role     = "roles/serviceusage.serviceUsageConsumer"
-  member   = each.value
-}
+# Readers need no project-level role such as serviceusage.serviceUsageConsumer. Secret Manager
+# bills an access to the project that holds the secret and ignores the caller's quota project
+# (x-goog-user-project): with user credentials, the access succeeds with no quota project, with
+# the user's own quota project, and with a project that does not exist.

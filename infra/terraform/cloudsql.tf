@@ -75,12 +75,21 @@ resource "google_sql_database" "dev" {
   instance = google_sql_database_instance.main.name
 }
 
-# cloudsqlsuperuser owns both databases, so its members can create tables in public.
+# The ingest service's database user. It owns the tables and runs the migrations, through
+# CREATE on schema public that scripts/grant_db.py grants. It is not a cloudsqlsuperuser member.
 resource "google_sql_user" "api" {
   instance       = google_sql_database_instance.main.name
   name           = trimsuffix(google_service_account.api.email, ".gserviceaccount.com")
   type           = "CLOUD_IAM_SERVICE_ACCOUNT"
-  database_roles = ["cloudsqlsuperuser"]
+  database_roles = []
+}
+
+# The dashboard's database user. It gets SELECT on every table and a few writes from the table
+# owner (scripts/grant_db.py, and the ingest service after each migration).
+resource "google_sql_user" "dashboard" {
+  instance = google_sql_database_instance.main.name
+  name     = trimsuffix(google_service_account.dashboard.email, ".gserviceaccount.com")
+  type     = "CLOUD_IAM_SERVICE_ACCOUNT"
 }
 
 resource "google_sql_user" "debug" {

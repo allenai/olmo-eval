@@ -6,7 +6,7 @@
             "cwd": "./dashboard",
             "dockerFile": "ui/Dockerfile",
             "isRootService": true,
-            "serviceAccount": "olmo-eval-api@ai2-skiff2-olmo-eval.iam.gserviceaccount.com",
+            "serviceAccount": "olmo-eval-dashboard@ai2-skiff2-olmo-eval.iam.gserviceaccount.com",
             "runtimeDependsOn": ["api"],
             "machine": {
                 "minInstances": 1,

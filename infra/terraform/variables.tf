@@ -11,7 +11,7 @@ variable "region" {
 }
 
 variable "debug_iam_users" {
-  description = "Google accounts that can impersonate the API service account and log in to Cloud SQL with IAM auth."
+  description = "Google accounts that can impersonate the runtime service accounts (api, dashboard) and log in to Cloud SQL with IAM auth."
   type        = list(string)
   default     = ["chrisg@allenai.org"]
 }

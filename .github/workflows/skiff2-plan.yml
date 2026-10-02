@@ -20,9 +20,17 @@ concurrency:
 jobs:
     plan:
         runs-on: ubuntu-latest
+        env:
+            # Fork PRs get no OIDC token, so they skip the GCP steps.
+            TRUSTED: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         steps:
+            - name: Skip fork PRs
+              if: env.TRUSTED != 'true'
+              run: echo "Fork PRs cannot authenticate to GCP, so the Skiff2 plan is skipped."
+
             - name: Skiff2 Setup
               id: setup
+              if: env.TRUSTED == 'true'
               uses: allenai/skiff2-actions/shared-actions/setup@main
               with:
                   workload_identity_provider: ${{ vars.SKIFF2_WORKLOAD_IDENTITY_PROVIDER }}
@@ -30,12 +38,14 @@ jobs:
                   project_id: ${{ vars.SKIFF2_PROJECT_ID }}
 
             - name: Skiff2 Plan Infra
+              if: env.TRUSTED == 'true'
               uses: allenai/skiff2-actions/shared-actions/deploy-infra@main
               with:
                   project_id: ${{ vars.SKIFF2_PROJECT_ID }}
                   command: plan
 
             - name: Skiff2 Plan Services
+              if: env.TRUSTED == 'true'
               uses: allenai/skiff2-actions/shared-actions/deploy-services@main
               with:
                   project_id: ${{ vars.SKIFF2_PROJECT_ID }}

@@ -53,10 +53,13 @@ recorded as the run's uploader.
   it into the workspace's `olmo_eval_uploader_key` Beaker secret, which the job reads as
   `OLMO_EVAL_UPLOAD_CREDENTIALS`. Personal credentials never reach Beaker. The run's `author`
   is the launching Beaker user, and only that user (or a direct uploader) can delete it;
-  service accounts cannot delete runs.
+  service accounts cannot delete runs. A re-upload keeps the stored author unless it comes from
+  the user who uploaded the run.
 
 Large files go straight to GCS: the ingest service returns V4 signed upload URLs, signed by the
-runtime service account through IAM `signBlob`. To re-upload a local results directory, run
+ingest service account through IAM `signBlob`. Each URL is signed for the declared MD5 and size
+(`x-goog-content-length-range`), so GCS rejects any other body. A run may hold at most 50 GiB of
+artifacts and 10 million instance rows. To re-upload a local results directory, run
 `olmo-eval results upload <dir>`.
 
 To call the ingest API by hand:
@@ -110,21 +113,24 @@ licensed font and this repo is public, so never commit the `.otf` files (they ar
 `.github/workflows/skiff2-deploy.yml` runs on pushes to `main` that touch `dashboard/`,
 `skiff2.json` or the workflow. It authenticates to GCP through Workload Identity Federation,
 downloads the Telegraf fonts from `gs://ai2-skiff2-olmo-eval-build-assets/fonts/`, builds one
-image per container (`ui`, `api`, `ingest`), and deploys them with Skiff2's Terraform. The API runs
-migrations at startup under a Postgres advisory lock, and the startup probe holds traffic until
-they finish. A final smoke test fails the deploy unless the prod ingest service's `/health`
+image per container (`ui`, `api`, `ingest`), and deploys them with Skiff2's Terraform. The `ui`
+service and its `api` sidecar run as `olmo-eval-dashboard`, which can read the database and the
+results bucket and write only saved views, run tags and notes, and the stats cache. The `ingest`
+service runs as `olmo-eval-api`, which owns the tables. Ingest runs migrations at startup under a
+Postgres advisory lock, and the startup probe holds traffic until they finish. A final smoke test fails the deploy unless the prod ingest service's `/health`
 reports the merged commit with a working database, and the dashboard redirects to Google sign-in.
 
-Pull requests get a Skiff2 Terraform plan (`skiff2-plan.yml`) and the dashboard checks
-(`dashboard-ci.yml`: API and UI tests, plus Docker builds of both images).
+Pull requests get a Skiff2 Terraform plan (`skiff2-plan.yml`; skipped for fork PRs, which cannot
+authenticate to GCP) and the dashboard checks (`dashboard-ci.yml`: API and UI tests, plus Docker
+builds of both images).
 
 Containers need no secrets. Configuration comes from code defaults keyed on `SKIFF_ENV`, which
 Cloud Run sets on every container. To allow another service account to upload, create the Secret
 Manager secret `global-ingest-INGEST_ALLOWED_SERVICE_ACCOUNTS` (comma-separated emails, which
 replaces the default list, so include the uploader account), grant
 `olmo-eval-api@ai2-skiff2-olmo-eval.iam.gserviceaccount.com` the
-`roles/secretmanager.secretAccessor` role on that secret only, and redeploy. The runtime service
-account has no project-wide secret access.
+`roles/secretmanager.secretAccessor` role on that secret only, and redeploy. Neither runtime
+service account has project-wide secret access.
 
 ## Terraform
 
@@ -145,6 +151,7 @@ terraform plan
 terraform apply
 ```
 
-This needs owner-level access to the project. Apply Terraform before the first deploy: the
-services run as the `olmo-eval-api` service account and connect to the database at startup.
-The Cloud SQL instance has deletion protection on. See `infra/terraform/README.md` for details.
+This needs owner-level access to the project. Apply Terraform before the first deploy, then run
+`infra/terraform/scripts/grant_db.py` once: the services run as the `olmo-eval-api` and
+`olmo-eval-dashboard` service accounts and connect to the database at startup. The Cloud SQL
+instance has deletion protection on. See `infra/terraform/README.md` for details.

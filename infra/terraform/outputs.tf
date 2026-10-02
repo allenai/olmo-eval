@@ -28,3 +28,11 @@ output "build_assets_bucket" {
 output "uploader_service_account_email" {
   value = google_service_account.uploader.email
 }
+
+output "dashboard_service_account_email" {
+  value = google_service_account.dashboard.email
+}
+
+output "dashboard_db_user" {
+  value = google_sql_user.dashboard.name
+}
