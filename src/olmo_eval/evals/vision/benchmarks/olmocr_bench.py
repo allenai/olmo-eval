@@ -1,9 +1,9 @@
 """olmOCR-bench — unit-test-graded document OCR (https://huggingface.co/datasets/allenai/olmOCR-bench).
 
-1,403 single-page PDFs carry 7,019 hand-checked unit tests: a phrase is present or absent
-(headers and footers must be dropped), two passages come in reading order, a table cell has
-the right neighbours, a rendered equation matches. The model transcribes each page to
-markdown once and the page's tests run against that text.
+Single-page PDFs carry hand-checked unit tests: a phrase is present or absent (headers and
+footers must be dropped), two passages come in reading order, a table cell has the right
+neighbours, a rendered equation matches. The model transcribes each page to markdown once
+and the page's tests run against that text.
 
 Scoring is the official implementation (:mod:`olmo_eval.evals.vision.scoring.olmocr_bench`) and
 follows ``olmocr.bench.benchmark``: every PDF without an explicit ``baseline`` test gets one
@@ -43,6 +43,7 @@ from olmo_eval.evals.vision.scoring.olmocr_bench import (
     OlmocrBenchCategoryMetric,
     OlmocrBenchOverallMetric,
     OlmocrBenchScorer,
+    OlmocrBenchTestErrorsMetric,
     OlmocrBenchTestTypeMetric,
     ensure_olmocr_bench_runtime,
 )
@@ -82,6 +83,7 @@ _METRICS: tuple[Metric, ...] = (
         for t in TEST_TYPES
         if t != "baseline"
     ),
+    OlmocrBenchTestErrorsMetric(name="n_test_errors", scorer=_SCORER),
 )
 
 
