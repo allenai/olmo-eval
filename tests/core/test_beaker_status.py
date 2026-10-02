@@ -108,10 +108,11 @@ class BeakerStatusReporterTest(unittest.TestCase):
             mock.patch.object(beaker_status, "Thread", InlineThread),
         ):
             reporter = beaker_status.BeakerStatusReporter(min_interval=60.0)
-
-        with mock.patch("time.monotonic", side_effect=[0.0, 1.0]):
-            reporter.update("a")
-            reporter.update("b", force=True)
+            # Send inline, as the other tests do: outside this block update() starts a
+            # real thread, and the count below can be read before its second send.
+            with mock.patch("time.monotonic", side_effect=[0.0, 1.0]):
+                reporter.update("a")
+                reporter.update("b", force=True)
 
         self.assertEqual(fake_client.workload.update.call_count, 2)
 
