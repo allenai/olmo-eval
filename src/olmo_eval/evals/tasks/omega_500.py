@@ -61,12 +61,8 @@ _PREFIX_REGEXES = (
 _ANSWER_REGEXES = (r"[\s\S]*?\\boxed\{(.*?)\}[\s\S]*?", r"(.*)\.?")
 _FORMAT_CORRECT_CUTOFF = 0.4
 
-# The reference cascade above cannot score two common answer shapes. After a
-# prefix, a colon survives into the answer ("The answer is: 42" extracts
-# ": 42"). An unformatted answer extracts "", because the catch-all also
-# matches the empty string at the end of the text and the last match wins.
-# The repaired cascade consumes an optional colon after each prefix and
-# requires the catch-all to match at least one character.
+# Repaired cascade: drop a colon after the prefix ("The answer is: 42") and
+# don't let the catch-all match the empty string.
 _REPAIRED_PREFIX_REGEXES = tuple(prefix + r"\s*:?" for prefix in _PREFIX_REGEXES)
 _REPAIRED_ANSWER_REGEXES = (_ANSWER_REGEXES[0], r"(.+)")
 
@@ -108,7 +104,6 @@ def _extract(
 
 
 def _extract_repaired(continuation: str) -> ExtractedAnswer:
-    """Extract the final answer with the repaired cascade."""
     return _extract(
         continuation,
         prefix_regexes=_REPAIRED_PREFIX_REGEXES,
@@ -135,7 +130,6 @@ class OmegaExactMatchScorer(Scorer):
             object.__setattr__(self, "name", "exact_match_flex" if self.flex else "exact_match")
 
     def extract(self, text: str) -> ExtractedAnswer:
-        """Extract the answer and its format score from a response."""
         return _extract(text)
 
     def score(self, instance: Instance, output: LMOutput) -> float:
@@ -207,8 +201,6 @@ class Omega500(Task):
         return self.config.formatter.format(instance, self.get_fewshot())
 
     def extract_answer(self, output: LMOutput) -> str:
-        # Read the answer the way the primary scorer does, so the displayed
-        # answer is the one that was scored.
         metric = self.config.get_primary_metric()
         scorer = getattr(metric, "scorer", None)
         assert isinstance(scorer, OmegaExactMatchScorer)
@@ -220,8 +212,7 @@ class Omega500HillClimb(Omega500):
     """OMEGA-500 on the corrected AllenAI snapshot, scored strictly at a 32K budget.
 
     Instances keep the dataset's own IDs, so they stay stable if rows move.
-    Answers are extracted with the repaired cascade, so colon-bearing prefixes
-    and unformatted answers are read correctly.
+    Answers are extracted with the repaired cascade.
     """
 
     data_source = DataSource(path="allenai/omega-500", revision=OMEGA_500_REVISION)
