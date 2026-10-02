@@ -7,6 +7,7 @@ import { cycleTheme, densityStore, resolvedTheme, themeStore } from "@/state/pre
 import { useStore } from "@/state/store";
 import { AppLink, useAppNavigate } from "../AppLink";
 import { cx, IconButton, Kbd, Menu, ModelDot, Tip } from "../primitives";
+import { UserAvatar } from "../UserAvatar";
 import { openPalette, shortcutsStore } from "./registry";
 import s from "./shell.module.css";
 
@@ -70,7 +71,6 @@ export function TopBar() {
   const density = useStore(densityStore);
   const me = useMe();
   const navigate = useAppNavigate();
-  const initials = (me.data?.username ?? "?").slice(0, 2);
   const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
   return (
     <header className={s.topbar}>
@@ -116,7 +116,7 @@ export function TopBar() {
         <Menu
           trigger={
             <button type="button" className={s.avatar} aria-label="Account menu" title={me.data?.email}>
-              {initials}
+              <UserAvatar seed={me.data?.email ?? me.data?.username} />
             </button>
           }
           items={[

@@ -131,15 +131,18 @@
   place-items: center;
   width: 28px;
   height: 28px;
+  padding: 0;
   border-radius: 50%;
-  background: var(--teal);
-  color: var(--teal-fg);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  overflow: hidden;
+  background: none;
   border: 0;
+  /* A thin ring keeps dark avatars visible on the dark theme's background. */
+  box-shadow: 0 0 0 1px var(--border);
   cursor: pointer;
-  text-transform: uppercase;
+}
+
+.avatar svg {
+  display: block;
 }
 
 .mockBadge {
