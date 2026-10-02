@@ -83,8 +83,8 @@ transformers = [
 
 [[package]]
 name = "ai2-olmo-core"
-version = "2.5.0"
-source = { git = "https://github.com/allenai/OLMo-core.git?rev=2dad929acb742faaa566a173f3484ff760c3ca07#2dad929acb742faaa566a173f3484ff760c3ca07" }
+version = "2.6.0"
+source = { git = "https://github.com/allenai/OLMo-core.git?rev=42e65ea6a69cce8858bbf18226c8d092388ced0a#42e65ea6a69cce8858bbf18226c8d092388ced0a" }
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
@@ -5293,7 +5293,7 @@ olmo-core = [
     { name = "torchao", version = "0.17.0", source = { registry = "https://pypi.org/simple" } },
 ]
 olmo-core-vlm = [
-    { name = "ai2-olmo-core", version = "2.5.0", source = { git = "https://github.com/allenai/OLMo-core.git?rev=2dad929acb742faaa566a173f3484ff760c3ca07#2dad929acb742faaa566a173f3484ff760c3ca07" }, extra = ["torchao", "transformers"], marker = "extra == 'extra-9-olmo-eval-olmo-core-vlm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra != 'extra-9-olmo-eval-olmo-core') or (extra == 'extra-9-olmo-eval-clients' and extra != 'extra-9-olmo-eval-olmo-core') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (extra != 'extra-9-olmo-eval-olmo-core' and extra != 'extra-9-olmo-eval-openhands')" },
+    { name = "ai2-olmo-core", version = "2.6.0", source = { git = "https://github.com/allenai/OLMo-core.git?rev=42e65ea6a69cce8858bbf18226c8d092388ced0a#42e65ea6a69cce8858bbf18226c8d092388ced0a" }, extra = ["torchao", "transformers"], marker = "extra == 'extra-9-olmo-eval-olmo-core-vlm' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-agents' and extra != 'extra-9-olmo-eval-olmo-core') or (extra == 'extra-9-olmo-eval-clients' and extra != 'extra-9-olmo-eval-olmo-core') or (extra == 'extra-9-olmo-eval-olmo-core' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm') or (extra != 'extra-9-olmo-eval-olmo-core' and extra != 'extra-9-olmo-eval-openhands')" },
 ]
 openhands = [
     { name = "openhands-ai" },
@@ -5339,7 +5339,7 @@ vllm = [
 [package.metadata]
 requires-dist = [
     { name = "ai2-olmo-core", extras = ["torchao", "transformers"], marker = "extra == 'olmo-core'", specifier = "==2.4.0" },
-    { name = "ai2-olmo-core", extras = ["torchao", "transformers"], marker = "extra == 'olmo-core-vlm'", git = "https://github.com/allenai/OLMo-core.git?rev=2dad929acb742faaa566a173f3484ff760c3ca07" },
+    { name = "ai2-olmo-core", extras = ["torchao", "transformers"], marker = "extra == 'olmo-core-vlm'", git = "https://github.com/allenai/OLMo-core.git?rev=42e65ea6a69cce8858bbf18226c8d092388ced0a" },
     { name = "antlr4-python3-runtime", specifier = ">=4.11,<4.12" },
     { name = "beaker-gantry", marker = "extra == 'beaker'", specifier = ">=3.7.0,<4" },
     { name = "beaker-py", marker = "extra == 'beaker'", specifier = ">=2.6.0,<3" },
