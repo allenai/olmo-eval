@@ -201,6 +201,14 @@ class TestExtractAnswer:
         output = LMOutput(text="ANSWER:\nC")
         assert task.extract_answer(output) == "C"
 
+    def test_answer_pattern_without_colon(self, task):
+        output = LMOutput(text="Reasoning about the options.\n\n**Answer** C")
+        assert task.extract_answer(output) == "C"
+
+    def test_answer_pattern_without_colon_ignores_prose(self, task):
+        output = LMOutput(text="To answer A good question needs care.")
+        assert task.extract_answer(output) is None
+
     def test_last_answer_pattern_wins(self, task):
         output = LMOutput(text="ANSWER: A\nWait, actually ANSWER: C")
         assert task.extract_answer(output) == "C"

@@ -281,6 +281,14 @@ class TestExtractAnswer:
         output = LMOutput(text="ANSWER:\nC\n\nOption A was close.")
         assert task.extract_answer(output) == "C"
 
+    def test_answer_pattern_without_colon(self, task):
+        output = LMOutput(text="Reasoning about the options.\n\n**Answer** C")
+        assert task.extract_answer(output) == "C"
+
+    def test_answer_pattern_without_colon_ignores_prose(self, task):
+        output = LMOutput(text="Let me answer a) first. So it is (B)")
+        assert task.extract_answer(output) == "B"
+
     def test_last_answer_pattern_wins(self, task):
         output = LMOutput(text="ANSWER: A\nWait, actually ANSWER: C")
         assert task.extract_answer(output) == "C"
