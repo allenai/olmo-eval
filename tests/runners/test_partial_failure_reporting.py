@@ -341,10 +341,6 @@ def test_total_failure_marks_task_failed_and_fails_the_run() -> None:
         check_hard_failure_gate({SPEC: result})
 
 
-# ---------------------------------------------------------------------------
-# Batched path: vllm_server swallows per-request 400s into empty output lists
-# ---------------------------------------------------------------------------
-
 _MAX_TOKENS_400 = (
     "max_tokens=131072 cannot be greater than max_model_len=max_total_tokens=40960. "
     "Please request fewer output tokens."

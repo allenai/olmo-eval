@@ -212,9 +212,7 @@ async def process_batch(
         else:
             all_outputs = await harness.provider.agenerate(prepared_requests, sampling_params)
 
-        # Map outputs back to individual items. A provider either records why a
-        # request failed (request_error) or, like vllm_server and litellm, returns
-        # no outputs for it; both are failures, not empty responses to score.
+        # A failed request has a request_error or, from vllm_server and litellm, no outputs.
         for item, prepared_request, request_trace, outputs in zip(
             items, prepared_requests, request_traces, all_outputs, strict=True
         ):
