@@ -10,6 +10,9 @@ from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.analysis.latest_run_merge import (
+    COMPLETE_RUN_RANK,
+    FAILED_RUN_RANK,
+    PARTIAL_RUN_RANK,
     LatestTaskRowInput,
 )
 from olmo_eval.analysis.latest_run_merge import (
@@ -554,23 +557,51 @@ def _latest_merge_context(
     return source_experiment_by_pk, display_experiment_by_hash, display_order
 
 
+def _task_result_completeness_rank(task_result: Any):
+    """SQL expression ranking a task-result row by how much of the task it covers.
+
+    Mirrors :func:`completeness_rank` for rows still in the database.
+    """
+    from sqlalchemy import case, cast, func, literal
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    return case(
+        (task_result.metrics == cast(literal("{}"), JSONB), FAILED_RUN_RANK),
+        (func.coalesce(task_result.instances_failed, 0) > 0, PARTIAL_RUN_RANK),
+        else_=COMPLETE_RUN_RANK,
+    )
+
+
 def _latest_source_experiment_pks_subquery(
     *,
     data_table: Any,
     source_pks: list[int],
     extra_filters: list[Any],
 ):
-    """Subquery yielding (experiment_pk, task_hash) pairs that are latest by
+    """Subquery yielding the preferred (experiment_pk, task_hash) pair per
     ``(experiment.model_hash, data_table.task_hash)`` over the given source PKs.
 
     ``data_table`` is either ``TaskResult`` or ``InstancePrediction``. Use the
     returned subquery to JOIN against the data table, restricting the fetch to
-    the latest run per (model_hash, task_hash) and skipping the Python-side
+    one run per (model_hash, task_hash) and skipping the Python-side
     duplicate-run merge entirely.
+
+    Runs are ranked by completeness before recency, so a newer run that failed or
+    lost instances cannot displace an older complete run of the same task.
     """
     from sqlalchemy import func, select
 
-    from olmo_eval.storage.backends.postgres.models import Experiment
+    from olmo_eval.storage.backends.postgres.models import Experiment, TaskResult
+
+    completeness = (
+        select(
+            TaskResult.experiment_pk.label("experiment_pk"),
+            TaskResult.task_hash.label("task_hash"),
+            func.min(_task_result_completeness_rank(TaskResult)).label("rank"),
+        )
+        .where(TaskResult.experiment_pk.in_(source_pks))
+        .group_by(TaskResult.experiment_pk, TaskResult.task_hash)
+    ).subquery()
 
     runs = (
         select(
@@ -597,9 +628,19 @@ def _latest_source_experiment_pks_subquery(
             func.row_number()
             .over(
                 partition_by=[runs.c.model_hash, runs.c.task_hash],
-                order_by=[runs.c.timestamp.desc(), runs.c.experiment_pk.desc()],
+                order_by=[
+                    func.coalesce(completeness.c.rank, COMPLETE_RUN_RANK).asc(),
+                    runs.c.timestamp.desc(),
+                    runs.c.experiment_pk.desc(),
+                ],
             )
             .label("rn"),
+        )
+        .select_from(runs)
+        .outerjoin(
+            completeness,
+            (completeness.c.experiment_pk == runs.c.experiment_pk)
+            & (completeness.c.task_hash == runs.c.task_hash),
         )
     ).subquery()
 
