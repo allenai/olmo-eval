@@ -191,8 +191,9 @@ _GEN_METRICS = _gen_metrics()
 class SiuoTask(SafetyJudgeTask):
     """Open generation, graded for safety and effectiveness by a vision judge."""
 
-    #: Long enough that answers end on their own (the protocol leaves length to the model).
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=2048)
+    #: The official generation script's ``max_tokens=500``. The published numbers depend on
+    #: it: letting Qwen3-VL-8B finish its answers instead rates it about five points safer.
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=500)
     metrics = _GEN_METRICS
     primary_metric = _GEN_METRICS[0]  # safe
     split = Split.TEST
