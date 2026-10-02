@@ -239,8 +239,10 @@ _METRICS = _metrics()
 class MMSafetyBenchTask(SafetyJudgeTask):
     """All 1,680 questions in the four settings, judged by the official templates."""
 
-    #: Long enough that answers end on their own (the protocol leaves length to the model).
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=2048)
+    #: The protocol fixes no length; 512 tokens is the regime published numbers were produced
+    #: in (Qwen3-VL-8B reproduces arXiv 2609.02082 at it). Judged complete instead, verbose
+    #: answers that refuse and then list alternatives come out several points safer.
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=512)
     metrics = _METRICS
     primary_metric = _METRICS[0]  # asr/sd_typo
     split = Split.TEST
