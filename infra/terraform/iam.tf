@@ -10,8 +10,6 @@ locals {
   api_project_roles = [
     "roles/cloudsql.client",
     "roles/cloudsql.instanceUser",
-    # Skiff reads global-<container>-* secrets at deploy time. Harmless when none exist.
-    "roles/secretmanager.secretAccessor",
     "roles/logging.logWriter",
   ]
 
@@ -26,6 +24,8 @@ locals {
   }
 }
 
+# The API reads no Secret Manager secrets. If a service later needs one, grant
+# roles/secretmanager.secretAccessor on that secret only.
 resource "google_project_iam_member" "api" {
   for_each = toset(local.api_project_roles)
   project  = var.project_id
