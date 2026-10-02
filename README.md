@@ -1486,9 +1486,10 @@ budget: ai2/oe-other
 | `--yes` | `-y` | `false` | Skip confirmation prompt |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
 | `--secret-env` | | none | Map Beaker secret to env var (`SECRET:VAR`) |
+| `--hf-token/--no-hf-token` | | auto | Inject `HF_TOKEN`; see [Hugging Face and Beaker tokens](#hugging-face-and-beaker-tokens) |
 | `--aws-credentials` | | auto | Inject AWS credentials (auto-detected from s3:// paths) |
-| `--gcp-credentials` | | auto | Inject Google credentials (auto-detected from gs:// model paths; always on with uploads) |
-| `--upload/--no-upload` | | `true` | Upload results to the dashboard from the job (also injects Google credentials) |
+| `--gcp-credentials` | | auto | Inject Google credentials (auto-detected from gs:// model paths) |
+| `--upload/--no-upload` | | `true` | Upload results to the dashboard from the job (injects the shared uploader key) |
 | `--api-url` | | production | Ingest service URL passed to the job |
 | `--tag` | | none | Label attached to uploaded runs (can specify multiple) |
 
@@ -1546,6 +1547,29 @@ The `-o` flag uses OmegaConf dotlist syntax, supporting:
 # Good - single quotes protect the value
 -o 'extra_config={key: value, nested: {a: 1}}'
 ```
+
+### Hugging Face and Beaker tokens
+
+`beaker launch` does not copy personal tokens into the Beaker workspace unless the job
+needs them.
+
+- **`HF_TOKEN`**: if the secret `{username}_HF_TOKEN` already exists in the workspace, it
+  is injected. Otherwise your local Hugging Face token (`HF_TOKEN` or `hf auth login`) is
+  copied there only when the job needs it: you passed `--hf-token`, a task or model
+  declares `HF_TOKEN` in `required_secrets`, or a model, tokenizer or task dataset is gated
+  or private on the Hub. Public models such as `Qwen/Qwen2.5-0.5B` do not trigger a copy.
+  If the Hub cannot be reached, the launch prints a warning and does not copy the token;
+  pass `--hf-token` for gated models. `--no-hf-token` never injects it.
+- **`BEAKER_TOKEN`**: the job uses it only to post status updates to the Beaker UI. It is
+  injected when the secret `{username}_BEAKER_TOKEN` exists in the workspace, and is never
+  created for you. Without it the launch prints a warning and the job runs without status
+  updates. To enable them:
+
+  ```bash
+  beaker secret write --workspace <workspace> {username}_BEAKER_TOKEN <your Beaker token>
+  ```
+
+A dry run (`--dry-run`) checks the Hub but does not read or write Beaker secrets.
 
 ### Secret Environment Overrides
 

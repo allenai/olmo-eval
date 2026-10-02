@@ -851,6 +851,41 @@ class BeakerLauncher:
         """Return the user-scoped GitHub token secret name for Gantry clones."""
         return f"{self.beaker.user_name}_GITHUB_TOKEN"
 
+    def beaker_token_secret(self, workspace: str, dry_run: bool) -> str | None:
+        """Return the user's BEAKER_TOKEN secret if it exists in ``workspace``.
+
+        The secret is never created: it holds a personal Beaker token, and it only
+        enables cosmetic status updates. A dry run does not query Beaker.
+        """
+        from olmo_eval.launch.beaker.secrets import beaker_token_secret_name, secret_exists
+
+        name = beaker_token_secret_name(self.beaker.user_name)
+        enable_hint = (
+            f"To enable them, create the secret: beaker secret write --workspace {workspace} "
+            f"{name} <your Beaker token>"
+        )
+        if dry_run:
+            _console.print(
+                f"[dim]BEAKER_TOKEN will be injected from secret {name} if it exists in "
+                f"{workspace}; otherwise job status updates in the Beaker UI are disabled. "
+                "Not checked in a dry run.[/dim]"
+            )
+            return None
+        try:
+            exists = secret_exists(
+                self.beaker, name, workspace if workspace != self._workspace else None
+            )
+        except Exception as e:
+            log.debug(f"Could not check for Beaker secret {name}: {e}")
+            exists = False
+        if exists:
+            return name
+        _console.print(
+            f"[yellow]Warning:[/yellow] Secret {name} not found in {workspace}, so job status "
+            f"updates in the Beaker UI are disabled. {enable_hint}"
+        )
+        return None
+
     def _build_install_cmd(
         self,
         extras: list[str],
@@ -1084,10 +1119,12 @@ class BeakerLauncher:
             (secret.name, secret.secret) for secret in config.env_secrets
         ]
 
-        # Inject BEAKER_TOKEN so the running job can post status updates back to
-        # the workload description via BeakerStatusReporter.
+        # BEAKER_TOKEN lets the running job post status updates to the workload
+        # description via BeakerStatusReporter.
         if not any(name == "BEAKER_TOKEN" for name, _ in env_secrets):
-            env_secrets.append(("BEAKER_TOKEN", f"{self.beaker.user_name}_BEAKER_TOKEN"))
+            token_secret = self.beaker_token_secret(config.workspace, dry_run)
+            if token_secret:
+                env_secrets.append(("BEAKER_TOKEN", token_secret))
 
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:

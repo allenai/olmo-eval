@@ -45,10 +45,6 @@ def fetch_uploader_key() -> str:
         credentials, _ = google.auth.default(
             scopes=["https://www.googleapis.com/auth/cloud-platform"]
         )
-        # Bill the call to the uploader's project, so it works whatever quota project
-        # the user's local credentials carry.
-        if hasattr(credentials, "with_quota_project"):
-            credentials = credentials.with_quota_project(UPLOADER_PROJECT)
         response = AuthorizedSession(credentials).get(_SECRET_URL, timeout=30)
     except GoogleAuthError as e:
         raise UploaderKeyError(

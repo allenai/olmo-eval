@@ -231,6 +231,17 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="UV cache directory for package downloads (on Weka shared storage)",
 )
 @click.option(
+    "--hf-token/--no-hf-token",
+    "hf_token",
+    default=None,
+    help=(
+        "Inject HF_TOKEN from the Beaker secret <user>_HF_TOKEN, copying your local token "
+        "there if the secret is missing. Default: inject an existing secret, and copy the "
+        "local token only when a task declares HF_TOKEN or a model or dataset is gated or "
+        "private. --no-hf-token never injects it."
+    ),
+)
+@click.option(
     "--secret-env",
     multiple=True,
     help="Map Beaker secret to env var: BEAKER_SECRET:ENV_VAR (e.g., my-openai-key:OPENAI_API_KEY)",
@@ -294,6 +305,7 @@ def launch(
     eval_args: tuple[str, ...],
     provider_kwargs: tuple[str, ...],
     uv_cache_dir: str,
+    hf_token: bool | None,
     secret_env: tuple[str, ...],
     env_vars: tuple[str, ...],
     gpus: int | None,
@@ -373,12 +385,12 @@ def launch(
             parsed_env_vars[entry] = local_value
 
     from olmo_eval.upload import resolve_upload_config
-    from olmo_eval.upload.config import API_URL_ENV
+    from olmo_eval.upload.config import API_URL_ENV, upload_param_hint
 
     try:
         upload_config = resolve_upload_config(upload, api_url, tags)
     except ValueError as e:
-        raise click.BadParameter(str(e), param_hint="--tag") from None
+        raise click.BadParameter(str(e), param_hint=upload_param_hint(e)) from None
     job_api_url = api_url or _os.environ.get(API_URL_ENV) or None
 
     # Build CLI args dict
@@ -462,6 +474,7 @@ def launch(
             api_url=job_api_url,
             tags=list(upload_config.tags),
             secret_env_overrides=secret_env_overrides,
+            hf_token=hf_token,
             user_env_vars=parsed_env_vars,
             eval_args=parsed_eval_args if parsed_eval_args else None,
             provider_kwargs=parsed_provider_kwargs if parsed_provider_kwargs else None,
@@ -578,8 +591,12 @@ def launch(
                 all_required_secrets.update(sandbox.required_secrets)
 
     # Ensure secrets
-    common_secrets, task_secrets = _ensure_secrets(
-        launcher, dry_run, launch_config, all_required_secrets
+    common_secrets, task_secrets = _prepare_secrets(
+        launcher,
+        dry_run=dry_run,
+        all_required_secrets=all_required_secrets,
+        hf_token=hf_token,
+        hf_repos=_hf_repos(launch_config.model_specs, task_configs_by_spec.values()),
     )
 
     # Print summary header
@@ -765,42 +782,6 @@ def _require_upload_credentials(upload: bool, dry_run: bool) -> None:
     raise SystemExit(1)
 
 
-def _ensure_secrets(
-    launcher, dry_run: bool, launch_config, all_required_secrets: set[str]
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """Ensure required secrets exist."""
-    from olmo_eval.launch.beaker.secrets import (
-        COMMON_SECRET_NAMES,
-        ensure_common_secrets,
-        ensure_task_secrets,
-        get_local_hf_token,
-        get_local_wandb_api_key,
-    )
-
-    beaker_username = launcher.beaker.user_name
-
-    task_required_secrets = all_required_secrets - COMMON_SECRET_NAMES
-
-    if dry_run:
-        common_secrets = []
-        if get_local_hf_token():
-            common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
-        if get_local_wandb_api_key():
-            common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
-        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(task_required_secrets)]
-    else:
-        common_secrets = ensure_common_secrets(workspace=launch_config.workspace)
-        try:
-            task_secrets = ensure_task_secrets(
-                workspace=launch_config.workspace, required_secrets=task_required_secrets
-            )
-        except ValueError as e:
-            console.print(f"[red]Error:[/red] {e}")
-            raise SystemExit(1) from None
-
-    return common_secrets, task_secrets
-
-
 def _print_experiment_matrix(experiment_plan: list["ExperimentPlan"]) -> None:
     """Print experiment matrix table."""
     matrix_table = Table(show_header=True, title="Experiment Plan")
@@ -912,41 +893,117 @@ def _auto_generate_group(prefix: str, existing_groups: list[str]) -> list[str]:
     return [f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
 
 
+def _hf_repos(model_specs, task_configs=()) -> list[tuple[str, str]]:
+    """Collect the Hugging Face models and datasets a launch reads, for the gating check.
+
+    Values that are not Hugging Face repo ids (paths, s3:// or gs:// URIs, API model
+    names) are filtered out later by ``check_hf_access``.
+    """
+    from olmo_eval.common.configs import get_provider_config
+    from olmo_eval.data import DataSource
+    from olmo_eval.data.sources import SourceType
+
+    repos: list[tuple[str, str]] = []
+    for model_spec in model_specs:
+        repos.append((model_spec, "model"))
+        try:
+            provider_config = get_provider_config(model_spec)
+        except Exception:
+            continue
+        for repo in (provider_config.model, provider_config.tokenizer):
+            if repo:
+                repos.append((repo, "model"))
+    for task_cfg in task_configs:
+        for source in (
+            getattr(task_cfg, "data_source", None),
+            getattr(task_cfg, "fewshot_source", None),
+        ):
+            if isinstance(source, str):
+                try:
+                    source = DataSource.from_uri(source)
+                except Exception:
+                    continue
+            if isinstance(source, DataSource) and source.source_type == SourceType.HF:
+                repos.append((source.path, "dataset"))
+    return repos
+
+
 def _prepare_secrets(
+    launcher,
+    *,
     dry_run: bool,
-    workspace: str,
     all_required_secrets: set[str],
-    beaker_username: str,
+    hf_token: bool | None = None,
+    hf_repos: list[tuple[str, str]] | None = None,
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """Prepare common and task secrets for Beaker jobs.
 
+    The Hugging Face token is injected from an existing ``<user>_HF_TOKEN`` secret, and
+    the local token is copied there only when the job needs it (see ``plan_hf_token``).
+    A dry run neither reads nor writes Beaker secrets.
+
     Args:
-        dry_run: If True, return mock secrets without creating them.
-        workspace: Beaker workspace name.
+        launcher: BeakerLauncher whose client defaults to the job's workspace.
+        dry_run: If True, return the secrets that would be used without touching Beaker.
         all_required_secrets: Set of required secret environment variable names.
-        beaker_username: Beaker username for dry-run secret naming.
+        hf_token: ``--hf-token`` (True), ``--no-hf-token`` (False), or auto (None).
+        hf_repos: (repo_id, repo_type) pairs checked for gated or private access.
 
     Returns:
         Tuple of (common_secrets, task_secrets) as lists of (env_var, secret_name) tuples.
     """
     from olmo_eval.launch.beaker.secrets import (
         COMMON_SECRET_NAMES,
+        HF_TOKEN_ENV,
+        HfAccessCheck,
+        check_hf_access,
         ensure_common_secrets,
         ensure_task_secrets,
         get_local_hf_token,
-        get_local_wandb_api_key,
+        plan_hf_token,
+        secret_exists,
+        write_secret,
     )
 
+    beaker_username = launcher.beaker.user_name
+    workspace = launcher._workspace
     task_required_secrets = all_required_secrets - COMMON_SECRET_NAMES
+    local_hf_token = get_local_hf_token()
 
+    secret_present: bool | None = None
+    if not dry_run and hf_token is not False:
+        secret_present = secret_exists(launcher.beaker, f"{beaker_username}_{HF_TOKEN_ENV}")
+    # Skip the Hugging Face lookups when the answer cannot change the plan.
+    if hf_token is None and not secret_present:
+        access = check_hf_access(hf_repos or [], token=local_hf_token)
+    else:
+        access = HfAccessCheck()
+    plan = plan_hf_token(
+        username=beaker_username,
+        mode=hf_token,
+        secret_present=secret_present,
+        required=HF_TOKEN_ENV in all_required_secrets,
+        access=access,
+        have_local_token=local_hf_token is not None,
+    )
+    if plan.error:
+        if not dry_run:
+            console.print(f"[red]Error:[/red] {plan.error}")
+            raise SystemExit(1)
+        console.print(f"[yellow]Warning:[/yellow] {plan.error}")
+    elif plan.warning:
+        console.print(f"[yellow]Warning:[/yellow] {plan.message}")
+    elif plan.message:
+        console.print(f"[dim]{plan.message}[/dim]")
+
+    common_secrets: list[tuple[str, str]] = []
     if dry_run:
-        common_secrets: list[tuple[str, str]] = []
-        if get_local_hf_token():
-            common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
-        if get_local_wandb_api_key():
-            common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
+        # Jobs are not built in a dry run, so explain the BEAKER_TOKEN rule here.
+        launcher.beaker_token_secret(workspace, dry_run=True)
         task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(task_required_secrets)]
     else:
+        if plan.copy_local and local_hf_token:
+            write_secret(launcher.beaker, plan.secret_name, local_hf_token)
         common_secrets = ensure_common_secrets(workspace=workspace)
         try:
             task_secrets = ensure_task_secrets(
@@ -956,6 +1013,8 @@ def _prepare_secrets(
         except ValueError as e:
             console.print(f"[red]Error:[/red] {e}")
             raise SystemExit(1) from None
+    if plan.inject:
+        common_secrets.insert(0, (HF_TOKEN_ENV, plan.secret_name))
 
     return common_secrets, task_secrets
 
@@ -1005,6 +1064,7 @@ def _launch_external_evals(
     api_url: str | None = None,
     tags: list[str] | None = None,
     secret_env_overrides: dict[str, str] | None = None,
+    hf_token: bool | None = None,
     user_env_vars: dict[str, str] | None = None,
     eval_args: dict[str, str] | None = None,
     provider_kwargs: dict[str, str] | None = None,
@@ -1107,10 +1167,11 @@ def _launch_external_evals(
 
     # Prepare secrets (using shared helper)
     common_secrets, task_secrets = _prepare_secrets(
+        launcher,
         dry_run=dry_run,
-        workspace=effective_workspace,
         all_required_secrets=all_required_secrets,
-        beaker_username=beaker_username,
+        hf_token=hf_token,
+        hf_repos=_hf_repos(model),
     )
 
     # Build env secrets list

@@ -18,9 +18,12 @@ from olmo_eval.upload.auth import (
 )
 from olmo_eval.upload.config import (
     DEFAULT_API_URL,
+    InvalidApiUrl,
     UploadConfig,
     resolve_upload_config,
     retry_command,
+    upload_param_hint,
+    validate_api_url,
     validate_tags,
 )
 
@@ -55,10 +58,58 @@ def test_api_url_and_timeout_from_env(monkeypatch) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://prod-ingest.olmo-eval.apps.allenai.org",
+        "https://dev-ingest.example:8443/",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://[::1]:8000",
+    ],
+)
+def test_api_url_accepts_https_and_local_http(url) -> None:
+    assert validate_api_url(url) == url.rstrip("/")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://dev-ingest.example",
+        "http://localhost.evil.example",
+        "http://10.0.0.5:8000",
+        "ftp://ingest.example",
+        "prod-ingest.olmo-eval.apps.allenai.org",
+        "https://",
+    ],
+)
+def test_api_url_rejects_non_https(url) -> None:
+    with pytest.raises(InvalidApiUrl, match="https|Invalid"):
+        validate_api_url(url)
+
+
+def test_resolve_rejects_http_api_url_from_env(monkeypatch) -> None:
+    monkeypatch.delenv("OLMO_EVAL_UPLOAD", raising=False)
+    monkeypatch.setenv("OLMO_EVAL_API_URL", "http://ingest.example")
+    with pytest.raises(InvalidApiUrl, match="OLMO_EVAL_API_URL") as error:
+        resolve_upload_config()
+    assert upload_param_hint(error.value) == "--api-url"
+    # A disabled upload sends no token, so the URL does not block the run.
+    assert resolve_upload_config(cli_upload=False).enabled is False
+
+
+def test_client_rejects_http_api_url() -> None:
+    from olmo_eval.upload.client import IngestClient
+
+    with pytest.raises(InvalidApiUrl):
+        IngestClient("http://ingest.example", token_provider=None)  # type: ignore[arg-type]
+
+
 def test_tags_are_validated_and_deduplicated() -> None:
     assert validate_tags(["a", "b:c", "a"]) == ("a", "b:c")
-    with pytest.raises(ValueError, match="Invalid tag"):
+    with pytest.raises(ValueError, match="Invalid tag") as error:
         validate_tags(["has space"])
+    assert upload_param_hint(error.value) == "--tag"
     with pytest.raises(ValueError, match="At most"):
         validate_tags([f"t{i}" for i in range(51)])
 

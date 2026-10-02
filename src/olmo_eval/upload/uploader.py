@@ -434,14 +434,15 @@ def _upload_artifacts(client: IngestClient, plan: UploadPlan) -> list[str]:
         path = signed["path"]
         local = plan.artifact_files[path]
         try:
+            size = by_path[path]["size_bytes"]
             try:
-                client.put_signed(signed["url"], dict(signed.get("headers") or {}), local)
+                client.put_signed(signed["url"], dict(signed.get("headers") or {}), local, size)
             except SignedUrlRejected:
                 resigned = client.sign_artifacts(plan.run_id, {"artifacts": [by_path[path]]})
                 fresh = (resigned.get("uploads") or [{}])[0]
                 if fresh.get("skip"):
                     return None
-                client.put_signed(fresh["url"], dict(fresh.get("headers") or {}), local)
+                client.put_signed(fresh["url"], dict(fresh.get("headers") or {}), local, size)
         except (IngestError, OSError, KeyError) as e:
             return f"{path}: {e}"
         return None
@@ -649,6 +650,8 @@ class DryRunReport:
     instances: int
     errors: list[str]
     used_schema: bool
+    #: Why validation fell back to required keys only, or None with the full schema.
+    degraded_reason: str | None = None
 
 
 def dry_run(output_dir: str | Path, tags: Sequence[str] = ()) -> DryRunReport:
@@ -682,4 +685,4 @@ def dry_run(output_dir: str | Path, tags: Sequence[str] = ()) -> DryRunReport:
     if plan.inference is not None:
         errors += validator.errors("InferenceUploadRequest", plan.inference)
     errors += validator.errors("CompleteRequest", plan.complete)
-    return DryRunReport(plan, instances, errors, validator.uses_schema)
+    return DryRunReport(plan, instances, errors, validator.uses_schema, validator.degraded_reason)

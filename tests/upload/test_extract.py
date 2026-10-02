@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from olmo_eval.upload.extract import (
+    MAX_NATIVE_ID,
     batched,
     count_instances,
     find_task_file,
@@ -130,6 +131,34 @@ def test_multi_sample_flags_and_metric_filtering(tmp_path: Path) -> None:
     _assert_valid(rows)
 
 
+def test_multi_sample_counts_every_sample(tmp_path: Path) -> None:
+    preds = tmp_path / "p.jsonl"
+    records = multi_sample_predictions(2)
+    # Only the second sample of the first instance was truncated.
+    records[0]["model_output"][1]["finish_reason"] = "length"
+    records[0]["model_output"][2]["completion_tokens"] = 30
+    write_jsonl(preds, records)
+
+    rows = list(iter_instances(preds, None, "pass_at_1:code"))
+
+    assert rows[0]["completion_tokens"] == 12 + 12 + 30
+    assert rows[1]["completion_tokens"] == 3 * 12
+    assert rows[0]["finish_reason"] == "length"
+    assert rows[1]["finish_reason"] == "stop"
+    _assert_valid(rows)
+
+
+def test_multiple_choice_tokens_are_not_summed_over_choices(tmp_path: Path) -> None:
+    preds = tmp_path / "p.jsonl"
+    write_jsonl(preds, mc_predictions(1))
+
+    rows = list(iter_instances(preds, None, None))
+
+    assert rows[0]["num_outputs"] == 4
+    assert rows[0]["completion_tokens"] == 3
+    assert rows[0]["finish_reason"] is None
+
+
 def test_duplicate_native_ids_get_suffixes(tmp_path: Path) -> None:
     preds = tmp_path / "p.jsonl"
     reqs = tmp_path / "r.jsonl"
@@ -144,6 +173,28 @@ def test_duplicate_native_ids_get_suffixes(tmp_path: Path) -> None:
     assert [r["native_id"] for r in rows] == ["same", "same#2", "same#3"]
     # All three match the request by their original native_id.
     assert {r["req_offset"] for r in rows} == {0}
+
+
+def test_long_duplicate_native_ids_stay_unique_and_within_limit(tmp_path: Path) -> None:
+    preds = tmp_path / "p.jsonl"
+    long_a = "a" * 600
+    long_b = "a" * 600 + "b"  # same first 512 characters as long_a
+    ids = [long_a, long_a, long_b, "x", "x", "x#2", "a" * 510 + "#2"]
+    records = mc_predictions(len(ids))
+    for rec, native_id in zip(records, ids, strict=True):
+        rec["native_id"] = native_id
+    write_jsonl(preds, records)
+
+    rows = list(iter_instances(preds, None, None))
+    native_ids = [r["native_id"] for r in rows]
+
+    assert len(set(native_ids)) == len(native_ids)
+    assert all(1 <= len(n) <= MAX_NATIVE_ID for n in native_ids)
+    assert native_ids[0] == "a" * MAX_NATIVE_ID
+    assert native_ids[1] == "a" * (MAX_NATIVE_ID - 2) + "#2"
+    assert native_ids[2] == "a" * (MAX_NATIVE_ID - 2) + "#3"
+    assert native_ids[3:6] == ["x", "x#2", "x#2#2"]
+    _assert_valid(rows)
 
 
 def test_missing_native_id_falls_back_to_doc_id(tmp_path: Path) -> None:

@@ -199,6 +199,34 @@ def _judge_verdict(judge: Any) -> str | None:
     return None
 
 
+def _output_tokens(output: Mapping[str, Any]) -> int | None:
+    tokens = _nonneg_int(output.get("completion_tokens"))
+    if tokens is None:
+        tokens = _nonneg_int(output.get("num_tokens"))
+    return tokens
+
+
+def _unique_native_id(base: str, counts: dict[str, int], used: set[str]) -> str:
+    """Return ``base``, or ``base#<n>`` for repeats, unique among ``used``.
+
+    ``base`` is already at most MAX_NATIVE_ID characters. The suffix replaces its tail
+    when needed so the result stays within the limit, and a candidate that is already
+    taken (including by a literal id such as "x#2") moves on to the next number.
+    """
+    n = counts.get(base, 0)
+    while True:
+        n += 1
+        if n == 1:
+            candidate = base
+        else:
+            suffix = f"#{n}"
+            candidate = base[: MAX_NATIVE_ID - len(suffix)] + suffix
+        if candidate not in used:
+            counts[base] = n
+            used.add(candidate)
+            return candidate
+
+
 def build_instance_row(
     rec: Mapping[str, Any],
     native_id: str,
@@ -225,10 +253,20 @@ def build_instance_row(
             if isinstance(scorers, Mapping):
                 primary_score = _finite(scorers.get(scorer))
 
+    # For generated samples, count every sample, so pass@k tasks (num_outputs > 1)
+    # report all generated tokens and any truncated sample. The server sums
+    # completion_tokens and counts finish_reason == "length" per row for the task's
+    # token and truncation statistics. Multiple-choice outputs are one per choice, not
+    # samples, so they keep the first output's token count.
     finish_reason = out0.get("finish_reason")
-    completion_tokens = _nonneg_int(out0.get("completion_tokens"))
-    if completion_tokens is None:
-        completion_tokens = _nonneg_int(out0.get("num_tokens"))
+    samples = [o for o in outputs if "completion_tokens" in o or "finish_reason" in o]
+    if any(o.get("finish_reason") == "length" for o in samples):
+        finish_reason = "length"
+    if samples:
+        counted = [n for n in map(_output_tokens, samples) if n is not None]
+        completion_tokens = sum(counted) if counted else None
+    else:
+        completion_tokens = _output_tokens(out0)
     extracted = out0.get("extracted_answer")
     text = out0.get("text") or rec.get("final_output") or ""
     judge = rec.get("judge_result", out0.get("judge_result"))
@@ -275,16 +313,17 @@ def iter_instances(
 ) -> Iterator[dict[str, Any]]:
     """Yield one InstanceIn row per predictions line.
 
-    Duplicate native_ids within the file get "#2", "#3", ... suffixes so every row
-    has a unique key. Lines that are not JSON objects yield a minimal row so the
-    count matches count_instances().
+    native_ids are cut to MAX_NATIVE_ID characters, then duplicates within the file get
+    "#2", "#3", ... suffixes (within the limit) so every row has a unique key. Lines
+    that are not JSON objects yield a minimal row so the count matches count_instances().
     """
     by_native: dict[str, RequestRef] = {}
     by_doc: dict[int, RequestRef] = {}
     if requests_path is not None and requests_path.is_file():
         by_native, by_doc = index_requests(requests_path)
 
-    seen: dict[str, int] = {}
+    counts: dict[str, int] = {}
+    used: set[str] = set()
     line_number = 0
     for offset, line in _iter_lines(predictions_path):
         if not line.strip():
@@ -301,9 +340,8 @@ def iter_instances(
         original = str(raw_native) if raw_native is not None else None
         if original is None:
             original = f"doc_{doc_id}" if doc_id is not None else f"line_{line_number}"
-        seen[original] = seen.get(original, 0) + 1
-        native_id = original if seen[original] == 1 else f"{original}#{seen[original]}"
-        native_id = native_id[:MAX_NATIVE_ID] or f"line_{line_number}"
+        base = original[:MAX_NATIVE_ID] or f"line_{line_number}"
+        native_id = _unique_native_id(base, counts, used)
 
         request = by_native.get(original)
         if request is None and isinstance(doc_id, int) and not isinstance(doc_id, bool):

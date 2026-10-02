@@ -224,11 +224,12 @@ def run_external(
         raise SystemExit(1) from None
 
     from olmo_eval.upload import resolve_upload_config
+    from olmo_eval.upload.config import upload_param_hint
 
     try:
         upload_config = resolve_upload_config(upload, api_url, tags)
     except ValueError as e:
-        raise click.BadParameter(str(e), param_hint="--tag") from None
+        raise click.BadParameter(str(e), param_hint=upload_param_hint(e)) from None
 
     # Build metrics config (matches default harness preset)
     from olmo_eval.inference.metrics import MetricsConfig

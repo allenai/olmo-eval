@@ -7,6 +7,7 @@ import re
 import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 DEFAULT_API_URL = "https://prod-ingest.olmo-eval.apps.allenai.org"
 DEFAULT_TIMEOUT_S = 1800.0
@@ -21,6 +22,7 @@ UPLOAD_CREDENTIALS_ENV = "OLMO_EVAL_UPLOAD_CREDENTIALS"
 
 MAX_TAGS = 50
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,63}$")
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
@@ -81,6 +83,45 @@ def validate_tags(tags: Sequence[str]) -> tuple[str, ...]:
     return unique
 
 
+class InvalidApiUrl(ValueError):
+    """The ingest service URL is malformed or not https."""
+
+
+def validate_api_url(url: str) -> str:
+    """Check that the ingest service URL is safe to send a Google access token to.
+
+    The client sends a cloud-platform-scoped access token with every request, so the
+    URL must use https. Plain http is allowed only for localhost (local development).
+
+    Returns:
+        The URL without a trailing slash.
+
+    Raises:
+        InvalidApiUrl: If the URL is malformed or uses http for a non-local host.
+    """
+    url = url.strip().rstrip("/")
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError as e:
+        raise InvalidApiUrl(f"Invalid ingest service URL {url!r}: {e}") from None
+    if not host:
+        raise InvalidApiUrl(f"Invalid ingest service URL {url!r}: expected https://<host>")
+    if parts.scheme == "https":
+        return url
+    if parts.scheme == "http" and host in _LOCAL_HOSTS:
+        return url
+    raise InvalidApiUrl(
+        f"Ingest service URL {url!r} must use https (plain http is allowed only for "
+        f"localhost, 127.0.0.1 and ::1). Check --api-url or ${API_URL_ENV}."
+    )
+
+
+def upload_param_hint(error: ValueError) -> str:
+    """The CLI option to blame for an error from ``resolve_upload_config``."""
+    return "--api-url" if isinstance(error, InvalidApiUrl) else "--tag"
+
+
 def resolve_upload_config(
     cli_upload: bool | None = None,
     cli_api_url: str | None = None,
@@ -92,6 +133,10 @@ def resolve_upload_config(
         cli_upload: Value of --upload/--no-upload, or None when not passed.
         cli_api_url: Value of --api-url, or None when not passed.
         cli_tags: Values of --tag.
+
+    Raises:
+        InvalidApiUrl: If uploads are on and the API URL is not https (or local http).
+        ValueError: If a tag is malformed.
     """
     enabled = cli_upload if cli_upload is not None else env_upload_enabled()
     api_url = cli_api_url or os.environ.get(API_URL_ENV) or DEFAULT_API_URL
@@ -102,9 +147,12 @@ def resolve_upload_config(
             timeout_s = max(1.0, float(raw_timeout))
         except ValueError:
             timeout_s = DEFAULT_TIMEOUT_S
+    enabled = True if enabled is None else enabled
+    # Only an enabled upload sends a token, so a disabled one does not fail on the URL.
+    api_url = validate_api_url(api_url) if enabled else api_url.rstrip("/")
     return UploadConfig(
-        enabled=True if enabled is None else enabled,
-        api_url=api_url.rstrip("/"),
+        enabled=enabled,
+        api_url=api_url,
         tags=validate_tags(cli_tags),
         timeout_s=timeout_s,
     )

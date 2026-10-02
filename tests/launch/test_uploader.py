@@ -27,10 +27,14 @@ def _fetch(session: MagicMock) -> str:
     creds = MagicMock()
     with (
         patch("google.auth.default", return_value=(creds, None)),
-        patch("google.auth.transport.requests.AuthorizedSession", return_value=session),
+        patch(
+            "google.auth.transport.requests.AuthorizedSession", return_value=session
+        ) as authorized_session,
     ):
         key = fetch_uploader_key()
-    creds.with_quota_project.assert_called_once_with("ai2-skiff2-olmo-eval")
+    # Secret Manager bills the secret's project, so the caller's quota project is left alone.
+    authorized_session.assert_called_once_with(creds)
+    creds.with_quota_project.assert_not_called()
     return key
 
 

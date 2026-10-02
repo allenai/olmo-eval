@@ -93,7 +93,9 @@ class IngestClient:
         sleep: Callable[[float], None] = time.sleep,
         max_retries: int = len(BACKOFF_SECONDS),
     ) -> None:
-        self.api_url = api_url.rstrip("/")
+        from olmo_eval.upload.config import validate_api_url
+
+        self.api_url = validate_api_url(api_url)
         self._tokens = token_provider
         self._deadline = time.monotonic() + deadline_s if deadline_s is not None else None
         self._sleep = sleep
@@ -137,15 +139,38 @@ class IngestClient:
     def complete(self, run_id: str, body: dict[str, Any]) -> dict[str, Any]:
         return self._json("POST", f"/v1/runs/{run_id}/complete", body)
 
-    def put_signed(self, url: str, headers: dict[str, str], file_path: Path) -> None:
+    def put_signed(
+        self,
+        url: str,
+        headers: dict[str, str],
+        file_path: Path,
+        expected_size: int | None = None,
+    ) -> None:
         """Upload a file to a V4 signed URL, sending exactly the signed headers.
+
+        The body is the file, sent with an explicit Content-Length equal to its size
+        (never chunked), since the signature may cover the exact size.
+
+        Args:
+            url: Signed URL.
+            headers: Headers the URL was signed with.
+            file_path: File to upload.
+            expected_size: Size the URL was signed for. The upload fails without being
+                sent if the file has changed size since.
 
         Raises:
             SignedUrlRejected: On HTTP 400/403 (the caller re-signs once).
             IngestError: On any other failure after retries.
         """
         size = file_path.stat().st_size
+        if expected_size is not None and size != expected_size:
+            raise IngestError(
+                f"{file_path.name} changed size since it was signed "
+                f"({expected_size} -> {size} bytes); not uploading it"
+            )
         read_timeout = max(READ_TIMEOUT_S, size / 1_000_000 * 2)
+        send_headers = {k: v for k, v in headers.items() if k.lower() != "content-length"}
+        send_headers["Content-Length"] = str(size)
 
         def send() -> httpx.Response:
             with file_path.open("rb") as f:
@@ -153,7 +178,7 @@ class IngestClient:
                     "PUT",
                     url,
                     content=f,
-                    headers={**headers, "Content-Length": str(size)},
+                    headers=send_headers,
                     timeout=self._timeout(read_timeout),
                 )
 

@@ -47,6 +47,7 @@ def upload(directory: str, api_url: str | None, tags: tuple[str, ...], dry_run: 
     """
     from olmo_eval.common.logging import configure_logging
     from olmo_eval.upload import resolve_upload_config, upload_results_dir
+    from olmo_eval.upload.config import upload_param_hint
     from olmo_eval.upload.manifest import ManifestError
     from olmo_eval.upload.uploader import dry_run as run_dry_run
 
@@ -54,7 +55,7 @@ def upload(directory: str, api_url: str | None, tags: tuple[str, ...], dry_run: 
     try:
         config = resolve_upload_config(True, api_url, tags)
     except ValueError as e:
-        raise click.BadParameter(str(e), param_hint="--tag") from None
+        raise click.BadParameter(str(e), param_hint=upload_param_hint(e)) from None
 
     if dry_run:
         try:
@@ -72,6 +73,11 @@ def upload(directory: str, api_url: str | None, tags: tuple[str, ...], dry_run: 
         checked = "contract schema" if report.used_schema else "required keys only"
         for warning in plan.warnings:
             echo(f"[yellow]Warning:[/yellow] {warning}")
+        if report.degraded_reason:
+            echo(
+                "[yellow]Warning:[/yellow] Checked required keys only, not the full "
+                f"contract schema: {report.degraded_reason}"
+            )
         if report.errors:
             echo(f"[red]{len(report.errors)} validation error(s) ({checked}):[/red]")
             for error in report.errors[:50]:

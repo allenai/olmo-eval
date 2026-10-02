@@ -2,8 +2,13 @@
 
 The full JSON Schema lives in the repository at
 ``dashboard/contract/ingest-v1.schema.json``. When it and ``jsonschema`` are
-available, payloads are validated against it; otherwise only required keys are
-checked.
+available, payloads are validated against it. Otherwise (an installed package
+outside a checkout, or no ``jsonschema``) only required keys are checked: this
+degraded mode is logged once and reported by ``PayloadValidator.degraded_reason``.
+
+The schema is not packaged with olmo-eval: ``jsonschema`` is a dev-only
+dependency, so a packaged copy would not enable full validation by itself, and a
+second copy could drift from the contract.
 """
 
 from __future__ import annotations
@@ -13,6 +18,10 @@ from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from olmo_eval.common.logging import get_logger
+
+logger = get_logger("upload.validation")
 
 SCHEMA_RELATIVE_PATH = Path("dashboard") / "contract" / "ingest-v1.schema.json"
 
@@ -66,11 +75,41 @@ def _validator_for(schema_path: str | None, definition: str) -> Any:
     return jsonschema.Draft7Validator(wrapper, format_checker=jsonschema.FormatChecker())
 
 
+@lru_cache(maxsize=8)
+def _warn_degraded(reason: str) -> None:
+    """Log the degraded-mode warning once per reason."""
+    logger.warning(f"Upload payloads are checked for required keys only: {reason}")
+
+
+def _jsonschema_available() -> bool:
+    try:
+        import jsonschema  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 class PayloadValidator:
     """Validates payloads by contract definition name."""
 
     def __init__(self, schema_path: Path | None = None) -> None:
         self.schema_path = schema_path if schema_path is not None else find_contract_schema()
+        reason = self.degraded_reason
+        if reason:
+            _warn_degraded(reason)
+
+    @property
+    def degraded_reason(self) -> str | None:
+        """Why full schema validation is unavailable, or None when it is used."""
+        if self.schema_path is None:
+            return (
+                f"contract schema {SCHEMA_RELATIVE_PATH.as_posix()} not found above the "
+                "working directory or the olmo-eval package (run from a repository checkout "
+                "for full validation)"
+            )
+        if not _jsonschema_available():
+            return "jsonschema is not installed (pip install jsonschema for full validation)"
+        return None
 
     @property
     def uses_schema(self) -> bool:
