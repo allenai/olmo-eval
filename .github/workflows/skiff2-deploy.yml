@@ -61,3 +61,31 @@ jobs:
               with:
                   project_id: ${{ vars.SKIFF2_PROJECT_ID }}
                   command: apply
+
+            # Cloud Run accepts a revision before the app has run its migrations, so check the live
+            # services: ingest must report this commit with a working database, and the dashboard
+            # (behind IAP) must redirect to Google sign-in.
+            - name: Smoke test
+              if: github.ref_name == 'main'
+              env:
+                  SHA: ${{ github.sha }}
+              run: |
+                  url=https://prod-ingest.olmo-eval.apps.allenai.org/health
+                  for _ in $(seq 60); do
+                      body="$(curl -sf --max-time 10 "$url" || true)"
+                      if [ "$(jq -r '"\(.git_sha) \(.db)"' <<< "$body" 2>/dev/null)" = "$SHA ok" ]; then
+                          echo "ingest: $body"
+                          ok=1
+                          break
+                      fi
+                      sleep 10
+                  done
+                  if [ -z "${ok:-}" ]; then
+                      echo "::error::$url did not report $SHA with db ok within 10 minutes. Last response: ${body:-none}"
+                      exit 1
+                  fi
+                  result="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 10 https://olmo-eval.allen.ai/)"
+                  case "$result" in
+                      302\ https://accounts.google.com/*) echo "dashboard: redirects to Google sign-in" ;;
+                      *) echo "::error::https://olmo-eval.allen.ai/ returned '$result', expected a 302 to Google sign-in"; exit 1 ;;
+                  esac

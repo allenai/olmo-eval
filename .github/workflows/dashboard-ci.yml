@@ -4,13 +4,11 @@ on:
         branches: [main]
         paths:
             - dashboard/**
-            - infra/terraform/**
             - .github/workflows/dashboard-ci.yml
     push:
         branches: [main]
         paths:
             - dashboard/**
-            - infra/terraform/**
             - .github/workflows/dashboard-ci.yml
 
 permissions:
@@ -84,17 +82,15 @@ jobs:
             - run: npm run contract:check
             - run: npm run build
 
-    terraform:
-        name: Terraform
+    # Builds the same images the Skiff2 deploy builds (context dashboard/), so a broken
+    # Dockerfile fails here instead of in the deploy on main. Nothing is pushed.
+    images:
+        name: Docker images
         runs-on: ubuntu-latest
-        defaults:
-            run:
-                working-directory: infra/terraform
         steps:
             - uses: actions/checkout@v6
-            - uses: hashicorp/setup-terraform@v4
-              with:
-                  terraform_version: "1.16.x"
-            - run: terraform fmt -check -recursive
-            - run: terraform init -backend=false -input=false
-            - run: terraform validate
+            - uses: docker/setup-buildx-action@v4
+            - name: Build ui image
+              run: docker buildx build -f dashboard/ui/Dockerfile dashboard
+            - name: Build api image
+              run: docker buildx build -f dashboard/api/Dockerfile --build-arg API_MODE=ingest dashboard

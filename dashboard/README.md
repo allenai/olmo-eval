@@ -112,10 +112,11 @@ licensed font and this repo is public, so never commit the `.otf` files (they ar
 downloads the Telegraf fonts from `gs://ai2-skiff2-olmo-eval-build-assets/fonts/`, builds one
 image per container (`ui`, `api`, `ingest`), and deploys them with Skiff2's Terraform. The API runs
 migrations at startup under a Postgres advisory lock, and the startup probe holds traffic until
-they finish.
+they finish. A final smoke test fails the deploy unless the prod ingest service's `/health`
+reports the merged commit with a working database, and the dashboard redirects to Google sign-in.
 
 Pull requests get a Skiff2 Terraform plan (`skiff2-plan.yml`) and the dashboard checks
-(`dashboard-ci.yml`).
+(`dashboard-ci.yml`: API and UI tests, plus Docker builds of both images).
 
 Containers need no secrets. Configuration comes from code defaults keyed on `SKIFF_ENV`, which
 Cloud Run sets on every container. To allow another service account to upload, create the Secret
@@ -131,6 +132,11 @@ account has no project-wide secret access.
 `gs://ai2-skiff2-olmo-eval-tf-state` under the prefix `terraform/olmo-eval`. Skiff2 owns the
 `terraform/infra` and `terraform/services` prefixes and the resources in them (load balancer,
 certificates, Cloud Armor, the `github-actions` service account, Workload Identity Federation).
+
+`.github/workflows/terraform.yml` deploys it continuously: pull requests that touch
+`infra/terraform` get a `terraform plan` against the real project in the job summary, and merging
+to `main` runs `terraform apply`. Both run as Skiff2's `github-actions` service account. To apply
+by hand instead:
 
 ```bash
 cd infra/terraform
