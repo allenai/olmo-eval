@@ -196,6 +196,7 @@ def compute_metrics(results: list[InstanceResult]) -> dict[str, float]:
         "num_resolved": float(sum(r.resolved for r in results)),
         "num_instances": float(n),
         "patch_apply_rate": rate([r.grade.patch_applied for r in results]),
+        "tests_ran_rate": rate([r.grade.tests_ran for r in results]),
         "empty_patch_rate": rate([r.grade.empty_patch for r in results]),
         "error_rate": rate([r.error is not None for r in results]),
     }
@@ -415,7 +416,8 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
 
         logger.info(
             f"[{instance.instance_id}] resolved={result.resolved} "
-            f"applied={result.grade.patch_applied} reason={result.completion_reason}"
+            f"applied={result.grade.patch_applied} tests_ran={result.grade.tests_ran} "
+            f"reason={result.completion_reason} error={result.error or result.grade.error}"
         )
         return result
 
@@ -497,6 +499,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 "difficulty": r.difficulty,
                 "resolved": r.resolved,
                 "patch_applied": r.grade.patch_applied,
+                "tests_ran": r.grade.tests_ran,
                 "empty_patch": r.grade.empty_patch,
                 "completion_reason": r.completion_reason,
                 "agent_duration": r.agent_duration,

@@ -188,7 +188,7 @@ class TestMetrics(unittest.TestCase):
                 instance_id="a",
                 repo="a/a",
                 difficulty="<15 min fix",
-                grade=swe_grader.GradeResult(resolved=True, patch_applied=True),
+                grade=swe_grader.GradeResult(resolved=True, patch_applied=True, tests_ran=True),
             ),
             swe_eval.InstanceResult(
                 instance_id="b",
@@ -203,6 +203,7 @@ class TestMetrics(unittest.TestCase):
         self.assertEqual(metrics["resolve_rate"], 0.5)
         self.assertEqual(metrics["num_resolved"], 1.0)
         self.assertEqual(metrics["patch_apply_rate"], 0.5)
+        self.assertEqual(metrics["tests_ran_rate"], 0.5)
         self.assertEqual(metrics["empty_patch_rate"], 0.5)
         self.assertEqual(metrics["error_rate"], 0.5)
         self.assertEqual(metrics["resolve_rate_repo_a_a"], 1.0)
@@ -246,6 +247,7 @@ class TestGradeInSandbox(unittest.TestCase):
         )
         self.assertTrue(grade.resolved)
         self.assertTrue(grade.patch_applied)
+        self.assertTrue(grade.tests_ran)
         self.assertIsNone(grade.error)
         self.assertEqual(executor.files["/tmp/patch.diff"], GOLD_PATCH)
         self.assertEqual(executor.files["/eval.sh"], EVAL_SCRIPT)
@@ -286,7 +288,22 @@ class TestGradeInSandbox(unittest.TestCase):
             swe_grader.grade_in_sandbox(executor, _instance(), GOLD_PATCH, timeout=1)  # type: ignore[arg-type]
         )
         self.assertEqual(grade.error, "eval_timeout")
+        self.assertTrue(grade.patch_applied)
         self.assertFalse(grade.resolved)
+
+    def test_unreadable_test_log_is_applied_but_not_run(self) -> None:
+        executor = FakeExecutor(
+            [
+                ("/bin/bash /eval.sh", _ok("eval exit code: 2")),
+                ("cat /tmp/eval_output.log", _ok("ImportError: cannot import name")),
+            ]
+        )
+        grade = asyncio.run(
+            swe_grader.grade_in_sandbox(executor, _instance(), GOLD_PATCH, timeout=60)  # type: ignore[arg-type]
+        )
+        self.assertTrue(grade.patch_applied)
+        self.assertFalse(grade.tests_ran)
+        self.assertEqual(grade.error, "test_log_unparsed")
 
     def test_empty_patch_is_not_run(self) -> None:
         executor = FakeExecutor([])

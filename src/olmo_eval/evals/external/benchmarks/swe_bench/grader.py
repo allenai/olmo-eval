@@ -45,7 +45,8 @@ class GradeResult:
 
     Attributes:
         resolved: Whether every FAIL_TO_PASS and PASS_TO_PASS test passes.
-        patch_applied: Whether the patch applied and the test log could be parsed.
+        patch_applied: Whether the patch applied to a fresh checkout.
+        tests_ran: Whether the test log showed a test run the grader could read.
         empty_patch: Whether the prediction contained no changes.
         tests_status: Upstream per-test report, when the log was parsed.
         test_output: Tail of the eval script output.
@@ -54,6 +55,7 @@ class GradeResult:
 
     resolved: bool = False
     patch_applied: bool = False
+    tests_ran: bool = False
     empty_patch: bool = False
     tests_status: dict[str, Any] = field(default_factory=dict)
     test_output: str = ""
@@ -77,7 +79,7 @@ def grade_log(
     """Grade an eval script log with the upstream ``swebench`` grader.
 
     Returns:
-        Tuple of (resolved, log_parsed, tests_status).
+        Tuple of (resolved, tests_ran, tests_status).
     """
     from swebench.harness.grading import get_eval_report
     from swebench.harness.utils import make_test_spec
@@ -198,14 +200,15 @@ async def grade_in_sandbox(
     )
     log = await executor.execute_command(f"cat {EVAL_LOG_PATH}", timeout=300.0)
     if "eval exit code:" not in run.output:
-        return GradeResult(test_output=_tail(log.output), error="eval_timeout")
+        return GradeResult(patch_applied=True, test_output=_tail(log.output), error="eval_timeout")
 
     test_log = log.output
-    resolved, parsed, tests_status = grade_log(instance, patch, test_log)
+    resolved, tests_ran, tests_status = grade_log(instance, patch, test_log)
     return GradeResult(
         resolved=resolved,
-        patch_applied=parsed,
+        patch_applied=True,
+        tests_ran=tests_ran,
         tests_status=tests_status,
         test_output=_tail(test_log),
-        error=None if parsed else "test_log_unparsed",
+        error=None if tests_ran else "test_log_unparsed",
     )
