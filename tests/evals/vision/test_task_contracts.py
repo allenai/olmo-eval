@@ -193,7 +193,9 @@ class TestLimitLeftToRunner:
 class TestJudgeScorersOutsideTaskHash:
     """A per-process cache dir must not make every run of a task a different config."""
 
-    @pytest.mark.parametrize("name", ["charxiv_descriptive", "charxiv_reasoning", "math_vista"])
+    @pytest.mark.parametrize(
+        "name", ["charxiv_descriptive", "charxiv_reasoning", "math_vista", "scimdr_eval"]
+    )
     def test_task_hash_is_stable_across_constructions(self, name):
         first = compute_task_hash(get_task(name).config.to_dict())
         second = compute_task_hash(get_task(name).config.to_dict())
