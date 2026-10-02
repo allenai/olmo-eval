@@ -111,8 +111,9 @@ def _load_subset(config: str):
             ds = datasets.load_dataset(local, config, split="test")
         else:
             ds = datasets.load_dataset(HF_REPO, config, split="test", revision=HF_REVISION)
-    ds = ds.cast_column("query_image", datasets.Image(decode=False))
-    return ds.cast_column("retrieved_images", datasets.Sequence(datasets.Image(decode=False)))
+    # No cast to undecoded images: casting a multi-GB image column concatenates it into one
+    # Arrow array, past its 2 GB offset limit. Images are read from Arrow as raw bytes instead.
+    return ds
 
 
 def _has_bytes(images) -> list[bool]:
@@ -148,15 +149,18 @@ def _present_query_images(dataset) -> list[bool]:
     return present
 
 
-def _decode(record: Any):
+def _decode(record: dict[str, Any]):
     from PIL import Image
 
     return Image.open(io.BytesIO(record["bytes"]))
 
 
 def _load_images(dataset, index: int, tile_ranks: tuple[int, ...], with_query: bool) -> list:
-    """The query image (if any) then the row's tiles, decoded (module-level so it is picklable)."""
-    row = dataset[index]
+    """The query image (if any) then the row's tiles, decoded (module-level so it is picklable).
+
+    The row is read from the Arrow table, so only the images sent are decoded.
+    """
+    row = dataset.data.slice(index, 1).select(["query_image", "retrieved_images"]).to_pylist()[0]
     images = [_decode(row["query_image"])] if with_query else []
     return images + [_decode(row["retrieved_images"][rank]) for rank in tile_ranks]
 
