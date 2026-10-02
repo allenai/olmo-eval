@@ -1,9 +1,4 @@
-"""Per-task counts of generations that did not end cleanly.
-
-A score computed over truncated, empty or never-concluded generations reads the
-same as one over complete answers. These counts sit beside every score so that
-a budget or template defect is visible where the score is read.
-"""
+"""Per-task counts of generations that did not end cleanly."""
 
 from __future__ import annotations
 
@@ -25,24 +20,11 @@ _THINK_CLOSE = "</think>"
 
 
 def count_generations(responses: Sequence[Response]) -> dict[str, int] | None:
-    """Count how the generated outputs of a task ended.
+    """Count how a task's generated outputs ended; None if it generated nothing.
 
-    Call after thinking traces are stripped, so ``empty`` means no answer was
-    left to score. Keys:
-
-    - ``generations``: generated outputs counted (the denominator).
-    - ``cap_hit``: the provider stopped at the token limit
-      (``finish_reason == "length"``).
-    - ``empty``: no non-whitespace text and no tool calls left to score.
-    - ``unclosed_think``: the generation opened a ``<think>`` block and never
-      closed it. A block opened by the chat template instead leaves no opening
-      tag in the output; when such a trace is cut off it shows up as ``cap_hit``.
-    - ``finish_reason_unknown``: the provider did not report why generation
-      stopped, so ``cap_hit`` is a lower bound.
-
-    Returns:
-        The counts, or None when the task produced no generated outputs
-        (e.g. loglikelihood tasks).
+    Call after thinking traces are stripped. ``unclosed_think`` sees only a
+    ``<think>`` the model wrote itself; a template-opened trace that is cut off
+    counts as ``cap_hit``, which is a lower bound when the finish reason is unknown.
     """
     counts = dict.fromkeys(GENERATION_COUNT_KEYS, 0)
     for response in responses:
@@ -72,11 +54,7 @@ def count_generations(responses: Sequence[Response]) -> dict[str, int] | None:
 def sum_generation_counts(
     task_results: Mapping[str, Mapping[str, Any]], task_specs: Sequence[str]
 ) -> dict[str, int] | None:
-    """Sum the counts of the given tasks, e.g. the members of a suite average.
-
-    Returns:
-        The summed counts, or None when none of the tasks carries counts.
-    """
+    """Sum the counts of the given tasks; None if none carries counts."""
     total = dict.fromkeys(GENERATION_COUNT_KEYS, 0)
     found = False
     for spec in task_specs:

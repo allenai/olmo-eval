@@ -42,9 +42,7 @@ class TaskResult:
     instances_processed: int = 0
     instances_failed: int = 0
     hard_failure_rate_exceeded: bool = False
-    # How the saved generations ended (cap-hit, empty, unclosed thinking trace);
-    # see olmo_eval.runners.processing.generation_counts. None for tasks that
-    # generate nothing, such as loglikelihood tasks.
+    # See olmo_eval.runners.processing.generation_counts.
     generation_counts: dict[str, int] | None = None
 
     @property

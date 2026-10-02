@@ -1,10 +1,4 @@
-"""Tests for per-task generation counts (cap-hit / empty / unclosed think).
-
-A reasoning model whose budget runs out mid-trace scores near zero on that
-instance, and nothing errors, so these counts must reach every surface a score
-is read from: the task completion line, the summary table, metrics.json, the
-stored task row and suite averages.
-"""
+"""Tests for per-task generation counts."""
 
 from __future__ import annotations
 
@@ -68,14 +62,13 @@ def _reasoning_batch() -> list[Response]:
     """One of each outcome, in the shapes a thinking model produces."""
     return _stripped(
         [
-            # Clean: trace closed, answer after it.
+            # Clean.
             _response(("<think>plan</think>\nFinal answer.", "stop")),
-            # Budget ran out mid-trace; the template opened the trace, so the
-            # output carries no <think> of its own.
+            # Cut off in a template-opened trace.
             _response(("step 1, step 2, step 3", "length")),
-            # The model opened a trace itself and was cut off inside it.
+            # Cut off in a trace the model opened.
             _response(("<think>still thinking", "length")),
-            # Trace closed, nothing after it.
+            # Empty answer.
             _response(("<think>plan</think>\n  ", "stop")),
         ]
     )
@@ -116,11 +109,6 @@ def _aggregate(result, spec: str = SPEC) -> dict[str, Any]:
         provider_config=provider_config,
         attention_backend=None,
     )
-
-
-# ---------------------------------------------------------------------------
-# Counting
-# ---------------------------------------------------------------------------
 
 
 def test_counts_each_outcome() -> None:
@@ -188,11 +176,6 @@ def test_format_lists_every_count_and_flags_unknown_only_when_present() -> None:
         count_generations([_response(("answer", None))])
     )
     assert format_generation_counts(None) == "-"
-
-
-# ---------------------------------------------------------------------------
-# Every surface a score is read from
-# ---------------------------------------------------------------------------
 
 
 def test_compute_task_metrics_attaches_counts() -> None:
@@ -268,11 +251,6 @@ def test_stored_task_row_carries_counts() -> None:
 
     assert row.generation_counts is not None
     assert row.generation_counts["cap_hit"] == 2
-
-
-# ---------------------------------------------------------------------------
-# Suite averages
-# ---------------------------------------------------------------------------
 
 
 def _task_data(cap_hit: int, generations: int) -> dict[str, Any]:
