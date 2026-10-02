@@ -758,6 +758,15 @@ system_prompt_style=style_and_length_v2`) gets the OCR style tag it was trained 
 The OCR datasets are downloaded from the Hugging Face Hub at pinned revisions rather
 than read from `$MOLMO_DATA_DIR`.
 
+[GEOBench-VLM](https://github.com/The-AI-Alliance/GEO-Bench-VLM) (geospatial
+multiple choice) asks each question with each of its five paraphrased prompts, using the
+official instruction and first-letter answer rule. `geobench_vlm` covers the single-image
+tasks and `geobench_vlm_temporal` the pre/post-image tasks. Each reports per-task accuracy
+and `average`, the unweighted mean over tasks. The release leaves out the xBD imagery behind
+the disaster-type and damaged-building tasks, so these tasks skip them. The `_full` variants
+add them back from an xBD download named by `$GEOBENCH_XBD_DIR`. The data comes from the Hub
+at a pinned revision.
+
 ### Setup
 
 The multimodal providers live behind the `hf` and `olmo_core_vlm` extras, and the
