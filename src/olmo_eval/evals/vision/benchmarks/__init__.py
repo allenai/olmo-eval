@@ -15,6 +15,7 @@ from olmo_eval.evals.vision.benchmarks import dense_caption as _dense_caption  #
 from olmo_eval.evals.vision.benchmarks import doc_qa as _doc_qa  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import info_qa as _info_qa  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import math_vista as _math_vista  # noqa: F401
+from olmo_eval.evals.vision.benchmarks import micro_bench as _micro_bench  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import mmiu as _mmiu  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import mmmu as _mmmu  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import mmmu_pro as _mmmu_pro  # noqa: F401
