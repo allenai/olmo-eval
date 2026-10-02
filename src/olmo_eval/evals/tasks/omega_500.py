@@ -167,6 +167,7 @@ class Omega500(Task):
         AccuracyMetric(name="exact_match_flex", scorer=_FLEX),
     )
     primary_metric = AccuracyMetric(name="exact_match_flex", scorer=_FLEX)
+    answer_scorer: OmegaExactMatchScorer = _STRICT
     strip_thinking = True
     # Defaults mirror oe-eval's ``omega_500:0-shot-chat_deepseek`` — the
     # OLMO_3 suite entry and the config the parity certification ran on.
@@ -201,10 +202,7 @@ class Omega500(Task):
         return self.config.formatter.format(instance, self.get_fewshot())
 
     def extract_answer(self, output: LMOutput) -> str:
-        metric = self.config.get_primary_metric()
-        scorer = getattr(metric, "scorer", None)
-        assert isinstance(scorer, OmegaExactMatchScorer)
-        return scorer.extract(output.text or "").answer
+        return self.answer_scorer.extract(output.text or "").answer
 
 
 @register("omega_500:hillclimb")
@@ -221,6 +219,7 @@ class Omega500HillClimb(Omega500):
         AccuracyMetric(name="exact_match_flex", scorer=_REPAIRED_FLEX),
     )
     primary_metric = AccuracyMetric(name="exact_match", scorer=_REPAIRED_STRICT)
+    answer_scorer = _REPAIRED_STRICT
     sampling_params = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:

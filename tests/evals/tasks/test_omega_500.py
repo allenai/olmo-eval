@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import dataclasses
 import unittest
+from unittest import mock
 
 import pytest
 
-from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.common.types import Instance, LMOutput, MetricName, RequestType
 from olmo_eval.evals.tasks import omega_500
 from olmo_eval.evals.tasks.common import get_task
 from olmo_eval.evals.tasks.omega_500 import _FLEX, _STRICT
@@ -171,6 +173,12 @@ class TestOmegaRepairedExtraction(unittest.TestCase):
         output = LMOutput(text="The answer is: 42")
         self.assertEqual(get_task("omega_500:hillclimb").extract_answer(output), "42")
         self.assertEqual(get_task("omega_500").extract_answer(output), ": 42")
+
+    def test_extract_answer_does_not_depend_on_the_primary_metric(self) -> None:
+        task = get_task("omega_500:hillclimb")
+        config = dataclasses.replace(task.config, primary_metric=MetricName.ACCURACY)
+        with mock.patch.object(task, "config", config):
+            self.assertEqual(task.extract_answer(LMOutput(text="The answer is: 42")), "42")
 
     def test_reference_task_keeps_reference_extraction(self) -> None:
         """omega_500 stays comparable with oe-eval's published numbers."""
