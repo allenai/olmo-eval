@@ -703,9 +703,9 @@ Five families of image tasks are built in:
 | --- | --- | --- |
 | Image-QA | `molmo2_imageqa` | `chart_qa`, `vqa2`, `doc_qa`, `info_qa`, `text_vqa`, `real_world_qa`, `mmmu`, `mmmu_pro`, `math_vista`, `countbench_qa`, `pixmo_count`, `ai2d`, `charxiv_descriptive`, `charxiv_reasoning` |
 | Dense caption | `molmo2_imageqa_caption` | the image-QA tasks plus `dense_caption` |
-| Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
-| Pointing (model prompts) | `molmo2_pointing_mp` | `pixmo_points_eval_mp`, `sa_co_gold_subset_mp`, `sa_co_gold_point_4k_mp` |
-| Pointing (MolmoPoint) | `molmopoint` | `point_bench`, `screen_spot_v2`, `screen_spot_pro`, `os_world_g` (and `os_world_g_refined`) |
+| Pointing | `pointing` | `pixmo_points_eval`, `sa_co_gold_subset`, `point_bench` |
+| Pointing (model prompts) | `pointing_mp` | `pixmo_points_eval_mp`, `sa_co_gold_subset_mp`, `sa_co_gold_point_4k_mp` |
+| GUI pointing | `gui_pointing` | `screen_spot_v2`, `screen_spot_pro`, `os_world_g` (and `os_world_g_refined`) |
 | Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
 | Document OCR, English (default for Molmo2) | `ocr_en` | `olmocr_bench`, `cc_ocr_multi_scene_en`, `omnidocbench_en` |
 | Document OCR, every language | `ocr` | `olmocr_bench`, `cc_ocr_multi_scene`, `omnidocbench` |
@@ -719,7 +719,7 @@ per instance (capped at 20, matching the mm_olmo eval config) and score multiple
 choice answers by MMMU-style option-letter parsing; besides the primary `all`
 accuracy each task reports per-category breakdowns (MuirBench's 12 task types,
 BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
-The MolmoPoint pointing tasks follow each benchmark's official scoring: the GUI tasks count a click
+Point-Bench and the GUI pointing tasks follow each benchmark's official scoring: the GUI tasks count a click
 correct when the first predicted point lands in the target (a box, an OSWorld-G polygon, or
 no point at all for OSWorld-G's refusals) and report accuracy over all instances; Point-Bench
 scores the first point (every point, plus the expected count, for `counting`) against the
@@ -822,7 +822,7 @@ uv run olmo-eval run -m molmo2-4b -t molmo2_imageqa
 uv run olmo-eval run -m molmo2-4b -t mmmu_pro
 
 # Pointing benchmarks
-uv run olmo-eval run -m molmo2-4b -t molmo2_pointing
+uv run olmo-eval run -m molmo2-4b -t pointing
 
 # Multi-image benchmarks
 uv run olmo-eval run -m molmo2-4b -t molmo2_multiimage

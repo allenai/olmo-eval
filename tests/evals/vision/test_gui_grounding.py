@@ -222,9 +222,13 @@ class TestPromptsAndRegistration:
             == "pointing: Point to x."
         )
 
-    def test_molmopoint_suite(self):
-        assert set(get_suite("molmopoint").tasks) == {
+    def test_pointing_suites(self):
+        assert set(get_suite("pointing").tasks) == {
+            "pixmo_points_eval",
+            "sa_co_gold_subset",
             "point_bench",
+        }
+        assert set(get_suite("gui_pointing").tasks) == {
             "screen_spot_v2",
             "screen_spot_pro",
             "os_world_g",

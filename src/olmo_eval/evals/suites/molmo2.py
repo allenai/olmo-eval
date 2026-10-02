@@ -36,37 +36,6 @@ make_suite(
     description="Molmo2's image-QA benchmarks plus PixMo-Cap dense caption (GPT judge).",
 )
 
-# Image-pointing benchmarks — point-in-mask precision/recall/f1, not VQA-style answers.
-MOLMO2_POINTING_TASKS = (
-    "pixmo_points_eval",
-    "sa_co_gold_subset",
-)
-
-make_suite(
-    "molmo2_pointing",
-    MOLMO2_POINTING_TASKS,
-    aggregation=AggregationStrategy.AVERAGE,
-    description="Molmo2's image-pointing benchmarks (primary metric is f1, 0-1).",
-)
-
-# The mm_olmo `_mp` variants: same scoring, but the prompt is built from a bare label by
-# the model's own formatter, so it follows the checkpoint (see `vision.scoring.prompts`).
-MOLMO2_POINTING_MP_TASKS = (
-    "pixmo_points_eval_mp",
-    "sa_co_gold_subset_mp",
-    "sa_co_gold_point_4k_mp",
-)
-
-# `sa_co_gold_point_mp` (the unsampled 166,766-example gold set) is registered but kept out
-# of the suite: it is ~6x the 4k variant and measures the same thing.
-
-make_suite(
-    "molmo2_pointing_mp",
-    MOLMO2_POINTING_MP_TASKS,
-    aggregation=AggregationStrategy.AVERAGE,
-    description="Molmo2's image-pointing benchmarks with mm_olmo's model-prompt (_mp) inputs.",
-)
-
 # Multi-image benchmarks — each instance carries a list of images, scored by the mm_olmo
 # MuirBenchEval-family protocol (option-letter accuracy).
 MOLMO2_MULTI_IMAGE_TASKS = (
@@ -80,21 +49,4 @@ make_suite(
     MOLMO2_MULTI_IMAGE_TASKS,
     aggregation=AggregationStrategy.AVERAGE,
     description="Molmo2's multi-image benchmarks (primary metrics are accuracy, 0-1).",
-)
-
-
-# MolmoPoint's pointing benchmarks: Point-Bench (natural images) and GUI click pointing.
-# All primary metrics are 0-1 success rates.
-MOLMOPOINT_TASKS = (
-    "point_bench",
-    "screen_spot_v2",
-    "screen_spot_pro",
-    "os_world_g",
-)
-
-make_suite(
-    "molmopoint",
-    MOLMOPOINT_TASKS,
-    aggregation=AggregationStrategy.AVERAGE,
-    description="MolmoPoint's pointing benchmarks: Point-Bench, ScreenSpot-v2/-Pro, OSWorld-G.",
 )
