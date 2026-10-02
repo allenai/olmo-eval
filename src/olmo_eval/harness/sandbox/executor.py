@@ -48,6 +48,16 @@ class _ControlCommandResult:
     exit_code: int
 
 
+def _is_command_timeout(error: BaseException) -> bool:
+    """Whether a runtime error reports that a command exceeded its timeout."""
+    message = str(error).lower()
+    return (
+        "CommandTimeoutError" in type(error).__name__
+        or "timed out" in message
+        or "timeout after" in message
+    )
+
+
 def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
     """Get docker args for logging to a named file.
 
@@ -496,8 +506,7 @@ class SandboxExecutor:
                 operation="command execution",
             )
         except Exception as e:
-            # Check for timeout errors (swerex.exceptions.CommandTimeoutError)
-            if "CommandTimeoutError" in type(e).__name__ or "timed out" in str(e).lower():
+            if _is_command_timeout(e):
                 return ExecutionResult(
                     success=False,
                     output=f"Command timed out after {effective_timeout}s",
@@ -939,6 +948,24 @@ class SandboxExecutor:
             await self._runtime.create_session(CreateBashSessionRequest(session="default"))
             self._session_created = True
 
+    async def _interrupt_session(self) -> None:
+        """Stop whatever is running in the session, or drop the session if that fails.
+
+        A dropped session is recreated on next use, without its earlier shell state.
+        """
+        from swerex.runtime.abstract import BashInterruptAction, CloseBashSessionRequest
+
+        try:
+            await self._runtime.run_in_session(BashInterruptAction(session="default", timeout=5.0))
+            return
+        except Exception as e:
+            self._log(logging.WARNING, f"Failed to interrupt session, recreating it: {e}")
+        try:
+            await self._runtime.close_session(CloseBashSessionRequest(session="default"))
+        except Exception as e:
+            self._log(logging.DEBUG, f"Failed to close session: {e}")
+        self._session_created = False
+
     async def execute_in_session(
         self,
         command: str,
@@ -958,7 +985,9 @@ class SandboxExecutor:
             log_prefix: Prefix for streamed log lines (defaults to self.name).
 
         Returns:
-            ExecutionResult with success status, output, and exit code.
+            ExecutionResult with success status, output, and exit code. A command
+            that times out is interrupted so the session stays usable, and is
+            reported with exit code -1 and error "timeout".
 
         Raises:
             RuntimeError: If the sandbox is not started.
@@ -973,14 +1002,25 @@ class SandboxExecutor:
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
         prefix = log_prefix or self.name or "sandbox"
 
-        observation = await self._runtime.run_in_session(
-            BashAction(
-                command=command,
-                session="default",
-                timeout=effective_timeout,
-                check="silent",
+        try:
+            observation = await self._runtime.run_in_session(
+                BashAction(
+                    command=command,
+                    session="default",
+                    timeout=effective_timeout,
+                    check="silent",
+                )
             )
-        )
+        except Exception as e:
+            if not _is_command_timeout(e):
+                raise
+            await self._interrupt_session()
+            return ExecutionResult(
+                success=False,
+                output=f"Command timed out after {effective_timeout:g}s and was interrupted.",
+                exit_code=-1,
+                error="timeout",
+            )
 
         output = observation.output or ""
 

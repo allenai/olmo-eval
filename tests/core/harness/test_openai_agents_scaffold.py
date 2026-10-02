@@ -14,6 +14,7 @@ from olmo_eval.harness.scaffolds.openai_agents import (
     FORCED_FINAL_ANSWER_INSTRUCTION,
     OpenAIAgentsScaffold,
     _make_tool_error_formatter,
+    truncate_tool_output,
 )
 
 pytest.importorskip("agents")
@@ -571,3 +572,62 @@ class TestModelRefusal:
 
         assert "I cannot help with that." in result.final_output.text
         assert result.error is not None
+
+
+class TestToolOutputTruncation:
+    def test_short_output_and_no_limit_are_unchanged(self):
+        assert truncate_tool_output("abc", 10) == "abc"
+        assert truncate_tool_output("x" * 100, None) == "x" * 100
+
+    def test_long_output_keeps_head_and_tail(self):
+        output = "a" * 50 + "b" * 50
+        truncated = truncate_tool_output(output, 20)
+        assert truncated.startswith("a" * 10)
+        assert truncated.endswith("b" * 10)
+        assert "[... 80 characters omitted ...]" in truncated
+
+    @pytest.mark.anyio
+    async def test_session_tool_output_is_truncated_during_a_run(self, monkeypatch):
+        from agents import Agent, Runner
+
+        from olmo_eval.harness.sandbox.executor import ExecutionResult
+        from olmo_eval.harness.scaffolds import openai_agents
+        from olmo_eval.harness.tools import get_tool
+
+        class FakeBinding:
+            async def execute_in_session(self, command):
+                return ExecutionResult(success=False, output="x" * 1000, exit_code=2)
+
+            async def release(self):
+                pass
+
+        class FakeManager:
+            async def acquire_binding(self, capabilities):
+                return FakeBinding()
+
+        tool = get_tool("execute_bash_session")
+        execute = OpenAIAgentsScaffold()._wrap_sandboxed_tool(tool, FakeManager())  # type: ignore[arg-type]
+        outputs = []
+
+        async def fake_run(**kwargs):
+            outputs.append(await execute("cat big_file"))
+            return SimpleNamespace(new_items=[], final_output="done")
+
+        agent = Agent(name="test-agent", instructions="Use tools.")
+        _patch_scaffold_agent(monkeypatch, agent)
+        monkeypatch.setattr(Runner, "run", staticmethod(fake_run))
+        scaffold = OpenAIAgentsScaffold()
+        scaffold.set_sandbox_manager(FakeManager())
+
+        await scaffold.run(
+            provider=SimpleNamespace(),
+            config=HarnessConfig(name="test", max_turns=3, tools=(tool,)),
+            request=_agent_request(),
+            enable_compaction=False,
+            max_tool_output_chars=100,
+        )
+
+        assert len(outputs[0]) < 200
+        assert "[... 900 characters omitted ...]" in outputs[0]
+        assert outputs[0].endswith("[Exit code: 2]")
+        assert openai_agents._max_tool_output_chars.get() is None

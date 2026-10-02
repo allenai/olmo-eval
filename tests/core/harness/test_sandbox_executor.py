@@ -149,3 +149,59 @@ class TestStreamingControlCommand(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _CommandTimeoutError(Exception):
+    pass
+
+
+_CommandTimeoutError.__name__ = "CommandTimeoutError"
+
+
+class TestSessionTimeout(unittest.IsolatedAsyncioTestCase):
+    def _executor(self) -> SandboxExecutor:
+        executor = SandboxExecutor(
+            SandboxConfig(image="test", mode=SandboxMode.DOCKER, container_runtime="podman")
+        )
+        executor._runtime = mock.Mock()
+        executor._runtime.create_session = mock.AsyncMock()
+        executor._runtime.close_session = mock.AsyncMock()
+        return executor
+
+    async def test_timeout_interrupts_and_keeps_session(self) -> None:
+        from swerex.runtime.abstract import BashInterruptAction
+
+        executor = self._executor()
+        executor._runtime.run_in_session = mock.AsyncMock(
+            side_effect=[_CommandTimeoutError("timeout after 5 seconds"), mock.Mock()]
+        )
+
+        result = await executor.execute_in_session("sleep 100", timeout=5)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.exit_code, -1)
+        self.assertEqual(result.error, "timeout")
+        self.assertIn("timed out after 5s", result.output)
+        interrupt = executor._runtime.run_in_session.await_args_list[1].args[0]
+        self.assertIsInstance(interrupt, BashInterruptAction)
+        self.assertTrue(executor._session_created)
+        executor._runtime.close_session.assert_not_awaited()
+
+    async def test_failed_interrupt_drops_session(self) -> None:
+        executor = self._executor()
+        executor._runtime.run_in_session = mock.AsyncMock(
+            side_effect=[_CommandTimeoutError("timeout"), RuntimeError("Failed to interrupt")]
+        )
+
+        result = await executor.execute_in_session("vim", timeout=1)
+
+        self.assertEqual(result.error, "timeout")
+        executor._runtime.close_session.assert_awaited_once()
+        self.assertFalse(executor._session_created)
+
+    async def test_other_errors_propagate(self) -> None:
+        executor = self._executor()
+        executor._runtime.run_in_session = mock.AsyncMock(side_effect=ConnectionError("gone"))
+
+        with self.assertRaises(ConnectionError):
+            await executor.execute_in_session("ls")

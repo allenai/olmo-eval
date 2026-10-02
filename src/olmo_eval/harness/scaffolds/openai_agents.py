@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _current_binding: ContextVar[ExecutorBinding | None] = ContextVar("_current_binding", default=None)
+_max_tool_output_chars: ContextVar[int | None] = ContextVar("_max_tool_output_chars", default=None)
 FORCED_FINAL_ANSWER_INSTRUCTION = (
     "You have reached the maximum number of steps. Based on the information gathered so far, "
     "provide your final answer now. Do not call any tools."
@@ -37,6 +38,24 @@ DEFAULT_CHAT_TEMPLATE_KWARGS: dict[str, Any] = {"enable_thinking": False}
 # Sentinel distinguishing "provider does not support chat_template_kwargs" from
 # "provider supports it but has none configured".
 _UNSUPPORTED: Any = object()
+
+
+def truncate_tool_output(output: str, max_chars: int | None) -> str:
+    """Shorten a tool output to at most ``max_chars``, keeping its start and end.
+
+    Args:
+        output: The tool output.
+        max_chars: Character budget, or None to leave the output unchanged.
+
+    Returns:
+        The output, with its middle replaced by a marker if it was over budget.
+    """
+    if max_chars is None or len(output) <= max_chars:
+        return output
+    head = max_chars // 2
+    tail = max_chars - head
+    omitted = len(output) - max_chars
+    return f"{output[:head]}\n[... {omitted} characters omitted ...]\n{output[-tail:]}"
 
 
 def _resolve_chat_template_kwargs(provider: InferenceProvider) -> dict[str, Any] | None:
@@ -222,7 +241,7 @@ class OpenAIAgentsScaffold(Scaffold):
                 if binding is None:
                     raise RuntimeError("No binding set for session tool")
                 result = await binding.execute_in_session(command)
-                output = result.output
+                output = truncate_tool_output(result.output, _max_tool_output_chars.get())
                 if result.exit_code != 0:
                     output += f"\n[Exit code: {result.exit_code}]"
                 return output
@@ -230,7 +249,8 @@ class OpenAIAgentsScaffold(Scaffold):
 
             async def sandboxed_execute(command: str) -> str:
                 """Execute command in sandbox."""
-                return await manager.execute(command, capabilities=required_caps)
+                output = await manager.execute(command, capabilities=required_caps)
+                return truncate_tool_output(output, _max_tool_output_chars.get())
 
         return sandboxed_execute
 
@@ -348,11 +368,14 @@ class OpenAIAgentsScaffold(Scaffold):
             trace_metadata: Optional metadata for tracing (e.g., instance_id, task_id).
             **kwargs: Scaffold-specific options:
                 - enable_compaction: Enable context compaction (default: True).
+                - max_tool_output_chars: Truncate sandboxed tool outputs to this many
+                  characters (default: no limit).
 
         Returns:
             HarnessResult with trajectory from SDK execution.
         """
         enable_compaction = kwargs.get("enable_compaction", True)
+        max_tool_output_chars = kwargs.get("max_tool_output_chars")
         try:
             from agents import RunConfig, Runner, trace  # type: ignore[ty:unresolved-import]
             from agents.exceptions import (  # type: ignore[ty:unresolved-import]
@@ -441,6 +464,8 @@ class OpenAIAgentsScaffold(Scaffold):
             ),
         )
 
+        output_limit_token = _max_tool_output_chars.set(max_tool_output_chars)
+
         # Run agent within trace context for observability
         date_cutoff = (trace_metadata or {}).get("date_cutoff")
         with search_date_cutoff(date_cutoff), trace(trace_name, metadata=trace_metadata):
@@ -509,6 +534,7 @@ class OpenAIAgentsScaffold(Scaffold):
                 logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
                 raise
             finally:
+                _max_tool_output_chars.reset(output_limit_token)
                 # Release binding after run
                 binding = _current_binding.get()
                 if binding is not None:
