@@ -3,8 +3,6 @@ on:
     push:
         branches:
             - main
-            # Ad hoc environment for end-to-end testing of PR #438. Remove before merging.
-            - chrisg/skiff2-dashboard
         # Only redeploy the dashboard when it or its deploy config changes,
         # not on every olmo-eval merge.
         paths:
@@ -50,10 +48,8 @@ jobs:
               with:
                   project_id: ${{ vars.SKIFF2_PROJECT_ID }}
 
-            # The second condition creates the load balancer before the first main deploy so the
-            # PR environment is reachable. Remove it together with the branch trigger before merging.
             - name: Skiff2 Deploy Infra
-              if: github.ref_name == 'main' || github.ref_name == 'chrisg/skiff2-dashboard'
+              if: github.ref_name == 'main'
               uses: allenai/skiff2-actions/shared-actions/deploy-infra@main
               with:
                   project_id: ${{ vars.SKIFF2_PROJECT_ID }}

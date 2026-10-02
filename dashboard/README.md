@@ -113,8 +113,10 @@ Pull requests get a Skiff2 Terraform plan (`skiff2-plan.yml`) and the dashboard 
 
 Containers need no secrets. Configuration comes from code defaults keyed on `SKIFF_ENV`, which
 Cloud Run sets on every container. To allow a service account to upload, create the Secret
-Manager secret `global-ingest-INGEST_ALLOWED_SERVICE_ACCOUNTS` (comma-separated emails) and
-redeploy.
+Manager secret `global-ingest-INGEST_ALLOWED_SERVICE_ACCOUNTS` (comma-separated emails), grant
+`olmo-eval-api@ai2-skiff2-olmo-eval.iam.gserviceaccount.com` the
+`roles/secretmanager.secretAccessor` role on that secret only, and redeploy. The runtime service
+account has no project-wide secret access.
 
 ## Terraform
 
