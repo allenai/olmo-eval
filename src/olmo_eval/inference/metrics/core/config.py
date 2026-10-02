@@ -65,24 +65,6 @@ class MetricsConfig:
     # User-defined tags (for special filtering beyond core metadata)
     tags: dict[str, str] = field(default_factory=dict)
 
-    def has_reporter(self, name: ReporterType | str) -> bool:
-        """Check if a specific reporter is configured.
-
-        Args:
-            name: Reporter name to check for.
-
-        Returns:
-            True if the reporter is in the reporters list.
-        """
-        name_str = str(name)
-        for r in self.reporters:
-            if isinstance(r, str):
-                if r == name_str:
-                    return True
-            elif isinstance(r, dict) and r.get("name") == name_str:
-                return True
-        return False
-
     def get_metrics_path(self) -> str | None:
         """Get the resolved path for metrics file.
 
