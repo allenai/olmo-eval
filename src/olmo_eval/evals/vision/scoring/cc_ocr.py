@@ -9,9 +9,9 @@ A prediction is compared with the reference as a multiset of basic units: charac
 Chinese sub-datasets (those whose name contains ``zh``), lower-cased alphanumeric-only words
 for the rest. ``###`` / ``***`` markers and whitespace layout are ignored.
 
-:class:`CcOcrScorer` stores each sample's statistics on ``output.metadata["cc_ocr_result"]``
-and the metrics reduce them the way the official evaluator does: a sub-dataset's score is its
-``macro_f1`` (mean per-image F1), and the track score is the unweighted mean over
+:class:`CcOcrScorer` records each sample's statistics as its scorer result (saved with the
+predictions), and the metrics reduce them the way the official evaluator does: a sub-dataset's
+score is its ``macro_f1`` (mean per-image F1), and the track score is the unweighted mean over
 sub-datasets. The evaluator's secondary ``micro_f1`` (pooled over a sub-dataset's images) is
 reported alongside.
 
@@ -24,12 +24,14 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any, Literal
 
 from olmo_eval.common.metrics.base import Metric
-from olmo_eval.common.scorers.base import Scorer
+from olmo_eval.common.scorers.base import Scorer, get_scorer_result, set_scorer_result
 from olmo_eval.common.types import Instance, LMOutput, Response
+from olmo_eval.evals.vision.scoring.common import response_text
 
-RESULT_KEY = "cc_ocr_result"
+SCORER_NAME = "cc_ocr"
 
 
 def ocr_eval_config(dataset: str) -> dict[str, bool]:
@@ -79,40 +81,33 @@ def score_ocr_sample(prediction: str, answer: str, dataset: str) -> dict[str, fl
     }
 
 
-def _response_text(output: LMOutput) -> str:
-    answer = output.extracted_answer
-    if isinstance(answer, str) and answer:
-        return answer
-    return output.text or ""
-
-
 @dataclass(frozen=True, slots=True)
 class CcOcrScorer(Scorer):
     """Per-image F1 of the multiset overlap between prediction and reference units."""
 
-    name: str = "cc_ocr"
+    name: str = SCORER_NAME
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         meta = instance.metadata
-        stats = score_ocr_sample(_response_text(output), meta["answer"], meta["dataset"])
-        if output.metadata is None:
-            output.metadata = {}
-        output.metadata[RESULT_KEY] = {"dataset": meta["dataset"], **stats}
+        stats = score_ocr_sample(response_text(output), meta["answer"], meta["dataset"])
+        set_scorer_result(output, self.name, {"dataset": meta["dataset"], **stats})
         return float(stats["f1"])
+
+
+def _result(response: Response) -> dict[str, Any] | None:
+    return get_scorer_result(response.outputs[0], SCORER_NAME) if response.outputs else None
 
 
 def _results_by_dataset(responses: Sequence[Response]) -> dict[str, list[dict]]:
     grouped: dict[str, list[dict]] = {}
     for response in responses:
-        if not response.outputs:
-            continue
-        result = (response.outputs[0].metadata or {}).get(RESULT_KEY)
+        result = _result(response)
         if result:
             grouped.setdefault(result["dataset"], []).append(result)
     return grouped
 
 
-def _dataset_value(results: list[dict], kind: str) -> float:
+def _dataset_value(results: list[dict], kind: Literal["macro_f1", "micro_f1"]) -> float:
     """One sub-dataset's score, with the official evaluator's smoothing constants."""
     if kind == "macro_f1":
         return sum(r["f1"] for r in results) / (len(results) + 1e-9)
@@ -136,6 +131,14 @@ class CcOcrDatasetMetric(Metric):
         results = _results_by_dataset(responses).get(self.dataset)
         return _dataset_value(results, "macro_f1") if results else 0.0
 
+    def compute_instance(self, response: Response) -> float | None:
+        """The image's F1, for images of this sub-dataset only."""
+        result = _result(response)
+        return float(result["f1"]) if result and result["dataset"] == self.dataset else None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
 
 @dataclass(frozen=True)
 class CcOcrTrackMetric(Metric):
@@ -143,8 +146,17 @@ class CcOcrTrackMetric(Metric):
 
     name: str  # type: ignore[misc]
     scorer: Scorer  # type: ignore[misc]
-    kind: str = "macro_f1"
+    kind: Literal["macro_f1", "micro_f1"] = "macro_f1"
 
     def compute(self, responses: Sequence[Response]) -> float:
         values = [_dataset_value(r, self.kind) for r in _results_by_dataset(responses).values()]
         return sum(values) / len(values) if values else 0.0
+
+    def compute_instance(self, response: Response) -> float | None:
+        """The image's F1: on a single image, both statistics reduce to it."""
+        result = _result(response)
+        return float(result["f1"]) if result else None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        # The track averages sub-datasets, not images.
+        return False

@@ -1,8 +1,8 @@
 """CC-OCR multi-scene OCR (https://arxiv.org/abs/2412.02210).
 
-The multi-scene track of CC-OCR: 2,750 images of scene text, documents and web/UGC images in
-English and Chinese, across 13 sub-datasets. The model transcribes all the text in each image;
-the reference is compared as a multiset of words (characters for the Chinese sub-datasets), so
+The multi-scene track of CC-OCR: scene text, documents and web/UGC images in English and
+Chinese, grouped into sub-datasets. The model transcribes all the text in each image; the
+reference is compared as a multiset of words (characters for the Chinese sub-datasets), so
 reading order does not matter.
 
 Each row of the dataset carries its own prompt, sent verbatim in a single user turn with the
@@ -14,9 +14,9 @@ Scoring is the official evaluator's (:mod:`olmo_eval.evals.vision.scoring.cc_ocr
 score the paper reports; ``micro_f1`` and every sub-dataset's score are reported alongside.
 Metrics are 0-1 (the paper reports x100).
 
-``cc_ocr_multi_scene_en`` keeps the 8 English sub-datasets (every one without ``zh`` in its
-name, 2,000 images) and averages over those. Molmo2 models read English only, so it is the
-default setting for evaluating them; ``cc_ocr_multi_scene`` runs all 13, for multilingual models.
+``cc_ocr_multi_scene_en`` keeps the English sub-datasets (every one without ``zh`` in its
+name) and averages over those. Molmo2 models read English only, so it is the default setting
+for evaluating them; ``cc_ocr_multi_scene`` runs every sub-dataset, for multilingual models.
 
 The benchmark prescribes no decoding settings; this task decodes greedily. Data is fetched from
 the Hub at a pinned revision; set ``CC_OCR_DIR`` to a local copy of the dataset repository to
@@ -112,6 +112,15 @@ def _data_dir() -> Path:
     )
 
 
+def _subset_of(stem: str) -> str:
+    """The sub-dataset a ``<name>_<count>.tsv`` file holds (``zh_scene_450`` -> ``zh_scene``)."""
+    for subset in SUBSETS:
+        rest = stem[len(subset) :]
+        if stem.startswith(subset) and (not rest or (rest[0] == "_" and rest[1:].isdigit())):
+            return subset
+    return stem
+
+
 @register("cc_ocr_multi_scene")
 class CcOcrMultiSceneTask(OcrTask):
     dependencies = ["pillow", "huggingface-hub"]
@@ -125,17 +134,20 @@ class CcOcrMultiSceneTask(OcrTask):
     subsets: tuple[str, ...] = SUBSETS
 
     def _build_instances(self) -> Iterator[Instance]:
-        instances = [
-            instance
-            for path in sorted((_data_dir() / TRACK).rglob("*.tsv"))
-            for instance in self._tsv_instances(str(path))
-        ]
-        found = {instance.metadata["dataset"] for instance in instances}
-        if found != set(SUBSETS):
+        # Each sub-dataset is one ``<name>_<count>.tsv``; only the ones this task runs are
+        # decoded, since the files embed every image.
+        paths = {_subset_of(path.stem): path for path in (_data_dir() / TRACK).rglob("*.tsv")}
+        if set(paths) != set(SUBSETS):
             raise RuntimeError(
-                f"CC-OCR {TRACK} has sub-datasets {sorted(found)}, expected {sorted(SUBSETS)}"
+                f"CC-OCR {TRACK} has sub-datasets {sorted(paths)}, expected {sorted(SUBSETS)}"
             )
-        yield from (i for i in instances if i.metadata["dataset"] in self.subsets)
+        for subset in self.subsets:
+            for instance in self._tsv_instances(str(paths[subset])):
+                if instance.metadata["dataset"] != subset:
+                    raise RuntimeError(
+                        f"{paths[subset]}: row of sub-dataset {instance.metadata['dataset']!r}"
+                    )
+                yield instance
 
     def _tsv_instances(self, tsv_path: str) -> Iterator[Instance]:
         for row_index, row in enumerate(_load_tsv(tsv_path)):
@@ -159,7 +171,7 @@ class CcOcrMultiSceneTask(OcrTask):
 
 @register("cc_ocr_multi_scene_en")
 class CcOcrMultiSceneEnglishTask(CcOcrMultiSceneTask):
-    """The 8 English sub-datasets of the multi-scene track (2,000 images); ``macro_f1`` is their
+    """The English sub-datasets of the multi-scene track; ``macro_f1`` is their
     unweighted mean."""
 
     metrics = _metrics(ENGLISH_SUBSETS)
