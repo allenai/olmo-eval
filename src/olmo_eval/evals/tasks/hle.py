@@ -45,7 +45,11 @@ Scoring
 The model gets the official system prompt (explanation, answer, confidence). The
 judge gets the official judge prompt with the model's visible response. A closed
 reasoning block is removed; a reasoning block that never closes means the model gave
-no final response, which is scored wrong without calling the judge. The judge's
+no final response, which is scored wrong without calling the judge. An answer that hit
+the generation token limit is also scored wrong without the judge: a model is expected
+to finish within its budget. Such outputs carry ``truncated: true`` in their
+``judge_result``, and a question the server returned nothing for (for example, a
+prompt longer than the context) scores wrong and is logged. The judge's
 ``correct:`` and ``confidence:`` lines are parsed from plain text, so any chat model
 can judge. A judge call that fails, or gives no parseable verdict after three
 attempts, is recorded as an incomplete score with the raw reply rather than as a
@@ -60,10 +64,15 @@ Metrics:
   over individual outputs, in bins of 100 as in the official scorer; lower is
   better. The official code leaves its highest-confidence bin out of the sum; this
   metric keeps it, hence the distinct name.
+- ``truncation_rate``: share of questions with no complete response, because
+  generation hit the token limit or the server returned nothing; lower is better.
+  These questions already count as wrong in ``accuracy``; a high rate means the
+  budget, not the model's knowledge, is limiting the score.
 
-Generation is greedy with a 32,768-token budget; raise it with ``-o max_tokens=<n>``.
-The task logs a warning when outputs hit the token limit, since those usually score
-wrong for lack of a final answer rather than a wrong one.
+Generation samples at temperature 0.6 and top_p 0.95 with a 32,768-token budget.
+Greedy decoding sends thinking models into repetition loops that run out the budget.
+Raise the budget with ``-o max_tokens=<n>``, keeping prompt plus budget within the
+model's context: the longest text-only HLE prompt is about 13.6k tokens.
 """
 
 from __future__ import annotations
@@ -356,10 +365,39 @@ class HLECalibrationErrorMetric(Metric):
         return "proportion"
 
 
+@dataclass(frozen=True)
+class HLETruncationRateMetric(Metric):
+    """Share of questions with no complete response; lower is better."""
+
+    name: str = "truncation_rate"
+    scorer: type[Scorer] | Scorer = HLEScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        values = [
+            value
+            for response in responses
+            if (value := self.compute_instance(response)) is not None
+        ]
+        return sum(values) / len(values) if values else 0.0
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+    def pairwise_higher_is_better(self) -> bool:
+        return False
+
+    def pairwise_display_format(self) -> str:
+        return "percentage"
+
+    def pairwise_unit(self) -> str:
+        return "proportion"
+
+
 HLE_ACCURACY = HLEAccuracyMetric()
 HLE_METRICS = (
     HLE_ACCURACY,
     HLECalibrationErrorMetric(),
+    HLETruncationRateMetric(),
     *(
         HLEAccuracyMetric(
             name=f"accuracy_{suffix}", metadata_key="category", metadata_value=category
@@ -381,7 +419,7 @@ class _HLE(Task):
     split = Split.TEST
     metrics = HLE_METRICS
     primary_metric = HLE_ACCURACY
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=32768)
+    sampling_params = SamplingParams(temperature=0.6, top_p=0.95, max_tokens=32768)
     output_score_aggregation = OutputScoreAggregation.MEAN
     required_secrets = ("OPENAI_API_KEY",)
 
@@ -486,11 +524,12 @@ class _HLE(Task):
         if not isinstance(answer, str):
             answer = visible_response(output.text)
 
-        judge_result: dict[str, Any] = {"scorer": HLE_SCORER_NAME}
+        truncated = output.metadata.get("finish_reason") == "length"
+        judge_result: dict[str, Any] = {"scorer": HLE_SCORER_NAME, "truncated": truncated}
         verdict: JudgeVerdict | None
-        if not answer:
-            # No final response to grade. Score it wrong at 100% confidence, as the
-            # judge prompt directs for a response that states no confidence.
+        if truncated or not answer:
+            # Nothing finished to grade. Score it wrong at 100% confidence, as the judge
+            # prompt directs for a response that states no confidence.
             verdict = JudgeVerdict(correct=False, confidence=1.0, extracted_final_answer=None)
             judge_result["no_final_response"] = True
         else:
@@ -540,9 +579,17 @@ class _HLE(Task):
         )
         if truncated:
             logger.warning(
-                "HLE generation hit the token limit on %d output(s); those without a final "
-                "response score wrong. Raise max_tokens before reading them as model errors.",
+                "HLE generation hit the token limit on %d output(s); they score wrong "
+                "without judging. Check truncation_rate before reading accuracy as capability.",
                 truncated,
+            )
+        unanswered = [response for response in responses if not response.outputs]
+        if unanswered:
+            logger.warning(
+                "HLE got no model output for %d question(s), e.g. %s; they score wrong. A "
+                "prompt longer than the context leaves room for no answer.",
+                len(unanswered),
+                unanswered[0].instance.metadata.get("id"),
             )
 
         jobs = [
@@ -605,6 +652,12 @@ class _HLE(Task):
 
         for response, accuracy in zip(responses, accuracy_by_response, strict=True):
             response.scores["accuracy"] = self._aggregate_output_scores(accuracy)
+            response.scores["truncation_rate"] = (
+                sum(output.metadata.get("finish_reason") == "length" for output in response.outputs)
+                / len(response.outputs)
+                if response.outputs
+                else 1.0
+            )
         return responses
 
 

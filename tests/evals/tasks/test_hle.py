@@ -131,8 +131,15 @@ class TestRegistration:
         names = {metric.name for metric in task.config.metrics}
         assert task.config.get_primary_metric().name == "accuracy"
         assert "calibration_error_all_bins" in names
+        assert "truncation_rate" in names
         assert {f"accuracy_{suffix}" for suffix in hle.HLE_CATEGORIES.values()} <= names
         assert {"accuracy_exact_match", "accuracy_multiple_choice"} <= names
+
+    def test_default_generation_samples_rather_than_decoding_greedily(self, task):
+        params = task.config.sampling_params
+        assert params.temperature == 0.6
+        assert params.top_p == 0.95
+        assert params.max_tokens == 32768
 
     def test_calibration_error_is_lower_is_better(self, task):
         assert _calibration_metric(task).pairwise_higher_is_better() is False
@@ -301,6 +308,7 @@ class TestScoring:
         saved = build_predictions([response])[0]["model_output"][0]["judge_result"]
         assert saved == {
             "scorer": "hle_judge",
+            "truncated": False,
             "raw_judge_response": _reply("yes", "80"),
             "correct": True,
             "confidence": pytest.approx(0.8),
@@ -311,7 +319,6 @@ class TestScoring:
     @pytest.mark.anyio
     async def test_unfinished_reasoning_is_scored_wrong_without_the_judge(self, task, monkeypatch):
         response = _response(task, "<think>so the answer is 42")
-        response.outputs[0].metadata["finish_reason"] = "length"
         judge, calls = _scripted_judge()
         _use_judge(monkeypatch, judge)
 
@@ -400,16 +407,44 @@ class TestScoring:
         assert all(response.scores["accuracy"] == 0.5 for response in responses)
 
     @pytest.mark.anyio
-    async def test_warns_when_generation_hit_the_token_limit(self, task, monkeypatch, caplog):
+    async def test_truncated_answer_scores_wrong_without_the_judge(self, task, monkeypatch, caplog):
+        # A visible answer that ran into the token limit still counts as wrong: the
+        # model has to finish within its budget.
+        truncated = _response(task, "Explanation: partial\nAnswer: 42")
+        truncated.outputs[0].metadata["finish_reason"] = "length"
+        finished = _response(task, "Answer: 42")
+        judge, calls = _scripted_judge(_reply("yes", "90"))
+        _use_judge(monkeypatch, judge)
+
+        with caplog.at_level(logging.WARNING, logger=hle.__name__):
+            await task.score_responses([truncated, finished])
+
+        assert len(calls) == 1
+        assert truncated.scores["accuracy"] == 0.0
+        judge_result = truncated.outputs[0].metadata["judge_result"]
+        assert judge_result["truncated"] is True
+        assert judge_result["correct"] is False
+        assert finished.outputs[0].metadata["judge_result"]["truncated"] is False
+        assert "hit the token limit on 1 output(s)" in caplog.text
+        metrics = {m.name: m.compute([truncated, finished]) for m in task.config.metrics}
+        assert metrics["truncation_rate"] == 0.5
+        assert metrics["accuracy"] == 0.5
+
+    @pytest.mark.anyio
+    async def test_question_without_output_scores_wrong_and_is_logged(
+        self, task, monkeypatch, caplog
+    ):
         response = _response(task)
-        response.outputs[0].metadata["finish_reason"] = "length"
-        judge, _ = _scripted_judge(_reply("no", "100"))
+        response.outputs = []
+        judge, calls = _scripted_judge()
         _use_judge(monkeypatch, judge)
 
         with caplog.at_level(logging.WARNING, logger=hle.__name__):
             await task.score_responses([response])
 
-        assert "hit the token limit on 1 output(s)" in caplog.text
+        assert calls == []
+        assert response.scores == {"accuracy": 0.0, "truncation_rate": 1.0}
+        assert "no model output for 1 question(s), e.g. abc123" in caplog.text
 
 
 async def _score_like_the_runner(task, response: Response) -> Response:
