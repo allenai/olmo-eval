@@ -241,7 +241,8 @@ _METRICS = _metrics()
 class UsbTask(SafetyJudgeTask):
     """One released USB file: vulnerability rows plus the MOSSBench over-refusal probes."""
 
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=512)
+    #: Long enough that answers end on their own (the protocol leaves length to the model).
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=2048)
     metrics = _METRICS
     primary_metric = _METRICS[0]  # sr
     split = Split.TEST

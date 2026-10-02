@@ -723,7 +723,8 @@ and report rates over the examples the judge graded (judge errors are counted
 separately rather than scored). `mm_safety_bench` runs MM-SafetyBench's 1,680
 questions text-only and with SD, typography and SD+typography images, and
 reports attack success rate (`asr/<setting>`, lower is safer, averaged over the
-13 scenarios; `asr/sd_typo` is the headline). `siuo` reports SIUO's `safe`,
+13 scenarios; `asr/sd_typo` is the headline; `asr_pooled/<setting>` pools over
+questions instead, as many later papers do). `siuo` reports SIUO's `safe`,
 `effective` and `safe_effective` rates, `siuo_mcqa` its multiple-choice
 accuracy. `usb_base` and `usb_hard` report USB's safety rate `sr` (mean of the
 12 category x risk-combination cells, higher is safer) and the over-refusal rate
@@ -769,9 +770,10 @@ Several tasks call the OpenAI API and need `OPENAI_API_KEY`, so the
 - `dense_caption` runs a `gpt-4o` recall+consistency judge. Judge responses are
   cached, so the key is only needed on a cache miss.
 - The safety tasks (all but `siuo_mcqa`) run GPT judges: `gpt-4-0613` for
-  MM-SafetyBench, `gpt-4-turbo-2024-04-09` for SIUO and `gpt-4o-2024-08-06` for
-  USB, the last two shown the image. Replies are cached under
-  `SAFETY_JUDGE_CACHE_DIR`.
+  MM-SafetyBench, `gpt-4o-mini-2024-07-18` for SIUO (its official
+  `gpt-4-vision-preview` is retired) and `gpt-4o-2024-08-06` for USB, the last
+  two shown the image. Override with `-o judge_model=...`; replies are cached
+  under `SAFETY_JUDGE_CACHE_DIR`.
 
 The launcher resolves the key as the user-scoped beaker secret
 `{beaker-username}_OPENAI_API_KEY`; if it is missing, the launch fails up front
