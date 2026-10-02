@@ -232,3 +232,23 @@ def test_gap_needs_one_shared_metric(
     )
 
     assert score is None
+
+
+@pytest.mark.parametrize(
+    ("task_in_scores", "expected"),
+    [([0.6, None], -0.15), ([0.6, 0.5], None)],
+    ids=["unscored-variant-ignored", "scored-variants-differ"],
+)
+def test_gap_reads_metrics_of_scored_variants_only(
+    gap_suite: Suite, task_in_scores: list[float | None], expected: float | None
+) -> None:
+    score = compute_scope_score(
+        task_scores_by_name={"task_in": task_in_scores, "task_out": [0.45]},
+        task_metrics_by_name={
+            "task_in": ["exact_match", "exact_match_flex"],
+            "task_out": ["exact_match"],
+        },
+        suite_name=gap_suite.name,
+    )
+
+    assert score == (pytest.approx(expected) if expected is not None else None)

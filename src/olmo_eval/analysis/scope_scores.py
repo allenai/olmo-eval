@@ -106,12 +106,19 @@ def _child_scope_score(
 
 def _same_metric(
     task_names: Sequence[str],
+    task_scores_by_name: Mapping[str, Sequence[float | None]],
     task_metrics_by_name: Mapping[str, Sequence[str | None]] | None,
 ) -> bool:
-    """Whether every task reports one known metric, and all report the same one."""
+    """Whether every task's scored variants report one known metric, the same for all."""
     if task_metrics_by_name is None:
         return False
-    metrics = {metric for name in task_names for metric in task_metrics_by_name.get(name) or [None]}
+    metrics: set[str | None] = set()
+    for name in task_names:
+        scores = task_scores_by_name.get(name) or []
+        names = task_metrics_by_name.get(name) or []
+        if len(scores) != len(names):
+            return False
+        metrics.update(m for s, m in zip(scores, names, strict=True) if s is not None)
     return len(metrics) == 1 and None not in metrics and "" not in metrics
 
 
@@ -157,7 +164,7 @@ def compute_scope_score(
             )
             if reference is None or companion is None:
                 return None
-            if not _same_metric(suite.expand(), task_metrics_by_name):
+            if not _same_metric(suite.expand(), task_scores_by_name, task_metrics_by_name):
                 return None
             return companion - reference
         if suite.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
