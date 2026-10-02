@@ -83,7 +83,7 @@ make_suite(
 )
 
 
-# MolmoPoint's grounding benchmarks: Point-Bench (natural images) and GUI click grounding.
+# MolmoPoint's pointing benchmarks: Point-Bench (natural images) and GUI click pointing.
 # All primary metrics are 0-1 success rates.
 MOLMOPOINT_TASKS = (
     "point_bench",
