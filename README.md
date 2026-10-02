@@ -848,7 +848,10 @@ What the setup needs:
 
 - **Network access**: TeX Live 2025 comes from the frozen `tlnet-final` repository in the
   TeX historic archive, ImageMagick and Ghostscript from their GitHub releases, the font
-  from Adobe's release, and Node.js from nodejs.org.
+  from Adobe's release, and Node.js from nodejs.org. Each download is checked against its
+  pinned SHA-256, and a mismatch stops the task.
+- **Linux x86_64**, where the installed binaries run. Elsewhere, put the toolchain on
+  `PATH` yourself.
 - **apt** (root, as in Beaker jobs), for the system libraries the ImageMagick AppImage
   links against and for `fontconfig`.
 - TeX Live, ImageMagick and Ghostscript already on `PATH` at exactly these versions are
@@ -867,7 +870,7 @@ Environment variables:
 | `OMNIDOCBENCH_CDM_DIR` | `~/.cache/olmo_eval/omnidocbench/cdm` | Where the toolchain is installed; point several runs at one shared install to reuse it |
 | `OMNIDOCBENCH_EVAL_DIR` | `~/.cache/olmo_eval/omnidocbench` | Where each version's evaluator checkout and virtualenv are provisioned |
 | `OMNIDOCBENCH_EVAL_WORKERS` | `min(16, cpus / 4)` | Evaluator worker threads (matching, TEDS, CDM); 48 suits a Beaker GPU node |
-| `OMNIDOCBENCH_EVAL_TIMEOUT_S` | `43200` (12 h) | Wall-clock cap on evaluation; past it the task reports NaN metrics with `evaluator_failed` and keeps the predictions |
+| `OMNIDOCBENCH_EVAL_TIMEOUT_S` | `43200` (12 h) | Wall-clock cap on evaluation; past it, as on any evaluator failure, the task reports no metrics and an error, and keeps the predictions for rescoring |
 | `OMNIDOCBENCH_DIR` / `OMNIDOCBENCH_V15_DIR` | Hub download | Local copy of the dataset (`OmniDocBench.json` + `images/`) |
 
 For example, on Beaker:

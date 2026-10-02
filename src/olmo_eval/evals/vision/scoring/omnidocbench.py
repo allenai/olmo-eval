@@ -16,7 +16,8 @@ provisioned on first use under ``$OMNIDOCBENCH_EVAL_DIR`` (default
 
 Evaluation is a dataset-level step: every metric is a mean over pages. One call to
 :func:`run_official_evaluation` scores all pages and returns both the evaluator's own
-leaderboard numbers and the per-page values, which the task stores on each response.
+leaderboard numbers and the per-page values, which the task records as each response's scorer
+result (saved with the predictions).
 """
 
 from __future__ import annotations
@@ -34,14 +35,14 @@ from pathlib import Path
 from typing import Any
 
 from olmo_eval.common.metrics.base import Metric
-from olmo_eval.common.scorers.base import Scorer
+from olmo_eval.common.scorers.base import Scorer, get_scorer_result
 from olmo_eval.common.types import Instance, LMOutput, Response
 
 logger = logging.getLogger(__name__)
 
 EVAL_REPO_URL = "https://github.com/opendatalab/OmniDocBench.git"
 
-RESULT_KEY = "omnidocbench_result"
+SCORER_NAME = "omnidocbench"
 
 #: Binaries the CDM formula metric shells out to (LaTeX, ImageMagick 7, Ghostscript).
 CDM_BINARIES = ("pdflatex", "magick", "gs")
@@ -128,8 +129,8 @@ class EvaluatorVersion:
     #: template (with a colored token and Chinese text) that must render for CDM to work.
     cdm_latex: str = "pdflatex"
     cdm_probe_tex: str = ""
-    #: Font families CDM's template names, with the archive each is installed from.
-    cdm_fonts: tuple[tuple[str, str], ...] = ()
+    #: Font families CDM's template names, as ``(family, archive URL, archive SHA-256)``.
+    cdm_fonts: tuple[tuple[str, str, str], ...] = ()
     #: ``(installed, replacement)`` pairs swapped after installing, for dependencies that
     #: pull a variant the evaluation host cannot load.
     replacements: tuple[tuple[str, str], ...] = ()
@@ -195,6 +196,7 @@ EVALUATORS: dict[str, EvaluatorVersion] = {
                 "Source Han Sans SC",
                 "https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/"
                 "09_SourceHanSansSC.zip",
+                "ef7364f7ac2564be1ae9c1d74276de2653fe38b73449070398c4fc0b7e032ff1",
             ),
         ),
         # ``mmeval`` requires the GUI OpenCV build, which needs ``libGL`` at import time;
@@ -310,7 +312,9 @@ _TEXLIVE_STY_FILES = ("CJK.sty", "xeCJK.sty", "upgreek.sty", "booktabs.sty", "mu
 #: The CDM runtime OmniDocBench's README lists as verified (its Docker image): TeX Live 2025,
 #: ImageMagick 7.1.1-47 and Ghostscript 9.55.0. Rendering differs between versions and CDM
 #: follows it (Ghostscript 10.02 instead of 9.55 moved a formula score by 0.2 points), so these
-#: exact versions are installed unless the ones on ``PATH`` already match.
+#: exact versions are installed unless the ones on ``PATH`` already match. Every download is
+#: checked against the SHA-256 recorded next to it. TeX Live's own packages are verified by
+#: its installer against the repository's checksums.
 _TEXLIVE_YEAR = "2025"
 #: The frozen final TeX Live 2025 repository, from the historic archive and a mirror of it.
 _TEXLIVE_REPOSITORIES = (
@@ -318,10 +322,12 @@ _TEXLIVE_REPOSITORIES = (
     "https://mirrors.tuna.tsinghua.edu.cn/tex-historic-archive/systems/texlive/2025/tlnet-final",
 )
 _MAGICK_VERSION = "7.1.1-47"
+_TEXLIVE_INSTALLER_SHA256 = "311df9f1477fd90c520159d1feddc2d6270f010d8349d1f6bdb9461a93b48a5c"
 _MAGICK_APPIMAGE_URL = (
     "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.1-47/"
     "ImageMagick-82572af-gcc-x86_64.AppImage"
 )
+_MAGICK_APPIMAGE_SHA256 = "dcdd2e135dd5f0701d992ccbbf744f51624441b5bc8eedcabe21516996e210ab"
 #: System libraries the AppImage links against but does not bundle (Debian/Ubuntu names).
 _MAGICK_SYSTEM_PACKAGES = (
     "libbrotli1",
@@ -340,8 +346,10 @@ _GHOSTSCRIPT_URL = (
     "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs9550/"
     "ghostscript-9.55.0-linux-x86_64.tgz"
 )
-#: The Node.js release v1.5's CDM README installs.
+_GHOSTSCRIPT_SHA256 = "e8756b70bd584ef1982577f88223aac95126065b2906a5b2a37931147ac6ab00"
+#: The Node.js release v1.5's CDM README installs (its SHA-256 as nodejs.org publishes it).
 _NODE_VERSION = "v16.13.1"
+_NODE_SHA256 = "a3721f87cecc0b52b0be8587c20776ac7305db413751db02c55aa2bffac15198"
 
 _cdm_ready: set[str] = set()
 
@@ -362,7 +370,16 @@ def ensure_cdm_toolchain(version: str = "v1.6") -> None:
         or Path.home() / ".cache" / "olmo_eval" / "omnidocbench" / "cdm"
     )
     _add_cdm_dirs_to_path(root)
-    if _cdm_tools_to_install(version):
+    if tools := _cdm_tools_to_install(version):
+        import platform
+        import sys
+
+        if not sys.platform.startswith("linux") or platform.machine() not in ("x86_64", "AMD64"):
+            raise RuntimeError(
+                f"CDM needs {', '.join(tools)} at the pinned versions, and they can only be "
+                f"installed automatically on Linux x86_64 (this host is {sys.platform} "
+                f"{platform.machine()}). Put them on PATH first."
+            )
         from filelock import FileLock
 
         root.mkdir(parents=True, exist_ok=True)
@@ -411,7 +428,7 @@ def _cdm_tools_to_install(version: str) -> list[str]:
             tools.append("texlive-packages")
     tools += [b for b in EVALUATORS[version].cdm_binaries if not shutil.which(b)]
     families = _run_quiet(["fc-list", ":", "family"])
-    if any(family not in families for family, _ in EVALUATORS[version].cdm_fonts):
+    if any(family not in families for family, *_ in EVALUATORS[version].cdm_fonts):
         tools.append("fonts")
     return tools
 
@@ -433,7 +450,9 @@ def _add_cdm_dirs_to_path(root: Path) -> None:
         os.environ["PATH"] = os.pathsep.join([*new, *current])
 
 
-def _download(url: str, dest: Path) -> Path:
+def _download(url: str, dest: Path, sha256: str) -> Path:
+    """Download ``url`` to ``dest`` and check it against ``sha256`` before anything runs it."""
+    import hashlib
     import ssl
     import urllib.request
 
@@ -453,11 +472,18 @@ def _download(url: str, dest: Path) -> Path:
                 open(dest, "wb") as out,
             ):
                 shutil.copyfileobj(response, out)
-            return dest
+            break
         except OSError:
             if attempt == 2:
                 raise
             logger.warning("Download of %s failed; retrying.", url, exc_info=True)
+    digest = hashlib.sha256()
+    with open(dest, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != sha256:
+        dest.unlink()
+        raise RuntimeError(f"{url} has SHA-256 {digest.hexdigest()}, expected {sha256}.")
     return dest
 
 
@@ -470,7 +496,7 @@ def _apt_install(*packages: str) -> None:
 
 
 def _install_magick(root: Path) -> None:
-    appimage = _download(_MAGICK_APPIMAGE_URL, root / "magick.AppImage")
+    appimage = _download(_MAGICK_APPIMAGE_URL, root / "magick.AppImage", _MAGICK_APPIMAGE_SHA256)
     appimage.chmod(0o755)
     shutil.rmtree(root / "squashfs-root", ignore_errors=True)
     # Extracting avoids mounting the AppImage, which needs FUSE.
@@ -504,7 +530,11 @@ def _install_texlive_from(root: Path, repository: str) -> None:
     texdir = root / "texlive"
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree(texdir, ignore_errors=True)
-    archive = _download(f"{repository}/install-tl-unx.tar.gz", work / "install-tl-unx.tar.gz")
+    archive = _download(
+        f"{repository}/install-tl-unx.tar.gz",
+        work / "install-tl-unx.tar.gz",
+        _TEXLIVE_INSTALLER_SHA256,
+    )
     with tarfile.open(archive) as tar:
         tar.extractall(work, filter="data")
     installer = next(work.glob("install-tl-*/install-tl"))
@@ -543,7 +573,7 @@ def _install_texlive_packages(root: Path) -> None:
 def _install_ghostscript(root: Path) -> None:
     import tarfile
 
-    archive = _download(_GHOSTSCRIPT_URL, root / "ghostscript.tgz")
+    archive = _download(_GHOSTSCRIPT_URL, root / "ghostscript.tgz", _GHOSTSCRIPT_SHA256)
     (root / "bin").mkdir(exist_ok=True)
     with tarfile.open(archive) as tar:
         member = next(
@@ -555,14 +585,14 @@ def _install_ghostscript(root: Path) -> None:
     archive.unlink()
 
 
-def _install_fonts(root: Path, fonts: Sequence[tuple[str, str]]) -> None:
+def _install_fonts(root: Path, fonts: Sequence[tuple[str, str, str]]) -> None:
     import zipfile
 
     # A per-user font directory fontconfig reads by default, so xelatex finds the families.
     target = Path.home() / ".local" / "share" / "fonts" / "omnidocbench"
     target.mkdir(parents=True, exist_ok=True)
-    for _, url in fonts:
-        archive = _download(url, root / Path(url).name)
+    for _, url, sha256 in fonts:
+        archive = _download(url, root / Path(url).name, sha256)
         with zipfile.ZipFile(archive) as zf:
             for name in zf.namelist():
                 if name.lower().endswith((".otf", ".ttf", ".ttc")):
@@ -577,7 +607,9 @@ def _install_node(root: Path) -> None:
 
     name = f"node-{_NODE_VERSION}-linux-x64"
     archive = _download(
-        f"https://nodejs.org/dist/{_NODE_VERSION}/{name}.tar.xz", root / f"{name}.tar.xz"
+        f"https://nodejs.org/dist/{_NODE_VERSION}/{name}.tar.xz",
+        root / f"{name}.tar.xz",
+        _NODE_SHA256,
     )
     target = root / "node"
     shutil.rmtree(target, ignore_errors=True)
@@ -630,6 +662,9 @@ class OfficialEvaluation:
     summary: dict[str, float] = field(default_factory=dict)
     #: Samples the evaluator scored zero because its scoring code crashed or timed out.
     num_scorer_failures: int = 0
+    #: Worker threads the evaluator ran with. v1.6 zeroes pages whose matching passes a time
+    #: limit, so the zeroed count, and the scores, can move with workers and host load.
+    workers: int = 0
 
 
 def _config(
@@ -849,7 +884,10 @@ def run_official_evaluation(
                 failures,
             )
         return OfficialEvaluation(
-            per_page=per_page, summary=_summary(metric_result), num_scorer_failures=failures
+            per_page=per_page,
+            summary=_summary(metric_result),
+            num_scorer_failures=failures,
+            workers=workers,
         )
 
 
@@ -862,25 +900,28 @@ def run_official_evaluation(
 class OmniDocBenchScorer(Scorer):
     """Names the OmniDocBench score channel.
 
-    Pages are graded together by :func:`run_official_evaluation`, which stores each page's
-    results on ``output.metadata["omnidocbench_result"]``; the per-response score is the
-    page's text accuracy (``1 - text edit distance``).
+    Pages are graded together by :func:`run_official_evaluation`, and the task records each
+    page's values as this scorer's result; the per-response score is the page's text accuracy
+    (``1 - text edit distance``).
     """
 
-    name: str = "omnidocbench"
+    name: str = SCORER_NAME
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        result = (output.metadata or {}).get(RESULT_KEY) or {}
+        result = get_scorer_result(output, self.name) or {}
         text_edit = result.get("text_edit")
         return 1.0 - text_edit if text_edit is not None else 0.0
 
 
+def _page_result(response: Response) -> dict[str, Any] | None:
+    return get_scorer_result(response.outputs[0], SCORER_NAME) if response.outputs else None
+
+
 def _page_results(responses: Sequence[Response]) -> Iterator[tuple[Response, dict[str, Any]]]:
     for response in responses:
-        if response.outputs:
-            result = (response.outputs[0].metadata or {}).get(RESULT_KEY)
-            if result is not None:
-                yield response, result
+        result = _page_result(response)
+        if result is not None:
+            yield response, result
 
 
 @dataclass(frozen=True)
@@ -901,22 +942,35 @@ class OmniDocBenchPageMetric(Metric):
     attribute: str | None = None
     attribute_value: str | None = None
 
+    def _page_value(self, response: Response, result: dict[str, Any]) -> float | None:
+        """The page's raw value, or ``None`` when the page is outside the metric's scope."""
+        meta = response.instance.metadata
+        if self.attribute is not None and meta.get(self.attribute) != self.attribute_value:
+            return None
+        value = result.get(self.component)
+        if value is None and self.zero_fill is not None and meta.get(self.zero_fill):
+            value = 0.0
+        return float(value) if value is not None else None
+
     def values(self, responses: Sequence[Response]) -> list[float]:
-        vals: list[float] = []
-        for response, result in _page_results(responses):
-            meta = response.instance.metadata
-            if self.attribute is not None and meta.get(self.attribute) != self.attribute_value:
-                continue
-            value = result.get(self.component)
-            if value is None and self.zero_fill is not None and meta.get(self.zero_fill):
-                value = 0.0
-            if value is not None:
-                vals.append(float(value))
-        return vals
+        vals = (self._page_value(response, result) for response, result in _page_results(responses))
+        return [v for v in vals if v is not None]
 
     def compute(self, responses: Sequence[Response]) -> float:
         vals = self.values(responses)
         return sum(vals) / len(vals) * self.scale if vals else 0.0
+
+    def compute_instance(self, response: Response) -> float | None:
+        result = _page_result(response)
+        value = self._page_value(response, result) if result is not None else None
+        return value * self.scale if value is not None else None
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+    def pairwise_higher_is_better(self) -> bool:
+        # Edit distances (text, formula, reading order) are better when lower.
+        return not self.component.endswith("_edit")
 
 
 @dataclass(frozen=True)
@@ -928,33 +982,36 @@ class OmniDocBenchOverallMetric(Metric):
     #: Whether missing table / formula pages count as zero (see the page metric).
     zero_fill: bool = True
 
+    def _components(self) -> tuple[OmniDocBenchPageMetric, ...]:
+        return (
+            OmniDocBenchPageMetric("", self.scorer, "text_edit"),
+            OmniDocBenchPageMetric(
+                "",
+                self.scorer,
+                "table_teds",
+                zero_fill="has_table" if self.zero_fill else None,
+                scale=100.0,
+            ),
+            OmniDocBenchPageMetric(
+                "",
+                self.scorer,
+                "formula_cdm",
+                zero_fill="has_formula" if self.zero_fill else None,
+                scale=100.0,
+            ),
+        )
+
     def compute(self, responses: Sequence[Response]) -> float:
-        text = OmniDocBenchPageMetric("", self.scorer, "text_edit").compute(responses)
-        teds = OmniDocBenchPageMetric(
-            "",
-            self.scorer,
-            "table_teds",
-            zero_fill="has_table" if self.zero_fill else None,
-            scale=100.0,
-        ).compute(responses)
-        cdm = OmniDocBenchPageMetric(
-            "",
-            self.scorer,
-            "formula_cdm",
-            zero_fill="has_formula" if self.zero_fill else None,
-            scale=100.0,
-        ).compute(responses)
+        text, teds, cdm = (metric.compute(responses) for metric in self._components())
         return ((1.0 - text) * 100.0 + teds + cdm) / 3.0
 
+    def compute_instance(self, response: Response) -> float | None:
+        """The same terms on one page, averaged over those the page has (0-100)."""
+        text, teds, cdm = (metric.compute_instance(response) for metric in self._components())
+        if text is None:
+            return None
+        terms = [(1.0 - text) * 100.0, *(v for v in (teds, cdm) if v is not None)]
+        return sum(terms) / len(terms)
 
-@dataclass(frozen=True)
-class OmniDocBenchScorerFailuresMetric(Metric):
-    """Samples the official evaluator zeroed after an internal crash, timeout or fallback."""
-
-    name: str  # type: ignore[misc]
-    scorer: Scorer  # type: ignore[misc]
-
-    def compute(self, responses: Sequence[Response]) -> float:
-        for _, result in _page_results(responses):
-            return float(result.get("num_scorer_failures", 0))
-        return 0.0
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
