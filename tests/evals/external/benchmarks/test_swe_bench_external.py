@@ -234,11 +234,38 @@ class TestGradeLog(unittest.TestCase):
 
 
 class TestGradeInSandbox(unittest.TestCase):
+    def setUp(self) -> None:
+        patcher = mock.patch.object(swe_grader, "EVAL_POLL_INTERVAL", 0.01)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_status_check_errors_do_not_abandon_the_run(self) -> None:
+        checks = iter([RuntimeError("poll timed out"), _fail(""), _ok("0\n")])
+
+        class FlakyExecutor(FakeExecutor):
+            async def execute_command(self, command: str, timeout: float | None = None, **_: Any):
+                if "cat /tmp/eval_exit_code" in command:
+                    self.commands.append(command)
+                    result = next(checks)
+                    if isinstance(result, Exception):
+                        raise result
+                    return result
+                return await super().execute_command(command, timeout)
+
+        executor = FlakyExecutor([("cat /tmp/eval_output.log", _ok(_log("PASSED")))])
+        grade = asyncio.run(
+            swe_grader.grade_in_sandbox(executor, _instance(), GOLD_PATCH, timeout=60)  # type: ignore[arg-type]
+        )
+        self.assertTrue(grade.resolved)
+        self.assertEqual(sum("cat /tmp/eval_exit_code" in c for c in executor.commands), 3)
+        start = next(c for c in executor.commands if "setsid nohup" in c)
+        self.assertIn("/bin/bash /eval.sh > /tmp/eval_output.log", start)
+
     def test_resolved_patch(self) -> None:
         executor = FakeExecutor(
             [
                 ("git apply --verbose /tmp", _ok("Applied")),
-                ("/bin/bash /eval.sh", _ok("eval exit code: 0")),
+                ("cat /tmp/eval_exit_code", _ok("0\n")),
                 ("cat /tmp/eval_output.log", _ok(_log("PASSED"))),
             ]
         )
@@ -257,7 +284,7 @@ class TestGradeInSandbox(unittest.TestCase):
             [
                 ("--3way", _ok("Applied")),
                 ("git apply --verbose /tmp", _fail("conflict")),
-                ("/bin/bash /eval.sh", _ok("eval exit code: 0")),
+                ("cat /tmp/eval_exit_code", _ok("0\n")),
                 ("cat /tmp/eval_output.log", _ok(_log("PASSED"))),
             ]
         )
@@ -283,18 +310,19 @@ class TestGradeInSandbox(unittest.TestCase):
         self.assertFalse(any("/eval.sh" in c for c in executor.commands))
 
     def test_eval_timeout(self) -> None:
-        executor = FakeExecutor([("/bin/bash /eval.sh", _fail("[Command timed out]"))])
+        executor = FakeExecutor([("cat /tmp/eval_exit_code", _fail("No such file"))])
         grade = asyncio.run(
-            swe_grader.grade_in_sandbox(executor, _instance(), GOLD_PATCH, timeout=1)  # type: ignore[arg-type]
+            swe_grader.grade_in_sandbox(executor, _instance(), GOLD_PATCH, timeout=0.05)  # type: ignore[arg-type]
         )
         self.assertEqual(grade.error, "eval_timeout")
+        self.assertTrue(any("pkill -f /eval.sh" in c for c in executor.commands))
         self.assertTrue(grade.patch_applied)
         self.assertFalse(grade.resolved)
 
     def test_unreadable_test_log_is_applied_but_not_run(self) -> None:
         executor = FakeExecutor(
             [
-                ("/bin/bash /eval.sh", _ok("eval exit code: 2")),
+                ("cat /tmp/eval_exit_code", _ok("2\n")),
                 ("cat /tmp/eval_output.log", _ok("ImportError: cannot import name")),
             ]
         )

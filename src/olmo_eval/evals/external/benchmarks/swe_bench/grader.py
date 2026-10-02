@@ -9,9 +9,11 @@ whether the instance is resolved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shlex
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,6 +29,8 @@ TESTBED_DIR = "/testbed"
 PATCH_PATH = "/tmp/patch.diff"
 EVAL_SCRIPT_PATH = "/eval.sh"
 EVAL_LOG_PATH = "/tmp/eval_output.log"
+EVAL_EXIT_PATH = "/tmp/eval_exit_code"
+EVAL_POLL_INTERVAL = 10.0
 
 # Mirrors the upstream harness: later commands are more lenient.
 GIT_APPLY_CMDS = (
@@ -175,6 +179,44 @@ async def apply_patch(executor: SandboxExecutor, patch: str) -> tuple[bool, str]
     return reverse.success, output
 
 
+async def run_eval_script(executor: SandboxExecutor, script: str, timeout: float) -> bool:
+    """Run an eval script detached from the request that starts it, and wait for it.
+
+    Waiting by polling for an exit-code file lets a busy container miss a few
+    status checks without the run being abandoned. The script's output is left
+    in ``EVAL_LOG_PATH``.
+
+    Returns:
+        Whether the script finished before ``timeout``.
+    """
+    await executor.write_files({EVAL_SCRIPT_PATH: script})
+    inner = f"/bin/bash {EVAL_SCRIPT_PATH} > {EVAL_LOG_PATH} 2>&1; echo $? > {EVAL_EXIT_PATH}"
+    start = await executor.execute_command(
+        f"rm -f {EVAL_EXIT_PATH}; setsid nohup bash -c {shlex.quote(inner)} "
+        "> /dev/null 2>&1 < /dev/null &",
+        timeout=60.0,
+    )
+    if not start.success:
+        raise RuntimeError(f"Failed to start eval script: {start.output[-2000:]}")
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        await asyncio.sleep(EVAL_POLL_INTERVAL)
+        try:
+            check = await executor.execute_command(f"cat {EVAL_EXIT_PATH}", timeout=30.0)
+        except Exception as e:
+            logger.debug(f"Eval status check failed, retrying: {e}")
+            continue
+        if check.success and check.output.strip():
+            return True
+
+    try:
+        await executor.execute_command(f"pkill -f {EVAL_SCRIPT_PATH}", timeout=30.0)
+    except Exception as e:
+        logger.debug(f"Failed to stop eval script: {e}")
+    return False
+
+
 async def grade_in_sandbox(
     executor: SandboxExecutor,
     instance: SWEBenchInstance,
@@ -190,16 +232,9 @@ async def grade_in_sandbox(
     if not applied:
         return GradeResult(test_output=_tail(apply_output), error="patch_apply_failed")
 
-    await executor.write_files({EVAL_SCRIPT_PATH: instance.eval_script})
-    # The log goes to a file so the streaming executor's output cap cannot cut it.
-    run = await executor.execute_command(
-        f"/bin/bash {EVAL_SCRIPT_PATH} > {EVAL_LOG_PATH} 2>&1; echo eval exit code: $?",
-        timeout=timeout,
-        stream=True,
-        log_prefix=f"swe-{instance.instance_id}-eval",
-    )
+    finished = await run_eval_script(executor, instance.eval_script, timeout)
     log = await executor.execute_command(f"cat {EVAL_LOG_PATH}", timeout=300.0)
-    if "eval exit code:" not in run.output:
+    if not finished:
         return GradeResult(patch_applied=True, test_output=_tail(log.output), error="eval_timeout")
 
     test_log = log.output
