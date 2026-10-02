@@ -201,6 +201,7 @@ class TestJudgeScorersOutsideTaskHash:
             "math_vista",
             "chartmuseum",
             "chartmuseum_visual",
+            "scimdr_eval",
         ],
     )
     def test_task_hash_is_stable_across_constructions(self, name):
