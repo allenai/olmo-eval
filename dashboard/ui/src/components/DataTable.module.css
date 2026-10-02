@@ -211,25 +211,30 @@
   transform: rotate(-90deg);
 }
 
+/* Trailing column that holds row actions. Sticky so the actions stay reachable when the
+   table scrolls sideways; the background follows the row's hover and selected states. */
 .actions {
   position: sticky;
   right: 0;
-  display: none;
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
   padding: 0 6px;
-  background: linear-gradient(90deg, transparent, var(--row-hover) 16px);
+  background: inherit;
   z-index: 2;
-  height: 100%;
+  visibility: hidden;
 }
 
 .row:hover .actions,
 .focused .actions {
-  display: flex;
+  visibility: visible;
 }
 
-.selected .actions {
-  background: linear-gradient(90deg, transparent, var(--accent-soft) 16px);
+.actionsHead {
+  position: sticky;
+  right: 0;
+  padding: 0;
 }
 
 .footer {

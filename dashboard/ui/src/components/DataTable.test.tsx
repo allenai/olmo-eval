@@ -64,4 +64,29 @@ describe("DataTable", () => {
     rerender(<DataTable tableId="t2" columns={columns} rows={[]} getRowId={(r) => r.id} empty={<span>Nothing here</span>} />);
     expect(screen.getByText("Nothing here")).toBeInTheDocument();
   });
+
+  it("puts row actions in their own trailing column", () => {
+    // Regression: the actions used to be placed across every column, which pushed the row's
+    // cells into a second grid row on hover and covered the links in the last column.
+    render(
+      <DataTable
+        tableId="t3"
+        columns={columns}
+        rows={rows}
+        getRowId={(r) => r.id}
+        maxHeight={400}
+        rowActions={(r) => <button type="button">act {r.id}</button>}
+      />,
+    );
+    const grid = screen.getByRole("grid");
+    const [header, firstRow] = within(grid).getAllByRole("row");
+    const template = firstRow.style.gridTemplateColumns;
+    expect(template.split(" ").at(-1)).toBe("96px");
+    expect(header.style.gridTemplateColumns).toBe(template);
+    expect(header.children).toHaveLength(columns.length + 1);
+    const cells = within(firstRow).getAllByRole("gridcell");
+    expect(cells).toHaveLength(columns.length + 1);
+    expect(cells.at(-1)).toHaveTextContent("act a");
+    expect(cells.at(-1)?.getAttribute("style")).toBeNull();
+  });
 });

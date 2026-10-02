@@ -21,6 +21,9 @@ import s from "./DataTable.module.css";
 import { Checkbox, cx, EmptyState, IconButton, Menu, SearchInput, SkeletonRows, uiStyles } from "./primitives";
 import { toast } from "./toast";
 
+/** Width of the trailing row-actions column; fits three small icon buttons. */
+const ROW_ACTIONS_WIDTH = 96;
+
 export interface Column<T> {
   id: string;
   header: ReactNode;
@@ -215,10 +218,14 @@ export function DataTable<T>(props: DataTableProps<T>) {
     c.grow && !c.pin && savedWidths?.[c.id] == null ? (c.minWidth ?? Math.round(widths[i] * 0.6)) : null,
   );
   const selectWidth = selectable ? 34 : 0;
+  // Row actions get their own trailing column, so showing them on hover never covers or
+  // displaces a cell.
+  const actionsWidth = rowActions ? ROW_ACTIONS_WIDTH : 0;
   const template = `${selectable ? `${selectWidth}px ` : ""}${widths
     .map((w, i) => (growMins[i] != null ? `minmax(${growMins[i]}px, ${w}fr)` : `${w}px`))
-    .join(" ")}`;
-  const totalWidth = selectWidth + widths.reduce((a, w, i) => a + (growMins[i] ?? w), 0);
+    .join(" ")}${actionsWidth ? ` ${actionsWidth}px` : ""}`;
+  const totalWidth =
+    selectWidth + actionsWidth + widths.reduce((a, w, i) => a + (growMins[i] ?? w), 0);
 
   // Offsets for pinned columns (pinned columns must come first).
   const pinOffsets = useMemo(() => {
@@ -515,6 +522,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                 </div>
               );
             })}
+            {rowActions && <div className={cx(s.th, s.actionsHead)} aria-hidden />}
           </div>
           {loading ? (
             <SkeletonRows rows={10} columns={Math.min(7, visibleColumns.length)} />
@@ -588,7 +596,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                       </div>
                     ))}
                     {rowActions && (
-                      <div className={s.actions} style={{ gridColumn: "1 / -1", gridRow: 1, justifySelf: "end" }}>
+                      <div className={s.actions} role="gridcell">
                         {rowActions(row)}
                       </div>
                     )}
