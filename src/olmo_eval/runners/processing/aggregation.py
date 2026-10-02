@@ -333,8 +333,7 @@ def _aggregate_suites(
 
     for spec, suite, priority_suffix in suites:
         if suite.aggregation == AggregationStrategy.NONE:
-            # No score of its own: each nested suite reports its aggregate under
-            # its own name, recording the innermost suite that contained it.
+            # No score of its own; nested suites report under their own names.
             nested = [
                 (f"{child.name}{priority_suffix}", child, priority_suffix)
                 for child in suite.tasks

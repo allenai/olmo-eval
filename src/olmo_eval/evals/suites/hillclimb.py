@@ -1,18 +1,6 @@
-"""Post-training hill-climb dev pass: the dev tiers and their guards in one run.
-
-Launching ``hillclimb:dev`` on a checkpoint evaluates, in one job:
-
-- the hills' dev tiers: LiveCodeBench release_v3 at one sample per problem, and
-  the OMEGA pair, reported as its in and out scores and the gap between them;
-- the guards, which are watched for regressions and never hill-climbed:
-  IFEval, IFBench and GPQA main.
-
-The suite has no aggregate of its own. A mean over code, math, instruction
-following and knowledge would hide which one moved, so every task reports its
-own score and the OMEGA pair reports its gap.
-
-LiveCodeBench is graded in a sandbox, so launch the suite with a sandboxed
-harness such as ``codex_python``; the README gives the full launch line.
+"""Hill-climb dev pass: the dev tiers (LiveCodeBench v3, the OMEGA in/out pair and its gap)
+and the guards (IFEval, IFBench, GPQA main) in one job, with no aggregate of their own.
+LiveCodeBench needs a sandboxed harness such as ``codex_python``; see the README.
 """
 
 from olmo_eval.evals.suites.math import OMEGA_DEV
