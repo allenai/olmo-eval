@@ -16,7 +16,7 @@ make_suite(
     aggregation=AggregationStrategy.DISPLAY_ONLY,
     description=(
         "Document OCR in every language the benchmarks cover, as their leaderboards score it: "
-        "olmOCR-bench, CC-OCR multi-scene (13 sub-datasets) and OmniDocBench v1.6 (all pages)."
+        "olmOCR-bench, CC-OCR multi-scene and OmniDocBench v1.6, every language."
     ),
 )
 
@@ -33,7 +33,7 @@ make_suite(
     aggregation=AggregationStrategy.DISPLAY_ONLY,
     description=(
         "English document OCR, the default setting for Molmo2 models (which read English only): "
-        "olmOCR-bench, CC-OCR's 8 English multi-scene sub-datasets and OmniDocBench v1.6's English "
+        "olmOCR-bench, CC-OCR's English multi-scene sub-datasets and OmniDocBench v1.6's English "
         "pages."
     ),
 )

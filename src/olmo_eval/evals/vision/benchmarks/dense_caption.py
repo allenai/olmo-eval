@@ -281,6 +281,10 @@ class DenseCaptionCaptionerEval(DenseCaptionEval):
     ``Molmo2-Stage1.py`` trains on (OLMo-core #875), so train and test share one prompt.
     Use ``dense_caption`` for released-Molmo2-family (``uber_model_v2``) checkpoints,
     which sample a seeded natural-language instruction instead.
+
+    mm_olmo's captioner-family checkpoints were trained on ``"long_caption 65:"`` instead.
+    They are no longer evaluated, so this task follows OLMo-core's stage 1 and no longer
+    reproduces their training prompt.
     """
 
     caption_prompt: str | None = "long_caption:"
