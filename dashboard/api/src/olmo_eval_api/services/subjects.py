@@ -135,15 +135,6 @@ async def models_task_results(
     return out
 
 
-async def model_task_results(
-    session: AsyncSession,
-    model_id: str,
-    group: str | None = None,
-    task_names: Sequence[str] | None = None,
-) -> dict[str, TaskResultRow]:
-    return (await models_task_results(session, [model_id], group, task_names))[model_id]
-
-
 def base_label(model: Mapping[Any, Any]) -> str:
     label = model["m_series_label"]
     if model["m_step"] is not None:
@@ -309,12 +300,6 @@ def detect_scale(mean: float, score: float) -> float | None:
         if abs(mean * scale - score) <= SCALE_TOLERANCE + SCALE_TOLERANCE * abs(score):
             return scale
     return None
-
-
-def resolve_metric_key(tr: TaskResultRow, metric: str) -> str | None:
-    if metric == "primary":
-        return tr["primary_metric"]
-    return metric
 
 
 def meta_for(tr: TaskResultRow, metric_key: str | None) -> dict[str, Any]:

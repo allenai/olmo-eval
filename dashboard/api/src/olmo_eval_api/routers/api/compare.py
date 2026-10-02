@@ -703,13 +703,17 @@ async def compare_instances(
     n_present = present.sum(axis=1)
     idx = {s.key: j for j, s in enumerate(subjects)}
     mask = np.ones(n, dtype=bool)
-    if body.filter == "disagree":
+    if corr is None and body.filter in ("all_wrong", "baseline_wrong", "cell"):
+        # Unbounded metrics have no right or wrong, so correctness filters match nothing.
+        mask = np.zeros(n, dtype=bool)
+    elif body.filter == "disagree":
         mask = (n_correct > 0) & (n_correct < n_present)
     elif body.filter == "all_wrong":
         mask = (n_correct == 0) & (n_present > 0)
     elif body.filter == "baseline_wrong":
         assert body.baseline is not None
-        mask = ~corr_arr[:, idx[body.baseline]]
+        jb = idx[body.baseline]
+        mask = present[:, jb] & ~corr_arr[:, jb]
     elif body.filter == "cell":
         assert body.a is not None and body.b is not None and body.cell is not None
         ja, jb = idx[body.a], idx[body.b]

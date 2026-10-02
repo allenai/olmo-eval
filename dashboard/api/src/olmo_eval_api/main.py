@@ -37,7 +37,9 @@ MAX_BODY_BYTES = 16 * 1024 * 1024
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 CSRF_HEADER = b"x-requested-with"
-CSRF_VALUE = b"olmo-eval-ui"
+# IAP answers XMLHttpRequest-marked requests with 401 instead of a sign-in redirect, so the
+# UI can show "session expired". Any custom header also forces a CORS preflight.
+CSRF_VALUE = b"XMLHttpRequest"
 
 
 def make_storage(settings: Settings) -> Storage:
@@ -117,7 +119,7 @@ class RequestContextMiddleware:
                 and path.startswith("/api/")
                 and headers.get(CSRF_HEADER) != CSRF_VALUE
             ):
-                await reply(403, "forbidden", "missing X-Requested-With: olmo-eval-ui header")
+                await reply(403, "forbidden", "missing X-Requested-With: XMLHttpRequest header")
                 return
 
             received = 0

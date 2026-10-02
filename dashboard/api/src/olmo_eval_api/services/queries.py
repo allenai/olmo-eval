@@ -99,12 +99,6 @@ def decode_name_cursor(cursor: str | None) -> str | None:
     return values[0]
 
 
-def parse_dt(value: Any) -> datetime | None:
-    if value is None or isinstance(value, datetime):
-        return value
-    return datetime.fromisoformat(value)
-
-
 def clamp_limit(limit: int | None, default: int = DEFAULT_LIMIT, maximum: int = MAX_LIMIT) -> int:
     if limit is None:
         return default

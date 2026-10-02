@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-EQUAL_WEIGHT_AGGREGATIONS = {"average", "average_of_averages", "none", "display_only"}
 NO_SCORE_AGGREGATIONS = {"none", "display_only"}
 
 
@@ -63,27 +62,45 @@ def leaves(node: SuiteNode) -> list[str]:
     return out
 
 
+def _flat_weights(
+    node: SuiteNode, n_instances: Mapping[str, int], present: set[str]
+) -> dict[str, float]:
+    """Weights over the present leaves: by instance count for weighted_average, else equal."""
+    names = [name for name in leaves(node) if name in present]
+    if not names:
+        return {}
+    if node.aggregation == "weighted_average":
+        total = sum(max(n_instances.get(name, 0), 0) for name in names)
+        if total > 0:
+            return {name: max(n_instances.get(name, 0), 0) / total for name in names}
+    return {name: 1.0 / len(names) for name in names}
+
+
 def leaf_weights(
     node: SuiteNode, n_instances: Mapping[str, int], present: set[str]
 ) -> dict[str, float]:
     """Weights over present leaves summing to 1 (empty when no leaf is present).
 
-    average / average_of_averages / none / display_only: equal weight among children that have
-    at least one present leaf, recursively. weighted_average: proportional to n_instances over
-    the node's present leaves.
+    These match olmo-eval's compute_suite_aggregations:
+
+    - average, display_only, none: equal weight for every present leaf in the expanded suite.
+    - weighted_average: proportional to n_instances over the present leaves.
+    - average_of_averages: equal weight for each direct child with a present leaf. A child suite
+      spreads its share over its own leaves, by instance count when it is weighted_average and
+      equally otherwise.
     """
     if node.type == "task":
         return {node.name: 1.0} if node.name in present else {}
-    if node.aggregation == "weighted_average":
-        names = [name for name in leaves(node) if name in present]
-        total = sum(max(n_instances.get(name, 0), 0) for name in names)
-        if not names:
-            return {}
-        if total <= 0:
-            return {name: 1.0 / len(names) for name in names}
-        return {name: max(n_instances.get(name, 0), 0) / total for name in names}
-    child_weights = [leaf_weights(child, n_instances, present) for child in node.children]
-    child_weights = [w for w in child_weights if w]
+    if node.aggregation != "average_of_averages":
+        return _flat_weights(node, n_instances, present)
+    child_weights = []
+    for child in node.children:
+        if child.type == "task":
+            weights = {child.name: 1.0} if child.name in present else {}
+        else:
+            weights = _flat_weights(child, n_instances, present)
+        if weights:
+            child_weights.append(weights)
     if not child_weights:
         return {}
     out: dict[str, float] = {}

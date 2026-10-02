@@ -515,6 +515,40 @@ async def test_compare_pairwise_contingency_instances(
     assert all(r["correct"][1] and not r["correct"][0] for r in body["items"])
 
 
+async def test_compare_instances_baseline_wrong(client: httpx.AsyncClient, seeded: dict) -> None:
+    full, short = f"r:{seeded['step1000']}", f"r:{seeded['failed']}"  # 80 vs 30 arc instances
+    body = await post(
+        client,
+        "/api/compare/instances",
+        {
+            "subjects": [full, short],
+            "task_name": "arc",
+            "metric": "primary",
+            "filter": "baseline_wrong",
+            "baseline": short,
+            "limit": 1000,
+        },
+        "CompareInstancesResponse",
+    )
+    assert 0 < body["total"] <= 30
+    assert all(r["scores"][1] is not None and r["correct"][1] is False for r in body["items"])
+
+    steps = [f"r:{seeded['step1000']}", f"r:{seeded['step2000']}"]
+    body = await post(
+        client,
+        "/api/compare/instances",
+        {
+            "subjects": steps,
+            "task_name": "unbounded",
+            "metric": "primary",
+            "filter": "baseline_wrong",
+            "baseline": steps[1],
+        },
+        "CompareInstancesResponse",
+    )
+    assert body["total"] == 0
+
+
 async def test_models_tasks_suites_groups(client: httpx.AsyncClient, seeded: dict) -> None:
     body = await get(client, "/api/models", "ModelsListResponse")
     series = {r["series"]: r for r in body["items"]}

@@ -5,7 +5,7 @@ Repeated values of one key are OR-ed; different keys are AND-ed. Globs use ``*``
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
@@ -228,7 +228,3 @@ def build_where(
         # Uploading runs are hidden by default; asking for them makes them visible.
         clauses[0] = f"({VISIBLE} OR r.upload_state = 'uploading')"
     return " AND ".join(clauses), params
-
-
-def filter_names() -> list[str]:
-    return [x.name for x in fields(RunFilters)]

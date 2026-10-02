@@ -151,16 +151,24 @@ DEFS = {
     "mc": ("average", [{"type": "task", "name": "a"}, {"type": "task", "name": "b"}]),
     "w": ("weighted_average", [{"type": "task", "name": "a"}, {"type": "task", "name": "b"}]),
     "cyc": ("average", [{"type": "suite", "name": "cyc"}]),
+    "aoa": (
+        "average_of_averages",
+        [{"type": "suite", "name": "w"}, {"type": "task", "name": "gen"}],
+    ),
 }
 
 
 def test_suite_tree_and_weights() -> None:
     tree = build_tree("root", DEFS)
     assert leaves(tree) == ["a", "b", "gen"]
+    # average weighs every expanded task equally, as olmo-eval does.
     w = leaf_weights(tree, {}, {"a", "b", "gen"})
-    assert w == pytest.approx({"a": 0.25, "b": 0.25, "gen": 0.5})
+    assert w == pytest.approx({"a": 1 / 3, "b": 1 / 3, "gen": 1 / 3})
     w = leaf_weights(tree, {}, {"a", "gen"})
     assert w == pytest.approx({"a": 0.5, "gen": 0.5})
+    # average_of_averages gives each child an equal share; a weighted child splits by instances.
+    aoa = leaf_weights(build_tree("aoa", DEFS), {"a": 30, "b": 10}, {"a", "b", "gen"})
+    assert aoa == pytest.approx({"a": 0.375, "b": 0.125, "gen": 0.5})
     assert leaf_weights(tree, {}, set()) == {}
     weighted = leaf_weights(build_tree("w", DEFS), {"a": 30, "b": 10}, {"a", "b"})
     assert weighted == pytest.approx({"a": 0.75, "b": 0.25})
@@ -172,7 +180,7 @@ def test_suite_tree_and_weights() -> None:
 
 def test_aggregate_and_stderr() -> None:
     tree = build_tree("root", DEFS)
-    assert aggregate(tree, {"a": 0.2, "b": 0.4, "gen": 0.9}, {}) == pytest.approx(0.6)
+    assert aggregate(tree, {"a": 0.2, "b": 0.4, "gen": 0.9}, {}) == pytest.approx(0.5)
     assert aggregate(tree, {"a": None, "b": None, "gen": None}, {}) is None
     display = build_tree("d", {"d": ("display_only", [{"type": "task", "name": "a"}])})
     assert aggregate(display, {"a": 1.0}, {}) is None

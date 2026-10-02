@@ -432,6 +432,58 @@ async def test_suite_with_missing_task_and_mean_headline(
     assert run["kind"] == "mean" and math.isclose(run["score"], 0.75)
 
 
+async def test_nested_average_suite_weighs_every_task_equally(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    t1, t2, t3 = [1.0, 0.0] * 10, [1.0, 1.0, 0.0] * 10, [0.0, 1.0, 1.0, 1.0] * 10
+    await seed_run(
+        client,
+        run_id="run000000004",
+        tasks={"t1": t1, "t2": t2, "t3": t3},
+        suites=[
+            suite("outer", ["suite:inner", "t3"], score=0.6),
+            suite("inner", ["t1", "t2"], score=0.6, parent="outer"),
+        ],
+    )
+    rows = {
+        r["suite_name"]: r
+        for r in (await session.execute(text("SELECT * FROM suite_results"))).mappings()
+    }
+    ses = [float(np.std(x, ddof=1) / math.sqrt(len(x))) for x in (t1, t2, t3)]
+    expected = math.sqrt(sum(se**2 for se in ses) / 9)
+    assert math.isclose(rows["outer"]["stderr"], expected)
+    assert rows["outer"]["n_instances"] == 20 + 30 + 40
+
+
+async def test_complete_warns_about_undefined_child_suites(client: httpx.AsyncClient) -> None:
+    await client.put(f"/v1/runs/{RUN_ID}", json=run_payload(run_id=RUN_ID, model_name="m"))
+    response = await client.post(
+        f"/v1/runs/{RUN_ID}/complete",
+        json={
+            "status": "complete",
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [suite("lonely", ["suite:ghost"])],
+            "expected_task_results": 0,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 200
+    assert any("ghost" in w for w in response.json()["warnings"])
+
+
+async def test_upsert_keeps_tags_added_in_the_dashboard(client: httpx.AsyncClient) -> None:
+    body = run_payload(run_id=RUN_ID, model_name="m", tags=["cli"], status="running")
+    assert (await client.put(f"/v1/runs/{RUN_ID}", json=body)).status_code in (200, 201)
+    response = await client.patch(f"/api/runs/{RUN_ID}", json={"tags": ["cli", "baseline"]})
+    assert response.status_code == 200
+    body["run"]["status"] = "complete"
+    body["run"]["tags"] = ["cli", "final"]
+    assert (await client.put(f"/v1/runs/{RUN_ID}", json=body)).status_code == 200
+    detail = (await client.get(f"/api/runs/{RUN_ID}")).json()
+    assert detail["tags"] == ["cli", "baseline", "final"]
+
+
 async def test_null_scores_and_failed_task(client: httpx.AsyncClient, session: Any) -> None:
     await seed_run(
         client,

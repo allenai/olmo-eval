@@ -207,6 +207,8 @@ async def upsert_run(
     if not created:
         downgrade = run.status in FINAL_STATUSES and req.run.status == "running"
         if not downgrade:
+            # Keep tags added in the dashboard: the client only knows the CLI tags.
+            fields["tags"] = list(dict.fromkeys([*(run.tags or []), *fields["tags"]]))
             for key, value in fields.items():
                 setattr(run, key, value)
             run.status = req.run.status
@@ -895,6 +897,7 @@ async def complete_run(
     stored = await current_suite_defs(session, child_suites - set(request_defs))
     defs: dict[str, tuple[str, list[dict]]] = {k: (v[0], v[1]) for k, v in stored.items()}
     defs.update(request_defs)
+    undefined_suites = sorted(child_suites - set(defs))
     suite_rows: list[SuiteResult] = []
     for x in req.suites:
         children = [c.model_dump() for c in x.children]
@@ -994,6 +997,11 @@ async def complete_run(
             )
     if missing:
         warnings.append(f"{len(missing)} signed artifacts are missing from storage")
+    if undefined_suites:
+        warnings.append(
+            "no definition for child suite(s) "
+            f"{', '.join(undefined_suites)}; they count as empty until one is uploaded"
+        )
 
     instances = run.num_instances
     await session.commit()

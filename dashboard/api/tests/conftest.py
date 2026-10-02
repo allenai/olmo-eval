@@ -21,13 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from olmo_eval_api.db.migrate import run_migrations
 from olmo_eval_api.db.models import ALL_TABLES
 from olmo_eval_api.main import create_app
+from olmo_eval_api.services.cache import clear_memory_cache
 from olmo_eval_api.settings import Settings
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
 DEFAULT_HEADERS = {
     "X-Goog-Authenticated-User-Email": "accounts.google.com:tester@allenai.org",
-    "X-Requested-With": "olmo-eval-ui",
+    "X-Requested-With": "XMLHttpRequest",
     "X-Olmo-Eval-Token": "dev:tester@allenai.org",
 }
 
@@ -75,6 +76,8 @@ async def app(engine: AsyncEngine, settings: Settings) -> AsyncIterator[Any]:
         yield application
     async with engine.begin() as conn:
         await conn.execute(text(f"TRUNCATE {', '.join(ALL_TABLES)} RESTART IDENTITY CASCADE"))
+    # The database is emptied, so cached stats from this test must not reach the next one.
+    clear_memory_cache()
 
 
 @pytest.fixture
