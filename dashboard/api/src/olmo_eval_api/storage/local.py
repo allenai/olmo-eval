@@ -9,11 +9,12 @@ import asyncio
 import base64
 import hashlib
 import shutil
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-from olmo_eval_api.storage.base import ObjectInfo, SignedUrl
+from olmo_eval_api.storage.base import ObjectInfo, SignedUrl, upload_headers
 
 
 def md5_b64(data: bytes) -> str:
@@ -52,8 +53,22 @@ class LocalStorage:
 
         return await asyncio.to_thread(run)
 
-    async def sign_upload(self, key: str, content_type: str, md5_b64: str) -> SignedUrl:
-        headers = {"Content-Type": content_type, "Content-MD5": md5_b64}
+    async def stat_objects(self, keys: Iterable[str]) -> dict[str, ObjectInfo]:
+        def run() -> dict[str, ObjectInfo]:
+            out: dict[str, ObjectInfo] = {}
+            for key in keys:
+                path = self.path_for(key)
+                if path.is_file():
+                    data = path.read_bytes()
+                    out[key] = ObjectInfo(size=len(data), md5_b64=md5_b64(data))
+            return out
+
+        return await asyncio.to_thread(run)
+
+    async def sign_upload(
+        self, key: str, content_type: str, md5_b64: str, size_bytes: int
+    ) -> SignedUrl:
+        headers = upload_headers(content_type, md5_b64, size_bytes)
         return SignedUrl(
             url=self.object_url(key),
             headers=headers,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,10 +19,11 @@ from google.api_core import exceptions as gexc
 from google.auth.transport.requests import Request as AuthRequest
 from google.cloud import storage
 
-from olmo_eval_api.storage.base import ObjectInfo, SignedUrl
+from olmo_eval_api.storage.base import LENGTH_RANGE_HEADER, ObjectInfo, SignedUrl, upload_headers
 
 UPLOAD_TTL = timedelta(hours=1)
 DOWNLOAD_TTL = timedelta(minutes=15)
+STAT_CONCURRENCY = 16
 _SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 _UNSAFE_FILENAME = re.compile(r"[^A-Za-z0-9._+=@-]")
 
@@ -78,12 +80,36 @@ class GcsStorage:
 
         return await asyncio.to_thread(run)
 
-    async def sign_upload(self, key: str, content_type: str, md5_b64: str) -> SignedUrl:
+    async def stat_objects(self, keys: Iterable[str]) -> dict[str, ObjectInfo]:
+        limiter = asyncio.Semaphore(STAT_CONCURRENCY)
+
+        def stat(key: str) -> ObjectInfo | None:
+            blob = self._gcs().bucket(self.bucket).get_blob(key)
+            if blob is None:
+                return None
+            return ObjectInfo(size=int(blob.size or 0), md5_b64=blob.md5_hash)
+
+        async def one(key: str) -> tuple[str, ObjectInfo | None]:
+            async with limiter:
+                return key, await asyncio.to_thread(stat, key)
+
+        found = await asyncio.gather(*(one(k) for k in dict.fromkeys(keys)))
+        return {k: info for k, info in found if info is not None}
+
+    async def sign_upload(
+        self, key: str, content_type: str, md5_b64: str, size_bytes: int
+    ) -> SignedUrl:
         expires_at = datetime.now(UTC) + UPLOAD_TTL
+        headers = upload_headers(content_type, md5_b64, size_bytes)
         url = await asyncio.to_thread(
-            self._sign, key, "PUT", UPLOAD_TTL, content_type=content_type, content_md5=md5_b64
+            self._sign,
+            key,
+            "PUT",
+            UPLOAD_TTL,
+            content_type=content_type,
+            content_md5=md5_b64,
+            headers={LENGTH_RANGE_HEADER: headers[LENGTH_RANGE_HEADER]},
         )
-        headers = {"Content-Type": content_type, "Content-MD5": md5_b64}
         return SignedUrl(url=url, headers=headers, expires_at=expires_at)
 
     async def sign_download(self, key: str, filename: str | None = None) -> SignedUrl:

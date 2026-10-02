@@ -14,6 +14,7 @@ from sqlalchemy import text
 from olmo_eval_api.errors import bad_request, not_found
 from olmo_eval_api.schemas import api as a
 from olmo_eval_api.services.cache import cache_key, get_cached, put_cached
+from olmo_eval_api.services.common import latest_by_task
 from olmo_eval_api.services.filters import like_contains
 from olmo_eval_api.services.queries import (
     MODEL_COLUMNS,
@@ -34,7 +35,6 @@ from olmo_eval_api.services.queries import (
 from olmo_eval_api.services.read_suites import load_defs, score_suite, tree
 from olmo_eval_api.services.subjects import (
     TR_COLUMNS,
-    latest_by_task,
     meta_for,
     models_task_results,
     resolve_subjects,
@@ -995,6 +995,11 @@ async def distributions(
     key = cache_key("distributions", body.model_dump(mode="json"), rows)
     cached = await get_cached(session, key, a.DistributionsResponse)
     if cached is not None:
+        # The key covers the task results, not model metadata, so refresh the top model.
+        by_run = {r["run_id"]: r for r in rows}
+        for item in cached.items:
+            if item.top is not None and item.top.run_id in by_run:
+                item.top.model = model_ref(by_run[item.top.run_id])
         return cached
     items = []
     for k in body.items:

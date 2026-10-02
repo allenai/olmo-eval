@@ -15,6 +15,7 @@ from jsonschema import Draft7Validator
 from sqlalchemy import text
 
 from olmo_eval_api.services.derive import instance_key_hash
+from olmo_eval_api.settings import UPLOADER_SERVICE_ACCOUNT
 from tests.factories import (
     instance_rows,
     run_payload,
@@ -108,7 +109,11 @@ async def test_contract_example_round_trip(client: httpx.AsyncClient, session: A
     for upload in sign["uploads"]:
         assert upload["skip"] is False
         assert upload["url"].startswith("http://test/_local/objects/dev/runs/")
-        assert set(upload["headers"]) == {"Content-Type", "Content-MD5"}
+        assert set(upload["headers"]) == {
+            "Content-Type",
+            "Content-MD5",
+            "x-goog-content-length-range",
+        }
 
     tr = (
         await client.post(
@@ -356,6 +361,57 @@ async def test_delete_run(client: httpx.AsyncClient, session: Any, app: Any) -> 
     counts = await table_counts(session)
     assert counts["runs"] == 0 and counts["task_results"] == 0 and counts["instance_results"] == 0
     assert counts["models"] == 1  # models and task variants outlive runs
+
+
+async def test_reupload_cannot_take_over_a_service_account_run(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    uploader = {"X-Olmo-Eval-Token": f"dev:{UPLOADER_SERVICE_ACCOUNT}"}
+    alice = {"X-Olmo-Eval-Token": "dev:alice@allenai.org"}
+    run_id = "spoof0000001"
+    body = run_payload(run_id=run_id, model_name="org/model", author="bob")
+    assert (await client.put(f"/v1/runs/{run_id}", json=body, headers=uploader)).status_code == 200
+    spoofed = run_payload(run_id=run_id, model_name="org/model", author="alice")
+    for headers in (alice, uploader):
+        response = await client.put(f"/v1/runs/{run_id}", json=spoofed, headers=headers)
+        assert response.status_code == 200, response.text
+        sql = text("SELECT author FROM runs WHERE run_id = :r")
+        assert await session.scalar(sql, {"r": run_id}) == "bob"
+    assert (await client.delete(f"/v1/runs/{run_id}", headers=alice)).status_code == 403
+    bob = {"X-Olmo-Eval-Token": "dev:bob@allenai.org"}
+    assert (await client.delete(f"/v1/runs/{run_id}", headers=bob)).status_code == 204
+
+
+async def test_uploader_may_correct_the_author_of_their_own_run(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    run_id = "ownrun000001"
+    body = run_payload(run_id=run_id, model_name="org/model", author="typo")
+    assert (await client.put(f"/v1/runs/{run_id}", json=body)).status_code == 200
+    body = run_payload(run_id=run_id, model_name="org/model", author="tester")
+    assert (await client.put(f"/v1/runs/{run_id}", json=body)).status_code == 200
+    author = await session.scalar(text("SELECT author FROM runs WHERE run_id = :r"), {"r": run_id})
+    assert author == "tester"
+
+
+async def test_latest_task_hash_is_the_last_uploaded(client: httpx.AsyncClient) -> None:
+    """complete_run finalizes every task result at once; that must not tie their updated_at."""
+    run_id = "latest000001"
+    await seed_run(client, run_id=run_id, tasks={"t": [1.0] * 25}, task_hashes={"t": "h1"})
+    await seed_run(client, run_id=run_id, tasks={"t": [0.0] * 25}, task_hashes={"t": "h2"})
+    # Re-upload h1 after h2: h1 is now the most recent, although h2 has the larger id.
+    await seed_run(client, run_id=run_id, tasks={"t": [1.0] * 25}, task_hashes={"t": "h1"})
+    for _ in range(2):  # and completing again does not change that
+        response = await client.get(
+            "/api/subjects/task-result", params={"subject": f"r:{run_id}", "task": "t"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["task_hash"] == "h1"
+        done = await client.post(
+            f"/v1/runs/{run_id}/complete",
+            json={**load_example("ingest/complete.request.json"), "expected_task_results": 2},
+        )
+        assert done.status_code == 200, done.text
 
 
 async def test_complete_derivations(client: httpx.AsyncClient, session: Any) -> None:

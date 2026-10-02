@@ -17,7 +17,8 @@
       "method": "PUT",
       "headers": {
         "Content-Type": "application/x-ndjson",
-        "Content-MD5": "jTm/RnEL1k8WrNeEEBxueQ=="
+        "Content-MD5": "jTm/RnEL1k8WrNeEEBxueQ==",
+        "x-goog-content-length-range": "4783708,4783708"
       },
       "expires_at": "2026-10-01T02:27:00+00:00"
     },
@@ -29,7 +30,8 @@
       "method": "PUT",
       "headers": {
         "Content-Type": "application/x-ndjson",
-        "Content-MD5": "VL5poiXMyMZj1ev+jXzu0g=="
+        "Content-MD5": "VL5poiXMyMZj1ev+jXzu0g==",
+        "x-goog-content-length-range": "1193030,1193030"
       },
       "expires_at": "2026-10-01T02:27:00+00:00"
     },
@@ -41,7 +43,8 @@
       "method": "PUT",
       "headers": {
         "Content-Type": "application/x-ndjson",
-        "Content-MD5": "PkJRSMp950TtO6uq28LfzQ=="
+        "Content-MD5": "PkJRSMp950TtO6uq28LfzQ==",
+        "x-goog-content-length-range": "1548445,1548445"
       },
       "expires_at": "2026-10-01T02:27:00+00:00"
     }

@@ -658,7 +658,7 @@
               "type": "null"
             }
           ],
-          "description": "model_output[0].completion_tokens."
+          "description": "Sum over all generated samples (multiple choice: model_output[0])."
         },
         "doc_id": {
           "anyOf": [
@@ -678,7 +678,7 @@
           ]
         },
         "finish_reason": {
-          "description": "model_output[0].finish_reason.",
+          "description": "\"length\" if any sample was truncated, else model_output[0].finish_reason.",
           "type": [
             "string",
             "null"
@@ -718,7 +718,7 @@
           "maxProperties": 200
         },
         "native_id": {
-          "description": "str(native_id). Unique within a task result; duplicates get a \"#<n>\" suffix.",
+          "description": "str(native_id), truncated to 512 characters. Unique within a task result; duplicates get a \"#<n>\" suffix, added within the 512-character limit.",
           "maxLength": 512,
           "minLength": 1,
           "type": "string"
@@ -1412,7 +1412,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Headers the PUT must send exactly (Content-Type, Content-MD5).",
+          "description": "Headers the PUT must send exactly (Content-Type, Content-MD5, and x-goog-content-length-range, which makes GCS reject a body of another size).",
           "type": "object"
         },
         "method": {

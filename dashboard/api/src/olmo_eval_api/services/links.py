@@ -28,7 +28,6 @@ def gcs_console_url(gs_uri: str) -> str:
 
 
 def run_links(run: Mapping[Any, Any]) -> dict[str, str | None]:
-    beaker = run.get("beaker") or {}
     experiment = run.get("beaker_experiment_id")
     dataset = run.get("beaker_result_dataset_id")
     workspace = run.get("beaker_workspace")
@@ -42,5 +41,5 @@ def run_links(run: Mapping[Any, Any]) -> dict[str, str | None]:
         "beaker_result_dataset": f"{BEAKER}/ds/{dataset}" if dataset else None,
         "beaker_workspace": f"{BEAKER}/ws/{workspace}" if workspace else None,
         "gcs_console": gcs_console_url(run["gcs_prefix"]) if run.get("gcs_prefix") else None,
-        "github_commit": github or (beaker.get("github_commit") if beaker else None),
+        "github_commit": github,
     }

@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from olmo_eval_api.services.ingest import current_suite_defs
 from olmo_eval_api.services.suites import (
     NO_SCORE_AGGREGATIONS,
     SuiteNode,
     aggregate,
     build_tree,
+    current_suite_defs,
     leaf_weights,
     leaves,
     propagate_stderr,
@@ -29,6 +29,23 @@ async def load_defs(session: AsyncSession) -> SuiteDefs:
 
 def tree(name: str, defs: SuiteDefs) -> SuiteNode:
     return build_tree(name, {k: (v[0], v[1]) for k, v in defs.items()})
+
+
+def definition_hashes(nodes: Iterable[SuiteNode], defs: SuiteDefs) -> dict[str, str | None]:
+    """Definition hash of every suite in the trees (None for an undefined suite), for cache
+    keys: a response computed from these trees is stale once any of them changes."""
+    out: dict[str, str | None] = {}
+
+    def walk(node: SuiteNode) -> None:
+        if node.type != "suite":
+            return
+        out[node.name] = defs[node.name][3] if node.name in defs else None
+        for child in node.children:
+            walk(child)
+
+    for node in nodes:
+        walk(node)
+    return out
 
 
 @dataclass

@@ -17,27 +17,22 @@ from olmo_eval_api.errors import bad_request, not_found
 from olmo_eval_api.schemas import api as a
 from olmo_eval_api.schemas.ingest import RUN_ID_PATTERN
 from olmo_eval_api.services.cache import cache_key, get_cached, put_cached
-from olmo_eval_api.services.filters import like_contains
+from olmo_eval_api.services.common import latest_by_task, now_utc
+from olmo_eval_api.services.instances import INSTANCE_SORTS, InstanceFilters, query_instances
 from olmo_eval_api.services.links import gcs_console_url, run_links, split_gs_uri
 from olmo_eval_api.services.queries import (
     clamp_limit,
-    decode_cursor,
-    encode_cursor,
     fetch_models,
     fetch_run_rows,
-    keyset,
     model_ref,
-    now_utc,
-    order_by,
     run_summary,
 )
-from olmo_eval_api.services.read_suites import load_defs, score_suite, tree
+from olmo_eval_api.services.read_suites import definition_hashes, load_defs, score_suite, tree
 from olmo_eval_api.services.subjects import (
     TR_COLUMNS,
     SideLoader,
     Subject,
     base_label,
-    latest_by_task,
     resolve_one,
     run_task_results,
 )
@@ -113,13 +108,15 @@ async def run_task_results_endpoint(
         {"run_id": run_id, "baseline": baseline, **stats.__dict__},
         used,
     )
+    cached = None
     if subject is not None:
         cached = await get_cached(session, key, a.RunTaskResultsResponse)
-        if cached is not None:
-            return cached
 
+    # Only the baseline cells come from the cache; rows and summaries are always current.
     cells: dict[int, a.BaselineCell] = {}
-    if subject is not None:
+    if cached is not None:
+        cells = {i.task_result_id: i.baseline for i in cached.items if i.baseline is not None}
+    elif subject is not None:
         loader = SideLoader(session)
         pairs = []
         for tr in trs:
@@ -199,9 +196,9 @@ async def run_task_results_endpoint(
         run_id=run_id,
         baseline=subject.info() if subject else None,
         items=items,
-        computed_at=now_utc(),
+        computed_at=cached.computed_at if cached is not None else now_utc(),
     )
-    if subject is not None:
+    if subject is not None and cached is None:
         await put_cached(session, key, response)
     return response
 
@@ -300,23 +297,22 @@ async def run_suites(
     trs_list = await run_task_results(session, run_id)
     run_trs = latest_by_task(trs_list)
     subject = await resolve_one(session, baseline) if baseline else None
-    key = cache_key(
-        "run-suites",
-        {"run_id": run_id, "baseline": baseline, **stats.__dict__},
-        trs_list + (list(subject.trs.values()) if subject else []),
-    )
-    if subject is not None:
-        cached = await get_cached(session, key, a.RunSuitesResponse)
-        if cached is not None:
-            return cached
-
     stored_defs = {
         r["suite_name"]: (r["aggregation"], r["children"], r["description"], r["definition_hash"])
         for r in rows
     }
     defs = {**(await load_defs(session)), **stored_defs}
-    loader = SideLoader(session)
+    key = cache_key(
+        "run-suites",
+        {"run_id": run_id, "baseline": baseline, **stats.__dict__},
+        trs_list + (list(subject.trs.values()) if subject else []),
+        definition_hashes([tree(r["suite_name"], defs) for r in ordered], defs),
+    )
+    cached = None
     if subject is not None:
+        cached = await get_cached(session, key, a.RunSuitesResponse)
+    loader = SideLoader(session)
+    if subject is not None and cached is None:
         for name, tr in run_trs.items():
             base = subject.trs.get(name)
             if base is not None and tr["primary_metric"]:
@@ -326,8 +322,11 @@ async def run_suites(
     depth: dict[str, int] = {}
     in_suites: set[str] = set()
     items: list[a.SuiteResultRow] = []
+    # Only the baseline cells come from the cache; rows and summaries are always current.
     base_cells: dict[str, a.SuiteBaselineCell] = {}
-    if subject is not None:
+    if cached is not None:
+        base_cells = {i.name: i.baseline for i in cached.items if i.baseline is not None}
+    elif subject is not None:
         base_trs = subject.trs
 
         def build_base_cells() -> None:
@@ -378,9 +377,9 @@ async def run_suites(
         baseline=subject.info() if subject else None,
         items=items,
         unsuited_tasks=sorted(set(run_trs) - in_suites),
-        computed_at=now_utc(),
+        computed_at=cached.computed_at if cached is not None else now_utc(),
     )
-    if subject is not None:
+    if subject is not None and cached is None:
         await put_cached(session, key, response)
     return response
 
@@ -407,28 +406,6 @@ async def _task_result(session: Any, run_id: str, task_result_id: int) -> Mappin
 async def _baseline_tr(session: Any, baseline: str, task_name: str) -> Mapping[Any, Any] | None:
     subject = await resolve_one(session, baseline)
     return subject.trs.get(task_name)
-
-
-def _goodness_sql(col: str, higher_is_better: bool | None) -> str:
-    return col if higher_is_better is not False else f"(1 - {col})"
-
-
-INSTANCE_SORTS = {
-    "doc_id": ("ir.doc_id", False),
-    "native_id": ("ir.native_id", False),
-    "score": ("ir.primary_score", False),
-    "-score": ("ir.primary_score", True),
-    "delta": ("(ir.primary_score - b.primary_score)", False),
-    "-delta": ("(ir.primary_score - b.primary_score)", True),
-    "length": ("ir.completion_tokens", False),
-    "-length": ("ir.completion_tokens", True),
-}
-HAS_FLAGS = {
-    "scoring_error": "ir.has_scoring_error",
-    "execution_result": "ir.has_execution_result",
-    "judge_result": "ir.has_judge_result",
-    "trajectory": "ir.has_trajectory",
-}
 
 
 @router.get(
@@ -472,96 +449,28 @@ async def run_instances(
     if sort not in INSTANCE_SORTS:
         raise bad_request(f"invalid sort {sort!r}")
     base_tr = await _baseline_tr(session, baseline, tr["task_name"]) if baseline else None
-    params: dict[str, Any] = {"tid": task_result_id, "thr": threshold}
-    join = ""
-    base_cols = "NULL::float8 AS b_score"
-    if base_tr is not None:
-        join = (
-            "LEFT JOIN instance_results b "
-            "ON b.task_result_id = :btid AND b.native_id = ir.native_id"
-        )
-        params["btid"] = base_tr["id"]
-        base_cols = "b.primary_score AS b_score"
-    elif sort in ("delta", "-delta") or vs:
-        if not baseline:
-            raise bad_request("delta sort requires baseline")
-        join = "LEFT JOIN (SELECT NULL::float8 AS primary_score) b ON FALSE"
-    good = _goodness_sql("ir.primary_score", hib)
-    bgood = _goodness_sql("b.primary_score", hib)
-    is_correct = f"(ir.primary_score IS NOT NULL AND {good} >= :thr)"
-    b_correct = f"(b.primary_score IS NOT NULL AND {bgood} >= :thr)"
-    where = ["ir.task_result_id = :tid"]
-    if correct == "correct":
-        where.append(is_correct)
-    elif correct == "incorrect":
-        where.append(f"NOT {is_correct}")
-    elif correct == "partial":
-        where.append(f"({good} > 0 AND {good} < 1)")
-    if vs:
-        if base_tr is None:
-            where.append("FALSE")
-        elif vs == "gained":
-            where.append(f"{is_correct} AND b.primary_score IS NOT NULL AND NOT {b_correct}")
-        elif vs == "lost":
-            where.append(f"NOT {is_correct} AND {b_correct} AND ir.primary_score IS NOT NULL")
-        elif vs == "both_right":
-            where.append(f"{is_correct} AND {b_correct}")
-        elif vs == "both_wrong":
-            where.append(
-                f"ir.primary_score IS NOT NULL AND b.primary_score IS NOT NULL "
-                f"AND NOT {is_correct} AND NOT {b_correct}"
-            )
-        elif vs == "changed":
-            where.append(
-                "b.native_id IS NOT NULL AND ir.primary_score IS DISTINCT FROM b.primary_score"
-            )
-    if finish_reason:
-        where.append("ir.finish_reason = ANY(:fr)")
-        params["fr"] = finish_reason
-    if len_min is not None:
-        where.append("ir.completion_tokens >= :lmin")
-        params["lmin"] = len_min
-    if len_max is not None:
-        where.append("ir.completion_tokens <= :lmax")
-        params["lmax"] = len_max
-    if score_min is not None:
-        where.append("ir.primary_score >= :smin")
-        params["smin"] = score_min
-    if score_max is not None:
-        where.append("ir.primary_score <= :smax")
-        params["smax"] = score_max
-    for flag in has:
-        if flag not in HAS_FLAGS:
-            raise bad_request(f"unknown has={flag}")
-        where.append(HAS_FLAGS[flag])
-    if q:
-        params["q"] = like_contains(q)
-        where.append(
-            "(ir.prompt_preview ILIKE :q OR ir.output_preview ILIKE :q OR ir.label ILIKE :q "
-            "OR ir.native_id ILIKE :q)"
-        )
-    where_sql = " AND ".join(where)
-    expr, desc = INSTANCE_SORTS[sort]
-    keys = [(expr, desc), ("ir.native_id", desc)] if expr != "ir.native_id" else [(expr, desc)]
-    cond, cparams = keyset(keys, decode_cursor(cursor))
-    sql = f"""
-        SELECT ir.*, {base_cols}, {expr} AS sort_value
-        FROM instance_results ir {join}
-        WHERE {where_sql} AND {cond}
-        ORDER BY {order_by(keys)} LIMIT {limit + 1}
-    """
-    rows = list((await session.execute(text(sql), {**params, **cparams})).mappings().all())
-    total = (
-        await session.execute(
-            text(f"SELECT count(*) FROM instance_results ir {join} WHERE {where_sql}"), params
-        )
-    ).scalar_one()
-    next_cursor = None
-    if len(rows) > limit:
-        rows = rows[:limit]
-        last = rows[-1]
-        values = [last["sort_value"], last["native_id"]] if len(keys) == 2 else [last["native_id"]]
-        next_cursor = encode_cursor(values)
+    rows, total, next_cursor = await query_instances(
+        session,
+        task_result_id,
+        InstanceFilters(
+            baseline_tr_id=base_tr["id"] if base_tr is not None else None,
+            baseline_requested=bool(baseline),
+            higher_is_better=hib,
+            threshold=threshold,
+            correct=correct,
+            vs=vs,
+            finish_reason=finish_reason,
+            len_min=len_min,
+            len_max=len_max,
+            score_min=score_min,
+            score_max=score_max,
+            has=has,
+            q=q,
+        ),
+        sort,
+        cursor,
+        limit,
+    )
 
     def corr(score: float | None) -> bool | None:
         if not bounded:
@@ -711,15 +620,17 @@ async def run_histograms(
 # Instance detail (full records from GCS)
 # ---------------------------------------------------------------------------
 
-# Parsed records keyed by (object key, offset, length). Capped by entries and by the raw bytes
-# they came from, so a few multi-MiB records cannot fill the container's memory.
-_RECORD_CACHE: OrderedDict[tuple[str, int, int], dict[str, Any]] = OrderedDict()
+# Parsed records keyed by (object key, offset, length, version). The version changes when the
+# object is re-uploaded (see instance_detail), so a rewritten file is not served from the cache.
+# Capped by entries and by the raw bytes they came from, so a few multi-MiB records cannot fill
+# the container's memory.
+_RECORD_CACHE: OrderedDict[tuple[str, int, int, str], dict[str, Any]] = OrderedDict()
 _RECORD_CACHE_MAX = 256
 _RECORD_CACHE_MAX_BYTES = 64 * 1024 * 1024
 _record_cache_bytes = 0
 
 
-def _cache_record(key: tuple[str, int, int], record: dict[str, Any]) -> None:
+def _cache_record(key: tuple[str, int, int, str], record: dict[str, Any]) -> None:
     global _record_cache_bytes
     length = key[2]
     if length > _RECORD_CACHE_MAX_BYTES // 8 or key in _RECORD_CACHE:
@@ -732,8 +643,19 @@ def _cache_record(key: tuple[str, int, int], record: dict[str, Any]) -> None:
 
 
 async def read_record(
-    storage: Any, run: Mapping[Any, Any], path: str | None, offset: int | None, length: int | None
+    storage: Any,
+    run: Mapping[Any, Any],
+    path: str | None,
+    offset: int | None,
+    length: int | None,
+    version: str = "",
+    cacheable: bool = True,
 ) -> tuple[dict[str, Any] | None, str | None]:
+    """One JSON record of a run file by byte range.
+
+    ``version`` identifies the object's content (for the cache key); ``cacheable`` is False
+    while a re-upload of the object may be in progress.
+    """
     if not path:
         return None, "no file recorded for this task"
     if offset is None or length is None:
@@ -746,7 +668,7 @@ async def read_record(
         return None, "record is larger than 25 MiB"
     _, prefix_key = split_gs_uri(run["gcs_prefix"])
     key = prefix_key + path
-    cache_key_ = (key, offset, length)
+    cache_key_ = (key, offset, length, version)
     if cache_key_ in _RECORD_CACHE:
         _RECORD_CACHE.move_to_end(cache_key_)
         return _RECORD_CACHE[cache_key_], None
@@ -760,7 +682,8 @@ async def read_record(
         return None, f"could not parse the record at byte {offset} of {path}"
     if not isinstance(record, dict):
         record = {"value": record}
-    _cache_record(cache_key_, record)
+    if cacheable:
+        _cache_record(cache_key_, record)
     return record, None
 
 
@@ -776,8 +699,15 @@ async def instance_detail(
         (
             await session.execute(
                 text(
-                    "SELECT ir.*, tr.run_id, tr.task_name, tr.predictions_path, tr.requests_path "
+                    "SELECT ir.*, tr.run_id, tr.task_name, tr.predictions_path, tr.requests_path, "
+                    "tr.updated_at AS tr_updated_at, pa.md5_b64 AS pred_md5, "
+                    "pa.uploaded AS pred_uploaded, ra.md5_b64 AS req_md5, "
+                    "ra.uploaded AS req_uploaded "
                     "FROM instance_results ir JOIN task_results tr ON tr.id = ir.task_result_id "
+                    "LEFT JOIN artifacts pa "
+                    "ON pa.run_id = tr.run_id AND pa.path = tr.predictions_path "
+                    "LEFT JOIN artifacts ra "
+                    "ON ra.run_id = tr.run_id AND ra.path = tr.requests_path "
                     "WHERE ir.task_result_id = :i AND ir.native_id = :n"
                 ),
                 {"i": task_result_id, "n": native_id},
@@ -789,11 +719,27 @@ async def instance_detail(
     if row is None:
         raise not_found(f"Instance {native_id} not found in task result {task_result_id}")
     run = await _run_row(session, row["run_id"])
+    # A re-upload rewrites the files and the task result; the artifact MD5 and the task
+    # result's updated_at identify the content. While a signed artifact is not yet verified as
+    # uploaded (between signing and complete), records are not cached.
+    updated = row["tr_updated_at"].isoformat()
     prediction, why_p = await read_record(
-        storage, run, row["predictions_path"], row["pred_offset"], row["pred_length"]
+        storage,
+        run,
+        row["predictions_path"],
+        row["pred_offset"],
+        row["pred_length"],
+        version=f"{updated}|{row['pred_md5']}",
+        cacheable=row["pred_uploaded"] is not False,
     )
     request, why_r = await read_record(
-        storage, run, row["requests_path"], row["req_offset"], row["req_length"]
+        storage,
+        run,
+        row["requests_path"],
+        row["req_offset"],
+        row["req_length"],
+        version=f"{updated}|{row['req_md5']}",
+        cacheable=row["req_uploaded"] is not False,
     )
     reasons = [f"prediction: {why_p}" if why_p else None, f"request: {why_r}" if why_r else None]
     reason = "; ".join(r for r in reasons if r) or None

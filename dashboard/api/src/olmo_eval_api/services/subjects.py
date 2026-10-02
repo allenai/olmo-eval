@@ -21,11 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from olmo_eval_api.errors import bad_request, not_found
 from olmo_eval_api.schemas import api as a
+from olmo_eval_api.services.common import detect_scale, latest_by_task
 from olmo_eval_api.services.queries import fetch_models, fetch_runs, model_ref, run_summary
 from olmo_eval_api.stats.paired import Side
 
 SUBJECT_RE = re.compile(r"^(r:[a-z0-9]{6,32}|m:[0-9a-f]{12})$")
-SCALE_TOLERANCE = 1e-6
 
 TR_COLUMNS = """
     tr.id, tr.run_id, tr.task_name, tr.task_hash, tr.model_id, tr.run_created_at,
@@ -76,15 +76,6 @@ def validate_subject_key(key: str) -> str:
     if not SUBJECT_RE.match(key):
         raise bad_request(f"invalid subject key {key!r}")
     return key
-
-
-def latest_by_task(rows: Iterable[TaskResultRow]) -> dict[str, TaskResultRow]:
-    out: dict[str, TaskResultRow] = {}
-    for row in rows:
-        prev = out.get(row["task_name"])
-        if prev is None or (row["updated_at"], row["id"]) > (prev["updated_at"], prev["id"]):
-            out[row["task_name"]] = row
-    return out
 
 
 async def run_task_results(session: AsyncSession, run_id: str) -> list[TaskResultRow]:
@@ -222,8 +213,15 @@ async def resolve_for_compare(
 # ---------------------------------------------------------------------------
 
 Vector = tuple[np.ndarray, np.ndarray]
+# Non-primary metric vectors keyed by (task_result_id, updated_at, metric key). Capped by the
+# bytes of the arrays (an entry is two arrays of n elements, 16 bytes per instance).
 _VECTOR_CACHE: OrderedDict[tuple[int, str, str], Vector] = OrderedDict()
-_VECTOR_CACHE_MAX = 512
+_VECTOR_CACHE_MAX_BYTES = 128 * 1024 * 1024
+_vector_cache_bytes = 0
+
+
+def _vector_bytes(value: Vector) -> int:
+    return int(value[0].nbytes + value[1].nbytes)
 
 
 def _cache_get(key: tuple[int, str, str]) -> Vector | None:
@@ -234,10 +232,15 @@ def _cache_get(key: tuple[int, str, str]) -> Vector | None:
 
 
 def _cache_put(key: tuple[int, str, str], value: Vector) -> None:
+    global _vector_cache_bytes
+    size = _vector_bytes(value)
+    if size > _VECTOR_CACHE_MAX_BYTES // 4 or key in _VECTOR_CACHE:
+        return
     _VECTOR_CACHE[key] = value
-    _VECTOR_CACHE.move_to_end(key)
-    while len(_VECTOR_CACHE) > _VECTOR_CACHE_MAX:
-        _VECTOR_CACHE.popitem(last=False)
+    _vector_cache_bytes += size
+    while _vector_cache_bytes > _VECTOR_CACHE_MAX_BYTES:
+        _, old = _VECTOR_CACHE.popitem(last=False)
+        _vector_cache_bytes -= _vector_bytes(old)
 
 
 async def load_primary_vectors(session: AsyncSession, tr_ids: Iterable[int]) -> dict[int, Vector]:
@@ -293,13 +296,6 @@ async def load_metric_vectors(
             out[tid] = vec
             _cache_put((tid, updated[tid], metric_key), vec)
     return out
-
-
-def detect_scale(mean: float, score: float) -> float | None:
-    for scale in (1.0, 100.0):
-        if abs(mean * scale - score) <= SCALE_TOLERANCE + SCALE_TOLERANCE * abs(score):
-            return scale
-    return None
 
 
 def meta_for(tr: TaskResultRow, metric_key: str | None) -> dict[str, Any]:

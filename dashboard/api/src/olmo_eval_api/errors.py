@@ -120,6 +120,12 @@ def install_exception_handlers(app: FastAPI) -> None:
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
         return error_response(exc.status_code, exc.code, exc.message, exc.details, exc.headers)
 
+    from olmo_eval_api.stats.paired import WorkBudgetExceeded
+
+    @app.exception_handler(WorkBudgetExceeded)
+    async def _too_much_work(_: Request, exc: WorkBudgetExceeded) -> JSONResponse:
+        return error_response(400, "bad_request", str(exc))
+
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
         return error_response(

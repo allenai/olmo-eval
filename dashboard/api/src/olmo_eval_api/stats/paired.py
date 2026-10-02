@@ -8,7 +8,7 @@ Per-instance values are multiplied by ``instance_scale`` so deltas are on the co
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,6 +19,26 @@ from olmo_eval_api.stats.mde import z
 from olmo_eval_api.stats.sign_test import sign_test
 
 MIN_SHARED = 20
+# Pair columns are processed in blocks of at most this many (instance, pair) cells, so the
+# working matrices stay under roughly 70 MB whatever the number of pairs.
+MAX_BLOCK_CELLS = 2_000_000
+# Limits for the all-pairs comparison. 50 subjects (1,225 pairs) on 20k-instance tasks with
+# 2,000 resamples is 4.9e10 cells and fits; the accumulators hold 3 x 8 bytes per pair and
+# resample, so 5M pair-resamples is about 120 MB.
+MAX_PAIRWISE_WORK = 60_000_000_000
+MAX_PAIR_RESAMPLES = 5_000_000
+
+
+class WorkBudgetExceeded(ValueError):
+    """The request needs more bootstrap work or memory than the server allows."""
+
+
+def column_blocks(n_cols: int, n_rows: int, block_cells: int | None = None) -> Iterator[slice]:
+    """Slices over ``n_cols`` columns with at most ``block_cells`` cells of ``n_rows`` each."""
+    cells = MAX_BLOCK_CELLS if block_cells is None else block_cells
+    step = max(1, cells // max(n_rows, 1))
+    for start in range(0, n_cols, step):
+        yield slice(start, min(start + step, n_cols))
 
 
 @dataclass
@@ -210,6 +230,37 @@ def paired_differences(a: Side, b: Side, union: np.ndarray) -> tuple[np.ndarray,
     return np.where(mask, va - vb, 0.0), mask
 
 
+def _boot_delta(
+    plan: PairPlan,
+    d: np.ndarray,
+    boot: np.ndarray,
+    alpha: float,
+    n_boot: int,
+    higher_is_better: bool | None,
+    keep_boot: bool,
+) -> Delta:
+    delta = float(d.mean())
+    summary = bootstrap_summary(boot, alpha)
+    lo, hi, p = summary if summary else (None, None, None)
+    se = float(d.std(ddof=1) / math.sqrt(d.size)) if d.size >= 2 else None
+    mismatch = bool(plan.a.task_hash and plan.b.task_hash and plan.a.task_hash != plan.b.task_hash)
+    return Delta(
+        delta=delta,
+        ci_low=lo,
+        ci_high=hi,
+        p_value=p,
+        n_shared=plan.n_shared,
+        method="paired_bootstrap",
+        significant=lo is not None and hi is not None and (lo > 0 or hi < 0),
+        improved=improved(delta, higher_is_better),
+        hash_mismatch=mismatch,
+        alpha=alpha,
+        n_boot=n_boot,
+        se=se,
+        boot=boot.copy() if keep_boot else None,
+    )
+
+
 def compare_pairs(
     pairs: Sequence[tuple[Side, Side]],
     *,
@@ -219,8 +270,13 @@ def compare_pairs(
     seed: int,
     higher_is_better: bool | None,
     keep_boot: bool = False,
+    block_cells: int | None = None,
 ) -> list[Delta]:
-    """Deltas for several (a, b) pairs of one task, sharing one weight matrix."""
+    """Deltas for several (a, b) pairs of one task.
+
+    Every pair uses the weights of the union of the task's keys, so a pair's result does not
+    depend on the other pairs or on how the pair columns are split into blocks.
+    """
     plans = [plan_pair(a, b) for a, b in pairs]
     results: list[Delta | None] = [None] * len(plans)
     boot_idx = [i for i, p in enumerate(plans) if p.method == "paired_bootstrap"]
@@ -248,35 +304,18 @@ def compare_pairs(
             )
     if boot_idx:
         union = union_keys(*[k for i in boot_idx for k in (plans[i].a.keys, plans[i].b.keys)])
-        cols = [paired_differences(plans[i].a, plans[i].b, union) for i in boot_idx]
-        diffs = np.stack([c[0] for c in cols], axis=1)
-        masks = np.stack([c[1] for c in cols], axis=1)
-        boot = resampled_means(union, diffs, masks, task_name, seed, n_boot)
-        for j, i in enumerate(boot_idx):
-            plan = plans[i]
-            d = diffs[masks[:, j], j]
-            delta = float(d.mean())
-            summary = bootstrap_summary(boot[:, j], alpha)
-            lo, hi, p = summary if summary else (None, None, None)
-            se = float(d.std(ddof=1) / math.sqrt(d.size)) if d.size >= 2 else None
-            mismatch = bool(
-                plan.a.task_hash and plan.b.task_hash and plan.a.task_hash != plan.b.task_hash
-            )
-            results[i] = Delta(
-                delta=delta,
-                ci_low=lo,
-                ci_high=hi,
-                p_value=p,
-                n_shared=plan.n_shared,
-                method="paired_bootstrap",
-                significant=lo is not None and hi is not None and (lo > 0 or hi < 0),
-                improved=improved(delta, higher_is_better),
-                hash_mismatch=mismatch,
-                alpha=alpha,
-                n_boot=n_boot,
-                se=se,
-                boot=boot[:, j].copy() if keep_boot else None,
-            )
+        for block in column_blocks(len(boot_idx), union.size, block_cells):
+            idx = boot_idx[block]
+            cols = [paired_differences(plans[i].a, plans[i].b, union) for i in idx]
+            diffs = np.stack([c[0] for c in cols], axis=1)
+            masks = np.stack([c[1] for c in cols], axis=1)
+            del cols
+            boot = resampled_means(union, diffs, masks, task_name, seed, n_boot)
+            for j, i in enumerate(idx):
+                d = diffs[masks[:, j], j]
+                results[i] = _boot_delta(
+                    plans[i], d, boot[:, j], alpha, n_boot, higher_is_better, keep_boot
+                )
     return [r for r in results if r is not None]
 
 
@@ -395,13 +434,26 @@ def stratified_pairs(
     seed: int,
     higher_is_better: bool | None,
     margin: float = 0.0,
+    max_work: int | None = None,
+    max_pair_resamples: int | None = None,
+    block_cells: int | None = None,
 ) -> dict[tuple[str, str], PairAccumulator]:
     """Combine per-task bootstrap means across tasks for each (row, col) subject pair.
 
     ``tasks`` lists (task_name, {subject: Side}). ``weight_fn(qualifying_task_names)`` returns
     task weights summing to 1. Tasks qualify for a pair when both sides are per-instance means
     with at least MIN_SHARED shared instances.
+
+    Pair columns are processed in blocks (``column_blocks``), so peak memory does not grow with
+    the number of pairs. ``max_work`` caps the sum over tasks of pairs x union instances x
+    resamples, and ``max_pair_resamples`` caps pairs x resamples (the accumulators hold three
+    resample vectors per pair); either raises WorkBudgetExceeded before any bootstrap runs.
     """
+    if max_pair_resamples is not None and len(pairs) * n_boot > max_pair_resamples:
+        raise WorkBudgetExceeded(
+            f"{len(pairs)} subject pairs x {n_boot} resamples exceeds the limit of "
+            f"{max_pair_resamples:,}; compare fewer subjects or lower n_boot"
+        )
     acc = {p: PairAccumulator(n_boot=n_boot) for p in pairs}
     qualifying: dict[tuple[str, str], list[str]] = {p: [] for p in pairs}
     for task_name, sides in tasks:
@@ -418,49 +470,79 @@ def stratified_pairs(
     for p in pairs:
         acc[p].weights = weight_fn(qualifying[p]) if qualifying[p] else {}
 
+    work: list[tuple[str, Mapping[str, Side], list[tuple[str, str]], np.ndarray]] = []
+    total = 0
     for task_name, sides in tasks:
         cols = [p for p in pairs if acc[p].weights.get(task_name)]
         if not cols:
             continue
         union = union_keys(*[k for p in cols for k in (sides[p[0]].keys, sides[p[1]].keys)])
-        diffs_masks = [paired_differences(sides[p[0]], sides[p[1]], union) for p in cols]
-        diffs = np.stack([dm[0] for dm in diffs_masks], axis=1)
-        masks = np.stack([dm[1] for dm in diffs_masks], axis=1)
-        outcomes = np.stack(
-            [outcome_counts(diffs[:, j], margin, higher_is_better) for j in range(len(cols))],
-            axis=1,
+        work.append((task_name, sides, cols, union))
+        total += len(cols) * int(union.size) * n_boot
+    if max_work is not None and total > max_work:
+        raise WorkBudgetExceeded(
+            f"this comparison needs {total:,} bootstrap cells (pairs x instances x resamples), "
+            f"more than the limit of {max_work:,}; compare fewer subjects, narrow the scope or "
+            "lower n_boot"
         )
-        win = np.where(masks, (outcomes == 1).astype(float), 0.0)
-        contested = np.where(masks, (outcomes != 0).astype(float), 0.0)
-        boot = np.empty((n_boot, len(cols)))
-        d0 = np.where(masks, diffs, 0.0)
-        m0 = masks.astype(float)
-        win_num = np.empty((n_boot, len(cols)))
-        win_den = np.empty((n_boot, len(cols)))
-        for b0, w in weight_chunks(union, task_name, seed, n_boot):
-            w64 = w.astype(np.float64)
-            sl = slice(b0, b0 + w.shape[0])
-            den = w64 @ m0
-            with np.errstate(invalid="ignore", divide="ignore"):
-                boot[sl] = np.where(den > 0, (w64 @ d0) / den, np.nan)
-            win_num[sl] = w64 @ win
-            win_den[sl] = w64 @ contested
-        for j, p in enumerate(cols):
-            a_ = acc[p]
-            wt = a_.weights[task_name]
-            d = diffs[masks[:, j], j]
-            a_.point += wt * float(d.mean())
-            a_.boot = a_.boot + wt * boot[:, j]
-            if d.size >= 2:
-                a_.var_terms += wt * wt * float(d.var(ddof=1)) / d.size
-            a_.n_shared += int(d.size)
-            o = outcomes[masks[:, j], j]
-            a_.wins += int((o == 1).sum())
-            a_.losses += int((o == -1).sum())
-            a_.ties += int((o == 0).sum())
-            a_.win_num = a_.win_num + win_num[:, j]
-            a_.win_den = a_.win_den + win_den[:, j]
+
+    hib = higher_is_better
+    for task_name, sides, all_cols, union in work:
+        for block in column_blocks(len(all_cols), union.size, block_cells):
+            cols = all_cols[block]
+            _stratified_block(acc, task_name, sides, cols, union, n_boot, seed, margin, hib)
     return acc
+
+
+def _stratified_block(
+    acc: Mapping[tuple[str, str], PairAccumulator],
+    task_name: str,
+    sides: Mapping[str, Side],
+    cols: Sequence[tuple[str, str]],
+    union: np.ndarray,
+    n_boot: int,
+    seed: int,
+    margin: float,
+    higher_is_better: bool | None,
+) -> None:
+    """Add one task's contribution for a block of pair columns to their accumulators."""
+    diffs_masks = [paired_differences(sides[p[0]], sides[p[1]], union) for p in cols]
+    diffs = np.stack([dm[0] for dm in diffs_masks], axis=1)  # zero where not shared
+    masks = np.stack([dm[1] for dm in diffs_masks], axis=1)
+    del diffs_masks
+    outcomes = np.stack(
+        [outcome_counts(diffs[:, j], margin, higher_is_better) for j in range(len(cols))],
+        axis=1,
+    ).astype(np.int8)
+    win = np.where(masks, outcomes == 1, False).astype(np.float64)
+    contested = np.where(masks, outcomes != 0, False).astype(np.float64)
+    m0 = masks.astype(np.float64)
+    boot = np.empty((n_boot, len(cols)))
+    win_num = np.empty((n_boot, len(cols)))
+    win_den = np.empty((n_boot, len(cols)))
+    for b0, w in weight_chunks(union, task_name, seed, n_boot):
+        w64 = w.astype(np.float64)
+        sl = slice(b0, b0 + w.shape[0])
+        den = w64 @ m0
+        with np.errstate(invalid="ignore", divide="ignore"):
+            boot[sl] = np.where(den > 0, (w64 @ diffs) / den, np.nan)
+        win_num[sl] = w64 @ win
+        win_den[sl] = w64 @ contested
+    for j, p in enumerate(cols):
+        a_ = acc[p]
+        wt = a_.weights[task_name]
+        d = diffs[masks[:, j], j]
+        a_.point += wt * float(d.mean())
+        a_.boot = a_.boot + wt * boot[:, j]
+        if d.size >= 2:
+            a_.var_terms += wt * wt * float(d.var(ddof=1)) / d.size
+        a_.n_shared += int(d.size)
+        o = outcomes[masks[:, j], j]
+        a_.wins += int((o == 1).sum())
+        a_.losses += int((o == -1).sum())
+        a_.ties += int((o == 0).sum())
+        a_.win_num = a_.win_num + win_num[:, j]
+        a_.win_den = a_.win_den + win_den[:, j]
 
 
 def pair_stats(acc: PairAccumulator, alpha: float, higher_is_better: bool | None) -> dict[str, Any]:

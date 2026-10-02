@@ -10,7 +10,8 @@ import asyncio
 import logging
 import math
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, cast
 
 import numpy as np
@@ -40,7 +41,16 @@ from olmo_eval_api.db.models import (
 from olmo_eval_api.errors import bad_request, conflict, forbidden, not_found
 from olmo_eval_api.schemas import ingest as s
 from olmo_eval_api.services import derive
-from olmo_eval_api.services.suites import build_tree, leaf_weights, leaves, propagate_stderr
+from olmo_eval_api.services.common import detect_scale, latest_by_task, now_utc
+from olmo_eval_api.services.search_text import build_search_text
+from olmo_eval_api.services.suites import (
+    build_tree,
+    current_suite_defs,
+    leaf_weights,
+    leaves,
+    propagate_stderr,
+    suite_definition_hash,
+)
 from olmo_eval_api.settings import Settings
 from olmo_eval_api.storage.base import Storage
 
@@ -50,26 +60,13 @@ FINAL_STATUSES = {"complete", "partial", "failed"}
 MAX_TASK_RESULTS_PER_RUN = 2000
 MAX_INSTANCES_PER_TASK_RESULT = 1_000_000
 MAX_ARTIFACTS_PER_RUN = 10_000
-SCALE_TOLERANCE = 1e-6
+# Each artifact is at most schemas.ingest.MAX_ARTIFACT_BYTES (5 GiB), and the signed upload
+# URL accepts only the declared size.
+MAX_ARTIFACT_BYTES_PER_RUN = 50 * 1024**3
+MAX_INSTANCES_PER_RUN = 10_000_000
 _INSTANCE_CHUNK = 500
 _BATCH_CHUNK = 1000
 SIGN_CONCURRENCY = 16
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)
-
-
-def build_search_text(run: Run) -> str:
-    parts = [
-        run.experiment_name,
-        run.experiment_group,
-        run.model_name,
-        " ".join(run.tags or []),
-        run.author,
-        run.run_id,
-    ]
-    return " ".join(p for p in parts if p).lower()
 
 
 async def get_run(session: AsyncSession, run_id: str, *, lock: bool = False) -> Run:
@@ -209,6 +206,10 @@ async def upsert_run(
         if not downgrade:
             # Keep tags added in the dashboard: the client only knows the CLI tags.
             fields["tags"] = list(dict.fromkeys([*(run.tags or []), *fields["tags"]]))
+            if not may_change_author(principal, run.uploaded_by):
+                # can_delete trusts the author of service-account uploads, so only the user
+                # who uploaded a run may change it.
+                fields.pop("author")
             for key, value in fields.items():
                 setattr(run, key, value)
             run.status = req.run.status
@@ -233,13 +234,25 @@ async def upsert_run(
     return response
 
 
+def may_change_author(principal: Principal, uploaded_by: str) -> bool:
+    """Whether a re-upload may change a run's author.
+
+    Only a user re-uploading their own run may. Service-account uploads keep the author from
+    the first upload: every Beaker job shares the uploader account, so any job could
+    otherwise rename another job's run to its own user and then delete it.
+    """
+    return principal.principal_type == "user" and principal.email == uploaded_by
+
+
 def can_delete(principal: Principal, uploaded_by: str, author: str | None) -> bool:
     """Whether a principal may delete a run.
 
     Service accounts never delete: every Beaker job shares the uploader account, so
     letting it delete would let any job delete any other job's run. A user may delete
     runs they uploaded, and runs a service account uploaded on their behalf, which
-    record their Beaker username as the author.
+    record their Beaker username as the author. ``uploaded_by`` never changes after the
+    first upload, and for service-account uploads neither does ``author``
+    (``may_change_author``), so a requester cannot change either value to pass this check.
     """
     if principal.principal_type == "service_account":
         return False
@@ -274,15 +287,29 @@ async def sign_artifacts(
     req: s.SignArtifactsRequest,
 ) -> s.SignArtifactsResponse:
     await get_run(session, run_id)
-    known = set(
-        (await session.execute(select(artifacts_t.c.path).where(artifacts_t.c.run_id == run_id)))
-        .scalars()
-        .all()
-    )
-    if len(known | {a.path for a in req.artifacts}) > MAX_ARTIFACTS_PER_RUN:
+    ac = artifacts_t.c
+    known: dict[str, int] = {
+        path: int(size)
+        for path, size in await session.execute(
+            select(ac.path, ac.size_bytes).where(ac.run_id == run_id)
+        )
+    }
+    # The last entry for a path wins, as in the upsert below.
+    requested = {a.path: a.size_bytes for a in req.artifacts}
+    if len(known.keys() | requested.keys()) > MAX_ARTIFACTS_PER_RUN:
         raise bad_request(f"a run may have at most {MAX_ARTIFACTS_PER_RUN} artifacts")
+    total_bytes = sum(v for k, v in known.items() if k not in requested) + sum(requested.values())
+    if total_bytes > MAX_ARTIFACT_BYTES_PER_RUN:
+        raise bad_request(
+            f"a run's artifacts may total at most {MAX_ARTIFACT_BYTES_PER_RUN // 1024**3} GiB; "
+            f"this request would bring it to {total_bytes / 1024**3:.1f} GiB"
+        )
 
-    existing = await storage.list_objects(settings.object_prefix(run_id))
+    # Check only the requested objects: listing the whole run prefix for every batch would be
+    # quadratic in the number of artifacts.
+    existing = await storage.stat_objects(
+        settings.object_key(run_id, a.path) for a in req.artifacts
+    )
     ts = now_utc()
     rows: dict[str, dict[str, Any]] = {}
     to_sign: list[s.ArtifactIn] = []
@@ -315,7 +342,7 @@ async def sign_artifacts(
         async with limiter:
             key = settings.object_key(run_id, artifact.path)
             return artifact.path, await storage.sign_upload(
-                key, artifact.content_type, artifact.md5_b64
+                key, artifact.content_type, artifact.md5_b64, artifact.size_bytes
             )
 
     signed_by_path = dict(await asyncio.gather(*(sign(x) for x in to_sign)))
@@ -566,6 +593,13 @@ async def add_instances(
         raise bad_request(
             f"a task result may have at most {MAX_INSTANCES_PER_TASK_RESULT} instances"
         )
+    trc = task_results_t.c
+    run_total = await _count(
+        session,
+        select(func.coalesce(func.sum(trc.instances_stored), 0)).where(trc.run_id == tr.run_id),
+    )
+    if run_total + len(req.instances) > MAX_INSTANCES_PER_RUN:
+        raise bad_request(f"a run may have at most {MAX_INSTANCES_PER_RUN:,} instances")
     # A batch with a repeated native_id would make ON CONFLICT touch one row twice.
     rows = list({i.native_id: _instance_row(task_result_id, i) for i in req.instances}.values())
     inserted = 0
@@ -648,14 +682,6 @@ async def put_inference(
 # ---------------------------------------------------------------------------
 
 
-def detect_scale(mean: float, score: float) -> float | None:
-    """1 or 100 when ``score`` equals ``mean`` on that scale, else None."""
-    for scale in (1.0, 100.0):
-        if abs(mean * scale - score) <= SCALE_TOLERANCE + SCALE_TOLERANCE * abs(score):
-            return scale
-    return None
-
-
 def corpus_kind(value: float | None) -> derive.MetricKind:
     if value is not None and 0.0 <= value <= 1.0:
         return "bounded"
@@ -703,10 +729,65 @@ _REASONS_SQL = text(
 )
 
 
+@dataclass(frozen=True)
+class VectorStats:
+    """What finalizing derives from a task result's per-instance primary scores."""
+
+    n_rows: int
+    n_scored: int
+    score: float | None
+    score_is_mean: bool
+    instance_scale: float
+    stderr: float | None
+    primary_kind: derive.MetricKind | None
+    key_bytes: bytes | None
+    score_bytes: bytes | None
+
+
+def vector_stats(rows: Sequence[Sequence[Any]], score: float | None) -> VectorStats:
+    """Steps 2, 3 and the vector of step 7 of spec 2.5, from (key_hash, primary_score) rows.
+
+    CPU-bound for large task results, so finalize_task_result runs it in a worker thread.
+    """
+    values = np.array([r[1] for r in rows if r[1] is not None], dtype=np.float64)
+    n = int(values.size)
+    # 2. Is the corpus score the mean of the per-instance values, and on which scale?
+    is_mean, scale = False, 1.0
+    if n:
+        mean = float(values.mean())
+        if score is None:
+            score, is_mean = mean, True
+        else:
+            found = detect_scale(mean, score)
+            if found is not None:
+                is_mean, scale = True, found
+    # 3. Standard error of the mean on the corpus scale.
+    stderr = float(scale * values.std(ddof=1) / math.sqrt(n)) if is_mean and n >= 2 else None
+    key_bytes = score_bytes = None
+    if rows:
+        key_bytes, score_bytes = build_vector([r[0] for r in rows], [r[1] for r in rows])
+    return VectorStats(
+        n_rows=len(rows),
+        n_scored=n,
+        score=score,
+        score_is_mean=is_mean,
+        instance_scale=scale,
+        stderr=stderr,
+        primary_kind=derive.metric_kind(values.tolist()) if n else None,
+        key_bytes=key_bytes,
+        score_bytes=score_bytes,
+    )
+
+
 async def finalize_task_result(
     session: AsyncSession, tr: TaskResult, client_meta: dict[str, Any], ts: datetime
 ) -> None:
-    """Steps 1-8 of spec 2.5 for one task result."""
+    """Steps 1-8 of spec 2.5 for one task result.
+
+    ``updated_at`` is left alone: it records the last upload, which latest_by_task uses to pick
+    between task hashes, and finalizing every task result of a run at once would tie them.
+    The cache keys include ``finalized_at`` instead.
+    """
     tid = tr.id
     irc = instance_results_t.c
     rows = (
@@ -714,29 +795,13 @@ async def finalize_task_result(
             select(irc.key_hash, irc.primary_score).where(irc.task_result_id == tid)
         )
     ).all()
-    tr.instances_stored = len(rows)
-    values = np.array([r[1] for r in rows if r[1] is not None], dtype=np.float64)
-    n = int(values.size)
-
-    # 2. Is the corpus score the mean of the per-instance values, and on which scale?
-    tr.score_is_mean = False
-    tr.instance_scale = 1.0
-    if n:
-        mean = float(values.mean())
-        if tr.score is None:
-            tr.score = mean
-            tr.score_is_mean = True
-        else:
-            scale = detect_scale(mean, tr.score)
-            if scale is not None:
-                tr.score_is_mean = True
-                tr.instance_scale = scale
-    # 3. Standard error of the mean on the corpus scale.
-    tr.stderr = (
-        float(tr.instance_scale * values.std(ddof=1) / math.sqrt(n))
-        if tr.score_is_mean and n >= 2
-        else None
-    )
+    stats = await asyncio.to_thread(vector_stats, rows, tr.score)
+    del rows
+    tr.instances_stored = stats.n_rows
+    tr.score = stats.score
+    tr.score_is_mean = stats.score_is_mean
+    tr.instance_scale = stats.instance_scale
+    tr.stderr = stats.stderr
 
     # 4-5. Metric kinds and metadata for every corpus metric key.
     kind_rows = (await session.execute(_KINDS_SQL, {"tid": tid})).all()
@@ -744,11 +809,11 @@ async def finalize_task_result(
         key: "binary" if is_binary else "bounded" if is_bounded else "unbounded"
         for key, is_binary, is_bounded in kind_rows
     }
-    if n and tr.primary_metric:
-        instance_kinds[tr.primary_metric] = derive.metric_kind(values.tolist())
+    if stats.primary_kind is not None and tr.primary_metric:
+        instance_kinds[tr.primary_metric] = stats.primary_kind
     meta: dict[str, dict[str, Any]] = {}
     keys = list(tr.metrics or {})
-    if tr.primary_metric and tr.primary_metric not in tr.metrics and n:
+    if tr.primary_metric and tr.primary_metric not in tr.metrics and stats.n_scored:
         keys.append(tr.primary_metric)
     for key in keys:
         kind = instance_kinds.get(key) or corpus_kind((tr.metrics or {}).get(key))
@@ -775,49 +840,19 @@ async def finalize_task_result(
     await session.execute(
         delete(task_result_vectors_t).where(task_result_vectors_t.c.task_result_id == tid)
     )
-    if rows:
-        key_bytes, score_bytes = build_vector([r[0] for r in rows], [r[1] for r in rows])
+    if stats.key_bytes is not None and stats.score_bytes is not None:
         session.add(
             TaskResultVector(
                 task_result_id=int(tid or 0),
                 metric_key=tr.primary_metric or "primary_score",
-                n=len(rows),
-                key_hashes=key_bytes,
-                scores=score_bytes,
+                n=stats.n_rows,
+                key_hashes=stats.key_bytes,
+                scores=stats.score_bytes,
                 built_at=ts,
             )
         )
     # 8.
     tr.finalized_at = ts
-    tr.updated_at = ts
-
-
-async def current_suite_defs(
-    session: AsyncSession, names: set[str] | None = None
-) -> dict[str, tuple[str, list[dict], str | None, str]]:
-    """Current definition per suite name: (aggregation, children, description, hash)."""
-    sql = """
-        SELECT DISTINCT ON (suite_name) suite_name, aggregation, children, description,
-               definition_hash
-        FROM suite_defs {where}
-        ORDER BY suite_name, last_seen_at DESC
-    """
-    if names is None:
-        rows = (await session.execute(text(sql.format(where="")))).all()
-    else:
-        if not names:
-            return {}
-        rows = (
-            await session.execute(
-                text(sql.format(where="WHERE suite_name = ANY(:names)")), {"names": list(names)}
-            )
-        ).all()
-    return {r[0]: (r[1], r[2], r[3], r[4]) for r in rows}
-
-
-def suite_definition_hash(aggregation: str, children: list[dict]) -> str:
-    payload = {"aggregation": aggregation, "children": children}
-    return derive.sha256_hex(derive.canonical_json(payload))[:16]
 
 
 def _headline(run: Run, suites: list[SuiteResult], trs: list[TaskResult]) -> dict[str, Any] | None:
@@ -854,16 +889,6 @@ def _headline(run: Run, suites: list[SuiteResult], trs: list[TaskResult]) -> dic
             "display_format": formats.pop(),
         }
     return None
-
-
-def latest_by_task(trs: Sequence[TaskResult]) -> dict[str, TaskResult]:
-    """One task result per task name (latest updated_at when a run has several hashes)."""
-    out: dict[str, TaskResult] = {}
-    for tr in trs:
-        prev = out.get(tr.task_name)
-        if prev is None or (tr.updated_at, tr.id or 0) >= (prev.updated_at, prev.id or 0):
-            out[tr.task_name] = tr
-    return out
 
 
 async def complete_run(

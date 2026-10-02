@@ -1,14 +1,18 @@
 """Cache for compute-heavy responses (spec 4.5).
 
-The key covers the endpoint, the normalized request and ``(task_result_id, updated_at)`` of
-every task result used, so re-uploading a task result changes the key. Entries live in
-``stats_cache`` (pruned after 30 days at startup) with a small in-process LRU in front.
+The key covers the endpoint, the normalized request, ``(task_result_id, updated_at,
+finalized_at)`` of every task result used (so a re-upload or a new ``complete`` changes it), and
+``extra``: the definition hashes of the suites a response was computed from. Run and model
+summaries (tags, status, labels) are not part of the key; endpoints take only the computed
+parts from a cached response and attach live summaries. Entries live in ``stats_cache``
+(pruned after 30 days at ingest startup) with a small in-process LRU in front.
 """
 
 from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -21,10 +25,21 @@ _LRU: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _LRU_MAX = 512
 
 
-def cache_key(endpoint: str, request: Any, trs: Iterable[Mapping[Any, Any]]) -> str:
-    used = sorted({(int(tr["id"]), tr["updated_at"].timestamp()) for tr in trs})
-    payload = {"endpoint": endpoint, "request": request, "trs": used}
+def cache_key(
+    endpoint: str, request: Any, trs: Iterable[Mapping[Any, Any]], extra: Any = None
+) -> str:
+    used = sorted(
+        {
+            (int(tr["id"]), tr["updated_at"].timestamp(), _timestamp(tr["finalized_at"]))
+            for tr in trs
+        }
+    )
+    payload = {"endpoint": endpoint, "request": request, "trs": used, "extra": extra}
     return sha256_hex(canonical_json(payload))
+
+
+def _timestamp(value: datetime | None) -> float | None:
+    return value.timestamp() if value is not None else None
 
 
 async def get_cached[M: BaseModel](session: AsyncSession, key: str, model: type[M]) -> M | None:

@@ -274,7 +274,10 @@ export interface SignedUpload {
     /** V4 signed URL, null when skip is true. */
     url: string | null;
     method: "PUT";
-    /** Headers the PUT must send exactly (Content-Type, Content-MD5). */
+    /**
+     * Headers the PUT must send exactly (Content-Type, Content-MD5, and
+     * x-goog-content-length-range, which makes GCS reject a body of another size).
+     */
     headers: { [name: string]: string };
     expires_at: DateTime | null;
 }
@@ -350,7 +353,8 @@ export interface TaskResultUpsertResponse {
  */
 export interface InstanceIn {
     /**
-     * str(native_id). Unique within a task result; duplicates get a "#<n>" suffix.
+     * str(native_id), truncated to 512 characters. Unique within a task result; duplicates get a
+     * "#<n>" suffix, added within the 512-character limit.
      * @minLength 1
      * @maxLength 512
      */
@@ -368,9 +372,9 @@ export interface InstanceIn {
      * @maxLength 256
      */
     label: string | null;
-    /** model_output[0].finish_reason. */
+    /** "length" if any sample was truncated, else model_output[0].finish_reason. */
     finish_reason: string | null;
-    /** model_output[0].completion_tokens. */
+    /** Sum over all generated samples (multiple choice: model_output[0]). */
     completion_tokens: NonNegativeInteger | null;
     /** Prompt tokens when recorded (usually null today). */
     prompt_tokens: NonNegativeInteger | null;

@@ -16,6 +16,7 @@ from olmo_eval_api.stats.histograms import box_stats, histogram
 from olmo_eval_api.stats.mde import mde80, mde_factor
 from olmo_eval_api.stats.paired import (
     Side,
+    WorkBudgetExceeded,
     compare,
     compare_pairs,
     contingency,
@@ -242,6 +243,82 @@ def test_stratified_weights_and_pair_stats() -> None:
     assert pair_stats(acc, 0.05, True)["method"] == "none"
 
 
+def _subject_tasks(n_subjects: int) -> list[tuple[str, dict[str, Side]]]:
+    """Two tasks; subjects cover overlapping but different instance sets."""
+    rng = np.random.default_rng(11)
+    tasks = []
+    for name, n in (("t1", 120), ("t2", 80)):
+        sides = {}
+        for k in range(n_subjects):
+            keys = keys_for(n + 10 * k, name)[10 * k :]
+            vals = (rng.random(keys.size) < 0.4 + 0.05 * k).astype(float)
+            vals[rng.random(keys.size) < 0.05] = np.nan
+            sides[f"s{k}"] = side(vals, keys, task_name=name)
+        tasks.append((name, sides))
+    return tasks
+
+
+def test_stratified_blocks_match_unblocked() -> None:
+    tasks = _subject_tasks(5)
+    names = [f"s{k}" for k in range(5)]
+    pairs = [(names[i], names[j]) for i in range(5) for j in range(i + 1, 5)]
+
+    def run(block_cells: int | None) -> dict:
+        return stratified_pairs(
+            tasks,
+            pairs,
+            lambda q: {n: 1 / len(q) for n in q},
+            alpha=0.05,
+            n_boot=300,
+            seed=3,
+            higher_is_better=True,
+            margin=0.0,
+            block_cells=block_cells,
+        )
+
+    whole, blocked = run(None), run(1)  # block_cells=1 puts every pair in its own block
+    for p in pairs:
+        a, b = whole[p], blocked[p]
+        assert a.weights == b.weights
+        assert (a.point, a.var_terms, a.n_shared) == (b.point, b.var_terms, b.n_shared)
+        assert (a.wins, a.losses, a.ties) == (b.wins, b.losses, b.ties)
+        np.testing.assert_array_equal(a.boot, b.boot)
+        np.testing.assert_array_equal(a.win_num, b.win_num)
+        np.testing.assert_array_equal(a.win_den, b.win_den)
+
+
+def test_compare_pairs_blocks_match_unblocked() -> None:
+    sides = _subject_tasks(6)[0][1]
+    base = sides.pop("s0")
+    pairs = [(sd, base) for sd in sides.values()]
+    kw: dict[str, Any] = dict(
+        task_name="t1", alpha=0.05, n_boot=300, seed=1, higher_is_better=True, keep_boot=True
+    )
+    whole = compare_pairs(pairs, **kw)
+    blocked = compare_pairs(pairs, block_cells=1, **kw)
+    for a, b in zip(whole, blocked, strict=True):
+        assert a.as_dict() == b.as_dict()
+        assert a.boot is not None and b.boot is not None
+        np.testing.assert_array_equal(a.boot, b.boot)
+
+
+def test_stratified_work_budget() -> None:
+    tasks = _subject_tasks(4)
+    pairs = [("s0", "s1"), ("s0", "s2"), ("s1", "s2"), ("s2", "s3")]
+    kw: dict[str, Any] = dict(alpha=0.05, n_boot=200, seed=0, higher_is_better=True)
+
+    def weights(q: Any) -> dict[str, float]:
+        return {n: 1 / len(q) for n in q}
+
+    # Union sizes are 150 (t1) and 110 (t2); all four pairs qualify on both tasks.
+    needed = 4 * (150 + 110) * 200
+    stratified_pairs(tasks, pairs, weights, max_work=needed, **kw)
+    with pytest.raises(WorkBudgetExceeded, match="bootstrap cells"):
+        stratified_pairs(tasks, pairs, weights, max_work=needed - 1, **kw)
+    with pytest.raises(WorkBudgetExceeded, match="resamples"):
+        stratified_pairs(tasks, pairs, weights, max_pair_resamples=4 * 200 - 1, **kw)
+
+
 def test_histograms_and_box() -> None:
     assert histogram([0, 1, 1], 10, binary=True) == {"edges": [-0.5, 0.5, 1.5], "counts": [1, 2]}
     h = histogram(np.arange(10.0), 5)
@@ -289,3 +366,21 @@ async def test_cache_key_changes_on_reupload(client: httpx.AsyncClient, session:
     trs2 = await run_task_results(session, "cache0000001")
     assert trs1[0]["id"] == trs2[0]["id"]
     assert cache_key("x", {"a": 1}, trs2) != k1
+
+
+def test_vector_cache_is_capped_by_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from olmo_eval_api.services import subjects
+
+    monkeypatch.setattr(subjects, "_VECTOR_CACHE", type(subjects._VECTOR_CACHE)())
+    monkeypatch.setattr(subjects, "_vector_cache_bytes", 0)
+    monkeypatch.setattr(subjects, "_VECTOR_CACHE_MAX_BYTES", 16 * 1000 * 4)
+
+    def vec(n: int) -> tuple[np.ndarray, np.ndarray]:
+        return np.zeros(n, dtype=np.int64), np.zeros(n, dtype=np.float64)
+
+    for i in range(10):
+        subjects._cache_put((i, "t", "m"), vec(1000))  # 16 kB each
+    assert list(subjects._VECTOR_CACHE) == [(i, "t", "m") for i in (6, 7, 8, 9)]
+    assert subjects._vector_cache_bytes == 4 * 16_000
+    subjects._cache_put((99, "t", "m"), vec(2000))  # over a quarter of the cap: not cached
+    assert subjects._cache_get((99, "t", "m")) is None

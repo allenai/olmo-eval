@@ -28,6 +28,7 @@ from olmo_eval_api.services.queries import (
     run_summary_fields,
 )
 from olmo_eval_api.services.read_suites import load_defs, score_suite, tree
+from olmo_eval_api.services.search_text import SEARCH_TEXT_SQL
 from olmo_eval_api.services.subjects import resolve_one
 from olmo_eval_api.stats.paired import Side, unpaired
 
@@ -324,16 +325,25 @@ async def run_facets(
     return a.RunsFacetsResponse(**out)
 
 
+# A run has at most MAX_TAGS tags (the ingest protocol's limit too), each at most 64 characters
+# (TAG_PATTERN).
+MAX_TAGS = 50
+MAX_NOTES_CHARS = 10_000
+
+
 def _check_tags(tags: list[str]) -> list[str]:
-    for tag in tags:
+    unique = list(dict.fromkeys(tags))
+    if len(unique) > MAX_TAGS:
+        raise bad_request(f"at most {MAX_TAGS} tags")
+    for tag in unique:
         if not _TAG_RE.match(tag):
             raise bad_request(f"invalid tag {tag!r}")
-    return list(dict.fromkeys(tags))
+    return unique
 
 
-SEARCH_TEXT_SQL = (
-    "lower(concat_ws(' ', r.experiment_name, r.experiment_group, r.model_name, "
-    "nullif(array_to_string(r.tags, ' '), ''), r.author, r.run_id))"
+_NEW_TAGS_SQL = (
+    "ARRAY(SELECT DISTINCT x FROM unnest(r.tags || CAST(:add AS text[])) AS x "
+    "WHERE x <> ALL(CAST(:remove AS text[])) ORDER BY x)"
 )
 
 
@@ -343,13 +353,28 @@ async def bulk_tag(body: a.BulkTagRequest, session: SessionDep, user: UserDep) -
     remove = _check_tags(body.remove)
     if not body.run_ids:
         return a.BulkTagResponse(updated=0)
+    params = {"add": add, "remove": remove, "ids": list(body.run_ids)}
+    too_many = (
+        (
+            await session.execute(
+                text(
+                    f"SELECT r.run_id FROM runs r WHERE r.run_id = ANY(:ids) "
+                    f"AND cardinality({_NEW_TAGS_SQL}) > {MAX_TAGS} ORDER BY r.run_id LIMIT 5"
+                ),
+                params,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if too_many:
+        raise bad_request(f"runs would have more than {MAX_TAGS} tags: {', '.join(too_many)}")
     result = await session.execute(
         text(
-            "UPDATE runs r SET tags = ARRAY(SELECT DISTINCT x FROM unnest(r.tags || "
-            "CAST(:add AS text[])) AS x WHERE x <> ALL(CAST(:remove AS text[])) ORDER BY x), "
-            "updated_at = now() WHERE r.run_id = ANY(:ids)"
+            f"UPDATE runs r SET tags = {_NEW_TAGS_SQL}, updated_at = now() "
+            "WHERE r.run_id = ANY(:ids)"
         ),
-        {"add": add, "remove": remove, "ids": list(body.run_ids)},
+        params,
     )
     await session.execute(
         text(f"UPDATE runs r SET search_text = {SEARCH_TEXT_SQL} WHERE r.run_id = ANY(:ids)"),
@@ -459,6 +484,8 @@ async def patch_run(
     _check_run_id(run_id)
     await fetch_run_detail_row(session, run_id)
     fields = body.model_fields_set
+    if body.notes is not None and len(body.notes) > MAX_NOTES_CHARS:
+        raise bad_request(f"notes must be at most {MAX_NOTES_CHARS} characters")
     if "tags" in fields and body.tags is not None:
         await session.execute(
             text("UPDATE runs SET tags = :t, updated_at = now() WHERE run_id = :r"),

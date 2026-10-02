@@ -150,10 +150,10 @@ def test_record_cache_is_bounded_by_bytes(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(run_tabs, "_record_cache_bytes", 0)
     big = run_tabs._RECORD_CACHE_MAX_BYTES // 8
     for i in range(20):
-        run_tabs._cache_record((f"k{i}", 0, big), {"i": i})
+        run_tabs._cache_record((f"k{i}", 0, big, ""), {"i": i})
     assert run_tabs._record_cache_bytes <= run_tabs._RECORD_CACHE_MAX_BYTES
     assert len(run_tabs._RECORD_CACHE) == 8
-    run_tabs._cache_record(("huge", 0, big + 1), {})  # too large to cache at all
+    run_tabs._cache_record(("huge", 0, big + 1, ""), {})  # too large to cache at all
     assert ("huge", 0, big + 1) not in run_tabs._RECORD_CACHE
 
 

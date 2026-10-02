@@ -24,7 +24,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from olmo_eval_api import __version__
 from olmo_eval_api.auth.google_token import TokenVerifier
+from olmo_eval_api.auth.iap import IapVerifier
 from olmo_eval_api.db.engine import make_database
+from olmo_eval_api.db.grants import grant_dashboard_access
 from olmo_eval_api.db.migrate import prune_stats_cache, run_migrations
 from olmo_eval_api.errors import error_body, install_exception_handlers
 from olmo_eval_api.log_config import configure_logging, principal_var, request_id_var
@@ -174,10 +176,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.db = db
         app.state.storage = make_storage(settings)
         app.state.token_verifier = TokenVerifier(settings)
+        app.state.iap_verifier = IapVerifier(settings.iap_audience)
         try:
             if settings.run_migrations:
                 await run_migrations(db.engine)
                 await prune_stats_cache(db.engine)
+                await grant_dashboard_access(db.engine, settings.dashboard_db_user)
             app.state.ready = True
             logger.info(
                 "started",
@@ -192,15 +196,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             await app.state.token_verifier.aclose()
+            await app.state.iap_verifier.aclose()
             await app.state.storage.aclose()
             await db.close()
 
+    # The ingest service is reachable without IAP, so it serves no docs outside local dev.
+    if settings.api_mode != "ingest":
+        docs_url, openapi_url = "/api/docs", "/api/openapi.json"
+    elif settings.is_local:
+        docs_url, openapi_url = "/docs", "/openapi.json"
+    else:
+        docs_url = openapi_url = None
     app = FastAPI(
         title=f"olmo-eval API ({settings.api_mode})",
         version=__version__,
         lifespan=lifespan,
-        docs_url="/api/docs" if settings.api_mode != "ingest" else "/docs",
-        openapi_url="/api/openapi.json" if settings.api_mode != "ingest" else "/openapi.json",
+        docs_url=docs_url,
+        openapi_url=openapi_url,
         redoc_url=None,
     )
     app.state.settings = settings

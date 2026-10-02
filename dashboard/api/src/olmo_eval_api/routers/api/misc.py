@@ -706,6 +706,9 @@ async def list_views(
     )
 
 
+MAX_VIEWS_PER_USER = 200
+
+
 def _check_view(name: str | None, page: str | None, query: str | None) -> None:
     if name is not None and not 1 <= len(name) <= 120:
         raise bad_request("name must be 1-120 characters")
@@ -718,6 +721,11 @@ def _check_view(name: str | None, page: str | None, query: str | None) -> None:
 @router.post("/views", response_model=a.SavedView)
 async def create_view(body: a.CreateViewRequest, session: SessionDep, user: UserDep) -> a.SavedView:
     _check_view(body.name, body.page, body.query)
+    owned = await session.scalar(
+        text("SELECT count(*) FROM saved_views WHERE owner_email = :o"), {"o": user.email}
+    )
+    if owned >= MAX_VIEWS_PER_USER:
+        raise bad_request(f"you can have at most {MAX_VIEWS_PER_USER} saved views")
     row = (
         (
             await session.execute(

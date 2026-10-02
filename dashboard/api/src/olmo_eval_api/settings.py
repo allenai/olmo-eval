@@ -16,9 +16,20 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 ApiMode = Literal["dashboard", "ingest", "all"]
 
 GCP_PROJECT = "ai2-skiff2-olmo-eval"
-RUNTIME_SERVICE_ACCOUNT = f"olmo-eval-api@{GCP_PROJECT}.iam.gserviceaccount.com"
+GCP_PROJECT_NUMBER = "354333262681"
+GCP_REGION = "us-west1"
+# The ingest service runs as this account. Its database user owns the schema and migrates it.
+API_SERVICE_ACCOUNT = f"olmo-eval-api@{GCP_PROJECT}.iam.gserviceaccount.com"
+# The ui service (and its API_MODE=dashboard sidecar) runs as this account. Its database user
+# reads every table and writes only what db/grants.py grants it.
+DASHBOARD_SERVICE_ACCOUNT = f"olmo-eval-dashboard@{GCP_PROJECT}.iam.gserviceaccount.com"
 # Beaker jobs upload as this account (infra/terraform/uploader.tf). It has no GCP roles.
 UPLOADER_SERVICE_ACCOUNT = f"olmo-eval-uploader@{GCP_PROJECT}.iam.gserviceaccount.com"
+
+
+def iam_db_user(service_account: str) -> str:
+    """Cloud SQL IAM database user of a service account (the email without the suffix)."""
+    return service_account.removesuffix(".gserviceaccount.com")
 
 
 def _split_csv(value: object) -> object:
@@ -37,17 +48,24 @@ class Settings(BaseSettings):
 
     db_url: str | None = None
     db_instance_connection_name: str = f"{GCP_PROJECT}:us-west1:olmo-eval-db"
-    db_iam_user: str = f"olmo-eval-api@{GCP_PROJECT}.iam"
+    # Empty means the default for the mode: the dashboard account's database user in dashboard
+    # mode, the ingest account's otherwise.
+    db_iam_user: str = ""
+    # The database role the ingest service grants dashboard access to after migrating.
+    dashboard_db_user: str = iam_db_user(DASHBOARD_SERVICE_ACCOUNT)
     db_name: str | None = None
     db_pool_size: int = 5
     db_max_overflow: int = 5
-    run_migrations: bool = True
+    # None means the default for the mode: off for the dashboard outside local development,
+    # since its database user cannot create tables.
+    run_migrations: bool | None = None
 
     storage_backend: Literal["gcs", "local"] | None = None
     results_bucket: str = "ai2-skiff2-olmo-eval-results"
     results_prefix: str | None = None
     local_storage_dir: str = "/tmp/olmo-eval-api-storage"
-    signer_service_account: str = RUNTIME_SERVICE_ACCOUNT
+    # Empty means the service's own account (by mode, like db_iam_user).
+    signer_service_account: str = ""
     public_base_url: str | None = None
     dashboard_base_url: str | None = None
 
@@ -59,6 +77,13 @@ class Settings(BaseSettings):
     )
     ingest_dev_auth: bool = False
     dashboard_dev_user: str = "dev@allenai.org"
+    # Outside local development the dashboard verifies IAP's signed header (auth/iap.py) and
+    # accepts only these email domains.
+    dashboard_allowed_domains: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["allenai.org"]
+    )
+    # Expected audience of the IAP JWT; empty means the Cloud Run service from K_SERVICE.
+    iap_audience: str = ""
 
     log_level: str = "INFO"
     # Cloud Run sets K_SERVICE on every container. Used only to refuse local mode there.
@@ -68,7 +93,11 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_lists(cls, data: object) -> object:
         if isinstance(data, dict):
-            for key in ("ingest_allowed_domains", "ingest_allowed_service_accounts"):
+            for key in (
+                "ingest_allowed_domains",
+                "ingest_allowed_service_accounts",
+                "dashboard_allowed_domains",
+            ):
                 for k in (key, key.upper()):
                     if k in data:
                         data[k] = _split_csv(data[k])
@@ -78,6 +107,18 @@ class Settings(BaseSettings):
     def _derive_defaults(self) -> Settings:
         prod = self.skiff_env == "prod"
         local = self.is_local
+        dashboard = self.api_mode == "dashboard" and not local
+        account = DASHBOARD_SERVICE_ACCOUNT if dashboard else API_SERVICE_ACCOUNT
+        if not self.db_iam_user:
+            self.db_iam_user = iam_db_user(account)
+        if not self.signer_service_account:
+            self.signer_service_account = account
+        if self.run_migrations is None:
+            self.run_migrations = not dashboard
+        if not self.iap_audience and self.k_service:
+            self.iap_audience = (
+                f"/projects/{GCP_PROJECT_NUMBER}/locations/{GCP_REGION}/services/{self.k_service}"
+            )
         if self.db_name is None:
             self.db_name = "olmo_eval" if prod else "olmo_eval_dev"
         if self.storage_backend is None:
@@ -96,6 +137,7 @@ class Settings(BaseSettings):
         self.public_base_url = self.public_base_url.rstrip("/")
         self.dashboard_base_url = self.dashboard_base_url.rstrip("/")
         self.ingest_allowed_domains = [d.lower() for d in self.ingest_allowed_domains]
+        self.dashboard_allowed_domains = [d.lower() for d in self.dashboard_allowed_domains]
         self.ingest_allowed_service_accounts = [
             s.lower() for s in self.ingest_allowed_service_accounts
         ]
@@ -109,6 +151,11 @@ class Settings(BaseSettings):
     @property
     def is_local(self) -> bool:
         return self.skiff_env == "local"
+
+    @property
+    def verify_iap(self) -> bool:
+        """Whether dashboard requests must carry a valid IAP JWT (auth/iap.py)."""
+        return self.api_mode == "dashboard" and not self.is_local
 
     @property
     def dev_auth_enabled(self) -> bool:

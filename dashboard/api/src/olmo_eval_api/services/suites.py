@@ -1,4 +1,8 @@
-"""Suite trees: leaves, weights, aggregation and stderr propagation (spec 2.6)."""
+"""Suite trees: leaves, weights, aggregation and stderr propagation (spec 2.6).
+
+Also the stored suite definitions (``suite_defs``) that ingest writes and the read endpoints
+build trees from.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,11 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from olmo_eval_api.services.derive import canonical_json, sha256_hex
 
 NO_SCORE_AGGREGATIONS = {"none", "display_only"}
 
@@ -149,3 +158,31 @@ def walk_suites(node: SuiteNode, depth: int = 0, parent: str | None = None):
     yield node, depth, parent
     for child in node.children:
         yield from walk_suites(child, depth + 1, node.name)
+
+
+async def current_suite_defs(
+    session: AsyncSession, names: set[str] | None = None
+) -> dict[str, tuple[str, list[dict], str | None, str]]:
+    """Current definition per suite name: (aggregation, children, description, hash)."""
+    sql = """
+        SELECT DISTINCT ON (suite_name) suite_name, aggregation, children, description,
+               definition_hash
+        FROM suite_defs {where}
+        ORDER BY suite_name, last_seen_at DESC
+    """
+    if names is None:
+        rows = (await session.execute(text(sql.format(where="")))).all()
+    else:
+        if not names:
+            return {}
+        rows = (
+            await session.execute(
+                text(sql.format(where="WHERE suite_name = ANY(:names)")), {"names": list(names)}
+            )
+        ).all()
+    return {r[0]: (r[1], r[2], r[3], r[4]) for r in rows}
+
+
+def suite_definition_hash(aggregation: str, children: list[dict]) -> str:
+    payload = {"aggregation": aggregation, "children": children}
+    return sha256_hex(canonical_json(payload))[:16]

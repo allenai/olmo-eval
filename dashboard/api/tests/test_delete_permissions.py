@@ -1,11 +1,11 @@
-"""Who may delete a run, and the uploader account allowlist default."""
+"""Who may delete a run or change its author, and the uploader account allowlist default."""
 
 from __future__ import annotations
 
 import pytest
 
 from olmo_eval_api.auth.google_token import Principal
-from olmo_eval_api.services.ingest import can_delete
+from olmo_eval_api.services.ingest import can_delete, may_change_author
 from olmo_eval_api.settings import UPLOADER_SERVICE_ACCOUNT, Settings
 
 ALICE = Principal(email="alice@allenai.org", principal_type="user", exp=0)
@@ -28,6 +28,20 @@ def test_can_delete(
     principal: Principal, uploaded_by: str, author: str | None, allowed: bool
 ) -> None:
     assert can_delete(principal, uploaded_by, author) is allowed
+
+
+@pytest.mark.parametrize(
+    ("principal", "uploaded_by", "allowed"),
+    [
+        (ALICE, "alice@allenai.org", True),
+        (ALICE, "bob@allenai.org", False),
+        # The author of a service-account upload is what can_delete trusts, so it is fixed.
+        (ALICE, UPLOADER_SERVICE_ACCOUNT, False),
+        (UPLOADER, UPLOADER_SERVICE_ACCOUNT, False),
+    ],
+)
+def test_may_change_author(principal: Principal, uploaded_by: str, allowed: bool) -> None:
+    assert may_change_author(principal, uploaded_by) is allowed
 
 
 def test_uploader_is_allowlisted_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

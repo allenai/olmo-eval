@@ -196,6 +196,30 @@ async def test_run_detail_patch_and_tags(client: httpx.AsyncClient, seeded: dict
     assert response.status_code == 400
 
 
+async def test_tag_note_and_view_caps(
+    client: httpx.AsyncClient, seeded: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = seeded["step2000"]
+    many = [f"t{i}" for i in range(51)]
+    assert (await client.patch(f"/api/runs/{run_id}", json={"tags": many})).status_code == 400
+    assert (await client.patch(f"/api/runs/{run_id}", json={"tags": many[:50]})).status_code == 200
+    response = await client.post(
+        "/api/runs/tags", json={"run_ids": [run_id], "add": ["extra"], "remove": []}
+    )
+    assert response.status_code == 400 and run_id in response.json()["error"]["message"]
+    swap = {"run_ids": [run_id], "add": ["extra"], "remove": ["t0"]}
+    assert (await client.post("/api/runs/tags", json={**swap})).status_code == 200
+    notes = {"notes": "x" * 10_001}
+    assert (await client.patch(f"/api/runs/{run_id}", json=notes)).status_code == 400
+
+    from olmo_eval_api.routers.api import misc
+
+    monkeypatch.setattr(misc, "MAX_VIEWS_PER_USER", 1)
+    view = {"name": "v", "page": "runs", "query": "", "shared": False}
+    assert (await client.post("/api/views", json=view)).status_code == 200
+    assert (await client.post("/api/views", json=view)).status_code == 400
+
+
 async def test_run_task_results_with_baseline(client: httpx.AsyncClient, seeded: dict) -> None:
     run_id = seeded["step3000"]
     body = await get(client, f"/api/runs/{run_id}/task-results", "RunTaskResultsResponse")
@@ -269,6 +293,15 @@ async def test_instances_filters_and_detail(
         client, url, "InstancesResponse", q="question 1", limit=5, cursor=body["next_cursor"]
     )
     assert not {r["native_id"] for r in body["items"]} & {r["native_id"] for r in page2["items"]}
+    # Later pages reuse the first page's total from the cursor instead of counting again.
+    assert page2["total"] == body["total"]
+    from olmo_eval_api.services.queries import decode_cursor, encode_cursor
+
+    values = decode_cursor(body["next_cursor"])
+    assert values is not None and values[-1] == body["total"]
+    forged = encode_cursor([*values[:-1], 999])
+    page2 = await get(client, url, "InstancesResponse", q="question 1", limit=5, cursor=forged)
+    assert page2["total"] == 999
     body = await get(client, url, "InstancesResponse", finish_reason="length", len_min=15)
     assert all(r["finish_reason"] == "length" for r in body["items"])
     unb = next(r for r in trs if r["task_name"] == "unbounded")
@@ -325,6 +358,28 @@ async def test_instance_detail_reads_byte_ranges(client: httpx.AsyncClient, app:
     assert detail["prediction"] == {"native_id": "1", "model_output": [{"text": "a"}]}
     assert detail["request"] is None
     assert "request:" in detail["unavailable_reason"]
+
+    # A re-upload that rewrites the file is not served from the record cache.
+    pred_key = (
+        prefix
+        + "predictions/meta-llama_Llama-3.1-8B-Instruct/omniscience_judge_afd898-predictions.jsonl"
+    )
+    async with app.state.db.sessionmaker() as s:
+        await s.execute(
+            text("UPDATE artifacts SET uploaded = true WHERE run_id = :r"), {"r": run_id}
+        )
+        await s.commit()
+    params = {"task_result_id": tr_id, "native_id": "1"}
+    await get(client, "/api/instances/detail", "InstanceDetailResponse", **params)  # cached now
+    storage.write(pred_key, b'{"native_id": "1", "model_output": [{"text": "b"}]}\n')
+    async with app.state.db.sessionmaker() as s:
+        await s.execute(
+            text("UPDATE artifacts SET md5_b64 = 'new' WHERE run_id = :r AND kind = 'predictions'"),
+            {"r": run_id},
+        )
+        await s.commit()
+    detail = await get(client, "/api/instances/detail", "InstanceDetailResponse", **params)
+    assert detail["prediction"]["model_output"] == [{"text": "b"}]
 
 
 async def test_histograms_inference_configs_artifacts(
@@ -450,6 +505,59 @@ async def test_compare_matrix(client: httpx.AsyncClient, seeded: dict) -> None:
         json={"subjects": ["r:nonexistent1"], "scope": "all", "metric": "primary"},
     )
     assert response.status_code == 400
+
+
+async def test_cached_compare_reflects_tag_and_suite_changes(
+    client: httpx.AsyncClient, seeded: dict, session: Any
+) -> None:
+    from sqlalchemy import text
+
+    subjects = [f"r:{seeded['step1000']}", f"r:{seeded['step3000']}"]
+    matrix = {"subjects": subjects, "scope": "suite:core", "metric": "primary"}
+    pairwise = {"subjects": subjects, "scope": "suite:core", "metric": "primary"}
+    m1 = await post(client, "/api/compare/matrix", matrix, "MatrixResponse")
+    p1 = await post(client, "/api/compare/pairwise", pairwise, "PairwiseResponse")
+    assert m1 == await post(client, "/api/compare/matrix", matrix, "MatrixResponse")  # cached
+    n_cached = await session.scalar(text("SELECT count(*) FROM stats_cache"))
+
+    # A tag edit shows up in the cached responses without recomputing them.
+    run_id = seeded["step1000"]
+    assert (await client.patch(f"/api/runs/{run_id}", json={"tags": ["fresh"]})).status_code == 200
+    m2 = await post(client, "/api/compare/matrix", matrix, "MatrixResponse")
+    p2 = await post(client, "/api/compare/pairwise", pairwise, "PairwiseResponse")
+    for body in (m2, p2):
+        tags = {s["key"]: s["run"]["tags"] for s in body["subjects"]}
+        assert tags[f"r:{run_id}"] == ["fresh"]
+    assert m2["rows"] == m1["rows"] and m2["computed_at"] == m1["computed_at"]
+    assert p2["pairs"] == p1["pairs"]
+    assert await session.scalar(text("SELECT count(*) FROM stats_cache")) == n_cached
+
+    # A new definition of the suite is a new cache key.
+    await seed_run(
+        client,
+        run_id="suitechange1",
+        tasks={"arc": [1.0, 0.0] * 15},
+        suites=[suite("core", ["arc"], score=0.5)],
+    )
+    m3 = await post(client, "/api/compare/matrix", matrix, "MatrixResponse")
+    assert [r["key"] for r in m3["rows"]] == ["suite:core", "task:arc"]
+    p3 = await post(client, "/api/compare/pairwise", pairwise, "PairwiseResponse")
+    assert p3["tasks_used"] == ["arc"]
+
+
+async def test_compare_pairwise_rejects_too_much_work(
+    client: httpx.AsyncClient, seeded: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from olmo_eval_api.routers.api import compare
+
+    monkeypatch.setattr(compare, "MAX_PAIRWISE_WORK", 1000)
+    subjects = [f"r:{seeded['step1000']}", f"r:{seeded['step3000']}"]
+    response = await client.post(
+        "/api/compare/pairwise",
+        json={"subjects": subjects, "scope": "suite:core", "metric": "primary"},
+    )
+    assert response.status_code == 400
+    assert "bootstrap cells" in response.json()["error"]["message"]
 
 
 async def test_compare_pairwise_contingency_instances(

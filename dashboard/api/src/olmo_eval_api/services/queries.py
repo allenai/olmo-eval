@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import shlex
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import orjson
@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from olmo_eval_api.errors import bad_request, not_found
 from olmo_eval_api.schemas import api as a
+from olmo_eval_api.services.common import now_utc
 from olmo_eval_api.services.links import run_links
 
 STALE_AFTER = timedelta(hours=24)
@@ -41,10 +42,6 @@ RUN_COLUMNS = (
     + MODEL_COLUMNS
 )
 RUN_FROM = "runs r JOIN models m ON m.model_id = r.model_id"
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------

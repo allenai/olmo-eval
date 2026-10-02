@@ -14,8 +14,15 @@ from sqlalchemy import text
 from olmo_eval_api.errors import bad_request
 from olmo_eval_api.schemas import api as a
 from olmo_eval_api.services.cache import cache_key, get_cached, put_cached
-from olmo_eval_api.services.queries import decode_offset_cursor, encode_cursor, now_utc
-from olmo_eval_api.services.read_suites import SuiteDefs, load_defs, score_suite, tree
+from olmo_eval_api.services.common import now_utc
+from olmo_eval_api.services.queries import decode_offset_cursor, encode_cursor
+from olmo_eval_api.services.read_suites import (
+    SuiteDefs,
+    definition_hashes,
+    load_defs,
+    score_suite,
+    tree,
+)
 from olmo_eval_api.services.subjects import (
     SideLoader,
     Subject,
@@ -27,6 +34,8 @@ from olmo_eval_api.services.suites import SuiteNode, leaf_weights, leaves
 from olmo_eval_api.stats.bootstrap import align, union_keys
 from olmo_eval_api.stats.mde import mde80
 from olmo_eval_api.stats.paired import (
+    MAX_PAIR_RESAMPLES,
+    MAX_PAIRWISE_WORK,
     Side,
     compare_pairs,
     contingency,
@@ -87,6 +96,19 @@ async def resolve_scope(
         names = set.union(*sets) if scope == "all" else set.intersection(*sets)
         return [RowSpec(f"task:{n}", "task", n, 0, None) for n in sorted(names)], None, None
     raise bad_request("scope must be all, shared, suite:<name> or task:<name>")
+
+
+def scope_hashes(node: SuiteNode | None, defs: SuiteDefs | None) -> dict[str, str | None]:
+    """Cache-key part for a suite scope: the definition hash of every suite in its tree."""
+    return definition_hashes([node], defs) if node is not None and defs is not None else {}
+
+
+def live_subjects(
+    cached: Sequence[a.SubjectInfo], by_key: Mapping[str, Subject]
+) -> list[a.SubjectInfo]:
+    """Current summaries (tags, status, labels) in the cached order; the cache key does not
+    cover them."""
+    return [by_key[x.key].info() for x in cached]
 
 
 def row_metric(
@@ -173,12 +195,12 @@ async def compare_matrix(
     shared_only = bool(body.shared_only)
     request = body.model_dump(mode="json")
     used = [tr for s in subjects for tr in s.trs.values()]
-    ckey = cache_key("matrix", request, used)
+    rows, node, defs = await resolve_scope(session, body.scope, subjects)
+    ckey = cache_key("matrix", request, used, scope_hashes(node, defs))
     cached = await get_cached(session, ckey, a.MatrixResponse)
     if cached is not None:
-        return cached
+        return cached.model_copy(update={"subjects": live_subjects(cached.subjects, by_key)})
 
-    rows, _, defs = await resolve_scope(session, body.scope, subjects)
     task_names = list(dict.fromkeys(r.name for r in rows if r.kind == "task"))
     metric_keys = {t: row_metric(t, body.metric, subjects, baseline) for t in task_names}
     loader = SideLoader(session)
@@ -456,12 +478,13 @@ async def compare_pairwise(
     if margin < 0:
         raise bad_request("margin must be >= 0")
     used = [tr for s in subjects for tr in s.trs.values()]
-    ckey = cache_key("pairwise", body.model_dump(mode="json"), used)
+    rows, node, defs = await resolve_scope(session, body.scope, subjects)
+    ckey = cache_key("pairwise", body.model_dump(mode="json"), used, scope_hashes(node, defs))
     cached = await get_cached(session, ckey, a.PairwiseResponse)
     if cached is not None:
-        return cached
+        by_key = {s.key: s for s in subjects}
+        return cached.model_copy(update={"subjects": live_subjects(cached.subjects, by_key)})
 
-    rows, node, _ = await resolve_scope(session, body.scope, subjects)
     task_names = list(dict.fromkeys(r.name for r in rows if r.kind == "task"))
     metric_keys = {t: row_metric(t, body.metric, subjects, None) for t in task_names}
     loader = SideLoader(session)
@@ -514,6 +537,8 @@ async def compare_pairwise(
             seed=stats.seed,
             higher_is_better=hib,
             margin=margin,
+            max_work=MAX_PAIRWISE_WORK,
+            max_pair_resamples=MAX_PAIR_RESAMPLES,
         )
     )
     pair_out: list[a.PairStats] = []
