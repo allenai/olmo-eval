@@ -242,6 +242,8 @@ select = [
 # Verbatim prompt templates vendored from the mm_olmo reference implementation
 "src/olmo_eval/evals/vision/scoring/prompt_templates.py" = ["E501"]
 "src/olmo_eval/evals/vision/scoring/vqa_normalization.py" = ["E501"]
+# Verbatim prompt templates from the ChartMuseum reference implementation
+"src/olmo_eval/evals/vision/scoring/chartmuseum.py" = ["E501"]
 "src/olmo_eval/evals/vision/scoring/multiple_choice.py" = ["E501"]
 "src/olmo_eval/evals/vision/scoring/math_vista_offline.py" = ["E501"]
 "src/olmo_eval/evals/vision/scoring/mmmu_pro.py" = ["E501"]
