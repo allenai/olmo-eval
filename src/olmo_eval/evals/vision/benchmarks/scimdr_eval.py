@@ -52,6 +52,9 @@ are reconstructed and may differ from the published numbers:
   same paper version with the pdffigures2 page, region and DPI stored in the paper JSON,
   for the 48 papers that need one (all of those papers' tables, so tables also appear as
   distractors there), and cached under ``SCIMDR_TABLE_DIR``.
+* **Broken images.** 70 release files under image names are not decodable (66 saved
+  HTML error pages covering 7 papers' figures, 4 truncated PNGs). None is the evidence of
+  any question; they are left out of the distractor pool.
 * **Image size.** Images over 2048x32x32 pixels are downscaled (aspect ratio kept) to that
   area: lmms-eval's Qwen3-VL default ``max_pixels``, which the paper's lmms-eval runs used.
   Transparent backgrounds are flattened onto white.
@@ -170,6 +173,9 @@ def _load_image(path: str, max_pixels: int):
     """Open a figure render, flatten transparency onto white, cap its pixel count."""
     from PIL import Image
 
+    # Some figure renders exceed PIL's decompression-bomb limit (up to ~145M pixels);
+    # the data is a pinned release, so the guard is lifted.
+    Image.MAX_IMAGE_PIXELS = None
     image = Image.open(path)
     if image.mode in ("RGBA", "LA", "P"):
         rgba = image.convert("RGBA")
@@ -183,6 +189,20 @@ def _load_image(path: str, max_pixels: int):
         size = (max(1, int(width * scale)), max(1, int(height * scale)))
         image = image.resize(size, Image.Resampling.BICUBIC)
     return image
+
+
+def _is_readable(path: Path) -> bool:
+    """Whether ``path`` is an intact image (the release has HTML pages and truncated
+    files saved under image names)."""
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    try:
+        with Image.open(path) as image:
+            image.verify()
+    except Exception:
+        return False
+    return True
 
 
 def _normalize(text: str) -> str:
@@ -396,7 +416,7 @@ class ScimdrEvalTask(MultiImageQATask):
         root = _data_dir()
         with open(root / "data" / "test.jsonl") as f:
             rows = [json.loads(line) for line in f if line.strip()]
-        files = {f"images/{p.name}": p for p in (root / "images").iterdir()}
+        files = {f"images/{p.name}": p for p in (root / "images").iterdir() if _is_readable(p)}
         papers: dict[str, dict] = {}
         for row in rows:
             pid = row["paper_id"]
