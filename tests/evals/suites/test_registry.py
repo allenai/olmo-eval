@@ -87,7 +87,7 @@ class TestSuite:
         suite = Suite(name="pair", tasks=("in", "out"), aggregation=AggregationStrategy.GAP)
         assert suite.expand() == ("in", "out")
 
-    @pytest.mark.parametrize("tasks", [("only",), ("a", "b", "c")])
+    @pytest.mark.parametrize("tasks", [("only",), ("a", "b", "c"), ("a", "a"), ("a", "b", "a")])
     def test_gap_suite_rejects_other_task_counts(self, tasks):
         with pytest.raises(ValueError, match="exactly two tasks"):
             Suite(name="pair", tasks=tasks, aggregation=AggregationStrategy.GAP)
