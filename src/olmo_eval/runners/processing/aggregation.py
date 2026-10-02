@@ -139,9 +139,7 @@ def _compute_gap(
 ) -> dict[str, Any] | None:
     """Report a reference task, its companion, and the companion minus the reference.
 
-    Returns None, with a warning, unless both tasks published a primary score
-    on the same primary metric: half of a pair, or a difference between two
-    different statistics, would read as a gap without being one.
+    None, with a warning, unless both have a primary score on the same metric.
     """
     reference_spec, companion_spec = task_specs
     scores: list[float] = []
