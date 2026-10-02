@@ -185,6 +185,12 @@ class TaskConfig:
     judge_reasoning_effort: str | None = None
     judge_max_tokens: int | None = None
 
+    #: How a task that builds its prompt from a bare label should render it. The
+    #: vision tasks read these; they follow the checkpoint, since instruction-tuned
+    #: and pretrain models were trained on different prompt forms.
+    prompt_templates: str | None = None
+    system_prompt_style: str | None = None
+
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
         if isinstance(self.output_score_aggregation, str):
@@ -299,6 +305,9 @@ class TaskConfig:
         }
         # Emitted only when set so that task hashes of runs without it are
         # unchanged from before the field existed.
+        if self.prompt_templates is not None or self.system_prompt_style is not None:
+            serialized["prompt_templates"] = self.prompt_templates
+            serialized["system_prompt_style"] = self.system_prompt_style
         if self.strip_thinking:
             serialized["strip_thinking"] = True
         if any(
