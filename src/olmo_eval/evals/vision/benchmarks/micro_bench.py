@@ -45,15 +45,17 @@ Deviations:
 
 from __future__ import annotations
 
+import functools
+import io
+import threading
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput, Response, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register
-from olmo_eval.evals.vision.data.images import lazy_hf_image
 from olmo_eval.evals.vision.scoring.common import response_text
 from olmo_eval.evals.vision.tasks.image_qa import ImageQATask
 
@@ -124,6 +126,48 @@ def is_correct(prediction: str, answer_idx: int, answer: str) -> bool:
     """The official ``check_prediction``: lettered gold option in the text, or gold first char."""
     letter = _LETTERS[answer_idx]
     return f"{letter}) {answer}" in prediction or prediction[0:1] == letter
+
+
+_LOAD_LOCK = threading.Lock()
+
+
+@functools.cache
+def _load_dataset() -> Any:
+    import datasets
+
+    return datasets.load_dataset(_DATASET, split="test", revision=_REVISION)
+
+
+@functools.cache
+def _load_image_column() -> Any:
+    import datasets
+
+    return (
+        _load_dataset().select_columns(["image"]).cast_column("image", datasets.Image(decode=False))
+    )
+
+
+def _dataset() -> Any:
+    """The pinned test split, loaded once per process."""
+    with _LOAD_LOCK:
+        return _load_dataset()
+
+
+def _decode_image(index: int):
+    """Decode the image of row ``index`` (module-level so a ``partial`` over it is picklable).
+
+    Instances reference images by row index and the table is opened once per process: a
+    ``Dataset`` inside each pickled instance would re-memory-map the Arrow shards on every
+    unpickle, which exhausts the process's mappings at ~80k instances.
+    """
+    from PIL import Image
+
+    with _LOAD_LOCK:
+        images = _load_image_column()
+    cell = images[index]["image"]
+    if cell.get("bytes"):
+        return Image.open(io.BytesIO(cell["bytes"]))
+    return Image.open(cell["path"])
 
 
 def _dataset_name(ex: dict) -> str | None:
@@ -236,13 +280,7 @@ class _MicroBenchTask(ImageQATask):
     QUESTION_TYPES: ClassVar[tuple[str, ...]] = ()
 
     def _build_instances(self) -> Iterator[Instance]:
-        import datasets
-
-        ds = datasets.load_dataset(_DATASET, split="test", revision=_REVISION)
-        # Image references hold only the image column, so each pickled instance stays small
-        # (the full table's schema is ~130 KB per pickle).
-        images = ds.select_columns(["image"]).cast_column("image", datasets.Image(decode=False))
-        rows = ds.select_columns(["image_id", "dataset", "stain", "domain", "questions"])
+        rows = _dataset().select_columns(["image_id", "dataset", "stain", "domain", "questions"])
         allowed = set(DATASETS)
         for idx, ex in enumerate(rows):
             dataset = _dataset_name(ex)
@@ -265,7 +303,7 @@ class _MicroBenchTask(ImageQATask):
                         "dataset": dataset,
                         "domain": ex["domain"],
                         "example_id": f"{ex['image_id']}:{question_type}",
-                        "image": lazy_hf_image(images, idx, "image"),
+                        "image": functools.partial(_decode_image, idx),
                     },
                 )
 
