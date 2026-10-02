@@ -81,11 +81,13 @@ class Suite:
     description: str = ""
 
     def __post_init__(self) -> None:
-        if self.aggregation == AggregationStrategy.GAP and len(self.expanded_tasks) != 2:
-            raise ValueError(
-                f"Gap suite {self.name!r} needs exactly two tasks (reference, companion), "
-                f"got {len(self.expanded_tasks)}"
-            )
+        if self.aggregation == AggregationStrategy.GAP:
+            expanded = self.expanded_tasks
+            if not len(expanded) == len(set(expanded)) == 2:
+                raise ValueError(
+                    f"Gap suite {self.name!r} needs exactly two tasks (reference, companion), "
+                    f"distinct, got {expanded!r}"
+                )
         nested_gaps = _gap_descendants(self)
         if nested_gaps and self.aggregation != AggregationStrategy.NONE:
             raise ValueError(
