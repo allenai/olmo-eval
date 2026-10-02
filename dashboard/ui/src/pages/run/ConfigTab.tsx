@@ -48,7 +48,7 @@ export function ConfigTab(ctx: RunCtx) {
   return (
     <div className="col" style={{ gap: 14 }}>
       {baseRunId ? (
-        <div className="row" style={{ gap: 10 }}>
+        <div className="row-wrap" style={{ gap: 10 }}>
           <Checkbox checked={diff} onChange={setDiff} label={`Diff against baseline (${label})`} />
           <span className="t-caption">Changed keys are highlighted, added in teal, removed in ochre. Unchanged keys are hidden.</span>
         </div>

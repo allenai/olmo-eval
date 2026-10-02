@@ -5,8 +5,6 @@ dist
 .DS_Store
 .vite
 /test-results/
-/playwright-report/
 
 # Telegraf is a licensed font. CI downloads it before the Docker build; never commit it.
 /public/fonts/
-/screenshots/

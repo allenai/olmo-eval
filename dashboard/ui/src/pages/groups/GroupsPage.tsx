@@ -9,7 +9,7 @@ import { shortDate } from "@/lib/time";
 import { useSearchParams } from "@/state/nav";
 
 export function GroupsPage() {
-  const [search, setSearch] = useSearchParams<{ q?: string }>();
+  const [search, setSearch] = useSearchParams<{ q?: string; sort?: string }>();
   const groups = usePagedList<GroupRow>("/groups", { q: search.q, include_heatmap: true }, 50);
   const navigate = useAppNavigate();
   const columns: Column<GroupRow>[] = [
@@ -58,6 +58,8 @@ export function GroupsPage() {
             total={groups.total}
             hasMore={groups.hasMore}
             onLoadMore={groups.loadMore}
+            sort={search.sort}
+            onSortChange={(v) => setSearch({ sort: v }, { replace: true })}
             clientSort
             onRowOpen={(r) => navigate(`/groups/${encodeURIComponent(r.name)}`)}
             toolbar={<SearchInput placeholder="Find a group" value={search.q ?? ""} onChange={(e) => setSearch({ q: e.target.value || undefined }, { replace: true })} wrapStyle={{ width: 260 }} />}

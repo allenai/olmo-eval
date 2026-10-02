@@ -11,13 +11,13 @@ import {
   Button,
   Checkbox,
   CopyText,
+  DebouncedSearchInput,
   EmptyState,
   ErrorPanel,
   IconButton,
   Input,
   Kbd,
   Panel,
-  SearchInput,
   Segmented,
   Select,
   Skeleton,
@@ -381,7 +381,12 @@ export function InstancesTab(ctx: RunCtx) {
             options={tasks.map((t) => ({ value: t.task_name, label: t.task_name, hint: formatCount(t.n) }))}
             width={260}
           />
-          <SearchInput placeholder="Search prompt and output" value={search.iq ?? ""} onChange={(e) => setSearch({ iq: e.target.value || undefined, inst: undefined }, { replace: true })} wrapStyle={{ flex: 1, minWidth: 160 }} />
+          <DebouncedSearchInput
+            placeholder="Search prompt and output"
+            value={search.iq ?? ""}
+            onCommit={(v) => setSearch({ iq: v || undefined, inst: undefined }, { replace: true })}
+            wrapStyle={{ flex: 1, minWidth: 160 }}
+          />
         </div>
         <div className={s.instFilters} style={{ paddingTop: 8 }}>
           {kind !== "unbounded" && (

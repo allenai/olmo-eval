@@ -14,24 +14,39 @@ export function Sparkline({
   height = 16,
   color = "var(--teal-line)",
   fill = false,
+  fluid = false,
 }: {
   values: number[];
   width?: number;
   height?: number;
   color?: string;
   fill?: boolean;
+  /** Shrink horizontally to fit a narrow container, up to `width`. */
+  fluid?: boolean;
 }) {
-  if (values.length < 2) return <svg width={width} height={height} aria-hidden />;
+  const box = fluid
+    ? { width: "100%", viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" as const }
+    : { width };
+  const sizeStyle = fluid ? { maxWidth: width } : {};
+  if (values.length < 2) return <svg {...box} height={height} aria-hidden style={sizeStyle} />;
   const lo = Math.min(...values);
   const hi = Math.max(...values);
   const x = (i: number) => (i / (values.length - 1)) * (width - 2) + 1;
   const y = (v: number) => (hi === lo ? height / 2 : height - 2 - ((v - lo) / (hi - lo)) * (height - 4));
   const d = values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
   return (
-    <svg width={width} height={height} aria-hidden style={{ overflow: "visible", display: "block" }}>
+    <svg {...box} height={height} aria-hidden style={{ overflow: "visible", display: "block", ...sizeStyle }}>
       {fill && <path d={`${d}L${x(values.length - 1)},${height}L${x(0)},${height}Z`} fill={color} opacity={0.12} />}
-      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={x(values.length - 1)} cy={y(values[values.length - 1])} r={2} fill={color} />
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      {!fluid && <circle cx={x(values.length - 1)} cy={y(values[values.length - 1])} r={2} fill={color} />}
     </svg>
   );
 }

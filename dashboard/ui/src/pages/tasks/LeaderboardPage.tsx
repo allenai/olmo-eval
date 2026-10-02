@@ -23,7 +23,7 @@ import { useStore } from "@/state/store";
 import { useEffect } from "react";
 import cc from "@/charts/charts.module.css";
 
-type LbSearch = { hash?: string; metric?: string; pm?: string; family?: string; group?: string; user?: string };
+type LbSearch = { hash?: string; metric?: string; pm?: string; family?: string; group?: string; user?: string; sort?: string };
 
 function histogramOf(values: number[], bins = 24) {
   if (!values.length) return { edges: [0, 1], counts: [0] };
@@ -111,6 +111,7 @@ function ScoreOverTime({ rows, meta }: { rows: LeaderboardRow[]; meta: MetricMet
 function LeaderboardBody({ kind, name, lb, meta }: { kind: "task" | "suite"; name: string; lb: ReturnType<typeof useTaskLeaderboard>; meta: MetricMeta | null }) {
   const navigate = useAppNavigate();
   const [baseline] = useBaseline();
+  const [search, setSearch] = useSearchParams<LbSearch>();
   const tray = useStore(trayStore);
   const slots = useSubjectSlots(tray.map((t) => t.key));
   const data: LeaderboardResponse | undefined = lb.data;
@@ -197,6 +198,8 @@ function LeaderboardBody({ kind, name, lb, meta }: { kind: "task" | "suite"; nam
             rows={rows}
             getRowId={(r) => r.subject + r.run_id}
             loading={lb.isLoading}
+            sort={search.sort}
+            onSortChange={(v) => setSearch({ sort: v }, { replace: true })}
             clientSort
             selected={new Set(rows.filter((r) => selected.has(r.subject)).map((r) => r.subject + r.run_id))}
             onSelectionChange={(next) => {

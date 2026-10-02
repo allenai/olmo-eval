@@ -78,9 +78,12 @@ export function CommandPalette() {
   const lastBaseline = useStore(lastBaselineStore);
 
   useEffect(() => {
-    // Reset the input to the requested prefill each time the palette opens.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (state.open) setQuery(state.query);
+    // Reset the input to the requested prefill and clear the selection each time the palette opens.
+    if (state.open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setQuery(state.query);
+      setSelected("");
+    }
   }, [state.open, state.query]);
 
   const parsed = parsePaletteQuery(query);
@@ -228,6 +231,9 @@ export function CommandPalette() {
   }
 
   const allItems = entries.flatMap((g) => g.items);
+  // A selection left over from an earlier query matches nothing, and cmdk would then highlight
+  // nothing and ignore Enter. Fall back to the first item.
+  const current = allItems.some((i) => i.value === selected) ? selected : (allItems[0]?.value ?? "");
 
   const activate = (entry: Entry, modifier: "none" | "tray" | "baseline" = "none") => {
     if (state.mode === "baseline" || modifier === "baseline") {
@@ -264,13 +270,13 @@ export function CommandPalette() {
       onOpenChange={(open) => (open ? undefined : closePalette())}
       label="Command palette"
       shouldFilter={false}
-      value={selected}
+      value={current}
       onValueChange={setSelected}
       overlayClassName={ui.overlay}
       contentClassName={s.palette}
       onKeyDown={(e) => {
         if (e.key !== "Enter") return;
-        const entry = allItems.find((i) => i.value === selected);
+        const entry = allItems.find((i) => i.value === current);
         if (!entry) return;
         if (e.metaKey || e.ctrlKey) {
           e.preventDefault();

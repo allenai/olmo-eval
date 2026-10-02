@@ -22,6 +22,8 @@ export type RunSearch = {
   tf?: string;
   all?: string;
   sel?: string;
+  /** Tasks tab sort. */
+  ts?: string;
   baseline?: string;
 };
 

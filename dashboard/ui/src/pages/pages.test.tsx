@@ -56,6 +56,14 @@ describe("pages", () => {
     await waitFor(() => expect(screen.getAllByText("mmlu_anatomy:mc").length).toBeGreaterThan(0), { timeout: 8000 });
   });
 
+  it("Compare leaves out unknown subjects instead of failing", async () => {
+    const other = world.runs.find((r) => r.summary.run_id !== runId && r.model.series === "olmo3-7b-midtrain")!.summary.run_id;
+    renderAt(`/compare?subjects=r:${runId},r:${other},r:zzzzzzzzzzzz&scope=suite:arc:rc`);
+    expect(await screen.findByText(/1 unknown subject ignored/, {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(await screen.findByText("Heatmap", { selector: "h2" }, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.queryByText(/Something went wrong/)).not.toBeInTheDocument();
+  });
+
   it("Compare pairwise renders win rates", async () => {
     renderAt(`/compare?group=${group}&scope=suite:arc:rc&view=pairwise`);
     await waitFor(() => expect(screen.getAllByText(/% wins/).length).toBeGreaterThan(2), { timeout: 10000 });

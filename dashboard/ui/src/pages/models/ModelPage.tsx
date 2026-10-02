@@ -315,7 +315,7 @@ export function ModelPage() {
 
       <ChartPanel
         title="Checkpoints × tasks"
-        caption={deltaMode ? "Change from the previous checkpoint: teal better, ochre worse (no significance test)." : "Scores per column, darker is better within each column. Newest checkpoint first."}
+        caption={deltaMode ? "Change from the previous checkpoint: teal better, ochre worse (no significance test)." : "Scores per column. Stronger teal is better within each column. Newest checkpoint first."}
         legend={
           <Segmented
             value={deltaMode ? "delta" : "abs"}

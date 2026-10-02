@@ -90,7 +90,7 @@ function ActiveGroups() {
   return (
     <Panel
       title="Active groups"
-      caption="Groups with runs in the last 14 days. Cells are suite scores, darker is better per column."
+      caption="Groups with runs in the last 14 days. Cells are suite scores. Stronger teal is better within each column."
       refetching={groups.isFetching && !groups.isLoading}
       actions={
         <AppLink href="/groups">
@@ -234,7 +234,7 @@ function Kpis() {
           <span style={{ fontFamily: "var(--font-sans)", fontWeight: 200, fontSize: "clamp(20px, 6vw, 30px)" }}>{formatCompact(value ?? 0)}</span>
         )
       }
-      extra={<div style={{ marginTop: 2 }}>{series.length > 1 && <Sparkline values={series} width={120} height={20} fill />}</div>}
+      extra={<div style={{ marginTop: 2 }}>{series.length > 1 && <Sparkline values={series} width={120} height={20} fill fluid />}</div>}
       title={value != null ? formatCount(value) : undefined}
     />
   );

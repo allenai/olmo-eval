@@ -12,7 +12,7 @@ import { useSubjectSlots } from "@/state/colors";
 import { useSearchParams } from "@/state/nav";
 import { pushRecent } from "@/state/prefs";
 import { ComparePage } from "../compare/ComparePage";
-import { shortLabel } from "../compare/types";
+import { distinctLabels } from "../compare/types";
 import { NotFoundPage } from "../NotFoundPage";
 import { RunsTable } from "../runs/RunsTable";
 
@@ -23,6 +23,10 @@ function CoverageGrid({ g }: { g: GroupDetailResponse }) {
   const navigate = useAppNavigate();
   const slots = useSubjectSlots(g.subjects.map((s) => s.key));
   const byKey = new Map(g.coverage.map((c) => [`${c.subject}|${c.task_name}`, c]));
+  const labels = distinctLabels(
+    g.subjects.map((s) => s.key),
+    new Map(g.subjects.map((s) => [s.key, s])),
+  );
   const cell = 16;
   return (
     <Panel
@@ -42,7 +46,7 @@ function CoverageGrid({ g }: { g: GroupDetailResponse }) {
             <div key={s.key} style={{ display: "contents" }}>
               <span className="row truncate" style={{ fontSize: 12, gap: 6, height: cell }}>
                 <ModelDot slot={slots[s.key]} />
-                <span className="truncate">{shortLabel(s, s.label)}</span>
+                <span className="truncate">{labels.get(s.key) ?? s.label}</span>
               </span>
               {g.tasks.map((t) => {
                 const c = byKey.get(`${s.key}|${t}`);

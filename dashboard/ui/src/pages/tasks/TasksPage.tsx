@@ -79,7 +79,7 @@ export function TasksPage() {
       <Tabs
         label="Tasks or suites"
         value={tab}
-        onChange={(v) => setSearch({ tab: v === "tasks" ? undefined : v })}
+        onChange={(v) => setSearch({ tab: v === "tasks" ? undefined : v, sort: undefined })}
         tabs={[
           { value: "tasks", label: "Tasks", count: allTasks.data?.total },
           { value: "suites", label: "Suites", count: nSuites },
@@ -100,6 +100,8 @@ export function TasksPage() {
               total={tasks.total}
               hasMore={tasks.hasMore}
               onLoadMore={tasks.loadMore}
+              sort={search.sort}
+              onSortChange={(v) => setSearch({ sort: v }, { replace: true })}
               clientSort
               onRowOpen={(r) => navigate(`/tasks/${encodeURIComponent(r.task_name)}`)}
               toolbar={
@@ -121,6 +123,8 @@ export function TasksPage() {
             total={suites.total}
             hasMore={suites.hasMore}
             onLoadMore={suites.loadMore}
+            sort={search.sort}
+            onSortChange={(v) => setSearch({ sort: v }, { replace: true })}
             clientSort
             onRowOpen={(r) => navigate(`/suites/${encodeURIComponent(r.suite_name)}`)}
             toolbar={<SearchInput placeholder="Find a suite" value={search.q ?? ""} onChange={(e) => setSearch({ q: e.target.value || undefined }, { replace: true })} wrapStyle={{ width: 260 }} />}

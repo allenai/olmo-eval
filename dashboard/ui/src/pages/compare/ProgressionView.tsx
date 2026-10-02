@@ -8,12 +8,14 @@ import { formatStep, sig3 } from "@/lib/format";
 import { catColor } from "@/lib/scales";
 import type { CompareCtx } from "./types";
 
+const MAX_PANELS = 24;
+
 export function ProgressionView(ctx: CompareCtx) {
   const { matrix, baseline } = ctx;
   const navigate = useAppNavigate();
   const data = matrix.data;
-  const { panels, families, refs } = useMemo(() => {
-    if (!data) return { panels: [] as MPanel[], families: [] as string[], refs: [] as string[] };
+  const { panels, families, refs, available } = useMemo(() => {
+    if (!data) return { panels: [] as MPanel[], families: [] as string[], refs: [] as string[], available: 0 };
     const withStep = data.subjects.map((s, i) => ({ s, i })).filter(({ s }) => s.model.step != null);
     const refs = data.subjects.map((s, i) => ({ s, i })).filter(({ s }) => s.model.step == null);
     const families = Array.from(new Set(withStep.map(({ s }) => s.model.series)));
@@ -21,7 +23,8 @@ export function ProgressionView(ctx: CompareCtx) {
     if (ctx.scope.startsWith("suite:")) rows = data.rows.filter((r) => r.depth === 1 || (r.depth === 0 && r.kind === "suite"));
     else if (ctx.scope.startsWith("task:")) rows = data.rows;
     else rows = data.rows.filter((r) => (r.kind === "suite" && r.depth <= 1) || (r.kind === "task" && r.depth === 0));
-    rows = rows.slice(0, 24);
+    const available = rows.length;
+    rows = rows.slice(0, MAX_PANELS);
     const panels: MPanel[] = rows.map((row) => {
       const pct = (row.meta?.display_format ?? "percent") === "percent";
       const scale = pct ? 100 : 1;
@@ -55,7 +58,7 @@ export function ProgressionView(ctx: CompareCtx) {
         })),
       };
     });
-    return { panels, families, refs: refs.map(({ s }) => s.key) };
+    return { panels, families, refs: refs.map(({ s }) => s.key), available };
   }, [data, ctx, baseline]);
 
   if (matrix.isLoading) return <Skeleton height={460} />;
@@ -90,6 +93,11 @@ export function ProgressionView(ctx: CompareCtx) {
         xLabel="step"
         onPointClick={(_s, p) => p.id && navigate(`/runs/${p.id}`)}
       />
+      {available > panels.length && (
+        <p className="t-caption" style={{ marginTop: 6 }}>
+          Showing the first {panels.length} of {available} panels. Pick a suite or task scope to see others.
+        </p>
+      )}
     </ChartPanel>
   );
 }

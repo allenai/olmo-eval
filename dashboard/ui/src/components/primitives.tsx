@@ -144,6 +144,50 @@ export const SearchInput = forwardRef<
   );
 });
 
+/**
+ * A search box that keeps its text locally and commits it after the user stops typing (or on
+ * Enter), so a server-side search runs once per pause instead of once per keystroke.
+ */
+export function DebouncedSearchInput({
+  value,
+  onCommit,
+  delay = 250,
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & {
+  value: string;
+  onCommit: (value: string) => void;
+  delay?: number;
+  wrapStyle?: CSSProperties;
+}) {
+  const [text, setText] = useState(value);
+  const [synced, setSynced] = useState(value);
+  if (value !== synced) {
+    // The committed value changed elsewhere (navigation, a cleared filter): show it.
+    setSynced(value);
+    setText(value);
+  }
+  const commit = useRef(onCommit);
+  useEffect(() => {
+    commit.current = onCommit;
+  });
+  useEffect(() => {
+    if (text === value) return;
+    const t = setTimeout(() => commit.current(text), delay);
+    return () => clearTimeout(t);
+  }, [text, value, delay]);
+  return (
+    <SearchInput
+      {...rest}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && text !== value) commit.current(text);
+        rest.onKeyDown?.(e);
+      }}
+    />
+  );
+}
+
 export function Checkbox({
   checked,
   indeterminate,
@@ -412,10 +456,6 @@ export function BaseTag() {
       BASE
     </Badge>
   );
-}
-
-export function CountBadge({ n }: { n: number }) {
-  return n > 0 ? <span className={s.countBadge}>{n}</span> : null;
 }
 
 export type DisplayStatus = RunStatus | "uploading" | "stale";
@@ -723,10 +763,6 @@ export function KV({ items }: { items: [ReactNode, ReactNode][] }) {
       ))}
     </dl>
   );
-}
-
-export function Divider() {
-  return <span className={s.divider} aria-hidden />;
 }
 
 export { s as uiStyles };

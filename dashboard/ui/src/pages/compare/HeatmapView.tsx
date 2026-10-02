@@ -151,7 +151,7 @@ export function HeatmapView(ctx: CompareCtx) {
         wantsDelta && !baseline
           ? "Delta vs baseline."
           : mode === "abs"
-          ? `Absolute scores, darker is better ${globalScale ? "on one scale for all percent rows" : "within each row"}.`
+          ? `Absolute scores. Stronger teal is better ${globalScale ? "on one scale for all percent rows" : "within each row"}.`
           : mode === "delta"
             ? "Delta vs baseline: teal better, ochre worse. A dot marks significance; faded cells are not resolved; hatched cells lack data."
             : "Rank within each row, 1 is best."

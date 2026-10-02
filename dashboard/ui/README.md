@@ -17,7 +17,6 @@ npm run test         # vitest: unit, component, page and mock-vs-contract tests
 npm run build
 npm run contract:check     # schemas up to date and examples valid
 npm run contract:generate  # regenerate ../contract/*.schema.json after editing the .ts files
-npm run screenshots -- http://localhost:5173 /tmp/shots   # every page, 1440/390 px, light/dark
 ```
 
 Production builds always use the real API; the mock code is not included.

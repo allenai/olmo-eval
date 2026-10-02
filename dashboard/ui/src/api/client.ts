@@ -28,8 +28,9 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
       signal,
       headers: {
         Accept: "application/json",
-        // Required by the API on writes (CSRF guard); harmless on reads.
-        "X-Requested-With": "olmo-eval-ui",
+        // Required by the API on writes (CSRF guard). This exact value also makes IAP
+        // answer an expired session with 401 instead of a redirect to Google sign-in.
+        "X-Requested-With": "XMLHttpRequest",
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,

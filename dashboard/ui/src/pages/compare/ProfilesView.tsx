@@ -13,28 +13,55 @@ interface Axis {
   values: (number | null)[];
 }
 
+const MAX_AXES = 30;
+
+/** Brushes in the URL: "lo~hi~axisKey" entries joined by commas (axis keys contain colons). */
+export function parseBrushes(value: string | undefined): Record<string, [number, number]> {
+  const out: Record<string, [number, number]> = {};
+  for (const part of (value ?? "").split(",")) {
+    const [lo, hi, ...rest] = part.split("~");
+    const key = rest.join("~");
+    if (key && Number.isFinite(Number(lo)) && Number.isFinite(Number(hi)) && lo !== "" && hi !== "") out[key] = [Number(lo), Number(hi)];
+  }
+  return out;
+}
+
+export function brushesParam(brushes: Record<string, [number, number]>): string | undefined {
+  const parts = Object.entries(brushes).map(([key, [lo, hi]]) => `${Math.min(lo, hi).toFixed(1)}~${Math.max(lo, hi).toFixed(1)}~${key}`);
+  return parts.length ? parts.join(",") : undefined;
+}
+
 export function ProfilesView(ctx: CompareCtx) {
-  const { matrix, baseline } = ctx;
+  const { matrix, baseline, search, setSearch } = ctx;
   const [ref, { width }] = useSize<HTMLDivElement>();
   const tip = useTooltip();
-  const [level, setLevel] = useState<"auto" | "suite" | "task">("auto");
-  const [shared, setShared] = useState(false);
-  const [order, setOrder] = useState<string[] | null>(null);
-  const [brushes, setBrushes] = useState<Record<string, [number, number]>>({});
+  // Level, scale, order and brushes live in the URL so a copied link reproduces the view.
+  const level: "auto" | "suite" | "task" = search.plevel === "suite" || search.plevel === "task" ? search.plevel : "auto";
+  const setLevel = (v: "auto" | "suite" | "task") => setSearch({ plevel: v === "auto" ? undefined : v, porder: undefined, pbrush: undefined }, { replace: true });
+  const shared = search.pscale === "1";
+  const setShared = (on: boolean) => setSearch({ pscale: on ? "1" : undefined }, { replace: true });
+  const order = useMemo(() => (search.porder ? search.porder.split(",") : null), [search.porder]);
+  const setOrder = (next: string[]) => setSearch({ porder: next.join(",") }, { replace: true });
+  const brushes = useMemo(() => parseBrushes(search.pbrush), [search.pbrush]);
+  const setBrushes = (update: (prev: Record<string, [number, number]>) => Record<string, [number, number]>) =>
+    setSearch({ pbrush: brushesParam(update(brushes)) }, { replace: true });
   const [hover, setHover] = useState<string | null>(null);
   const dragAxis = useRef<string | null>(null);
   const brushDrag = useRef<{ axis: string; start: number } | null>(null);
   const [liveBrush, setLiveBrush] = useState<{ axis: string; range: [number, number] } | null>(null);
 
-  const axes: Axis[] = useMemo(() => {
+  const { axes, available, axisKind } = useMemo(() => {
     const data = matrix.data;
-    if (!data) return [];
+    if (!data) return { axes: [] as Axis[], available: 0, axisKind: "tasks" };
     const pct = data.rows.filter((r) => (r.meta?.display_format ?? "percent") === "percent");
     const suites = pct.filter((r) => r.kind === "suite");
     const tasks = pct.filter((r) => r.kind === "task");
-    const useSuites = level === "suite" || (level === "auto" && tasks.length > 30 && suites.length >= 3);
-    const rows = (useSuites ? suites : tasks).slice(0, 30);
-    return rows.map((r) => ({ key: r.key, label: r.name, values: r.cells.map((cl) => (cl.score == null ? null : cl.score * 100)) }));
+    const useSuites = level === "suite" || (level === "auto" && tasks.length > MAX_AXES && suites.length >= 3);
+    const all = useSuites ? suites : tasks;
+    const axes = all
+      .slice(0, MAX_AXES)
+      .map((r) => ({ key: r.key, label: r.name, values: r.cells.map((cl) => (cl.score == null ? null : cl.score * 100)) }));
+    return { axes, available: all.length, axisKind: useSuites ? "suites" : "tasks" };
   }, [matrix.data, level]);
 
   const ordered = useMemo(() => {
@@ -92,7 +119,7 @@ export function ProfilesView(ctx: CompareCtx) {
           />
           <Checkbox checked={shared} onChange={setShared} label="Shared 0–100 scale" />
           {Object.keys(brushes).length > 0 && (
-            <Button size="sm" variant="ghost" onClick={() => setBrushes({})}>
+            <Button size="sm" variant="ghost" onClick={() => setBrushes(() => ({}))}>
               Clear {Object.keys(brushes).length} filter{Object.keys(brushes).length > 1 ? "s" : ""}
             </Button>
           )}
@@ -222,6 +249,7 @@ export function ProfilesView(ctx: CompareCtx) {
       </div>
       <p className="t-caption" style={{ marginTop: 6 }}>
         Values are scores in percent. Lines that fail any axis filter fade out.
+        {available > axes.length && ` Showing the first ${axes.length} of ${available} ${axisKind}; narrow the scope to see others.`}
       </p>
       <ChartTooltip state={tip.state} />
     </ChartPanel>

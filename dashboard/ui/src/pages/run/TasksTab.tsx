@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
 import { useMemo } from "react";
 import { AppLink, buildHref } from "@/components/AppLink";
 import { DeltaValue, MetricName, ScoreValue, SigLegend } from "@/components/cells";
-import { type Column, DataTable } from "@/components/DataTable";
+import { type Column, DataTable, parseSortList, sortRows } from "@/components/DataTable";
 import { Badge, Checkbox, EmptyState, ErrorPanel, IconButton, Kbd, Panel, SearchInput, Select, Tip, uiStyles as ui } from "@/components/primitives";
 import { formatCount, formatDuration, formatP, formatRate, formatScore, metricLabel, shortHash } from "@/lib/format";
 import { useHotkeys } from "@/lib/keyboard";
@@ -224,12 +224,14 @@ export function TasksTab(ctx: RunCtx) {
     return cols;
   }, [allMetrics, metricKeys]);
 
-  const openIdx = search.task ? rows.findIndex((r) => r.task_name === search.task) : -1;
-  const openRow = openIdx >= 0 ? rows[openIdx] : items.find((r) => r.task_name === search.task);
+  // [ and ] step through the rows in the order the table shows them.
+  const sortedRows = useMemo(() => sortRows(rows, parseSortList(search.ts), columns), [rows, search.ts, columns]);
+  const openIdx = search.task ? sortedRows.findIndex((r) => r.task_name === search.task) : -1;
+  const openRow = openIdx >= 0 ? sortedRows[openIdx] : items.find((r) => r.task_name === search.task);
   const move = (delta: number) => {
-    if (!rows.length) return;
-    const idx = openIdx < 0 ? 0 : (openIdx + delta + rows.length) % rows.length;
-    setSearch({ task: rows[idx].task_name, cell: undefined }, { replace: true });
+    if (!sortedRows.length) return;
+    const idx = openIdx < 0 ? 0 : (openIdx + delta + sortedRows.length) % sortedRows.length;
+    setSearch({ task: sortedRows[idx].task_name, cell: undefined }, { replace: true });
   };
   useHotkeys({ "[": () => move(-1), "]": () => move(1) }, { enabled: !!search.task, allowInDialog: true });
   const baselineRunId = ctx.baselineInfo?.run?.run_id ?? ctx.baselineInfo?.run_ids[0];
@@ -245,6 +247,8 @@ export function TasksTab(ctx: RunCtx) {
           rows={rows}
           getRowId={(r) => String(r.task_result_id)}
           loading={ctx.tasks.isLoading}
+          sort={search.ts}
+          onSortChange={(v) => setSearch({ ts: v }, { replace: true })}
           clientSort
           onRowOpen={(r) => setSearch({ task: r.task_name })}
           focusedId={openRow ? String(openRow.task_result_id) : null}

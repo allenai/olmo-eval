@@ -17,7 +17,7 @@ import { pushRecent, trayStore } from "@/state/prefs";
 import { useStore } from "@/state/store";
 import { HeatmapView } from "./HeatmapView";
 import c from "./compare.module.css";
-import { type CompareCtx, type CompareSearch, type CompareView, shortLabel, VIEWS } from "./types";
+import { type CompareCtx, type CompareSearch, type CompareView, distinctLabels, VIEWS } from "./types";
 
 const PairwiseView = lazy(() => import("./PairwiseView").then((m) => ({ default: m.PairwiseView })));
 const ScatterView = lazy(() => import("./ScatterView").then((m) => ({ default: m.ScatterView })));
@@ -94,8 +94,10 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
   const [rawSearch, setSearch] = useSearchParams<CompareSearch>();
   const search = useMemo(() => (presetGroup ? { ...rawSearch, group: presetGroup } : rawSearch), [rawSearch, presetGroup]);
   const [baseline, setBaseline] = useBaseline();
-  const { keys, loading } = useSubjectKeys(search, baseline);
-  const resolved = useResolveSubjects(keys, search.group);
+  const { keys: requestedKeys, loading } = useSubjectKeys(search, baseline);
+  const resolved = useResolveSubjects(requestedKeys, search.group);
+  const resolvedFresh = !!resolved.data && !resolved.isPlaceholderData;
+  const missingKey = resolvedFresh ? resolved.data.missing.join(",") : "";
   const suites = useSuites();
   const groups = useGroups({ limit: 100 });
   const view = oneOf<CompareView>(search.view, VIEWS, "heatmap");
@@ -104,13 +106,35 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
   const scope = search.scope ?? "all";
   const metric = search.metric ?? "primary";
   const infoByKey = useMemo(() => new Map((resolved.data?.items ?? []).map((i) => [i.key, i])), [resolved.data]);
+  const explicitKey = search.subjects ?? "";
+  const keys = useMemo(() => {
+    // Unknown subjects (a deleted run in a shared link, a stale baseline) are left out so the
+    // rest of the page still loads.
+    const missing = new Set(missingKey.split(",").filter(Boolean));
+    let out = requestedKeys.filter((k) => !missing.has(k));
+    // A run baseline prepended to a group's model subjects duplicates the model subject it
+    // belongs to, so that model subject is dropped.
+    if (baseline?.startsWith("r:") && !parseSubjects(explicitKey).length) {
+      const runId = baseline.slice(2);
+      out = out.filter((k) => k === baseline || !infoByKey.get(k)?.run_ids.includes(runId) || infoByKey.get(k)?.kind !== "model");
+    }
+    return out;
+  }, [requestedKeys, missingKey, baseline, explicitKey, infoByKey]);
+  const missingKeys = missingKey ? missingKey.split(",") : [];
+  const removeMissing = () => {
+    const explicit = parseSubjects(search.subjects).filter((k) => !missingKeys.includes(k));
+    setSearch({
+      subjects: explicit.join(",") || undefined,
+      baseline: baseline && missingKeys.includes(baseline) ? undefined : baseline,
+    });
+  };
   const subjects = keys.map((k) => infoByKey.get(k)).filter((x): x is NonNullable<typeof x> => !!x);
   const slots = useSubjectSlots(keys.filter((k) => k !== baseline));
   const matrixBody = useMemo(
     () => ({ subjects: keys, group: search.group ?? null, scope, metric, alpha, baseline: baseline ?? null, shared_only: shared }),
     [keys, search.group, scope, metric, alpha, baseline, shared],
   );
-  const matrix = useMatrix(matrixBody, keys.length > 0);
+  const matrix = useMatrix(matrixBody, keys.length > 0 && (resolvedFresh || resolved.isError));
   const [drag, setDrag] = useState<number | null>(null);
   // Phones show the first three subjects until the list is expanded.
   const [allSubjects, setAllSubjects] = useState(false);
@@ -126,15 +150,8 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
 
   const setSubjects = (next: SubjectKey[]) => setSearch({ subjects: next.join(",") || undefined, group: search.group });
   const labelOf = useMemo(() => {
-    const base = new Map(keys.map((k) => [k, shortLabel(infoByKey.get(k), k)]));
-    const counts = new Map<string, number>();
-    base.forEach((v) => counts.set(v, (counts.get(v) ?? 0) + 1));
-    // Disambiguate checkpoints that share a label (different settings) with a short model hash.
-    return (key: string) => {
-      const label = base.get(key) ?? key;
-      const info = infoByKey.get(key);
-      return (counts.get(label) ?? 0) > 1 && info ? `${label} ·${info.model.model_hash.slice(0, 4)}` : label;
-    };
+    const labels = distinctLabels(keys, infoByKey);
+    return (key: string) => labels.get(key) ?? key;
   }, [keys, infoByKey]);
   const explicitList = keys.filter((k) => k !== baseline || parseSubjects(search.subjects).includes(k));
 
@@ -245,7 +262,14 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
             </button>
           )}
           <AddSubject onAdd={(key) => setSubjects([...explicitList, key].filter((v, i, a) => a.indexOf(v) === i))} />
-          {resolved.data?.missing.length ? <span className="t-caption">{resolved.data.missing.length} unknown subject(s) ignored</span> : null}
+          {missingKeys.length ? (
+            <span className="t-caption" title={missingKeys.join(", ")}>
+              {missingKeys.length} unknown subject{missingKeys.length === 1 ? "" : "s"} ignored ·{" "}
+              <button type="button" className="link" onClick={removeMissing}>
+                remove from link
+              </button>
+            </span>
+          ) : null}
         </div>
         <div className={c.controls}>
           <Select size="sm" label="Scope" value={scope} onChange={(v) => setSearch({ scope: v === "all" ? undefined : v })} options={scopeOptions} width={240} />
@@ -304,7 +328,7 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
           )}
         </div>
       </div>
-      {loading || (keys.length > 0 && resolved.isLoading) ? (
+      {loading || (requestedKeys.length > 0 && resolved.isLoading) ? (
         <Skeleton height={420} />
       ) : keys.length < 2 ? (
         <EmptyState

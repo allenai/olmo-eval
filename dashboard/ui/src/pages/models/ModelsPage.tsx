@@ -71,6 +71,8 @@ export function ModelsPage() {
             total={models.total}
             hasMore={models.hasMore}
             onLoadMore={models.loadMore}
+            sort={search.sort}
+            onSortChange={(v) => setSearch({ sort: v }, { replace: true })}
             clientSort
             onRowOpen={(r) => navigate(`/models/${encodeURIComponent(r.series)}`)}
             toolbar={

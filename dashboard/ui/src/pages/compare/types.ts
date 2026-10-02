@@ -22,6 +22,11 @@ export type CompareSearch = {
   inst?: string;
   x?: string;
   size?: string;
+  /** Profiles view: axis level, shared scale, axis order and axis brushes. */
+  plevel?: string;
+  pscale?: string;
+  porder?: string;
+  pbrush?: string;
   baseline?: string;
 };
 
@@ -52,6 +57,22 @@ export function shortLabel(info: SubjectInfo | undefined, fallback: string): str
   if (step == null) return info.label.includes(" · ") ? info.label : base;
   const s = step >= 1000 && step % 1000 === 0 ? `${step / 1000}k` : step.toLocaleString("en-US");
   return `${base} @${s}`;
+}
+
+/**
+ * Short labels for a set of subjects. Checkpoints that share a label (same step, different
+ * settings) get a short model hash appended so they stay distinguishable.
+ */
+export function distinctLabels(keys: string[], infoByKey: Map<string, SubjectInfo>): Map<string, string> {
+  const base = new Map(keys.map((k) => [k, shortLabel(infoByKey.get(k), k)]));
+  const counts = new Map<string, number>();
+  base.forEach((v) => counts.set(v, (counts.get(v) ?? 0) + 1));
+  const out = new Map<string, string>();
+  for (const [key, label] of base) {
+    const info = infoByKey.get(key);
+    out.set(key, (counts.get(label) ?? 0) > 1 && info ? `${label} ·${info.model.model_hash.slice(0, 4)}` : label);
+  }
+  return out;
 }
 
 /**

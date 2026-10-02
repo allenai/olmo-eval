@@ -84,6 +84,7 @@
   height: 30px;
   width: 300px;
   max-width: 34vw;
+  min-width: 0;
   padding: 0 8px 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -117,6 +118,11 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.right > * {
   flex: none;
 }
 
@@ -156,10 +162,14 @@
   border: 1px solid var(--teal);
   background: var(--teal-soft);
   font-size: 12px;
-  max-width: 280px;
+  max-width: min(280px, 22vw);
   min-width: 0;
   cursor: pointer;
   color: var(--fg);
+}
+
+.right > .baseline {
+  flex: 0 1 auto;
 }
 
 .baselineEmpty {
@@ -214,9 +224,22 @@
   display: none;
 }
 
+/* With the full nav showing, the search button shrinks to its icon and shortcut. */
+@media (max-width: 1250px) {
+  .searchText {
+    display: none;
+  }
+  .search {
+    width: auto;
+  }
+}
+
 @media (max-width: 1100px) {
   .nav {
     display: none;
+  }
+  .searchText {
+    display: block;
   }
   .mobileMenu {
     display: inline-flex;
@@ -225,6 +248,9 @@
     width: auto;
     flex: 1;
     max-width: none;
+  }
+  .brand {
+    min-width: 0;
   }
 }
 

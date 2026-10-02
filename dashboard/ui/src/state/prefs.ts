@@ -113,11 +113,6 @@ export function removeFromTray(key: SubjectKey): void {
   trayStore.set((prev) => prev.filter((p) => p.key !== key));
 }
 
-export function toggleTray(item: TrayItem): void {
-  if (trayStore.get().some((p) => p.key === item.key)) removeFromTray(item.key);
-  else addToTray(item);
-}
-
 export function moveTrayItem(from: number, to: number): void {
   trayStore.set((prev) => {
     const next = [...prev];

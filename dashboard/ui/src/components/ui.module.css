@@ -378,19 +378,6 @@
   padding: 0 4px;
 }
 
-.countBadge {
-  display: inline-grid;
-  place-items: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 10px;
-  font-weight: 800;
-}
-
 .status {
   display: inline-flex;
   align-items: center;
@@ -1094,13 +1081,6 @@
   background: var(--surface);
   border: 2px solid var(--teal);
   cursor: pointer;
-}
-
-.divider {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border);
-  flex: none;
 }
 
 /* Keyframes are module-local (CSS Modules scopes animation names). */

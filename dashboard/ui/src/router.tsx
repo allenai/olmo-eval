@@ -14,16 +14,16 @@ import { parseSearch, pickStrings, stringifySearch } from "./lib/url";
 export const SEARCH_KEYS = {
   root: ["baseline"],
   runs: [...RUN_FILTER_KEYS, "sort", "cols", "gb"],
-  run: ["tab", "task", "hash", "inst", "cell", "correct", "thr", "fin", "len", "score", "has", "iq", "isort", "only", "side", "diff", "tq", "tf", "all", "sel"],
+  run: ["tab", "task", "hash", "inst", "cell", "correct", "thr", "fin", "len", "score", "has", "iq", "isort", "only", "side", "diff", "tq", "tf", "all", "sel", "ts"],
   runTask: ["hash"],
-  compare: ["subjects", "group", "merge", "scope", "metric", "view", "mode", "alpha", "margin", "shared", "a", "b", "task", "cell", "filter", "rsort", "scale", "inst", "x", "size"],
+  compare: ["subjects", "group", "merge", "scope", "metric", "view", "mode", "alpha", "margin", "shared", "a", "b", "task", "cell", "filter", "rsort", "scale", "inst", "x", "size", "plevel", "pscale", "porder", "pbrush"],
   models: ["q", "family", "sort"],
   model: ["variant", "scope", "tasks", "x", "refs", "merge", "delta", "sel"],
   tasks: ["q", "suite", "sort", "tab"],
-  task: ["hash", "metric", "pm", "family", "group", "user"],
-  suite: ["pm", "family", "group", "user"],
+  task: ["hash", "metric", "pm", "family", "group", "user", "sort"],
+  suite: ["pm", "family", "group", "user", "sort"],
   groups: ["q", "sort"],
-  group: ["tab", "sort", "subjects", "merge", "scope", "metric", "view", "mode", "alpha", "margin", "shared", "a", "b", "task", "cell", "filter", "rsort", "scale", "inst", "x", "size"],
+  group: ["tab", "sort", "subjects", "merge", "scope", "metric", "view", "mode", "alpha", "margin", "shared", "a", "b", "task", "cell", "filter", "rsort", "scale", "inst", "x", "size", "plevel", "pscale", "porder", "pbrush"],
   views: [] as string[],
 } as const;
 

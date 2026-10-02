@@ -1,6 +1,7 @@
 import { ArrowRight, Plus, Star, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { buildHref, useAppNavigate } from "../AppLink";
+import { useHotkeys } from "@/lib/keyboard";
 import { useSubjectSlots } from "@/state/colors";
 import { useBaseline } from "@/state/nav";
 import { clearTray, moveTrayItem, removeFromTray, trayStore } from "@/state/prefs";
@@ -15,12 +16,25 @@ export function CompareTray() {
   const navigate = useAppNavigate();
   const slots = useSubjectSlots(items.map((i) => i.key));
   const [drag, setDrag] = useState<number | null>(null);
-  if (!items.length) return null;
+  const lastG = useRef(0);
   const open = () => {
     const subjects = items.map((i) => i.key);
     if (baseline && !subjects.includes(baseline)) subjects.unshift(baseline);
     navigate(buildHref("/compare", { subjects: subjects.join(",") }));
   };
+  useHotkeys(
+    {
+      // tinykeys fires both "g c" and "c" on the second key, so "c" right after "g" is ignored.
+      g: () => {
+        lastG.current = Date.now();
+      },
+      c: () => {
+        if (Date.now() - lastG.current > 1000) open();
+      },
+    },
+    { enabled: items.length > 0 },
+  );
+  if (!items.length) return null;
   return (
     <div className={s.tray} role="region" aria-label="Compare tray">
       <span className={s.trayLabel}>Compare</span>
