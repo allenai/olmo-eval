@@ -4,14 +4,18 @@ Sources: ``metrics/*-inference.jsonl`` (one BatchMetrics per line, written by th
 file reporter) and ``metrics/vllm_server_metrics.jsonl`` (vLLM /metrics snapshots,
 external runner only). Per-sample GPU arrays become downsampled series; the full
 files are uploaded to GCS as artifacts.
+
+The file reporter appends, and an output directory can be reused across runs and
+models, so only this model's batch files and records stamped after the run started
+are included.
 """
 
 from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterator, Mapping
-from datetime import UTC, datetime
+from collections.abc import Iterator, Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +24,9 @@ import numpy as np
 MAX_POINTS = 500
 MAX_SERIES = 64
 MAX_BATCHES = 20000
+# Clock slack for records that predate the run's recorded start (matches the uploader).
+STALE_RECORD_SLACK = timedelta(minutes=1)
+SUFFIX = "-inference.jsonl"
 VLLM_METRICS_FILE = "vllm_server_metrics.jsonl"
 _VLLM_SERIES = (
     ("vllm:num_requests_running", "vllm_num_requests_running", None, 1.0),
@@ -111,24 +118,43 @@ def _quantiles(values: list[float]) -> dict[str, Any] | None:
     }
 
 
-def find_inference_files(output_dir: Path) -> tuple[list[Path], Path | None]:
+def _safe_name(name: str) -> str:
+    return name.replace("/", "_").replace("\\", "_")
+
+
+def find_inference_files(
+    output_dir: Path, model_names: Sequence[str] = ()
+) -> tuple[list[Path], Path | None]:
+    """Batch files and the vLLM metrics file under ``metrics/``.
+
+    Batch files are named ``<provider>_<model>-inference.jsonl``, where the model is the
+    alias or the provider model. When any file matches one of ``model_names``, files for
+    other models are left out.
+    """
     metrics_dir = output_dir / "metrics"
     if not metrics_dir.is_dir():
         return [], None
-    batch_files = sorted(metrics_dir.glob("*-inference.jsonl"))
+    batch_files = sorted(metrics_dir.glob(f"*{SUFFIX}"))
+    endings = tuple(f"_{_safe_name(n)}{SUFFIX}" for n in model_names if n)
+    if endings:
+        ours = [p for p in batch_files if p.name.endswith(endings)]
+        if ours:
+            batch_files = ours
     vllm = metrics_dir / VLLM_METRICS_FILE
     return batch_files, vllm if vllm.is_file() else None
 
 
 def build_inference_payload(
-    output_dir: Path, started_at: str | None = None
+    output_dir: Path, started_at: str | None = None, model_names: Sequence[str] = ()
 ) -> dict[str, Any] | None:
-    """Build InferenceUploadRequest, or None when the run has no inference files."""
-    batch_files, vllm_file = find_inference_files(output_dir)
+    """Build InferenceUploadRequest, or None when the run has no inference records."""
+    batch_files, vllm_file = find_inference_files(output_dir, model_names)
     if not batch_files and vllm_file is None:
         return None
 
     origin = _parse_time(started_at)
+    cutoff = origin - STALE_RECORD_SLACK if origin is not None else None
+    used: set[Path] = set()
     batches: list[dict[str, Any]] = []
     gpu_samples: dict[tuple[str, int], list[tuple[datetime, float]]] = {}
     devices: dict[int, dict[str, Any]] = {}
@@ -141,8 +167,9 @@ def build_inference_payload(
                 continue
             data = rec["data"]
             timestamp = _parse_time(data.get("timestamp"))
-            if timestamp is None:
+            if timestamp is None or (cutoff is not None and timestamp < cutoff):
                 continue
+            used.add(path)
             if len(batches) < MAX_BATCHES:
                 batches.append(
                     {
@@ -181,7 +208,7 @@ def build_inference_payload(
                     if not isinstance(sample, Mapping):
                         continue
                     ts = _parse_time(sample.get("timestamp"))
-                    if ts is None:
+                    if ts is None or (cutoff is not None and ts < cutoff):
                         continue
                     earliest = ts if earliest is None or ts < earliest else earliest
                     for field, name in (
@@ -212,6 +239,9 @@ def build_inference_payload(
             metrics = rec.get("metrics")
             if ts is None or not isinstance(metrics, Mapping):
                 continue
+            if cutoff is not None and ts < cutoff:
+                continue
+            used.add(vllm_file)
             earliest = ts if earliest is None or ts < earliest else earliest
             for source, name, unit, scale in _VLLM_SERIES:
                 entry = metrics.get(source)
@@ -219,6 +249,8 @@ def build_inference_payload(
                 if isinstance(value, (int, float)) and math.isfinite(value):
                     vllm_samples.setdefault(name, (unit, []))[1].append((ts, value * scale))
 
+    if not used:
+        return None
     base = origin or earliest or datetime.now(UTC)
     series: list[dict[str, Any]] = []
     for (name, device_id), samples in sorted(gpu_samples.items(), key=lambda kv: kv[0][::-1]):
@@ -243,7 +275,7 @@ def build_inference_payload(
             "tpot_s": _quantiles(latencies["tpot"]),
         }
 
-    sources = [*batch_files, *([vllm_file] if vllm_file else [])]
+    sources = [p for p in [*batch_files, vllm_file] if p is not None and p in used]
     return {
         "source_paths": [p.relative_to(output_dir).as_posix() for p in sources],
         "batches": batches,

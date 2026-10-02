@@ -176,28 +176,70 @@ def _clean_metrics(metrics: Any) -> dict[str, dict[str, float | None]]:
     return cleaned
 
 
-def suite_results(suite_aggregations: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Convert runner suite aggregations into SuiteResultIn payloads."""
-    results = []
-    for raw_name, data in suite_aggregations.items():
-        name = strip_priority(raw_name)
-        metrics = _clean_metrics(data.get("metrics"))
-        score = metrics.get("primary_score", {}).get("average")
-        parent = data.get("parent_suite")
-        num_tasks = data.get("num_tasks")
-        results.append(
-            {
-                "name": name,
-                "aggregation": str(data.get("aggregation") or "average"),
-                "parent": strip_priority(parent) if isinstance(parent, str) else None,
-                "description": _suite_description(name),
-                "children": _suite_children(name, data.get("tasks") or []),
-                "metrics": metrics,
-                "primary_metric": data.get("primary_metric"),
-                "score": score,
-                "num_tasks": num_tasks if isinstance(num_tasks, int) and num_tasks >= 0 else None,
-            }
-        )
+def _suite_result(raw_name: str, data: Mapping[str, Any]) -> dict[str, Any]:
+    name = strip_priority(raw_name)
+    metrics = _clean_metrics(data.get("metrics"))
+    score = metrics.get("primary_score", {}).get("average")
+    parent = data.get("parent_suite")
+    num_tasks = data.get("num_tasks")
+    return {
+        "name": name,
+        "aggregation": str(data.get("aggregation") or "average"),
+        "parent": strip_priority(parent) if isinstance(parent, str) else None,
+        "description": _suite_description(name),
+        "children": _suite_children(name, data.get("tasks") or []),
+        "metrics": metrics,
+        "primary_metric": data.get("primary_metric"),
+        "score": score,
+        "num_tasks": num_tasks if isinstance(num_tasks, int) and num_tasks >= 0 else None,
+    }
+
+
+def _nested_suites(name: str) -> list[tuple[str, str, str]]:
+    """(child name, parent name, aggregation) for every suite nested under a registered suite."""
+    from olmo_eval.evals.suites import get_suite, suite_exists
+    from olmo_eval.evals.suites.registry import Suite
+
+    if not suite_exists(name):
+        return []
+    out: list[tuple[str, str, str]] = []
+
+    def walk(suite: Suite, stack: tuple[str, ...]) -> None:
+        for child in suite.tasks:
+            if isinstance(child, Suite) and child.name not in stack:
+                out.append((child.name, suite.name, child.aggregation.value))
+                walk(child, (*stack, child.name))
+
+    walk(get_suite(name), (name,))
+    return out
+
+
+def suite_results(
+    suite_aggregations: Mapping[str, Mapping[str, Any]],
+    task_results: Mapping[str, Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Convert runner suite aggregations into SuiteResultIn payloads.
+
+    The runner only reports nested suites under average_of_averages parents. The server
+    needs a definition for every nested suite to build the tree, so the missing ones are
+    added here, scored from ``task_results`` when given (the same way the runner scores
+    a top-level suite) and otherwise sent as definitions with no score.
+    """
+    results = [_suite_result(raw, data) for raw, data in suite_aggregations.items()]
+    seen = {r["name"] for r in results}
+    for raw_name in suite_aggregations:
+        suffix = f"@{raw_name.rsplit('@', 1)[1]}" if "@" in raw_name else ""
+        for child, parent, aggregation in _nested_suites(strip_priority(raw_name)):
+            if child in seen:
+                continue
+            seen.add(child)
+            data: dict[str, Any] = {}
+            if task_results is not None:
+                computed = recompute_suite_aggregations([f"{child}{suffix}"], task_results)
+                data = dict(computed.get(f"{child}{suffix}") or {})
+            data["parent_suite"] = parent
+            data.setdefault("aggregation", aggregation)
+            results.append(_suite_result(child, data))
     return results
 
 

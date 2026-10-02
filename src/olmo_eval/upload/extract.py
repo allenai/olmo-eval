@@ -29,12 +29,22 @@ class RequestRef:
     preview: str | None
 
 
-def find_task_file(output_dir: Path, kind: str, spec: str, task_hash: str | None) -> Path | None:
-    """Locate a task's predictions or requests file.
+def find_task_file(
+    output_dir: Path,
+    kind: str,
+    spec: str,
+    task_hash: str | None,
+    model_path: str | None = None,
+    since: float | None = None,
+    warnings: list[str] | None = None,
+) -> Path | None:
+    """Locate the predictions or requests file this run wrote for a task.
 
-    Files live at ``<kind>/<sanitized model>/<sanitized spec>[_<hash6>]-<kind>.jsonl``.
-    The model directory is not reconstructed because it uses the provider model while
-    metrics.json reports the alias.
+    Files live at ``<kind>/<sanitized model path>/<sanitized spec>[_<hash6>]-<kind>.jsonl``.
+    An output directory can hold files from earlier runs and other models, so the
+    run's own model directory (``model_path``, the provider model) is searched first.
+    Without it, files modified before ``since`` (a POSIX timestamp) are ignored, and
+    an ambiguous match returns None with a warning rather than guessing.
     """
     suffix = PREDICTIONS_SUFFIX if kind == "predictions" else REQUESTS_SUFFIX
     base = sanitize_spec_for_filename(spec)
@@ -43,10 +53,24 @@ def find_task_file(output_dir: Path, kind: str, spec: str, task_hash: str | None
     root = output_dir / kind
     if not root.is_dir():
         return None
+    if model_path:
+        model_dir = root / sanitize_spec_for_filename(model_path)
+        if model_dir.is_dir():
+            for name in names:
+                if (model_dir / name).is_file():
+                    return model_dir / name
+            return None
     for name in names:
-        matches = sorted(root.glob(f"*/{name}"))
-        if matches:
+        matches = [p for p in root.glob(f"*/{name}") if p.is_file()]
+        if since is not None:
+            matches = [p for p in matches if p.stat().st_mtime >= since]
+        if len(matches) == 1:
             return matches[0]
+        if len(matches) > 1:
+            if warnings is not None:
+                listed = ", ".join(sorted(p.relative_to(output_dir).as_posix() for p in matches))
+                warnings.append(f"Skipped {kind} for {spec}: several candidate files ({listed})")
+            return None
     return None
 
 

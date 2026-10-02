@@ -295,7 +295,7 @@ def degraded_manifest(output_dir: str | Path, metrics: Mapping[str, Any]) -> dic
     summary = metrics.get("summary") or {}
     suite_specs = [name for name in summary if suite_exists(strip_priority(name))]
     task_results = {str(row["task"]): dict(row) for row in task_rows}
-    suites = suite_results(recompute_suite_aggregations(suite_specs, task_results))
+    suites = suite_results(recompute_suite_aggregations(suite_specs, task_results), task_results)
 
     finished_at = to_utc_iso(metrics.get("timestamp"))
     duration = metrics.get("experiment_duration_seconds")

@@ -29,6 +29,7 @@ from tests.upload.fixtures import (
     ARC_SUITE,
     CONTRACT_SCHEMA,
     MODEL,
+    MODEL_DIR,
     write_inference,
     write_jsonl,
 )
@@ -98,6 +99,28 @@ def test_suite_results_use_registered_definitions() -> None:
     assert other["children"] == [{"type": "task", "name": "gsm8k"}]
     assert other["parent"] == ARC_SUITE
     assert other["score"] is None
+
+
+def test_suite_results_add_nested_suites_the_runner_does_not_report() -> None:
+    from olmo_eval.evals.suites import get_suite
+    from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+    tasks = {
+        spec: {"metrics": {"acc": {"x": 0.5}}, "primary_metric": "acc:x", "num_instances": 10}
+        for spec in get_suite("biology").expand()
+    }
+    aggregations = compute_suite_aggregations(["biology"], tasks)
+    assert list(aggregations) == ["biology"]
+
+    by_name = {s["name"]: s for s in suite_results(aggregations, tasks)}
+
+    assert set(by_name) == {"biology", "lab_bench", "geneturing"}
+    lab = by_name["lab_bench"]
+    assert lab["parent"] == "biology"
+    assert lab["score"] == 0.5
+    assert lab["children"] and all(c["type"] == "task" for c in lab["children"])
+    unscored = {s["name"]: s for s in suite_results(aggregations)}["geneturing"]
+    assert unscored["score"] is None and unscored["children"]
 
 
 def test_degraded_manifest_for_external_runner_metrics() -> None:
@@ -286,6 +309,22 @@ def test_inference_payload(tmp_path: Path) -> None:
     assert e2e["p5"] <= e2e["mean"] <= e2e["p95"]
     assert latency["tpot_s"] is None
     assert payload["source_paths"][-1] == "metrics/vllm_server_metrics.jsonl"
+
+
+def test_inference_payload_leaves_out_earlier_runs_and_other_models(tmp_path: Path) -> None:
+    write_inference(tmp_path)
+    other = tmp_path / "metrics" / "vllm_server_other-model-inference.jsonl"
+    other.write_bytes(
+        (tmp_path / "metrics" / f"vllm_server_{MODEL_DIR}-inference.jsonl").read_bytes()
+    )
+
+    # Batches stamped 09:59:00-02 predate a run that started at 10:30.
+    assert build_inference_payload(tmp_path, "2026-10-01T10:30:00+00:00", [MODEL]) is None
+
+    payload = build_inference_payload(tmp_path, "2026-10-01T09:59:01+00:00", [MODEL])
+    assert payload is not None
+    assert payload["source_paths"] == [f"metrics/vllm_server_{MODEL_DIR}-inference.jsonl"]
+    assert len(payload["batches"]) == 3  # within the one-minute clock slack
 
 
 def test_no_inference_files(tmp_path: Path) -> None:

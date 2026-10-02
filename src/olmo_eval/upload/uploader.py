@@ -240,6 +240,9 @@ def _task_payload(
     manifest_task: Mapping[str, Any] | None,
     run_errors: Mapping[str, str],
     summary: Mapping[str, Any],
+    model_path: str | None = None,
+    since: datetime | None = None,
+    warnings: list[str] | None = None,
 ) -> TaskUpload:
     spec = str(row["task"])
     raw_config = row.get("config")
@@ -250,8 +253,13 @@ def _task_payload(
     raw_metrics = row.get("metrics")
     metrics: Mapping[str, Any] = raw_metrics if isinstance(raw_metrics, Mapping) else {}
 
-    predictions = find_task_file(output_dir, "predictions", spec, row.get("task_hash"))
-    requests = find_task_file(output_dir, "requests", spec, row.get("task_hash"))
+    cutoff = (since - STALE_FILE_SLACK).timestamp() if since is not None else None
+    raw_hash = row.get("task_hash")
+    file_hash = raw_hash if isinstance(raw_hash, str) and raw_hash else None
+    predictions = find_task_file(
+        output_dir, "predictions", spec, file_hash, model_path, cutoff, warnings
+    )
+    requests = find_task_file(output_dir, "requests", spec, file_hash, model_path, cutoff, warnings)
 
     if manifest_task is not None:
         metric_meta = dict(manifest_task.get("metric_meta") or {})
@@ -337,12 +345,25 @@ def build_plan(output_dir: str | Path, tags: Sequence[str] = ()) -> UploadPlan:
         if isinstance(e, Mapping) and e.get("task") and e.get("error")
     }
     summary = (metrics or {}).get("summary") or {}
+    started_at = _parse_time(run.get("started_at"))
+    model_path = model.get("path") if isinstance(model.get("path"), str) else None
     tasks: list[TaskUpload] = []
     for row in (metrics or {}).get("tasks") or []:
         if not isinstance(row, Mapping) or not row.get("task"):
             continue
         spec = str(row["task"])
-        tasks.append(_task_payload(out, row, manifest_tasks.get(spec), run_errors, summary))
+        tasks.append(
+            _task_payload(
+                out,
+                row,
+                manifest_tasks.get(spec),
+                run_errors,
+                summary,
+                model_path=model_path,
+                since=started_at,
+                warnings=warnings,
+            )
+        )
 
     status = run.get("status")
     if status not in FINAL_STATUSES:
@@ -357,13 +378,12 @@ def build_plan(output_dir: str | Path, tags: Sequence[str] = ()) -> UploadPlan:
         for key in ("predictions_path", "requests_path"):
             if task.payload[key]:
                 task_files[task.payload[key]] = task.payload["task_name"]
-    artifacts, artifact_files = collect_artifacts(
-        out, task_files, warnings, since=_parse_time(run.get("started_at"))
-    )
+    artifacts, artifact_files = collect_artifacts(out, task_files, warnings, since=started_at)
 
     inference = None
     try:
-        inference = build_inference_payload(out, run.get("started_at"))
+        model_names = [str(n) for n in (model.get("name"), model.get("path")) if n]
+        inference = build_inference_payload(out, run.get("started_at"), model_names)
     except Exception as e:
         warnings.append(f"Skipped inference metrics: {e}")
 

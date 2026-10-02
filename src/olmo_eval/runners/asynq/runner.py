@@ -1285,7 +1285,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 provider_kind=results_dict.get("provider") or str(self.provider_config.kind),
                 provider_config=results_dict.get("model_config", {}),
             )
-            suites = suite_results(results_dict.get("suites") or {})
+            suites = suite_results(results_dict.get("suites") or {}, results_dict.get("tasks"))
             write_manifest(self.output_dir, build_manifest(run, model, tasks, suites))
         except Exception as e:
             logger.warning(f"Could not write the run manifest: {e}")

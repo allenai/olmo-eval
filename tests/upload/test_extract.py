@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from olmo_eval.upload.extract import (
@@ -192,6 +193,34 @@ def test_find_task_file(tmp_path: Path) -> None:
     unhashed = find_task_file(tmp_path, "predictions", "gsm8k", None)
     assert unhashed is not None and unhashed.name == "gsm8k-predictions.jsonl"
     assert find_task_file(tmp_path, "requests", "arc_easy:mc", "0123456789abcdef") is None
+
+
+def test_find_task_file_prefers_the_run_model_directory(tmp_path: Path) -> None:
+    name = "gsm8k_abcdef-predictions.jsonl"
+    other = tmp_path / "predictions" / "aaa-model" / name
+    ours = tmp_path / "predictions" / "zzz-model" / name
+    write_jsonl(other, [])
+    write_jsonl(ours, [])
+    task_hash = "0123456789abcdef"
+
+    assert find_task_file(tmp_path, "predictions", "gsm8k", task_hash, "zzz-model") == ours
+    assert find_task_file(tmp_path, "predictions", "gsm8k", task_hash, "org/missing") is None
+    assert find_task_file(tmp_path, "predictions", "gsm8k", task_hash, "aaa-model") == other
+
+
+def test_find_task_file_without_model_ignores_stale_and_ambiguous_files(tmp_path: Path) -> None:
+    name = "gsm8k_abcdef-predictions.jsonl"
+    old = tmp_path / "predictions" / "aaa-model" / name
+    new = tmp_path / "predictions" / "zzz-model" / name
+    write_jsonl(old, [])
+    write_jsonl(new, [])
+    os.utime(old, (1000, 1000))
+    task_hash = "0123456789abcdef"
+
+    assert find_task_file(tmp_path, "predictions", "gsm8k", task_hash, since=2000) == new
+    warnings: list[str] = []
+    assert find_task_file(tmp_path, "predictions", "gsm8k", task_hash, warnings=warnings) is None
+    assert "several candidate files" in warnings[0]
 
 
 def test_batched() -> None:
