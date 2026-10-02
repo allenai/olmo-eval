@@ -116,7 +116,8 @@ class SWEBenchArgs:
     revision: str | None = DATASET_REVISION
     max_concurrency: int = 4
     max_turns: int = 100
-    command_timeout: float = 300.0
+    command_timeout: float = 120.0
+    agent_timeout: float = 3600.0
     max_tool_output_chars: int | None = 10000
     eval_timeout: float = 1800.0
     include_hints: bool = False
@@ -135,7 +136,8 @@ class SWEBenchArgs:
             revision=data.get("revision", DATASET_REVISION) or None,
             max_concurrency=int(data.get("max_concurrency", 4)),
             max_turns=int(data.get("max_turns", 100)),
-            command_timeout=float(data.get("command_timeout", 300.0)),
+            command_timeout=float(data.get("command_timeout", 120.0)),
+            agent_timeout=float(data.get("agent_timeout", 3600.0)),
             max_tool_output_chars=_as_optional_int(data.get("max_tool_output_chars", 10000)),
             eval_timeout=float(data.get("eval_timeout", 1800.0)),
             include_hints=_as_bool(data.get("include_hints", False)),
@@ -240,7 +242,8 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             "revision": ("Dataset revision", DATASET_REVISION),
             "max_concurrency": ("Max instances in flight at once", 4),
             "max_turns": ("Max agent turns per instance", 100),
-            "command_timeout": ("Timeout in seconds for each agent command", 300.0),
+            "command_timeout": ("Timeout in seconds for each agent command", 120.0),
+            "agent_timeout": ("Wall-clock budget in seconds for the agent on one instance", 3600.0),
             "max_tool_output_chars": ("Truncate each tool output to this many characters", 10000),
             "eval_timeout": ("Timeout in seconds for running the tests", 1800.0),
             "include_hints": ("Show the issue's hints to the agent", False),
@@ -373,7 +376,13 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 await manager.start()
                 baseline = await snapshot_worktree(manager.get_executor(frozenset()))
                 try:
-                    await self._run_agent(manager, instance, provider, swe_args, result)
+                    await asyncio.wait_for(
+                        self._run_agent(manager, instance, provider, swe_args, result),
+                        timeout=swe_args.agent_timeout,
+                    )
+                except TimeoutError:
+                    logger.info(f"[{instance.instance_id}] Agent ran out of time")
+                    result.completion_reason = "agent_timeout"
                 except Exception as e:
                     if is_context_length_error(e):
                         logger.info(f"[{instance.instance_id}] Agent ran out of context")

@@ -416,6 +416,12 @@ class TestRunInstanceAgent(unittest.TestCase):
                 )
             )
 
+    def test_agent_timeout_still_grades_partial_patch(self) -> None:
+        result = self._run(TimeoutError())
+        self.assertEqual(result.completion_reason, "agent_timeout")
+        self.assertIsNone(result.error)
+        self.assertEqual(result.patch, GOLD_PATCH)
+
     def test_context_overflow_still_grades_partial_patch(self) -> None:
         result = self._run(RuntimeError("maximum context length is 40960 tokens"))
         self.assertEqual(result.completion_reason, "context_exceeded")
