@@ -13,6 +13,7 @@ from olmo_eval.evals.vision.benchmarks import charxiv as _charxiv  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import countbench_qa as _countbench_qa  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import dense_caption as _dense_caption  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import doc_qa as _doc_qa  # noqa: F401
+from olmo_eval.evals.vision.benchmarks import geobench_vlm as _geobench_vlm  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import info_qa as _info_qa  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import math_vista as _math_vista  # noqa: F401
 from olmo_eval.evals.vision.benchmarks import mmiu as _mmiu  # noqa: F401
