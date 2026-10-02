@@ -10,13 +10,64 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, delete, exists, insert, or_, select
+from sqlalchemy import Table, UniqueConstraint, and_, delete, exists, func, insert, or_, select
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.dialects.postgresql import Insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, load_only, noload
 from sqlalchemy.sql.elements import ColumnElement
 
 from olmo_eval.common.metrics.predictions import normalize_prediction_instance_metrics
 from olmo_eval.common.types import EvalResult, StoredTaskResult
-from olmo_eval.storage.backends.postgres.models import Experiment, InstancePrediction, TaskResult
+from olmo_eval.storage.backends.postgres.models import (
+    Base,
+    Experiment,
+    InstancePrediction,
+    TaskResult,
+)
+
+
+def _upsert(
+    model: type[Base],
+    rows: list[dict[str, Any]],
+    constraint: str,
+    keep_when_null: frozenset[str] = frozenset(),
+) -> Insert:
+    """Build an INSERT that updates the existing row when ``constraint`` conflicts.
+
+    Every column given in ``rows`` is overwritten except the ones that make up
+    the constraint itself.
+
+    Args:
+        model: ORM model to insert into.
+        rows: Column values keyed by ORM attribute name, one dict per row.
+        constraint: Name of the unique constraint that identifies a row.
+        keep_when_null: Columns whose stored value is kept when the new value is NULL.
+
+    Returns:
+        The insert statement.
+    """
+    mapper = sa_inspect(model)
+    table = model.__table__
+    assert isinstance(table, Table)
+    unique = next(
+        c for c in table.constraints if isinstance(c, UniqueConstraint) and c.name == constraint
+    )
+    key_columns = {column.name for column in unique.columns}
+    column_rows = [
+        {mapper.attrs[attr].columns[0].name: value for attr, value in row.items()} for row in rows
+    ]
+    stmt = pg_insert(table).values(column_rows)
+    update_columns = {
+        name: (
+            func.coalesce(stmt.excluded[name], table.c[name])
+            if name in keep_when_null
+            else stmt.excluded[name]
+        )
+        for name in column_rows[0]
+        if name not in key_columns
+    }
+    return stmt.on_conflict_do_update(constraint=constraint, set_=update_columns)
 
 
 def _prefix_filter(column: Any, value: str) -> ColumnElement[bool]:
@@ -104,7 +155,13 @@ class ExperimentRepository:
         return stmt
 
     def save(self, eval_result: EvalResult) -> int:
-        """Save a new evaluation experiment.
+        """Save an evaluation experiment, updating it if it was saved before.
+
+        An experiment is identified by (experiment_id, model_name, model_hash) and
+        a task result by (experiment, task_name). Saving the same result again
+        updates those rows in place rather than adding new ones. Task results
+        already stored for tasks not in ``eval_result`` are kept, as is a stored
+        S3 location when the new save has none.
 
         Args:
             eval_result: EvalResult dataclass containing experiment data.
@@ -117,52 +174,60 @@ class ExperimentRepository:
         experiment_group = (
             eval_result.experiment_group or eval_result.experiment_name or eval_result.experiment_id
         )
-        experiment = Experiment(
-            experiment_id=eval_result.experiment_id,
-            model_name=eval_result.model_name,
-            model_hash=eval_result.model_hash,
-            model_config=eval_result.model_config,
-            backend_name=eval_result.backend_name,
-            timestamp=eval_result.timestamp,
-            experiment_name=eval_result.experiment_name,
-            workspace=eval_result.workspace,
-            author=eval_result.author,
-            tags=eval_result.tags,
-            git_ref=eval_result.git_ref,
-            revision=eval_result.revision,
-            s3_location=eval_result.s3_location,
-            model_path=eval_result.model_path,
-            metadata_=eval_result.metadata,
-            experiment_group=experiment_group,
-            experiment_duration_seconds=eval_result.experiment_duration_seconds,
-            provider_init_seconds=eval_result.provider_init_seconds,
-        )
-        self.session.add(experiment)
-        self.session.flush()  # Get the auto-generated id
+        experiment_values: dict[str, Any] = {
+            "experiment_id": eval_result.experiment_id,
+            "model_name": eval_result.model_name,
+            "model_hash": eval_result.model_hash,
+            "model_config": eval_result.model_config,
+            "backend_name": eval_result.backend_name,
+            "timestamp": eval_result.timestamp,
+            "experiment_name": eval_result.experiment_name,
+            "workspace": eval_result.workspace,
+            "author": eval_result.author,
+            "tags": eval_result.tags,
+            "git_ref": eval_result.git_ref,
+            "revision": eval_result.revision,
+            "s3_location": eval_result.s3_location,
+            "model_path": eval_result.model_path,
+            "metadata_": eval_result.metadata,
+            "experiment_group": experiment_group,
+            "experiment_duration_seconds": eval_result.experiment_duration_seconds,
+            "provider_init_seconds": eval_result.provider_init_seconds,
+        }
+        experiment_pk = self.session.execute(
+            _upsert(
+                Experiment,
+                [experiment_values],
+                "uq_experiments_identity",
+                keep_when_null=frozenset({"s3_location"}),
+            ).returning(Experiment.id)
+        ).scalar_one()
 
-        # Add task results using experiment.id as FK
-        for task_data in eval_result.tasks:
-            task_result = TaskResult(
-                experiment_pk=experiment.id,
-                model_hash=eval_result.model_hash,
-                task_name=task_data.task_name,
-                task_hash=task_data.task_hash,
-                task_config=task_data.task_config,
-                metrics=task_data.metrics,
-                num_instances=task_data.num_instances,
-                instances_processed=task_data.instances_processed,
-                instances_failed=task_data.instances_failed,
-                error_summary=task_data.error_summary,
-                primary_metric=task_data.primary_metric,
-                s3_metrics_key=task_data.s3_metrics_key,
-                s3_predictions_key=task_data.s3_predictions_key,
-                s3_requests_key=task_data.s3_requests_key,
-                duration_seconds=task_data.duration_seconds,
+        task_values = [
+            {
+                "experiment_pk": experiment_pk,
+                "model_hash": eval_result.model_hash,
+                "task_name": task_data.task_name,
+                "task_hash": task_data.task_hash,
+                "task_config": task_data.task_config,
+                "metrics": task_data.metrics,
+                "num_instances": task_data.num_instances,
+                "instances_processed": task_data.instances_processed,
+                "instances_failed": task_data.instances_failed,
+                "error_summary": task_data.error_summary,
+                "primary_metric": task_data.primary_metric,
+                "s3_metrics_key": task_data.s3_metrics_key,
+                "s3_predictions_key": task_data.s3_predictions_key,
+                "s3_requests_key": task_data.s3_requests_key,
+                "duration_seconds": task_data.duration_seconds,
+            }
+            for task_data in eval_result.tasks
+        ]
+        if task_values:
+            self.session.execute(
+                _upsert(TaskResult, task_values, "uq_task_results_experiment_task")
             )
-            self.session.add(task_result)
-
-        self.session.flush()
-        return experiment.id
+        return experiment_pk
 
     def get(self, experiment_pk: int) -> EvalResult | None:
         """Retrieve an evaluation experiment by its primary key (id).
@@ -398,8 +463,10 @@ class InstancePredictionRepository:
     ) -> None:
         """Save instance predictions for an experiment's task.
 
-        Uses bulk insert for efficiency - drastically reduces DB round-trips
-        compared to row-by-row inserts.
+        Replaces any instances already stored for the same experiment and task,
+        so saving a task again leaves one row per instance. Uses bulk insert for
+        efficiency - drastically reduces DB round-trips compared to row-by-row
+        inserts.
 
         Args:
             experiment_pk: Experiment primary key (id).
@@ -410,6 +477,12 @@ class InstancePredictionRepository:
             experiment_group: Experiment group for fast filtering (denormalized).
             chunk_size: Number of instances per bulk insert batch.
         """
+        self.session.execute(
+            delete(InstancePrediction).where(
+                InstancePrediction.experiment_pk == experiment_pk,
+                InstancePrediction.task_hash == task_hash,
+            )
+        )
         if not instances:
             return
 

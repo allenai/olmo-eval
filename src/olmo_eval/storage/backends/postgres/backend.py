@@ -69,6 +69,20 @@ class PostgresBackend(StorageBackend):
             echo=echo,
         )
 
+    @classmethod
+    def from_database_session(cls, db: DatabaseSession) -> PostgresBackend:
+        """Create a backend that uses an existing database session manager.
+
+        Args:
+            db: Session manager to run all operations through.
+
+        Returns:
+            A backend bound to ``db``.
+        """
+        backend = cls.__new__(cls)
+        backend.db = db
+        return backend
+
     def initialize(self) -> None:
         """Initialize the database connection.
 

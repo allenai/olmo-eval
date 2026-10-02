@@ -246,3 +246,94 @@ class TestPostgresBackend:
         model_names = {r.model_name for r in all_results}
         assert "llama3.1-8b" in model_names
         assert "llama3.1-70b" in model_names
+
+
+class TestIdempotentSaves:
+    """Saving the same result more than once must not duplicate rows."""
+
+    INSTANCES = {
+        "mmlu": [
+            {"native_id": "doc_0", "instance_metrics": {"accuracy": {"exact_match": 1.0}}},
+            {"native_id": "doc_1", "instance_metrics": {"accuracy": {"exact_match": 0.0}}},
+        ]
+    }
+
+    @staticmethod
+    def _counts(postgres_backend):
+        from sqlalchemy import func, select
+
+        from olmo_eval.storage.backends.postgres.models import (
+            Experiment,
+            InstancePrediction,
+            TaskResult,
+        )
+
+        with postgres_backend.db.session() as session:
+            return tuple(
+                session.execute(select(func.count()).select_from(model)).scalar_one()
+                for model in (Experiment, TaskResult, InstancePrediction)
+            )
+
+    @pytest.mark.integration
+    def test_saving_twice_keeps_one_row_per_entity(self, postgres_backend, sample_eval_result):
+        postgres_backend.save(sample_eval_result, self.INSTANCES)
+        postgres_backend.save(sample_eval_result, self.INSTANCES)
+
+        assert self._counts(postgres_backend) == (1, 2, 2)
+
+    @pytest.mark.integration
+    def test_saving_again_updates_the_stored_values(self, postgres_backend, sample_eval_result):
+        from dataclasses import replace
+
+        postgres_backend.save(sample_eval_result, self.INSTANCES)
+        rescored = replace(
+            sample_eval_result,
+            author="ingest-user",
+            tasks=[
+                replace(sample_eval_result.tasks[0], metrics={"accuracy": {"exact_match": 0.9}}),
+            ],
+        )
+        postgres_backend.save(
+            rescored,
+            {
+                "mmlu": [
+                    {"native_id": "doc_0", "instance_metrics": {"accuracy": {"exact_match": 0.5}}}
+                ]
+            },
+        )
+
+        assert self._counts(postgres_backend) == (1, 2, 1)
+        stored = postgres_backend.get(sample_eval_result.experiment_id)
+        assert stored.author == "ingest-user"
+        tasks = {task.task_name: task.metrics for task in stored.tasks}
+        assert tasks["mmlu"] == {"accuracy": {"exact_match": 0.9}}
+        # A task left out of the second save keeps its stored row.
+        assert tasks["gsm8k"] == {"exact_match": {"exact_match": 0.58}}
+
+    @pytest.mark.integration
+    def test_same_experiment_id_with_another_model_hash_is_a_new_row(
+        self, postgres_backend, sample_eval_result
+    ):
+        from dataclasses import replace
+
+        postgres_backend.save(sample_eval_result)
+        postgres_backend.save(replace(sample_eval_result, model_hash="other-hash"))
+
+        assert self._counts(postgres_backend) == (2, 4, 0)
+
+    @pytest.mark.integration
+    def test_resave_without_s3_location_keeps_the_stored_one(
+        self, postgres_backend, sample_eval_result
+    ):
+        from dataclasses import replace
+
+        postgres_backend.save(replace(sample_eval_result, s3_location="s3://bucket/run"))
+        postgres_backend.save(replace(sample_eval_result, s3_location=None))
+        assert postgres_backend.get(sample_eval_result.experiment_id).s3_location == (
+            "s3://bucket/run"
+        )
+
+        postgres_backend.save(replace(sample_eval_result, s3_location="s3://bucket/moved"))
+        assert postgres_backend.get(sample_eval_result.experiment_id).s3_location == (
+            "s3://bucket/moved"
+        )

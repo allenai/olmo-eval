@@ -23,6 +23,16 @@ if TYPE_CHECKING:
 logger = get_logger("runners.storage")
 
 
+class ResultsSaveError(RuntimeError):
+    """Raised when results could not be saved to one or more storage backends."""
+
+    def __init__(self, failures: list[str]):
+        self.failures = failures
+        super().__init__(
+            f"Failed to save results ({len(failures)} failure(s)): " + "; ".join(failures)
+        )
+
+
 def upload_to_s3(
     output_dir: str,
     s3_config: S3Config,
@@ -183,6 +193,10 @@ def save_results(
         experiment_group: Group for related experiments.
         experiment_duration_seconds: Total time for the experiment.
         provider_init_seconds: Dict mapping model name to provider init time.
+
+    Raises:
+        ResultsSaveError: If any model's results could not be converted or saved
+            to any backend. Every model and backend is still attempted first.
     """
     if not storages:
         logger.info("No storage backend configured; skipping results save.")
@@ -226,6 +240,7 @@ def save_results(
     author = get_author()
     git_ref = get_git_ref()
     workspace = get_workspace()
+    failures: list[str] = []
 
     for model_name, model_results, exp_id, m_hash, s3_loc in models_to_save:
         task_count = len(model_results.get("tasks", {}))
@@ -264,6 +279,7 @@ def save_results(
         except Exception as e:
             logger.error(f"Failed to convert results for {model_name}: {e}")
             console.print(f"[red]Failed to convert results for {model_name}: {e}[/red]")
+            failures.append(f"convert {model_name}: {e}")
             continue
 
         # Build instances_by_task from predictions in model_results
@@ -286,3 +302,7 @@ def save_results(
             except Exception as e:
                 logger.error(f"Failed to save to {backend_name}: {e}")
                 console.print(f"[red]Failed to save to {backend_name}: {e}[/red]")
+                failures.append(f"save {model_name} to {backend_name}: {e}")
+
+    if failures:
+        raise ResultsSaveError(failures)

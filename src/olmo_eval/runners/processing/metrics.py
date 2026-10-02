@@ -114,6 +114,7 @@ def build_single_model_metrics(
         experiment_id=experiment_id,
         experiment_name=experiment_name,
         experiment_group=experiment_group,
+        model_name=results.get("model"),
         experiment_duration_seconds=experiment_duration_seconds,
         provider_init_seconds=provider_init_seconds,
     )

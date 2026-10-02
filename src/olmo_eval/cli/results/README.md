@@ -10,6 +10,7 @@ you have, launching the local results viewer, and exporting pairwise stats.
 | `group`                    | Drill into one experiment group — its models, tasks, and covered suites.                |
 | `suites`                   | List registered suites and how many of their tasks have results in the filtered scope.  |
 | `viewer` **(experimental)** | Launch the local DB-backed results viewer, or dump pairwise data as JSON / CSV. |
+| `ingest`                   | Save a finished run's output directory or S3 prefix to the results DB.                  |
 
 Each command accepts `--db-host`, `--db-port`, `--db-name`, `--db-user`,
 `--db-password` (or the matching `OLMO_EVAL_DB_*` env vars). Auth falls back
@@ -48,6 +49,24 @@ olmo-eval results group my-benchmark
 # 3. (Alternative) Which suites have coverage in this group?
 olmo-eval results suites -G my-benchmark
 ```
+
+## `ingest`
+
+Saves a run that is on disk or in S3 but missing from the DB, for example
+when the job's own save failed. SOURCE is the directory or S3 prefix that
+holds the run's `metrics.json` and `predictions/`.
+
+```
+olmo-eval results ingest ./output
+olmo-eval results ingest s3://bucket/olmo-eval/group/model_abc123/exp-id
+olmo-eval results ingest ./output --dry-run
+```
+
+A stored experiment is identified by its experiment ID, model name, and model
+hash, all read from `metrics.json`. Ingesting a run that is already stored
+updates its rows in place. For a local SOURCE, pass `--s3-location` to keep the
+S3 artifact links on the stored rows. Older `metrics.json` files do not record
+a model alias; pass `--model-name` for those.
 
 ## `viewer` *(experimental)*
 
