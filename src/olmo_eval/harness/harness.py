@@ -266,7 +266,7 @@ class Harness:
     def initialize_reporters(self) -> None:
         """Initialize metrics reporters eagerly.
 
-        Call this at job start to establish database connections early rather than
+        Call this at job start to surface reporter setup errors early rather than
         waiting until the first batch is processed. This is optional - reporters
         will be lazily initialized on first use if not called.
         """

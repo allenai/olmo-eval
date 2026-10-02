@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-# Filename suffixes for output files (consistent across all runners and storage backends)
+# Filename suffixes for output files (consistent across all runners)
 PREDICTIONS_SUFFIX = "-predictions.jsonl"
 REQUESTS_SUFFIX = "-requests.jsonl"
 

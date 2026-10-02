@@ -125,27 +125,20 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Inject GCP credentials. Auto-detected from gs:// model paths.",
 )
 @click.option(
-    "--s3-bucket",
-    help="S3 bucket for storing evaluation results (required for S3 uploads)",
+    "--upload/--no-upload",
+    "upload",
+    default=None,
+    help=(
+        "Upload results to the olmo-eval dashboard from the job with your Google "
+        "credentials (default: on; OLMO_EVAL_UPLOAD=0 turns it off)"
+    ),
 )
 @click.option(
-    "--s3-prefix",
-    help="S3 prefix/path within bucket for results (required for S3 uploads)",
+    "--api-url",
+    default=None,
+    help="Ingest service URL for the job (default: $OLMO_EVAL_API_URL, else production)",
 )
-@click.option(
-    "--s3-endpoint-url",
-    help="S3 endpoint URL (for S3-compatible storage like LocalStack)",
-)
-@click.option(
-    "--s3-region",
-    default="us-east-1",
-    help="S3 region (default: us-east-1)",
-)
-@click.option(
-    "--store/--no-store",
-    default=False,
-    help="Persist results to the configured database",
-)
+@click.option("--tag", "tags", multiple=True, help="Label to attach to uploaded runs (repeatable)")
 @click.option(
     "--debug-requests",
     is_flag=True,
@@ -282,11 +275,9 @@ def launch(
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
-    s3_bucket: str | None,
-    s3_prefix: str | None,
-    s3_endpoint_url: str | None,
-    s3_region: str,
-    store: bool,
+    upload: bool | None,
+    api_url: str | None,
+    tags: tuple[str, ...],
     debug_requests: bool,
     debug_provider: bool,
     force_download_model: bool,
@@ -381,6 +372,15 @@ def launch(
                 continue
             parsed_env_vars[entry] = local_value
 
+    from olmo_eval.upload import resolve_upload_config
+    from olmo_eval.upload.config import API_URL_ENV
+
+    try:
+        upload_config = resolve_upload_config(upload, api_url, tags)
+    except ValueError as e:
+        raise click.BadParameter(str(e), param_hint="--tag") from None
+    job_api_url = api_url or _os.environ.get(API_URL_ENV) or None
+
     # Build CLI args dict
     cli_args = {
         "name": name,
@@ -399,11 +399,9 @@ def launch(
         "image": image,
         "group": group,
         "gpus": gpus,
-        "s3_bucket": s3_bucket,
-        "s3_prefix": s3_prefix,
-        "s3_endpoint_url": s3_endpoint_url,
-        "s3_region": s3_region,
-        "store": store,
+        "upload": upload_config.enabled,
+        "api_url": job_api_url,
+        "tags": list(upload_config.tags),
         "debug_requests": debug_requests,
         "debug_provider": debug_provider,
         "force_download_model": force_download_model,
@@ -460,10 +458,9 @@ def launch(
             follow=follow,
             aws_credentials=aws_credentials,
             gcs_credentials=gcs_credentials,
-            s3_bucket=s3_bucket,
-            s3_prefix=s3_prefix,
-            s3_region=s3_region,
-            store=store,
+            upload=upload_config.enabled,
+            api_url=job_api_url,
+            tags=list(upload_config.tags),
             secret_env_overrides=secret_env_overrides,
             user_env_vars=parsed_env_vars,
             eval_args=parsed_eval_args if parsed_eval_args else None,
@@ -504,11 +501,12 @@ def launch(
     # Set up credentials
     cred_manager = CredentialManager(
         launch_config.model_specs,
-        launch_config.store,
         aws_credentials,
         gcs_credentials,
+        upload=launch_config.upload,
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
+    _require_upload_credentials(launch_config.upload, dry_run)
 
     if dry_run:
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
@@ -516,16 +514,7 @@ def launch(
     # Auto-generate group if needed
     effective_groups = _auto_generate_group(launch_config.name, list(launch_config.groups))
 
-    # Display storage info
-    cred_manager.display_storage_info(
-        launcher,
-        launch_config.s3_bucket,
-        launch_config.s3_prefix,
-        launch_config.s3_region,
-        launch_config.s3_endpoint_url,
-        effective_groups,
-        inject_aws,
-    )
+    cred_manager.display_aws_info(launcher, inject_aws)
 
     # Determine effective image
     # Check if harness has a sandbox configured - if so, use sandbox image
@@ -590,7 +579,7 @@ def launch(
                 all_required_secrets.update(sandbox.required_secrets)
 
     # Ensure secrets
-    common_secrets, store_secrets, task_secrets = _ensure_secrets(
+    common_secrets, task_secrets = _ensure_secrets(
         launcher, dry_run, launch_config, all_required_secrets
     )
 
@@ -620,7 +609,6 @@ def launch(
         effective_groups,
         launcher.beaker.user_name,
         common_secrets,
-        store_secrets,
         task_secrets,
         inject_aws,
         inject_gcs,
@@ -761,9 +749,23 @@ def _get_task_configs(
     return task_configs
 
 
+def _require_upload_credentials(upload: bool, dry_run: bool) -> None:
+    """Stop before launching when uploads are on but no Google credentials exist."""
+    from olmo_eval.launch.beaker.gcs import get_local_gcs_credentials
+    from olmo_eval.upload.auth import NO_CREDENTIALS_MESSAGE
+
+    if not upload or get_local_gcs_credentials() is not None:
+        return
+    if dry_run:
+        console.print(f"[yellow]Warning:[/yellow] {NO_CREDENTIALS_MESSAGE}")
+        return
+    console.print(f"[red]Error:[/red] {NO_CREDENTIALS_MESSAGE}")
+    raise SystemExit(1)
+
+
 def _ensure_secrets(
     launcher, dry_run: bool, launch_config, all_required_secrets: set[str]
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """Ensure required secrets exist."""
     from olmo_eval.launch.beaker.secrets import (
         COMMON_SECRET_NAMES,
@@ -771,7 +773,6 @@ def _ensure_secrets(
         ensure_task_secrets,
         get_local_hf_token,
         get_local_wandb_api_key,
-        get_store_secret_mappings,
     )
 
     beaker_username = launcher.beaker.user_name
@@ -795,9 +796,7 @@ def _ensure_secrets(
             console.print(f"[red]Error:[/red] {e}")
             raise SystemExit(1) from None
 
-    store_secrets = get_store_secret_mappings() if launch_config.store else []
-
-    return common_secrets, store_secrets, task_secrets
+    return common_secrets, task_secrets
 
 
 def _print_experiment_matrix(experiment_plan: list["ExperimentPlan"]) -> None:
@@ -916,20 +915,17 @@ def _prepare_secrets(
     workspace: str,
     all_required_secrets: set[str],
     beaker_username: str,
-    store: bool = False,
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
-    """Prepare common, task, and store secrets for Beaker jobs.
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Prepare common and task secrets for Beaker jobs.
 
     Args:
         dry_run: If True, return mock secrets without creating them.
         workspace: Beaker workspace name.
         all_required_secrets: Set of required secret environment variable names.
         beaker_username: Beaker username for dry-run secret naming.
-        store: If True, include database secret mappings.
 
     Returns:
-        Tuple of (common_secrets, task_secrets, store_secrets) as lists of
-        (env_var, secret_name) tuples.
+        Tuple of (common_secrets, task_secrets) as lists of (env_var, secret_name) tuples.
     """
     from olmo_eval.launch.beaker.secrets import (
         COMMON_SECRET_NAMES,
@@ -937,7 +933,6 @@ def _prepare_secrets(
         ensure_task_secrets,
         get_local_hf_token,
         get_local_wandb_api_key,
-        get_store_secret_mappings,
     )
 
     task_required_secrets = all_required_secrets - COMMON_SECRET_NAMES
@@ -960,9 +955,7 @@ def _prepare_secrets(
             console.print(f"[red]Error:[/red] {e}")
             raise SystemExit(1) from None
 
-    store_secrets = get_store_secret_mappings() if store else []
-
-    return common_secrets, task_secrets, store_secrets
+    return common_secrets, task_secrets
 
 
 def _launch_jobs(
@@ -1006,10 +999,9 @@ def _launch_external_evals(
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
-    s3_bucket: str | None,
-    s3_prefix: str | None,
-    s3_region: str,
-    store: bool = False,
+    upload: bool = True,
+    api_url: str | None = None,
+    tags: list[str] | None = None,
     secret_env_overrides: dict[str, str] | None = None,
     user_env_vars: dict[str, str] | None = None,
     eval_args: dict[str, str] | None = None,
@@ -1082,11 +1074,12 @@ def _launch_external_evals(
     # Use CredentialManager for consistent credential detection (same as task path)
     cred_manager = CredentialManager(
         model_specs=list(model),
-        store=store,
         aws_credentials=aws_credentials,
         gcs_credentials=gcs_credentials,
+        upload=upload,
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
+    _require_upload_credentials(upload, dry_run)
 
     # Auto-generate group if needed (using shared helper)
     effective_groups = _auto_generate_group("external-eval", list(group))
@@ -1094,16 +1087,7 @@ def _launch_external_evals(
     # Handle group creation
     _handle_group_creation(launcher, effective_groups, dry_run, yes)
 
-    # Display storage info (same as task path)
-    cred_manager.display_storage_info(
-        launcher,
-        s3_bucket,
-        s3_prefix,
-        s3_region,
-        None,  # s3_endpoint_url not supported yet
-        effective_groups,
-        inject_aws,
-    )
+    cred_manager.display_aws_info(launcher, inject_aws)
 
     # Collect required secrets from external evals and models
     all_required_secrets: set[str] = set()
@@ -1121,16 +1105,15 @@ def _launch_external_evals(
             pass
 
     # Prepare secrets (using shared helper)
-    common_secrets, task_secrets, store_secrets = _prepare_secrets(
+    common_secrets, task_secrets = _prepare_secrets(
         dry_run=dry_run,
         workspace=effective_workspace,
         all_required_secrets=all_required_secrets,
         beaker_username=beaker_username,
-        store=store,
     )
 
     # Build env secrets list
-    env_secrets = common_secrets + task_secrets + store_secrets
+    env_secrets = common_secrets + task_secrets
 
     # Add explicit secret overrides
     env_secrets.extend(
@@ -1141,6 +1124,9 @@ def _launch_external_evals(
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 
     # Build jobs and summaries for each model
+    from uuid import uuid4
+
+    launch_id = uuid4().hex[:12]
     job_configs = []
     summaries = []
     for model_spec in model:
@@ -1194,10 +1180,10 @@ def _launch_external_evals(
             budget=budget,
             groups=effective_groups,
             tensor_parallel_size=tensor_parallel_size,
-            s3_bucket=s3_bucket,
-            s3_prefix=s3_prefix,
-            s3_region=s3_region,
-            store=store,
+            upload=upload,
+            api_url=api_url,
+            tags=tags,
+            launch_id=launch_id,
             env_secrets=env_secrets,
             inject_aws_credentials=inject_aws,
             inject_gcs_credentials=inject_gcs,

@@ -409,7 +409,7 @@ class BeakerJobConfig:
     # Result path
     result_path: str = "/results"
 
-    # Optional dependency groups to install at runtime (e.g., ["vllm", "postgres"])
+    # Optional dependency groups to install at runtime (e.g., ["vllm", "s3"])
     extras: list[str] = field(default_factory=list)
 
     # Group assignment - experiment will be added to these groups at creation time
@@ -418,7 +418,8 @@ class BeakerJobConfig:
     # AWS S3 access - when True, injects user's AWS credentials as env secrets
     inject_aws_credentials: bool = False
 
-    # GCS access - when True, injects user's GCS credentials as env secret
+    # Google credentials - when True, injects the user's credentials (GCS access and
+    # dashboard uploads) through gantry's google_credentials_secret
     inject_gcs_credentials: bool = False
 
     # Provider-specific dependencies (from provider config)
@@ -435,9 +436,6 @@ class BeakerJobConfig:
 
     # Registry mirror setup script to run during install (for sandbox jobs)
     setup_registry_mirror: bool = False
-
-    # Run setup_store_secrets during install to configure database access
-    setup_store_secrets: bool = False
 
     # Install vLLM in isolated venv (for server mode to avoid dependency conflicts)
     # When True, vLLM is installed in /opt/vllm-venv and VLLM_PYTHON points to it.
@@ -858,7 +856,6 @@ class BeakerLauncher:
         task_packages: list[str] | None = None,
         setup_registry_mirror: bool = False,
         enable_sandbox: bool = False,
-        setup_store_secrets: bool = False,
         vllm_isolated_venv: bool = False,
         setup_modal_gcp_secret: bool = False,
     ) -> str:
@@ -879,7 +876,6 @@ class BeakerLauncher:
             task_packages: Optional list of task-specific packages to install.
             setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
             enable_sandbox: If True, set up /dev/net/tun and Artifact Registry auth.
-            setup_store_secrets: If True, run setup_store_secrets to configure database access.
             vllm_isolated_venv: If True, install vLLM in isolated venv for server mode.
             setup_modal_gcp_secret: If True, run setup_modal_gcp_secret to create Modal secret.
 
@@ -908,7 +904,7 @@ class BeakerLauncher:
             steps.append(f'if [ -n "$MIRROR_HOSTS" ]; then {script} "$MIRROR_HOSTS"; fi')
 
         # Set up Artifact Registry auth for sandbox image caching
-        # Checks for GOOGLE_APPLICATION_CREDENTIALS and exits gracefully if not set
+        # Skips itself unless GOOGLE_APPLICATION_CREDENTIALS holds a service account key
         if enable_sandbox:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_artifact_registry"
             steps.append(f"source {script}")
@@ -1030,11 +1026,6 @@ class BeakerLauncher:
             for pkg in task_packages:
                 steps.append(build_install_command(pkg, constraints))
 
-        # Set up database credentials for --store
-        if setup_store_secrets:
-            script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_store_secrets"
-            steps.append(f"source {script}")
-
         # Set up Modal secret for GCP Artifact Registry (Modal sandboxes)
         if setup_modal_gcp_secret:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_modal_gcp_secret"
@@ -1075,7 +1066,6 @@ class BeakerLauncher:
             config.task_packages,
             config.setup_registry_mirror,
             config.enable_sandbox,
-            config.setup_store_secrets,
             config.vllm_isolated_venv,
             config.setup_modal_gcp_secret,
         )
@@ -1106,11 +1096,14 @@ class BeakerLauncher:
 
         # Inject GCS credentials if requested
         google_credentials_secret: str | None = None
-        if config.inject_gcs_credentials:
+        if config.inject_gcs_credentials and dry_run:
+            # A dry run shows the secret name without writing credentials to Beaker.
+            google_credentials_secret = f"{self.beaker.user_name}_GOOGLE_CREDENTIALS"
+        elif config.inject_gcs_credentials:
             from olmo_eval.launch.beaker.gcs import ensure_gcs_secrets
 
             google_credentials_secret = ensure_gcs_secrets(config.workspace)
-            log.info("Injecting GCS credentials for GCS access")
+            log.info("Injecting Google credentials (GCS access and results upload)")
 
         # Build env vars as tuples: (name, value)
         env_vars: list[tuple[str, str]] = list(config.env_vars.items())

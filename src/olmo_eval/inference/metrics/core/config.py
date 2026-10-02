@@ -19,7 +19,6 @@ class ReporterType(StrEnum):
 
     CONSOLE = "console"
     FILE = "file"
-    DB = "db"
 
 
 @hide_unset()
@@ -30,7 +29,7 @@ class MetricsConfig:
     Can be embedded in HarnessConfig for automatic instrumentation,
     or used directly with collect_metrics().
 
-    Core metadata fields mirror the evaluation database schema for join-ability:
+    Core metadata fields identify the run each batch belongs to:
     - experiment_id, experiment_name, experiment_group: identify the eval run
     - model_name, model_hash: identify the model
     - task_name, task_hash: identify the task (optional, set per-batch)

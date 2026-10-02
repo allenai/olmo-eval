@@ -1,0 +1,195 @@
+"""Upload settings and Google token acquisition."""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from olmo_eval.upload.auth import (
+    NO_CREDENTIALS_MESSAGE,
+    SCOPES,
+    GoogleTokenProvider,
+    UploadAuthError,
+    load_google_credentials,
+)
+from olmo_eval.upload.config import (
+    DEFAULT_API_URL,
+    UploadConfig,
+    resolve_upload_config,
+    retry_command,
+    validate_tags,
+)
+
+# ---------------------------------------------------------------------- config
+
+
+def test_defaults_upload_to_production(monkeypatch) -> None:
+    monkeypatch.delenv("OLMO_EVAL_UPLOAD", raising=False)
+    config = resolve_upload_config()
+    assert config.enabled is True
+    assert config.api_url == DEFAULT_API_URL
+    assert config.timeout_s == 1800
+
+
+@pytest.mark.parametrize(
+    ("env", "cli", "expected"),
+    [("0", None, False), ("false", None, False), ("1", None, True), ("0", True, True)],
+)
+def test_cli_flag_beats_env(monkeypatch, env, cli, expected) -> None:
+    monkeypatch.setenv("OLMO_EVAL_UPLOAD", env)
+    assert resolve_upload_config(cli_upload=cli).enabled is expected
+
+
+def test_api_url_and_timeout_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("OLMO_EVAL_API_URL", "https://dev-ingest.example/")
+    monkeypatch.setenv("OLMO_EVAL_UPLOAD_TIMEOUT", "60")
+    config = resolve_upload_config()
+    assert config.api_url == "https://dev-ingest.example"
+    assert config.timeout_s == 60
+    assert resolve_upload_config(cli_api_url="http://localhost:8000").api_url == (
+        "http://localhost:8000"
+    )
+
+
+def test_tags_are_validated_and_deduplicated() -> None:
+    assert validate_tags(["a", "b:c", "a"]) == ("a", "b:c")
+    with pytest.raises(ValueError, match="Invalid tag"):
+        validate_tags(["has space"])
+    with pytest.raises(ValueError, match="At most"):
+        validate_tags([f"t{i}" for i in range(51)])
+
+
+def test_retry_command() -> None:
+    assert retry_command("/results", UploadConfig()) == "olmo-eval results upload /results"
+    custom = UploadConfig(api_url="http://localhost:8000", tags=("x",))
+    assert retry_command("/tmp/my results", custom) == (
+        "olmo-eval results upload '/tmp/my results' --api-url http://localhost:8000 --tag x"
+    )
+
+
+# ---------------------------------------------------------------------- auth
+
+
+class FakeCredentials:
+    def __init__(self, token=None, valid=False, expiry=None, refresh_token="fresh"):
+        self.token = token
+        self.valid = valid
+        self.expiry = expiry
+        self.refreshes = 0
+        self._refresh_token = refresh_token
+
+    def refresh(self, request) -> None:
+        self.refreshes += 1
+        self.token = self._refresh_token
+        self.valid = self._refresh_token is not None
+        self.expiry = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1)
+
+
+def test_token_refreshes_when_missing() -> None:
+    creds = FakeCredentials()
+    provider = GoogleTokenProvider(creds)
+    assert provider.token() == "fresh"
+    assert provider.token() == "fresh"
+    assert creds.refreshes == 1
+
+
+def test_valid_token_is_reused() -> None:
+    expiry = datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=30)
+    creds = FakeCredentials(token="cached", valid=True, expiry=expiry)
+    assert GoogleTokenProvider(creds).token() == "cached"
+    assert creds.refreshes == 0
+
+
+def test_token_refreshes_within_five_minutes_of_expiry() -> None:
+    expiry = datetime.now(UTC) + timedelta(minutes=2)  # tz-aware expiry works too
+    creds = FakeCredentials(token="old", valid=True, expiry=expiry)
+    assert GoogleTokenProvider(creds).token() == "fresh"
+
+
+def test_empty_token_after_refresh_raises() -> None:
+    with pytest.raises(UploadAuthError, match="no access token"):
+        GoogleTokenProvider(FakeCredentials(refresh_token=None)).token()
+
+
+def test_refresh_error_becomes_upload_auth_error() -> None:
+    from google.auth.exceptions import RefreshError
+
+    class Broken(FakeCredentials):
+        def refresh(self, request) -> None:
+            raise RefreshError("invalid_grant")
+
+    with pytest.raises(UploadAuthError, match="application-default login"):
+        GoogleTokenProvider(Broken()).token()
+
+
+def test_no_credentials_message() -> None:
+    from google.auth.exceptions import DefaultCredentialsError
+
+    with (
+        patch("google.auth.default", side_effect=DefaultCredentialsError("none")),
+        pytest.raises(UploadAuthError) as excinfo,
+    ):
+        GoogleTokenProvider().token()
+    assert str(excinfo.value) == NO_CREDENTIALS_MESSAGE
+
+
+def test_requests_the_ingest_scopes() -> None:
+    with patch("google.auth.default", return_value=(object(), None)) as default:
+        load_google_credentials()
+    assert default.call_args.kwargs["scopes"] == list(SCOPES)
+    assert "https://www.googleapis.com/auth/userinfo.email" in SCOPES
+
+
+def test_authorized_user_adc_file(tmp_path: Path, monkeypatch) -> None:
+    from google.oauth2.credentials import Credentials
+
+    path = tmp_path / "adc.json"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "authorized_user",
+                "client_id": "id.apps.googleusercontent.com",
+                "client_secret": "secret",
+                "refresh_token": "refresh",
+            }
+        )
+    )
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(path))
+    creds = load_google_credentials()
+    assert isinstance(creds, Credentials)
+    assert creds.refresh_token == "refresh"
+
+
+def test_service_account_key_file(tmp_path: Path, monkeypatch) -> None:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from google.oauth2 import service_account
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    path = tmp_path / "sa.json"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "service_account",
+                "project_id": "p",
+                "private_key_id": "k",
+                "private_key": pem,
+                "client_email": "ci@p.iam.gserviceaccount.com",
+                "client_id": "1",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        )
+    )
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(path))
+    creds = load_google_credentials()
+    assert isinstance(creds, service_account.Credentials)
+    assert set(SCOPES) <= set(creds.scopes or [])

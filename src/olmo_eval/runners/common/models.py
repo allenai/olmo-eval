@@ -9,24 +9,6 @@ from olmo_eval.common.utils import Serializable
 
 
 @dataclass
-class S3Config:
-    """Configuration for S3 uploads.
-
-    The S3 path structure is:
-    s3://{bucket}/{prefix}/{group}/{model_name}_{model_hash_last_6}/{experiment_id}/
-        - metrics.json
-        - predictions/{task}-predictions.jsonl
-        - requests/{task}-requests.jsonl
-    """
-
-    bucket: str
-    prefix: str  # Base prefix, e.g., "olmo-eval"
-    group: str  # Experiment group, e.g., "baseline", "ablation-lr"
-    endpoint_url: str | None = None
-    region: str = "us-east-1"
-
-
-@dataclass
 class ModelMetadata(Serializable):
     """Model metadata for metrics.json output format."""
 
