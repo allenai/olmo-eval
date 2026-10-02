@@ -20,12 +20,14 @@ const NAV = [
   { href: "/groups", label: "Groups", match: (p: string) => p.startsWith("/groups") },
 ];
 
+/** The Ai2 mark, drawn in the text color (same as the go-links site). */
 function Logo() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <rect x="2" y="12" width="5" height="10" rx="1.5" fill="var(--teal)" />
-      <rect x="9.5" y="6" width="5" height="16" rx="1.5" fill="var(--teal)" opacity="0.55" />
-      <rect x="17" y="2" width="5" height="20" rx="1.5" fill="var(--accent)" />
+    <svg viewBox="0 0 48 48" aria-hidden focusable="false">
+      <path
+        d="M19.2,18.73h-9.6v-9.13h7.73c1.03,0,1.87-.84,1.87-1.87V0h9.13v9.6c0,5.06-4.1,9.13-9.13,9.13ZM9.6,19.67H0v9.13h7.73c1.03,0,1.87.84,1.87,1.87v7.73h9.13v-9.6c0-5.06-4.1-9.13-9.13-9.13ZM40.3,19.2c-1.03,0-1.87-.84-1.87-1.87v-7.73h-9.13v9.6c0,5.06,4.1,9.13,9.13,9.13h9.6v-9.13h-7.73ZM19.67,38.4v9.6h9.13v-7.73c0-1.03.84-1.87,1.87-1.87h7.73v-9.13h-9.6c-5.06,0-9.13,4.1-9.13,9.13Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -84,7 +86,6 @@ export function TopBar() {
       <AppLink href="/" className={s.brand} aria-label="olmo-eval home">
         <Logo />
         <span>olmo-eval</span>
-        <span className={s.brandSub}>results</span>
       </AppLink>
       <nav className={s.nav} aria-label="Main">
         {NAV.map((n) => (

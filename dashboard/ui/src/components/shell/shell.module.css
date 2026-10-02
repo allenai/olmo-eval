@@ -17,13 +17,15 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Matches the go-links site header: Ai2 mark in the text color, regular-weight title. */
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  font-weight: 800;
-  font-size: 15px;
-  letter-spacing: -0.01em;
+  gap: 10px;
+  font-weight: 400;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  line-height: 1;
   color: var(--fg);
   flex: none;
 }
@@ -31,12 +33,7 @@
 .brand svg {
   width: 22px;
   height: 22px;
-}
-
-.brandSub {
-  font-weight: 200;
-  color: var(--muted);
-  margin-left: -4px;
+  flex: none;
 }
 
 .nav {
@@ -258,7 +255,6 @@
 }
 
 @media (max-width: 640px) {
-  .brandSub,
   .searchKbd,
   .baselineLabelWrap {
     display: none;
