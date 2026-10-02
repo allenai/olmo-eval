@@ -27,7 +27,11 @@ from olmo_eval.runners.processing.generation_counts import (
     format_generation_counts,
     sum_generation_counts,
 )
-from olmo_eval.runners.processing.metrics import build_single_model_metrics, log_summary
+from olmo_eval.runners.processing.metrics import (
+    build_multi_model_metrics,
+    build_single_model_metrics,
+    log_summary,
+)
 from olmo_eval.storage.base import convert_runner_results
 
 SPEC = "ifeval_ood"
@@ -291,6 +295,25 @@ def test_average_of_averages_suite_sums_member_counts() -> None:
 
     assert suite["generation_counts"]["cap_hit"] == 12
     assert suite["generation_counts"]["generations"] == 1920
+
+
+def test_metrics_json_summary_carries_suite_counts() -> None:
+    task_results = {
+        "ifeval_mt_wildchat_unused_withRewrite": _task_data(cap_hit=1, generations=10),
+        "ifeval_mt_ood_wildchat_unused_withRewrite": _task_data(cap_hit=2, generations=10),
+        "ifeval_ood": _task_data(cap_hit=291, generations=300),
+    }
+    results = {
+        "tasks": task_results,
+        "suites": compute_suite_aggregations(["ifbench"], task_results),
+    }
+
+    single = build_single_model_metrics(results).to_dict()["summary"]
+    multi = build_multi_model_metrics({"models": {"m": results}}).to_dict()["summary"]["m"]
+
+    for summary in (single, multi):
+        assert summary["ifbench"]["generation_counts"]["cap_hit"] == 294
+        assert "generation_counts" not in summary["ifeval_ood"]
 
 
 def test_sum_is_none_when_no_member_has_counts() -> None:

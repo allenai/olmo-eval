@@ -105,7 +105,11 @@ def build_single_model_metrics(
             primary = get_primary_metric(metrics, preferred)
             if primary:
                 metric_scorer, score = primary
-                summary[suite_name] = ScoreSummary(metric=metric_scorer, score=score)
+                summary[suite_name] = ScoreSummary(
+                    metric=metric_scorer,
+                    score=score,
+                    generation_counts=suite_data.get("generation_counts"),
+                )
 
     return MetricsOutput(
         timestamp=results.get("timestamp", ""),
@@ -202,7 +206,9 @@ def build_multi_model_metrics(
                 if primary:
                     metric_scorer, score = primary
                     summary[model_name][suite_name] = ScoreSummary(
-                        metric=metric_scorer, score=score
+                        metric=metric_scorer,
+                        score=score,
+                        generation_counts=suite_data.get("generation_counts"),
                     )
 
     return MetricsOutput(

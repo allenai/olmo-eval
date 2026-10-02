@@ -73,6 +73,7 @@ class ScoreSummary(Serializable):
 
     metric: str  # Format: "metric_name:scorer_name"
     score: float
+    generation_counts: dict[str, int] | None = None  # suites only
 
 
 @dataclass
