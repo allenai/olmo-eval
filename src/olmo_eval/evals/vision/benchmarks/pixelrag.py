@@ -11,14 +11,17 @@ usually include distractors and sometimes miss the answer. One task per source b
 * ``pixelrag_nq`` — Natural Questions validation;
 * ``pixelrag_nq_tables`` — NQ-Tables dev, answered from tables;
 * ``pixelrag_mmsearch`` — MMSearch end2end, most questions with a query image;
-* ``pixelrag_evqa`` — Encyclopedic-VQA's Google Landmarks questions, each with a query photo.
+* ``pixelrag_evqa`` — Encyclopedic-VQA's automatic Google Landmarks questions, each with a query
+  photo (the card says test; the ids rebuild from the val split).
 
 The reader protocol is the paper's (``build_messages`` in the official ``eval/lib/llm.py``): the
 top 3 tiles, the paper's system prompt, and a user turn of the question, the tiles, then the
 subset's answer-format instruction. A question with a query image gets the query-image system
 prompt and one text block (question, a note on the images, the instruction) followed by the query
 image and the tiles. Images are sent as stored; a tile missing from the dataset is left out.
-Decoding is greedy with up to 16,384 new tokens, as the readers were run. Grading is the official
+Decoding is greedy with the budgets of the official ``reproduce.sh``: 200 new tokens for
+SimpleQA, NQ and NQ-Tables, 16,384 for MMSearch and EVQA (where the paper also turns on Qwen3.5's
+thinking for MMSearch; models without a thinking mode answer directly). Grading is the official
 GPT-4.1 judge (:mod:`olmo_eval.evals.vision.scoring.pixelrag`): ``accuracy`` is the fraction
 graded correct, the paper's number, and NQ and NQ-Tables also report exact match.
 
@@ -281,7 +284,8 @@ class PixelRagTask(VisionTask):
 
     dependencies = ["pillow", "openai"]
     required_secrets = ("OPENAI_API_KEY",)
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=16384)
+    #: The official budget for the short-answer subsets; MMSearch and EVQA allow long answers.
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=200)
     metrics = _JUDGE_METRICS
     primary_metric = _ACCURACY
     split = Split.TEST
@@ -410,6 +414,7 @@ class PixelRagNqTablesTask(PixelRagTask):
 class PixelRagMmSearchTask(PixelRagTask):
     """MMSearch end2end; questions with a query image send it before the tiles."""
 
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=16384)
     subset = "mmsearch"
 
 
@@ -417,4 +422,5 @@ class PixelRagMmSearchTask(PixelRagTask):
 class PixelRagEvqaTask(PixelRagTask):
     """Encyclopedic-VQA's Google Landmarks questions, each with its query photo."""
 
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=16384)
     subset = "encyclopedic_vqa_landmarks"
