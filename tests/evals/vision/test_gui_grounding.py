@@ -228,6 +228,12 @@ class TestPromptsAndRegistration:
             "sa_co_gold_subset",
             "point_bench",
         }
+        assert set(get_suite("pointing_mp").tasks) == {
+            "pixmo_points_eval_mp",
+            "sa_co_gold_subset_mp",
+            "sa_co_gold_point_4k_mp",
+            "point_bench",
+        }
         assert set(get_suite("gui_pointing").tasks) == {
             "screen_spot_v2",
             "screen_spot_pro",

@@ -22,11 +22,15 @@ make_suite(
 )
 
 # The mm_olmo `_mp` variants: same scoring, but the prompt is built from a bare label by
-# the model's own formatter, so it follows the checkpoint (see `vision.scoring.prompts`).
+# the model's own formatter, so it follows the checkpoint (see `vision.scoring.prompts`). Under
+# the stage-1 family that is `pointing: <label>`, the turn OLMo-core's stage 1 trains on.
+# Point-Bench has no bare label (its queries are sentences), so it is asked as
+# `pointing: <query>` under that family, mm_olmo's fallback for label-less pointing data.
 POINTING_MP_TASKS = (
     "pixmo_points_eval_mp",
     "sa_co_gold_subset_mp",
     "sa_co_gold_point_4k_mp",
+    "point_bench",
 )
 
 # `sa_co_gold_point_mp` (the unsampled 166,766-example gold set) is registered but kept out
@@ -36,7 +40,10 @@ make_suite(
     "pointing_mp",
     POINTING_MP_TASKS,
     aggregation=AggregationStrategy.AVERAGE,
-    description="Natural-image pointing with mm_olmo's model-prompt (_mp) inputs.",
+    description=(
+        "Natural-image pointing with mm_olmo's model-prompt (_mp) inputs, plus Point-Bench; "
+        "the suite for stage-1 checkpoints."
+    ),
 )
 
 # GUI click pointing: the first predicted point must land on the target element.
