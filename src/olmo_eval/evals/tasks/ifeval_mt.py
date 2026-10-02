@@ -41,8 +41,7 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 _PRIMARY_METRIC = IFEvalPromptLooseAccuracy()
 _DATASET_PATH = "VGraf/ifeval_mt"
-# max_tokens=None generates to the model's context limit, so a reasoning
-# trace is never cut off by a fixed budget below the context size.
+# max_tokens=None: generate up to the context limit.
 _SAMPLING_PARAMS = SamplingParams(
     max_tokens=None,
     temperature=0.6,

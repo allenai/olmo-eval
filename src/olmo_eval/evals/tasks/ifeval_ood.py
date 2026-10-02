@@ -47,8 +47,7 @@ class IFEvalOOD(Task):
     )
     primary_metric = _PRIMARY_METRIC
     strip_thinking = True
-    # max_tokens=None generates to the model's context limit, so a reasoning
-    # trace is never cut off by a fixed budget below the context size.
+    # max_tokens=None: generate up to the context limit.
     sampling_params = SamplingParams(
         max_tokens=None,
         temperature=0.6,
