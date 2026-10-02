@@ -171,6 +171,7 @@ def _pairwise_model_scope_score(
         return compute_scope_score(
             task_scores_by_name=task_scores_by_name,
             task_instance_counts_by_name=_group_by_task_name(task_entries, task_instance_counts),
+            task_metrics_by_name=_group_by_task_name(task_entries, list(result.task_metric_keys)),
             suite_name=result.suite_name,
         )
 

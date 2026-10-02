@@ -834,6 +834,7 @@
         if (resultsData?.scope_score_meta && isNumber(model.scope_score)) {
           return model.scope_score;
         }
+        if (resultsData?.scope_score_meta && model.scope_score_exact) return null;
         return averageVisibleScore(model, columns);
       }
 

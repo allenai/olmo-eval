@@ -1171,6 +1171,66 @@ def test_timed_value_cache_reuses_fresh_entries_and_expires_stale_ones() -> None
     assert calls["count"] == 2
 
 
+@pytest.mark.parametrize(
+    ("out_metric", "out_score", "expected", "label"),
+    [
+        ("exact_match", 0.45, -0.15, "-15.0%"),
+        ("exact_match_flex", 0.45, None, "—"),
+        ("exact_match", None, None, "—"),
+    ],
+    ids=["same-metric", "mixed-metric", "missing-half"],
+)
+def test_results_table_gap_scope_score_needs_one_metric(
+    out_metric: str, out_score: float | None, expected: float | None, label: str
+) -> None:
+    """A missing gap renders as missing, never as the mean of the visible columns."""
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+    from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+    _REGISTRY["_test_gap_results_table"] = Suite(
+        name="_test_gap_results_table",
+        tasks=("task_in", "task_out"),
+        aggregation=AggregationStrategy.GAP,
+    )
+    try:
+        column = {
+            "score_display_format": "percentage",
+            "score_unit": "proportion",
+            "higher_is_better": True,
+        }
+        results_table = {
+            "models": [
+                {
+                    "index": 0,
+                    "display_label": "model-a",
+                    "task_scores": {"task_in": 0.6, "task_out": out_score},
+                }
+            ],
+            "task_columns": [
+                {**column, "id": "task_in", "task_name": "task_in", "metric": "exact_match"},
+                {**column, "id": "task_out", "task_name": "task_out", "metric": out_metric},
+            ],
+        }
+
+        annotated = viewer_server._annotate_results_table_scope_scores(
+            results_table,
+            selected_scope_key="suite::_test_gap_results_table",
+            selected_scope_option={
+                "key": "suite::_test_gap_results_table",
+                "kind": "suite",
+                "value": "_test_gap_results_table",
+                "task_ids": ["task_in", "task_out"],
+            },
+        )
+    finally:
+        del _REGISTRY["_test_gap_results_table"]
+
+    assert annotated is not None
+    model = annotated["models"][0]
+    assert model["scope_score"] == (pytest.approx(expected) if expected is not None else None)
+    assert viewer_server._model_filter_score_label(model, annotated["task_columns"]) == label
+
+
 def test_viewer_scope_pickers_require_explicit_selection() -> None:
     viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 

@@ -175,3 +175,80 @@ def test_weighted_child_of_average_of_averages_is_weighted() -> None:
     # The child collapses to its weighted mean of 0.6, then the parent weights
     # its two children equally: (1.0 + 0.6) / 2.
     assert score == pytest.approx(0.8)
+
+
+@pytest.fixture
+def gap_suite() -> Iterator[Suite]:
+    suite = Suite(
+        name="_test_gap_scope",
+        tasks=("task_in", "task_out"),
+        aggregation=AggregationStrategy.GAP,
+    )
+    _REGISTRY[suite.name] = suite
+    yield suite
+    del _REGISTRY[suite.name]
+
+
+_SAME_METRIC = {"task_in": ["exact_match"], "task_out": ["exact_match"]}
+
+
+def test_gap_is_companion_minus_reference(gap_suite: Suite) -> None:
+    score = compute_scope_score(
+        task_scores_by_name={"task_in": [0.6], "task_out": [0.45]},
+        task_metrics_by_name=_SAME_METRIC,
+        suite_name=gap_suite.name,
+    )
+
+    assert score == pytest.approx(-0.15)
+
+
+def test_gap_without_both_tasks_is_none(gap_suite: Suite) -> None:
+    score = compute_scope_score(
+        task_scores_by_name={"task_in": [0.6], "task_out": [None]},
+        task_metrics_by_name=_SAME_METRIC,
+        suite_name=gap_suite.name,
+    )
+
+    assert score is None
+
+
+@pytest.mark.parametrize(
+    "task_metrics_by_name",
+    [
+        None,
+        {"task_in": ["exact_match"], "task_out": ["exact_match_flex"]},
+        {"task_in": ["exact_match"], "task_out": [None]},
+        {"task_in": ["exact_match", "exact_match_flex"], "task_out": ["exact_match"]},
+    ],
+    ids=["unknown", "different", "missing", "mixed-variants"],
+)
+def test_gap_needs_one_shared_metric(
+    gap_suite: Suite, task_metrics_by_name: dict[str, list[str | None]] | None
+) -> None:
+    score = compute_scope_score(
+        task_scores_by_name={"task_in": [0.6], "task_out": [0.45]},
+        task_metrics_by_name=task_metrics_by_name,
+        suite_name=gap_suite.name,
+    )
+
+    assert score is None
+
+
+@pytest.mark.parametrize(
+    ("task_in_scores", "expected"),
+    [([0.6, None], -0.15), ([0.6, 0.5], None)],
+    ids=["unscored-variant-ignored", "scored-variants-differ"],
+)
+def test_gap_reads_metrics_of_scored_variants_only(
+    gap_suite: Suite, task_in_scores: list[float | None], expected: float | None
+) -> None:
+    score = compute_scope_score(
+        task_scores_by_name={"task_in": task_in_scores, "task_out": [0.45]},
+        task_metrics_by_name={
+            "task_in": ["exact_match", "exact_match_flex"],
+            "task_out": ["exact_match"],
+        },
+        suite_name=gap_suite.name,
+    )
+
+    assert score == (pytest.approx(expected) if expected is not None else None)

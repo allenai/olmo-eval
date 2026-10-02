@@ -104,10 +104,29 @@ def _child_scope_score(
     return _task_score(str(child), task_scores_by_name)
 
 
+def _same_metric(
+    task_names: Sequence[str],
+    task_scores_by_name: Mapping[str, Sequence[float | None]],
+    task_metrics_by_name: Mapping[str, Sequence[str | None]] | None,
+) -> bool:
+    """Whether every task's scored variants report one known metric, the same for all."""
+    if task_metrics_by_name is None:
+        return False
+    metrics: set[str | None] = set()
+    for name in task_names:
+        scores = task_scores_by_name.get(name) or []
+        names = task_metrics_by_name.get(name) or []
+        if len(scores) != len(names):
+            return False
+        metrics.update(m for s, m in zip(scores, names, strict=True) if s is not None)
+    return len(metrics) == 1 and None not in metrics and "" not in metrics
+
+
 def compute_scope_score(
     *,
     task_scores_by_name: dict[str, list[float | None]],
     task_instance_counts_by_name: Mapping[str, Sequence[float | None]] | None = None,
+    task_metrics_by_name: Mapping[str, Sequence[str | None]] | None = None,
     suite_name: str | None = None,
     task_name: str | None = None,
 ) -> float | None:
@@ -118,7 +137,10 @@ def compute_scope_score(
     aggregation is applied. ``task_instance_counts_by_name`` carries the instance
     count of each of those variants in the same order, and is only read by
     instance-weighted aggregation strategies. Those strategies return None when
-    a contributing task has no instance count.
+    a contributing task has no instance count. A gap suite scores its
+    companion task minus its reference task, or None unless both scored on the
+    same primary metric, read from ``task_metrics_by_name`` (keyed like
+    ``task_scores_by_name``).
     """
     from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, suite_exists
 
@@ -136,6 +158,15 @@ def compute_scope_score(
                     for child in suite.tasks
                 ]
             )
+        if suite.aggregation == AggregationStrategy.GAP:
+            reference, companion = (
+                _task_score(task, task_scores_by_name) for task in suite.expand()
+            )
+            if reference is None or companion is None:
+                return None
+            if not _same_metric(suite.expand(), task_scores_by_name, task_metrics_by_name):
+                return None
+            return companion - reference
         if suite.aggregation == AggregationStrategy.WEIGHTED_AVERAGE:
             return _weighted_mean_over_tasks(
                 suite.expand(),

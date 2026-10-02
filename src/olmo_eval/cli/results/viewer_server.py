@@ -820,6 +820,16 @@ def _group_model_values_by_name(
     return grouped_values
 
 
+def _group_column_metrics_by_name(columns: list[dict[str, Any]]) -> dict[str, list[str | None]]:
+    """Each column's metric grouped by task name, in column order."""
+    grouped: dict[str, list[str | None]] = {}
+    for column in columns:
+        task_name = str(column.get("task_name") or "")
+        if task_name:
+            grouped.setdefault(task_name, []).append(column.get("metric") or None)
+    return grouped
+
+
 def _scoped_model_score(
     model: dict[str, Any],
     columns: list[dict[str, Any]],
@@ -845,6 +855,7 @@ def _scoped_model_score(
             task_instance_counts_by_name=_group_model_values_by_name(
                 model.get("task_instance_counts", {}), columns
             ),
+            task_metrics_by_name=_group_column_metrics_by_name(columns),
             suite_name=suite_name,
         )
     if scope_kind == "task":
@@ -905,6 +916,10 @@ def _annotate_results_table_scope_scores(
         selected_scope_key=selected_scope_key,
         selected_scope_option=selected_scope_option,
     )
+    exact = _scope_score_is_exact(
+        selected_scope_key=selected_scope_key,
+        selected_scope_option=selected_scope_option,
+    )
     for model in prepared["models"]:
         model["scope_score"] = _scoped_model_score(
             model,
@@ -912,6 +927,8 @@ def _annotate_results_table_scope_scores(
             selected_scope_key=selected_scope_key,
             selected_scope_option=selected_scope_option,
         )
+        if exact:
+            model["scope_score_exact"] = True
     return prepared
 
 
@@ -932,6 +949,21 @@ def _average_model_scope_score(
     return sum(scores) / len(scores)
 
 
+def _scope_score_is_exact(
+    *,
+    selected_scope_key: str | None,
+    selected_scope_option: dict[str, Any] | None,
+) -> bool:
+    """Whether a missing scope score stays missing: a gap suite's column mean is no gap."""
+    from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, suite_exists
+
+    scope_kind, _ = _parse_scope_key(selected_scope_key)
+    if scope_kind != "suite" or selected_scope_option is None:
+        return False
+    suite_name = str(selected_scope_option.get("value") or "")
+    return suite_exists(suite_name) and get_suite(suite_name).aggregation == AggregationStrategy.GAP
+
+
 def _model_scope_score(
     model: dict[str, Any],
     columns: list[dict[str, Any]],
@@ -939,6 +971,8 @@ def _model_scope_score(
     raw_scope_score = model.get("scope_score")
     if _is_numeric_score(raw_scope_score):
         return float(raw_scope_score)
+    if model.get("scope_score_exact"):
+        return None
     return _average_model_scope_score(model, columns)
 
 
