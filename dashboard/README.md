@@ -42,12 +42,18 @@ URLs:
 olmo-eval gets a Google OAuth access token from Application Default Credentials (scopes `openid`,
 `userinfo.email`, `cloud-platform`) and sends it in the `X-Olmo-Eval-Token` header. The ingest
 service checks it with Google's tokeninfo endpoint and caches the result. It accepts verified
-`@allenai.org` users and the service accounts listed in `INGEST_ALLOWED_SERVICE_ACCOUNTS`. The
-verified email is recorded as the run's uploader.
+`@allenai.org` users and allowlisted service accounts (by default only
+`olmo-eval-uploader@ai2-skiff2-olmo-eval.iam.gserviceaccount.com`). The verified email is
+recorded as the run's uploader.
 
 - On a laptop: `gcloud auth application-default login`.
-- On Beaker: olmo-eval copies the launching user's credentials into the Beaker secret
-  `<beakeruser>_GOOGLE_CREDENTIALS`, so uploads are attributed to that user.
+- On Beaker: jobs upload as `olmo-eval-uploader`, a service account with no Google Cloud roles
+  (`infra/terraform/uploader.tf`). `olmo-eval beaker launch` reads its key from the Secret
+  Manager secret `olmo-eval-uploader-key` with the launching user's local credentials and copies
+  it into the workspace's `olmo_eval_uploader_key` Beaker secret, which the job reads as
+  `OLMO_EVAL_UPLOAD_CREDENTIALS`. Personal credentials never reach Beaker. The run's `author`
+  is the launching Beaker user, and only that user (or a direct uploader) can delete it;
+  service accounts cannot delete runs.
 
 Large files go straight to GCS: the ingest service returns V4 signed upload URLs, signed by the
 runtime service account through IAM `signBlob`. To re-upload a local results directory, run
@@ -112,8 +118,9 @@ Pull requests get a Skiff2 Terraform plan (`skiff2-plan.yml`) and the dashboard 
 (`dashboard-ci.yml`).
 
 Containers need no secrets. Configuration comes from code defaults keyed on `SKIFF_ENV`, which
-Cloud Run sets on every container. To allow a service account to upload, create the Secret
-Manager secret `global-ingest-INGEST_ALLOWED_SERVICE_ACCOUNTS` (comma-separated emails), grant
+Cloud Run sets on every container. To allow another service account to upload, create the Secret
+Manager secret `global-ingest-INGEST_ALLOWED_SERVICE_ACCOUNTS` (comma-separated emails, which
+replaces the default list, so include the uploader account), grant
 `olmo-eval-api@ai2-skiff2-olmo-eval.iam.gserviceaccount.com` the
 `roles/secretmanager.secretAccessor` role on that secret only, and redeploy. The runtime service
 account has no project-wide secret access.

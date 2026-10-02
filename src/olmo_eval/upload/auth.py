@@ -1,16 +1,19 @@
 """Google credentials for the ingest service.
 
-The ingest service verifies a Google OAuth access token on every request. Both
-``gcloud auth application-default login`` credentials and service-account keys
-produce one. Inside Beaker, gantry writes the launching user's
-``<beakeruser>_GOOGLE_CREDENTIALS`` secret to a file and points
-GOOGLE_APPLICATION_CREDENTIALS at it.
+The ingest service verifies a Google OAuth access token on every request. Local
+runs use Application Default Credentials (``gcloud auth application-default
+login``). Beaker jobs use the shared uploader service account key, which
+``olmo-eval beaker launch`` injects as OLMO_EVAL_UPLOAD_CREDENTIALS, so personal
+credentials never reach Beaker.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import threading
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 SCOPES = (
@@ -29,19 +32,50 @@ class UploadAuthError(Exception):
 
 
 def load_google_credentials() -> Any:
-    """Load Application Default Credentials with the scopes the ingest service needs.
+    """Load credentials with the scopes the ingest service needs.
+
+    Uses the uploader service account key from OLMO_EVAL_UPLOAD_CREDENTIALS when set,
+    else Application Default Credentials.
 
     Raises:
-        UploadAuthError: If no credentials are configured.
+        UploadAuthError: If no credentials are configured or the key is unreadable.
     """
     import google.auth
     from google.auth.exceptions import DefaultCredentialsError
 
+    from olmo_eval.upload.config import UPLOAD_CREDENTIALS_ENV
+
+    key = os.environ.get(UPLOAD_CREDENTIALS_ENV, "").strip()
+    if key:
+        return _service_account_credentials(key, UPLOAD_CREDENTIALS_ENV)
     try:
         credentials, _project = google.auth.default(scopes=list(SCOPES))
     except DefaultCredentialsError as e:
         raise UploadAuthError(NO_CREDENTIALS_MESSAGE) from e
     return credentials
+
+
+def _service_account_credentials(key: str, env_name: str) -> Any:
+    """Build service account credentials from a JSON key or a path to one."""
+    from google.oauth2 import service_account
+
+    try:
+        info = json.loads(key if key.startswith("{") else Path(key).read_text())
+        return service_account.Credentials.from_service_account_info(info, scopes=list(SCOPES))
+    except (OSError, ValueError, KeyError) as e:
+        raise UploadAuthError(f"{env_name} does not hold a valid service account key: {e}") from e
+
+
+def has_local_google_credentials() -> bool:
+    """Whether Application Default Credentials are configured on this machine."""
+    import google.auth
+    from google.auth.exceptions import DefaultCredentialsError
+
+    try:
+        google.auth.default(scopes=list(SCOPES))
+    except DefaultCredentialsError:
+        return False
+    return True
 
 
 def _expires_soon(expiry: datetime | None) -> bool:

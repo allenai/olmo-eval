@@ -418,9 +418,12 @@ class BeakerJobConfig:
     # AWS S3 access - when True, injects user's AWS credentials as env secrets
     inject_aws_credentials: bool = False
 
-    # Google credentials - when True, injects the user's credentials (GCS access and
-    # dashboard uploads) through gantry's google_credentials_secret
+    # GCS access - when True, injects user's GCS credentials as env secret
     inject_gcs_credentials: bool = False
+
+    # Results upload - when True, injects the shared uploader service account key so the
+    # job can upload results to the dashboard's ingest service
+    inject_upload_credentials: bool = False
 
     # Provider-specific dependencies (from provider config)
     provider_packages: list[str] | None = None
@@ -1103,7 +1106,19 @@ class BeakerLauncher:
             from olmo_eval.launch.beaker.gcs import ensure_gcs_secrets
 
             google_credentials_secret = ensure_gcs_secrets(config.workspace)
-            log.info("Injecting Google credentials (GCS access and results upload)")
+            log.info("Injecting GCS credentials for GCS access")
+
+        # Inject the uploader key for results upload. A dry run shows the secret name
+        # without reading the key or writing it to Beaker.
+        if config.inject_upload_credentials:
+            from olmo_eval.launch.beaker.uploader import (
+                UPLOADER_SECRET_NAME,
+                ensure_uploader_secret,
+            )
+            from olmo_eval.upload.config import UPLOAD_CREDENTIALS_ENV
+
+            secret = UPLOADER_SECRET_NAME if dry_run else ensure_uploader_secret(config.workspace)
+            env_secrets.append((UPLOAD_CREDENTIALS_ENV, secret))
 
         # Build env vars as tuples: (name, value)
         env_vars: list[tuple[str, str]] = list(config.env_vars.items())

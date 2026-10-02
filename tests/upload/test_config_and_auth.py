@@ -193,3 +193,50 @@ def test_service_account_key_file(tmp_path: Path, monkeypatch) -> None:
     creds = load_google_credentials()
     assert isinstance(creds, service_account.Credentials)
     assert set(SCOPES) <= set(creds.scopes or [])
+
+
+def _service_account_key_json() -> str:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    return json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "p",
+            "private_key_id": "k",
+            "private_key": pem,
+            "client_email": "olmo-eval-uploader@p.iam.gserviceaccount.com",
+            "client_id": "1",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    )
+
+
+@pytest.mark.parametrize("as_path", [False, True])
+def test_uploader_key_env_beats_adc(tmp_path: Path, monkeypatch, as_path: bool) -> None:
+    from google.oauth2 import service_account
+
+    key = _service_account_key_json()
+    if as_path:
+        path = tmp_path / "uploader.json"
+        path.write_text(key)
+        key = str(path)
+    monkeypatch.setenv("OLMO_EVAL_UPLOAD_CREDENTIALS", key)
+    with patch("google.auth.default") as default:
+        creds = load_google_credentials()
+    default.assert_not_called()
+    assert isinstance(creds, service_account.Credentials)
+    assert creds.service_account_email == "olmo-eval-uploader@p.iam.gserviceaccount.com"
+    assert set(SCOPES) <= set(creds.scopes or [])
+
+
+def test_malformed_uploader_key_is_an_upload_auth_error(monkeypatch) -> None:
+    monkeypatch.setenv("OLMO_EVAL_UPLOAD_CREDENTIALS", '{"type": "service_account"}')
+    with pytest.raises(UploadAuthError, match="OLMO_EVAL_UPLOAD_CREDENTIALS"):
+        load_google_credentials()

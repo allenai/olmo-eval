@@ -15,6 +15,9 @@ UPLOAD_ENV = "OLMO_EVAL_UPLOAD"
 API_URL_ENV = "OLMO_EVAL_API_URL"
 TIMEOUT_ENV = "OLMO_EVAL_UPLOAD_TIMEOUT"
 LAUNCH_ID_ENV = "OLMO_EVAL_LAUNCH_ID"
+# Uploader service account key (JSON content or a file path). Beaker jobs get it from the
+# shared olmo_eval_uploader_key secret; when unset, uploads use local credentials.
+UPLOAD_CREDENTIALS_ENV = "OLMO_EVAL_UPLOAD_CREDENTIALS"
 
 MAX_TAGS = 50
 _TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,63}$")

@@ -21,3 +21,9 @@ variable "github_actions_service_account" {
   type        = string
   default     = "github-actions@ai2-skiff2-olmo-eval.iam.gserviceaccount.com"
 }
+
+variable "uploader_key_readers" {
+  description = "Principals that can read the uploader key, i.e. launch Beaker jobs that upload results."
+  type        = list(string)
+  default     = ["domain:allenai.org"]
+}

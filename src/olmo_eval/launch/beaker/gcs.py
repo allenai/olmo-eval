@@ -1,8 +1,7 @@
-"""Google credential handling for Beaker jobs.
+"""GCS credential handling for Beaker jobs.
 
-Provides utilities to retrieve local Google credentials and store them as
-user-scoped Beaker secrets. Jobs use them for GCS access and to upload results
-to the dashboard as the launching user.
+Provides utilities to retrieve local GCS credentials and store them as
+user-scoped Beaker secrets for GCS access in evaluation jobs.
 
 Example:
     from olmo_eval.launch.beaker.gcs import ensure_gcs_secrets, is_gcs_path
@@ -34,75 +33,85 @@ __all__ = [
 ]
 
 
-SUPPORTED_CREDENTIAL_TYPES = ("service_account", "authorized_user")
-
-
 @dataclass
 class GCSCredentials:
-    """Google credentials JSON for Beaker jobs.
+    """GCS service account credentials.
 
     Attributes:
-        json_key: The full JSON content of the credentials file.
-        project_id: The GCP project ID, when the file records one.
-        client_email: The service account email (service-account keys only).
-        credential_type: "service_account" or "authorized_user".
+        json_key: The full JSON content of the service account key file.
+        project_id: The GCP project ID (extracted from JSON).
+        client_email: The service account email (extracted from JSON).
     """
 
     json_key: str
     project_id: str | None = None
     client_email: str | None = None
-    credential_type: str = "service_account"
-
-
-def _read_credentials(path: Path) -> GCSCredentials | None:
-    try:
-        json_key = path.read_text()
-        data = json.loads(json_key)
-    except Exception as e:
-        log.warning(f"Could not read {path}: {e}")
-        return None
-    cred_type = data.get("type") if isinstance(data, dict) else None
-    if cred_type not in SUPPORTED_CREDENTIAL_TYPES:
-        log.warning(
-            f"Found {path} but its type is {cred_type!r}; expected a service account key or "
-            "`gcloud auth application-default login` credentials."
-        )
-        return None
-    log.debug(f"Found Google {cred_type} credentials at {path}")
-    return GCSCredentials(
-        json_key=json_key,
-        project_id=data.get("project_id") or data.get("quota_project_id"),
-        client_email=data.get("client_email"),
-        credential_type=cred_type,
-    )
 
 
 def get_local_gcs_credentials() -> GCSCredentials | None:
-    """Retrieve Google credentials from the local environment.
+    """Retrieve GCS credentials from the local environment.
 
     Checks (in order):
-    1. GOOGLE_APPLICATION_CREDENTIALS environment variable (path to a JSON file)
-    2. gcloud application default credentials
+    1. GOOGLE_APPLICATION_CREDENTIALS environment variable (path to JSON key)
+    2. gcloud default application credentials
        (~/.config/gcloud/application_default_credentials.json)
 
-    Service-account keys and user credentials from
-    ``gcloud auth application-default login`` are both accepted. Beaker jobs use
-    them for GCS access and to upload results to the dashboard as the launching user.
+    Note: Only service account keys are supported. Application Default Credentials
+    from 'gcloud auth application-default login' are not supported because Beaker
+    jobs require a service account to authenticate.
 
     Returns:
         GCSCredentials if found, None otherwise.
     """
+    # Check GOOGLE_APPLICATION_CREDENTIALS first
     creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if creds_path:
         path = Path(creds_path).expanduser()
         if path.exists():
-            creds = _read_credentials(path)
-            if creds is not None:
-                return creds
+            try:
+                json_key = path.read_text()
+                data = json.loads(json_key)
+                if data.get("type") == "service_account":
+                    log.debug(f"Found GCS service account credentials at {creds_path}")
+                    return GCSCredentials(
+                        json_key=json_key,
+                        project_id=data.get("project_id"),
+                        client_email=data.get("client_email"),
+                    )
+                else:
+                    log.warning(
+                        f"Found {creds_path} but it's not a service account key "
+                        f"(type={data.get('type')}). "
+                        "For Beaker jobs, use a service account key file."
+                    )
+            except Exception as e:
+                log.warning(f"Could not read {creds_path}: {e}")
 
-    default_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
-    if default_path.exists():
-        return _read_credentials(default_path)
+    # Check gcloud default application credentials
+    default_paths = [
+        Path.home() / ".config" / "gcloud" / "application_default_credentials.json",
+    ]
+
+    for path in default_paths:
+        if path.exists():
+            try:
+                json_key = path.read_text()
+                data = json.loads(json_key)
+                # application_default_credentials.json may have different types
+                if data.get("type") == "service_account":
+                    log.debug(f"Found GCS service account credentials at {path}")
+                    return GCSCredentials(
+                        json_key=json_key,
+                        project_id=data.get("project_id"),
+                        client_email=data.get("client_email"),
+                    )
+                else:
+                    log.debug(
+                        f"Found {path} but it's type '{data.get('type')}', not 'service_account'. "
+                        "For Beaker jobs, use a service account key file."
+                    )
+            except Exception as e:
+                log.warning(f"Could not read {path}: {e}")
 
     return None
 
@@ -137,31 +146,24 @@ def _write_secret_if_needed(
     value: str,
     overwrite: bool,
 ) -> bool:
-    """Write a secret unless it already holds the same value (or overwrite is False).
+    """Write a secret to Beaker if it doesn't exist or overwrite is True.
 
     Args:
         client: Beaker client instance.
         name: Secret name.
         value: Secret value.
-        overwrite: Write even when a secret with this name exists. When False, an
-            existing secret is still replaced if its value differs from ``value``.
+        overwrite: Whether to overwrite existing secrets.
 
     Returns:
-        True if the secret was written, False if it already held this value.
+        True if the secret was written, False if it already existed.
     """
-    if not overwrite:
-        try:
-            existing = client.secret.get(name)
-        except Exception:
-            existing = None  # Secret doesn't exist
-        if existing:
-            try:
-                current = client.secret.read(existing)
-            except Exception:
-                current = None
-            if current == value:
-                log.debug(f"Secret {name} is up to date, skipping")
-                return False
+    try:
+        existing = client.secret.get(name)
+        if existing and not overwrite:
+            log.debug(f"Secret {name} already exists, skipping")
+            return False
+    except Exception:
+        pass  # Secret doesn't exist
 
     client.secret.write(name, value)
     log.info(f"Wrote secret {name} to Beaker workspace")
@@ -173,22 +175,20 @@ def ensure_gcs_secrets(
     credentials: GCSCredentials | None = None,
     overwrite: bool = False,
 ) -> str:
-    """Ensure Google credentials exist as a user-scoped Beaker secret.
+    """Ensure GCS credentials exist as a user-scoped Beaker secret.
 
     The secret is stored with a username prefix to prevent collisions between
     users in shared workspaces. For example, user "alice" will have a secret
     named "alice_GOOGLE_CREDENTIALS".
 
-    Unlike AWS credentials which use multiple env vars, Google credentials are
-    stored as a single secret containing the full credentials JSON (service-account
-    key or authorized-user ADC). This is what gantry's google_credentials_secret
-    parameter expects. An existing secret is replaced when its value differs from
-    the local credentials, so refreshed ADC reaches new jobs.
+    Unlike AWS credentials which use multiple env vars, GCS credentials are
+    stored as a single secret containing the full service account JSON key.
+    This is what gantry's google_credentials_secret parameter expects.
 
     Args:
         workspace: Beaker workspace to store secrets in.
-        credentials: Credentials to store. If None, retrieves from local env.
-        overwrite: Write the secret even when it already holds the same value.
+        credentials: GCS credentials to store. If None, retrieves from local env.
+        overwrite: Whether to overwrite existing secrets.
 
     Returns:
         The Beaker secret name containing the GCS credentials JSON.
@@ -203,8 +203,12 @@ def ensure_gcs_secrets(
 
     if credentials is None:
         raise ValueError(
-            "No Google credentials found. Run `gcloud auth application-default login`, "
-            "or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file."
+            "No GCS credentials found. Please configure GCS credentials via:\n"
+            "  - GOOGLE_APPLICATION_CREDENTIALS env var (path to service account JSON)\n"
+            "  - Service account key file\n"
+            "\n"
+            "Note: Application Default Credentials from 'gcloud auth application-default login'\n"
+            "are not supported for Beaker jobs. Use a service account key instead."
         )
 
     client = Beaker.from_env(default_workspace=workspace)

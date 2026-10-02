@@ -1,4 +1,4 @@
-"""Beaker launch carries dashboard upload settings and Google credentials into jobs."""
+"""Beaker launch carries dashboard upload settings and the uploader key into jobs."""
 
 from __future__ import annotations
 
@@ -65,6 +65,7 @@ def test_job_command_and_env_carry_upload_settings() -> None:
     assert not {"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "OLMO_S3_BUCKET"} & set(env)
     assert not any(s.env_var in {"DB_SECRET_ARN", "PGHOST"} for s in job.env_secrets)
     assert job.inject_gcs_credentials is True
+    assert job.inject_upload_credentials is True
     assert "storage" not in job.extras and "postgres" not in job.extras
 
 
@@ -116,25 +117,27 @@ def test_external_eval_job_carries_upload_settings() -> None:
     assert not any(arg.startswith(("--store", "--s3")) for arg in job.command)
 
 
-def test_upload_forces_google_credential_injection() -> None:
+def test_upload_does_not_inject_personal_google_credentials() -> None:
     from olmo_eval.cli.beaker.credentials import CredentialManager
 
     launcher = SimpleNamespace(beaker=SimpleNamespace(user_name="test-user"))
     with patch("olmo_eval.launch.beaker.gcs.get_local_gcs_credentials", return_value=None):
-        manager = CredentialManager(["Qwen/Qwen2-0.5B"], None, None, upload=True)
-        assert manager.detect_and_setup(launcher) == (False, True)
-
-        manager = CredentialManager(["Qwen/Qwen2-0.5B"], None, None, upload=False)
+        manager = CredentialManager(["Qwen/Qwen2-0.5B"], None, None)
         assert manager.detect_and_setup(launcher) == (False, False)
 
-        manager = CredentialManager(["gs://bucket/model"], None, None, upload=False)
+        manager = CredentialManager(["gs://bucket/model"], None, None)
         assert manager.detect_and_setup(launcher) == (False, True)
+
+
+def test_no_upload_skips_the_uploader_key() -> None:
+    _, job = _assemble(upload=False)
+    assert job.inject_upload_credentials is False
 
 
 def test_launch_stops_without_google_credentials(capsys) -> None:
     from olmo_eval.cli.beaker.launch import _require_upload_credentials
 
-    with patch("olmo_eval.launch.beaker.gcs.get_local_gcs_credentials", return_value=None):
+    with patch("olmo_eval.upload.auth.has_local_google_credentials", return_value=False):
         with pytest.raises(SystemExit):
             _require_upload_credentials(upload=True, dry_run=False)
         _require_upload_credentials(upload=True, dry_run=True)  # warns only
@@ -163,29 +166,3 @@ def test_launch_cli_resolves_upload_from_env(monkeypatch) -> None:
     assert captured["upload"] is False
     assert captured["api_url"] == "https://dev-ingest.example"
     assert captured["tags"] == ["x"]
-
-
-def test_no_gcp_credentials_with_upload_is_an_error() -> None:
-    from olmo_eval.cli.beaker.credentials import CredentialManager
-
-    launcher = SimpleNamespace(beaker=SimpleNamespace(user_name="test-user"))
-    with patch("olmo_eval.launch.beaker.gcs.get_local_gcs_credentials", return_value=None):
-        manager = CredentialManager(["Qwen/Qwen2-0.5B"], None, False, upload=True)
-        with pytest.raises(SystemExit):
-            manager.detect_and_setup(launcher)
-
-        manager = CredentialManager(["Qwen/Qwen2-0.5B"], None, False, upload=False)
-        assert manager.detect_and_setup(launcher) == (False, False)
-
-
-def test_user_credentials_warn_about_workspace_exposure(capsys) -> None:
-    from olmo_eval.cli.beaker.credentials import CredentialManager
-    from olmo_eval.launch.beaker.gcs import GCSCredentials
-
-    creds = GCSCredentials(json_key="{}", credential_type="authorized_user")
-    launcher = SimpleNamespace(beaker=SimpleNamespace(user_name="test-user"), _workspace="ai2/x")
-    with patch("olmo_eval.launch.beaker.gcs.get_local_gcs_credentials", return_value=creds):
-        CredentialManager(["m"], None, None, upload=True).detect_and_setup(launcher)
-    out = " ".join(capsys.readouterr().out.split())
-    assert "refresh token" in out
-    assert "ai2/x" in out

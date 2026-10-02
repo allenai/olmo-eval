@@ -82,49 +82,24 @@ class TestGetLocalGcsCredentials:
         assert creds.client_email == "test@test-project.iam.gserviceaccount.com"
         assert json.loads(creds.json_key) == key_data
 
-    def test_from_env_var_authorized_user(self, tmp_path):
-        """User ADC from `gcloud auth application-default login` is accepted."""
+    def test_from_env_var_non_service_account(self, tmp_path):
+        """Test that non-service-account credentials are rejected."""
         key_file = tmp_path / "key.json"
         key_data = {
             "type": "authorized_user",
             "client_id": "123",
             "client_secret": "secret",
-            "refresh_token": "refresh",
-            "quota_project_id": "quota-project",
         }
         key_file.write_text(json.dumps(key_data))
 
-        with (
-            patch.dict("os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": str(key_file)}),
-            patch("pathlib.Path.home", return_value=tmp_path),
-        ):
-            creds = get_local_gcs_credentials()
-
-        assert creds is not None
-        assert creds.credential_type == "authorized_user"
-        assert creds.client_email is None
-        assert creds.project_id == "quota-project"
-        assert json.loads(creds.json_key) == key_data
-
-    def test_from_env_var_unsupported_type(self, tmp_path):
-        """Credential types other than service accounts and user ADC are rejected."""
-        key_file = tmp_path / "key.json"
-        key_file.write_text(json.dumps({"type": "external_account"}))
-
-        with (
-            patch.dict("os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": str(key_file)}),
-            patch("pathlib.Path.home", return_value=tmp_path),
-        ):
+        with patch.dict("os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": str(key_file)}):
             creds = get_local_gcs_credentials()
 
         assert creds is None
 
-    def test_from_env_var_file_not_found(self, tmp_path):
+    def test_from_env_var_file_not_found(self):
         """Test handling of missing credential file."""
-        with (
-            patch.dict("os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": "/nonexistent/path.json"}),
-            patch("pathlib.Path.home", return_value=tmp_path),
-        ):
+        with patch.dict("os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": "/nonexistent/path.json"}):
             creds = get_local_gcs_credentials()
 
         assert creds is None
@@ -199,47 +174,7 @@ class TestGetLocalGcsCredentials:
         key_file = tmp_path / "invalid.json"
         key_file.write_text("not valid json")
 
-        with (
-            patch.dict("os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": str(key_file)}),
-            patch("pathlib.Path.home", return_value=tmp_path),
-        ):
+        with patch.dict("os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": str(key_file)}):
             creds = get_local_gcs_credentials()
 
         assert creds is None
-
-
-class TestWriteSecretIfNeeded:
-    """ensure_gcs_secrets replaces a stale secret so refreshed ADC reaches new jobs."""
-
-    def _client(self, existing_value: str | None):
-        from unittest.mock import MagicMock
-
-        client = MagicMock()
-        if existing_value is None:
-            client.secret.get.side_effect = Exception("not found")
-        else:
-            client.secret.get.return_value = MagicMock(name="secret")
-            client.secret.read.return_value = existing_value
-        return client
-
-    def test_writes_missing_secret(self):
-        from olmo_eval.launch.beaker.gcs import _write_secret_if_needed
-
-        client = self._client(None)
-        assert _write_secret_if_needed(client, "u_GOOGLE_CREDENTIALS", "{}", overwrite=False)
-        client.secret.write.assert_called_once_with("u_GOOGLE_CREDENTIALS", "{}")
-
-    def test_skips_identical_secret(self):
-        from olmo_eval.launch.beaker.gcs import _write_secret_if_needed
-
-        client = self._client("{}")
-        assert not _write_secret_if_needed(client, "u_GOOGLE_CREDENTIALS", "{}", overwrite=False)
-        client.secret.write.assert_not_called()
-
-    def test_replaces_stale_secret(self):
-        from olmo_eval.launch.beaker.gcs import _write_secret_if_needed
-
-        client = self._client('{"type": "service_account"}')
-        new_value = '{"type": "authorized_user"}'
-        assert _write_secret_if_needed(client, "u_GOOGLE_CREDENTIALS", new_value, overwrite=False)
-        client.secret.write.assert_called_once_with("u_GOOGLE_CREDENTIALS", new_value)

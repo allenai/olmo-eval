@@ -848,9 +848,11 @@ request. Registration and variants work exactly as described in
 `olmo-eval run`, `olmo-eval run-external`, and Beaker jobs upload their results to the
 olmo-eval dashboard at <https://olmo-eval.allen.ai> (Ai2 accounts only). The upload uses
 your Google credentials, so run `gcloud auth application-default login` once. Beaker
-jobs use the credentials that `olmo-eval beaker launch` copies into your
-`<beaker-user>_GOOGLE_CREDENTIALS` secret; the launch stops before submitting anything
-if no local Google credentials exist.
+jobs never get your personal credentials: they upload as the shared
+`olmo-eval-uploader` service account, whose key `olmo-eval beaker launch` reads from
+Secret Manager (with your local credentials) and copies into the workspace's
+`olmo_eval_uploader_key` Beaker secret. The run still records you as its author. The
+launch stops before submitting anything if no local Google credentials exist.
 
 What is uploaded:
 

@@ -24,3 +24,7 @@ output "results_bucket" {
 output "build_assets_bucket" {
   value = google_storage_bucket.build_assets.name
 }
+
+output "uploader_service_account_email" {
+  value = google_service_account.uploader.email
+}

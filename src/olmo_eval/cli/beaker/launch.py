@@ -503,7 +503,6 @@ def launch(
         launch_config.model_specs,
         aws_credentials,
         gcs_credentials,
-        upload=launch_config.upload,
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
     _require_upload_credentials(launch_config.upload, dry_run)
@@ -750,11 +749,14 @@ def _get_task_configs(
 
 
 def _require_upload_credentials(upload: bool, dry_run: bool) -> None:
-    """Stop before launching when uploads are on but no Google credentials exist."""
-    from olmo_eval.launch.beaker.gcs import get_local_gcs_credentials
-    from olmo_eval.upload.auth import NO_CREDENTIALS_MESSAGE
+    """Stop before launching when uploads are on but no local Google credentials exist.
 
-    if not upload or get_local_gcs_credentials() is not None:
+    The launch reads the uploader key from Secret Manager with the local credentials, so
+    they never leave this machine.
+    """
+    from olmo_eval.upload.auth import NO_CREDENTIALS_MESSAGE, has_local_google_credentials
+
+    if not upload or has_local_google_credentials():
         return
     if dry_run:
         console.print(f"[yellow]Warning:[/yellow] {NO_CREDENTIALS_MESSAGE}")
@@ -1076,7 +1078,6 @@ def _launch_external_evals(
         model_specs=list(model),
         aws_credentials=aws_credentials,
         gcs_credentials=gcs_credentials,
-        upload=upload,
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
     _require_upload_credentials(upload, dry_run)

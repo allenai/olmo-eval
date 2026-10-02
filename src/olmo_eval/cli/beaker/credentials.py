@@ -22,19 +22,17 @@ class CredentialManager:
         model_specs: list[str],
         aws_credentials: bool | None,
         gcs_credentials: bool | None,
-        upload: bool = False,
     ):
         self.model_specs = model_specs
-        self.upload = upload
         self.aws_credentials = aws_credentials
         self.gcs_credentials = gcs_credentials
 
     def detect_and_setup(self, launcher: BeakerLauncher) -> tuple[bool, bool]:
         """Decide which credentials to inject into the job.
 
-        Google credentials are injected when results upload is on, because the job
-        authenticates to the dashboard's ingest service as the launching user. Passing
-        ``--no-gcp-credentials`` with upload on is an error: the job could not upload.
+        Personal Google credentials are only injected for GCS model access, and only
+        service-account keys. Results upload uses the shared uploader service account
+        key instead (see ``olmo_eval.launch.beaker.uploader``).
         """
         from olmo_eval.launch.beaker.aws import is_s3_path
         from olmo_eval.launch.beaker.gcs import get_local_gcs_credentials, is_gcs_path
@@ -48,14 +46,6 @@ class CredentialManager:
         inject_gcs = self.gcs_credentials
         if inject_gcs is None:
             inject_gcs = bool(gcs_models)
-        if self.upload:
-            if self.gcs_credentials is False:
-                console.print(
-                    "[red]Error:[/red] --no-gcp-credentials leaves the job without credentials "
-                    "to upload results. Add --no-upload as well, or drop --no-gcp-credentials."
-                )
-                raise SystemExit(1)
-            inject_gcs = True
 
         if inject_gcs:
             self._display_gcs_info(launcher, get_local_gcs_credentials())
@@ -70,26 +60,13 @@ class CredentialManager:
         gcs_table.add_column("Value")
 
         if local_gcs_creds:
-            kind = (
-                "user"
-                if local_gcs_creds.credential_type == "authorized_user"
-                else "service account"
-            )
-            gcs_table.add_row("Credentials", f"[green]found[/green] ({kind})")
+            gcs_table.add_row("Credentials", "[green]found[/green] (service account)")
             if local_gcs_creds.client_email:
                 gcs_table.add_row("Service account", local_gcs_creds.client_email)
             if local_gcs_creds.project_id:
                 gcs_table.add_row("Project", local_gcs_creds.project_id)
             gcs_table.add_row("Beaker user", beaker_user)
             gcs_table.add_row("Beaker secret", f"{beaker_user}_GOOGLE_CREDENTIALS")
-            if local_gcs_creds.credential_type == "authorized_user":
-                workspace = getattr(launcher, "_workspace", None) or "the job's workspace"
-                gcs_table.add_row(
-                    "Warning",
-                    "[yellow]This secret holds your gcloud refresh token, which can act as "
-                    f"you on Google Cloud. Anyone with write access to {workspace} can read "
-                    "it. Use a workspace only you can write to, or pass --no-upload.[/yellow]",
-                )
         else:
             gcs_table.add_row(
                 "Credentials",
@@ -100,7 +77,7 @@ class CredentialManager:
         console.print(
             Panel(
                 gcs_table,
-                title="[bold]Google Credentials[/bold]",
+                title="[bold]GCS Access Configuration[/bold]",
                 border_style="magenta",
                 expand=True,
             )

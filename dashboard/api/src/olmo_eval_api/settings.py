@@ -17,6 +17,8 @@ ApiMode = Literal["dashboard", "ingest", "all"]
 
 GCP_PROJECT = "ai2-skiff2-olmo-eval"
 RUNTIME_SERVICE_ACCOUNT = f"olmo-eval-api@{GCP_PROJECT}.iam.gserviceaccount.com"
+# Beaker jobs upload as this account (infra/terraform/uploader.tf). It has no GCP roles.
+UPLOADER_SERVICE_ACCOUNT = f"olmo-eval-uploader@{GCP_PROJECT}.iam.gserviceaccount.com"
 
 
 def _split_csv(value: object) -> object:
@@ -52,7 +54,9 @@ class Settings(BaseSettings):
     ingest_allowed_domains: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["allenai.org"]
     )
-    ingest_allowed_service_accounts: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    ingest_allowed_service_accounts: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [UPLOADER_SERVICE_ACCOUNT]
+    )
     ingest_dev_auth: bool = False
     dashboard_dev_user: str = "dev@allenai.org"
 

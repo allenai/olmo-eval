@@ -9,21 +9,6 @@ if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
     return 0 2>/dev/null || true  # return when sourced, no-op when executed directly
 fi
 
-# Jobs that upload results carry the launching user's credentials, which are often
-# `gcloud auth application-default login` user credentials. Artifact Registry auth
-# below needs a service account key, so skip it for any other credential type.
-if [[ -f "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
-    CREDS_JSON=$(cat "$GOOGLE_APPLICATION_CREDENTIALS")
-else
-    CREDS_JSON="$GOOGLE_APPLICATION_CREDENTIALS"
-fi
-if ! grep -Eq '"type"[[:space:]]*:[[:space:]]*"service_account"' <<< "$CREDS_JSON"; then
-    unset CREDS_JSON
-    echo "Google credentials are not a service account key, skipping Artifact Registry setup"
-    return 0 2>/dev/null || exit 0
-fi
-unset CREDS_JSON
-
 echo "Setting up Artifact Registry credentials..."
 
 # Install gcloud if not available

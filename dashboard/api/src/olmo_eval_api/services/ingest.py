@@ -233,12 +233,28 @@ async def upsert_run(
     return response
 
 
+def can_delete(principal: Principal, uploaded_by: str, author: str | None) -> bool:
+    """Whether a principal may delete a run.
+
+    Service accounts never delete: every Beaker job shares the uploader account, so
+    letting it delete would let any job delete any other job's run. A user may delete
+    runs they uploaded, and runs a service account uploaded on their behalf, which
+    record their Beaker username as the author.
+    """
+    if principal.principal_type == "service_account":
+        return False
+    if principal.email == uploaded_by:
+        return True
+    username = principal.email.split("@", 1)[0]
+    return uploaded_by.endswith(".gserviceaccount.com") and author == username
+
+
 async def delete_run(
     session: AsyncSession, storage: Storage, settings: Settings, run_id: str, principal: Principal
 ) -> None:
     run = await get_run(session, run_id, lock=True)
-    if principal.principal_type != "service_account" and principal.email != run.uploaded_by:
-        raise forbidden(f"only {run.uploaded_by} can delete run {run_id}")
+    if not can_delete(principal, run.uploaded_by, run.author):
+        raise forbidden(f"only the person who uploaded or launched run {run_id} can delete it")
     deleted = await storage.delete_prefix(settings.object_prefix(run_id))
     await session.execute(delete(runs_t).where(runs_t.c.run_id == run_id))
     await session.commit()
