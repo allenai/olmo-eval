@@ -77,6 +77,17 @@ def normalize_patch(patch: str) -> str:
     return patch if patch.endswith("\n") else patch + "\n"
 
 
+def build_eval_script(instance: SWEBenchInstance) -> str:
+    """Return the instance's eval script as the upstream harness runs it.
+
+    Upstream adds a line that records the test command's exit code. The grader
+    uses it to reject logs that report passing tests from a run that failed.
+    """
+    from swebench.harness.utils import make_test_spec
+
+    return make_test_spec(instance.to_swebench_dict()).eval_script
+
+
 def grade_log(
     instance: SWEBenchInstance, patch: str, test_log: str
 ) -> tuple[bool, bool, dict[str, Any]]:
@@ -150,6 +161,8 @@ async def extract_patch(executor: SandboxExecutor, baseline: str) -> str:
     if not result.success:
         raise RuntimeError(f"Failed to extract patch: {result.output[-2000:]}")
     cat = await executor.execute_command(f"cat {out}", timeout=120.0)
+    if not cat.success:
+        raise RuntimeError(f"Failed to read patch: {cat.output[-2000:]}")
     return normalize_patch(cat.output)
 
 
@@ -232,7 +245,7 @@ async def grade_in_sandbox(
     if not applied:
         return GradeResult(test_output=_tail(apply_output), error="patch_apply_failed")
 
-    finished = await run_eval_script(executor, instance.eval_script, timeout)
+    finished = await run_eval_script(executor, build_eval_script(instance), timeout)
     log = await executor.execute_command(f"cat {EVAL_LOG_PATH}", timeout=300.0)
     if not finished:
         return GradeResult(patch_applied=True, test_output=_tail(log.output), error="eval_timeout")

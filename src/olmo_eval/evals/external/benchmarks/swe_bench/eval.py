@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -85,6 +85,15 @@ HINTS_TEMPLATE = """
 SESSION_SETUP = f"source /opt/miniconda3/bin/activate && conda activate testbed && cd {TESTBED_DIR}"
 
 
+def _swebench_version() -> str | None:
+    try:
+        from importlib.metadata import version
+
+        return version("swebench")
+    except Exception:
+        return None
+
+
 def _as_bool(value: Any) -> bool:
     return value in (True, "true", "True", "1", 1)
 
@@ -133,7 +142,12 @@ class SWEBenchArgs:
             repos=_as_list(data.get("repos")),
             limit=_as_optional_int(data.get("limit")),
             dataset=data.get("dataset", DATASET_PATH),
-            revision=data.get("revision", DATASET_REVISION) or None,
+            # The pinned revision belongs to the default dataset only.
+            revision=data.get(
+                "revision",
+                DATASET_REVISION if data.get("dataset", DATASET_PATH) == DATASET_PATH else None,
+            )
+            or None,
             max_concurrency=int(data.get("max_concurrency", 4)),
             max_turns=int(data.get("max_turns", 100)),
             command_timeout=float(data.get("command_timeout", 120.0)),
@@ -226,7 +240,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
 
     @property
     def timeout_seconds(self) -> float:
-        return 4 * 3600.0
+        return 24 * 3600.0
 
     @property
     def extras(self) -> tuple[str, ...]:
@@ -291,17 +305,18 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         results = await asyncio.gather(*[run(inst) for inst in instances])
 
         metrics = compute_metrics(results)
+        # A run where no instance got through without an error measured nothing.
+        all_failed = all(r.error is not None for r in results)
         result = ExternalEvalResult(
             name=self.name,
-            success=True,
+            success=not all_failed,
+            error=f"All {len(results)} instances failed" if all_failed else None,
             metrics=metrics,
             metadata={
                 "model_name": provider.model_name,
-                "dataset": swe_args.dataset,
-                "revision": swe_args.revision,
-                "oracle_mode": swe_args.oracle,
-                "max_turns": swe_args.max_turns,
+                "swebench_version": _swebench_version(),
                 "num_tasks": len(results),
+                **asdict(swe_args),
             },
             duration_seconds=time.time() - start_time,
             predictions=self._build_predictions(results),
@@ -488,8 +503,8 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 "instance_metrics": {
                     "resolved": {"external": float(r.resolved)},
                     "patch_applied": {"external": float(r.grade.patch_applied)},
-                    "agent_duration": {"external": r.agent_duration},
                 },
+                "agent_duration": r.agent_duration,
                 "repo": r.repo,
                 "difficulty": r.difficulty,
                 "completion_reason": r.completion_reason,

@@ -152,6 +152,12 @@ class TestArgsAndPrompt(unittest.TestCase):
         self.assertEqual(args.max_concurrency, 8)
         self.assertFalse(args.include_hints)
 
+    def test_other_dataset_does_not_inherit_pinned_revision(self) -> None:
+        args = swe_eval.SWEBenchArgs.from_dict({"dataset": "SWE-bench/SWE-bench_Lite"})
+        self.assertIsNone(args.revision)
+        args = swe_eval.SWEBenchArgs.from_dict({"dataset": "x/y", "revision": "abc"})
+        self.assertEqual(args.revision, "abc")
+
     def test_from_dict_defaults(self) -> None:
         args = swe_eval.SWEBenchArgs.from_dict({})
         self.assertIsNone(args.instance_ids)
@@ -227,6 +233,19 @@ class TestGradeLog(unittest.TestCase):
         self.assertEqual(resolved, expected)
         self.assertIn("FAIL_TO_PASS", status)
 
+    def test_passing_log_from_failed_test_command_is_rejected(self) -> None:
+        log = _log("PASSED") + ">>>>> Test Exit Code: 1\n"
+        resolved, tests_ran, _ = swe_grader.grade_log(_instance(), GOLD_PATCH, log)
+        self.assertFalse(resolved)
+        self.assertFalse(tests_ran)
+
+    def test_build_eval_script_records_test_exit_code(self) -> None:
+        script = swe_grader.build_eval_script(_instance())
+        lines = script.splitlines()
+        end = next(i for i, line in enumerate(lines) if "End Test Output" in line)
+        self.assertIn("SWEBENCH_TEST_EXIT_CODE=$?", lines[end - 1])
+        self.assertIn(">>>>> Test Exit Code", lines[end + 1])
+
     def test_grade_log_without_markers_is_unparsed(self) -> None:
         resolved, parsed, _ = swe_grader.grade_log(_instance(), GOLD_PATCH, "no output")
         self.assertFalse(resolved)
@@ -277,7 +296,8 @@ class TestGradeInSandbox(unittest.TestCase):
         self.assertTrue(grade.tests_ran)
         self.assertIsNone(grade.error)
         self.assertEqual(executor.files["/tmp/patch.diff"], GOLD_PATCH)
-        self.assertEqual(executor.files["/eval.sh"], EVAL_SCRIPT)
+        self.assertIn("pytest -rA tests/test_mod.py", executor.files["/eval.sh"])
+        self.assertIn(">>>>> Test Exit Code", executor.files["/eval.sh"])
 
     def test_falls_back_to_lenient_apply(self) -> None:
         executor = FakeExecutor(
@@ -361,6 +381,11 @@ class TestExtractPatch(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "not a git repository"):
             asyncio.run(swe_grader.snapshot_worktree(executor))  # type: ignore[arg-type]
 
+    def test_extract_patch_raises_when_patch_cannot_be_read(self) -> None:
+        executor = FakeExecutor([("cat /tmp/_model.patch", _fail("No such file"))])
+        with self.assertRaisesRegex(RuntimeError, "No such file"):
+            asyncio.run(swe_grader.extract_patch(executor, "tree123"))  # type: ignore[arg-type]
+
     def test_extract_patch_raises_on_git_failure(self) -> None:
         executor = FakeExecutor([("git add -A", _fail("not a git repository"))])
         with self.assertRaisesRegex(RuntimeError, "not a git repository"):
@@ -405,6 +430,25 @@ class TestExecuteOracle(unittest.TestCase):
         self.assertEqual(len(details), 2)
         self.assertEqual(len(predictions.splitlines()), 2)
         self.assertEqual(result.predictions[0]["model_patch"], GOLD_PATCH)  # type: ignore[index]
+        self.assertNotIn("agent_duration", result.predictions[0]["instance_metrics"])  # type: ignore[index]
+        self.assertEqual(result.metadata["swebench_version"], "5.0.2")
+        self.assertTrue(result.metadata["oracle"])
+
+    def test_run_where_every_instance_errors_is_not_a_success(self) -> None:
+        provider = mock.MagicMock(model_name="test-model")
+        with (
+            mock.patch.object(swe_eval, "load_instances", return_value=[_instance()]),
+            mock.patch(
+                "olmo_eval.harness.sandbox.image.get_swerex_image",
+                side_effect=RuntimeError("toomanyrequests"),
+            ),
+        ):
+            result = asyncio.run(
+                swe_eval.SWEBenchVerifiedExternalEval().execute(provider, {"oracle": True})
+            )
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "All 1 instances failed")
+        self.assertEqual(result.metrics["error_rate"], 1.0)
 
     def test_no_instances_is_error(self) -> None:
         provider = mock.MagicMock(model_name="test-model")

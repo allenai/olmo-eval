@@ -110,7 +110,8 @@ sandbox = [
 ]
 # Test log parsers and grading for SWE-bench external evals.
 swebench = [
-    "swebench~=5.0",
+    # Grading logic changes between releases, so pin exactly for comparable scores.
+    "swebench==5.0.2",
 ]
 beaker = [
     "beaker-py>=2.6.0,<3",
