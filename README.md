@@ -774,6 +774,13 @@ and download their data from the Hub at a pinned revision:
   experimental images). The official score is an exact letter match inside the first
   `<ANSWER>` tag; `overall_lenient` and `no_answer_tag` are diagnostics for models that
   ignore the tag.
+- `scimdr_eval` — the 907 expert-annotated questions of
+  [SciMDR-Eval](https://arxiv.org/abs/2603.12249) in the paper's standard setting: the
+  annotated evidence plus same-paper distractors, at most 8 images and 6 text passages.
+  `scimdr_eval_oracle` gives only the evidence. A `gpt-5-mini` judge grades text
+  citation, image citation and answer with the paper's rubric; `accuracy` counts full
+  points on all three, `answer_correct` on the answer alone. Table images missing from
+  the release are re-rendered from the arXiv PDFs and cached under `$SCIMDR_TABLE_DIR`.
 - `geobench_vlm` / `geobench_vlm_temporal` —
   [GEOBench-VLM](https://github.com/The-AI-Alliance/GEO-Bench-VLM) geospatial multiple
   choice (single-image and pre/post-image tasks), with the official instruction and
@@ -823,6 +830,7 @@ tasks and `dense_caption` are in `molmo2_imageqa`, so that suite needs it as a w
 - `dense_caption` runs a `gpt-4o` recall+consistency judge. Judge responses are
   cached, so the key is only needed on a cache miss.
 - `chartmuseum` and `chartmuseum_visual` run the official `gpt-4.1-mini` answer judge.
+- `scimdr_eval` and `scimdr_eval_oracle` run the paper's `gpt-5-mini` rubric judge.
 
 The launcher resolves the key as the user-scoped beaker secret
 `{beaker-username}_OPENAI_API_KEY`; if it is missing, the launch fails up front
