@@ -17,6 +17,12 @@ from .execution import Call, build_instances, execute_calls, is_empty_execute_re
 
 CheckResult = dict[str, Any]
 
+#: Rollout metadata recording that the conversation outgrew the model's context
+#: window before it finished. The reference implementation records the failure
+#: as the model's answer and grades the entry wrong, so it scores zero here too.
+CONTEXT_OVERFLOW_METADATA_KEY = "bfcl_context_overflow"
+CONTEXT_OVERFLOW_ERROR_TYPE = "multi_turn:context_overflow"
+
 
 def _fail(message: str, error_type: str, **details: Any) -> CheckResult:
     return {"valid": False, "error_message": message, "error_type": error_type, "details": details}

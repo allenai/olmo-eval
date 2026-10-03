@@ -9,6 +9,7 @@ from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.harness.scaffolds import get_scaffold
 from olmo_eval.harness.scaffolds.bfcl_multi_turn import ADDITIONAL_FUNCTION_PROMPT
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
 
 FS_CONFIG = {
     "GorillaFileSystem": {
@@ -233,3 +234,46 @@ async def test_a_prompted_offer_without_written_out_functions_is_refused() -> No
                 missed_function={"1": [schema]},
             ),
         )
+
+
+OVERFLOW = LMOutput(
+    text="",
+    metadata={REQUEST_ERROR_KEY: "context overflow: too long", CONTEXT_OVERFLOW_KEY: True},
+)
+
+
+@pytest.mark.anyio
+async def test_a_conversation_that_outgrows_the_window_ends_the_rollout() -> None:
+    provider = ScriptedProvider([LMOutput(text="[mkdir(dir_name='temp')]"), OVERFLOW])
+    turns = [
+        [{"role": "user", "content": "Make temp."}],
+        [{"role": "user", "content": "Now list it."}],
+    ]
+
+    result = await run(provider, request_for(turns))
+
+    # The overflow is recorded for the scorer, and nothing after it is asked.
+    assert result.final_output.metadata["bfcl_context_overflow"] == "context overflow: too long"
+    assert len(provider.requests) == 2
+    # The rollout's own reply carries no provider error, so the runner scores it
+    # instead of setting the instance aside as failed.
+    assert REQUEST_ERROR_KEY not in result.final_output.metadata
+
+
+@pytest.mark.anyio
+async def test_any_other_failed_step_still_fails_the_instance() -> None:
+    failed = LMOutput(text="", metadata={REQUEST_ERROR_KEY: "server unavailable"})
+    provider = ScriptedProvider([failed])
+
+    with pytest.raises(RuntimeError, match="server unavailable"):
+        await run(provider, request_for([[{"role": "user", "content": "Go."}]]))
+
+
+@pytest.mark.anyio
+async def test_a_step_with_no_reply_fails_with_a_reason() -> None:
+    class SilentProvider(ScriptedProvider):
+        async def agenerate(self, requests, sampling_params=None):
+            return [[]]
+
+    with pytest.raises(RuntimeError, match="no reply"):
+        await run(SilentProvider([]), request_for([[{"role": "user", "content": "Go."}]]))

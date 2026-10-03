@@ -1,6 +1,12 @@
 """Execution and grading for the BFCL multi-turn categories."""
 
-from .checker import multi_turn_checker, response_checker, state_checker
+from .checker import (
+    CONTEXT_OVERFLOW_ERROR_TYPE,
+    CONTEXT_OVERFLOW_METADATA_KEY,
+    multi_turn_checker,
+    response_checker,
+    state_checker,
+)
 from .execution import (
     Call,
     build_instances,
@@ -12,6 +18,8 @@ from .execution import (
 )
 
 __all__ = [
+    "CONTEXT_OVERFLOW_ERROR_TYPE",
+    "CONTEXT_OVERFLOW_METADATA_KEY",
     "build_instances",
     "build_method_table",
     "Call",

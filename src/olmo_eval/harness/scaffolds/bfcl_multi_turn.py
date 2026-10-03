@@ -21,6 +21,7 @@ from typing import Any
 from olmo_eval.common.scorers.bfcl import DecodeError, decode_text, decode_tool_calls
 from olmo_eval.common.scorers.bfcl.constants import Language
 from olmo_eval.common.scorers.bfcl.multi_turn import (
+    CONTEXT_OVERFLOW_METADATA_KEY,
     build_instances,
     calls_from_decoded,
     execute_calls,
@@ -30,6 +31,7 @@ from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.result import HarnessResult
 from olmo_eval.harness.scaffolds import Scaffold, register_scaffold
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.errors import is_context_overflow_output, request_error
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,7 @@ class BFCLMultiTurnScaffold(Scaffold):
         tools: list[ToolSchema] = list(request.tools or ())
         calls_per_turn: list[list[list[dict[str, Any]]]] = []
         step_budget_exhausted = False
+        context_overflow: str | None = None
         last_output = LMOutput(text="")
 
         for turn_index, turn_messages in enumerate(turns):
@@ -119,7 +122,22 @@ class BFCLMultiTurnScaffold(Scaffold):
                     ],
                     sampling_params,
                 )
-                last_output = outputs[0][0]
+                replies = outputs[0] if outputs else []
+                if is_context_overflow_output(replies):
+                    # The conversation no longer fits the model's window. The
+                    # reference implementation grades such an entry wrong rather
+                    # than abandoning the run, so the rollout ends here.
+                    context_overflow = request_error(replies) or "context overflow"
+                    break
+                error = request_error(replies)
+                if error is not None:
+                    raise RuntimeError(f"A BFCL multi-turn step failed: {error}")
+                if not replies:
+                    raise RuntimeError(
+                        "The provider returned no reply for a BFCL multi-turn step; "
+                        "its logged warnings name the cause."
+                    )
+                last_output = replies[0]
 
                 decoded = self._decode(last_output, from_tool_calls, language, payload)
                 if not decoded:
@@ -140,13 +158,15 @@ class BFCLMultiTurnScaffold(Scaffold):
                 )
 
             calls_per_turn.append(steps)
-            if step_budget_exhausted:
+            if step_budget_exhausted or context_overflow is not None:
                 break
 
         final = LMOutput(text=last_output.text, metadata=dict(last_output.metadata or {}))
         final.extracted_answer = calls_per_turn
         if step_budget_exhausted:
             final.metadata["bfcl_step_budget_exhausted"] = True
+        if context_overflow is not None:
+            final.metadata[CONTEXT_OVERFLOW_METADATA_KEY] = context_overflow
 
         return HarnessResult(
             final_output=final,
