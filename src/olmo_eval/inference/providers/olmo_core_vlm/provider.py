@@ -44,7 +44,7 @@ from olmo_eval.inference.providers.olmo_core_vlm import cache, checkpoint, prepr
 from olmo_eval.inference.request_utils import (
     chat_messages_for_request,
     chat_with_images,
-    fold_system_turns,
+    drop_system_turns,
     template_has_system_role,
 )
 
@@ -265,13 +265,13 @@ class OlmoCoreVLMProvider(InferenceProvider):
         Passes structured content parts so the Molmo2 chat template itself
         hoists the image markers in front of the conversation (with ``Image N``
         prefixes for multi-image requests), exactly like the released
-        processor's ``apply_chat_template``. A system message goes to the start
-        of the user turn, since the Molmo2 template has no system role.
+        processor's ``apply_chat_template``. A system message is dropped, since the
+        Molmo2 template has no system role.
         """
         image_parts = [{"type": "image"} for _ in range(num_images)]
         chat = chat_with_images(chat_messages_for_request(request), image_parts)
         if not template_has_system_role(getattr(self.tokenizer, "chat_template", None)):
-            chat = fold_system_turns(chat)
+            chat = drop_system_turns(chat)
         return self.tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
 
     def _preprocess_images(
