@@ -243,6 +243,16 @@ OVERFLOW = LMOutput(
 
 
 @pytest.mark.anyio
+async def test_an_overflow_is_logged_so_it_can_be_counted(caplog) -> None:  # noqa: ANN001
+    provider = ScriptedProvider([OVERFLOW])
+
+    with caplog.at_level("WARNING"):
+        await run(provider, request_for([[{"role": "user", "content": "Go."}]]))
+
+    assert "outgrew the context window" in caplog.text
+
+
+@pytest.mark.anyio
 async def test_a_conversation_that_outgrows_the_window_ends_the_rollout() -> None:
     provider = ScriptedProvider([LMOutput(text="[mkdir(dir_name='temp')]"), OVERFLOW])
     turns = [
