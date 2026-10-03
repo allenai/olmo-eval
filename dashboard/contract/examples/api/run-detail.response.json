@@ -126,7 +126,13 @@
   "output_dir": "/results",
   "notes": null,
   "errors": [],
-  "provider_init_seconds": null,
+  "provider_init_seconds": {
+    "Llama-3.1-8B-Inst...-w0": 70.6639575958252,
+    "Llama-3.1-8B-Inst...-w1": 70.67538738250732
+  },
+  "startup_seconds": 78.4,
+  "processing_started_at": "2026-10-01T01:01:30.810000+00:00",
+  "processing_seconds": 1266.1,
   "suites_used": [],
   "siblings": [],
   "updated_at": "2026-10-01T01:27:40+00:00"

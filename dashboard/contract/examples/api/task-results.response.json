@@ -160,6 +160,18 @@
       "error": null,
       "error_summary": null,
       "duration_seconds": 1265.2544946670532,
+      "runtime": {
+        "inference_seconds": 1266.1,
+        "basis": "measured",
+        "startup_seconds": 78.4,
+        "with_startup_seconds": 1344.5,
+        "token_share": 1.0,
+        "prompt_tokens_total": 61234,
+        "completion_tokens_total": 48210,
+        "seconds_per_1k_instances": 2110.1666666666665,
+        "span_start_s": 0.12,
+        "span_end_s": 1265.2544946670532
+      },
       "completion_tokens_total": 48210,
       "mean_completion_tokens": 80.35,
       "truncation_rate": 0.0,

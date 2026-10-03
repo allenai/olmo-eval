@@ -794,6 +794,7 @@
           ]
         },
         "metric": {
+          "description": "\"primary\" (each task's primary metric), \"metric:scorer\", or a runtime metric: \"runtime:inference\" or \"runtime:with_startup\" (seconds, lower is better; no instance-level pairing, so pairwise significance is not available for them).",
           "type": "string"
         },
         "n_boot": {
@@ -2680,6 +2681,22 @@
             "null"
           ]
         },
+        "gpu_count": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gpu_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "model": {
           "$ref": "#/definitions/ModelRef"
         },
@@ -2698,6 +2715,17 @@
         },
         "run_id": {
           "$ref": "#/definitions/RunId"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TaskRuntime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Task leaderboards only; null for suites."
         },
         "score": {
           "type": [
@@ -2751,7 +2779,10 @@
         "experiment_group",
         "author",
         "tied_with_leader",
-        "child_scores"
+        "child_scores",
+        "runtime",
+        "gpu_type",
+        "gpu_count"
       ],
       "type": "object"
     },
@@ -2881,6 +2912,7 @@
           ]
         },
         "metric": {
+          "description": "\"primary\" (each task's primary metric), \"metric:scorer\", or a runtime metric: \"runtime:inference\" or \"runtime:with_startup\" (seconds, lower is better; no instance-level pairing, so pairwise significance is not available for them).",
           "type": "string"
         },
         "n_boot": {
@@ -3560,6 +3592,7 @@
           "type": "number"
         },
         "metric": {
+          "description": "\"primary\" (each task's primary metric), \"metric:scorer\", or a runtime metric: \"runtime:inference\" or \"runtime:with_startup\" (seconds, lower is better; no instance-level pairing, so pairwise significance is not available for them).",
           "type": "string"
         },
         "n_boot": {
@@ -4127,6 +4160,24 @@
             "null"
           ]
         },
+        "processing_seconds": {
+          "description": "Seconds from processing_started_at until the last task finished.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "processing_started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When every inference worker was ready."
+        },
         "provider_init_seconds": {
           "anyOf": [
             {
@@ -4169,6 +4220,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "startup_seconds": {
+          "description": "See TaskRuntime.startup_seconds. Null for runs that predate runtime recording.",
+          "type": [
+            "number",
+            "null"
           ]
         },
         "status": {
@@ -4231,12 +4289,15 @@
         "num_tasks",
         "olmo_eval_version",
         "output_dir",
+        "processing_seconds",
+        "processing_started_at",
         "provider_init_seconds",
         "reproduce_command",
         "run_id",
         "siblings",
         "stale",
         "started_at",
+        "startup_seconds",
         "status",
         "suites_used",
         "tags",
@@ -4844,6 +4905,64 @@
         "total",
         "columns",
         "baseline"
+      ],
+      "type": "object"
+    },
+    "RuntimeBasis": {
+      "description": "How inference_seconds was obtained:\n- measured: the run contained only this task, so its processing time is the task's time.\n- attributed: from per-batch inference metrics split by the task's share of each batch.\n- estimated: the run's processing time times the task's share of the run's tokens.\n- not_recorded: the run predates runtime recording or lacks token counts.",
+      "enum": [
+        "measured",
+        "attributed",
+        "estimated",
+        "not_recorded"
+      ],
+      "type": "string"
+    },
+    "RuntimeMode": {
+      "description": "Selects which runtime a view shows.",
+      "enum": [
+        "inference",
+        "with_startup"
+      ],
+      "type": "string"
+    },
+    "RuntimeStats": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "median": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "n": {
+          "$ref": "#/definitions/Count"
+        },
+        "p90": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "n",
+        "median",
+        "p90",
+        "min",
+        "max"
       ],
       "type": "object"
     },
@@ -5715,6 +5834,7 @@
           ]
         },
         "duration_seconds": {
+          "description": "Seconds from the run's processing start until this task finished (shared workers).",
           "type": [
             "number",
             "null"
@@ -5829,6 +5949,9 @@
         "run_id": {
           "$ref": "#/definitions/RunId"
         },
+        "runtime": {
+          "$ref": "#/definitions/TaskRuntime"
+        },
         "score": {
           "type": [
             "number",
@@ -5894,6 +6017,7 @@
         "error",
         "error_summary",
         "duration_seconds",
+        "runtime",
         "completion_tokens_total",
         "mean_completion_tokens",
         "truncation_rate",
@@ -5961,6 +6085,272 @@
         "suites",
         "primary_metric",
         "last_run_at"
+      ],
+      "type": "object"
+    },
+    "TaskRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "$ref": "#/definitions/RuntimeBasis"
+        },
+        "completion_tokens_total": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inference_seconds": {
+          "description": "Inference time for this task alone.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "prompt_tokens_total": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seconds_per_1k_instances": {
+          "description": "inference_seconds per 1,000 instances.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "span_end_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "span_start_s": {
+          "description": "Wall-clock span within the run, in seconds after processing started.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "startup_seconds": {
+          "description": "The run's startup (model load, server start); excludes Beaker queueing.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "token_share": {
+          "description": "The task's share of the run's prompt plus completion tokens, 0 to 1.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "with_startup_seconds": {
+          "description": "inference_seconds plus the run's full startup: about what running this task alone takes.",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "inference_seconds",
+        "basis",
+        "startup_seconds",
+        "with_startup_seconds",
+        "token_share",
+        "prompt_tokens_total",
+        "completion_tokens_total",
+        "seconds_per_1k_instances",
+        "span_start_s",
+        "span_end_s"
+      ],
+      "type": "object"
+    },
+    "TaskRuntimeModelRow": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_count": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gpu_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inference": {
+          "$ref": "#/definitions/RuntimeStats"
+        },
+        "latest_score": {
+          "description": "Score of the model's latest run in this group.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "model": {
+          "$ref": "#/definitions/ModelRef"
+        },
+        "runs": {
+          "$ref": "#/definitions/Count"
+        },
+        "seconds_per_1k_instances": {
+          "$ref": "#/definitions/RuntimeStats"
+        },
+        "with_startup": {
+          "$ref": "#/definitions/RuntimeStats"
+        }
+      },
+      "required": [
+        "model",
+        "gpu_type",
+        "gpu_count",
+        "runs",
+        "inference",
+        "with_startup",
+        "seconds_per_1k_instances",
+        "latest_score"
+      ],
+      "type": "object"
+    },
+    "TaskRuntimePoint": {
+      "additionalProperties": false,
+      "properties": {
+        "date": {
+          "$ref": "#/definitions/DateTime"
+        },
+        "gpu_count": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gpu_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "$ref": "#/definitions/ModelRef"
+        },
+        "n": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "$ref": "#/definitions/RunId"
+        },
+        "runtime": {
+          "$ref": "#/definitions/TaskRuntime"
+        },
+        "score": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "task_result_id": {
+          "$ref": "#/definitions/TaskResultId"
+        }
+      },
+      "required": [
+        "run_id",
+        "task_result_id",
+        "model",
+        "date",
+        "gpu_type",
+        "gpu_count",
+        "score",
+        "n",
+        "runtime"
+      ],
+      "type": "object"
+    },
+    "TaskRuntimeResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "gpu_types": {
+          "description": "GPU types present, most runs first (for the filter).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MetricMeta"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "not_recorded": {
+          "$ref": "#/definitions/Count",
+          "description": "Runs of this variant whose runtime is not recorded."
+        },
+        "points": {
+          "description": "One point per finalized run with any runtime data, newest first, at most 2,000.",
+          "items": {
+            "$ref": "#/definitions/TaskRuntimePoint"
+          },
+          "type": "array"
+        },
+        "rows": {
+          "description": "One row per (model, GPU type, GPU count).",
+          "items": {
+            "$ref": "#/definitions/TaskRuntimeModelRow"
+          },
+          "type": "array"
+        },
+        "task_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_name",
+        "task_hash",
+        "meta",
+        "gpu_types",
+        "rows",
+        "points",
+        "not_recorded"
       ],
       "type": "object"
     },

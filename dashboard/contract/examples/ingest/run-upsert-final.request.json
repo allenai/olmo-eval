@@ -112,6 +112,9 @@
       "Llama-3.1-8B-Inst...-w0": 70.6639575958252,
       "Llama-3.1-8B-Inst...-w3": 70.69633603096008
     },
+    "startup_seconds": 78.4,
+    "processing_started_at": "2026-10-01T01:01:30.810000+00:00",
+    "processing_seconds": 1266.1,
     "errors": []
   },
   "model": {

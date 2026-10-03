@@ -397,11 +397,52 @@ export interface RunDetail extends RunSummary {
     notes: string | null;
     errors: RunError[];
     provider_init_seconds: { [worker: string]: number } | null;
+    /** See TaskRuntime.startup_seconds. Null for runs that predate runtime recording. */
+    startup_seconds: number | null;
+    /** When every inference worker was ready. */
+    processing_started_at: DateTime | null;
+    /** Seconds from processing_started_at until the last task finished. */
+    processing_seconds: number | null;
     /** Definitions of the suites stored with this run, outermost first. */
     suites_used: SuiteDef[];
     /** Other runs with the same launch_id. */
     siblings: RunSummary[];
     updated_at: DateTime;
+}
+
+// ---------------------------------------------------------------------------
+// Task runtime
+// ---------------------------------------------------------------------------
+
+/**
+ * How inference_seconds was obtained:
+ * - measured: the run contained only this task, so its processing time is the task's time.
+ * - attributed: from per-batch inference metrics split by the task's share of each batch.
+ * - estimated: the run's processing time times the task's share of the run's tokens.
+ * - not_recorded: the run predates runtime recording or lacks token counts.
+ */
+export type RuntimeBasis = "measured" | "attributed" | "estimated" | "not_recorded";
+
+/** Selects which runtime a view shows. */
+export type RuntimeMode = "inference" | "with_startup";
+
+export interface TaskRuntime {
+    /** Inference time for this task alone. */
+    inference_seconds: number | null;
+    basis: RuntimeBasis;
+    /** The run's startup (model load, server start); excludes Beaker queueing. */
+    startup_seconds: number | null;
+    /** inference_seconds plus the run's full startup: about what running this task alone takes. */
+    with_startup_seconds: number | null;
+    /** The task's share of the run's prompt plus completion tokens, 0 to 1. */
+    token_share: number | null;
+    prompt_tokens_total: Count | null;
+    completion_tokens_total: Count | null;
+    /** inference_seconds per 1,000 instances. */
+    seconds_per_1k_instances: number | null;
+    /** Wall-clock span within the run, in seconds after processing started. */
+    span_start_s: number | null;
+    span_end_s: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -443,7 +484,9 @@ export interface TaskResultRow {
     metrics: FlatMetrics;
     error: string | null;
     error_summary: JsonObject | null;
+    /** Seconds from the run's processing start until this task finished (shared workers). */
     duration_seconds: number | null;
+    runtime: TaskRuntime;
     completion_tokens_total: Count | null;
     mean_completion_tokens: number | null;
     /** Share of instances with finish_reason "length". */
@@ -782,6 +825,11 @@ export interface CompareRequestBase {
     subjects: SubjectKey[];
     group?: string | null;
     scope: string;
+    /**
+     * "primary" (each task's primary metric), "metric:scorer", or a runtime metric:
+     * "runtime:inference" or "runtime:with_startup" (seconds, lower is better; no
+     * instance-level pairing, so pairwise significance is not available for them).
+     */
     metric: string;
     alpha?: number;
     n_boot?: Count;
@@ -1159,6 +1207,10 @@ export interface LeaderboardRow {
     tied_with_leader: boolean;
     /** Suite leaderboards only: child score by child key ("task:<name>" or "suite:<name>"). */
     child_scores: { [childKey: string]: number | null } | null;
+    /** Task leaderboards only; null for suites. */
+    runtime: TaskRuntime | null;
+    gpu_type: string | null;
+    gpu_count: Count | null;
 }
 
 export interface LeaderboardResponse {
@@ -1335,4 +1387,55 @@ export interface UpdateViewRequest {
     name?: string;
     query?: string;
     shared?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/tasks/{task_name}/runtime?hash=&gpu_type=&family=&group=&user=
+// Runtime of every finalized run of a task variant (default: the most-run variant).
+// ---------------------------------------------------------------------------
+
+export interface RuntimeStats {
+    n: Count;
+    median: number | null;
+    p90: number | null;
+    min: number | null;
+    max: number | null;
+}
+
+export interface TaskRuntimeModelRow {
+    model: ModelRef;
+    gpu_type: string | null;
+    gpu_count: Count | null;
+    runs: Count;
+    inference: RuntimeStats;
+    with_startup: RuntimeStats;
+    seconds_per_1k_instances: RuntimeStats;
+    /** Score of the model's latest run in this group. */
+    latest_score: number | null;
+}
+
+export interface TaskRuntimePoint {
+    run_id: RunId;
+    task_result_id: TaskResultId;
+    model: ModelRef;
+    date: DateTime;
+    gpu_type: string | null;
+    gpu_count: Count | null;
+    score: number | null;
+    n: Count | null;
+    runtime: TaskRuntime;
+}
+
+export interface TaskRuntimeResponse {
+    task_name: string;
+    task_hash: string | null;
+    meta: MetricMeta | null;
+    /** GPU types present, most runs first (for the filter). */
+    gpu_types: string[];
+    /** One row per (model, GPU type, GPU count). */
+    rows: TaskRuntimeModelRow[];
+    /** One point per finalized run with any runtime data, newest first, at most 2,000. */
+    points: TaskRuntimePoint[];
+    /** Runs of this variant whose runtime is not recorded. */
+    not_recorded: Count;
 }

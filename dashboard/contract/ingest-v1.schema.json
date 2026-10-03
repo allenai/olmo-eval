@@ -780,7 +780,7 @@
               "type": "null"
             }
           ],
-          "description": "Prompt tokens when recorded (usually null today)."
+          "description": "Prompt tokens for this instance (log-likelihood requests: context plus continuation)."
         },
         "req_length": {
           "anyOf": [
@@ -1172,6 +1172,24 @@
             "null"
           ]
         },
+        "processing_seconds": {
+          "description": "Seconds from processing_started_at until the last task finished (inference and scoring).",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "processing_started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When every inference worker was ready. Task spans are measured from here."
+        },
         "provider_init_seconds": {
           "anyOf": [
             {
@@ -1196,6 +1214,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "startup_seconds": {
+          "description": "Seconds from olmo-eval starting until every inference worker was ready (model download and load, server start). Excludes Beaker queueing and job setup before olmo-eval starts.",
+          "type": [
+            "number",
+            "null"
           ]
         },
         "status": {
@@ -1546,6 +1571,13 @@
       "additionalProperties": false,
       "description": "Create or replace one task result. Upsert key: (run_id, task_name, task_hash). Replacing deletes the task result's stored instances; the client then sends all instances again.",
       "properties": {
+        "attributed_inference_seconds": {
+          "description": "Inference seconds attributed to this task from per-batch inference metrics (each batch's wall time split by the task's share of the batch's tokens). Null unless recorded.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "base_task": {
           "description": "Registered base task name, e.g. \"gsm8k\" for \"gsm8k:cot:olmo3\".",
           "type": [
@@ -1553,11 +1585,23 @@
             "null"
           ]
         },
+        "completion_tokens_total": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NonNegativeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Completion tokens over every request of the task, including failed instances."
+        },
         "config": {
           "$ref": "#/definitions/JsonObject",
           "description": "TaskConfig.to_dict() (metrics.json tasks[].config)."
         },
         "duration_seconds": {
+          "description": "Seconds from the run's processing_started_at until this task finished. Tasks share inference workers, so this is not the task's own cost; see first_request_at and the token totals for that.",
           "type": [
             "number",
             "null"
@@ -1578,6 +1622,17 @@
               "type": "null"
             }
           ]
+        },
+        "first_request_at": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the task's first request was sent to an inference worker."
         },
         "instance_count": {
           "$ref": "#/definitions/NonNegativeInteger",
@@ -1602,6 +1657,17 @@
               "type": "null"
             }
           ]
+        },
+        "last_completed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DateTime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the task's last instance finished."
         },
         "limit": {
           "anyOf": [
@@ -1652,6 +1718,17 @@
             "string",
             "null"
           ]
+        },
+        "prompt_tokens_total": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NonNegativeInteger"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prompt tokens over every request of the task, including failed instances."
         },
         "requests_path": {
           "anyOf": [

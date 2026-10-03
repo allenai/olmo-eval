@@ -178,6 +178,15 @@ export interface RunInfo {
     /** HarnessConfig.to_dict() (metrics.json "config"). */
     harness_config: JsonObject | null;
     provider_init_seconds: { [worker: string]: number } | null;
+    /**
+     * Seconds from olmo-eval starting until every inference worker was ready (model download
+     * and load, server start). Excludes Beaker queueing and job setup before olmo-eval starts.
+     */
+    startup_seconds?: number | null;
+    /** When every inference worker was ready. Task spans are measured from here. */
+    processing_started_at?: DateTime | null;
+    /** Seconds from processing_started_at until the last task finished (inference and scoring). */
+    processing_seconds?: number | null;
     errors: RunError[];
 }
 
@@ -327,7 +336,25 @@ export interface TaskResultIn {
     instances_failed: NonNegativeInteger | null;
     error: string | null;
     error_summary: JsonObject | null;
+    /**
+     * Seconds from the run's processing_started_at until this task finished. Tasks share
+     * inference workers, so this is not the task's own cost; see first_request_at and the
+     * token totals for that.
+     */
     duration_seconds: number | null;
+    /** When the task's first request was sent to an inference worker. */
+    first_request_at?: DateTime | null;
+    /** When the task's last instance finished. */
+    last_completed_at?: DateTime | null;
+    /** Prompt tokens over every request of the task, including failed instances. */
+    prompt_tokens_total?: NonNegativeInteger | null;
+    /** Completion tokens over every request of the task, including failed instances. */
+    completion_tokens_total?: NonNegativeInteger | null;
+    /**
+     * Inference seconds attributed to this task from per-batch inference metrics (each batch's
+     * wall time split by the task's share of the batch's tokens). Null unless recorded.
+     */
+    attributed_inference_seconds?: number | null;
     predictions_path: RelativePath | null;
     requests_path: RelativePath | null;
     /** Registered suites that contain this task spec (static membership). */
@@ -376,7 +403,7 @@ export interface InstanceIn {
     finish_reason: string | null;
     /** Sum over all generated samples (multiple choice: model_output[0]). */
     completion_tokens: NonNegativeInteger | null;
-    /** Prompt tokens when recorded (usually null today). */
+    /** Prompt tokens for this instance (log-likelihood requests: context plus continuation). */
     prompt_tokens: NonNegativeInteger | null;
     /** len(model_output). */
     num_outputs: NonNegativeInteger;
