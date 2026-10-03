@@ -128,6 +128,12 @@ class BFCLMultiTurnScaffold(Scaffold):
                     # reference implementation grades such an entry wrong rather
                     # than abandoning the run, so the rollout ends here.
                     context_overflow = request_error(replies) or "context overflow"
+                    logger.warning(
+                        "BFCL multi-turn entry %s outgrew the context window on turn %s "
+                        "and is graded wrong.",
+                        (trace_metadata or {}).get("instance_id", "?"),
+                        turn_index,
+                    )
                     break
                 error = request_error(replies)
                 if error is not None:
