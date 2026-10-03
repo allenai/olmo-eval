@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from olmo_eval.common.types import LMRequest
+
+logger = logging.getLogger(__name__)
+_DROPPED_SYSTEM_WARNED: list[bool] = []
 
 
 def chat_messages_for_request(request: LMRequest) -> tuple[dict, ...]:
@@ -67,17 +71,16 @@ def template_has_system_role(chat_template: str | None) -> bool:
     return chat_template is None or "system" in chat_template
 
 
-def fold_system_turns(chat: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Move system turns' content parts to the start of the first user turn.
+def drop_system_turns(chat: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The conversation without its system turns, for chat templates with no system role.
 
-    For chat templates with no system role, which otherwise reject the conversation.
+    Such templates reject a system turn, and the model was never trained on system text,
+    so moving it into the user turn puts unfamiliar text in front of the question (it made
+    Molmo2-4B answer questions with pointing output). The rest of the conversation is sent
+    unchanged; a warning is logged once.
     """
-    system_parts = [part for m in chat if m["role"] == "system" for part in m["content"]]
-    if not system_parts:
-        return chat
-    folded = [m for m in chat if m["role"] != "system"]
-    for i, msg in enumerate(folded):
-        if msg["role"] == "user":
-            folded[i] = {**msg, "content": [*system_parts, *msg["content"]]}
-            return folded
-    return [{"role": "user", "content": system_parts}, *folded]
+    kept = [m for m in chat if m["role"] != "system"]
+    if len(kept) != len(chat) and not _DROPPED_SYSTEM_WARNED:
+        _DROPPED_SYSTEM_WARNED.append(True)
+        logger.warning("The chat template has no system role; dropping the system turn.")
+    return kept

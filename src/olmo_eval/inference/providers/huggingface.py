@@ -19,7 +19,7 @@ from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.request_utils import (
     chat_messages_for_request,
     chat_with_images,
-    fold_system_turns,
+    drop_system_turns,
     template_has_system_role,
 )
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
@@ -456,8 +456,8 @@ class HuggingFaceProvider(InferenceProvider):
         Mirrors the released Molmo2 HF eval: a single user turn whose content is
         the image(s) followed by the question text, unless the request places its
         images with ``{"type": "image"}`` parts. A system message (if present) is
-        preserved as a text-only turn, or moved into the user turn when the chat
-        template has no system role.
+        preserved as a text-only turn, or dropped when the chat template has no
+        system role.
         """
         image_parts = [{"type": "image", "image": img} for img in (images or ())]
         chat = chat_with_images(chat_messages_for_request(request), image_parts)
@@ -465,7 +465,7 @@ class HuggingFaceProvider(InferenceProvider):
             self.tokenizer, "chat_template", None
         )
         if not template_has_system_role(template):
-            chat = fold_system_turns(chat)
+            chat = drop_system_turns(chat)
         return chat
 
     def _generate_multimodal(
