@@ -12,6 +12,11 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.errors import (
+    CONTEXT_OVERFLOW_KEY,
+    REQUEST_ERROR_KEY,
+    is_context_overflow,
+)
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 from olmo_eval.inference.utils import run_async
@@ -1098,7 +1103,7 @@ class VLLMServerProvider(InferenceProvider):
         params = self._default_sampling_params(sampling_params)
 
         async def process(req: LMRequest) -> list[LMOutput]:
-            return await self._generate_single_async(req, params)
+            return await self._generate_or_mark_overflow(req, params)
 
         results = await dispatch_concurrent(
             requests,
@@ -1107,6 +1112,29 @@ class VLLMServerProvider(InferenceProvider):
             max_retries=self.max_retries,
         )
         return [r if r is not None else [] for r in results]
+
+    async def _generate_or_mark_overflow(
+        self, request: LMRequest, params: SamplingParams
+    ) -> list[LMOutput]:
+        """Generate, recording a context overflow on the reply instead of raising.
+
+        A prompt too long for the window fails the same way every time, so it is
+        not worth retrying; marking it lets the caller see why the request failed.
+        """
+        try:
+            return await self._generate_single_async(request, params)
+        except Exception as exc:
+            if not is_context_overflow(exc):
+                raise
+            return [
+                LMOutput(
+                    text="",
+                    metadata={
+                        REQUEST_ERROR_KEY: f"context overflow: {exc}",
+                        CONTEXT_OVERFLOW_KEY: True,
+                    },
+                )
+            ]
 
     def generate(
         self,

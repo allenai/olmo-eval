@@ -174,6 +174,19 @@ def test_a_rollout_matching_the_ground_truth_scores_one() -> None:
     assert BFCLMultiTurnScorer().score(instance, output) == 1.0
 
 
+def test_a_rollout_that_outgrew_the_context_window_scores_zero() -> None:
+    task = task_with_stubbed_data()
+    instance = task.process_doc(ENTRY)
+    assert instance is not None
+    # Even calls that would have passed count for nothing once the conversation
+    # overflowed, as in the reference implementation.
+    output = LMOutput(text="", metadata={"bfcl_context_overflow": "context overflow: too long"})
+    output.extracted_answer = [[[{"mkdir": {"dir_name": "temp"}}]], []]
+
+    assert BFCLMultiTurnScorer().score(instance, output) == 0.0
+    assert output.metadata["bfcl_error"]["error_type"] == "multi_turn:context_overflow"
+
+
 def test_calling_on_a_turn_that_expects_nothing_scores_zero() -> None:
     task = task_with_stubbed_data()
     instance = task.process_doc(ENTRY)

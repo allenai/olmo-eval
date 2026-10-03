@@ -33,7 +33,12 @@ from typing import Any, ClassVar
 from olmo_eval.common.formatters import Formatter
 from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.scorers.bfcl.multi_turn import calls_from_decoded, multi_turn_checker
+from olmo_eval.common.scorers.bfcl.multi_turn import (
+    CONTEXT_OVERFLOW_ERROR_TYPE,
+    CONTEXT_OVERFLOW_METADATA_KEY,
+    calls_from_decoded,
+    multi_turn_checker,
+)
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -170,6 +175,14 @@ class BFCLMultiTurnScorer(Scorer):
                 "under a harness with scaffold=bfcl_multi_turn, for example "
                 "`--harness bfcl_multi_turn`."
             )
+
+        overflow = (output.metadata or {}).get(CONTEXT_OVERFLOW_METADATA_KEY)
+        if overflow:
+            output.metadata["bfcl_error"] = {
+                "error_type": CONTEXT_OVERFLOW_ERROR_TYPE,
+                "error": str(overflow),
+            }
+            return 0.0
 
         metadata = instance.metadata
         calls = [[calls_from_decoded(step) for step in turn] for turn in rollout]
