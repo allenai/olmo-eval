@@ -26,8 +26,8 @@ GPT-4.1 judge (:mod:`olmo_eval.evals.vision.scoring.pixelrag`): ``accuracy`` is 
 graded correct, the paper's number, and NQ and NQ-Tables also report exact match.
 
 How the turn reaches the model depends on its chat template: one without a system role (Molmo2)
-gets the system prompt at the start of the user turn, and Molmo2's places every image before the
-text.
+gets no system prompt (moving it into the user turn made Molmo2-4B answer with pointing output),
+and Molmo2's places every image before the text.
 
 The questions are instruction-following QA over several images, so the tasks target
 instruction-tuned checkpoints and have no stage-1 prompt form. Data is fetched from the Hub at a
