@@ -6,6 +6,14 @@ import pytest
 pytest_plugins = ["anyio"]
 
 
+@pytest.fixture(autouse=True)
+def _no_results_upload(monkeypatch):
+    """Keep tests from uploading results to the dashboard ingest service."""
+    monkeypatch.setenv("OLMO_EVAL_UPLOAD", "0")
+    monkeypatch.delenv("OLMO_EVAL_API_URL", raising=False)
+    monkeypatch.delenv("OLMO_EVAL_LAUNCH_ID", raising=False)
+
+
 @pytest.fixture
 def anyio_backend():
     """Use only asyncio backend for async tests (trio not installed)."""
@@ -24,7 +32,7 @@ def pytest_addoption(parser):
         "--no-docker",
         action="store_true",
         default=False,
-        help="Skip Docker-based integration tests (postgres, localstack)",
+        help="Skip Docker-based integration tests",
     )
 
 

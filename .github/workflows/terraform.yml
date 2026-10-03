@@ -1,0 +1,71 @@
+name: Terraform
+on:
+    pull_request:
+        branches: [main]
+        paths:
+            - infra/terraform/**
+            - .github/workflows/terraform.yml
+    push:
+        branches: [main]
+        paths:
+            - infra/terraform/**
+            - .github/workflows/terraform.yml
+
+# id-token lets the job authenticate to GCP as Skiff2's GitHub Actions service account.
+permissions:
+    contents: read
+    id-token: write
+
+# Applies queue in their own group so a PR plan can never replace a pending apply. Overlapping
+# runs are serialized by the state lock in the GCS backend (see -lock-timeout below).
+concurrency:
+    group: terraform-${{ github.event_name == 'push' && 'apply' || github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    terraform:
+        name: Terraform
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: infra/terraform
+        env:
+            # Fork PRs get no OIDC token, so they only run the offline checks.
+            TRUSTED: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        steps:
+            - uses: actions/checkout@v6
+            - uses: hashicorp/setup-terraform@v4
+              with:
+                  terraform_version: "1.16.x"
+                  terraform_wrapper: false
+            - run: terraform fmt -check -recursive
+            - run: terraform init -backend=false -input=false
+            - run: terraform validate
+
+            - name: Authenticate to Google Cloud
+              if: env.TRUSTED == 'true'
+              uses: google-github-actions/auth@v3
+              with:
+                  workload_identity_provider: ${{ vars.SKIFF2_WORKLOAD_IDENTITY_PROVIDER }}
+                  service_account: ${{ vars.SKIFF2_SERVICE_ACCOUNT }}
+            - name: Init with the state backend
+              if: env.TRUSTED == 'true'
+              run: terraform init -input=false -reconfigure
+
+            # The plan goes to the job summary. Sensitive values (the uploader key) are redacted by
+            # Terraform, but the rest is visible to anyone who can see this public repo's Actions.
+            - name: Plan
+              if: env.TRUSTED == 'true' && github.event_name == 'pull_request'
+              run: |
+                  set -o pipefail
+                  terraform plan -input=false -no-color -lock-timeout=10m | tee plan.txt
+                  {
+                      echo '### Terraform plan'
+                      echo '```'
+                      head -c 60000 plan.txt
+                      echo '```'
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Apply
+              if: env.TRUSTED == 'true' && github.event_name == 'push'
+              run: terraform apply -input=false -auto-approve -no-color -lock-timeout=10m

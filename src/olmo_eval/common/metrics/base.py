@@ -81,10 +81,10 @@ class Metric(ABC):
     def supports_pairwise_scorer_fallback(self) -> bool:
         """Whether scorer-level instance values match the metric's per-instance signal.
 
-        Pairwise analysis sometimes has to fall back from an exact per-instance metric key
-        (for example ``accuracy:exact_match``) to the stored scorer channel
-        (for example ``exact_match:exact_match``). That fallback is only valid when the
-        task-level metric is literally an average of per-instance scorer values.
+        When a prediction has no exact per-instance value for a metric key (for example
+        ``accuracy:exact_match``), ``augment_prediction_instance_metrics`` fills it from the
+        scorer channel (for example ``exact_match:exact_match``). That fallback is only valid
+        when the task-level metric is literally an average of per-instance scorer values.
 
         Metrics that aggregate across multiple continuations, weight instances unevenly,
         or otherwise derive the final value from richer response structure should override
@@ -97,11 +97,12 @@ class Metric(ABC):
         return True
 
     def pairwise_display_format(self) -> str:
-        """Return the preferred viewer formatting family for this metric.
+        """Return the display format the dashboard uses for this metric.
 
-        ``percentage`` means the metric is naturally interpreted on a 0-1 scale and
-        should be rendered as percentages / percentage-point deltas. ``raw`` means the
-        metric should stay in its native numeric units.
+        The uploader sends it as metric metadata. ``percentage`` means the metric is
+        naturally interpreted on a 0-1 scale and should be rendered as percentages /
+        percentage-point deltas. ``raw`` means the metric should stay in its native
+        numeric units.
         """
         percentage_names = {"accuracy", "f1", "recall", "tool_accuracy"}
         if self.name in percentage_names:

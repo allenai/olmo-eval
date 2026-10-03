@@ -1,9 +1,8 @@
 """Run command for olmo-eval CLI.
 
 This module provides the main 'run' command for executing evaluations.
-Configuration parsing, storage setup, and runner creation are delegated to:
+Configuration parsing and runner creation are delegated to:
 - config.py: RunConfigBuilder for parsing and validating CLI arguments
-- storage.py: StorageSetup for initializing storage backends
 - factory.py: RunnerFactory for creating appropriate runners
 - options.py: Option decorators for logical grouping
 """
@@ -16,7 +15,7 @@ from olmo_eval.cli.run.options import (
     inspect_options,
     output_options,
     parallelism_options,
-    storage_options,
+    upload_options,
 )
 from olmo_eval.cli.utils import (
     OrderedMultiOption,
@@ -64,7 +63,7 @@ from olmo_eval.cli.utils import (
 # Grouped options via decorators
 @harness_options
 @parallelism_options
-@storage_options
+@upload_options
 @experiment_options
 @output_options
 @inspect_options
@@ -81,18 +80,10 @@ def run(
     # Parallelism options
     num_gpus: int,
     parallelism: int,
-    # Storage options
-    store: bool,
-    s3_bucket: str | None,
-    s3_prefix: str | None,
-    s3_group: str | None,
-    s3_endpoint_url: str | None,
-    s3_region: str,
-    db_host: str,
-    db_port: int,
-    db_name: str,
-    db_user: str,
-    db_password: str,
+    # Upload options
+    upload: bool | None,
+    api_url: str | None,
+    tags: tuple[str, ...],
     # Experiment options
     experiment_name: str | None,
     experiment_group: str | None,
@@ -123,9 +114,15 @@ def run(
 
     from olmo_eval.cli.run.config import RunConfigBuilder
     from olmo_eval.cli.run.factory import RunnerFactory
-    from olmo_eval.cli.run.storage import StorageSetup
     from olmo_eval.common.logging import configure_logging
     from olmo_eval.runners import ValidationError
+    from olmo_eval.upload import mark_run_failed, resolve_upload_config
+    from olmo_eval.upload.config import upload_param_hint
+
+    try:
+        upload_config = resolve_upload_config(upload, api_url, tags)
+    except ValueError as e:
+        raise click.BadParameter(str(e), param_hint=upload_param_hint(e)) from None
 
     # Process ordered args to associate overrides with tasks/harness
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
@@ -159,17 +156,6 @@ def run(
         output_dir=output_dir,
         num_gpus=num_gpus,
         parallelism=parallelism,
-        store=store,
-        s3_bucket=s3_bucket,
-        s3_prefix=s3_prefix,
-        s3_group=s3_group,
-        s3_endpoint_url=s3_endpoint_url,
-        s3_region=s3_region,
-        db_host=db_host,
-        db_port=db_port,
-        db_name=db_name,
-        db_user=db_user,
-        db_password=db_password,
         experiment_name=experiment_name,
         experiment_group=experiment_group,
         save_predictions=save_predictions,
@@ -201,24 +187,8 @@ def run(
         )
     )
 
-    # Set up storage backends
-    storage_setup = StorageSetup(
-        store=store,
-        db_host=db_host,
-        db_port=db_port,
-        db_name=db_name,
-        db_user=db_user,
-        db_password=db_password,
-        s3_bucket=s3_bucket,
-        s3_prefix=s3_prefix,
-        s3_group=s3_group,
-        s3_endpoint_url=s3_endpoint_url,
-        s3_region=s3_region,
-    )
-    storages, s3_config = storage_setup.setup()
-
     # Create runner factory
-    factory = RunnerFactory(run_config, storages, s3_config)
+    factory = RunnerFactory(run_config, upload_config)
 
     # Create and run the appropriate runner
     runner = factory.create()
@@ -237,4 +207,5 @@ def run(
         except Exception as e:
             console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
             console.print_exception()
+            mark_run_failed(runner.output_dir, upload_config, error=str(e))
             raise SystemExit(1) from None
