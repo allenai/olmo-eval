@@ -19,71 +19,83 @@ number, which averages the executable categories in.
 
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, register
 
-NON_LIVE_SIMPLE = register(
-    Suite(
-        name="bfcl:non_live_simple",
-        tasks=("bfcl_simple", "bfcl_java", "bfcl_javascript"),
-        aggregation=AggregationStrategy.AVERAGE,
-        description="BFCL non-live simple AST, across languages",
-    )
+#: Suffix appended to every task spec in a suite, one per prompting regime.
+REGIMES: tuple[tuple[str, str], ...] = (
+    ("", "native function calling"),
+    (":prompt", "BFCL's prompting mode"),
+    (":base", "completion prompting with exemplars"),
 )
 
-_AST_TERMS: tuple[str | Suite, ...] = (
-    NON_LIVE_SIMPLE,
-    "bfcl_multiple",
-    "bfcl_parallel",
-    "bfcl_parallel_multiple",
+CATEGORIES: tuple[str, ...] = (
+    "simple",
+    "multiple",
+    "parallel",
+    "parallel_multiple",
+    "java",
+    "javascript",
+    "irrelevance",
+    "live_simple",
+    "live_multiple",
+    "live_parallel",
+    "live_parallel_multiple",
+    "live_irrelevance",
+    "live_relevance",
 )
 
-register(
-    Suite(
-        name="bfcl:non_live_ast",
-        tasks=_AST_TERMS,
-        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description="BFCL non-live AST summary",
-    )
-)
 
-NON_LIVE = register(
-    Suite(
-        name="bfcl:non_live",
-        tasks=(*_AST_TERMS, "bfcl_irrelevance"),
-        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description="BFCL non-live AST summary with irrelevance",
+def _register_regime(suffix: str, description: str) -> None:
+    """Register the suite family for one prompting regime."""
+    simple = register(
+        Suite(
+            name=f"bfcl:non_live_simple{suffix}",
+            tasks=(f"bfcl_simple{suffix}", f"bfcl_java{suffix}", f"bfcl_javascript{suffix}"),
+            aggregation=AggregationStrategy.AVERAGE,
+            description=f"BFCL non-live simple AST, across languages ({description})",
+        )
     )
-)
 
-register(
-    Suite(
-        name="bfcl",
-        tasks=(NON_LIVE, "bfcl_live"),
-        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description="BFCL v3 single-turn overall",
+    ast_terms: tuple[str | Suite, ...] = (
+        simple,
+        f"bfcl_multiple{suffix}",
+        f"bfcl_parallel{suffix}",
+        f"bfcl_parallel_multiple{suffix}",
     )
-)
+    register(
+        Suite(
+            name=f"bfcl:non_live_ast{suffix}",
+            tasks=ast_terms,
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+            description=f"BFCL non-live AST summary ({description})",
+        )
+    )
 
-register(
-    Suite(
-        name="bfcl:categories",
-        tasks=tuple(
-            f"bfcl_{category}"
-            for category in (
-                "simple",
-                "multiple",
-                "parallel",
-                "parallel_multiple",
-                "java",
-                "javascript",
-                "irrelevance",
-                "live_simple",
-                "live_multiple",
-                "live_parallel",
-                "live_parallel_multiple",
-                "live_irrelevance",
-                "live_relevance",
-            )
-        ),
-        aggregation=AggregationStrategy.DISPLAY_ONLY,
-        description="Every BFCL v3 single-turn category, reported separately",
+    non_live = register(
+        Suite(
+            name=f"bfcl:non_live{suffix}",
+            tasks=(*ast_terms, f"bfcl_irrelevance{suffix}"),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+            description=f"BFCL non-live AST summary with irrelevance ({description})",
+        )
     )
-)
+
+    register(
+        Suite(
+            name=f"bfcl{suffix}",
+            tasks=(non_live, f"bfcl_live{suffix}"),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+            description=f"BFCL v3 single-turn overall ({description})",
+        )
+    )
+
+    register(
+        Suite(
+            name=f"bfcl:categories{suffix}",
+            tasks=tuple(f"bfcl_{category}{suffix}" for category in CATEGORIES),
+            aggregation=AggregationStrategy.DISPLAY_ONLY,
+            description=f"Every BFCL v3 single-turn category, reported separately ({description})",
+        )
+    )
+
+
+for _suffix, _description in REGIMES:
+    _register_regime(_suffix, _description)
