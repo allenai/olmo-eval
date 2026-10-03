@@ -145,6 +145,9 @@ def _run_fields(req: s.RunUpsertRequest) -> dict[str, Any]:
         "output_dir": run.output_dir,
         "harness_config": run.harness_config,
         "provider_init_seconds": run.provider_init_seconds,
+        "startup_seconds": derive.finite_or_none(run.startup_seconds),
+        "processing_started_at": run.processing_started_at,
+        "processing_seconds": derive.finite_or_none(run.processing_seconds),
         "errors": [e.model_dump(mode="json") for e in run.errors],
         "client": req.client.model_dump(mode="json"),
     }
@@ -459,8 +462,14 @@ async def upsert_task_result(
         "error": req.error,
         "error_summary": req.error_summary,
         "duration_seconds": req.duration_seconds,
-        "completion_tokens_total": None,
-        "prompt_tokens_total": None,
+        "first_request_at": req.first_request_at,
+        "last_completed_at": req.last_completed_at,
+        "attributed_inference_seconds": derive.finite_or_none(req.attributed_inference_seconds),
+        "reported_prompt_tokens_total": req.prompt_tokens_total,
+        "reported_completion_tokens_total": req.completion_tokens_total,
+        # Replaced when the run completes (finalize_task_result).
+        "completion_tokens_total": req.completion_tokens_total,
+        "prompt_tokens_total": req.prompt_tokens_total,
         "mean_completion_tokens": None,
         "truncation_rate": None,
         "finish_reason_counts": {},
@@ -779,6 +788,12 @@ def vector_stats(rows: Sequence[Sequence[Any]], score: float | None) -> VectorSt
     )
 
 
+def _first_not_none(reported: int | None, summed: Any) -> int | None:
+    if reported is not None:
+        return int(reported)
+    return int(summed) if summed is not None else None
+
+
 async def finalize_task_result(
     session: AsyncSession, tr: TaskResult, client_meta: dict[str, Any], ts: datetime
 ) -> None:
@@ -825,13 +840,14 @@ async def finalize_task_result(
         tr.higher_is_better = primary["higher_is_better"]
         tr.display_format = primary["display_format"]
 
-    # 6. Token and finish-reason statistics.
+    # 6. Token and finish-reason statistics. The task-level totals the client reported cover
+    # every request (failed instances too), so they win over the sums of stored instances.
     total, comp_sum, comp_avg, prompt_sum, n_length = (
         await session.execute(_TOKENS_SQL, {"tid": tid})
     ).one()
-    tr.completion_tokens_total = int(comp_sum) if comp_sum is not None else None
+    tr.completion_tokens_total = _first_not_none(tr.reported_completion_tokens_total, comp_sum)
     tr.mean_completion_tokens = float(comp_avg) if comp_avg is not None else None
-    tr.prompt_tokens_total = int(prompt_sum) if prompt_sum is not None else None
+    tr.prompt_tokens_total = _first_not_none(tr.reported_prompt_tokens_total, prompt_sum)
     tr.truncation_rate = (n_length / total) if total else None
     reasons = (await session.execute(_REASONS_SQL, {"tid": tid})).all()
     tr.finish_reason_counts = {reason: int(count) for reason, count in reasons}

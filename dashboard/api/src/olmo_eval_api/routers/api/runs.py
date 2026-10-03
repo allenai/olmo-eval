@@ -451,6 +451,9 @@ async def build_run_detail(session: Any, run_id: str) -> a.RunDetail:
         notes=row["notes"],
         errors=[a.RunError(task=e.get("task"), error=e.get("error", "")) for e in row["errors"]],
         provider_init_seconds=row["provider_init_seconds"],
+        startup_seconds=row["startup_seconds"],
+        processing_started_at=row["processing_started_at"],
+        processing_seconds=row["processing_seconds"],
         suites_used=[
             a.SuiteDef(
                 name=s["suite_name"],

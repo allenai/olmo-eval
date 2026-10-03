@@ -189,6 +189,12 @@ class Run(SQLModel, table=True):
     output_dir: str | None = _text()
     harness_config: dict[str, Any] | None = _jsonb(nullable=True)
     provider_init_seconds: dict[str, float] | None = _jsonb(nullable=True)
+    # Seconds from olmo-eval starting until every inference worker was ready.
+    startup_seconds: float | None = _float()
+    # When every inference worker was ready; task spans are measured from here.
+    processing_started_at: datetime | None = _ts(nullable=True)
+    # Seconds from processing_started_at until the last task finished.
+    processing_seconds: float | None = _float()
     errors: list[dict[str, Any]] = _jsonb(default="[]")
     client: dict[str, Any] | None = _jsonb(nullable=True)
     gcs_prefix: str = _text(nullable=False)
@@ -268,7 +274,18 @@ class TaskResult(SQLModel, table=True):
     instances_stored: int = _int(nullable=False, default=0)
     error: str | None = _text()
     error_summary: dict[str, Any] | None = _jsonb(nullable=True)
+    # Seconds from the run's processing start until this task finished (shared workers, so not
+    # the task's own cost; see services/runtime.py).
     duration_seconds: float | None = _float()
+    first_request_at: datetime | None = _ts(nullable=True)
+    last_completed_at: datetime | None = _ts(nullable=True)
+    attributed_inference_seconds: float | None = _float()
+    # Task-level token totals as the client reported them (every request, including failed
+    # instances); null for older clients.
+    reported_prompt_tokens_total: int | None = _int(BigInteger)
+    reported_completion_tokens_total: int | None = _int(BigInteger)
+    # Set when the run completes: the reported total when present, else the sum over stored
+    # instances.
     completion_tokens_total: int | None = _int(BigInteger)
     prompt_tokens_total: int | None = _int(BigInteger)
     mean_completion_tokens: float | None = _float()

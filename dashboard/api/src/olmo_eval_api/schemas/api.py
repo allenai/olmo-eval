@@ -32,6 +32,8 @@ MetricKind = Literal["binary", "bounded", "unbounded"]
 ModelId = Annotated[str, Field(pattern="^[0-9a-f]{12}$")]
 RunId = Annotated[str, Field(pattern="^[a-z0-9]{6,32}$")]
 RunStatus = Literal["running", "complete", "partial", "failed"]
+RuntimeBasis = Literal["measured", "attributed", "estimated", "not_recorded"]
+RuntimeMode = Literal["inference", "with_startup"]
 SearchResultType = Literal["run", "model", "task", "suite", "group", "user", "id"]
 SubjectKey = Annotated[str, Field(pattern="^(r:[a-z0-9]{6,32}|m:[0-9a-f]{12})$")]
 UploadState = Literal["uploading", "complete"]
@@ -629,6 +631,19 @@ class SuiteChild(_Response):
     type: Literal["task", "suite"]
 
 
+class TaskRuntime(_Response):
+    basis: RuntimeBasis
+    completion_tokens_total: int | None
+    inference_seconds: float | None
+    prompt_tokens_total: int | None
+    seconds_per_1k_instances: float | None
+    span_end_s: float | None
+    span_start_s: float | None
+    startup_seconds: float | None
+    token_share: float | None
+    with_startup_seconds: float | None
+
+
 class LeaderboardRow(_Response):
     author: str | None
     child_scores: dict[str, float | None] | None
@@ -636,10 +651,13 @@ class LeaderboardRow(_Response):
     ci_low: float | None
     date: datetime
     experiment_group: str | None
+    gpu_count: int | None
+    gpu_type: str | None
     model: ModelRef
     n: int | None
     rank: int
     run_id: RunId
+    runtime: TaskRuntime | None
     score: float | None
     stderr: float | None
     subject: SubjectKey
@@ -932,12 +950,15 @@ class RunDetail(_Response):
     num_tasks: int
     olmo_eval_version: str | None
     output_dir: str | None
+    processing_seconds: float | None
+    processing_started_at: datetime | None
     provider_init_seconds: dict[str, float] | None
     reproduce_command: str | None
     run_id: RunId
     siblings: list[RunSummary]
     stale: bool
     started_at: datetime | None
+    startup_seconds: float | None
     status: RunStatus
     suites_used: list[SuiteDef]
     tags: list[str]
@@ -1044,6 +1065,7 @@ class TaskResultRow(_Response):
     primary_metric: str | None
     requests_uri: str | None
     run_id: RunId
+    runtime: TaskRuntime
     score: float | None
     score_is_mean: bool
     split: str | None
@@ -1086,6 +1108,14 @@ class RunsListResponse(_Response):
     items: list[RunRow]
     next_cursor: str | None
     total: int
+
+
+class RuntimeStats(_Response):
+    max: float | None
+    median: float | None
+    min: float | None
+    n: int
+    p90: float | None
 
 
 class SavedView(_Response):
@@ -1210,6 +1240,39 @@ class TaskRow(_Response):
     n_variants: int
     primary_metric: str | None
     suites: list[str]
+    task_name: str
+
+
+class TaskRuntimeModelRow(_Response):
+    gpu_count: int | None
+    gpu_type: str | None
+    inference: RuntimeStats
+    latest_score: float | None
+    model: ModelRef
+    runs: int
+    seconds_per_1k_instances: RuntimeStats
+    with_startup: RuntimeStats
+
+
+class TaskRuntimePoint(_Response):
+    date: datetime
+    gpu_count: int | None
+    gpu_type: str | None
+    model: ModelRef
+    n: int | None
+    run_id: RunId
+    runtime: TaskRuntime
+    score: float | None
+    task_result_id: int
+
+
+class TaskRuntimeResponse(_Response):
+    gpu_types: list[str]
+    meta: MetricMeta | None
+    not_recorded: int
+    points: list[TaskRuntimePoint]
+    rows: list[TaskRuntimeModelRow]
+    task_hash: str | None
     task_name: str
 
 

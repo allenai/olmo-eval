@@ -189,8 +189,55 @@ async def test_contract_example_round_trip(client: httpx.AsyncClient, session: A
         is False
     )
     assert row["finish_reason_counts"] == {"stop": 3}
-    assert row["completion_tokens_total"] == 59 + 9 + 2
+    # The client's task-level totals win over the sums of the three stored instances.
+    assert row["completion_tokens_total"] == 398112
+    assert row["prompt_tokens_total"] == 61234
+    assert row["reported_completion_tokens_total"] == 398112
+    assert row["first_request_at"] is not None and row["last_completed_at"] is not None
+    assert row["attributed_inference_seconds"] is None
     assert row["finalized_at"] is not None
+    assert run["startup_seconds"] == 78.4
+    assert run["processing_seconds"] == 1266.1
+    assert run["processing_started_at"] is not None
+
+
+async def test_old_client_payloads_ingest(client: httpx.AsyncClient, session: Any) -> None:
+    """Payloads without the runtime fields still ingest; token totals come from instances."""
+    final = load_example("ingest/run-upsert-final.request.json")
+    for key in ("startup_seconds", "processing_started_at", "processing_seconds"):
+        del final["run"][key]
+    assert (await client.put(f"/v1/runs/{RUN_ID}", json=final)).status_code == 200
+    task = load_example("ingest/task-result.request.json")
+    for key in (
+        "first_request_at",
+        "last_completed_at",
+        "prompt_tokens_total",
+        "completion_tokens_total",
+        "attributed_inference_seconds",
+    ):
+        del task[key]
+    tr = (await client.post(f"/v1/runs/{RUN_ID}/task-results", json=task)).json()
+    response = await client.post(
+        f"/v1/task-results/{tr['task_result_id']}/instances",
+        json=load_example("ingest/instances.request.json"),
+    )
+    assert response.status_code == 200
+    response = await client.post(
+        f"/v1/runs/{RUN_ID}/complete", json=load_example("ingest/complete.request.json")
+    )
+    assert response.status_code == 200
+    row = (await session.execute(text("SELECT * FROM task_results"))).mappings().one()
+    assert row["completion_tokens_total"] == 59 + 9 + 2
+    assert row["reported_completion_tokens_total"] is None
+    assert row["first_request_at"] is None
+    run = (await session.execute(text("SELECT * FROM runs"))).mappings().one()
+    assert run["startup_seconds"] is None and run["processing_seconds"] is None
+    results = (await client.get(f"/api/runs/{RUN_ID}/task-results")).json()
+    runtime = results["items"][0]["runtime"]
+    assert runtime["basis"] == "not_recorded"
+    assert runtime["inference_seconds"] is None
+    # Older runs fall back to the slowest provider init for startup.
+    assert runtime["startup_seconds"] == max(final["run"]["provider_init_seconds"].values())
 
 
 async def test_reupload_is_idempotent(client: httpx.AsyncClient, session: Any) -> None:

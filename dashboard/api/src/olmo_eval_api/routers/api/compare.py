@@ -23,6 +23,7 @@ from olmo_eval_api.services.read_suites import (
     score_suite,
     tree,
 )
+from olmo_eval_api.services.runtime import runtimes_for
 from olmo_eval_api.services.subjects import (
     SideLoader,
     Subject,
@@ -36,10 +37,13 @@ from olmo_eval_api.stats.mde import mde80
 from olmo_eval_api.stats.paired import (
     MAX_PAIR_RESAMPLES,
     MAX_PAIRWISE_WORK,
+    Delta,
     Side,
     compare_pairs,
     contingency,
+    corpus_delta,
     correctness,
+    improved,
     pair_stats,
     resampled_win_rate,
     stratified_pairs,
@@ -196,6 +200,9 @@ async def compare_matrix(
     request = body.model_dump(mode="json")
     used = [tr for s in subjects for tr in s.trs.values()]
     rows, node, defs = await resolve_scope(session, body.scope, subjects)
+    if is_runtime_metric(body.metric):
+        # No bootstraps, so nothing worth caching.
+        return await _runtime_matrix(session, body, subjects, baseline, rows, stats.alpha)
     ckey = cache_key("matrix", request, used, scope_hashes(node, defs))
     cached = await get_cached(session, ckey, a.MatrixResponse)
     if cached is not None:
@@ -443,6 +450,185 @@ def _matrix_suite_row(
 
 
 # ---------------------------------------------------------------------------
+# Runtime matrix
+# ---------------------------------------------------------------------------
+
+RUNTIME_METRICS = {"runtime:inference": "inference", "runtime:with_startup": "with_startup"}
+RUNTIME_META = a.MetricMeta(
+    higher_is_better=False, display_format="raw", unit="s", kind="unbounded"
+)
+
+
+def is_runtime_metric(metric: str) -> bool:
+    if not metric.startswith("runtime:"):
+        return False
+    if metric not in RUNTIME_METRICS:
+        raise bad_request(f"unknown runtime metric {metric!r}; use {' or '.join(RUNTIME_METRICS)}")
+    return True
+
+
+def reject_runtime_metric(metric: str) -> None:
+    """Runtime has one value per task result and no instances, so nothing to pair."""
+    if metric.startswith("runtime:"):
+        raise bad_request(
+            f"metric {metric!r} is not available here: runtime has no per-instance values, so "
+            "pairwise and instance-level comparisons do not apply; use the matrix"
+        )
+
+
+def _runtime_delta(
+    value: float | None, base: float | None, alpha: float, hash_mismatch: bool
+) -> a.DeltaStats:
+    # A plain difference: there is one runtime per task result, so no confidence interval.
+    d = corpus_delta(value, base)
+    return a.DeltaStats(
+        **Delta(
+            delta=d,
+            method="none",
+            improved=improved(d, False),
+            hash_mismatch=hash_mismatch,
+            alpha=alpha,
+            note="runtime difference in seconds; no confidence interval",
+        ).as_dict()
+    )
+
+
+async def _runtime_matrix(
+    session: Any,
+    body: a.MatrixRequest,
+    subjects: Sequence[Subject],
+    baseline: Subject | None,
+    rows: Sequence[RowSpec],
+    alpha: float,
+) -> a.MatrixResponse:
+    """Matrix of task runtimes in seconds (lower is better).
+
+    A suite cell is the sum of its tasks' inference seconds; with startup, it adds the largest
+    startup among those tasks' runs once (about what running the suite in one job takes).
+    """
+    mode = RUNTIME_METRICS[body.metric]
+    names = {r.name for r in rows if r.kind == "task"}
+    for r in rows:
+        if r.node is not None:
+            names.update(leaves(r.node))
+    trs = [tr for s in subjects for n, tr in s.trs.items() if n in names]
+    runtimes = await runtimes_for(session, trs)
+
+    def task_value(tr: Mapping[Any, Any] | None) -> float | None:
+        if tr is None:
+            return None
+        rt = runtimes[int(tr["id"])]
+        return rt.inference_seconds if mode == "inference" else rt.with_startup_seconds
+
+    def suite_value(s: Subject, leaf_names: Sequence[str]) -> tuple[float | None, int, int]:
+        """(seconds, tasks with a runtime, tasks without one)."""
+        known = [runtimes[int(s.trs[n]["id"])] for n in leaf_names if n in s.trs]
+        known = [rt for rt in known if rt.inference_seconds is not None]
+        if not known:
+            return None, 0, len(leaf_names)
+        total = sum(rt.inference_seconds or 0.0 for rt in known)
+        if mode == "with_startup":
+            startups = [rt.startup_seconds for rt in known if rt.startup_seconds is not None]
+            if not startups:
+                return None, 0, len(leaf_names)
+            total += max(startups)
+        return total, len(known), len(leaf_names) - len(known)
+
+    coverage = {"complete": 0, "missing": 0, "failed": 0, "hash_mismatch": 0}
+    task_names = list(dict.fromkeys(r.name for r in rows if r.kind == "task"))
+    out_rows: list[a.MatrixRow] = []
+    for spec in rows:
+        cells: list[a.MatrixCell] = []
+        if spec.kind == "task":
+            base_tr = baseline.trs.get(spec.name) if baseline is not None else None
+            base_value = task_value(base_tr)
+            ref = base_tr or next((s.trs[spec.name] for s in subjects if spec.name in s.trs), None)
+            ref_hash = ref["task_hash"] if ref is not None else None
+            for s in subjects:
+                tr = s.trs.get(spec.name)
+                value = task_value(tr)
+                if tr is None or value is None:
+                    status: a.CellStatus = "failed" if tr is not None and tr["error"] else "missing"
+                    coverage[status] += 1
+                    cells.append(_empty_cell(status, tr))
+                    continue
+                coverage["complete"] += 1
+                mismatch = bool(ref_hash and tr["task_hash"] != ref_hash)
+                coverage["hash_mismatch"] += int(mismatch)
+                delta = None
+                if baseline is not None and s.key != baseline.key and base_value is not None:
+                    hash_mismatch = base_tr is not None and tr["task_hash"] != base_tr["task_hash"]
+                    delta = _runtime_delta(value, base_value, alpha, hash_mismatch)
+                cells.append(
+                    a.MatrixCell(
+                        status="failed" if tr["error"] else "ok",
+                        score=value,
+                        stderr=None,
+                        n=int(tr["num_instances"] or 0),
+                        task_result_id=tr["id"],
+                        run_id=tr["run_id"],
+                        task_hash=tr["task_hash"],
+                        delta=delta,
+                        children_missing=0,
+                    )
+                )
+        else:
+            assert spec.node is not None
+            leaf_names = leaves(spec.node)
+            values = {s.key: suite_value(s, leaf_names) for s in subjects}
+            base_value = values[baseline.key][0] if baseline is not None else None
+            for s in subjects:
+                value, present, missing = values[s.key]
+                delta = None
+                if baseline is not None and s.key != baseline.key and base_value is not None:
+                    delta = _runtime_delta(value, base_value, alpha, False)
+                cells.append(
+                    a.MatrixCell(
+                        status="missing" if not present else ("partial" if missing else "ok"),
+                        score=value,
+                        stderr=None,
+                        n=None,
+                        task_result_id=None,
+                        run_id=s.run["run_id"] if s.run is not None else None,
+                        task_hash=None,
+                        delta=delta,
+                        children_missing=missing,
+                    )
+                )
+        out_rows.append(
+            a.MatrixRow(
+                key=spec.key,
+                kind="task" if spec.kind == "task" else "suite",
+                name=spec.name,
+                depth=spec.depth,
+                parent=spec.parent,
+                aggregation=spec.aggregation,
+                metric_key=body.metric,
+                meta=RUNTIME_META,
+                cells=cells,
+            )
+        )
+    return a.MatrixResponse(
+        subjects=[s.info() for s in subjects],
+        baseline=body.baseline,
+        scope=body.scope,
+        metric=body.metric,
+        rows=out_rows,
+        coverage=a.Coverage(
+            n_subjects=len(subjects),
+            n_tasks=len(task_names),
+            complete=coverage["complete"],
+            missing=coverage["missing"],
+            failed=coverage["failed"],
+            hash_mismatch=coverage["hash_mismatch"],
+        ),
+        mde80=None,
+        alpha=alpha,
+        computed_at=now_utc(),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Pairwise
 # ---------------------------------------------------------------------------
 
@@ -470,6 +656,7 @@ async def compare_pairwise(
     body: a.PairwiseRequest, session: SessionDep, user: UserDep
 ) -> a.PairwiseResponse:
     stats = check_stats(body.alpha, body.n_boot, body.seed, None)
+    reject_runtime_metric(body.metric)
     if len(set(body.subjects)) < 2:
         raise bad_request("pairwise needs at least two subjects")
     subjects = await resolve_for_compare(session, body.subjects, body.group)
@@ -628,6 +815,7 @@ async def compare_contingency(
     body: a.ContingencyRequest, session: SessionDep, user: UserDep
 ) -> a.ContingencyResponse:
     threshold = check_threshold(body.threshold)
+    reject_runtime_metric(body.metric)
     subjects = await resolve_for_compare(session, [body.a, body.b], body.group)
     if len(subjects) < 2:
         raise bad_request("a and b must be different subjects")
@@ -686,6 +874,7 @@ async def compare_instances(
     body: a.CompareInstancesRequest, session: SessionDep, user: UserDep
 ) -> a.CompareInstancesResponse:
     threshold = check_threshold(body.threshold)
+    reject_runtime_metric(body.metric)
     include_previews = bool(body.include_previews)
     max_limit = 1000 if include_previews else 20_000
     limit = body.limit if body.limit is not None else 200

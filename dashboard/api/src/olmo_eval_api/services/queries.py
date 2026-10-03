@@ -237,7 +237,8 @@ async def fetch_runs(session: AsyncSession, run_ids: Iterable[str]) -> dict[str,
 async def fetch_run_detail_row(session: AsyncSession, run_id: str) -> Mapping[Any, Any]:
     extra = """,
         r.notes, r.olmo_eval_version, r.git_dirty, r.beaker_job_id, r.environment, r.argv,
-        r.task_specs, r.output_dir, r.harness_config, r.provider_init_seconds, r.errors, r.client
+        r.task_specs, r.output_dir, r.harness_config, r.provider_init_seconds, r.errors, r.client,
+        r.startup_seconds, r.processing_started_at, r.processing_seconds
     """
     rows = await fetch_run_rows(session, "r.run_id = :rid", {"rid": run_id}, extra_columns=extra)
     if not rows:

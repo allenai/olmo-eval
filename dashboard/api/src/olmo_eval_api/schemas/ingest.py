@@ -121,6 +121,9 @@ class RunInfo(_In):
     output_dir: str | None
     harness_config: dict[str, Any] | None
     provider_init_seconds: dict[str, float] | None
+    startup_seconds: float | None = None
+    processing_started_at: datetime | None = None
+    processing_seconds: float | None = None
     errors: list[RunError]
 
 
@@ -211,6 +214,11 @@ class TaskResultIn(_In):
     error: str | None
     error_summary: dict[str, Any] | None
     duration_seconds: float | None
+    first_request_at: datetime | None = None
+    last_completed_at: datetime | None = None
+    prompt_tokens_total: NonNeg | None = None
+    completion_tokens_total: NonNeg | None = None
+    attributed_inference_seconds: float | None = None
     predictions_path: RelativePath | None
     requests_path: RelativePath | None
     suites: list[str]

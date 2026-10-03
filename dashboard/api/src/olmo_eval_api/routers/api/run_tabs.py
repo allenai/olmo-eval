@@ -28,6 +28,7 @@ from olmo_eval_api.services.queries import (
     run_summary,
 )
 from olmo_eval_api.services.read_suites import definition_hashes, load_defs, score_suite, tree
+from olmo_eval_api.services.runtime import RunTiming, derive_runtime, load_run_timings
 from olmo_eval_api.services.subjects import (
     TR_COLUMNS,
     SideLoader,
@@ -90,9 +91,8 @@ async def run_task_results_endpoint(
 ) -> a.RunTaskResultsResponse:
     run = await _run_row(session, run_id)
     sql = f"""
-        SELECT {TR_COLUMNS}, tr.error_summary, tr.completion_tokens_total,
-               tr.mean_completion_tokens, tr.truncation_rate, tr.finish_reason_counts,
-               tr.predictions_path, tr.requests_path,
+        SELECT {TR_COLUMNS}, tr.error_summary, tr.mean_completion_tokens, tr.truncation_rate,
+               tr.finish_reason_counts, tr.predictions_path, tr.requests_path,
                tv.base_task, tv.num_fewshot, tv.task_limit, tv.split, tv.suites
         FROM task_results tr
         JOIN task_variants tv ON tv.task_name = tr.task_name AND tv.task_hash = tr.task_hash
@@ -157,6 +157,7 @@ async def run_task_results_endpoint(
 
         # Bootstraps are CPU-bound; a worker thread keeps the event loop serving other requests.
         await asyncio.to_thread(build_cells)
+    timing = (await load_run_timings(session, [run_id])).get(run_id, RunTiming())
     items = [
         a.TaskResultRow(
             task_result_id=tr["id"],
@@ -178,6 +179,7 @@ async def run_task_results_endpoint(
             error=tr["error"],
             error_summary=tr["error_summary"],
             duration_seconds=tr["duration_seconds"],
+            runtime=derive_runtime(tr, timing),
             completion_tokens_total=tr["completion_tokens_total"],
             mean_completion_tokens=tr["mean_completion_tokens"],
             truncation_rate=tr["truncation_rate"],

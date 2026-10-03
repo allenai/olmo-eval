@@ -33,6 +33,12 @@ from olmo_eval_api.services.queries import (
     run_summary,
 )
 from olmo_eval_api.services.read_suites import load_defs, score_suite, tree
+from olmo_eval_api.services.runtime import (
+    GPU_COUNT_SQL,
+    GPU_TYPE_SQL,
+    runtime_stats,
+    runtimes_for,
+)
 from olmo_eval_api.services.subjects import (
     TR_COLUMNS,
     meta_for,
@@ -699,6 +705,7 @@ async def task_leaderboard(
     before: datetime | None = None,
     step_min: int | None = None,
     step_max: int | None = None,
+    gpu_type: str | None = None,
     cursor: str | None = None,
     limit: int | None = None,
 ) -> a.LeaderboardResponse:
@@ -711,6 +718,9 @@ async def task_leaderboard(
     if hash:
         where.append("tr.task_hash = :hash")
         params["hash"] = hash
+    if gpu_type:
+        where.append(f"{GPU_TYPE_SQL} = :gpu")
+        params["gpu"] = gpu_type
     distinct = "DISTINCT ON (tr.model_id)" if per_model == "latest" else ""
     order = (
         "tr.model_id, (tr.error IS NOT NULL), tr.run_created_at DESC, tr.id DESC"
@@ -722,7 +732,9 @@ async def task_leaderboard(
             await session.execute(
                 text(
                     f"""
-                    SELECT {distinct} {TR_COLUMNS}, r.experiment_group, r.author, {MODEL_COLUMNS}
+                    SELECT {distinct} {TR_COLUMNS}, r.experiment_group, r.author,
+                           {GPU_TYPE_SQL} AS gpu_type, {GPU_COUNT_SQL} AS gpu_count,
+                           {MODEL_COLUMNS}
                     FROM task_results tr JOIN runs r ON r.run_id = tr.run_id
                     JOIN models m ON m.model_id = tr.model_id
                     WHERE {" AND ".join(where)} ORDER BY {order}
@@ -757,10 +769,17 @@ async def task_leaderboard(
                 "experiment_group": r["experiment_group"],
                 "author": r["author"],
                 "child_scores": None,
+                "gpu_type": r["gpu_type"],
+                "gpu_count": r["gpu_count"],
+                "_row": r,
             }
         )
     ranked = _rank(entries, meta.get("higher_is_better"))
     page, nxt = _page(ranked, cursor, limit)
+    # Runtime only for the page: it needs every task result of each run for the token shares.
+    runtimes = await runtimes_for(session, [e["_row"] for e in page])
+    for e in page:
+        e["runtime"] = runtimes[e.pop("_row")["id"]]
     return a.LeaderboardResponse(
         kind="task",
         name=task,
@@ -771,6 +790,146 @@ async def task_leaderboard(
         items=[a.LeaderboardRow(**e) for e in page],
         next_cursor=nxt,
         total=len(ranked),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task runtime
+# ---------------------------------------------------------------------------
+
+# Most recent task results the runtime endpoint reads, and points it returns.
+MAX_RUNTIME_RESULTS = 20_000
+MAX_RUNTIME_POINTS = 2_000
+
+
+@router.get("/tasks/{task_name:path}/runtime", response_model=a.TaskRuntimeResponse)
+async def task_runtime(
+    session: SessionDep,
+    user: UserDep,
+    task_name: str,
+    hash: str | None = None,  # noqa: A002
+    gpu_type: str | None = None,
+    family: Annotated[list[str], Query()] = [],  # noqa: B006
+    group: str | None = None,
+    user_filter: Annotated[str | None, Query(alias="user")] = None,
+) -> a.TaskRuntimeResponse:
+    if hash is None:
+        # The most-run variant, as on the task page (task_detail).
+        hash = (  # noqa: A001
+            await session.execute(
+                text(
+                    f"""
+                    SELECT v.task_hash FROM task_variants v
+                    LEFT JOIN task_results tr ON tr.task_name = v.task_name
+                        AND tr.task_hash = v.task_hash
+                    LEFT JOIN runs r ON r.run_id = tr.run_id
+                    WHERE v.task_name = :t
+                    GROUP BY v.task_name, v.task_hash
+                    ORDER BY count(DISTINCT tr.run_id) FILTER (WHERE {VISIBLE}) DESC,
+                             v.last_seen_at DESC
+                    LIMIT 1
+                    """
+                ),
+                {"t": task_name},
+            )
+        ).scalar()
+        if hash is None:
+            raise not_found(f"Task {task_name!r} not found")
+    where, params = _leaderboard_filters(
+        family, group, user_filter, user.username, None, None, None, None
+    )
+    where += ["tr.task_name = :task", "tr.task_hash = :hash"]
+    params.update(task=task_name, hash=hash)
+    gpu_rows = (
+        await session.execute(
+            text(
+                f"""
+                SELECT {GPU_TYPE_SQL} AS gpu_type, count(*) AS n
+                FROM task_results tr JOIN runs r ON r.run_id = tr.run_id
+                JOIN models m ON m.model_id = tr.model_id
+                WHERE {" AND ".join(where)} AND {GPU_TYPE_SQL} IS NOT NULL
+                GROUP BY 1 ORDER BY n DESC, gpu_type
+                """
+            ),
+            params,
+        )
+    ).all()
+    if gpu_type:
+        where.append(f"{GPU_TYPE_SQL} = :gpu")
+        params["gpu"] = gpu_type
+    rows = (
+        (
+            await session.execute(
+                text(
+                    f"""
+                    SELECT {TR_COLUMNS}, {GPU_TYPE_SQL} AS gpu_type,
+                           {GPU_COUNT_SQL} AS gpu_count, {MODEL_COLUMNS}
+                    FROM task_results tr JOIN runs r ON r.run_id = tr.run_id
+                    JOIN models m ON m.model_id = tr.model_id
+                    WHERE {" AND ".join(where)}
+                    ORDER BY tr.run_created_at DESC, tr.id DESC
+                    LIMIT {MAX_RUNTIME_RESULTS}
+                    """
+                ),
+                params,
+            )
+        )
+        .mappings()
+        .all()
+    )
+    runtimes = await runtimes_for(session, rows)
+    latest = max(rows, key=lambda r: r["updated_at"]) if rows else None
+    meta = meta_for(latest, latest["primary_metric"]) if latest else {}
+
+    points: list[a.TaskRuntimePoint] = []
+    groups: dict[tuple[str, str | None, int | None], list[Mapping[Any, Any]]] = {}
+    not_recorded = 0
+    for r in rows:  # newest first
+        runtime = runtimes[r["id"]]
+        if runtime.basis == "not_recorded":
+            not_recorded += 1
+            continue
+        groups.setdefault((r["model_id"], r["gpu_type"], r["gpu_count"]), []).append(r)
+        if len(points) < MAX_RUNTIME_POINTS:
+            points.append(
+                a.TaskRuntimePoint(
+                    run_id=r["run_id"],
+                    task_result_id=r["id"],
+                    model=model_ref(r),
+                    date=r["run_created_at"],
+                    gpu_type=r["gpu_type"],
+                    gpu_count=r["gpu_count"],
+                    score=r["score"],
+                    n=r["num_instances"],
+                    runtime=runtime,
+                )
+            )
+    out_rows = []
+    for (_, gpu, count), members in groups.items():
+        rts = [runtimes[r["id"]] for r in members]
+        out_rows.append(
+            a.TaskRuntimeModelRow(
+                model=model_ref(members[0]),
+                gpu_type=gpu,
+                gpu_count=count,
+                runs=len(members),
+                inference=runtime_stats([x.inference_seconds for x in rts]),
+                with_startup=runtime_stats([x.with_startup_seconds for x in rts]),
+                seconds_per_1k_instances=runtime_stats([x.seconds_per_1k_instances for x in rts]),
+                latest_score=members[0]["score"],
+            )
+        )
+    out_rows.sort(
+        key=lambda x: (x.inference.median is None, x.inference.median or 0.0, x.model.name)
+    )
+    return a.TaskRuntimeResponse(
+        task_name=task_name,
+        task_hash=hash,
+        meta=metric_meta_or_none(meta),
+        gpu_types=[g for g, _ in gpu_rows],
+        rows=out_rows,
+        points=points,
+        not_recorded=not_recorded,
     )
 
 
@@ -854,6 +1013,9 @@ async def suite_leaderboard(
                 "experiment_group": run["experiment_group"],
                 "author": run["author"],
                 "child_scores": child_scores,
+                "runtime": None,
+                "gpu_type": None,
+                "gpu_count": None,
             }
         )
     hib = hib_values.pop() if len(hib_values) == 1 else None

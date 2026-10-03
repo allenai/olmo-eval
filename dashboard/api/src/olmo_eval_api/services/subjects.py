@@ -23,17 +23,21 @@ from olmo_eval_api.errors import bad_request, not_found
 from olmo_eval_api.schemas import api as a
 from olmo_eval_api.services.common import detect_scale, latest_by_task
 from olmo_eval_api.services.queries import fetch_models, fetch_runs, model_ref, run_summary
+from olmo_eval_api.services.runtime import RUNTIME_TR_COLUMNS
 from olmo_eval_api.stats.paired import Side
 
 SUBJECT_RE = re.compile(r"^(r:[a-z0-9]{6,32}|m:[0-9a-f]{12})$")
 
-TR_COLUMNS = """
+TR_COLUMNS = (
+    """
     tr.id, tr.run_id, tr.task_name, tr.task_hash, tr.model_id, tr.run_created_at,
     tr.primary_metric, tr.score, tr.stderr, tr.score_is_mean, tr.instance_scale, tr.metric_kind,
     tr.higher_is_better, tr.display_format, tr.metrics, tr.metric_meta, tr.num_instances,
     tr.instances_processed, tr.instances_failed, tr.instances_stored, tr.error,
-    tr.duration_seconds, tr.updated_at, tr.finalized_at
+    tr.duration_seconds, tr.updated_at, tr.finalized_at,
 """
+    + RUNTIME_TR_COLUMNS
+)
 
 TaskResultRow = Mapping[Any, Any]
 
