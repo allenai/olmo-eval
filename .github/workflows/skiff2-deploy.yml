@@ -3,6 +3,9 @@ on:
     push:
         branches:
             - main
+            # TEMPORARY: deploys the PR branch to its preview environment for review.
+            # Revert before merging.
+            - chrisg/skiff2-dashboard
         # Only redeploy the dashboard when it or its deploy config changes,
         # not on every olmo-eval merge.
         paths:
