@@ -19,11 +19,12 @@ image and context budgets).
 
 Scoring follows Appendix A.4: GPT-5-mini grades each response against the question and the
 annotated answer with the rubric of Figure 4 (text citation 0.3, image citation 0.3, answer
-accuracy 0.4). The primary metric ``accuracy`` is the paper's strict binary score: an
-answer counts only if it addresses all key points (answer accuracy 0.4/0.4). Also reported:
-the paper's fine-grained rates (``text_correct``, ``visual_correct``: full citation points;
-``partial_credit``: answer points / 0.4), the mean rubric total ``rubric_score``, the rate of
-perfect rubric totals ``strict_total``, per-question-type accuracy, and ``judge_errors``.
+accuracy 0.4). The primary metric ``accuracy`` is the paper's strict binary score: a
+response counts only with full points on all three components (rubric total 1.0). Also
+reported: the paper's fine-grained rates (``text_correct``, ``visual_correct``: full citation
+points; ``partial_credit``: answer points / 0.4), the rate of full answer points alone
+``answer_correct``, the mean rubric total ``rubric_score``, per-question-type accuracy, and
+``judge_errors``.
 Responses the judge never grades count as wrong. Metrics are 0-1 (the paper reports x100).
 
 The authors' evaluation module (a custom lmms-eval task) is not released, so these parts
@@ -45,8 +46,9 @@ are reconstructed and may differ from the published numbers:
   points and conclusion; the judge's reply format (JSON with the three component scores)
   is not given in the paper and is appended to the rubric.
 * **Binary score.** The paper defines it as "correctly addresses all key points with
-  accurate reasoning"; ``accuracy`` reads that as full answer-accuracy points, and
-  ``strict_total`` (all three components full) is reported alongside.
+  accurate reasoning". ``accuracy`` reads that as full points on every rubric component;
+  for Qwen3-VL-8B it gives 39.1 against the published 34.2, while full answer points alone
+  (``answer_correct``) give 58.2.
 * **Table images.** The release lists table renders (``<id>-Table<N>-1.png``; the evidence
   of 85 questions) but does not ship them. They are re-rendered from the arXiv PDF of the
   same paper version with the pdffigures2 page, region and DPI stored in the paper JSON,
@@ -312,17 +314,17 @@ class ScimdrJudgeScorer(Scorer):
 
 #: Per-response value of each metric from a stored judge result (ungraded -> 0).
 _FIELDS = {
-    "accuracy": lambda r: float(r["answer_accuracy_score"] >= ANSWER_ACCURACY_MAX),
+    "accuracy": lambda r: float(
+        r["text_citation_score"] >= CITATION_MAX
+        and r["image_citation_score"] >= CITATION_MAX
+        and r["answer_accuracy_score"] >= ANSWER_ACCURACY_MAX
+    ),
+    "answer_correct": lambda r: float(r["answer_accuracy_score"] >= ANSWER_ACCURACY_MAX),
     "partial_credit": lambda r: r["answer_accuracy_score"] / ANSWER_ACCURACY_MAX,
     "text_correct": lambda r: float(r["text_citation_score"] >= CITATION_MAX),
     "visual_correct": lambda r: float(r["image_citation_score"] >= CITATION_MAX),
     "rubric_score": lambda r: (
         r["text_citation_score"] + r["image_citation_score"] + r["answer_accuracy_score"]
-    ),
-    "strict_total": lambda r: float(
-        r["text_citation_score"] >= CITATION_MAX
-        and r["image_citation_score"] >= CITATION_MAX
-        and r["answer_accuracy_score"] >= ANSWER_ACCURACY_MAX
     ),
 }
 
