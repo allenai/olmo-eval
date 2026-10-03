@@ -15,6 +15,7 @@ import type {
   SuiteDetailResponse,
   SuitesListResponse,
   TaskDetailResponse,
+  TaskRuntimeResponse,
   TasksListResponse,
   UpdateViewRequest,
 } from "@contract/api-types";
@@ -121,6 +122,14 @@ export function useTaskLeaderboard(params: Params) {
   return useQuery({
     queryKey: ["task-leaderboard", params],
     queryFn: ({ signal }) => apiGet<LeaderboardResponse>("/tasks/leaderboard", params, signal),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useTaskRuntime(task: string, params: Params) {
+  return useQuery({
+    queryKey: ["task-runtime", task, params],
+    queryFn: ({ signal }) => apiGet<TaskRuntimeResponse>(`/tasks/${encodeURIComponent(task)}/runtime`, params, signal),
     placeholderData: keepPreviousData,
   });
 }

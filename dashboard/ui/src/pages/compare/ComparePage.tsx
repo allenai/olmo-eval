@@ -8,6 +8,7 @@ import { useRunsList } from "@/api/hooks/runs";
 import { PageHeader } from "@/components/PageHeader";
 import { Banner, Button, Checkbox, cx, EmptyState, ErrorPanel, ModelDot, SearchInput, Segmented, Select, Skeleton, Tabs, Tip, uiStyles as ui } from "@/components/primitives";
 import { formatDelta, metricLabel } from "@/lib/format";
+import { runtimeMetricMode } from "@/lib/runtime";
 import { useHotkeys } from "@/lib/keyboard";
 import { parseSubjects } from "@/lib/subjects";
 import { oneOf, parseBool, parseNumber } from "@/lib/url";
@@ -158,10 +159,18 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
   const coverage = matrix.data?.coverage;
   const metricOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const row of matrix.data?.rows ?? []) if (row.metric_key) set.add(row.metric_key);
-    return [{ value: "primary", label: "primary (per task)" }, ...[...set].sort().map((m) => ({ value: m, label: metricLabel(m) }))];
+    for (const row of matrix.data?.rows ?? []) if (row.metric_key && !runtimeMetricMode(row.metric_key)) set.add(row.metric_key);
+    return [
+      { value: "primary", label: "primary (per task)", group: "Score" },
+      ...[...set].sort().map((m) => ({ value: m, label: metricLabel(m), group: "Score" })),
+      { value: "runtime:inference", label: "Runtime: inference", hint: "seconds", group: "Runtime (lower is better)" },
+      { value: "runtime:with_startup", label: "Runtime: with startup", hint: "seconds", group: "Runtime (lower is better)" },
+    ];
   }, [matrix.data]);
 
+  const runtimeMode = runtimeMetricMode(metric);
+  // Runtime has no instance-level pairing and no score scale, so only the heatmap shows it.
+  const runtimeBlocked = runtimeMode != null && view !== "heatmap";
   const ctx: CompareCtx = { keys, subjects, baseline, group: search.group, scope, metric, alpha, shared, matrix, slots, search, setSearch, labelOf };
 
   const scopeOptions = [
@@ -274,6 +283,7 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
         <div className={c.controls}>
           <Select size="sm" label="Scope" value={scope} onChange={(v) => setSearch({ scope: v === "all" ? undefined : v })} options={scopeOptions} width={240} />
           <Select size="sm" label="Metric" value={metric} onChange={(v) => setSearch({ metric: v === "primary" ? undefined : v })} options={metricOptions} width={210} />
+          {!runtimeMode && (<>
           <span className="row" style={{ gap: 6 }}>
             <span className="t-caption">alpha</span>
             <Segmented
@@ -288,6 +298,7 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
             />
           </span>
           <Checkbox checked={shared} onChange={(on) => setSearch({ shared: on ? "1" : undefined })} label="Shared instances only" />
+          </>)}
           <span className="spacer" />
           {coverage && (
             <span className={c.coverage}>
@@ -374,12 +385,29 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
             <ErrorPanel error={matrix.error} onRetry={() => matrix.refetch()} />
           ) : (
             <Suspense fallback={<Skeleton height={400} />}>
+              {runtimeBlocked && (
+                <EmptyState
+                  title={view === "pairwise" || view === "disagree" ? "Not available for runtime" : "This view shows scores only"}
+                  actions={
+                    <>
+                      <Button variant="primary" onClick={() => setSearch({ view: undefined })}>
+                        Show runtime in the heatmap
+                      </Button>
+                      <Button onClick={() => setSearch({ metric: undefined })}>Back to scores</Button>
+                    </>
+                  }
+                >
+                  {view === "pairwise" || view === "disagree"
+                    ? "Runtime is one number per task result, with no per-instance values to pair, so wins, losses and disagreements cannot be computed."
+                    : "Runtime is in seconds, not on a score scale, so this view cannot show it."}
+                </EmptyState>
+              )}
               {view === "heatmap" && <HeatmapView {...ctx} />}
-              {view === "pairwise" && <PairwiseView {...ctx} />}
-              {view === "scatter" && <ScatterView {...ctx} />}
-              {view === "profiles" && <ProfilesView {...ctx} />}
-              {view === "progression" && <ProgressionView {...ctx} />}
-              {view === "disagree" && <DisagreeView {...ctx} />}
+              {view === "pairwise" && !runtimeBlocked && <PairwiseView {...ctx} />}
+              {view === "scatter" && !runtimeBlocked && <ScatterView {...ctx} />}
+              {view === "profiles" && !runtimeBlocked && <ProfilesView {...ctx} />}
+              {view === "progression" && !runtimeBlocked && <ProgressionView {...ctx} />}
+              {view === "disagree" && !runtimeBlocked && <DisagreeView {...ctx} />}
             </Suspense>
           )}
         </>

@@ -123,6 +123,27 @@ export function formatSeconds(s: number | null | undefined): string {
   return formatDuration(s);
 }
 
+/**
+ * Elapsed time that reads well at any size: "350 ms", "4.2 s", "42 s", "3m 12s", "1h 05m",
+ * "2d 3h". A leading "~" can be added by callers for estimates.
+ */
+export function formatRuntime(s: number | null | undefined): string {
+  if (s == null || !Number.isFinite(s)) return "—";
+  if (s < 0) return `${MINUS}${formatRuntime(-s)}`;
+  if (s === 0) return "0 s";
+  if (s < 1) return `${Math.max(1, Math.round(s * 1000))} ms`;
+  if (s < 9.95) return `${s.toFixed(1)} s`;
+  if (s < 59.5) return `${Math.round(s)} s`;
+  return formatDuration(s);
+}
+
+/** Signed runtime difference ("+42 s", "−3m 10s"). */
+export function formatRuntimeDelta(s: number | null | undefined): string {
+  if (s == null || !Number.isFinite(s)) return "—";
+  if (Math.abs(s) < 0.05) return "0 s";
+  return `${s > 0 ? "+" : MINUS}${formatRuntime(Math.abs(s))}`;
+}
+
 export function formatStep(step: number | null | undefined): string {
   if (step == null) return "—";
   // Compact "k" form when it is exact to two decimals (2000 → 2k, 2400 → 2.4k, 1750 → 1.75k).

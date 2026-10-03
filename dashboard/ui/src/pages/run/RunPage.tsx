@@ -11,7 +11,7 @@ import { Badge, Button, CopyText, cx, displayStatus, ErrorPanel, LinkOut, Menu, 
 import { openPalette } from "@/components/shell/registry";
 import { toast } from "@/components/toast";
 import { copyText } from "@/lib/csv";
-import { formatCount, formatDuration, shortHash } from "@/lib/format";
+import { formatCount, formatDuration, formatRuntime, shortHash } from "@/lib/format";
 import { useHotkeys } from "@/lib/keyboard";
 import { modelLabel, runSubject } from "@/lib/subjects";
 import { absoluteLocal } from "@/lib/time";
@@ -208,6 +208,21 @@ function RunHeader({ run, baseline }: { run: RunDetail; baseline?: SubjectKey })
         <span title={run.created_at}>{absoluteLocal(run.finished_at ?? run.created_at)}</span>
         <span>
           <span className={s.metaKey}>took</span> {formatDuration(run.duration_seconds)}
+          {(run.startup_seconds != null || run.processing_seconds != null) && (
+            <Tip
+              content={
+                <span style={{ display: "block", maxWidth: 280 }}>
+                  Startup is model load and server start. Processing runs from when every worker was ready until the last task finished. The total also covers result upload; Beaker queue time is never included.
+                </span>
+              }
+            >
+              <span className="muted" style={{ marginLeft: 6, textDecoration: "underline dotted", textUnderlineOffset: 3 }}>
+                {run.startup_seconds != null && <>startup {formatRuntime(run.startup_seconds)}</>}
+                {run.startup_seconds != null && run.processing_seconds != null && " · "}
+                {run.processing_seconds != null && <>processing {formatRuntime(run.processing_seconds)}</>}
+              </span>
+            </Tip>
+          )}
         </span>
         {run.git.commit && (
           <span>

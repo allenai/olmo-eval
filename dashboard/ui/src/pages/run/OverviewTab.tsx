@@ -10,7 +10,7 @@ import { DeltaValue, ScoreValue, SigLegend } from "@/components/cells";
 import { Badge, Button, Checkbox, CopyText, cx, EmptyState, ErrorPanel, KV, LinkOut, Panel, Skeleton, Tip } from "@/components/primitives";
 import { type Cell, downloadText, toCSV } from "@/lib/csv";
 import { jsonDiff } from "@/lib/diff";
-import { formatCI, formatCount, formatDuration, formatRate, formatScore, formatStderr, shortHash } from "@/lib/format";
+import { formatCI, formatCount, formatDuration, formatRate, formatRuntime, formatScore, formatStderr, shortHash } from "@/lib/format";
 import { useHotkeys } from "@/lib/keyboard";
 import { goodness } from "@/lib/scales";
 import { absoluteLocal } from "@/lib/time";
@@ -487,6 +487,8 @@ export function Provenance({ run }: { run: RunDetail }) {
             ["Started", absoluteLocal(run.started_at)],
             ["Finished", run.finished_at ? absoluteLocal(run.finished_at) : <span className="muted">not finished</span>],
             ["Duration", formatDuration(run.duration_seconds)],
+            ["Startup", run.startup_seconds != null ? formatRuntime(run.startup_seconds) : <span className="muted">not recorded</span>],
+            ["Processing", run.processing_seconds != null ? formatRuntime(run.processing_seconds) : <span className="muted">{run.startup_seconds != null && !run.finished_at ? "in progress" : "not recorded"}</span>],
             ["olmo-eval", run.olmo_eval_version ? <span className="mono">{run.olmo_eval_version} @ {shortHash(run.git.commit)}</span> : null],
             ["Stack", <span className="mono" style={{ fontSize: 11.5 }}>{["vllm", "torch", "transformers"].filter((p) => env.packages[p]).map((p) => `${p} ${env.packages[p]}`).join(" · ") || "—"}</span>],
             ["Results", <CopyText text={run.gcs_prefix} display={<span className="mono" style={{ fontSize: 11.5 }}>{run.gcs_prefix}</span>} />],

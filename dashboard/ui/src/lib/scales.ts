@@ -95,3 +95,24 @@ export function ranks(values: (number | null)[], higherIsBetter: boolean | null)
   });
   return out;
 }
+
+/**
+ * Colors for model families on one chart: the most common families get categorical slots in
+ * order of frequency, the rest share the context gray.
+ */
+export function familyColors(families: (string | null | undefined)[], max = 5): { colorOf: (family: string | null | undefined) => string; legend: { label: string; color: string }[] } {
+  const counts = new Map<string, number>();
+  for (const f of families) counts.set(f ?? "other", (counts.get(f ?? "other") ?? 0) + 1);
+  const top = [...counts.entries()]
+    .filter(([f]) => f !== "other")
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, max)
+    .map(([f]) => f);
+  const colorOf = (family: string | null | undefined) => {
+    const i = top.indexOf(family ?? "other");
+    return i >= 0 ? catColor(i) : "var(--cat-context)";
+  };
+  const legend = top.map((f, i) => ({ label: f, color: catColor(i) }));
+  if (counts.size > top.length) legend.push({ label: "other", color: "var(--cat-context)" });
+  return { colorOf, legend };
+}

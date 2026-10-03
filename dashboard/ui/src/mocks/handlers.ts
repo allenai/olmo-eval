@@ -81,6 +81,7 @@ export const handlers = [
   http.get("/api/tasks", wrap(({ query }) => api.tasksList(query))),
   http.get("/api/tasks/detail", wrap(({ query }) => api.taskDetail(query))),
   http.get("/api/tasks/leaderboard", wrap(({ query }) => api.taskLeaderboard(query))),
+  http.get("/api/tasks/:taskName/runtime", wrap(({ params, query }) => api.taskRuntimeSummary(decodeURIComponent(params.taskName), query))),
   http.get("/api/suites", wrap(({ query }) => api.suitesList(query))),
   http.get("/api/suites/detail", wrap(({ query }) => api.suiteDetail(query))),
   http.get("/api/suites/leaderboard", wrap(({ query }) => api.suiteLeaderboard(query))),

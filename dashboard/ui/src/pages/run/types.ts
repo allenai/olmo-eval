@@ -24,6 +24,8 @@ export type RunSearch = {
   sel?: string;
   /** Tasks tab sort. */
   ts?: string;
+  /** Tasks tab runtime view: "with_startup", or unset for inference only. */
+  rt?: string;
   baseline?: string;
 };
 

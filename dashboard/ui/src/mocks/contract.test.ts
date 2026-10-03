@@ -85,6 +85,9 @@ describe("mock API matches the contract", () => {
     check("SubjectTaskResultResponse", api.subjectTaskResult(q({ subject: subjects[0], task: "gsm8k:cot:olmo3" })));
     check("MatrixResponse", api.compareMatrix({ subjects, scope: "all", metric: "primary", baseline: subjects[0] }));
     check("MatrixResponse", api.compareMatrix({ subjects, scope: "suite:olmes:base", metric: "primary" }));
+    check("MatrixResponse", api.compareMatrix({ subjects, scope: "suite:olmes:base", metric: "runtime:inference", baseline: subjects[0] }));
+    check("MatrixResponse", api.compareMatrix({ subjects, scope: "all", metric: "runtime:with_startup" }));
+    expect(() => api.comparePairwise({ subjects, scope: "all", metric: "runtime:inference" })).toThrow(api.MockHttpError);
     check("PairwiseResponse", api.comparePairwise({ subjects, scope: "suite:olmes:base", metric: "primary" }));
     check("ContingencyResponse", api.compareContingency({ a: subjects[0], b: subjects[1], scope: "all", metric: "primary" }));
     check(
@@ -100,6 +103,9 @@ describe("mock API matches the contract", () => {
     check("ProgressionResponse", api.progression(q({ series, references: baseline })));
     check("TaskDetailResponse", api.taskDetail(q({ task: "gsm8k:cot:olmo3" })));
     check("LeaderboardResponse", api.taskLeaderboard(q({ task: "gsm8k:cot:olmo3" })));
+    check("LeaderboardResponse", api.taskLeaderboard(q({ task: "gsm8k:cot:olmo3", gpu_type: "NVIDIA A100-SXM4-80GB" })));
+    check("TaskRuntimeResponse", api.taskRuntimeSummary("gsm8k:cot:olmo3", q()));
+    check("TaskRuntimeResponse", api.taskRuntimeSummary("ifeval", q({ gpu_type: "NVIDIA H100 80GB HBM3" })));
     check("SuiteDetailResponse", api.suiteDetail(q({ suite: "olmes:base" })));
     check("LeaderboardResponse", api.suiteLeaderboard(q({ suite: "olmes:base" })));
     check("GroupDetailResponse", api.groupDetail(q({ group })));

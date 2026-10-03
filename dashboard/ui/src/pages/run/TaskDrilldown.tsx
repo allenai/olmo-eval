@@ -8,7 +8,8 @@ import { DeltaValue, MetricName, ScoreValue } from "@/components/cells";
 import { JsonDiff, JsonTree } from "@/components/Json";
 import { Badge, Button, Checkbox, CopyText, EmptyState, ErrorPanel, Panel, Skeleton, Tip } from "@/components/primitives";
 import { toast } from "@/components/toast";
-import { formatCI, formatCount, formatDelta, formatDuration, formatP, formatRate, formatScore, metricLabel, sig3 } from "@/lib/format";
+import { formatCI, formatCount, formatDelta, formatDuration, formatP, formatRate, formatRuntime, formatScore, metricLabel, sig3 } from "@/lib/format";
+import { BASIS_LABEL, basisMark } from "@/lib/runtime";
 import { rowMeta, scoreFormat } from "./types";
 
 export async function openSigned(gsUri: string): Promise<void> {
@@ -299,7 +300,13 @@ export function TaskDrilldown({
                 </div>
               ))}
               <div className="t-caption">
-                {row.duration_seconds != null && <>Took {formatDuration(row.duration_seconds)}. </>}
+                {row.runtime.inference_seconds != null && (
+                  <>
+                    Runtime {basisMark(row.runtime.basis)}
+                    {formatRuntime(row.runtime.inference_seconds)} ({BASIS_LABEL[row.runtime.basis].toLowerCase()}).{" "}
+                  </>
+                )}
+                {row.duration_seconds != null && <>Done {formatDuration(row.duration_seconds)} after processing started. </>}
                 {row.num_fewshot != null && <>{row.num_fewshot}-shot. </>}
                 {row.limit != null && <>Limit {formatCount(row.limit)}. </>}
                 Split {row.split ?? "—"}.

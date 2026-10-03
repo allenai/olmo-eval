@@ -1,8 +1,8 @@
-import type { LeaderboardResponse, LeaderboardRow, MetricMeta } from "@contract/api-types";
+import type { LeaderboardResponse, LeaderboardRow, MetricMeta, RuntimeMode } from "@contract/api-types";
 import { useParams } from "@tanstack/react-router";
 import { scaleLinear } from "d3-scale";
 import { useMemo } from "react";
-import { useSuiteDetail, useSuiteLeaderboard, useTaskDetail, useTaskLeaderboard } from "@/api/hooks/catalog";
+import { useSuiteDetail, useSuiteLeaderboard, useTaskDetail, useTaskLeaderboard, useTaskRuntime } from "@/api/hooks/catalog";
 import { useDistributions, useResolveSubjects } from "@/api/hooks/compare";
 import { useRunsFacets } from "@/api/hooks/runs";
 import { CIWhisker, HistogramChart } from "@/charts/basic";
@@ -12,9 +12,10 @@ import { MetricName, ScoreValue, SubjectLabel } from "@/components/cells";
 import { type Column, DataTable } from "@/components/DataTable";
 import { JsonTree } from "@/components/Json";
 import { MetaItem, PageHeader } from "@/components/PageHeader";
-import { Badge, Chip, ErrorPanel, KV, Panel, RelativeTime, Segmented, Select, Skeleton } from "@/components/primitives";
-import { formatCount, formatScore, metricLabel, shortHash } from "@/lib/format";
-import { catColor, extent, normalize, seqColor, seqTextColor } from "@/lib/scales";
+import { Badge, Chip, ErrorPanel, KV, Panel, RelativeTime, Segmented, Select, Skeleton, Tip } from "@/components/primitives";
+import { formatCount, formatRuntime, formatScore, metricLabel, shortHash } from "@/lib/format";
+import { BASIS_HELP, BASIS_LABEL, basisMark, gpuLabel, gpuShort, parseRuntimeMode, RUNTIME_MODE_HELP, RUNTIME_MODE_OPTIONS, runtimeModeParam, runtimeValue } from "@/lib/runtime";
+import { extent, familyColors, normalize, seqColor, seqTextColor } from "@/lib/scales";
 import { modelLabel } from "@/lib/subjects";
 import { useSubjectSlots } from "@/state/colors";
 import { useBaseline, useSearchParams } from "@/state/nav";
@@ -22,8 +23,9 @@ import { addToTray, pushRecent, removeFromTray, trayStore } from "@/state/prefs"
 import { useStore } from "@/state/store";
 import { useEffect } from "react";
 import cc from "@/charts/charts.module.css";
+import { RuntimeSection } from "./RuntimeSection";
 
-type LbSearch = { hash?: string; metric?: string; pm?: string; family?: string; group?: string; user?: string; sort?: string };
+type LbSearch = { hash?: string; metric?: string; pm?: string; family?: string; group?: string; user?: string; sort?: string; gpu?: string; rt?: string };
 
 function histogramOf(values: number[], bins = 24) {
   if (!values.length) return { edges: [0, 1], counts: [0] };
@@ -40,10 +42,7 @@ function ScoreOverTime({ rows, meta }: { rows: LeaderboardRow[]; meta: MetricMet
   const tip = useTooltip();
   const navigate = useAppNavigate();
   const fmt = meta?.display_format ?? "percent";
-  const families = Object.entries(rows.reduce<Record<string, number>>((acc, r) => ((acc[r.model.family ?? "other"] = (acc[r.model.family ?? "other"] ?? 0) + 1), acc), {}))
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([f]) => f);
+  const families = familyColors(rows.map((r) => r.model.family));
   const height = 200;
   const m = { top: 8, right: 12, bottom: 22, left: 40 };
   const innerW = Math.max(10, width - m.left - m.right);
@@ -53,13 +52,10 @@ function ScoreOverTime({ rows, meta }: { rows: LeaderboardRow[]; meta: MetricMet
   const x = scaleLinear().domain([Math.min(...ts), Math.max(...ts) + 1]).range([0, innerW]);
   const ext = extent(vals) ?? [0, 1];
   const y = scaleLinear().domain([ext[0] - (ext[1] - ext[0]) * 0.1, ext[1] + (ext[1] - ext[0]) * 0.1 || 1]).range([innerH, 0]);
-  const colorOf = (r: LeaderboardRow) => {
-    const i = families.indexOf(r.model.family ?? "other");
-    return i >= 0 ? catColor(i) : "var(--cat-context)";
-  };
+  const colorOf = (r: LeaderboardRow) => families.colorOf(r.model.family);
   return (
     <div ref={ref}>
-      <Legend items={[...families.map((f, i) => ({ label: f, color: catColor(i) })), { label: "other", color: "var(--cat-context)" }]} />
+      <Legend items={families.legend} />
       {width > 0 && (
         <svg width={width} height={height} onMouseLeave={tip.hide} style={{ marginTop: 6 }}>
           <g transform={`translate(${m.left},${m.top})`}>
@@ -108,7 +104,77 @@ function ScoreOverTime({ rows, meta }: { rows: LeaderboardRow[]; meta: MetricMet
   );
 }
 
-function LeaderboardBody({ kind, name, lb, meta }: { kind: "task" | "suite"; name: string; lb: ReturnType<typeof useTaskLeaderboard>; meta: MetricMeta | null }) {
+function runtimeColumns(mode: RuntimeMode): Column<LeaderboardRow>[] {
+  return [
+    {
+      id: "runtime",
+      header: (
+        <Tip content={RUNTIME_MODE_HELP[mode]}>
+          <span>{mode === "inference" ? "Runtime" : "With startup"}</span>
+        </Tip>
+      ),
+      title: mode === "inference" ? "Runtime (inference)" : "Runtime with startup",
+      width: 116,
+      align: "right",
+      sortValue: (r) => runtimeValue(r.runtime, mode),
+      cell: (r) => {
+        const rt = r.runtime;
+        if (!rt || rt.basis === "not_recorded") {
+          return (
+            <Tip content={BASIS_HELP.not_recorded}>
+              <span className="faint" style={{ fontSize: 11.5 }}>not recorded</span>
+            </Tip>
+          );
+        }
+        const v = runtimeValue(rt, mode);
+        return (
+          <Tip
+            content={
+              <span style={{ display: "block", maxWidth: 260 }}>
+                <strong>{BASIS_LABEL[rt.basis]}.</strong> {BASIS_HELP[rt.basis]}
+                {mode === "with_startup" && rt.startup_seconds != null && <> Startup {formatRuntime(rt.startup_seconds)}.</>}
+              </span>
+            }
+          >
+            <span className="mono" style={{ color: rt.basis === "estimated" ? "var(--fg-2)" : undefined }}>
+              {v == null ? "—" : `${basisMark(rt.basis)}${formatRuntime(v)}`}
+            </span>
+          </Tip>
+        );
+      },
+      csv: (r) => runtimeValue(r.runtime, mode),
+    },
+    {
+      id: "per1k",
+      header: (
+        <Tip content="Inference seconds per 1,000 instances; comparable across variants of different sizes.">
+          <span>Per 1k</span>
+        </Tip>
+      ),
+      title: "Seconds per 1k instances",
+      width: 84,
+      align: "right",
+      sortValue: (r) => r.runtime?.seconds_per_1k_instances,
+      cell: (r) => <span className="mono muted">{r.runtime?.seconds_per_1k_instances != null ? `${basisMark(r.runtime.basis)}${formatRuntime(r.runtime.seconds_per_1k_instances)}` : "—"}</span>,
+      csv: (r) => r.runtime?.seconds_per_1k_instances,
+    },
+    {
+      id: "gpu",
+      header: "GPUs",
+      title: "GPUs",
+      width: 82,
+      sortValue: (r) => (r.gpu_type ? `${gpuShort(r.gpu_type)} ${r.gpu_count ?? 0}` : null),
+      cell: (r) => (
+        <span className="mono muted" title={r.gpu_type ?? undefined}>
+          {gpuLabel(r.gpu_type, r.gpu_count)}
+        </span>
+      ),
+      csv: (r) => r.gpu_type,
+    },
+  ];
+}
+
+function LeaderboardBody({ kind, name, lb, meta, runtimeMode }: { kind: "task" | "suite"; name: string; lb: ReturnType<typeof useTaskLeaderboard>; meta: MetricMeta | null; runtimeMode?: RuntimeMode }) {
   const navigate = useAppNavigate();
   const [baseline] = useBaseline();
   const [search, setSearch] = useSearchParams<LbSearch>();
@@ -177,6 +243,7 @@ function LeaderboardBody({ kind, name, lb, meta }: { kind: "task" | "suite"; nam
         csv: (r) => r.child_scores?.[`${ch.type}:${ch.name}`],
       }),
     ),
+    ...(kind === "task" && runtimeMode ? runtimeColumns(runtimeMode) : []),
     { id: "n", header: "n", title: "Instances", width: 76, align: "right", sortValue: (r) => r.n, cell: (r) => <span className="mono muted">{formatCount(r.n)}</span>, csv: (r) => r.n },
     { id: "family", header: "Family", title: "Family", width: 90, sortValue: (r) => r.model.family, cell: (r) => <span className="muted">{r.model.family ?? "—"}</span>, csv: (r) => r.model.family },
     { id: "group", header: "Group", title: "Group", width: 190, sortValue: (r) => r.experiment_group, cell: (r) => <span className="truncate muted">{r.experiment_group ?? "—"}</span>, csv: (r) => r.experiment_group },
@@ -233,7 +300,7 @@ function LeaderboardBody({ kind, name, lb, meta }: { kind: "task" | "suite"; nam
           </ChartPanel>
         </div>
         <div className="span-6">
-          <ChartPanel title="Score over time" caption="Each point is a model's result by run date, colored by the three most common families.">
+          <ChartPanel title="Score over time" caption="Each point is a model's result by run date, colored by model family.">
             {lb.isLoading ? <Skeleton height={200} /> : <ScoreOverTime rows={rows} meta={meta} />}
           </ChartPanel>
         </div>
@@ -246,11 +313,14 @@ function Filters({
   search,
   setSearch,
   scopeFilter,
+  gpuTypes,
 }: {
   search: LbSearch;
   setSearch: (p: Partial<LbSearch>, o?: { replace?: boolean }) => void;
   /** Runs filter for facet counts: the task or suite this leaderboard covers. */
   scopeFilter: { task?: string; suite?: string; suite_coverage?: string };
+  /** Task pages: GPU types for the runtime filter (also shows the runtime toggle). */
+  gpuTypes?: string[];
 }) {
   const facets = useRunsFacets(scopeFilter);
   const values = (key: "family" | "group" | "user") =>
@@ -269,6 +339,22 @@ function Filters({
       <Select size="sm" label="Family" value={search.family ?? ""} onChange={(v) => setSearch({ family: v || undefined })} options={[{ value: "", label: "any" }, ...values("family")]} />
       <Select size="sm" label="Group" value={search.group ?? ""} onChange={(v) => setSearch({ group: v || undefined })} options={[{ value: "", label: "any" }, ...values("group")]} width={240} />
       <Select size="sm" label="User" value={search.user ?? ""} onChange={(v) => setSearch({ user: v || undefined })} options={[{ value: "", label: "any" }, ...values("user")]} />
+      {gpuTypes && (
+        <>
+          <Select
+            size="sm"
+            label="GPU"
+            value={search.gpu ?? ""}
+            onChange={(v) => setSearch({ gpu: v || undefined })}
+            options={[{ value: "", label: "any" }, ...(search.gpu && !gpuTypes.includes(search.gpu) ? [search.gpu] : []).concat(gpuTypes).map((g) => ({ value: g, label: gpuShort(g), hint: g.replace(/^NVIDIA\s+/, "") }))]}
+          />
+          <span className="spacer" />
+          <span className="row" style={{ gap: 6 }}>
+            <span className="t-caption">Runtime</span>
+            <Segmented value={parseRuntimeMode(search.rt)} onChange={(v) => setSearch({ rt: runtimeModeParam(v) }, { replace: true })} label="Runtime view" options={RUNTIME_MODE_OPTIONS} />
+          </span>
+        </>
+      )}
     </div>
   );
 }
@@ -281,7 +367,11 @@ export function TaskPage() {
   const variant = search.hash ?? detail.data?.variants[0]?.task_hash;
   const v = detail.data?.variants.find((x) => x.task_hash === variant);
   const metric = search.metric ?? "primary";
-  const lb = useTaskLeaderboard({ task: name, hash: variant, metric, per_model: search.pm, family: search.family, group: search.group, user: search.user, limit: 500 });
+  const lb = useTaskLeaderboard({ task: name, hash: variant, metric, per_model: search.pm, family: search.family, group: search.group, user: search.user, gpu_type: search.gpu, limit: 500 });
+  const runtimeMode = parseRuntimeMode(search.rt);
+  const palette = useMemo(() => familyColors((lb.data?.items ?? []).map((r) => r.model.family)), [lb.data]);
+  // GPU types for the filter come from the unfiltered runtime summary (shared query cache).
+  const gpuTypes = useTaskRuntime(name, { hash: variant, gpu_type: undefined, family: search.family, group: search.group, user: search.user });
   useEffect(() => pushRecent({ type: "task", key: name, label: name, href: `/tasks/${encodeURIComponent(name)}` }), [name]);
   if (detail.error) return <ErrorPanel error={detail.error} />;
   const meta = v ? v.metric_meta[metric === "primary" ? (v.primary_metric ?? "") : metric] ?? null : null;
@@ -338,8 +428,9 @@ export function TaskPage() {
           </div>
         )}
       </PageHeader>
-      <Filters search={search} setSearch={setSearch} scopeFilter={{ task: name }} />
-      <LeaderboardBody kind="task" name={name} lb={lb} meta={meta} />
+      <Filters search={search} setSearch={setSearch} scopeFilter={{ task: name }} gpuTypes={gpuTypes.data?.gpu_types ?? []} />
+      <LeaderboardBody kind="task" name={name} lb={lb} meta={meta} runtimeMode={runtimeMode} />
+      <RuntimeSection palette={palette} task={name} hash={variant} mode={runtimeMode} gpu={search.gpu} family={search.family} group={search.group} user={search.user} />
       {v && (
         <div className="grid-12">
           <div className="span-5">

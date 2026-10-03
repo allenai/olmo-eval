@@ -75,6 +75,25 @@ function runTRs(run: MockRun): MockTaskResult[] {
   return run.taskResultIds.map(tr);
 }
 
+/** The contract's TaskRuntime for a mock task result. */
+function taskRuntime(t: MockTaskResult): T.TaskRuntime {
+  const run = getRun(t.runId);
+  const rt = t.runtime;
+  const recorded = rt.basis !== "not_recorded";
+  return {
+    inference_seconds: rt.inferenceS,
+    basis: rt.basis,
+    startup_seconds: run.startupS,
+    with_startup_seconds: rt.inferenceS != null && run.startupS != null ? Math.round((rt.inferenceS + run.startupS) * 10) / 10 : null,
+    token_share: rt.tokenShare,
+    prompt_tokens_total: recorded ? rt.promptTokens : null,
+    completion_tokens_total: recorded && rt.completionTokens ? rt.completionTokens : null,
+    seconds_per_1k_instances: rt.inferenceS != null && t.n ? (rt.inferenceS / t.n) * 1000 : null,
+    span_start_s: rt.spanStart,
+    span_end_s: rt.spanEnd,
+  };
+}
+
 function paginate<X>(items: X[], q: Query, defLimit = 50, maxLimit = 500) {
   const offset = Number(q.get("cursor") ?? 0) || 0;
   const limit = Math.min(maxLimit, Math.max(1, Number(q.get("limit") ?? defLimit) || defLimit));
@@ -437,6 +456,9 @@ export function runDetail(runId: string): T.RunDetail {
     notes: run.notes,
     errors: run.errors,
     provider_init_seconds: { [`${run.model.series_label.slice(0, 18)}...-w0`]: 74.2 + (run.model.step ?? 0) / 1000 },
+    startup_seconds: run.startupS,
+    processing_started_at: run.processingStartedAt,
+    processing_seconds: run.processingS,
     suites_used: suitesFor(names),
     siblings,
     updated_at: run.updatedAt,
@@ -506,6 +528,7 @@ function taskRow(t: MockTaskResult, baseline: Resolved | null, alpha: number, th
     error: t.error,
     error_summary: t.error ? { type: t.error.split(":")[0], count: 1 } : failed ? { SandboxTimeoutError: failed } : null,
     duration_seconds: t.durationS,
+    runtime: taskRuntime(t),
     completion_tokens_total: tokenCount ? tokens : null,
     mean_completion_tokens: tokenCount ? tokens / tokenCount : null,
     truncation_rate: tokenCount ? (finish.length ?? 0) / tokenCount : null,
@@ -1140,7 +1163,94 @@ function metricValue(t: MockTaskResult, metric: string): number | null {
   return s.metrics[metric] ?? null;
 }
 
+const RUNTIME_META: T.MetricMeta = { kind: "unbounded", higher_is_better: false, display_format: "raw", unit: "s" };
+
+function runtimeMode(metric: string): T.RuntimeMode | null {
+  if (metric === "runtime:inference") return "inference";
+  if (metric === "runtime:with_startup") return "with_startup";
+  return null;
+}
+
+function rejectRuntime(metric: string) {
+  if (runtimeMode(metric)) {
+    throw new MockHttpError(400, "bad_request", "Runtime metrics have no instance-level pairing; use the heatmap instead.");
+  }
+}
+
+function runtimeValue(t: MockTaskResult, mode: T.RuntimeMode): number | null {
+  const rt = taskRuntime(t);
+  return mode === "inference" ? rt.inference_seconds : rt.with_startup_seconds;
+}
+
+/** Matrix of task runtimes: seconds, lower is better, suites sum their tasks. */
+function runtimeMatrix(body: T.MatrixRequest, mode: T.RuntimeMode): T.MatrixResponse {
+  const subjects = resolveMany(body.subjects, body.group);
+  const alpha = body.alpha ?? 0.05;
+  const baselineIdx = body.baseline ? body.subjects.indexOf(body.baseline) : -1;
+  const baseline = body.baseline ? (baselineIdx >= 0 ? subjects[baselineIdx] : resolveSubject(body.baseline, body.group)) : null;
+  const rows = scopeRows(body.scope, subjects);
+  const coverage: T.Coverage = { n_subjects: subjects.length, n_tasks: 0, complete: 0, missing: 0, failed: 0, hash_mismatch: 0 };
+  const delta = (a: number | null, b: number | null) => unpairedDelta({ score: a, stderr: null }, { score: b, stderr: null }, false, alpha);
+  const out: T.MatrixRow[] = rows.map((row) => {
+    if (row.kind === "task") {
+      coverage.n_tasks += 1;
+      const hashes = new Set<string>();
+      const cells: T.MatrixCell[] = subjects.map((s) => {
+        const t = s.lookup.get(row.name);
+        if (!t) {
+          coverage.missing += 1;
+          return { status: "missing", score: null, stderr: null, n: null, task_result_id: null, run_id: null, task_hash: null, delta: null, children_missing: 0 };
+        }
+        if (t.error) {
+          coverage.failed += 1;
+          return { status: "failed", score: null, stderr: null, n: 0, task_result_id: t.id, run_id: t.runId, task_hash: t.taskHash, delta: null, children_missing: 0 };
+        }
+        coverage.complete += 1;
+        hashes.add(t.taskHash);
+        const value = runtimeValue(t, mode);
+        const bt = baseline?.lookup.get(row.name);
+        const d = bt && !bt.error && s.info.key !== baseline?.info.key ? delta(value, runtimeValue(bt, mode)) : null;
+        return { status: "ok", score: value, stderr: null, n: t.n, task_result_id: t.id, run_id: t.runId, task_hash: t.taskHash, delta: d, children_missing: 0 };
+      });
+      if (hashes.size > 1) coverage.hash_mismatch += 1;
+      return { key: row.key, kind: "task", name: row.name, depth: row.depth, parent: row.parent, aggregation: null, metric_key: body.metric, meta: RUNTIME_META, cells };
+    }
+    const leaves = suiteLeaves(row.name);
+    const total = (s: Resolved) => {
+      let sum = 0;
+      let missing = 0;
+      for (const leaf of leaves) {
+        const t = s.lookup.get(leaf);
+        const v = t && !t.error ? runtimeValue(t, mode) : null;
+        if (v == null) missing += 1;
+        else sum += v;
+      }
+      return { sum: missing < leaves.length ? sum : null, missing };
+    };
+    const base = baseline ? total(baseline) : null;
+    const cells: T.MatrixCell[] = subjects.map((s) => {
+      const { sum, missing } = total(s);
+      const d = base && s.info.key !== baseline?.info.key && sum != null ? delta(sum, base.sum) : null;
+      return { status: sum == null ? "missing" : missing ? "partial" : "ok", score: sum, stderr: null, n: null, task_result_id: null, run_id: null, task_hash: null, delta: d, children_missing: missing };
+    });
+    return { key: row.key, kind: "suite", name: row.name, depth: row.depth, parent: row.parent, aggregation: "sum", metric_key: null, meta: RUNTIME_META, cells };
+  });
+  return {
+    subjects: subjects.map((s) => s.info),
+    baseline: body.baseline ?? null,
+    scope: body.scope,
+    metric: body.metric,
+    rows: out,
+    coverage,
+    mde80: null,
+    alpha,
+    computed_at: nowIso(),
+  };
+}
+
 export function compareMatrix(body: T.MatrixRequest): T.MatrixResponse {
+  const mode = runtimeMode(body.metric);
+  if (mode) return runtimeMatrix(body, mode);
   const subjects = resolveMany(body.subjects, body.group);
   const alpha = body.alpha ?? 0.05;
   const baselineIdx = body.baseline ? body.subjects.indexOf(body.baseline) : -1;
@@ -1239,6 +1349,7 @@ function scopeTasks(scope: string, subjects: Resolved[]): string[] {
 }
 
 export function comparePairwise(body: T.PairwiseRequest): T.PairwiseResponse {
+  rejectRuntime(body.metric);
   const subjects = resolveMany(body.subjects, body.group);
   const alpha = body.alpha ?? 0.05;
   const margin = body.margin ?? 0;
@@ -1347,6 +1458,7 @@ function phiLocal(x: number): number {
 }
 
 export function compareContingency(body: T.ContingencyRequest): T.ContingencyResponse {
+  rejectRuntime(body.metric);
   const [a, b] = resolveMany([body.a, body.b], body.group);
   const threshold = body.threshold ?? 0.5;
   const tasks = scopeTasks(body.scope, [a, b]);
@@ -1382,6 +1494,7 @@ export function compareContingency(body: T.ContingencyRequest): T.ContingencyRes
 }
 
 export function compareInstances(body: T.CompareInstancesRequest): T.CompareInstancesResponse {
+  rejectRuntime(body.metric);
   const subjects = resolveMany(body.subjects, body.group);
   const threshold = body.threshold ?? 0.5;
   const trs = subjects.map((s) => {
@@ -1452,12 +1565,12 @@ export function compareInstances(body: T.CompareInstancesRequest): T.CompareInst
 
 // ------------------------------------------------------------------------------------- distributions, models
 
-function latestPerModel(taskName: string, hash?: string | null): MockTaskResult[] {
+function latestPerModel(taskName: string, hash?: string | null, keep: (run: MockRun) => boolean = () => true): MockTaskResult[] {
   const w = getWorld();
   const seen = new Set<string>();
   const out: MockTaskResult[] = [];
   for (const run of w.runs) {
-    if (!visible(run) || run.summary.status === "running") continue;
+    if (!visible(run) || run.summary.status === "running" || !keep(run)) continue;
     if (seen.has(run.model.model_id)) continue;
     const t = runTRs(run).find((x) => x.task.name === taskName && !x.error && (!hash || x.taskHash === hash));
     if (!t) continue;
@@ -1713,7 +1826,9 @@ function leaderboardFilter(q: Query) {
   const families = q.getAll("family").flatMap((v) => v.split(","));
   const groups = q.getAll("group").flatMap((v) => v.split(","));
   const users = q.getAll("user").flatMap((v) => v.split(","));
+  const gpus = q.getAll("gpu_type").flatMap((v) => v.split(","));
   return (run: MockRun) =>
+    (!gpus.length || gpus.includes(run.environment.gpu_type ?? "")) &&
     (!families.length || families.includes(run.model.family ?? "")) &&
     (!groups.length || groups.includes(run.summary.experiment_group ?? "")) &&
     (!users.length || users.includes(run.summary.author ?? ""));
@@ -1731,7 +1846,7 @@ export function taskLeaderboard(q: Query): T.LeaderboardResponse {
   const hib = meta?.higher_is_better !== false;
   const trs = perModel === "all"
     ? [...getWorld().taskResults.values()].filter((t) => t.task.name === name && !t.error && (!hash || t.taskHash === hash))
-    : latestPerModel(name, hash);
+    : latestPerModel(name, hash, keep);
   const z = 1.96;
   const rows = trs
     .map((t) => ({ t, run: getRun(t.runId), s: taskScore(t) }))
@@ -1762,10 +1877,80 @@ export function taskLeaderboard(q: Query): T.LeaderboardResponse {
       author: x.run.summary.author,
       tied_with_leader: i > 0 && leaderCi != null && lo != null && hi != null && (hib ? hi >= leaderCi[0] : lo <= leaderCi[1]),
       child_scores: null,
+      runtime: taskRuntime(x.t),
+      gpu_type: x.run.environment.gpu_type,
+      gpu_count: x.run.environment.gpu_count,
     };
   });
   const { page, next_cursor, total } = paginate(items, q, 100, 1000);
   return { kind: "task", name, task_hash: hash, metric, meta, children: null, items: page, next_cursor, total };
+}
+
+function runtimeStats(values: (number | null)[]): T.RuntimeStats {
+  const v = values.filter((x): x is number => x != null).sort((a, b) => a - b);
+  return {
+    n: v.length,
+    median: v.length ? quantile(v, 0.5) : null,
+    p90: v.length ? quantile(v, 0.9) : null,
+    min: v.length ? v[0] : null,
+    max: v.length ? v[v.length - 1] : null,
+  };
+}
+
+export function taskRuntimeSummary(name: string, q: Query): T.TaskRuntimeResponse {
+  const task = TASK_BY_NAME.get(name);
+  if (!task) throw new MockHttpError(404, "not_found", `Task ${name} not found.`);
+  const all = [...getWorld().taskResults.values()].filter((t) => t.task.name === name && !t.error);
+  const counts = new Map<string, number>();
+  all.forEach((t) => counts.set(t.taskHash, (counts.get(t.taskHash) ?? 0) + 1));
+  const hash = q.get("hash") ?? [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const keep = leaderboardFilter(q);
+  const finalized = all
+    .filter((t) => t.taskHash === hash)
+    .map((t) => ({ t, run: getRun(t.runId) }))
+    .filter((x) => x.run.summary.status !== "running" && x.run.summary.upload_state === "complete");
+  const gpuCounts = new Map<string, number>();
+  finalized.forEach((x) => x.run.environment.gpu_type && gpuCounts.set(x.run.environment.gpu_type, (gpuCounts.get(x.run.environment.gpu_type) ?? 0) + 1));
+  const rows = finalized.filter((x) => keep(x.run)).sort((a, b) => b.run.summary.created_at.localeCompare(a.run.summary.created_at));
+  const recorded = rows.filter((x) => x.t.runtime.basis !== "not_recorded");
+  const groups = new Map<string, typeof recorded>();
+  for (const x of recorded) {
+    const key = `${x.run.model.model_id}|${x.run.environment.gpu_type}|${x.run.environment.gpu_count}`;
+    groups.set(key, [...(groups.get(key) ?? []), x]);
+  }
+  const modelRows: T.TaskRuntimeModelRow[] = [...groups.values()].map((list) => {
+    const rts = list.map((x) => taskRuntime(x.t));
+    return {
+      model: list[0].run.summary.model,
+      gpu_type: list[0].run.environment.gpu_type,
+      gpu_count: list[0].run.environment.gpu_count,
+      runs: list.length,
+      inference: runtimeStats(rts.map((r) => r.inference_seconds)),
+      with_startup: runtimeStats(rts.map((r) => r.with_startup_seconds)),
+      seconds_per_1k_instances: runtimeStats(rts.map((r) => r.seconds_per_1k_instances)),
+      latest_score: taskScore(list[0].t).score,
+    };
+  });
+  modelRows.sort((a, b) => (a.inference.median ?? Infinity) - (b.inference.median ?? Infinity));
+  return {
+    task_name: name,
+    task_hash: hash,
+    meta: task.meta[task.primary] ?? null,
+    gpu_types: [...gpuCounts.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g),
+    rows: modelRows,
+    points: recorded.slice(0, 2000).map((x) => ({
+      run_id: x.run.summary.run_id,
+      task_result_id: x.t.id,
+      model: x.run.summary.model,
+      date: x.run.summary.created_at,
+      gpu_type: x.run.environment.gpu_type,
+      gpu_count: x.run.environment.gpu_count,
+      score: taskScore(x.t).score,
+      n: x.t.n,
+      runtime: taskRuntime(x.t),
+    })),
+    not_recorded: rows.length - recorded.length,
+  };
 }
 
 export function suitesList(q: Query): T.SuitesListResponse {
@@ -1857,6 +2042,9 @@ export function suiteLeaderboard(q: Query): T.LeaderboardResponse {
     author: x.run.summary.author,
     tied_with_leader: i > 0 && x.s.score! + 1.96 * (x.s.stderr ?? 0) >= leader.s.score! - 1.96 * (leader.s.stderr ?? 0),
     child_scores: x.children,
+    runtime: null,
+    gpu_type: null,
+    gpu_count: null,
   }));
   const { page, next_cursor, total } = paginate(items, q, 100, 1000);
   return {

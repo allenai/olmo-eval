@@ -17,6 +17,7 @@ import type {
   RunLinks,
   RunStatus,
   RunSummary,
+  RuntimeBasis,
   SuiteDef,
   UploadState,
 } from "@contract/api-types";
@@ -433,7 +434,7 @@ export const SERIES: SeriesSpec[] = [
     pathFor: (s) => `gs://ai2-llm/checkpoints/olmo3-1b-anneal/step${s}-hf`,
     revisionFor: (s) => `step${s}`,
     size: 1,
-    gpuType: "NVIDIA H100 80GB HBM3",
+    gpuType: "NVIDIA A100-SXM4-80GB",
     gpuCount: 1,
     daysAgoStart: 20,
     daysAgoEnd: 4,
@@ -562,14 +563,30 @@ export interface MockTaskResult {
   noiseKey: string;
   runKey: string;
   error: string | null;
+  /** Seconds from the run's processing start until this task finished. */
   durationS: number;
+  runtime: MockTaskRuntime;
   createdAt: string;
   thinking: boolean;
   maxTokens: number | null;
 }
 
+export interface MockTaskRuntime {
+  inferenceS: number | null;
+  basis: RuntimeBasis;
+  spanStart: number | null;
+  spanEnd: number | null;
+  promptTokens: number;
+  completionTokens: number;
+  tokenShare: number | null;
+}
+
 export interface MockRun {
   summary: RunSummary;
+  /** Model load and server start; null for runs that predate runtime recording. */
+  startupS: number | null;
+  processingStartedAt: string | null;
+  processingS: number | null;
   model: ModelDetail;
   beaker: BeakerDetail | null;
   environment: EnvironmentDetail;
@@ -781,14 +798,19 @@ function makePlans(): RunPlan[] {
   });
 
   // Reference models.
-  const refRuns: [RefSpec, string, string | null, number][] = [
+  const A100 = "NVIDIA A100-SXM4-80GB";
+  // The last entries run a single task, so their task runtime is measured directly.
+  const refRuns: [RefSpec, string, string | null, number, { gpu?: string; tasks?: string[] }?][] = [
     [REFERENCES[1], "chrisg", "olmo3-7b-midtrain-ablations", 12.5],
     [REFERENCES[2], "chrisg", "olmo3-7b-midtrain-ablations", 12.4],
     [REFERENCES[0], "maliam", "tulu4-dpo-safety", 5.9],
-    [REFERENCES[0], "kylel", null, 2.2],
+    [REFERENCES[0], "kylel", null, 2.2, { gpu: A100 }],
     [REFERENCES[1], "raj", "olmo3-32b-sft-sweep", 8.8],
+    [REFERENCES[2], "kylel", null, 1.6, { gpu: A100, tasks: ["gsm8k:cot:olmo3"] }],
+    [REFERENCES[1], "kylel", null, 0.9, { gpu: A100, tasks: ["gsm8k:cot:olmo3"] }],
+    [REFERENCES[2], "chrisg", "olmo3-7b-midtrain-ablations", 0.7, { tasks: ["ifeval"] }],
   ];
-  refRuns.forEach(([ref, author, group, daysAgo], i) => {
+  refRuns.forEach(([ref, author, group, daysAgo, extra], i) => {
     plans.push({
       modelName: ref.name,
       series: ref.name,
@@ -801,7 +823,7 @@ function makePlans(): RunPlan[] {
       group,
       launch: `L-${hexId(8, "ref", i)}`,
       createdAt: NOW - daysAgo * DAY,
-      tasks: ref.name.includes("Llama") && group?.includes("7b") ? BASE_SET : ref.name.includes("OLMo-2") ? BASE_SET : ALL,
+      tasks: extra?.tasks ?? (ref.name.includes("Llama") && group?.includes("7b") ? BASE_SET : ref.name.includes("OLMo-2") ? BASE_SET : ALL),
       ability: (task) => {
         const affinity = normal(rngFor("affinity", ref.name, task.name)) * 0.2;
         return abilityFor(ref.ability, task.category, 1) + affinity;
@@ -811,7 +833,7 @@ function makePlans(): RunPlan[] {
       uploadState: "complete",
       failTasks: {},
       size: ref.size,
-      gpuType: "NVIDIA H100 80GB HBM3",
+      gpuType: extra?.gpu ?? "NVIDIA H100 80GB HBM3",
       gpuCount: 1,
       thinking: !!ref.thinking,
       tags: ["reference"],
@@ -824,6 +846,105 @@ function makePlans(): RunPlan[] {
     });
   });
   return plans;
+}
+
+// ---------------------------------------------------------------------------------------- runtime
+
+/** Prompt tokens per instance; the inference tab uses the same estimate. */
+export function promptTokensPerInstance(task: TaskDef): number {
+  return 180 + (task.fewshot ?? 0) * 140;
+}
+
+/**
+ * Processor sharing: up to `concurrency` tasks share the inference workers, each progressing at
+ * an equal share of their throughput. `work` is each task's time with the workers to itself.
+ */
+export function shareWorkers(work: number[], concurrency: number): { start: number; end: number }[] {
+  const out = work.map(() => ({ start: 0, end: 0 }));
+  const rem = [...work];
+  const active: number[] = [];
+  let next = 0;
+  let t = 0;
+  while (next < work.length && active.length < concurrency) active.push(next++);
+  while (active.length) {
+    const step = Math.min(...active.map((i) => rem[i]));
+    t += step * active.length;
+    for (const i of active) rem[i] -= step;
+    for (const i of active.filter((j) => rem[j] <= 1e-9)) {
+      out[i].end = t;
+      active.splice(active.indexOf(i), 1);
+    }
+    while (next < work.length && active.length < concurrency) {
+      out[next].start = t;
+      active.push(next++);
+    }
+  }
+  return out;
+}
+
+interface RunSim {
+  basis: RuntimeBasis;
+  startupS: number | null;
+  processingS: number;
+  tasks: { end: number; runtime: MockTaskRuntime }[];
+}
+
+/**
+ * Runtime of one run: startup, then the tasks sharing inference workers. Runs older than two
+ * weeks predate runtime recording; single-task runs are measured; recent runs have per-batch
+ * metrics (attributed); the rest are estimated from the task's token share.
+ */
+function simulateRun(plan: RunPlan, runId: string, taskNames: string[]): RunSim {
+  const a100 = plan.gpuType.includes("A100");
+  const sizeSpeed = plan.size >= 32 ? 0.7 : plan.size >= 7 ? 1 : 3;
+  const speed = sizeSpeed * (a100 ? 0.55 : 1);
+  const promptRate = 25_000 * speed;
+  const genRate = 2_200 * speed;
+  const tokens = taskNames.map((name) => {
+    const task = TASK_BY_NAME.get(name)!;
+    const n = Math.min(task.n, plan.limits[name] ?? task.n);
+    return {
+      prompt: n * promptTokensPerInstance(task),
+      completion: Math.round(n * task.meanTokens * (plan.thinking ? 4 : 1)),
+    };
+  });
+  const work = tokens.map(
+    (tk, k) => (12 + tk.prompt / promptRate + tk.completion / genRate) * (0.85 + 0.3 * rngFor("work", runId, taskNames[k])()),
+  );
+  const spans = shareWorkers(work, 6);
+  const processingS = spans.reduce((m, sp) => Math.max(m, sp.end), 0);
+  const startRng = rngFor("startup", runId);
+  const startupBase = plan.size >= 32 ? 460 : plan.size >= 7 ? 190 : 110;
+  const startupS = Math.round(startupBase * (0.9 + 0.25 * startRng()) * (a100 ? 1.15 : 1) * 10) / 10;
+  const old = plan.createdAt < NOW - 14 * DAY;
+  const basis: RuntimeBasis = old
+    ? "not_recorded"
+    : taskNames.length === 1
+      ? "measured"
+      : plan.status === "running" || plan.createdAt > NOW - 2.5 * DAY
+        ? "attributed"
+        : "estimated";
+  const totalTokens = tokens.reduce((acc, tk) => acc + tk.prompt + tk.completion, 0);
+  const tasks = taskNames.map((name, k) => {
+    const share = totalTokens ? (tokens[k].prompt + tokens[k].completion) / totalTokens : null;
+    let inferenceS: number | null = null;
+    if (basis === "measured") inferenceS = processingS;
+    else if (basis === "attributed") inferenceS = work[k] * (0.97 + 0.06 * rngFor("attr", runId, name)());
+    else if (basis === "estimated" && share != null) inferenceS = processingS * share;
+    return {
+      end: spans[k].end,
+      runtime: {
+        inferenceS: inferenceS != null ? Math.round(inferenceS * 10) / 10 : null,
+        basis,
+        spanStart: old ? null : Math.round(spans[k].start * 10) / 10,
+        spanEnd: old ? null : Math.round(spans[k].end * 10) / 10,
+        promptTokens: tokens[k].prompt,
+        completionTokens: tokens[k].completion,
+        tokenShare: old ? null : share,
+      },
+    };
+  });
+  return { basis, startupS: old ? null : startupS, processingS, tasks };
 }
 
 // ---------------------------------------------------------------------------------------- world
@@ -891,15 +1012,13 @@ function buildWorld(): World {
     const doneCount = plan.doneFraction != null ? Math.round(plan.tasks.length * plan.doneFraction) : plan.tasks.length;
     const taskNames = plan.tasks.slice(0, doneCount);
     const trIds: number[] = [];
-    let t = plan.createdAt + 6 * 60_000;
-    const speed = plan.size >= 32 ? 2.2 : plan.size >= 7 ? 1 : 0.5;
-    for (const name of taskNames) {
+    const started = plan.createdAt - 30_000;
+    const sim = simulateRun(plan, runId, taskNames);
+    const processingStart = started + (sim.startupS ?? 0) * 1000;
+    taskNames.forEach((name, k) => {
       const task = TASK_BY_NAME.get(name)!;
       const limit = plan.limits[name] ?? null;
       const n = Math.min(task.n, limit ?? task.n);
-      const perInstance = task.meanTokens ? (task.meanTokens / 900) * speed * (plan.thinking ? 3 : 1) : 0.012 * speed;
-      const durationS = Math.round(25 + n * perInstance * (0.8 + 0.4 * rngFor("dur", runId, name)()));
-      t += durationS * 1000;
       const tr: MockTaskResult = {
         id: trId++,
         runId,
@@ -911,19 +1030,20 @@ function buildWorld(): World {
         noiseKey: plan.noiseKey,
         runKey: runId,
         error: plan.failTasks[name] ?? null,
-        durationS,
-        createdAt: iso(t),
+        durationS: Math.round(sim.tasks[k].end),
+        runtime: sim.tasks[k].runtime,
+        createdAt: iso(processingStart + sim.tasks[k].end * 1000),
         thinking: plan.thinking,
         maxTokens: task.maxTokens && plan.thinking ? Math.max(task.maxTokens, 8192) : task.maxTokens,
       };
       taskResults.set(tr.id, tr);
       trIds.push(tr.id);
-    }
-    const lastTaskEnd = t;
+    });
+    const lastTaskEnd = processingStart + sim.processingS * 1000;
     const status = plan.status;
     const finished = status === "running" ? null : failedRun ? plan.createdAt + 14 * 60_000 : lastTaskEnd + 2 * 60_000;
-    const started = plan.createdAt - 30_000;
     const duration = finished ? (finished - started) / 1000 : null;
+    const recorded = sim.basis !== "not_recorded";
     const experimentId = beakerId("ex", runId);
     const datasetId = beakerId("ds", runId);
     const commit = hexId(40, "commit", Math.floor((NOW - plan.createdAt) / (3 * DAY)));
@@ -980,6 +1100,9 @@ function buildWorld(): World {
     };
     const run: MockRun = {
       summary,
+      startupS: sim.startupS,
+      processingStartedAt: recorded && sim.startupS != null && !failedRun ? iso(processingStart) : null,
+      processingS: recorded && status !== "running" && !failedRun ? sim.processingS : null,
       model,
       beaker: {
         experiment_id: experimentId,
