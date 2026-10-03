@@ -34,6 +34,10 @@ headline metrics use the first prompt, and ``average_majority`` (correct on at l
 of five prompts) and ``average_prompt_mean`` (every request counted) are reported beside it.
 ``unparsed`` is the fraction of replies with no A-E first character.
 
+Parity: Qwen2-VL-7B-Instruct (HF, bf16) scores a 16-task ``average`` of 0.400 against
+0.393 from the paper's Figure 4 over the same tasks. Four per-task values match exactly
+(more than any other prompt combination gives), and the rest are within a few points.
+
 Deviations:
 
 * **xBD imagery.** 210 of the 227 disaster-type questions (single and temporal) and all
@@ -43,7 +47,7 @@ Deviations:
   as the release's ``preprocess_xbd.py`` expects) and fail if it is unset or incomplete. The
   default tasks drop those two tasks entirely rather than score them on a remnant. Their
   ``average`` is a 16-task mean, so compare it with the paper's per-task numbers over the
-  same 16 tasks.
+  same 16 tasks. Their ``event_detection`` category is fire-risk assessment alone.
 * **Temporal image placement.** The official temporal prompt interleaves text and images
   ("This is the 'pre' image:" <image> "This is the 'post' image:" <image>). Providers here
   place images before the text, so the request sends the pre and post images (the first and
