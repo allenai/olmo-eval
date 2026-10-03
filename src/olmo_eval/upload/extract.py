@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from olmo_eval.runners.common.types import PREDICTIONS_SUFFIX, REQUESTS_SUFFIX
+from olmo_eval.runners.common.usage import instance_prompt_tokens
 from olmo_eval.runners.processing.utils import sanitize_spec_for_filename
 
 BATCH_SIZE = 2000
@@ -206,6 +207,20 @@ def _output_tokens(output: Mapping[str, Any]) -> int | None:
     return tokens
 
 
+def _prompt_tokens(rec: Mapping[str, Any], outputs: list[Mapping[str, Any]]) -> int | None:
+    """Prompt tokens for one instance (rules in runners/common/usage.py).
+
+    Agent records with more than one assistant turn are left null: their outputs
+    describe only the last model call.
+    """
+    turns = _get(rec.get("trajectory"), "turns")
+    if isinstance(turns, list):
+        assistant_turns = [t for t in turns if _get(t, "role") == "assistant"]
+        if len(assistant_turns) > 1:
+            return None
+    return instance_prompt_tokens(outputs)
+
+
 def _unique_native_id(base: str, counts: dict[str, int], used: set[str]) -> str:
     """Return ``base``, or ``base#<n>`` for repeats, unique among ``used``.
 
@@ -279,7 +294,7 @@ def build_instance_row(
         "label": _label(rec.get("label")),
         "finish_reason": finish_reason[:32] if isinstance(finish_reason, str) else None,
         "completion_tokens": completion_tokens,
-        "prompt_tokens": None,
+        "prompt_tokens": _prompt_tokens(rec, outputs),
         "num_outputs": len(outputs),
         "extracted_answer": None if extracted is None else str(extracted)[:256],
         "prompt_preview": request.preview[:PREVIEW_CHARS] if request and request.preview else None,

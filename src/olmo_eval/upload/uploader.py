@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import math
 import mimetypes
 import os
 from collections.abc import Iterator, Mapping, Sequence
@@ -43,6 +44,7 @@ from olmo_eval.upload.manifest import (
     read_manifest,
     read_metrics,
     run_status,
+    to_utc_iso,
     utc_now,
     write_manifest,
 )
@@ -130,6 +132,27 @@ def _nonneg_int(value: Any) -> int | None:
     if isinstance(value, float) and value.is_integer() and value >= 0:
         return int(value)
     return None
+
+
+def _nonneg_float(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) and number >= 0 else None
+
+
+def _str_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def run_timing(metrics: Mapping[str, Any] | None) -> dict[str, Any]:
+    """RunInfo timing fields from metrics.json, null when absent (older results)."""
+    metrics = metrics or {}
+    return {
+        "startup_seconds": _nonneg_float(metrics.get("startup_seconds")),
+        "processing_started_at": to_utc_iso(_str_or_none(metrics.get("processing_started_at"))),
+        "processing_seconds": _nonneg_float(metrics.get("processing_seconds")),
+    }
 
 
 def _md5_b64(path: Path) -> str:
@@ -302,6 +325,11 @@ def _task_payload(
         "error": str(error) if error else None,
         "error_summary": dict(error_summary) if error_summary else None,
         "duration_seconds": float(duration) if isinstance(duration, (int, float)) else None,
+        "first_request_at": to_utc_iso(_str_or_none(row.get("first_request_at"))),
+        "last_completed_at": to_utc_iso(_str_or_none(row.get("last_completed_at"))),
+        "prompt_tokens_total": _nonneg_int(row.get("prompt_tokens_total")),
+        "completion_tokens_total": _nonneg_int(row.get("completion_tokens_total")),
+        "attributed_inference_seconds": _nonneg_float(row.get("attributed_inference_seconds")),
         "predictions_path": predictions.relative_to(output_dir).as_posix() if predictions else None,
         "requests_path": requests.relative_to(output_dir).as_posix() if requests else None,
         "suites": suites,
@@ -336,6 +364,7 @@ def build_plan(output_dir: str | Path, tags: Sequence[str] = ()) -> UploadPlan:
     if not isinstance(run_id, str) or not run_id:
         raise ManifestError(f"{out / MANIFEST_NAME} has no run_id")
     run["tags"] = list(validate_tags([*(run.get("tags") or []), *tags]))
+    run.update(run_timing(metrics))
 
     warnings: list[str] = []
     manifest_tasks = manifest.get("tasks") or {}

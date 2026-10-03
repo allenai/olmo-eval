@@ -41,6 +41,12 @@ class TaskMetricsEntry(Serializable):
     instances_processed: int | None = None
     instances_failed: int | None = None
     error_summary: str | None = None
+    # Per-task cost; see TASK_COST_KEYS in runners/common/types.py
+    first_request_at: str | None = None
+    last_completed_at: str | None = None
+    prompt_tokens_total: int | None = None
+    completion_tokens_total: int | None = None
+    attributed_inference_seconds: float | None = None
 
 
 @dataclass
@@ -71,3 +77,7 @@ class MetricsOutput(Serializable):
     # Duration metrics
     experiment_duration_seconds: float | None = None
     provider_init_seconds: dict[str, float] | None = None  # model_name -> init_time
+    # Run timing; see RUN_TIMING_KEYS in runners/common/types.py
+    startup_seconds: float | None = None
+    processing_started_at: str | None = None
+    processing_seconds: float | None = None

@@ -28,6 +28,7 @@ from olmo_eval.runners.asynq.results import (
     aggregate_results,
     check_hard_failure_gate,
     process_results,
+    utc_iso,
 )
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.common.base import BaseEvalRunner
@@ -90,6 +91,23 @@ class ProcessPoolPlan:
     pools: dict[str, ProcessScoringPoolConfig]
     demand: dict[str, ProcessPoolDemand]
     auto_created: frozenset[str]
+
+
+def _processing_seconds(
+    results: Mapping[str, TaskResult], processing_start: float, fallback_end: float
+) -> float:
+    """Seconds from processing start until the last task finished.
+
+    Uses the latest task last_completed_at, or fallback_end when no task has one.
+    """
+    from datetime import datetime
+
+    ends = [
+        datetime.fromisoformat(r.last_completed_at).timestamp()
+        for r in results.values()
+        if r.last_completed_at
+    ]
+    return max([*ends, processing_start] if ends else [fallback_end]) - processing_start
 
 
 def _materialize_sandbox_instances(sandboxes: Sequence[SandboxConfig]) -> list[SandboxConfig]:
@@ -581,7 +599,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
     async def run_async(self) -> dict[str, Any]:
         """Execute evaluations using instance-level queuing."""
-        # Track experiment start time
+        # Track experiment start time. This is also the anchor for startup_seconds: it
+        # comes before task data loading, worker spawn and provider init, and after CLI
+        # startup (imports and config resolution), which it does not cover.
         experiment_start = time.time()
 
         # Generate experiment ID early so metrics can include it
@@ -854,6 +874,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             processing_start = time.time()
             for tracker in trackers.values():
                 tracker.start_time = processing_start
+            startup_seconds = processing_start - experiment_start
 
             # Process results
             results = await self._process_results(
@@ -865,6 +886,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 len(expanded_tasks),
                 total_instances,
             )
+            processing_seconds = _processing_seconds(results, processing_start, time.time())
 
             # Wait for all workers
             for worker in workers:
@@ -893,6 +915,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Aggregate and save results
             results_dict = self._aggregate_results(results, expanded_tasks)
+            results_dict["startup_seconds"] = startup_seconds
+            results_dict["processing_started_at"] = utc_iso(processing_start)
+            results_dict["processing_seconds"] = processing_seconds
             return self._finalize_and_gate(
                 results,
                 results_dict,
