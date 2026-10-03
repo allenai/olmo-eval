@@ -981,3 +981,213 @@ class TestChatMessagesForRequest:
         from olmo_eval.inference.request_utils import chat_messages_for_request
 
         assert chat_messages_for_request(self._request()) == ()
+
+
+class TestDocumentLayoutDetection:
+    """OLMo-core document-layout checkpoints are recognized from their config."""
+
+    @staticmethod
+    def _info(config: dict, model_config: dict | None = None, fmt: str = "olmo_core_unsharded"):
+        from olmo_eval.inference.providers.olmo_core_vlm.checkpoint import (
+            MultimodalCheckpointInfo,
+        )
+
+        return MultimodalCheckpointInfo(format=fmt, config=config, model_config=model_config or {})
+
+    def test_document_message_format_in_any_source(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import preprocessing
+
+        dataset = {
+            "sources": {
+                "a": {"dataset": {"message_format": "qwen3"}},
+                "b": {"dataset": {"message_format": "document"}},
+            }
+        }
+        assert preprocessing.uses_document_layout(self._info({"dataset": dataset}))
+        chat = {"sources": {"a": {"message_format": "qwen3"}}}
+        assert not preprocessing.uses_document_layout(self._info({"dataset": chat}))
+
+    def test_kda_language_model_implies_document_layout(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import preprocessing
+
+        lm = {
+            "block_overrides": {"0": {"sequence_mixer": {"_CLASS_": "x.KimiDeltaAttentionConfig"}}}
+        }
+        assert preprocessing.uses_document_layout(self._info({}, {"lm": lm}))
+        assert not preprocessing.uses_document_layout(self._info({}, {"lm": {"_CLASS_": "x.TC"}}))
+        mm_olmo = self._info({"dataset": {"message_format": "document"}}, fmt="mm_olmo_dcp")
+        assert not preprocessing.uses_document_layout(mm_olmo)
+
+    def test_olmo_ddp_language_model_trains_in_bfloat16(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import preprocessing
+
+        ddp = {"lm": {"_CLASS_": "olmo_core.nn.transformer.config.OLMoDDPModelConfig"}}
+        plain = {"lm": {"_CLASS_": "olmo_core.nn.transformer.config.TransformerConfig"}}
+        assert preprocessing.trains_in_bfloat16(self._info({}, ddp))
+        assert not preprocessing.trains_in_bfloat16(self._info({}, plain))
+
+    def test_tokenizer_comes_from_an_adapted_dataset_tokenizer(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import preprocessing
+
+        dataset = {
+            "tokenizer": {"identifier": "allenai/dolma2-tokenizer"},
+            "model_vocab_size": 100352,
+            "tokenizer_revision": "abc",
+        }
+        info = self._info({"dataset": dataset})
+        assert preprocessing.dataset_tokenizer(info) == ("allenai/dolma2-tokenizer", "abc")
+        assert preprocessing.resolve_tokenizer_path(info, None) == "allenai/dolma2-tokenizer"
+        assert preprocessing.resolve_tokenizer_path(info, "explicit") == "explicit"
+        with_model_id = self._info({"dataset": dataset, "model_id": "allenai/Molmo2-4B"})
+        assert preprocessing.resolve_tokenizer_path(with_model_id, None) == "allenai/Molmo2-4B"
+        # Without model_vocab_size the run used a tokenizer that already had image tokens.
+        unadapted = self._info({"dataset": {"tokenizer": {"identifier": "t"}}})
+        assert preprocessing.dataset_tokenizer(unadapted) is None
+        assert preprocessing.resolve_tokenizer_path(unadapted, None) == "allenai/Molmo2-4B"
+
+
+class TestDocumentPrompt:
+    """Document prompts are [EOS] + image tokens + plain text turns, no chat template."""
+
+    def _provider(self):
+        from olmo_eval.inference.providers.olmo_core_vlm.provider import OlmoCoreVLMProvider
+
+        provider = OlmoCoreVLMProvider.__new__(OlmoCoreVLMProvider)
+        provider.tokenizer = FakeTokenizer()
+        provider.prompt_format = "document"
+        return provider
+
+    def test_layout(self) -> None:
+        provider = self._provider()
+        request = LMRequest(request_type=RequestType.CHAT, prompt="Prompt")
+        assert provider._document_ids(request, [90, 91]) == [2, 90, 91, 10, 11]
+        assert provider._document_ids(request, []) == [2, 10, 11]
+
+    def test_later_turns_follow_a_space(self) -> None:
+        provider = self._provider()
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            prompt="!",
+            messages=({"role": "system", "content": "Other"},),
+        )
+        # "Other" first and unchanged, then " !" with its separating space.
+        assert provider._document_ids(request, [90]) == [2, 90, 12, 13, 6]
+
+    def test_text_only_request_uses_the_document_layout(self) -> None:
+        provider = self._provider()
+        request = LMRequest(request_type=RequestType.CHAT, prompt="Prompt")
+        token_ids, images, pooling = provider._encode_request(request)
+        assert token_ids == [2, 10, 11]
+        assert images is None and pooling is None
+
+
+class _CausalSumLm:
+    """Causal fake LM: the next token is (sum of the row's tokens so far) % vocab.
+
+    Pad slots to the right of a row's last token would change the sum if any position
+    looked ahead, so right-padded batches must reproduce single-row decoding exactly.
+    """
+
+    def __init__(self, torch, vocab_size: int = 32) -> None:
+        self._torch = torch
+        self.vocab_size = vocab_size
+        self.embeddings = SimpleNamespace(
+            weight=torch.arange(vocab_size, dtype=torch.float32)[:, None], padding_idx=None
+        )
+        self.embed_scale = None
+        self.embedding_norm = None
+        self.calls: list[tuple[int, ...]] = []
+
+    def __call__(self, ids, input_embeddings=None, logits_to_keep=0):
+        torch = self._torch
+        self.calls.append(tuple(ids.shape))
+        sums = input_embeddings[..., 0].cumsum(dim=1).long() % self.vocab_size
+        logits = torch.nn.functional.one_hot(sums, self.vocab_size).float()
+        return logits.gather(1, logits_to_keep[..., None].expand(-1, -1, self.vocab_size))
+
+
+class TestUncachedBatchedDecode:
+    """Right-padded uncached batches decode every row exactly as it decodes alone."""
+
+    @pytest.fixture(autouse=True)
+    def _torch(self):
+        self.torch = pytest.importorskip("torch")
+
+    def _provider(self):
+        from olmo_eval.inference.providers.olmo_core_vlm.provider import OlmoCoreVLMProvider
+
+        provider = OlmoCoreVLMProvider.__new__(OlmoCoreVLMProvider)
+        provider.tokenizer = FakeTokenizer()
+        provider.device = self.torch.device("cpu")
+        provider.model = SimpleNamespace(lm=_CausalSumLm(self.torch))
+        provider._first_extra_token_id = 32
+        provider.stop_token_ids = frozenset({2})
+        provider.image_patch_token_id = 31
+        return provider
+
+    def test_batch_matches_single_rows(self) -> None:
+        provider = self._provider()
+        params = SamplingParams(temperature=0.0, max_tokens=6)
+        entries = [
+            ([5, 7, 9], None, None, 6),
+            ([3], None, None, 4),
+            ([8, 8, 8, 8, 1], None, None, 6),
+        ]
+        batched = provider._decode_batch_uncached(entries, params)
+        single = [provider._decode_batch_uncached([entry], params)[0] for entry in entries]
+        assert batched == single
+        for row, (_, _, _, budget) in zip(batched, entries, strict=True):
+            assert len(row) == budget or row[-1] == 2  # budget or stop token ends each row
+
+    def test_finished_rows_leave_the_batch(self) -> None:
+        provider = self._provider()
+        params = SamplingParams(temperature=0.0, max_tokens=3)
+        provider._decode_batch_uncached([([5], None, None, 1), ([7], None, None, 3)], params)
+        # First step runs both rows; later steps only the unfinished one.
+        assert [shape[0] for shape in provider.model.lm.calls] == [2, 1, 1]
+
+
+class TestMoePermutationFallback:
+    """The torch MoE permutation fallback groups by expert and merges back exactly."""
+
+    @pytest.fixture(autouse=True)
+    def _torch(self):
+        self.torch = pytest.importorskip("torch")
+
+    def test_round_trip_matches_naive_routing(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
+
+        torch = self.torch
+        gen = torch.Generator().manual_seed(0)
+        tokens, top_k, hidden, experts = 7, 3, 5, 4
+        inp = torch.randn(tokens, hidden, generator=gen)
+        routing = torch.stack(
+            [torch.randperm(experts, generator=gen)[:top_k] for _ in range(tokens)]
+        )
+        probs = torch.rand(tokens, top_k, generator=gen)
+        scale = torch.arange(1, experts + 1, dtype=torch.float32)
+
+        permuted, row_id_map = moe_fallback.moe_permute(inp, routing, num_out_tokens=-1)
+        expert_of_row = routing.reshape(-1)[row_id_map]
+        assert torch.equal(expert_of_row, expert_of_row.sort().values)  # grouped by expert
+        out = moe_fallback.moe_unpermute(
+            permuted * scale[expert_of_row][:, None],
+            row_id_map,
+            restore_shape=inp.shape,
+            merging_probs=probs,
+        )
+        expected = torch.zeros_like(inp)
+        for t in range(tokens):
+            for k in range(top_k):
+                expected[t] += probs[t, k] * scale[routing[t, k]] * inp[t]
+        assert torch.allclose(out, expected, atol=1e-6)
+
+    def test_installs_only_without_transformer_engine(self, monkeypatch) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
+
+        fake = SimpleNamespace(moe_permute=None, moe_unpermute=None)
+        monkeypatch.setitem(sys.modules, "olmo_core.nn.moe.utils", fake)
+        assert moe_fallback.install_torch_moe_permutation()
+        assert fake.moe_permute is moe_fallback.moe_permute
+        # A second call (or TransformerEngine being present) leaves the hooks alone.
+        assert not moe_fallback.install_torch_moe_permutation()

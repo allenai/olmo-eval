@@ -284,3 +284,16 @@ class DenseCaptionCaptionerEval(DenseCaptionEval):
     """
 
     caption_prompt: str | None = "long_caption:"
+
+
+@register("dense_caption_description")
+class DenseCaptionDescriptionEval(DenseCaptionEval):
+    """Dense-caption eval prompt for checkpoints trained on ``Description:`` captions.
+
+    OLMo-core's vision-alignment recipe (OLMo 3.5) trains its PixMo captions as plain
+    documents prompted by the fixed text ``Description:`` (``PixMoCapDatasetConfig.
+    fixed_prompt``) rather than a style tag, so this task asks exactly that. Use
+    ``dense_caption_captioner`` for checkpoints trained on the ``long_caption:`` tag.
+    """
+
+    caption_prompt: str | None = "Description:"

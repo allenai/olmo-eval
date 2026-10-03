@@ -1,0 +1,93 @@
+"""Torch stand-ins for the TransformerEngine MoE permutation ops.
+
+OLMo-core's OLMoDDP MoE blocks route tokens through TransformerEngine's
+``moe_permute`` / ``moe_unpermute`` even without expert parallelism, and leave
+them as ``None`` when TransformerEngine is not installed (it is not in the eval
+images). These reproduce the "index" map semantics the no-EP forward uses:
+token copies grouped by expert in ascending expert order, then merged back
+weighted by the routing probabilities, accumulating in float32.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+def moe_permute(
+    inp: Any, routing_map: Any, num_out_tokens: int | None = -1, map_type: str = "index", **_: Any
+) -> tuple[Any, Any]:
+    """Group each token's ``top_k`` copies by expert.
+
+    :param inp: ``(tokens, hidden)`` inputs.
+    :param routing_map: ``(tokens, top_k)`` expert index per routing slot.
+    :param num_out_tokens: Number of permuted rows to keep (``-1``/``None`` keeps all).
+    :returns: ``(permuted, row_id_map)``: the ``(rows, hidden)`` permuted copies and,
+        for each permuted row, the flat ``token * top_k + slot`` index it came from.
+    """
+    import torch
+
+    if map_type != "index":
+        raise NotImplementedError(f"moe_permute fallback supports map_type='index', not {map_type}")
+    top_k = routing_map.shape[1]
+    order = torch.argsort(routing_map.reshape(-1).long(), stable=True)
+    if num_out_tokens is not None and num_out_tokens >= 0:
+        order = order[:num_out_tokens]
+    return inp.index_select(0, order // top_k), order
+
+
+def moe_unpermute(
+    inp: Any,
+    row_id_map: Any,
+    restore_shape: Any = None,
+    map_type: str = "index",
+    merging_probs: Any = None,
+    **_: Any,
+) -> Any:
+    """Merge permuted rows back into their tokens, weighted by ``merging_probs``.
+
+    :param inp: ``(rows, hidden)`` expert outputs in :func:`moe_permute` order.
+    :param row_id_map: The ``row_id_map`` returned by :func:`moe_permute`.
+    :param restore_shape: ``(tokens, hidden)`` shape of the original inputs.
+    :param merging_probs: ``(tokens, top_k)`` routing weights; ``None`` sums the copies.
+    """
+    import torch
+
+    if map_type != "index":
+        raise NotImplementedError(
+            f"moe_unpermute fallback supports map_type='index', not {map_type}"
+        )
+    num_tokens = restore_shape[0]
+    top_k = row_id_map.numel() // num_tokens if merging_probs is None else merging_probs.shape[1]
+    # Dropped slots (num_out_tokens below tokens * top_k) contribute zeros.
+    rows = inp.new_zeros((num_tokens * top_k, inp.shape[-1]), dtype=torch.float32)
+    rows[row_id_map.long()] = inp.float()
+    rows = rows.view(num_tokens, top_k, -1)
+    if merging_probs is not None:
+        rows = rows * merging_probs.float().unsqueeze(-1)
+    return rows.sum(dim=1).to(inp.dtype)
+
+
+def install_torch_moe_permutation() -> bool:
+    """Point OLMo-core's MoE permutation hooks at the torch fallbacks when TE is absent.
+
+    :returns: Whether the fallbacks were installed (``False`` when TransformerEngine
+        provides the ops, or the installed OLMo-core has no such hooks).
+    """
+    import importlib
+
+    try:
+        moe_utils = importlib.import_module("olmo_core.nn.moe.utils")
+    except ImportError:
+        return False
+    if not hasattr(moe_utils, "moe_permute") or moe_utils.moe_permute is not None:
+        return False
+    setattr(moe_utils, "moe_permute", moe_permute)  # noqa: B010
+    setattr(moe_utils, "moe_unpermute", moe_unpermute)  # noqa: B010
+    logger.warning(
+        "TransformerEngine is not installed; MoE token permutation uses the torch fallback "
+        "(same routing, float32 merge; not bitwise identical to TE's kernels)"
+    )
+    return True

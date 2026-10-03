@@ -22,6 +22,14 @@ Supported checkpoint formats (see ``checkpoint``): raw OLMo-core
 multimodal trainer checkpoints, consolidated OLMo-core safetensors exports, and
 mm_olmo (Molmo2 ``video_olmo``) trainer checkpoints, which are key-remapped into
 the OLMo-core layout at load time.
+
+Checkpoints trained on OLMo-core's plain-document layout (e.g. the OLMo 3.5
+vision-alignment runs, whose language model mixes Kimi Delta Attention with a
+few attention layers) are prompted as ``[EOS] + image tokens + prompt`` with no
+chat template and causal image attention (``prompt_format="document"``, picked
+automatically; see ``preprocessing.uses_document_layout``). Their recurrent
+mixers have no KV cache, so they decode without one, batched by right-padding:
+every forward is causal, so pad slots after a row's last token never reach it.
 """
 
 from __future__ import annotations
@@ -32,6 +40,7 @@ import dataclasses
 import gc
 import logging
 import threading
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 import olmo_eval.inference.providers.olmo_core_utils as core_utils
@@ -40,7 +49,12 @@ from olmo_eval.common.images import resolve_images
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import REQUEST_ERROR_KEY
-from olmo_eval.inference.providers.olmo_core_vlm import cache, checkpoint, preprocessing
+from olmo_eval.inference.providers.olmo_core_vlm import (
+    cache,
+    checkpoint,
+    moe_fallback,
+    preprocessing,
+)
 from olmo_eval.inference.request_utils import chat_messages_for_request
 
 if TYPE_CHECKING:
@@ -49,6 +63,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Provider-foreign kwargs silently accepted for config compatibility.
+_PROMPT_FORMATS = ("chat", "document")
+
 _IGNORED_KWARGS = frozenset(
     {
         "gpu_memory_utilization",
@@ -107,13 +123,14 @@ class OlmoCoreVLMProvider(InferenceProvider):
         model_name: str,
         tokenizer: str | None = None,
         *,
-        dtype: str = "float32",
-        autocast_dtype: str | None = "bfloat16",
+        dtype: str = "auto",
+        autocast_dtype: str | None = "auto",
         max_crops: int | None = None,
         max_multi_image_crops: int | None = None,
         max_model_len: int | None = None,
         device: str | None = None,
-        bidirectional_image_attention: bool = True,
+        bidirectional_image_attention: bool | None = None,
+        prompt_format: str | None = None,
         use_cache: bool = True,
         batch_size: int | None = 16,
         attention_backend: str | None = "torch",
@@ -143,8 +160,11 @@ class OlmoCoreVLMProvider(InferenceProvider):
         if kwargs:
             unsupported = ", ".join(sorted(kwargs))
             raise ValueError(f"Unsupported OlmoCoreVLMProvider kwargs: {unsupported}")
-        if dtype == "auto":
-            dtype = "float32"
+        if prompt_format is not None and prompt_format not in _PROMPT_FORMATS:
+            raise ValueError(
+                f"OlmoCoreVLMProvider prompt_format must be one of {_PROMPT_FORMATS} or None, "
+                f"got {prompt_format!r}"
+            )
 
         super().__init__(model_name)
 
@@ -155,7 +175,32 @@ class OlmoCoreVLMProvider(InferenceProvider):
             model_name,
         )
 
+        # Checkpoints trained on the plain-document layout get its prompt and its causal
+        # image attention; OLMoDDP checkpoints ran in bfloat16 without autocast.
+        if prompt_format is None:
+            document = preprocessing.uses_document_layout(self.checkpoint_info)
+            prompt_format = "document" if document else "chat"
+        self.prompt_format = prompt_format
+        if bidirectional_image_attention is None:
+            bidirectional_image_attention = prompt_format == "chat"
+        bf16_checkpoint = preprocessing.trains_in_bfloat16(self.checkpoint_info)
+        if dtype == "auto":
+            dtype = "bfloat16" if bf16_checkpoint else "float32"
+        if autocast_dtype == "auto":
+            autocast_dtype = None if bf16_checkpoint else "bfloat16"
+        logger.info(
+            "Prompt format %r, bidirectional image attention %s, dtype %s, autocast %s",
+            prompt_format,
+            bidirectional_image_attention,
+            dtype,
+            autocast_dtype,
+        )
+
         tokenizer_path = preprocessing.resolve_tokenizer_path(self.checkpoint_info, tokenizer)
+        if revision is None and tokenizer is None:
+            from_dataset = preprocessing.dataset_tokenizer(self.checkpoint_info)
+            if from_dataset is not None and from_dataset[0] == tokenizer_path:
+                revision = from_dataset[1]
         tokenizer_kwargs = {
             key: value
             for key, value in {
@@ -169,6 +214,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
             preprocessing.VLMTokenizerProtocol,
             AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs),
         )
+        self._add_missing_image_tokens()
         self._resolve_special_token_ids(tokenizer_path)
 
         self.model_config = checkpoint.build_model_config(
@@ -195,6 +241,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
         self.max_length = preprocessing.resolve_max_length(self.checkpoint_info, max_model_len)
 
         logger.info("Building MultimodalLM and loading weights from %s", model_name)
+        moe_fallback.install_torch_moe_permutation()
         model = self.model_config.build(init_device="cpu")
         checkpoint.load_checkpoint_weights(self.checkpoint_info, model_name, model)
         model = model.to(dtype=self.param_dtype).to(self.device)
@@ -203,7 +250,13 @@ class OlmoCoreVLMProvider(InferenceProvider):
         self.model = model
 
         self.use_cache = use_cache and cache.enable_kv_cache(model)
-        if use_cache and not self.use_cache:
+        if use_cache and not self.use_cache and not bidirectional_image_attention:
+            logger.warning(
+                "KV-cached decoding is unavailable for this model (e.g. recurrent Kimi Delta "
+                "Attention blocks); decoding re-runs the LM over each batch's whole "
+                "right-padded sequence for every generated token."
+            )
+        elif use_cache and not self.use_cache:
             logger.error(
                 "KV-cached decoding is UNAVAILABLE for this model's attention backend; "
                 "falling back to full re-forward decoding, which re-runs the LM over the "
@@ -215,6 +268,29 @@ class OlmoCoreVLMProvider(InferenceProvider):
         # KV-cached decoding mutates per-block cache state on the shared model,
         # so concurrent agenerate/alogprobs threads must take turns.
         self._model_lock = threading.Lock()
+
+    def _add_missing_image_tokens(self) -> None:
+        """Append the Molmo2 image tokens to a text tokenizer that lacks them.
+
+        Runs trained on a text model's own tokenizer (``dataset.model_vocab_size`` in
+        the config) appended the image tokens with OLMo-core's
+        ``prepare_molmo2_tokenizer``, which keeps existing IDs and adds the new tokens
+        in a fixed order; repeating it here reproduces the training IDs, which the
+        ``image_patch_token_id`` check in ``__init__`` then confirms.
+        """
+        if self.tokenizer.convert_tokens_to_ids("<im_patch>") not in (
+            None,
+            getattr(self.tokenizer, "unk_token_id", None),
+        ):
+            return
+        dataset = self.checkpoint_info.config.get("dataset")
+        model_vocab_size = dataset.get("model_vocab_size") if isinstance(dataset, dict) else None
+        if not isinstance(model_vocab_size, int):
+            return
+        from olmo_core.nn.vision.molmo2_tokens import prepare_molmo2_tokenizer
+
+        prepare_molmo2_tokenizer(self.tokenizer, model_vocab_size=model_vocab_size)
+        logger.info("Appended the Molmo2 image tokens to the checkpoint's text tokenizer")
 
     def _resolve_special_token_ids(self, tokenizer_path: str) -> None:
         """Resolve Molmo2 image special-token IDs through the tokenizer."""
@@ -241,11 +317,35 @@ class OlmoCoreVLMProvider(InferenceProvider):
         # (inputs-only in Molmo2); generation must never select these ids.
         self._first_extra_token_id = min(self.image_structural_token_ids)
 
+        # Image token blocks use OLMo-core's (Qwen-vocab) IDs unless told otherwise.
+        self.molmo2_token_ids = self._molmo2_token_ids(by_name)
+
         stop_ids = {self.tokenizer.eos_token_id}
         end_of_turn = self.tokenizer.convert_tokens_to_ids(preprocessing.END_OF_TURN_TOKEN)
         if end_of_turn is not None and end_of_turn != unk_id:
             stop_ids.add(end_of_turn)
         self.stop_token_ids = frozenset(token_id for token_id in stop_ids if token_id is not None)
+
+    def _molmo2_token_ids(self, by_name: dict[str, int]) -> Any:
+        """OLMo-core ``Molmo2TokenIds`` for a vocab whose image IDs differ from Molmo2's.
+
+        :returns: ``None`` when the tokenizer uses OLMo-core's default IDs, so image
+            blocks are built exactly as before.
+        """
+        from olmo_core.nn.vision import molmo2_tokens
+
+        if by_name["<im_patch>"] == molmo2_tokens.IM_PATCH_ID:
+            return None
+        end_of_turn = self.tokenizer.convert_tokens_to_ids(preprocessing.END_OF_TURN_TOKEN)
+        return molmo2_tokens.Molmo2TokenIds(
+            im_start_id=by_name["<im_start>"],
+            im_end_id=by_name["<im_end>"],
+            im_patch_id=by_name["<im_patch>"],
+            im_col_id=by_name["<im_col>"],
+            low_res_im_start_id=by_name["<low_res_im_start>"],
+            image_placeholder_id=self.image_placeholder_id,
+            im_end_turn_id=end_of_turn if end_of_turn is not None else -1,
+        )
 
     def get_tokenizer(self) -> Any:
         return self.tokenizer
@@ -321,8 +421,15 @@ class OlmoCoreVLMProvider(InferenceProvider):
 
             crop_tensors.append(crops)
             pooling_tensors.append(offset_pooling)
+            token_ids = getattr(self, "molmo2_token_ids", None)
             token_sequences.append(
-                build_image_token_ids(int(grid[0]), int(grid[1]), int(grid[2]), int(grid[3]))
+                build_image_token_ids(
+                    int(grid[0]),
+                    int(grid[1]),
+                    int(grid[2]),
+                    int(grid[3]),
+                    **({"token_ids": token_ids} if token_ids is not None else {}),
+                )
             )
 
         return (
@@ -343,6 +450,10 @@ class OlmoCoreVLMProvider(InferenceProvider):
         if images:
             image_tensor, pooling_tensor, token_sequences = self._preprocess_images(images)
 
+        if getattr(self, "prompt_format", "chat") == "document":
+            image_ids = [token for image_tokens in token_sequences for token in image_tokens]
+            return self._document_ids(request, image_ids), image_tensor, pooling_tensor
+
         text = self._chat_text(request, len(images))
         token_ids: list[int] = self.tokenizer.encode(text, add_special_tokens=False)
 
@@ -358,6 +469,27 @@ class OlmoCoreVLMProvider(InferenceProvider):
         if bos is not None and (not token_ids or token_ids[0] != bos):
             token_ids = [bos, *token_ids]
         return token_ids, image_tensor, pooling_tensor
+
+    def _document_ids(self, request: LMRequest, image_ids: list[int]) -> list[int]:
+        """Encode a request in OLMo-core's plain-document layout.
+
+        Mirrors OLMo-core's ``document_prompt_ids``: an EOS document boundary, the
+        expanded image blocks, then the turns as plain text with no roles or chat
+        template, each turn after the first preceded by one space (Molmo's
+        ``message_format=none`` rule). The model's answer then continues after a
+        space, which ``_finalize_output`` strips.
+        """
+        eos = self.tokenizer.eos_token_id
+        if eos is None:
+            raise ValueError("The document prompt format needs a tokenizer with an EOS token")
+        token_ids = [int(eos), *image_ids]
+        texts = [msg.get("content", "") or "" for msg in chat_messages_for_request(request)]
+        for text in (text for text in texts if text):
+            first = len(token_ids) == len(image_ids) + 1
+            token_ids += self.tokenizer.encode(
+                text if first else " " + text, add_special_tokens=False
+            )
+        return token_ids
 
     # ------------------------------------------------------------------
     # Model forward helpers
@@ -510,22 +642,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
             ids[row, pad:] = torch.tensor(token_ids, dtype=torch.long, device=self.device)
 
         h = self._embed(ids).clone()
-        any_images = False
-        for row, (_, image_tensor, pooling_tensor, _) in enumerate(entries):
-            if image_tensor is None:
-                continue
-            any_images = True
-            features = self.model._encode_images(image_tensor, pooling_tensor)  # (1, P, d)
-            valid_rows = (pooling_tensor >= 0).any(dim=-1)
-            features = features[valid_rows]  # (P_valid, d)
-            is_patch = ids[row] == self.image_patch_token_id
-            n_patches = int(is_patch.sum())
-            if n_patches != features.shape[0]:
-                raise ValueError(
-                    f"Number of <im_patch> tokens ({n_patches}) does not match the number of "
-                    f"pooled image features ({features.shape[0]})"
-                )
-            h[row, is_patch] = h[row, is_patch] + features.to(h.dtype)
+        any_images = self._splice_image_features(ids, h, entries)
 
         or_mask = None
         if self.bidirectional_image_attention and any_images:
@@ -547,6 +664,112 @@ class OlmoCoreVLMProvider(InferenceProvider):
             leftpad=leftpad,
             budgets=budgets,
         )
+
+    def _splice_image_features(
+        self, ids: torch.Tensor, h: torch.Tensor, entries: list[tuple[list[int], Any, Any, int]]
+    ) -> bool:
+        """Add each row's pooled image features onto its ``<im_patch>`` embeddings in place.
+
+        The vision tower runs once per request, so features match single-request
+        processing exactly.
+
+        :returns: Whether any row has images.
+        """
+        any_images = False
+        for row, (_, image_tensor, pooling_tensor, _) in enumerate(entries):
+            if image_tensor is None:
+                continue
+            any_images = True
+            features = self.model._encode_images(image_tensor, pooling_tensor)  # (1, P, d)
+            valid_rows = (pooling_tensor >= 0).any(dim=-1)
+            features = features[valid_rows]  # (P_valid, d)
+            is_patch = ids[row] == self.image_patch_token_id
+            n_patches = int(is_patch.sum())
+            if n_patches != features.shape[0]:
+                raise ValueError(
+                    f"Number of <im_patch> tokens ({n_patches}) does not match the number of "
+                    f"pooled image features ({features.shape[0]})"
+                )
+            h[row, is_patch] = h[row, is_patch] + features.to(h.dtype)
+        return any_images
+
+    def _decode_batch_uncached(
+        self, entries: list[tuple[list[int], Any, Any, int]], params: SamplingParams
+    ) -> list[list[int]]:
+        """Batched decode without a KV cache for causal-only models.
+
+        Rows are right-padded into one buffer sized for prompt plus budget, and every
+        step re-runs the LM over the active rows up to the longest active row, keeping
+        only each row's logits at its own last token (``logits_to_keep`` as indices).
+        Every position attends causally and the LM has no positional state shared
+        across rows, so the pad slots to the right of a row's last token never reach
+        its logits, and each row decodes exactly as it would alone. Finished rows
+        leave the batch. Not for bidirectional image attention, whose mask this path
+        does not build.
+        """
+        import torch
+
+        pad_id = self.tokenizer.pad_token_id
+        if pad_id is None:
+            pad_id = self.tokenizer.eos_token_id
+        if pad_id is None:
+            raise ValueError("Tokenizer defines neither pad_token_id nor eos_token_id")
+
+        lens = [len(token_ids) for token_ids, _, _, _ in entries]
+        budgets = [budget for _, _, _, budget in entries]
+        width = max(length + budget for length, budget in zip(lens, budgets, strict=True))
+        ids = torch.full((len(entries), width), pad_id, dtype=torch.long, device=self.device)
+        for row, (token_ids, _, _, _) in enumerate(entries):
+            ids[row, : lens[row]] = torch.tensor(token_ids, dtype=torch.long, device=self.device)
+        h = self._embed(ids).clone()
+        self._splice_image_features(ids, h, entries)
+
+        generated: list[list[int]] = [[] for _ in entries]
+        active = list(range(len(entries)))
+        start, steps = time.perf_counter(), 0
+        while active:
+            steps += 1
+            rows = torch.tensor(active, dtype=torch.long, device=self.device)
+            last = torch.tensor([lens[row] - 1 for row in active], device=self.device)
+            span = max(lens[row] for row in active)
+            logits = self.model.lm(
+                ids[rows, :span],
+                input_embeddings=h[rows, :span],
+                logits_to_keep=last.unsqueeze(1),
+            )
+            next_ids = self._select_tokens(logits[:, -1, :].float(), params)
+            continuing: list[int] = []
+            for row, next_id in zip(active, next_ids, strict=True):
+                generated[row].append(next_id)
+                if next_id not in self.stop_token_ids and len(generated[row]) < budgets[row]:
+                    continuing.append(row)
+            if continuing:
+                cont = torch.tensor(continuing, dtype=torch.long, device=self.device)
+                pos = torch.tensor([lens[row] for row in continuing], device=self.device)
+                tokens = torch.tensor(
+                    [generated[row][-1] for row in continuing],
+                    dtype=torch.long,
+                    device=self.device,
+                )
+                ids[cont, pos] = tokens
+                h[cont, pos] = self._embed(tokens.unsqueeze(1))[:, 0].to(h.dtype)
+                for row in continuing:
+                    lens[row] += 1
+            active = continuing
+        elapsed = time.perf_counter() - start
+        logger.info(
+            "Uncached decode: %d rows, prompts %d-%d tokens, %d generated tokens in %d steps, "
+            "%.1fs (%.3fs/step, %.2fs/row)",
+            len(entries),
+            min(len(token_ids) for token_ids, _, _, _ in entries),
+            max(len(token_ids) for token_ids, _, _, _ in entries),
+            sum(len(row) for row in generated),
+            steps,
+            elapsed,
+            elapsed / steps,
+            elapsed / len(entries),
+        )
+        return generated
 
     def _decode_batch_cached(
         self, batch: _PreparedBatch, params: SamplingParams
@@ -736,6 +959,11 @@ class OlmoCoreVLMProvider(InferenceProvider):
                 batch = self._build_batch(entries)
                 for _ in range(params.num_samples):
                     generated_rows = self._decode_batch_cached(batch, params)
+                    for row, generated in enumerate(generated_rows):
+                        outputs[active[row]].append(self._finalize_output(generated, params))
+            elif not self.bidirectional_image_attention:
+                for _ in range(params.num_samples):
+                    generated_rows = self._decode_batch_uncached(entries, params)
                     for row, generated in enumerate(generated_rows):
                         outputs[active[row]].append(self._finalize_output(generated, params))
             else:

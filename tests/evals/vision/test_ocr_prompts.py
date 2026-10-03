@@ -74,6 +74,12 @@ def test_captioner_sends_the_bare_caption_tag() -> None:
     assert "long_caption" not in get_task("dense_caption")._question(0)
 
 
+def test_description_task_sends_the_document_caption_prompt() -> None:
+    # The OLMo-core alignment recipe's fixed caption prompt, whatever the prompt family.
+    assert get_task("dense_caption_description")._question(0) == "Description:"
+    assert get_task("dense_caption_description", STAGE1)._question(0) == "Description:"
+
+
 # ---------------------------------------------------------------------------
 # English-only variants
 # ---------------------------------------------------------------------------
