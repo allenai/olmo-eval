@@ -91,3 +91,46 @@ def install_torch_moe_permutation() -> bool:
         "(same routing, float32 merge; not bitwise identical to TE's kernels)"
     )
     return True
+
+
+def grouped_mm_loop(mat_a: Any, mat_b: Any, *, offs: Any = None, **kwargs: Any) -> Any:
+    """Per-group matmul with the semantics OLMo-core's routed experts use from ``F.grouped_mm``.
+
+    ``mat_a`` is ``(rows, K)`` with rows grouped by expert, ``mat_b`` is ``(groups, K, N)``
+    and ``offs[i]`` is the end row of group ``i``. Rows past ``offs[-1]`` are zero.
+    """
+
+    if offs is None or mat_a.dim() != 2 or mat_b.dim() != 3 or kwargs:
+        raise NotImplementedError("grouped_mm fallback supports 2D x 3D with offs only")
+    out = mat_a.new_zeros((mat_a.shape[0], mat_b.shape[-1]))
+    start = 0
+    for group, end in enumerate(offs.tolist()):
+        if end > start:
+            out[start:end] = mat_a[start:end] @ mat_b[group]
+        start = end
+    return out
+
+
+def install_grouped_mm_fallback(device: Any) -> bool:
+    """Replace ``F.grouped_mm`` with :func:`grouped_mm_loop` on Blackwell with torch < 2.13.
+
+    torch 2.10's grouped-mm CUTLASS kernels are not built for Blackwell (sm_10x) and fail
+    with an unspecified launch failure on B200/B300; the training stack runs torch 2.13.
+
+    :returns: Whether the fallback was installed.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    if not torch.cuda.is_available() or not hasattr(F, "grouped_mm"):
+        return False
+    major, _ = torch.cuda.get_device_capability(device)
+    version = tuple(int(p) for p in torch.__version__.split("+")[0].split(".")[:2])
+    if major < 10 or version >= (2, 13):
+        return False
+    setattr(F, "grouped_mm", grouped_mm_loop)  # noqa: B010
+    logger.warning(
+        "torch %s grouped_mm has no Blackwell kernels; MoE experts use a per-expert matmul loop",
+        torch.__version__,
+    )
+    return True

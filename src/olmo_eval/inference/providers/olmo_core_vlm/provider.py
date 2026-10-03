@@ -242,6 +242,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
 
         logger.info("Building MultimodalLM and loading weights from %s", model_name)
         moe_fallback.install_torch_moe_permutation()
+        moe_fallback.install_grouped_mm_fallback(self.device)
         model = self.model_config.build(init_device="cpu")
         checkpoint.load_checkpoint_weights(self.checkpoint_info, model_name, model)
         model = model.to(dtype=self.param_dtype).to(self.device)

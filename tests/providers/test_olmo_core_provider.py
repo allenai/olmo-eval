@@ -1191,3 +1191,17 @@ class TestMoePermutationFallback:
         assert fake.moe_permute is moe_fallback.moe_permute
         # A second call (or TransformerEngine being present) leaves the hooks alone.
         assert not moe_fallback.install_torch_moe_permutation()
+
+
+def test_grouped_mm_loop_matches_per_group_matmul():
+    import torch
+
+    from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
+
+    torch.manual_seed(0)
+    a = torch.randn(9, 4)
+    b = torch.randn(3, 4, 5)
+    offs = torch.tensor([2, 2, 7], dtype=torch.int32)  # group 1 empty, rows 7-8 padding
+    out = moe_fallback.grouped_mm_loop(a, b, offs=offs)
+    expected = torch.cat([a[:2] @ b[0], a[2:7] @ b[2], torch.zeros(2, 5)])
+    torch.testing.assert_close(out, expected)
