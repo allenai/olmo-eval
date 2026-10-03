@@ -879,7 +879,13 @@ def fewshot_source_for(language: Language) -> str:
 
 BFCL_METRIC = AccuracyMetric(scorer=BFCLScorer)
 
-CHAT_SAMPLING = SamplingParams(max_tokens=1024, temperature=0.0)
+#: BFCL asks for up to 4096 tokens, shrunk to whatever the context window has
+#: left once the prompt is in it, and samples at 0.001 rather than a flat zero.
+CHAT_SAMPLING = SamplingParams(
+    max_tokens=4096,
+    temperature=0.001,
+    fit_max_tokens_to_context=True,
+)
 
 #: The completion regime stops at the next block header so that a model which
 #: keeps writing examples is scored on the answer it gave, not on what follows.

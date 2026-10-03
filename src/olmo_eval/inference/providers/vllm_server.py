@@ -897,6 +897,60 @@ class VLLMServerProvider(InferenceProvider):
             for choice in response.choices
         ]
 
+    #: Room left for the turn markers the chat template adds around a reply.
+    _CONTEXT_MARGIN_TOKENS = 2
+
+    #: What to ask for when the prompt already fills the window. The request
+    #: will be rejected either way; this keeps the number recognisable.
+    _NO_ROOM_MAX_TOKENS = 1000
+
+    async def _fit_max_tokens(
+        self, max_tokens: int, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> int:
+        """Shrink ``max_tokens`` to the room the prompt leaves in the context window.
+
+        Returns ``max_tokens`` unchanged when the window or the prompt length
+        cannot be established, so a server that does not report them behaves as
+        it did before.
+        """
+        context_length = self.max_length
+        if context_length is None:
+            return max_tokens
+
+        prompt_tokens = await self._count_chat_tokens(messages, tools)
+        if prompt_tokens is None:
+            return max_tokens
+
+        if context_length < prompt_tokens + self._CONTEXT_MARGIN_TOKENS:
+            return self._NO_ROOM_MAX_TOKENS
+        return min(max_tokens, context_length - prompt_tokens - self._CONTEXT_MARGIN_TOKENS)
+
+    async def _count_chat_tokens(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> int | None:
+        """Return the prompt's token count as the server's chat template renders it."""
+        payload: dict[str, Any] = {"model": self._request_model_name, "messages": messages}
+        if tools:
+            payload["tools"] = tools
+        if self.chat_template_kwargs:
+            payload["chat_template_kwargs"] = dict(self.chat_template_kwargs)
+
+        base_url = self.base_url.rstrip("/").removesuffix("/v1")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                response = await http_client.post(f"{base_url}/tokenize", json=payload)
+                response.raise_for_status()
+                data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Could not count prompt tokens for max_tokens fitting: %s", exc)
+            return None
+
+        count = data.get("count")
+        if count is None:
+            tokens = data.get("tokens")
+            count = len(tokens) if isinstance(tokens, list) else None
+        return int(count) if count is not None else None
+
     async def _generate_chat(
         self, client: AsyncOpenAI, request: LMRequest, params: SamplingParams
     ) -> list[LMOutput]:
@@ -929,8 +983,11 @@ class VLLMServerProvider(InferenceProvider):
         }
         # max_tokens=None means "generate to the context limit"; omit the field
         # rather than sending null, which some OpenAI-compatible servers reject.
-        if params.max_tokens is not None:
-            kwargs["max_tokens"] = params.max_tokens
+        max_tokens = params.max_tokens
+        if max_tokens is not None and params.fit_max_tokens_to_context:
+            max_tokens = await self._fit_max_tokens(max_tokens, messages, tools)
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature

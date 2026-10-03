@@ -738,3 +738,21 @@ def test_the_overall_suite_averages_the_non_live_summary_with_the_live_one() -> 
         "bfcl_irrelevance",
         "bfcl_live",
     )
+
+
+def test_the_chat_regimes_sample_the_way_the_leaderboard_does() -> None:
+    # BFCL asks for up to 4096 tokens, fitted to the context window, at 0.001.
+    for spec in ("bfcl_simple", "bfcl_simple:prompt"):
+        params = get_task(spec).config.sampling_params
+        assert params.max_tokens == 4096
+        assert params.temperature == 0.001
+        assert params.fit_max_tokens_to_context
+
+
+def test_the_completion_regime_keeps_its_own_budget() -> None:
+    # The completion regime has no counterpart upstream; its budget and stop
+    # sequences are tuned for a base model writing past its answer.
+    params = get_task("bfcl_simple:base").config.sampling_params
+
+    assert params.max_tokens == 512
+    assert not params.fit_max_tokens_to_context

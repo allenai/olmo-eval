@@ -249,6 +249,10 @@ class SamplingParams:
     do_sample: bool = True
     truncate_prompt_tokens: int | None = None
     truncation_side: Literal["left", "right"] | None = None
+    #: Shrink ``max_tokens`` so the prompt and the generation together fit the
+    #: model's context window. Without it a prompt that leaves less room than
+    #: ``max_tokens`` makes the server reject the whole request.
+    fit_max_tokens_to_context: bool = False
 
 
 @dataclass(slots=True)
