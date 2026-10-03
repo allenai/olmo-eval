@@ -75,9 +75,8 @@ def drop_system_turns(chat: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The conversation without its system turns, for chat templates with no system role.
 
     Such templates reject a system turn, and the model was never trained on system text,
-    so moving it into the user turn puts unfamiliar text in front of the question (it made
-    Molmo2-4B answer questions with pointing output). The rest of the conversation is sent
-    unchanged; a warning is logged once.
+    so moving it into the user turn puts unfamiliar text in front of the question. The rest
+    of the conversation is sent unchanged; a warning is logged once.
     """
     kept = [m for m in chat if m["role"] != "system"]
     if len(kept) != len(chat) and not _DROPPED_SYSTEM_WARNED:
