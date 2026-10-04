@@ -15,6 +15,7 @@ being measured.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -209,7 +210,22 @@ class BFCLMultiTurnScaffold(Scaffold):
     ) -> None:
         message: dict[str, Any] = {"role": "assistant", "content": output.text or ""}
         if from_tool_calls and output.tool_calls:
-            message["tool_calls"] = [call.to_openai() for call in output.tool_calls]
+            if all(_arguments_are_an_object(call) for call in output.tool_calls):
+                message["tool_calls"] = [call.to_openai() for call in output.tool_calls]
+            else:
+                # A call whose arguments are not a JSON object cannot travel back to
+                # an OpenAI-compatible endpoint as a tool call: vLLM re-renders the
+                # history through the chat template and rejects the request (400),
+                # which would drop the entry from the run instead of grading the
+                # step wrong as the reference does. Keep the model's words as text,
+                # the way a prompted rollout would see them, and let the rollout
+                # continue; `_decode` has already read this step as no calls.
+                rendered = "\n".join(
+                    f"{call.function.name}({call.function.arguments})" for call in output.tool_calls
+                )
+                message["content"] = "\n".join(
+                    part for part in (message["content"], rendered) if part
+                )
         messages.append(message)
 
     def _record_results(
@@ -227,3 +243,14 @@ class BFCLMultiTurnScaffold(Scaffold):
         # A prompted model has no tool role to read, so the results come back
         # as the user's next message, as the reference implementation does.
         messages.append({"role": "user", "content": repr(results)})
+
+
+def _arguments_are_an_object(call: Any) -> bool:
+    """True when a tool call's arguments decode to a JSON object the endpoint can re-render."""
+    raw = call.function.arguments
+    if raw is None or raw == "" or isinstance(raw, dict):
+        return True
+    try:
+        return isinstance(json.loads(raw), dict)
+    except (TypeError, ValueError):
+        return False

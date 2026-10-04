@@ -311,3 +311,36 @@ async def test_a_prompted_rollout_needs_no_tool_support() -> None:
     )
 
     assert result.final_output.extracted_answer == [[]]
+
+
+@pytest.mark.anyio
+async def test_a_call_with_malformed_arguments_is_recorded_as_text_and_the_rollout_goes_on() -> (
+    None
+):
+    """vLLM rejects a history whose tool-call arguments are not a JSON object (400), which
+    would drop the entry from the run; the scaffold keeps the step as text instead."""
+    from olmo_eval.common.types.tools import Function
+
+    bad_call = ToolCall(id="c1", function=Function(name="mkdir", arguments="{dir_name: temp"))
+    provider = ScriptedProvider(
+        [
+            LMOutput(text="", tool_calls=[bad_call]),
+            LMOutput(text="Done."),
+            LMOutput(text="ok"),
+        ]
+    )
+    result = await run(
+        provider,
+        request_for(
+            [
+                [{"role": "user", "content": "Make a temp directory."}],
+                [{"role": "user", "content": "Now list it."}],
+            ],
+            call_source="tool_calls",
+        ),
+    )
+    assert result.final_output.extracted_answer[0] == []  # the malformed step reads as no calls
+    history = provider.requests[1].messages
+    assistant = [m for m in history if m["role"] == "assistant"]
+    assert assistant and "tool_calls" not in assistant[0]
+    assert "mkdir({dir_name: temp" in assistant[0]["content"]
