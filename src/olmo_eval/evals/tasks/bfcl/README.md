@@ -23,20 +23,22 @@ functions reach the model and how its calls are read back.
 
 ### Native function calling
 
-The server has to be told to parse tool calls. vLLM only emits `tool_calls`
-when started with `--enable-auto-tool-choice`; without it the server answers in
-plain text and no tool calls come back. The run stops with an error saying so
-rather than reporting a score of zero. Provider overrides follow `--harness`,
-not `-t`:
+Needs no server flags:
 
 ```bash
-uv run olmo-eval run -m my-model \
-    --harness default -o provider.kwargs.enable_auto_tool_choice=true \
-    -t bfcl
+uv run olmo-eval run -m my-model -t bfcl
 ```
 
-vLLM infers a `--tool-call-parser` from the model name; add
-`-o provider.kwargs.tool_call_parser=<name>` to choose one explicitly.
+vLLM only emits `tool_calls` when started with `--enable-auto-tool-choice`, so a
+vLLM server the run starts itself gets that flag whenever a task sends tool
+schemas. vLLM infers a `--tool-call-parser` from the model name; add
+`-o provider.kwargs.tool_call_parser=<name>` to choose one explicitly. Provider
+overrides follow `--harness`, not `-t`.
+
+If the server would still answer in plain text, because
+`provider.kwargs.enable_auto_tool_choice=false` was passed, the run stops with
+an error saying so rather than reporting a score of zero. An external server
+given with `base_url` is trusted to have been started with the flag.
 
 A provider that cannot carry tool schemas at all — the in-process `vllm`
 provider and `litellm` both ignore them — is refused the same way, naming the

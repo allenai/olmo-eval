@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -951,6 +952,18 @@ class VLLMServerProvider(InferenceProvider):
             count = len(tokens) if isinstance(tokens, list) else None
         return int(count) if count is not None else None
 
+    def _refuse_tools_without_parsing(self, requests: Sequence[LMRequest]) -> None:
+        """Fail when tool requests would go to a server that returns no tool calls."""
+        if self._tool_calls_parsed is not False or not any(r.tools for r in requests):
+            return
+        raise ValueError(
+            "This vLLM server was started without --enable-auto-tool-choice, so it "
+            "answers in plain text and returns no tool_calls. Every instance of a "
+            "tool-calling task would score as if the model called nothing. Remove the "
+            "provider.kwargs.enable_auto_tool_choice=false override, or run a task "
+            "variant that writes the functions into the prompt instead."
+        )
+
     async def _generate_chat(
         self, client: AsyncOpenAI, request: LMRequest, params: SamplingParams
     ) -> list[LMOutput]:
@@ -964,15 +977,6 @@ class VLLMServerProvider(InferenceProvider):
         # Build tools if present
         tools = None
         if request.tools:
-            if self._tool_calls_parsed is False:
-                raise ValueError(
-                    "This vLLM server was started without --enable-auto-tool-choice, so it "
-                    "answers in plain text and returns no tool_calls. Every instance of a "
-                    "tool-calling task would score as if the model called nothing. Add "
-                    "`--harness default -o provider.kwargs.enable_auto_tool_choice=true` "
-                    "(before -t), or run a task variant that writes the functions into the "
-                    "prompt instead."
-                )
             tools = [t.to_openai() for t in request.tools]
 
         # Build request kwargs
@@ -1095,6 +1099,9 @@ class VLLMServerProvider(InferenceProvider):
         """
         from olmo_eval.inference.dispatch import dispatch_concurrent
 
+        # Checked for the whole batch before dispatch, which would otherwise catch
+        # the refusal per request and hand back empty outputs that score as zero.
+        self._refuse_tools_without_parsing(requests)
         params = self._default_sampling_params(sampling_params)
 
         async def process(req: LMRequest) -> list[LMOutput]:

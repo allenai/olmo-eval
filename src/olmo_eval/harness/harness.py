@@ -101,10 +101,6 @@ class Harness:
         functions attached, which it answers in prose, so every instance of a
         tool-calling task scores zero. That reads like a weak model rather than
         a misconfigured run.
-
-        Unlike the image check, this runs from ``_apply_config``: the async
-        runner reaches the provider through a scaffold or directly, so the
-        methods below are not on its path.
         """
         if getattr(self.provider, "supports_tools", False):
             return
@@ -370,7 +366,9 @@ class Harness:
 
         messages = self._inject_system_prompt(request.messages)
         tools = self.config.tool_schemas if self.config.has_tools else request.tools
-        if tools:
+        # A scaffold sends its tools itself; only a request the provider sends
+        # directly depends on the provider honouring its tool schemas.
+        if request.tools and not self.config.scaffold:
             self._check_tools_supported()
 
         return LMRequest(

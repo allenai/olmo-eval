@@ -690,8 +690,7 @@ for the task list, suites, server flags, exemplar settings, and what is not
 implemented.
 
 ```bash
-uv run olmo-eval run -m my-model \
-    --harness default -o provider.kwargs.enable_auto_tool_choice=true -t bfcl
+uv run olmo-eval run -m my-model -t bfcl
 uv run olmo-eval run -m my-base-model -t bfcl:base
 ```
 

@@ -13,18 +13,16 @@ functions reach the model and how its calls are read back:
     Native function calling. The functions go to the server as tool schemas and
     the calls come back as ``tool_calls``. This is the regime BFCL was built
     for, and the one to use for an instruction-tuned model behind an
-    OpenAI-compatible endpoint. The server has to be told to parse tool calls,
-    with an override that follows ``--harness`` rather than ``-t``::
+    OpenAI-compatible endpoint::
 
-        uv run olmo-eval run -m my-model \
-            --harness default -o provider.kwargs.enable_auto_tool_choice=true \
-            -t bfcl_simple
+        uv run olmo-eval run -m my-model -t bfcl_simple
 
-    vLLM picks a ``--tool-call-parser`` from the model name; add
-    ``-o provider.kwargs.tool_call_parser=<name>`` to choose one. Without
-    ``enable_auto_tool_choice`` the server answers in plain text and parses no
-    tool calls; the run stops with an error rather than reporting a score of
-    zero, as it does for a provider that cannot carry tool schemas at all.
+    A vLLM server the run starts itself is told to parse tool calls whenever
+    a task sends tool schemas, and vLLM picks a ``--tool-call-parser`` from
+    the model name; add ``-o provider.kwargs.tool_call_parser=<name>`` to
+    choose one. A server that would answer in plain text, or a provider that
+    cannot carry tool schemas at all, stops the run with an error rather than
+    reporting a score of zero.
 
 ``bfcl_simple:prompt``
     BFCL's own prompting mode: the functions are written into a system prompt
