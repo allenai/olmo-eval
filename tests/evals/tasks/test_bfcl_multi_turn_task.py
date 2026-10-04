@@ -222,3 +222,11 @@ def test_there_is_no_base_regime_for_multi_turn() -> None:
     from olmo_eval.evals.suites import list_suites
 
     assert "bfcl:multi_turn:base" not in list_suites()
+
+
+def test_the_multi_turn_rollout_samples_the_way_the_leaderboard_does() -> None:
+    params = get_task("bfcl_multi_turn_base").config.sampling_params
+
+    assert params.max_tokens == 4096
+    assert params.temperature == 0.001
+    assert params.fit_max_tokens_to_context

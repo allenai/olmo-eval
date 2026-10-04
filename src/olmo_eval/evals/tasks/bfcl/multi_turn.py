@@ -78,7 +78,11 @@ FUNC_DOC_FILES: dict[str, str] = {
 #: use survives a large state.
 LONG_CONTEXT_CATEGORIES: frozenset[str] = frozenset({"long_context"})
 
-MULTI_TURN_SAMPLING = SamplingParams(max_tokens=1024, temperature=0.0)
+MULTI_TURN_SAMPLING = SamplingParams(
+    max_tokens=4096,
+    temperature=0.001,
+    fit_max_tokens_to_context=True,
+)
 
 
 def category_from_id(test_id: str) -> str:
