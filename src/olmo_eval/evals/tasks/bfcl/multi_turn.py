@@ -7,9 +7,7 @@ executed rather than compared with a reference string. The
 :mod:`~olmo_eval.harness.scaffolds.bfcl_multi_turn` scaffold drives it, which
 means these tasks need a harness configured with that scaffold::
 
-    uv run olmo-eval run -m my-model --harness bfcl_multi_turn \\
-        -o provider.kwargs.enable_auto_tool_choice=true \\
-        -t bfcl_multi_turn_base
+    uv run olmo-eval run -m my-model --harness bfcl_multi_turn -t bfcl_multi_turn_base
 
 Unlike the single-turn categories, an entry carries no function documents. It
 names the API classes it involves, and the documents are assembled from the

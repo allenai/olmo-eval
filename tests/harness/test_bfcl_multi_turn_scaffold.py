@@ -287,3 +287,27 @@ async def test_a_step_with_no_reply_fails_with_a_reason() -> None:
 
     with pytest.raises(RuntimeError, match="no reply"):
         await run(SilentProvider([]), request_for([[{"role": "user", "content": "Go."}]]))
+
+
+@pytest.mark.anyio
+async def test_a_native_rollout_refuses_a_provider_that_would_drop_its_tools() -> None:
+    class ToollessProvider(ScriptedProvider):
+        supports_tools = False
+
+    request = request_for([[{"role": "user", "content": "Go."}]], call_source="tool_calls")
+
+    with pytest.raises(ValueError, match="does not support tool requests"):
+        await run(ToollessProvider([]), request)
+
+
+@pytest.mark.anyio
+async def test_a_prompted_rollout_needs_no_tool_support() -> None:
+    class ToollessProvider(ScriptedProvider):
+        supports_tools = False
+
+    result = await run(
+        ToollessProvider([LMOutput(text="Done.")]),
+        request_for([[{"role": "user", "content": "Go."}]]),
+    )
+
+    assert result.final_output.extracted_answer == [[]]
