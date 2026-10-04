@@ -8,9 +8,12 @@ Each class simulates its domain in memory -- there is no file, network or
 process access anywhere in them -- and is loaded from a test entry's
 ``initial_config`` before a rollout begins.
 
-Source: https://github.com/ShishirPatil/gorilla, berkeley-function-call-leaderboard,
-``bfcl_eval/eval_checker/multi_turn_eval/func_source_code``. Only the imports
-between these modules are rewritten; the bodies are untouched.
+Source: https://github.com/ShishirPatil/gorilla at commit
+``ac59a475d3d09dc70ee057008bf178fbc50d9a04``, berkeley-function-call-leaderboard,
+``bfcl/eval_checker/multi_turn_eval/func_source_code``. That is the version the
+v3 multi-turn ground truth was written against; later versions changed method
+signatures the ground truth calls. Only the imports between these modules are
+rewritten; the bodies are untouched.
 """
 
 from .gorilla_file_system import GorillaFileSystem
