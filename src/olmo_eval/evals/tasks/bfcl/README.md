@@ -148,9 +148,7 @@ Driving a rollout needs the `bfcl_multi_turn` scaffold, so these tasks run
 under a harness that carries it:
 
 ```bash
-uv run olmo-eval run -m my-model --harness bfcl_multi_turn \
-    -o provider.kwargs.enable_auto_tool_choice=true \
-    -t bfcl:multi_turn
+uv run olmo-eval run -m my-model --harness bfcl_multi_turn -t bfcl:multi_turn
 
 uv run olmo-eval run -m my-model --harness bfcl_multi_turn -t bfcl:multi_turn:prompt
 ```

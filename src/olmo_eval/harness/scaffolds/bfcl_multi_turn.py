@@ -72,6 +72,15 @@ class BFCLMultiTurnScaffold(Scaffold):
         held_back_docs: dict[str, str] = payload.get("missed_function_docs") or {}
         language = Language(payload.get("language", Language.PYTHON))
         from_tool_calls = payload.get("call_source") == "tool_calls"
+        if from_tool_calls and not getattr(provider, "supports_tools", False):
+            # The harness leaves tool support to a scaffold, and this one sends
+            # its schemas through the provider, which would drop them.
+            raise ValueError(
+                f"{type(provider).__name__} does not support tool requests, so a native "
+                "function calling rollout would show the model no functions. Run it with "
+                "a provider that sends them (e.g. provider.kind=vllm_server), or use the "
+                ":prompt variant, which writes the functions into the prompt."
+            )
         max_steps = int(payload.get("max_steps", MAXIMUM_STEP_LIMIT))
 
         instances = build_instances(
