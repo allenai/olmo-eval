@@ -1105,8 +1105,10 @@ class TestSuiteAggregations:
         finally:
             del _REGISTRY["_test_weighted_child_no_counts_parent"]
 
-    def test_weighted_child_suite_tasks_are_collapsed_in_log_summary(self, capsys):
+    def test_weighted_child_suite_tasks_are_collapsed_in_log_summary(self, capsys, monkeypatch):
         """Test a WEIGHTED_AVERAGE child collapses its tasks in log_summary."""
+        from rich.console import Console
+
         from olmo_eval.evals.suites.registry import (
             _REGISTRY,
             AggregationStrategy,
@@ -1114,6 +1116,8 @@ class TestSuiteAggregations:
         )
         from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
         from olmo_eval.runners.processing.metrics import log_summary
+
+        monkeypatch.setattr("rich.console.Console", lambda **kwargs: Console(width=240))
 
         child = Suite(
             name="_test_weighted_child_display",
@@ -1156,13 +1160,15 @@ class TestSuiteAggregations:
         finally:
             del _REGISTRY["_test_weighted_child_display_parent"]
 
-    def test_collapsed_tasks_in_log_summary(self, capsys):
+    def test_collapsed_tasks_in_log_summary(self, capsys, monkeypatch):
         """Test that child suite tasks are collapsed in log_summary display.
 
         When a parent suite uses AVERAGE_OF_AVERAGES and a child suite uses
         AVERAGE, the child's individual tasks should not appear as separate
         rows — only the sub-suite average row should be shown.
         """
+        from rich.console import Console
+
         from olmo_eval.evals.suites.registry import (
             _REGISTRY,
             AggregationStrategy,
@@ -1170,6 +1176,8 @@ class TestSuiteAggregations:
         )
         from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
         from olmo_eval.runners.processing.metrics import log_summary
+
+        monkeypatch.setattr("rich.console.Console", lambda **kwargs: Console(width=240))
 
         nested_suite = Suite(
             name="_test_nested_display",
