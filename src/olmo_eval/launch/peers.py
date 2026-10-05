@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from olmo_eval.runners.processing.generation_counts import GENERATION_COUNT_KEYS
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,33 @@ CORE_TASKS = (
     "ifeval",
     "ifeval_ood",
 )
+
+
+def validate_smoke(output_dir: Path) -> dict[str, int]:
+    """Require complete smoke coverage and known generation finish reasons."""
+    acceptance_path = output_dir / "smoke-validation.json"
+    acceptance_path.unlink(missing_ok=True)
+    metrics = json.loads((output_dir / "metrics.json").read_text())
+    entries = metrics["tasks"]
+    if metrics.get("errors") or sorted(entry["task"] for entry in entries) != sorted(CORE_TASKS):
+        raise ValueError("Smoke tasks are missing, duplicated, unexpected, or errored")
+    total = dict.fromkeys(GENERATION_COUNT_KEYS, 0)
+    for entry in entries:
+        counts = entry.get("generation_counts") or {}
+        if (
+            entry.get("instances_saved") != 2
+            or entry.get("instances_processed") != 2
+            or entry.get("instances_failed") != 0
+            or counts.get("generations") != 2
+            or counts.get("empty") != 0
+            or counts.get("finish_reason_unknown") != 0
+        ):
+            raise ValueError(f"Incomplete smoke accounting for {entry['task']}")
+        for key in GENERATION_COUNT_KEYS:
+            total[key] += counts.get(key, 0)
+    report = {"accepted": True, "smoke_only": True, "generation_counts": total}
+    acceptance_path.write_text(json.dumps(report, indent=2) + "\n")
+    return total
 
 
 def build_command(
@@ -115,18 +145,34 @@ def main() -> None:
         subprocess.run([*command, "--dry-run"], check=True)
         return
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    if args.phase == "smoke":
+        (args.output_dir / "smoke-validation.json").unlink(missing_ok=True)
+    git = ["git", "-C", str(Path(__file__).resolve().parent)]
+    commit = subprocess.check_output([*git, "rev-parse", "HEAD"], text=True).strip()
+    dirty_tree = bool(subprocess.check_output([*git, "status", "--porcelain"], text=True).strip())
+    if dirty_tree and args.phase != "smoke":
+        parser.error("Core and knowledge runs require a clean source checkout")
     manifest = {
         "commit": commit,
+        "dirty_tree": dirty_tree,
         "peer": args.peer,
         "model_revision": PEERS[args.peer].revision,
         "phase": args.phase,
         "command": command,
         "smoke_only": args.phase == "smoke",
-        "sampling": "T=1, top_p=0.95, top_k=20, one draw per item",
+        "sampling": {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20,
+            "num_samples": 1,
+            "max_tokens": 128 if args.phase == "smoke" else 32768,
+        },
+        "beaker_job_id": os.environ.get("BEAKER_JOB_ID"),
     }
     (args.output_dir / "peer-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     subprocess.run(command, check=True)
+    if args.phase == "smoke":
+        print(f"Smoke accepted: {validate_smoke(args.output_dir)}", flush=True)
 
 
 if __name__ == "__main__":
