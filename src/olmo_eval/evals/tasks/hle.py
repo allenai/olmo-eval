@@ -9,10 +9,11 @@ so they run on any model. A model judge grades the responses, so both tasks need
 Variants
 --------
 ``hle:text``
-    The 2,158 questions without an image, from ``cais/hle``. Use it for numbers
-    comparable to public text-only HLE results, such as the Artificial Analysis
-    index. ``cais/hle`` is gated: accept its terms on Hugging Face with the account
-    behind your ``HF_TOKEN``.
+    The 2,158 questions without an image, from ``cais/hle``. This is the question set
+    behind public text-only HLE results, such as the Artificial Analysis index, but
+    scores are only directly comparable when the judge matches theirs (see Judge).
+    ``cais/hle`` is gated: accept its terms on Hugging Face with the account behind
+    your ``HF_TOKEN``.
 
 ``hle:text:verified``
     The 575 text-only questions in the Gold subset of HLE-Verified (arXiv
@@ -28,9 +29,12 @@ Both datasets are pinned to a fixed Hub revision.
 Judge
 -----
 The default judge is ``gpt-6-luna``; the official HLE scorer uses
-``o3-mini-2025-01-31``. Change it for one task with ``-o judge_model=<model>`` (and
-``-o judge_reasoning_effort=<effort>`` for reasoning judges), or for every judge task
-in a run with ``OLMO_EVAL_JUDGE=<model>[:<effort>]``; a task override wins. The judge
+``o3-mini-2025-01-31``. ``gpt-6-luna`` is an alias, not a dated snapshot, so the
+model behind it can change without the task hash changing; pass a dated model with
+``-o judge_model`` when results must stay comparable across time. Change the judge
+for one task with ``-o judge_model=<model>`` (and ``-o judge_reasoning_effort=<effort>``
+for reasoning judges), or for every judge task in a run with
+``OLMO_EVAL_JUDGE=<model>[:<effort>]``; a task override wins. The judge
 settings are part of the task configuration and hash, so runs with different judges
 are stored and compared as separate results.
 
@@ -52,8 +56,9 @@ to finish within its budget. Such outputs carry ``truncated: true`` in their
 prompt longer than the context) scores wrong and is logged. The judge's
 ``correct:`` and ``confidence:`` lines are parsed from plain text, so any chat model
 can judge. A judge call that fails, or gives no parseable verdict after three
-attempts, is recorded as an incomplete score with the raw reply rather than as a
-wrong answer, and the run's result is flagged incomplete. Every judge reply is kept
+attempts, is recorded as an incomplete score with the raw reply and left out of
+accuracy rather than counted as a wrong answer; the run's result is flagged
+incomplete. Every judge reply is kept
 in the output's ``judge_result``.
 
 Metrics:
@@ -121,6 +126,8 @@ HLE_VERIFIED_REVISION = "0bc83643672d4f68a5f89998617a639d85e7318b"
 HLE_VERIFIED_GOLD_FILES = "data/Gold_subset.part*.parquet"
 HLE_VERIFIED_GOLD_CLASS = "Gold subset"
 
+# An alias rather than a dated snapshot: OpenAI publishes no dated gpt-6-luna model
+# (checked 2026-10-05), so the model behind this name can change under the same hash.
 HLE_DEFAULT_JUDGE_MODEL = "gpt-6-luna"
 HLE_JUDGE_MAX_TOKENS = 8192
 HLE_JUDGE_ATTEMPTS = 3
@@ -303,13 +310,18 @@ class HLEAccuracyMetric(Metric):
     metadata_value: str | None = None
 
     def compute_instance(self, response: Response) -> float | None:
-        """Return the instance's accuracy if it falls in this metric's slice, else None."""
+        """Return the instance's accuracy if it is in this slice and was judged, else None.
+
+        An instance whose judging failed has no accuracy score; it is left out rather
+        than counted as wrong.
+        """
         if (
             self.metadata_key is not None
             and response.instance.metadata.get(self.metadata_key) != self.metadata_value
         ):
             return None
-        return float(response.scores.get("accuracy", 0.0))
+        value = response.scores.get("accuracy")
+        return float(value) if isinstance(value, (int, float)) else None
 
     def compute(self, responses: Sequence[Response]) -> float:
         values = [

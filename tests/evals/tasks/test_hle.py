@@ -474,6 +474,26 @@ class TestRunnerFinalization:
         assert result.metrics["calibration_error_all_bins"] == {"hle_judge": 0.0}
 
     @pytest.mark.anyio
+    async def test_unjudged_instance_is_left_out_of_accuracy(self, task, monkeypatch):
+        # One question judged correct, one whose judge never gave a verdict: the
+        # unjudged one must not count as a wrong answer, in aggregate or per instance.
+        judged, failed = _response(task, category="Physics"), _response(task, category="Physics")
+        judge, _ = _scripted_judge(_reply("yes", "90"), *["garbage"] * hle.HLE_JUDGE_ATTEMPTS)
+        _use_judge(monkeypatch, judge)
+
+        scored = [await _score_like_the_runner(task, judged)]
+        scored.append(await _score_like_the_runner(task, failed))
+        result = compute_task_metrics("hle:text", task, scored, {}, len(scored), 0.0)
+
+        assert result.error is not None and result.error.startswith("Incomplete:")
+        assert result.metrics["accuracy"] == {"hle_judge": 1.0}
+        assert result.metrics["accuracy_physics"] == {"hle_judge": 1.0}
+        judged_prediction, failed_prediction = result.predictions
+        assert judged_prediction["instance_metrics"]["accuracy"]["hle_judge"] == 1.0
+        assert "accuracy" not in failed_prediction["instance_metrics"]
+        assert "accuracy_physics" not in failed_prediction["instance_metrics"]
+
+    @pytest.mark.anyio
     async def test_an_api_error_after_retries_is_incomplete_not_wrong(self, task, monkeypatch):
         async def judge(_prompt: str, **_kwargs) -> str:
             raise ValueError("judge unavailable")
