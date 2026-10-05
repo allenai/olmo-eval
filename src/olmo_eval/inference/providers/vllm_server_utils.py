@@ -265,49 +265,6 @@ def _apply_olmo3_tool_parser_patch() -> None:
         patch_parser(parser_path)
 
 
-def _has_rope_scaling(rope_config: Any) -> bool:
-    if not isinstance(rope_config, dict):
-        return False
-    rope_type = rope_config.get("rope_type", rope_config.get("type"))
-    return rope_type not in (None, "default")
-
-
-def _native_context_warning(model_name: str, max_model_len: int, **kwargs: Any) -> str | None:
-    """Describe why ``max_model_len`` exceeds the model's native context, if it does.
-
-    Returns ``None`` when the length fits, when RoPE scaling is configured (on the
-    model or through ``hf_overrides``), or when the model config cannot be read.
-    """
-    hf_overrides = kwargs.get("hf_overrides")
-    if isinstance(hf_overrides, dict) and any(
-        _has_rope_scaling(hf_overrides.get(key)) for key in ("rope_scaling", "rope_parameters")
-    ):
-        return None
-    try:
-        from transformers import AutoConfig
-
-        config = AutoConfig.from_pretrained(
-            model_name,
-            trust_remote_code=bool(kwargs.get("trust_remote_code", False)),
-            revision=kwargs.get("revision"),
-        )
-    except Exception:
-        return None
-    config = getattr(config, "get_text_config", lambda: config)()
-    native = getattr(config, "max_position_embeddings", None)
-    if not isinstance(native, int) or max_model_len <= native:
-        return None
-    if any(
-        _has_rope_scaling(getattr(config, key, None)) for key in ("rope_scaling", "rope_parameters")
-    ):
-        return None
-    return (
-        f"max_model_len={max_model_len} exceeds max_position_embeddings={native} for "
-        f"{model_name} and no RoPE scaling is configured; positions beyond {native} are "
-        "untrained. Lower max_model_len or configure RoPE scaling via hf_overrides."
-    )
-
-
 def _build_server_command(
     model_name: str,
     port: int,
@@ -580,12 +537,8 @@ class VLLMServerProcess:
 
         # Allow extended max_model_len when user specifies it (e.g., with rope_scaling)
         # This is needed when max_model_len > model's max_position_embeddings
-        if max_model_len := self.server_kwargs.get("max_model_len"):
+        if self.server_kwargs.get("max_model_len"):
             env["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] = "1"
-            if warning := _native_context_warning(
-                self.model_name, max_model_len, **self.server_kwargs
-            ):
-                self._log(logging.WARNING, warning)
 
         # Enable verbose vLLM logging when debugging
         if is_debug_provider():

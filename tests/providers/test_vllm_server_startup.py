@@ -1,6 +1,5 @@
 """Tests for VLLMServerProcess startup and timeout handling."""
 
-import logging
 import time
 from unittest.mock import MagicMock, patch
 
@@ -336,79 +335,3 @@ class TestVLLMServerProviderStartup:
         server_kwargs = mock_server_cls.call_args.kwargs
         assert server_kwargs["download_dir"] == "/tmp/hf-cache"
         assert "force_download" not in server_kwargs
-
-
-def _fake_auto_config(**from_pretrained):
-    """Stand in for ``transformers`` so the tests never load the real library."""
-    import sys
-    from types import SimpleNamespace
-
-    auto_config = SimpleNamespace(from_pretrained=MagicMock(**from_pretrained))
-    return patch.dict(sys.modules, {"transformers": SimpleNamespace(AutoConfig=auto_config)})
-
-
-class TestNativeContextWarning:
-    """Tests for the warning when max_model_len exceeds the model's native context."""
-
-    @staticmethod
-    def _config(max_position_embeddings=32768, **attrs):
-        from types import SimpleNamespace
-
-        return SimpleNamespace(max_position_embeddings=max_position_embeddings, **attrs)
-
-    def _warning(self, config, max_model_len=65536, **kwargs):
-        from olmo_eval.inference.providers.vllm_server_utils import _native_context_warning
-
-        with _fake_auto_config(return_value=config):
-            return _native_context_warning("org/model", max_model_len, **kwargs)
-
-    def test_warns_beyond_native_context(self):
-        warning = self._warning(self._config())
-        assert warning is not None
-        assert "max_model_len=65536" in warning
-        assert "max_position_embeddings=32768" in warning
-
-    def test_no_warning_within_native_context(self):
-        assert self._warning(self._config(), max_model_len=32768) is None
-
-    @pytest.mark.parametrize("key", ["rope_scaling", "rope_parameters"])
-    def test_no_warning_with_model_rope_scaling(self, key):
-        config = self._config(**{key: {"rope_type": "yarn", "factor": 4.0}})
-        assert self._warning(config) is None
-
-    def test_default_rope_parameters_still_warn(self):
-        config = self._config(rope_parameters={"rope_type": "default", "rope_theta": 1e6})
-        assert self._warning(config) is not None
-
-    def test_no_warning_with_hf_overrides_rope_scaling(self):
-        overrides = {"rope_scaling": {"rope_type": "yarn", "factor": 2.0}}
-        assert self._warning(self._config(), hf_overrides=overrides) is None
-
-    def test_uses_text_config_for_multimodal_models(self):
-        from types import SimpleNamespace
-
-        config = SimpleNamespace(get_text_config=lambda: self._config())
-        assert self._warning(config) is not None
-
-    def test_unreadable_config_does_not_warn(self):
-        from olmo_eval.inference.providers.vllm_server_utils import _native_context_warning
-
-        with _fake_auto_config(side_effect=OSError("missing")):
-            assert _native_context_warning("org/model", 65536) is None
-
-    def test_start_logs_warning(self):
-        from olmo_eval.inference.providers.vllm_server_utils import VLLMServerProcess
-
-        server = VLLMServerProcess(model_name="org/model", max_model_len=65536)
-        with (
-            patch(
-                "olmo_eval.inference.providers.vllm_server_utils._native_context_warning",
-                return_value="too long",
-            ) as warn,
-            patch.object(server, "_log") as log,
-            patch("subprocess.Popen", side_effect=RuntimeError("stop")),
-            pytest.raises(RuntimeError, match="stop"),
-        ):
-            server.start()
-        warn.assert_called_once_with("org/model", 65536, max_model_len=65536)
-        log.assert_any_call(logging.WARNING, "too long")
