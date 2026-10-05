@@ -1,0 +1,57 @@
+groups: []
+tasks:
+- arguments:
+  - bash
+  - -lc
+  - uv sync --frozen --no-default-groups --extra vllm --extra clients --extra hf &&
+    uv pip freeze --python .venv/bin/python > /results/eval-packages.txt && uv run
+    --no-sync python -m olmo_eval.launch.peers --peer lfm --phase core --output-dir
+    /results/eval
+  command:
+  - bash
+  - /gantry/entrypoint.sh
+  constraints:
+    cluster:
+    - ai2/jupiter
+  context:
+    autoResume: false
+    minRuntime: 1800000000000
+    priority: normal
+  datasets:
+  - mountPath: /gantry
+    source:
+      beaker: 01KPC90ZVKH5AF7CG61HPXEPG3
+  envVars:
+  - name: GANTRY_VERSION
+    value: 3.7.0
+  - name: GITHUB_REPO
+    value: allenai/olmo-eval
+  - name: GIT_REF
+    value: 6f8cac1d2f7ee403a68bac4fcaa46df6267b4130
+  - name: GANTRY_TASK_NAME
+    value: main
+  - name: RESULTS_DIR
+    value: /results
+  - name: GANTRY_RUNTIME_DIR
+    value: /gantry-runtime
+  - name: GANTRY_EXEC_METHOD
+    value: exec
+  - name: GIT_BRANCH
+    value: codex/ling-peer-evals
+  - name: GANTRY_NO_PYTHON
+    value: '1'
+  - name: HF_TOKEN
+    secret: abhishekr_HF_TOKEN
+  hostNetworking: false
+  image:
+    beaker: 01KVTNKQXYACY9J3HEE265KJXA
+  leaderSelection: false
+  name: main
+  resources:
+    gpuCount: 1
+    memory: 64GiB
+    sharedMemory: 16GiB
+  result:
+    path: /results
+  timeout: 43200000000000
+version: v2
