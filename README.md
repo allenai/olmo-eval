@@ -16,6 +16,10 @@ Features:
 - Aggregate and instance-level prediction storage.
 - Inspection tooling for viewing instances, formatted prompts, token arrays, and model responses.
 
+For contributors, [HUMANS.md](HUMANS.md) explains the design, code organization, and
+local-to-Beaker trial workflow. [AGENTS.md](AGENTS.md) covers implementation rules and
+verification commands for coding agents.
+
 ## Quick Start
 
 This project uses [uv](https://docs.astral.sh/uv/) with a checked-in `uv.lock`
