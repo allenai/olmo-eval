@@ -35,10 +35,10 @@ from olmo_eval.common.scorers.helmet_summ_prompts import (
 )
 from olmo_eval.common.types import Instance, LMOutput
 from olmo_eval.data.helmet_icl_loader import _balance_labels
-from olmo_eval.data.helmet_kilt_loader import _load_jsonl, _question_key
-from olmo_eval.data.helmet_loader import sample_jsonl_by_key
+from olmo_eval.data.helmet_kilt_loader import _question_key
 from olmo_eval.data.helmet_msmarco_loader import parse_rankings
 from olmo_eval.data.helmet_tasks import HELMET_TASKS, STANDARD_CONTEXT_SIZES
+from olmo_eval.data.jsonl import load_jsonl, sample_jsonl_by_key
 from olmo_eval.evals.tasks.helmet import (
     HelmetExactMatchScorer,
     InfbenchChoiceScorer,
@@ -327,7 +327,7 @@ def test_sampled_rows_identical_to_full_load(tmp_path):
     import random
 
     def old_path(max_samples, keep=None):
-        loaded = _load_jsonl(str(path))
+        loaded = load_jsonl(str(path))
         if keep is not None:
             loaded = [r for r in loaded if keep(r)]
         if max_samples is not None:

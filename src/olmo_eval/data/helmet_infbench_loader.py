@@ -22,13 +22,13 @@ the same trade already taken for the ICL tasks -- see `helmet_tasks.py`.
 """
 
 import functools
-import json
 import logging
 from typing import Any
 
 from datasets import Features, Sequence, Value, load_dataset
 
 from olmo_eval.data.helmet_loader import download_helmet_plus_file
+from olmo_eval.data.jsonl import load_jsonl
 
 logger = logging.getLogger(__name__)
 
@@ -205,12 +205,8 @@ def load_infbench_dataset(
     keypoints = {}
     if spec.get("keypoints_file"):
         # judge inputs, keyed by the InfiniteBench row id
-        with open(download_helmet_plus_file(spec["keypoints_file"]), encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    record = json.loads(line)
-                    keypoints[record["id"]] = record["keypoints"]
+        for record in load_jsonl(download_helmet_plus_file(spec["keypoints_file"])):
+            keypoints[record["id"]] = record["keypoints"]
 
     tokenizer = _load_reference_tokenizer(reference_tokenizer)
     separator_length = len(tokenizer(TRUNCATION_POSTFIX)["input_ids"])

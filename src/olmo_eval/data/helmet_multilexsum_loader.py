@@ -13,7 +13,6 @@ judge needs -- so nothing is lost by bypassing the broken path, and pinning the
 data makes runs reproducible besides.
 """
 
-import json
 import logging
 from typing import Any
 
@@ -24,6 +23,7 @@ from olmo_eval.data.helmet_infbench_loader import (
     _truncate_context,
 )
 from olmo_eval.data.helmet_loader import download_helmet_plus_file
+from olmo_eval.data.jsonl import load_jsonl
 
 logger = logging.getLogger(__name__)
 
@@ -65,13 +65,7 @@ def load_multi_lexsum_dataset(
     """
     import random
 
-    path = download_helmet_plus_file(MULTI_LEXSUM_FILE)
-    rows: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
+    rows = load_jsonl(download_helmet_plus_file(MULTI_LEXSUM_FILE))
 
     # HELMET keeps only cases that actually have a short gold summary
     rows = [r for r in rows if r.get("summary/short")]

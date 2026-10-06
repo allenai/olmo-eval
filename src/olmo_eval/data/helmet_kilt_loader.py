@@ -38,7 +38,8 @@ import random
 from typing import Any
 
 from olmo_eval.data.helmet_infbench_loader import REFERENCE_TOKENIZER, _load_reference_tokenizer
-from olmo_eval.data.helmet_loader import download_helmet_plus_file, sample_jsonl_by_key
+from olmo_eval.data.helmet_loader import download_helmet_plus_file
+from olmo_eval.data.jsonl import load_jsonl, sample_jsonl_by_key
 
 logger = logging.getLogger(__name__)
 
@@ -58,16 +59,6 @@ def load_kilt_manifest() -> dict[str, dict[str, Any]]:
     """Download and parse the KILT manifest: task -> length tier -> file paths."""
     with open(download_helmet_plus_file(KILT_MANIFEST), encoding="utf-8") as f:
         return json.load(f)
-
-
-def _load_jsonl(path: str) -> list[dict[str, Any]]:
-    records = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                records.append(json.loads(line))
-    return records
 
 
 def _question_key(row: dict[str, Any]) -> Any:
@@ -158,7 +149,7 @@ def load_kilt_dataset(
     entry = manifest[task][length_name]
     logger.info("Fetching %s data for %s (%s)...", task, length_name, entry["test_file"])
     test_path = download_helmet_plus_file(entry["test_file"])
-    demo_pool = _load_jsonl(download_helmet_plus_file(entry["demo_file"]))
+    demo_pool = load_jsonl(download_helmet_plus_file(entry["demo_file"]))
 
     below_threshold = None
     if popularity_threshold is not None:
