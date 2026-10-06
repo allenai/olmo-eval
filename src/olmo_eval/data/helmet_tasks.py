@@ -132,6 +132,11 @@ _BASE_TASKS: dict[str, dict] = {
             "shots": 2,
             # the answer is a single short line, so stop at the newline
             "stop_new_line": True,
+            # Each question repeats once per gold-passage depth, and the score
+            # averages over depths. The loader caps questions; an instance
+            # `limit` on top would re-sample rows and break up the sweep.
+            "max_questions": _DEFAULT_LIMIT,
+            "limit": None,
             **extra,
         }
         for name, extra in {
@@ -268,6 +273,7 @@ def _generate_helmet_tasks() -> dict:
                 # HELMET trims the retrieved passages at inference time so the
                 # prompt plus generation fits the tier
                 task["max_prompt_tokens"] = size - max_gen_toks
+                task["max_questions"] = base_config["max_questions"]
                 if "popularity_threshold" in base_config:
                     task["popularity_threshold"] = base_config["popularity_threshold"]
             if "icl_dataset" in base_config:

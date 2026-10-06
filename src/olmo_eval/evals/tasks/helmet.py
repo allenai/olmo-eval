@@ -326,14 +326,21 @@ class HelmetNarrativeQaTask(HelmetTask):
 
 
 class HelmetKiltTask(HelmetTask):
-    """HELMET RAG task: answer an open-domain question from retrieved passages."""
+    """HELMET RAG task: answer an open-domain question from retrieved passages.
+
+    The question cap is `max_questions`, not `config.limit`: every question
+    appears once per gold-passage depth, and the runner applies `limit` to
+    instances, which would keep some depths of a question and drop others.
+    These tasks leave `limit` unset by default; setting one (e.g. for a smoke
+    test) caps instances like any other task, at the cost of the depth sweep.
+    """
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_kilt_dataset(
             task=self.helmet_config["kilt_task"],
             length_name=self.helmet_config["length_name"],
             shots=self.helmet_config["shots"],
-            max_samples=self.config.limit,
+            max_samples=self.helmet_config["max_questions"],
             seed=self.config.seed,
             popularity_threshold=self.helmet_config.get("popularity_threshold"),
             max_prompt_tokens=self.helmet_config["max_prompt_tokens"],

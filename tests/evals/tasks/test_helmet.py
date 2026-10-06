@@ -350,6 +350,53 @@ def test_sampled_rows_identical_to_full_load(tmp_path):
     assert len({r["question"] for r in sampled}) == 3
 
 
+def test_kilt_runner_keeps_every_depth_of_each_question(tmp_path, monkeypatch):
+    """The runner's instance cap must not break up a question's depth sweep.
+
+    Runs the real `prepare_task_items` against a stub 300-question x 6-depth
+    file. The loader caps questions; if the task also set an instance
+    `limit`, the runner would re-sample rows and queue a question at only
+    some of its depths.
+    """
+    import olmo_eval.data.helmet_kilt_loader as kilt
+    from olmo_eval.runners.asynq.preparation import prepare_task_items
+
+    depths = (0.0, 0.2, 0.4, 0.6, 0.8, 0.95)
+    rows = [
+        {
+            "id": f"q{question}",
+            "question": f"question {question}?",
+            "answers": [f"answer {question}"],
+            "depth": depth,
+            "ctxs": [{"title": f"t{question}", "text": f"depth {depth}"}],
+        }
+        for question in range(300)
+        for depth in depths
+    ]
+    test_file = tmp_path / "test.jsonl"
+    test_file.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    demo_file = tmp_path / "demo.jsonl"
+    demo_file.write_text("\n".join(json.dumps(r) for r in rows[:12]) + "\n")
+
+    manifest = {"kilt_nq": {"4k": {"test_file": str(test_file), "demo_file": str(demo_file)}}}
+    monkeypatch.setattr(kilt, "load_kilt_manifest", lambda: manifest)
+    monkeypatch.setattr(kilt, "download_helmet_plus_file", lambda path: path)
+    monkeypatch.setattr(kilt, "_load_reference_tokenizer", lambda *args, **kwargs: None)
+    monkeypatch.setattr(kilt, "_truncate_prompt_context", lambda row, *args: row)
+
+    task, items = prepare_task_items("helmet_kilt_nq__4096", "stub-model", None)
+
+    max_questions = HELMET_TASKS["kilt_nq__4096"]["max_questions"]
+    assert task.config.limit is None
+    assert len(items) == max_questions * len(depths)
+    depths_by_question: dict[str, set[str]] = {}
+    for item in items:
+        question = item.instance.metadata["judge_question"]
+        depths_by_question.setdefault(question, set()).add(item.instance.question)
+    assert len(depths_by_question) == max_questions
+    assert all(len(seen) == len(depths) for seen in depths_by_question.values())
+
+
 # ---------------------------------------------------------------------------
 # task registry and suite structure
 
