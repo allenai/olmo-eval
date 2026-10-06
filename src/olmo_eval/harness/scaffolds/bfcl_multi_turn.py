@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 #: Matches the reference implementation's limit.
 MAXIMUM_STEP_LIMIT = 20
 
+#: Metadata key carrying each step's finish reason and length, per turn.
+ROLLOUT_STEPS_METADATA_KEY = "bfcl_rollout_steps"
+
 #: What the user says when functions held back from a turn are offered.
 ADDITIONAL_FUNCTION_PROMPT = (
     "I have updated some more functions you can choose from. What about now?"
@@ -93,6 +96,11 @@ class BFCLMultiTurnScaffold(Scaffold):
         messages: list[dict[str, Any]] = [dict(m) for m in request.messages]
         tools: list[ToolSchema] = list(request.tools or ())
         calls_per_turn: list[list[list[dict[str, Any]]]] = []
+        # Per turn, the finish reason and completion length of every step the model
+        # took, so a rollout's capped steps (finish_reason "length") can be audited.
+        # Only the last step's output survives as the final output otherwise.
+        finish_per_turn: list[list[str | None]] = []
+        tokens_per_turn: list[list[int | None]] = []
         step_budget_exhausted = False
         context_overflow: str | None = None
         last_output = LMOutput(text="")
@@ -119,6 +127,8 @@ class BFCLMultiTurnScaffold(Scaffold):
 
             messages.extend(dict(m) for m in turn_messages)
             steps: list[list[dict[str, Any]]] = []
+            finishes: list[str | None] = []
+            tokens: list[int | None] = []
 
             for _ in range(max_steps):
                 outputs = await provider.agenerate(
@@ -154,6 +164,9 @@ class BFCLMultiTurnScaffold(Scaffold):
                         "its logged warnings name the cause."
                     )
                 last_output = replies[0]
+                step_meta = last_output.metadata or {}
+                finishes.append(step_meta.get("finish_reason"))
+                tokens.append(step_meta.get("completion_tokens"))
 
                 decoded = self._decode(last_output, from_tool_calls, language, payload)
                 if not decoded:
@@ -174,6 +187,8 @@ class BFCLMultiTurnScaffold(Scaffold):
                 )
 
             calls_per_turn.append(steps)
+            finish_per_turn.append(finishes)
+            tokens_per_turn.append(tokens)
             if step_budget_exhausted or context_overflow is not None:
                 break
 
@@ -181,6 +196,12 @@ class BFCLMultiTurnScaffold(Scaffold):
         final.extracted_answer = calls_per_turn
         if step_budget_exhausted:
             final.metadata["bfcl_step_budget_exhausted"] = True
+        final.metadata[ROLLOUT_STEPS_METADATA_KEY] = {
+            "finish_reasons": finish_per_turn,
+            "completion_tokens": tokens_per_turn,
+            "step_budget_exhausted": step_budget_exhausted,
+            "context_overflow": context_overflow is not None,
+        }
         if context_overflow is not None:
             final.metadata[CONTEXT_OVERFLOW_METADATA_KEY] = context_overflow
 

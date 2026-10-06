@@ -344,3 +344,34 @@ async def test_a_call_with_malformed_arguments_is_recorded_as_text_and_the_rollo
     assistant = [m for m in history if m["role"] == "assistant"]
     assert assistant and "tool_calls" not in assistant[0]
     assert "mkdir({dir_name: temp" in assistant[0]["content"]
+
+
+@pytest.mark.anyio
+async def test_every_steps_finish_reason_is_kept_per_turn() -> None:
+    # A capped step ends its turn like a deliberate stop does; only this record tells them apart.
+    provider = ScriptedProvider(
+        [
+            LMOutput(
+                text="[mkdir(dir_name='temp')]",
+                metadata={"finish_reason": "stop", "completion_tokens": 12},
+            ),
+            LMOutput(text="", metadata={"finish_reason": "length", "completion_tokens": 4096}),
+            LMOutput(text="Done.", metadata={"finish_reason": "stop", "completion_tokens": 3}),
+        ]
+    )
+
+    result = await run(
+        provider,
+        request_for(
+            [
+                [{"role": "user", "content": "Make temp."}],
+                [{"role": "user", "content": "Now stop."}],
+            ]
+        ),
+    )
+
+    steps = result.final_output.metadata["bfcl_rollout_steps"]
+    assert steps["finish_reasons"] == [["stop", "length"], ["stop"]]
+    assert steps["completion_tokens"] == [[12, 4096], [3]]
+    assert steps["step_budget_exhausted"] is False
+    assert steps["context_overflow"] is False

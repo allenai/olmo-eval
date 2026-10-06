@@ -103,6 +103,9 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
             # Whether the answer was stated in the requested format (scorer-set).
             if "answer_format_correct" in meta:
                 out_data["answer_format_correct"] = meta["answer_format_correct"]
+            # BFCL multi-turn: every step's finish reason and length, per turn.
+            if "bfcl_rollout_steps" in meta:
+                out_data["bfcl_rollout_steps"] = meta["bfcl_rollout_steps"]
             # Per-instance results scorers keep, keyed by scorer name.
             if SCORER_RESULTS_KEY in meta:
                 out_data[SCORER_RESULTS_KEY] = meta[SCORER_RESULTS_KEY]
