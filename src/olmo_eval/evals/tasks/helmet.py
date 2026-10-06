@@ -23,14 +23,39 @@ from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.scorers.helmet_judge import HelmetLongQAJudgeScorer, HelmetSummJudgeScorer
 from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.data import (
+    helmet_alce_loader,
+    helmet_icl_loader,
+    helmet_infbench_loader,
+    helmet_kilt_loader,
+    helmet_loader,
+    helmet_msmarco_loader,
+    helmet_multilexsum_loader,
+    helmet_narrativeqa_loader,
+)
 from olmo_eval.data.helmet_alce_loader import load_alce_dataset
-from olmo_eval.data.helmet_icl_loader import load_icl_dataset
-from olmo_eval.data.helmet_infbench_loader import load_infbench_dataset
+from olmo_eval.data.helmet_icl_loader import ICL_DATASETS, load_icl_dataset
+from olmo_eval.data.helmet_infbench_loader import (
+    INFBENCH_SUBSETS,
+    INFINITEBENCH_REPO,
+    INFINITEBENCH_REVISION,
+    REFERENCE_TOKENIZER,
+    REFERENCE_TOKENIZER_REVISION,
+    load_infbench_dataset,
+)
 from olmo_eval.data.helmet_kilt_loader import load_kilt_dataset
-from olmo_eval.data.helmet_loader import load_json_kv_dataset
+from olmo_eval.data.helmet_loader import (
+    HELMET_PLUS_REPO_ID,
+    HELMET_PLUS_REVISION,
+    load_json_kv_dataset,
+)
 from olmo_eval.data.helmet_msmarco_loader import load_msmarco_dataset, parse_rankings
 from olmo_eval.data.helmet_multilexsum_loader import load_multi_lexsum_dataset
-from olmo_eval.data.helmet_narrativeqa_loader import load_narrativeqa_dataset
+from olmo_eval.data.helmet_narrativeqa_loader import (
+    NARRATIVEQA_REPO,
+    NARRATIVEQA_REVISION,
+    load_narrativeqa_dataset,
+)
 from olmo_eval.data.helmet_tasks import HELMET_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 from olmo_eval.evals.tasks.common.registry import register
@@ -454,6 +479,50 @@ _TASK_METRICS: dict[str, tuple] = {
 }
 
 
+# The loader module behind each task kind, whose prompt templates feed the task hash.
+_LOADER_MODULES = {
+    "json_kv": helmet_loader,
+    "icl": helmet_icl_loader,
+    "infbench": helmet_infbench_loader,
+    "narrativeqa": helmet_narrativeqa_loader,
+    "kilt": helmet_kilt_loader,
+    "msmarco": helmet_msmarco_loader,
+    "multi_lexsum": helmet_multilexsum_loader,
+    "alce": helmet_alce_loader,
+}
+
+# Kinds that truncate or trim with the reference tokenizer.
+_USES_REFERENCE_TOKENIZER = {"infbench", "narrativeqa", "kilt", "multi_lexsum"}
+
+
+def _task_settings(task_cfg: dict) -> dict[str, Any]:
+    """Everything that shapes a task's prompts but has no TaskConfig field of its own.
+
+    Serialized into the task hash, so a change to shots, token budgets, prompt
+    templates or a pinned source revision gives the task a new hash.
+    """
+    kind = task_cfg["kind"]
+    sources: dict[str, Any] = {}
+    if kind == "icl":
+        sources["icl"] = ICL_DATASETS[task_cfg["icl_dataset"]]
+    elif kind == "narrativeqa":
+        sources["narrativeqa"] = f"{NARRATIVEQA_REPO}@{NARRATIVEQA_REVISION}"
+    else:
+        sources["helmet_plus"] = f"{HELMET_PLUS_REPO_ID}@{HELMET_PLUS_REVISION}"
+    if kind == "infbench":
+        sources["infinitebench"] = f"{INFINITEBENCH_REPO}@{INFINITEBENCH_REVISION}"
+        sources["infinitebench_subset"] = INFBENCH_SUBSETS[task_cfg["infbench_subset"]]
+    if kind in _USES_REFERENCE_TOKENIZER:
+        sources["reference_tokenizer"] = f"{REFERENCE_TOKENIZER}@{REFERENCE_TOKENIZER_REVISION}"
+
+    templates = {
+        name: value
+        for name, value in vars(_LOADER_MODULES[kind]).items()
+        if "TEMPLATE" in name and isinstance(value, str)
+    }
+    return {"helmet": task_cfg, "sources": sources, "templates": templates}
+
+
 def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
     """Create a task subclass for a HELMET-plus task variant.
 
@@ -483,6 +552,7 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
                 stop_sequences=stop_sequences,
             ),
             "limit": task_cfg["limit"],
+            "task_settings": _task_settings(task_cfg),
         },
     )
 

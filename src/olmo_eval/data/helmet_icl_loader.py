@@ -28,10 +28,14 @@ from datasets import load_dataset
 # and banking77 via `legacy-datasets/banking77`, since PolyAI/banking77 hosts
 # only the loading script and no data. Split sizes and label counts were
 # verified against the values HELMET hardcodes.
+#
+# Every source is pinned to a commit. For trec that is a commit on the
+# `refs/convert/parquet` branch, which the Hub regenerates; if it is ever
+# garbage-collected the load fails loudly rather than silently drifting.
 ICL_DATASETS: dict[str, dict[str, Any]] = {
     "trec_coarse": {
         "path": "CogComp/trec",
-        "revision": "refs/convert/parquet",
+        "revision": "65752bf53af25bc935a0dce92fb5b6c930728450",
         "train_split": "train",
         "test_split": "test",
         "text_field": "text",
@@ -40,7 +44,7 @@ ICL_DATASETS: dict[str, dict[str, Any]] = {
     },
     "trec_fine": {
         "path": "CogComp/trec",
-        "revision": "refs/convert/parquet",
+        "revision": "65752bf53af25bc935a0dce92fb5b6c930728450",
         "train_split": "train",
         "test_split": "test",
         "text_field": "text",
@@ -49,6 +53,7 @@ ICL_DATASETS: dict[str, dict[str, Any]] = {
     },
     "banking77": {
         "path": "legacy-datasets/banking77",
+        "revision": "f54121560de48f2852f90be299010d1d6dc612ec",
         "train_split": "train",
         "test_split": "test",
         "text_field": "text",
@@ -57,6 +62,7 @@ ICL_DATASETS: dict[str, dict[str, Any]] = {
     },
     "clinic150": {
         "path": "clinc/clinc_oos",
+        "revision": "155b9c710419136e17307b80d0a13e68cd46b4ec",
         "name": "plus",
         "train_split": "train",
         "test_split": "validation",

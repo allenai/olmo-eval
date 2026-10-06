@@ -585,3 +585,41 @@ def test_summ_judge_records_parse_errors_and_missing_keypoints():
     output = _output("A summary.")
     assert asyncio.run(scorer.ascore_with_context(_instance(gold="ref"), output, None)) == 0.0
     assert output.metadata["judge_result"] == {"missing_keypoints": True, "parse_error": False}
+
+
+# ---------------------------------------------------------------------------
+# HELMET's own settings and source revisions reach the task hash
+
+
+def test_helmet_settings_reach_the_task_hash(monkeypatch):
+    from olmo_eval.common.types.base import compute_task_hash
+    from olmo_eval.data import helmet_icl_loader
+    from olmo_eval.evals.tasks import helmet
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    config = get_task("helmet_icl_trec_coarse__4096").config
+    settings = config.to_dict()["task_settings"]
+    assert settings["helmet"]["shots"] == 200
+    assert settings["sources"]["icl"]["revision"] == "65752bf53af25bc935a0dce92fb5b6c930728450"
+    assert settings["templates"]["_SYSTEM_TEMPLATE"] == "label:"
+
+    base = helmet._task_settings(HELMET_TASKS["icl_trec_coarse__4096"])
+    assert helmet._task_settings({**HELMET_TASKS["icl_trec_coarse__4096"], "shots": 100}) != base
+    monkeypatch.setattr(helmet_icl_loader, "_SYSTEM_TEMPLATE", "Label:")
+    assert helmet._task_settings(HELMET_TASKS["icl_trec_coarse__4096"]) != base
+    monkeypatch.setattr(helmet, "HELMET_PLUS_REVISION", "0" * 40)
+    kilt_cfg = HELMET_TASKS["kilt_nq__4096"]
+    assert helmet._task_settings(kilt_cfg)["sources"]["helmet_plus"].endswith("0" * 40)
+
+    def task_hash(settings):
+        from dataclasses import replace
+
+        return compute_task_hash(replace(config, task_settings=settings).to_dict())
+
+    assert task_hash(base) != task_hash({**base, "helmet": {**base["helmet"], "shots": 100}})
+
+
+def test_task_settings_are_omitted_when_unset():
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    assert "task_settings" not in get_task("hellaswag").config.to_dict()
