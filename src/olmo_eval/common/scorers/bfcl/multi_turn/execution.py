@@ -23,7 +23,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..decoding import resolve_ast_by_type
+from ..decoding import call_name, resolve_ast_by_type
 from .api import API_CLASSES, STATELESS_CLASSES
 
 
@@ -60,16 +60,9 @@ def parse_call_strings(call_strings: list[str]) -> list[Call | str]:
         if not isinstance(parsed, ast.Call):
             calls.append(call_string)
             continue
-        name_parts: list[str] = []
-        func: ast.expr = parsed.func
-        while isinstance(func, ast.Attribute):
-            name_parts.append(func.attr)
-            func = func.value
-        if isinstance(func, ast.Name):
-            name_parts.append(func.id)
         calls.append(
             Call(
-                name=".".join(reversed(name_parts)),
+                name=call_name(parsed),
                 args=tuple(resolve_ast_by_type(arg) for arg in parsed.args),
                 kwargs={
                     keyword.arg: resolve_ast_by_type(keyword.value)
@@ -79,6 +72,13 @@ def parse_call_strings(call_strings: list[str]) -> list[Call | str]:
             )
         )
     return calls
+
+
+def render_call(call: Call) -> str:
+    """Write a call out as the reference implementation does, e.g. ``cd(folder='temp')``."""
+    arguments = [repr(arg) for arg in call.args]
+    arguments += [f"{name}={value!r}" for name, value in call.kwargs.items()]
+    return f"{call.name}({','.join(arguments)})"
 
 
 def calls_from_decoded(decoded: list[dict[str, Any]]) -> list[Call]:

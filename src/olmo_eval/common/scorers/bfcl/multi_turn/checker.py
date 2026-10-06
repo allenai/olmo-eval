@@ -13,7 +13,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from .execution import Call, build_instances, execute_calls, is_empty_execute_response
+from .execution import (
+    Call,
+    build_instances,
+    execute_calls,
+    is_empty_execute_response,
+    parse_call_strings,
+)
 
 CheckResult = dict[str, Any]
 
@@ -22,6 +28,12 @@ CheckResult = dict[str, Any]
 #: as the model's answer and grades the entry wrong, so it scores zero here too.
 CONTEXT_OVERFLOW_METADATA_KEY = "bfcl_context_overflow"
 CONTEXT_OVERFLOW_ERROR_TYPE = "multi_turn:context_overflow"
+
+#: Rollout metadata recording that a turn ran out of steps. The rollout stops
+#: there, and the reference implementation fails such an entry outright when it
+#: was stopped before its last turn.
+STEP_BUDGET_METADATA_KEY = "bfcl_step_budget_exhausted"
+FORCE_TERMINATED_ERROR_TYPE = "multi_turn:force_terminated"
 
 
 def _fail(message: str, error_type: str, **details: Any) -> CheckResult:
@@ -89,29 +101,6 @@ def response_checker(
     return {"valid": True}
 
 
-def irrelevance_checker(
-    model_calls_per_turn: list[list[list[Call]]],
-    truth_path: list[list[str]],
-) -> CheckResult:
-    """Check the model called nothing on the turns where it should not have.
-
-    A turn whose ground truth is empty is one the model cannot yet satisfy --
-    a parameter it has not been given, or a function it has not been offered --
-    so any call there is wrong.
-    """
-    for turn_index, truth_turn in enumerate(truth_path):
-        if truth_turn:
-            continue
-        steps = model_calls_per_turn[turn_index] if turn_index < len(model_calls_per_turn) else []
-        if not is_empty_execute_response([call for step in steps for call in step]):
-            return _fail(
-                f"Model called a function on turn {turn_index}, where it should not have.",
-                "multi_turn:irrelevance_error:decoder_success",
-                turn=turn_index,
-            )
-    return {"valid": True}
-
-
 def multi_turn_checker(
     model_calls_per_turn: list[list[list[Call]]],
     truth_path: list[list[str]],
@@ -124,8 +113,6 @@ def multi_turn_checker(
     The model's calls are replayed against instances of their own so that the
     state they build up is compared with, not shared with, the ground truth's.
     """
-    from .execution import parse_call_strings
-
     model_instances = build_instances(initial_config, involved_classes, long_context)
     truth_instances = build_instances(initial_config, involved_classes, long_context)
     model_results_so_far: list[str] = []
@@ -138,8 +125,9 @@ def multi_turn_checker(
         truth_results = execute_calls(parse_call_strings(truth_turn), truth_instances)
 
         if not truth_turn:
-            # A turn the model should not act on; the state of both sides still
-            # has to move on together, so its calls were executed above.
+            # A turn the ground truth leaves alone is not graded, as in the
+            # reference implementation. Its calls were still executed above, so
+            # that the state compared at the next turn includes them.
             continue
 
         if is_empty_execute_response([call for step in steps for call in step]):
@@ -158,4 +146,4 @@ def multi_turn_checker(
         if not response_result["valid"]:
             return response_result
 
-    return irrelevance_checker(model_calls_per_turn, truth_path)
+    return {"valid": True}

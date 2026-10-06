@@ -30,10 +30,13 @@ from typing import Any, ClassVar
 
 from olmo_eval.common.formatters import Formatter
 from olmo_eval.common.metrics import AccuracyMetric
-from olmo_eval.common.scorers.base import Scorer
+from olmo_eval.common.scorers.base import Scorer, set_scorer_result
+from olmo_eval.common.scorers.bfcl.constants import Language
 from olmo_eval.common.scorers.bfcl.multi_turn import (
     CONTEXT_OVERFLOW_ERROR_TYPE,
     CONTEXT_OVERFLOW_METADATA_KEY,
+    FORCE_TERMINATED_ERROR_TYPE,
+    STEP_BUDGET_METADATA_KEY,
     calls_from_decoded,
     multi_turn_checker,
 )
@@ -52,6 +55,7 @@ from olmo_eval.evals.tasks.bfcl import (
     SYSTEM_PROMPT,
     CallSource,
     build_tool_schemas,
+    prepare_function_docs,
     render_function_docs,
 )
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -77,20 +81,11 @@ FUNC_DOC_FILES: dict[str, str] = {
     "VehicleControlAPI": "vehicle_control.json",
 }
 
-#: Categories whose scenarios are inflated with filler, to see whether tool
-#: use survives a large state.
-LONG_CONTEXT_CATEGORIES: frozenset[str] = frozenset({"long_context"})
-
 MULTI_TURN_SAMPLING = SamplingParams(
     max_tokens=4096,
     temperature=0.001,
     fit_max_tokens_to_context=True,
 )
-
-
-def category_from_id(test_id: str) -> str:
-    """Return the category an entry belongs to, without its multi_turn prefix."""
-    return test_id.rsplit("_", 1)[0].removeprefix("multi_turn_")
 
 
 # ---------------------------------------------------------------------------
@@ -174,29 +169,47 @@ class BFCLMultiTurnScorer(Scorer):
                 "`--harness bfcl_multi_turn`."
             )
 
-        overflow = (output.metadata or {}).get(CONTEXT_OVERFLOW_METADATA_KEY)
+        flags = output.metadata or {}
+        recorded = {"step_budget_exhausted": bool(flags.get(STEP_BUDGET_METADATA_KEY))}
+
+        overflow = flags.get(CONTEXT_OVERFLOW_METADATA_KEY)
         if overflow:
-            output.metadata["bfcl_error"] = {
-                "error_type": CONTEXT_OVERFLOW_ERROR_TYPE,
-                "error": str(overflow),
-            }
-            return 0.0
+            return self._fail(output, recorded, CONTEXT_OVERFLOW_ERROR_TYPE, str(overflow))
 
         metadata = instance.metadata
+        ground_truth = metadata["ground_truth"]
+        if len(rollout) != len(ground_truth):
+            return self._fail(
+                output,
+                recorded,
+                FORCE_TERMINATED_ERROR_TYPE,
+                f"The rollout stopped after {len(rollout)} of {len(ground_truth)} turns.",
+            )
+
         calls = [[calls_from_decoded(step) for step in turn] for turn in rollout]
         result = multi_turn_checker(
             calls,
-            metadata["ground_truth"],
+            ground_truth,
             metadata["initial_config"],
             metadata["involved_classes"],
             metadata["long_context"],
         )
-        if result["valid"]:
-            return 1.0
-        output.metadata["bfcl_error"] = {
-            "error_type": result.get("error_type", ""),
-            "error": result.get("error_message", ""),
-        }
+        if not result["valid"]:
+            return self._fail(
+                output, recorded, result.get("error_type", ""), result.get("error_message", "")
+            )
+        set_scorer_result(output, self.name, {"valid": True, **recorded})
+        return 1.0
+
+    def _fail(
+        self, output: LMOutput, recorded: dict[str, Any], error_type: str, error: str
+    ) -> float:
+        """Record why an entry failed where the saved predictions keep it."""
+        set_scorer_result(
+            output,
+            self.name,
+            {"valid": False, "error_type": error_type, "error": error, **recorded},
+        )
         return 0.0
 
 
@@ -277,9 +290,6 @@ class BFCLMultiTurnTask(Task):
         return visible, held
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
-        from olmo_eval.common.scorers.bfcl.constants import Language
-        from olmo_eval.evals.tasks.bfcl import prepare_function_docs
-
         functions: list[dict[str, Any]] = []
         for class_name in doc["involved_classes"]:
             functions.extend(self._function_docs(class_name))
@@ -321,10 +331,9 @@ class BFCLMultiTurnTask(Task):
                 "involved_classes": list(doc["involved_classes"]),
                 "missed_function": held_schemas,
                 "missed_function_docs": held_docs,
-                "functions": visible,
                 "prepared_functions": prepared,
                 "name_map": name_map,
-                "long_context": self.category in LONG_CONTEXT_CATEGORIES,
+                "long_context": self.category == "long_context",
                 "ground_truth": self._load_answers().get(doc["id"], []),
             },
         )

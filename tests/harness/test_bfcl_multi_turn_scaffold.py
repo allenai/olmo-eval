@@ -7,7 +7,10 @@ import pytest
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.harness.scaffolds import get_scaffold
-from olmo_eval.harness.scaffolds.bfcl_multi_turn import ADDITIONAL_FUNCTION_PROMPT
+from olmo_eval.harness.scaffolds.bfcl_multi_turn import (
+    ADDITIONAL_FUNCTION_PROMPT,
+    MAXIMUM_STEP_LIMIT,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
 
@@ -93,10 +96,24 @@ async def test_execution_results_come_back_to_the_model() -> None:
 
     await run(provider, request_for([[{"role": "user", "content": "List."}]]))
 
-    # The reply after the call carries what the call returned.
-    roles = [m["role"] for m in provider.requests[-1].messages]
-    assert roles[-1] == "user"
-    assert "current_directory_content" in provider.requests[-1].messages[-1]["content"]
+    # The result comes back as a tool message named after the call that produced
+    # it, as the reference implementation's handler for local models sends it.
+    last = provider.requests[-1].messages[-1]
+    assert last["role"] == "tool"
+    assert last["name"] == "ls()"
+    assert "current_directory_content" in last["content"]
+
+
+@pytest.mark.anyio
+async def test_each_result_is_paired_with_its_call() -> None:
+    provider = ScriptedProvider(
+        [LMOutput(text="[mkdir(dir_name='a'), mkdir(dir_name='b')]"), LMOutput(text="Done.")]
+    )
+
+    await run(provider, request_for([[{"role": "user", "content": "Make two."}]]))
+
+    results = [m for m in provider.requests[-1].messages if m["role"] == "tool"]
+    assert [m["name"] for m in results] == ["mkdir(dir_name='a')", "mkdir(dir_name='b')"]
 
 
 @pytest.mark.anyio
@@ -188,11 +205,31 @@ async def test_a_held_back_function_reaches_the_tool_list_when_calling_natively(
 async def test_the_step_budget_stops_a_model_that_never_finishes() -> None:
     provider = ScriptedProvider([LMOutput(text="[ls()]") for _ in range(20)])
 
-    result = await run(provider, request_for([[{"role": "user", "content": "Go."}]], max_steps=3))
+    result = await run(provider, request_for([[{"role": "user", "content": "Go."}]]), max_steps=3)
 
     assert result.max_turns_reached
     assert result.final_output.metadata["bfcl_step_budget_exhausted"] is True
-    assert len(provider.requests) == 3
+    # The turn stops once more than the budget has run, as the reference counts.
+    assert len(provider.requests) == 4
+
+
+@pytest.mark.anyio
+async def test_the_default_budget_allows_one_step_past_the_limit() -> None:
+    provider = ScriptedProvider([LMOutput(text="[ls()]") for _ in range(30)])
+
+    await run(provider, request_for([[{"role": "user", "content": "Go."}]]))
+
+    assert len(provider.requests) == MAXIMUM_STEP_LIMIT + 1
+
+
+@pytest.mark.anyio
+async def test_a_budget_stop_before_the_last_turn_ends_the_rollout() -> None:
+    provider = ScriptedProvider([LMOutput(text="[ls()]") for _ in range(10)])
+    turns = [[{"role": "user", "content": "Go."}], [{"role": "user", "content": "Again."}]]
+
+    result = await run(provider, request_for(turns), max_steps=2)
+
+    assert len(result.final_output.extracted_answer) == 1
 
 
 @pytest.mark.anyio
@@ -285,7 +322,7 @@ async def test_a_step_with_no_reply_fails_with_a_reason() -> None:
         async def agenerate(self, requests, sampling_params=None):
             return [[]]
 
-    with pytest.raises(RuntimeError, match="no reply"):
+    with pytest.raises(RuntimeError, match="no output"):
         await run(SilentProvider([]), request_for([[{"role": "user", "content": "Go."}]]))
 
 

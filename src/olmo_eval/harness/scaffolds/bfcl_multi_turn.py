@@ -9,8 +9,7 @@ answer the model.
 
 Two of the categories perturb the conversation. A turn may hold back functions
 the model needs, offering them partway through with a stock message; and a turn
-may be one the model cannot satisfy yet, where calling anything is the failure
-being measured.
+may omit something the model needs, so that it should ask rather than act.
 """
 
 from __future__ import annotations
@@ -23,21 +22,24 @@ from olmo_eval.common.scorers.bfcl import DecodeError, decode_text, decode_tool_
 from olmo_eval.common.scorers.bfcl.constants import Language
 from olmo_eval.common.scorers.bfcl.multi_turn import (
     CONTEXT_OVERFLOW_METADATA_KEY,
+    STEP_BUDGET_METADATA_KEY,
     build_instances,
     calls_from_decoded,
     execute_calls,
+    render_call,
 )
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams, ToolSchema
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.result import HarnessResult
 from olmo_eval.harness.scaffolds import Scaffold, register_scaffold
-from olmo_eval.inference.base import InferenceProvider
-from olmo_eval.inference.errors import is_context_overflow_output, request_error
+from olmo_eval.inference.base import InferenceProvider, require_tool_support
+from olmo_eval.inference.errors import first_output, is_context_overflow_output, request_error
 
 logger = logging.getLogger(__name__)
 
-#: Steps the model may take within one turn before the entry is abandoned.
-#: Matches the reference implementation's limit.
+#: A turn stops once more than this many steps have run, so it can run one
+#: more; the reference implementation counts the same way. Set ``max_steps``
+#: in the harness's ``scaffold_kwargs`` to change it.
 MAXIMUM_STEP_LIMIT = 20
 
 #: What the user says when functions held back from a turn are offered.
@@ -73,16 +75,11 @@ class BFCLMultiTurnScaffold(Scaffold):
         held_back_docs: dict[str, str] = payload.get("missed_function_docs") or {}
         language = Language(payload.get("language", Language.PYTHON))
         from_tool_calls = payload.get("call_source") == "tool_calls"
-        if from_tool_calls and not getattr(provider, "supports_tools", False):
+        if from_tool_calls:
             # The harness leaves tool support to a scaffold, and this one sends
             # its schemas through the provider, which would drop them.
-            raise ValueError(
-                f"{type(provider).__name__} does not support tool requests, so a native "
-                "function calling rollout would show the model no functions. Run it with "
-                "a provider that sends them (e.g. provider.kind=vllm_server), or use the "
-                ":prompt variant, which writes the functions into the prompt."
-            )
-        max_steps = int(payload.get("max_steps", MAXIMUM_STEP_LIMIT))
+            require_tool_support(provider)
+        max_steps = int(kwargs.get("max_steps", MAXIMUM_STEP_LIMIT))
 
         instances = build_instances(
             payload["initial_config"],
@@ -120,7 +117,7 @@ class BFCLMultiTurnScaffold(Scaffold):
             messages.extend(dict(m) for m in turn_messages)
             steps: list[list[dict[str, Any]]] = []
 
-            for _ in range(max_steps):
+            while True:
                 outputs = await provider.agenerate(
                     [
                         LMRequest(
@@ -145,15 +142,7 @@ class BFCLMultiTurnScaffold(Scaffold):
                         turn_index,
                     )
                     break
-                error = request_error(replies)
-                if error is not None:
-                    raise RuntimeError(f"A BFCL multi-turn step failed: {error}")
-                if not replies:
-                    raise RuntimeError(
-                        "The provider returned no reply for a BFCL multi-turn step; "
-                        "its logged warnings name the cause."
-                    )
-                last_output = replies[0]
+                last_output = first_output(replies)
 
                 decoded = self._decode(last_output, from_tool_calls, language, payload)
                 if not decoded:
@@ -161,17 +150,20 @@ class BFCLMultiTurnScaffold(Scaffold):
                     break
 
                 steps.append(decoded)
-                results = execute_calls(calls_from_decoded(decoded), instances)
+                calls = calls_from_decoded(decoded)
+                results = execute_calls(calls, instances)
                 self._record_assistant(messages, last_output, from_tool_calls)
-                self._record_results(messages, last_output, results, from_tool_calls)
-            else:
-                step_budget_exhausted = True
-                logger.warning(
-                    "BFCL multi-turn entry %s stopped after %s steps on turn %s.",
-                    (trace_metadata or {}).get("instance_id", "?"),
-                    max_steps,
-                    turn_index,
-                )
+                self._record_results(messages, last_output, calls, results, from_tool_calls)
+
+                if len(steps) > max_steps:
+                    step_budget_exhausted = True
+                    logger.warning(
+                        "BFCL multi-turn entry %s stopped after %s steps on turn %s.",
+                        (trace_metadata or {}).get("instance_id", "?"),
+                        len(steps),
+                        turn_index,
+                    )
+                    break
 
             calls_per_turn.append(steps)
             if step_budget_exhausted or context_overflow is not None:
@@ -180,7 +172,7 @@ class BFCLMultiTurnScaffold(Scaffold):
         final = LMOutput(text=last_output.text, metadata=dict(last_output.metadata or {}))
         final.extracted_answer = calls_per_turn
         if step_budget_exhausted:
-            final.metadata["bfcl_step_budget_exhausted"] = True
+            final.metadata[STEP_BUDGET_METADATA_KEY] = True
         if context_overflow is not None:
             final.metadata[CONTEXT_OVERFLOW_METADATA_KEY] = context_overflow
 
@@ -232,17 +224,20 @@ class BFCLMultiTurnScaffold(Scaffold):
         self,
         messages: list[dict[str, Any]],
         output: LMOutput,
+        calls: list[Any],
         results: list[str],
         from_tool_calls: bool,
     ) -> None:
         """Put the execution results where the model will read them next."""
         if from_tool_calls and output.tool_calls:
-            for call, result in zip(output.tool_calls, results, strict=False):
-                messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
+            for tool_call, result in zip(output.tool_calls, results, strict=False):
+                messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
             return
-        # A prompted model has no tool role to read, so the results come back
-        # as the user's next message, as the reference implementation does.
-        messages.append({"role": "user", "content": repr(results)})
+        # A prompted model gets one tool message per result, named after the call
+        # that produced it, as the reference implementation's handler for local
+        # models sends them. The chat template decides how a tool message reads.
+        for call, result in zip(calls, results, strict=False):
+            messages.append({"role": "tool", "name": render_call(call), "content": result})
 
 
 def _arguments_are_an_object(call: Any) -> bool:

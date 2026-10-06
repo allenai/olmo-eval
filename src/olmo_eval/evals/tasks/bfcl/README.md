@@ -164,10 +164,18 @@ uv run olmo-eval run -m my-model --harness bfcl_multi_turn -t bfcl:multi_turn:pr
 also exists as `:prompt`. There is no `:base` regime: a pretrained model is not
 asked to drive a twenty-step tool-executing rollout.
 
-Within a turn the model is asked for calls, the calls are run, their results
-come back as the next message, and the turn ends when it stops calling, up to
-twenty steps. The rollout's own instances only serve to answer the model; the
-score comes from replaying its calls against fresh ones.
+Within a turn the model is asked for calls, the calls are run, and each result
+comes back as a tool message, named after its call when the model was prompted.
+The turn ends when the model stops calling. A turn that runs past twenty steps
+stops the rollout, and an entry stopped before its last turn scores zero, as
+does one whose conversation outgrows the model's context window. The rollout's
+own instances only serve to answer the model; the score comes from replaying
+its calls against fresh ones. As in the reference implementation, a turn whose
+ground truth makes no call is not graded, though its calls still shape the
+state the next turn is compared on.
+
+Each prediction's `scorer_results` records whether the entry passed, why it
+failed if it did, and whether a turn ran out of steps.
 
 The API classes are vendored under
 `olmo_eval/common/scorers/bfcl/multi_turn/api/`, because an instance's

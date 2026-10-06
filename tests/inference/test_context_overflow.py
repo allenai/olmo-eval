@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 from olmo_eval.common.types import LMOutput
 from olmo_eval.inference.errors import (
     CONTEXT_OVERFLOW_KEY,
     REQUEST_ERROR_KEY,
+    first_output,
     is_context_overflow,
     is_context_overflow_output,
 )
@@ -49,3 +52,19 @@ def test_a_marked_reply_reads_as_overflow() -> None:
     assert is_context_overflow_output([marked])
     assert not is_context_overflow_output([LMOutput(text="", metadata={REQUEST_ERROR_KEY: "x"})])
     assert not is_context_overflow_output([])
+
+
+def test_first_output_returns_a_served_reply() -> None:
+    assert first_output([LMOutput(text="ok")]).text == "ok"
+
+
+def test_first_output_raises_on_a_marked_failure() -> None:
+    marked = LMOutput(text="", metadata={REQUEST_ERROR_KEY: "context overflow: too long"})
+
+    with pytest.raises(RuntimeError, match="context overflow"):
+        first_output([marked])
+
+
+def test_first_output_raises_when_nothing_came_back() -> None:
+    with pytest.raises(RuntimeError, match="no output"):
+        first_output([])

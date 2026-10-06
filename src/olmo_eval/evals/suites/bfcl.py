@@ -18,6 +18,7 @@ number, which averages the executable categories in.
 """
 
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, register
+from olmo_eval.evals.tasks.bfcl.multi_turn import MULTI_TURN_CATEGORIES
 
 #: Suffix appended to every task spec in a suite, one per prompting regime.
 REGIMES: tuple[tuple[str, str], ...] = (
@@ -95,15 +96,6 @@ def _register_regime(suffix: str, description: str) -> None:
             description=f"Every BFCL v3 single-turn category, reported separately ({description})",
         )
     )
-
-
-#: The categories the v3 multi-turn summary averages, as equals.
-MULTI_TURN_CATEGORIES: tuple[str, ...] = (
-    "base",
-    "miss_func",
-    "miss_param",
-    "long_context",
-)
 
 
 def _register_multi_turn(suffix: str, description: str) -> None:

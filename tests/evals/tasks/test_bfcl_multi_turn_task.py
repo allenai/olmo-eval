@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from olmo_eval.common.scorers.base import get_scorer_result
 from olmo_eval.common.types import LMOutput, RequestType
 from olmo_eval.evals.suites import get_suite
 from olmo_eval.evals.tasks.bfcl.multi_turn import (
@@ -13,7 +14,6 @@ from olmo_eval.evals.tasks.bfcl.multi_turn import (
     MULTI_TURN_CATEGORIES,
     BFCLMultiTurnScorer,
     BFCLMultiTurnTask,
-    category_from_id,
 )
 from olmo_eval.evals.tasks.common import get_task
 
@@ -61,12 +61,6 @@ def test_every_api_class_has_a_documented_file() -> None:
     from olmo_eval.common.scorers.bfcl.multi_turn.api import API_CLASSES
 
     assert set(FUNC_DOC_FILES) == set(API_CLASSES)
-
-
-def test_the_category_of_an_entry_comes_from_its_id() -> None:
-    assert category_from_id("multi_turn_base_0") == "base"
-    assert category_from_id("multi_turn_miss_func_12") == "miss_func"
-    assert category_from_id("multi_turn_long_context_3") == "long_context"
 
 
 def test_functions_are_assembled_from_the_classes_an_entry_involves() -> None:
@@ -184,10 +178,45 @@ def test_a_rollout_that_outgrew_the_context_window_scores_zero() -> None:
     output.extracted_answer = [[[{"mkdir": {"dir_name": "temp"}}]], []]
 
     assert BFCLMultiTurnScorer().score(instance, output) == 0.0
-    assert output.metadata["bfcl_error"]["error_type"] == "multi_turn:context_overflow"
+    recorded = get_scorer_result(output, "bfcl_multi_turn")
+    assert recorded is not None
+    assert recorded["error_type"] == "multi_turn:context_overflow"
 
 
-def test_calling_on_a_turn_that_expects_nothing_scores_zero() -> None:
+def test_a_rollout_stopped_before_its_last_turn_scores_zero() -> None:
+    # The reviewer's reproduction: the ground truth's remaining turn is empty, so
+    # padding it would pass the entry, where the reference fails it outright.
+    task = task_with_stubbed_data()
+    instance = task.process_doc(ENTRY)
+    assert instance is not None
+    output = LMOutput(text="", metadata={"bfcl_step_budget_exhausted": True})
+    output.extracted_answer = [[[{"mkdir": {"dir_name": "temp"}}]]]
+
+    assert BFCLMultiTurnScorer().score(instance, output) == 0.0
+    recorded = get_scorer_result(output, "bfcl_multi_turn")
+    assert recorded is not None
+    assert recorded["error_type"] == "multi_turn:force_terminated"
+    assert recorded["step_budget_exhausted"] is True
+
+
+def test_a_passing_rollout_is_recorded_for_the_predictions() -> None:
+    task = task_with_stubbed_data()
+    instance = task.process_doc(ENTRY)
+    assert instance is not None
+    output = LMOutput(text="")
+    output.extracted_answer = [[[{"mkdir": {"dir_name": "temp"}}]], []]
+
+    BFCLMultiTurnScorer().score(instance, output)
+
+    assert get_scorer_result(output, "bfcl_multi_turn") == {
+        "valid": True,
+        "step_budget_exhausted": False,
+    }
+
+
+def test_calling_on_a_turn_that_expects_nothing_is_not_penalised() -> None:
+    # The reference implementation defines an irrelevance check for such a turn
+    # but never runs it.
     task = task_with_stubbed_data()
     instance = task.process_doc(ENTRY)
     assert instance is not None
@@ -197,8 +226,7 @@ def test_calling_on_a_turn_that_expects_nothing_scores_zero() -> None:
         [[{"mkdir": {"dir_name": "x"}}]],
     ]
 
-    assert BFCLMultiTurnScorer().score(instance, output) == 0.0
-    assert "irrelevance" in output.metadata["bfcl_error"]["error_type"]
+    assert BFCLMultiTurnScorer().score(instance, output) == 1.0
 
 
 def test_a_reply_with_no_rollout_is_refused() -> None:

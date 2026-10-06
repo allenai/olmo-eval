@@ -175,13 +175,34 @@ def test_leaving_the_wrong_state_fails() -> None:
     assert result["error_type"] == "multi_turn:instance_state_mismatch"
 
 
-def test_calling_on_a_turn_that_expects_nothing_fails() -> None:
+def test_calling_on_a_turn_that_expects_nothing_is_not_graded() -> None:
+    # The reference implementation defines an irrelevance check for these turns
+    # but never runs it, so a call there is not penalised.
     path = [["mkdir(dir_name='temp')"], []]
     model = [parse_call_strings(["mkdir(dir_name='temp')"])], [parse_call_strings(["ls()"])]
-    result = check([list(model[0]), list(model[1])], path)
 
-    assert not result["valid"]
-    assert result["error_type"] == "multi_turn:irrelevance_error:decoder_success"
+    assert check([list(model[0]), list(model[1])], path)["valid"]
+
+
+def test_a_call_ahead_of_its_turn_still_passes() -> None:
+    # The reviewer's reproduction against the reference: the model adds on both
+    # turns although the ground truth only adds on the second.
+    path = [[], ["add(a=1, b=2)"]]
+    rollout = [[parse_call_strings(["add(a=1, b=2)"])], [parse_call_strings(["add(a=1, b=2)"])]]
+
+    assert multi_turn_checker(rollout, path, {}, ["MathAPI"])["valid"]
+
+
+def test_a_call_on_an_ungraded_turn_still_counts_toward_the_next_turns_state() -> None:
+    path = [[], ["cd(folder='temp')"]]
+    # The ungraded turn's mkdir is still executed, so at the graded turn the
+    # model's file system has a folder the ground truth's does not.
+    early = [
+        [parse_call_strings(["mkdir(dir_name='temp')"])],
+        [parse_call_strings(["cd(folder='temp')"])],
+    ]
+
+    assert not check(early, path)["valid"]
 
 
 def test_declining_on_a_turn_that_expects_nothing_passes() -> None:
