@@ -11,6 +11,7 @@ graded by an LLM judge (see `helmet_judge.py`) and therefore need a judge
 configured -- the `helmet_nojudge__*` suites exclude them.
 """
 
+import os
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -57,6 +58,14 @@ from olmo_eval.data.helmet_narrativeqa_loader import (
     load_narrativeqa_dataset,
 )
 from olmo_eval.data.helmet_tasks import HELMET_TASKS
+from olmo_eval.data.ruler_loader import (
+    RULER_DATA_REPO,
+    RULER_DATA_REVISION,
+    download_ruler_data,
+    get_ruler_templates,
+    load_ruler_dataset,
+)
+from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 from olmo_eval.evals.tasks.common.registry import register
 
@@ -123,8 +132,13 @@ class HelmetTask(Task):
         # With a chat template the answer prefix is left off rather than fed in
         # as a partial assistant turn, matching how HELMET runs its chat-format
         # tasks (and how ruler.py handles the same distinction).
+        # RULER's answer prefixes name the needle and query, so the system
+        # template is filled from the row too; for every other task it has no
+        # fields and formatting leaves it unchanged
         prepend_text = (
-            "" if self.helmet_config.get("use_chat_template") else self._templates["system"]
+            ""
+            if self.helmet_config.get("use_chat_template")
+            else self._templates["system"].format(**doc)
         )
 
         answer = doc.get("answer")
@@ -424,8 +438,28 @@ class HelmetAlceTask(HelmetTask):
         )
 
 
+class HelmetRulerTask(HelmetTask):
+    """HELMET recall task: one of the RULER needle-in-a-haystack variants.
+
+    Reads the same pre-generated RULER files as the `ruler_*` tasks, but builds
+    the prompt the way HELMET does: from its templates and the row's fields,
+    with the answer prefix on its own line. The files' prebuilt `input`, which
+    the `ruler_*` tasks use, joins the two with a space instead.
+    """
+
+    def _load_dataset(self) -> dict[str, Any]:
+        ruler_name = f"{self.helmet_config['ruler_task']}__{self.context_size}"
+        return load_ruler_dataset(
+            task_name=ruler_name,
+            data_path=os.path.join(download_ruler_data(), RULER_TASKS[ruler_name]["data"]),
+            max_samples=self.config.limit,
+            seed=self.config.seed,
+        )
+
+
 _TASK_CLASSES: dict[str, type[HelmetTask]] = {
     "json_kv": HelmetJsonKvTask,
+    "ruler": HelmetRulerTask,
     "icl": HelmetIclTask,
     "infbench": HelmetInfbenchTask,
     "narrativeqa": HelmetNarrativeQaTask,
@@ -440,6 +474,8 @@ _TASK_CLASSES: dict[str, type[HelmetTask]] = {
 # answer) and ICL with exact match; see HELMET's scripts/collect_results.py.
 _TASK_METRICS: dict[str, tuple] = {
     "json_kv": ((RecallMetric(),), "recall"),
+    # HELMET's ruler_recall: the fraction of gold values found in the output
+    "ruler": ((RecallMetric(),), "recall"),
     # HELMET-normalized exact match, not the generic scorer -- see
     # HelmetExactMatchScorer for why the difference is load-bearing
     "icl": ((AccuracyMetric(name="exact_match", scorer=HelmetExactMatchScorer),), "exact_match"),
@@ -505,6 +541,8 @@ def _task_settings(task_cfg: dict) -> dict[str, Any]:
     sources: dict[str, Any] = {}
     if kind == "icl":
         sources["icl"] = ICL_DATASETS[task_cfg["icl_dataset"]]
+    elif kind == "ruler":
+        sources["ruler_data"] = f"{RULER_DATA_REPO}@{RULER_DATA_REVISION}"
     elif kind == "narrativeqa":
         sources["narrativeqa"] = f"{NARRATIVEQA_REPO}@{NARRATIVEQA_REVISION}"
     else:
@@ -515,11 +553,15 @@ def _task_settings(task_cfg: dict) -> dict[str, Any]:
     if kind in _USES_REFERENCE_TOKENIZER:
         sources["reference_tokenizer"] = f"{REFERENCE_TOKENIZER}@{REFERENCE_TOKENIZER_REVISION}"
 
-    templates = {
-        name: value
-        for name, value in vars(_LOADER_MODULES[kind]).items()
-        if "TEMPLATE" in name and isinstance(value, str)
-    }
+    if kind == "ruler":
+        user, system, _ = get_ruler_templates(task_cfg["ruler_task"])
+        templates = {"user": user, "system": system}
+    else:
+        templates = {
+            name: value
+            for name, value in vars(_LOADER_MODULES[kind]).items()
+            if "TEMPLATE" in name and isinstance(value, str)
+        }
     return {"helmet": task_cfg, "sources": sources, "templates": templates}
 
 

@@ -406,7 +406,7 @@ def test_helmet_task_inventory():
     for config in HELMET_TASKS.values():
         by_tag[config["tag"]] = by_tag.get(config["tag"], 0) + 1
     assert by_tag == {
-        "recall": 6,
+        "recall": 24,
         "rag": 24,
         "rerank": 6,
         "longqa": 18,
@@ -414,7 +414,7 @@ def test_helmet_task_inventory():
         "icl": 30,
         "cite": 24,
     }
-    assert len(HELMET_TASKS) == 120
+    assert len(HELMET_TASKS) == 138
 
 
 def test_helmet_context_budgets_match_helmet():
@@ -456,8 +456,20 @@ def test_helmet_suite_structure():
     import olmo_eval.evals.suites.helmet  # noqa: F401 - triggers registration
     from olmo_eval.evals.suites.registry import get_suite
 
-    assert len(get_suite("helmet_all__4096").expanded_tasks) == 20
-    assert len(get_suite("helmet_cite__4096").expanded_tasks) == 4
+    assert len(get_suite("helmet_all__4096").expanded_tasks) == 21
+    # HELMET's Recall average: json_kv plus three RULER NIAH tasks
+    assert set(get_suite("helmet_recall__4096").expanded_tasks) == {
+        "helmet_json_kv__4096",
+        "helmet_ruler_niah_mk_2__4096",
+        "helmet_ruler_niah_mk_3__4096",
+        "helmet_ruler_niah_mv__4096",
+    }
+    # HELMET's Cite average leaves out the nocite ablations, which stay runnable
+    assert set(get_suite("helmet_cite__4096").expanded_tasks) == {
+        "helmet_alce_asqa__4096",
+        "helmet_alce_qampari__4096",
+    }
+    assert HELMET_TASKS["alce_asqa_nocite__4096"]["ablation"] is True
     # nojudge excludes exactly the three judged tasks
     all_tasks = set(get_suite("helmet_all__4096").expanded_tasks)
     nojudge = set(get_suite("helmet_nojudge__4096").expanded_tasks)
@@ -653,3 +665,46 @@ def test_nlu_csv_is_parsed_like_its_original_loading_script(tmp_path, monkeypatc
     # labels are `{scenario}_{intent}`, indexed in sorted order
     assert train.features["label"].names == ["alarm_query", "alarm_set", "weather_query"]
     assert train["label"] == [1, 2, 0]
+
+
+def test_helmet_ruler_tasks_render_helmets_prompt(tmp_path, monkeypatch):
+    """HELMET renders RULER from its templates with the answer prefix on its own
+    line, not from the files' prebuilt `input`, and keeps HELMET's budgets."""
+    from olmo_eval.data.ruler_tasks import RULER_TASKS
+    from olmo_eval.evals.tasks import helmet
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    row = {
+        "index": 0,
+        "input": "prebuilt prompt that HELMET does not use",
+        "outputs": ["111", "222"],
+        "answer": ["111", "222"],
+        "context": "HAYSTACK",
+        "query": "blue-tick",
+        "type_needle_v": "numbers",
+        "length": 10,
+    }
+    path = tmp_path / RULER_TASKS["niah_mv__4096"]["data"]
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(row) + "\n")
+    monkeypatch.setattr(helmet, "download_ruler_data", lambda: str(tmp_path))
+
+    task = get_task("helmet_ruler_niah_mv__4096")
+    (instance,) = list(task.instances)
+    prompt = task.format_request(instance).prompt
+    assert prompt.endswith(
+        "What are all the special magic numbers for blue-tick mentioned in the provided text?"
+        "\nThe special magic numbers for blue-tick mentioned in the provided text are"
+    )
+    assert "HAYSTACK" in prompt and "prebuilt" not in prompt
+    assert instance.gold_answer == ["111", "222"]
+    # ruler_recall is the fraction of gold values found
+    assert task.config.get_primary_metric().scorer().score(instance, _output("111 and 333")) == 0.5
+
+    budgets = {
+        name: HELMET_TASKS[f"ruler_{name}__4096"]["max_gen_toks"]
+        for name in ("niah_mk_2", "niah_mk_3", "niah_mv")
+    }
+    assert budgets == {"niah_mk_2": 50, "niah_mk_3": 100, "niah_mv": 50}
+    sources = task.config.to_dict()["task_settings"]["sources"]
+    assert sources["ruler_data"].startswith("allenai/ruler_data@")
