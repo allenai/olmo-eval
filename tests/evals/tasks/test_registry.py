@@ -16,6 +16,7 @@ from olmo_eval.evals.tasks.common import (
     list_variants,
     parse_overrides,
     register,
+    register_configured,
     register_variant,
 )
 from olmo_eval.evals.tasks.common.registry import _configs, _tasks, _variants
@@ -466,3 +467,29 @@ class TestParseOverridesSamplingParams:
     def test_parse_truncate_prompt_tokens_sentinel(self):
         """The -1 sentinel meaning 'the model's max input length' survives parsing."""
         assert parse_overrides("truncate_prompt_tokens=-1") == {"truncate_prompt_tokens": -1}
+
+
+class TestRegisterConfigured:
+    """Tests for registering one class under many names."""
+
+    def test_each_name_gets_its_own_config(self):
+        register_configured("dummy_short", DummyTask, limit=10)
+        register_configured("dummy_long", DummyTask, limit=20)
+
+        short, long = get_task("dummy_short"), get_task("dummy_long")
+        assert type(short) is DummyTask and type(long) is DummyTask
+        assert (short.config.name, short.config.limit) == ("dummy_short", 10)
+        assert (long.config.name, long.config.limit) == ("dummy_long", 20)
+
+    def test_config_starts_from_class_attributes(self):
+        class Seeded(DummyTask):
+            seed = 7
+
+        register_configured("seeded", Seeded, limit=3)
+        config = get_task("seeded").config
+        assert (config.seed, config.limit) == (7, 3)
+
+    def test_duplicate_name_is_rejected(self):
+        register_configured("dummy_once", DummyTask)
+        with pytest.raises(ValueError, match="already registered"):
+            register_configured("dummy_once", DummyTask)

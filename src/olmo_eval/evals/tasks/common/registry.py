@@ -70,6 +70,25 @@ def register(name: str) -> Callable[[T], T]:
     return decorator
 
 
+def register_configured(name: str, cls: type[Task], **config: Any) -> None:
+    """Register an existing task class under a name, with that name's config.
+
+    For families of tasks that share one implementation and differ only in
+    configuration, such as one task per context length. The config starts
+    from the class attributes, as with `register`, and `config` overrides
+    TaskConfig fields for this name alone, so no subclass per name is needed.
+
+    Args:
+        name: Task name to register.
+        cls: Task class that implements every task in the family.
+        **config: TaskConfig field values for this name.
+    """
+    if name in _tasks:
+        raise ValueError(f"Task '{name}' already registered")
+    _tasks[name] = cls
+    _configs[name] = replace(_build_config(name, cls), **config)
+
+
 def register_variant(task_name: str, variant: str, **overrides: Any) -> None:
     """Register a variant for a task.
 
