@@ -455,6 +455,10 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
     """
     base_cls = _TASK_CLASSES[task_cfg["kind"]]
     metrics, primary_metric = _TASK_METRICS[task_cfg["metrics_key"]]
+    # Hand over the Metric itself, not its name: TaskConfig only resolves a
+    # Metric instance, and an unresolved primary drops the task out of its
+    # suite's average-of-averages.
+    primary_metric = next(m for m in metrics if m.name == primary_metric)
 
     stop_sequences = ("\n",) if task_cfg.get("stop_new_line") else None
 
