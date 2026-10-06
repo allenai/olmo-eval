@@ -504,3 +504,84 @@ def test_judge_scorer_to_dict_is_stable_and_serializable():
     # two independent constructions carry distinct closures but must
     # serialize identically, or task hashes would differ run to run
     assert HelmetLongQAJudgeScorer().to_dict() == HelmetLongQAJudgeScorer().to_dict()
+
+
+# ---------------------------------------------------------------------------
+# judge settings reach the task hash, and judge failures are recorded
+
+
+def _stub_judge(*replies: str):
+    pending = list(replies)
+
+    async def judge(prompt: str, **kwargs) -> str:
+        return pending.pop(0)
+
+    return judge
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"judge_model": "gpt-4o-mini"}, {"judge_temperature": 1.0}, {"judge_max_tokens": 64}],
+)
+def test_judge_settings_change_the_serialized_scorer(change):
+    for scorer_cls in (HelmetLongQAJudgeScorer, HelmetSummJudgeScorer):
+        assert scorer_cls().to_dict() != scorer_cls(**change).to_dict()
+
+
+def test_provider_path_uses_the_judge_settings(monkeypatch):
+    import asyncio
+
+    seen = {}
+
+    async def fake_provider(self, prompt, context, **kwargs):
+        seen.update(kwargs)
+        return '{"fluency": 1, "correctness": 3}'
+
+    monkeypatch.setattr(HelmetLongQAJudgeScorer, "_score_with_provider", fake_provider)
+    monkeypatch.setattr(HelmetLongQAJudgeScorer, "_validate_provider", lambda self, ctx: None)
+    scorer = HelmetLongQAJudgeScorer(provider_name="judge", judge_temperature=0.3)
+    score = asyncio.run(scorer.ascore_with_context(_instance(gold="x"), _output("x"), None))
+    assert score == 1.0
+    assert seen == {"temperature": 0.3, "max_tokens": scorer.judge_max_tokens}
+
+
+def test_longqa_judge_records_parse_errors_in_predictions():
+    import asyncio
+
+    from olmo_eval.common.types import LMRequest, RequestType, Response
+    from olmo_eval.runners.io.builders import build_predictions
+
+    instance = _instance(gold="x")
+    good, bad = _output("x"), _output("x")
+    scorer = HelmetLongQAJudgeScorer(
+        judge_fn=_stub_judge('{"fluency": 1, "correctness": 3}', "no json here")
+    )
+    assert asyncio.run(scorer.ascore_with_context(instance, good, None)) == 1.0
+    assert asyncio.run(scorer.ascore_with_context(instance, bad, None)) == 0.0
+    assert good.metadata["judge_result"]["parse_error"] is False
+    assert bad.metadata["judge_result"] == {
+        "raw_judge_response": "no json here",
+        "parse_error": True,
+    }
+
+    request = LMRequest(request_type=RequestType.COMPLETION, prompt="q")
+    (prediction,) = build_predictions([Response(instance=instance, request=request, outputs=[bad])])
+    assert prediction["model_output"][0]["judge_result"]["parse_error"] is True
+
+
+def test_summ_judge_records_parse_errors_and_missing_keypoints():
+    import asyncio
+
+    scorer = HelmetSummJudgeScorer(
+        judge_fn=_stub_judge('{"fluency": 1}', '{"recall": 2}', "unparseable")
+    )
+    output = _output("A summary.")
+    instance = _instance(gold="ref", keypoints=["a", "b"], expert_summary="ref")
+    assert asyncio.run(scorer.ascore_with_context(instance, output, None)) == 0.0
+    result = output.metadata["judge_result"]
+    assert result["parse_error"] is True
+    assert result["raw_judge_responses"]["precision"] == "unparseable"
+
+    output = _output("A summary.")
+    assert asyncio.run(scorer.ascore_with_context(_instance(gold="ref"), output, None)) == 0.0
+    assert output.metadata["judge_result"] == {"missing_keypoints": True, "parse_error": False}

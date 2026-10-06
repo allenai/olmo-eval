@@ -223,6 +223,17 @@ def load_infbench_dataset(
 
     rows = data.to_list()
     if keypoints:
+        missing = [row["id"] for row in rows if not keypoints.get(row["id"])]
+        if missing:
+            # the judge cannot grade these; each scores 0.0 and is flagged in
+            # its judge_result
+            logger.warning(
+                "%d InfiniteBench %s rows have no key points in %s: %s",
+                len(missing),
+                subset,
+                spec["keypoints_file"],
+                missing[:5],
+            )
         for row in rows:
             row["keypoints"] = keypoints.get(row["id"], [])
             # the expert reference the precision rubric grades against
