@@ -623,3 +623,33 @@ def test_task_settings_are_omitted_when_unset():
     from olmo_eval.evals.tasks.common.registry import get_task
 
     assert "task_settings" not in get_task("hellaswag").config.to_dict()
+
+
+def test_nlu_csv_is_parsed_like_its_original_loading_script(tmp_path, monkeypatch):
+    from olmo_eval.data import helmet_icl_loader
+
+    header = (
+        "userid;answerid;scenario;intent;status;answer_annotation;notes;"
+        "suggested_entities;answer_normalised;answer;question"
+    )
+    lines = [
+        header,
+        '1;1;alarm;set;;"wake me up at [time : five am] this week";;;x;x;q',
+        '1;2;alarm;set;;"null";;;x;x;q',
+        '1;3;weather;query;;"is it [weather_descriptor : raining]";;;x;x;q',
+        '1;4;alarm;query;;"what alarms do i have";;;x;x;q',
+    ]
+    path = tmp_path / "nlu.csv"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(helmet_icl_loader.DownloadManager, "download", lambda self, url: str(path))
+
+    train = helmet_icl_loader._load_nlu_csv("unused")["train"]
+    # the null row is dropped, entity markup stripped, and file order kept
+    assert train["text"] == [
+        "wake me up at five am this week",
+        "is it raining",
+        "what alarms do i have",
+    ]
+    # labels are `{scenario}_{intent}`, indexed in sorted order
+    assert train.features["label"].names == ["alarm_query", "alarm_set", "weather_query"]
+    assert train["label"] == [1, 2, 0]
