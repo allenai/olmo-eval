@@ -13,6 +13,7 @@ from olmo_eval.runners.common.models import (
     ScoreSummary,
     TaskMetricsEntry,
 )
+from olmo_eval.runners.processing.generation_counts import format_generation_counts
 from olmo_eval.runners.processing.utils import get_primary_metric
 
 logger = get_logger("runners.metrics")
@@ -82,6 +83,7 @@ def build_single_model_metrics(
             instances_processed=task_data.get("instances_processed"),
             instances_failed=task_data.get("instances_failed"),
             error_summary=task_data.get("error_summary"),
+            generation_counts=task_data.get("generation_counts"),
         )
         tasks_list.append(entry)
 
@@ -103,7 +105,11 @@ def build_single_model_metrics(
             primary = get_primary_metric(metrics, preferred)
             if primary:
                 metric_scorer, score = primary
-                summary[suite_name] = ScoreSummary(metric=metric_scorer, score=score)
+                summary[suite_name] = ScoreSummary(
+                    metric=metric_scorer,
+                    score=score,
+                    generation_counts=suite_data.get("generation_counts"),
+                )
 
     return MetricsOutput(
         timestamp=results.get("timestamp", ""),
@@ -175,6 +181,7 @@ def build_multi_model_metrics(
                 instances_processed=task_data.get("instances_processed"),
                 instances_failed=task_data.get("instances_failed"),
                 error_summary=task_data.get("error_summary"),
+                generation_counts=task_data.get("generation_counts"),
             )
             tasks_list.append(entry)
 
@@ -199,7 +206,9 @@ def build_multi_model_metrics(
                 if primary:
                     metric_scorer, score = primary
                     summary[model_name][suite_name] = ScoreSummary(
-                        metric=metric_scorer, score=score
+                        metric=metric_scorer,
+                        score=score,
+                        generation_counts=suite_data.get("generation_counts"),
                     )
 
     return MetricsOutput(
@@ -290,6 +299,7 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
     table.add_column("Task", style="cyan")
     table.add_column("Status")
     table.add_column("Instances")
+    table.add_column("Generations")
     table.add_column("Metric")
     table.add_column("Result")
 
@@ -313,15 +323,23 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
 
         metric_name = primary[0] if primary else (preferred or "-")
         instances = format_instances(task_data)
+        generations = format_generation_counts(task_data.get("generation_counts"))
 
         if error:
-            table.add_row(name, "[red]Failed[/red]", instances, metric_name, str(error))
+            table.add_row(
+                name, "[red]Failed[/red]", instances, generations, metric_name, str(error)
+            )
         elif primary:
             table.add_row(
-                name, "[green]Success[/green]", instances, metric_name, f"{primary[1]:.4f}"
+                name,
+                "[green]Success[/green]",
+                instances,
+                generations,
+                metric_name,
+                f"{primary[1]:.4f}",
             )
         else:
-            table.add_row(name, "[green]Success[/green]", instances, metric_name, "-")
+            table.add_row(name, "[green]Success[/green]", instances, generations, metric_name, "-")
 
     def _get_collapsed_tasks(suites: dict[str, Any]) -> set[str]:
         """Identify tasks collapsed into a sub-suite average.
