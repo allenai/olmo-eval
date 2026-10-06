@@ -3,7 +3,6 @@
 Ported from HELMET: https://github.com/princeton-nlp/HELMET
 """
 
-import json
 import logging
 import os
 import re
@@ -11,16 +10,14 @@ import tarfile
 from typing import Any
 
 import numpy as np
-from huggingface_hub import hf_hub_download
-from huggingface_hub.utils import disable_progress_bars as disable_hf_hub_progress_bars
-from huggingface_hub.utils import silent_tqdm
+
+from olmo_eval.data.hub import download_dataset_file
+from olmo_eval.data.jsonl import load_jsonl
 
 logger = logging.getLogger(__name__)
 
-
-def _disable_ruler_progress_bars() -> None:
-    """Avoid HF tqdm `_lock` failures in the RULER download path."""
-    disable_hf_hub_progress_bars()
+RULER_DATA_REPO = "allenai/ruler_data"
+RULER_DATA_REVISION = "b2d1d948dc4f6ca37c0135123f3b3afbed741130"
 
 
 def _hf_datasets_cache() -> str:
@@ -40,18 +37,16 @@ def download_ruler_data() -> str:
     Returns:
         Path to the extracted RULER data directory.
     """
-    _disable_ruler_progress_bars()
 
-    root_dir = os.path.join(_hf_datasets_cache(), "allenai--RULER")
+    # Keyed by revision, so moving the pin re-extracts rather than reusing an
+    # older copy.
+    root_dir = os.path.join(_hf_datasets_cache(), f"allenai--RULER-{RULER_DATA_REVISION[:12]}")
     data_dir = os.path.join(root_dir, "data")
 
     if not os.path.exists(data_dir):
         logger.info(f"Local RULER data not found in {root_dir}, downloading...")
-        my_file = hf_hub_download(  # ty: ignore[no-matching-overload]
-            repo_id="allenai/ruler_data",
-            filename="data_100_samples.tgz",
-            repo_type="dataset",
-            tqdm_class=silent_tqdm,
+        my_file = download_dataset_file(
+            RULER_DATA_REPO, "data_100_samples.tgz", revision=RULER_DATA_REVISION
         )
         os.makedirs(root_dir, exist_ok=True)
         logger.info(f"Extracting RULER data to {root_dir}...")
@@ -63,25 +58,6 @@ def download_ruler_data() -> str:
         logger.info(f"Using cached RULER data in {root_dir}.")
 
     return root_dir
-
-
-def _load_jsonl(path: str) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError as err:
-                raise ValueError(f"Invalid JSONL in {path}:{line_num}: {err}") from err
-            if not isinstance(record, dict):
-                raise ValueError(
-                    f"Expected JSON object in {path}:{line_num}, got {type(record).__name__}"
-                )
-            records.append(record)
-    return records
 
 
 def get_ruler_templates(task_type: str) -> tuple[str, str, str]:
@@ -184,7 +160,6 @@ def load_ruler_dataset(
             - user_template: User message template
             - system_template: System/assistant prefix template
     """
-    _disable_ruler_progress_bars()
 
     # Extract task type from task name (remove context size)
     task_type = re.findall(r"^(.*)__\d+$", task_name)[0]
@@ -206,7 +181,7 @@ def load_ruler_dataset(
         )
         return processed
 
-    data = [process_example(record) for record in _load_jsonl(data_path)]
+    data = [process_example(record) for record in load_jsonl(data_path)]
 
     # Sample if requested
     if max_samples is not None:
