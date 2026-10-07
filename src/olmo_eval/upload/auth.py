@@ -26,9 +26,32 @@ NO_CREDENTIALS_MESSAGE = (
 )
 REFRESH_MARGIN = timedelta(minutes=5)
 
+# The uploader key once take_upload_credentials_from_env has moved it out of the environment.
+_uploader_key: str | None = None
+
 
 class UploadAuthError(Exception):
     """Google credentials are missing or cannot produce an access token."""
+
+
+def take_upload_credentials_from_env() -> None:
+    """Move the uploader key out of the environment, keeping it for this process only.
+
+    Evals start subprocesses (inference servers, code sandboxes, external benchmarks) that
+    inherit the environment and may run model-written code, so they must not see the key.
+    """
+    global _uploader_key
+    from olmo_eval.upload.config import UPLOAD_CREDENTIALS_ENV
+
+    key = os.environ.pop(UPLOAD_CREDENTIALS_ENV, "").strip()
+    if key:
+        _uploader_key = key
+
+
+def _uploader_key_value() -> str:
+    from olmo_eval.upload.config import UPLOAD_CREDENTIALS_ENV
+
+    return _uploader_key or os.environ.get(UPLOAD_CREDENTIALS_ENV, "").strip()
 
 
 def load_google_credentials() -> Any:
@@ -45,7 +68,7 @@ def load_google_credentials() -> Any:
 
     from olmo_eval.upload.config import UPLOAD_CREDENTIALS_ENV
 
-    key = os.environ.get(UPLOAD_CREDENTIALS_ENV, "").strip()
+    key = _uploader_key_value()
     if key:
         return _service_account_credentials(key, UPLOAD_CREDENTIALS_ENV)
     try:
@@ -68,11 +91,7 @@ def _service_account_credentials(key: str, env_name: str) -> Any:
 
 def has_upload_credentials() -> bool:
     """Whether an uploader key or Application Default Credentials are configured."""
-    from olmo_eval.upload.config import UPLOAD_CREDENTIALS_ENV
-
-    return bool(os.environ.get(UPLOAD_CREDENTIALS_ENV, "").strip()) or (
-        has_local_google_credentials()
-    )
+    return bool(_uploader_key_value()) or has_local_google_credentials()
 
 
 def has_local_google_credentials() -> bool:

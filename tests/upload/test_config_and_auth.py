@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -322,3 +323,41 @@ def test_malformed_uploader_key_is_an_upload_auth_error(monkeypatch) -> None:
     monkeypatch.setenv("OLMO_EVAL_UPLOAD_CREDENTIALS", '{"type": "service_account"}')
     with pytest.raises(UploadAuthError, match="OLMO_EVAL_UPLOAD_CREDENTIALS"):
         load_google_credentials()
+
+
+def test_uploader_key_is_hidden_from_subprocesses(monkeypatch) -> None:
+    import subprocess
+    import sys
+
+    from google.oauth2 import service_account
+
+    from olmo_eval.upload.auth import take_upload_credentials_from_env
+
+    monkeypatch.setenv("OLMO_EVAL_UPLOAD_CREDENTIALS", _service_account_key_json())
+    take_upload_credentials_from_env()
+
+    assert "OLMO_EVAL_UPLOAD_CREDENTIALS" not in os.environ
+    child = subprocess.run(
+        [sys.executable, "-c", "import os; print(os.environ.get('OLMO_EVAL_UPLOAD_CREDENTIALS'))"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert child.stdout.strip() == "None"
+    with patch("google.auth.default") as default:
+        creds = load_google_credentials()
+    default.assert_not_called()
+    assert isinstance(creds, service_account.Credentials)
+
+
+def test_cli_moves_the_uploader_key_out_of_the_environment(monkeypatch) -> None:
+    from click.testing import CliRunner
+
+    from olmo_eval.cli import main
+    from olmo_eval.upload import auth
+
+    monkeypatch.setenv("OLMO_EVAL_UPLOAD_CREDENTIALS", "/secrets/key.json")
+    CliRunner().invoke(main, ["results", "--help"])
+
+    assert "OLMO_EVAL_UPLOAD_CREDENTIALS" not in os.environ
+    assert auth.has_upload_credentials() is True

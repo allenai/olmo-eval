@@ -12,6 +12,7 @@ def _no_results_upload(monkeypatch):
     monkeypatch.setenv("OLMO_EVAL_UPLOAD", "0")
     monkeypatch.delenv("OLMO_EVAL_API_URL", raising=False)
     monkeypatch.delenv("OLMO_EVAL_LAUNCH_ID", raising=False)
+    monkeypatch.setattr("olmo_eval.upload.auth._uploader_key", None)
 
 
 @pytest.fixture

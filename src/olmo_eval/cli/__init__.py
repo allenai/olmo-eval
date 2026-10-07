@@ -30,7 +30,9 @@ from olmo_eval.evals.tasks.common import list_tasks, list_variants
 @click.group()
 def main() -> None:
     """olmo-eval command line interface."""
-    pass
+    from olmo_eval.upload.auth import take_upload_credentials_from_env
+
+    take_upload_credentials_from_env()
 
 
 # Register command groups
