@@ -19,7 +19,6 @@ from rich.panel import Panel
 from rich.pretty import Pretty
 from rich.table import Table
 
-from olmo_eval.cli.removed import removed_storage_options
 from olmo_eval.cli.utils import (
     ConfiguredExternalEval,
     ExperimentSummary,
@@ -125,7 +124,6 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     default=None,
     help="Inject GCP credentials. Auto-detected from gs:// model paths.",
 )
-@removed_storage_options
 @click.option(
     "--upload/--no-upload",
     "upload",

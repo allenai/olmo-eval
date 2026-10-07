@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 
 import click
 
-from olmo_eval.cli.removed import removed_storage_options
 from olmo_eval.cli.run.options import (
     experiment_options,
     harness_options,
@@ -92,7 +91,6 @@ def _sigterm_raises() -> Iterator[None]:
 @harness_options
 @parallelism_options
 @upload_options
-@removed_storage_options
 @experiment_options
 @output_options
 @inspect_options
