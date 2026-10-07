@@ -1207,74 +1207,119 @@ def test_grouped_mm_loop_matches_per_group_matmul():
     torch.testing.assert_close(out, expected)
 
 
-def _reference_swiglu_valid_prefix(x, num_elements, *, start=None, out=None, max_elements=None):
-    """OLMo-core's ``swiglu_valid_prefix`` semantics; fails on inputs over ``max_elements``."""
+def _reference_swiglu_valid_prefix(x, num_elements, *, start=None, out=None):
+    """OLMo-core's ``swiglu_valid_prefix`` semantics, including its ``row < rows`` mask."""
     import torch.nn.functional as F
 
-    if max_elements is not None:
-        assert x.shape[0] * x.shape[1] <= max_elements, "chunk would overflow int32 offsets"
     hidden = x.shape[1] // 2
     if out is None:
         out = x.new_empty((x.shape[0], hidden))
     begin = 0 if start is None else int(start)
-    end = begin + int(num_elements)
-    out[begin:end] = x[begin:end, :hidden] * F.silu(x[begin:end, hidden:])
+    end = min(begin + int(num_elements), x.shape[0])
+    if end > begin:
+        out[begin:end] = x[begin:end, :hidden] * F.silu(x[begin:end, hidden:])
     return out
 
 
-class TestSwigluInt32Guard:
+def _start_value(kind, value):
+    import torch
+
+    if kind == "none":
+        return None
+    if kind == "int":
+        return value
+    return torch.tensor(value, dtype=torch.int32 if kind == "t32" else torch.int64)
+
+
+class TestSwigluRowBuckets:
     @pytest.mark.parametrize(
-        "start,count",
-        [(None, 13), (None, 0), (None, 6), (0, 9), (3, 10), (5, 3), ("t", 7), ("t32", 4), (12, 1)],
+        "rows,window",
+        [
+            (1, 16384),
+            (16384, 16384),
+            (16385, 16384),
+            (32767, 16384),
+            (32768, 32768),
+            (310528, 262144),  # 16 rows x span 1213 x top-16
+            (524288, 524288),
+            (1046784, 524288),
+            (2**20 + 1, 524288),
+            (16 * 9000 * 16, 524288),
+        ],
     )
-    def test_chunked_matches_single_call(self, start, count) -> None:
+    def test_window_rows(self, rows, window) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
+
+        assert moe_fallback.swiglu_window_rows(rows, 2048) == window
+
+    def test_window_rows_bounded_and_int32_safe(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
+
+        windows = {moe_fallback.swiglu_window_rows(r, 2048) for r in range(1, 3_000_000, 257)}
+        assert windows == {2**k for k in range(14, 20)}
+        assert max(windows) * 2048 <= 2**31 - 1
+        assert moe_fallback.swiglu_window_rows(10, 2**20) == 1024  # int32 cap below min_rows
+
+    @pytest.mark.parametrize("rows", [1, 2, 3, 5, 8, 9, 13, 16, 17, 23, 31, 40])
+    @pytest.mark.parametrize(
+        "start_kind,start,count",
+        [
+            ("none", 0, 10**6),  # whole input; count past the end is masked like the kernel
+            ("none", 0, 7),
+            ("none", 0, 0),
+            ("int", 3, 5),
+            ("t32", 1, 11),
+            ("t64", 6, 2),
+            ("t64", 9, 10**6),
+            ("int", 50, 4),  # starts past the input: nothing to do
+        ],
+    )
+    @pytest.mark.parametrize("with_out", [True, False])
+    def test_bucketed_matches_single_call(self, rows, start_kind, start, count, with_out) -> None:
         import functools
 
         import torch
 
         from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
 
-        torch.manual_seed(0)
-        x = torch.randn(13, 8)
-        if start == "t":
-            start = torch.tensor(2)
-        elif start == "t32":
-            start = torch.tensor(8, dtype=torch.int32)
+        width, max_elements, min_rows = 8, 8 * 8 + 3, 2  # windows of 2, 4 or 8 rows
+        torch.manual_seed(rows)
+        x = torch.randn(rows, width)
+        x[:, 0] = torch.arange(rows, dtype=x.dtype)  # row ids, to check each row runs once
         num = torch.tensor(count)
-        sentinel = torch.full((13, 4), -7.0)
-        expected = _reference_swiglu_valid_prefix(x, num, start=start, out=sentinel.clone())
-        calls = []
+        st = _start_value(start_kind, start)
+        sentinel = torch.full((rows, width // 2), -7.0)
+        expected = _reference_swiglu_valid_prefix(x, num, start=st, out=sentinel.clone())
+        launches, processed = [], []
 
-        def kernel(x, num_elements, **kw):
-            calls.append(x.shape[0])
-            return _reference_swiglu_valid_prefix(x, num_elements, max_elements=4 * 8, **kw)
+        def kernel(x, num_elements, *, start, out, **kw):
+            assert x.shape[0] * x.shape[1] <= max_elements, "launch would overflow int32"
+            assert out is not None and out.shape == (x.shape[0], width // 2)
+            launches.append(x.shape[0])
+            lo = int(start)
+            hi = min(lo + int(num_elements), x.shape[0])
+            processed.extend(int(i) for i in x[lo:hi, 0].tolist())
+            return _reference_swiglu_valid_prefix(x, num_elements, start=start, out=out, **kw)
 
-        out = moe_fallback.swiglu_valid_prefix_int32_safe(
-            kernel, x, num, start=start, out=sentinel.clone(), max_elements=4 * 8 + 3
+        call = functools.partial(
+            moe_fallback.swiglu_valid_prefix_bucketed,
+            kernel,
+            x,
+            num,
+            start=st,
+            min_rows=min_rows,
+            max_elements=max_elements,
         )
-        assert calls == [4, 4, 4, 1]
-        assert torch.equal(out, expected)  # bitwise, including untouched rows outside the range
-        fresh = functools.partial(moe_fallback.swiglu_valid_prefix_int32_safe, kernel)
-        allocated = fresh(x, num, start=start, max_elements=4 * 8)
-        lo = 0 if start is None else int(start)
-        assert torch.equal(allocated[lo : lo + count], expected[lo : lo + count])
-
-    def test_within_limit_is_one_unchanged_call(self) -> None:
-        import torch
-
-        from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
-
-        seen = []
-
-        def kernel(x, num_elements, **kw):
-            seen.append((x, num_elements, kw))
-            return "kernel-out"
-
-        x, num = torch.randn(4, 8), torch.tensor(4)
-        out = moe_fallback.swiglu_valid_prefix_int32_safe(kernel, x, num, block_m=8)
-        assert out == "kernel-out"
-        assert len(seen) == 1 and seen[0][0] is x and seen[0][1] is num
-        assert seen[0][2] == {"start": None, "out": None, "block_m": 8}
+        out = call(out=sentinel.clone()) if with_out else call()
+        lo = min(start, rows)
+        hi = min(start + count, rows)
+        assert sorted(processed) == list(range(lo, hi))  # every valid row exactly once
+        assert set(launches) <= {2, 4, 8}
+        assert out.shape == (rows, width // 2)
+        if with_out:
+            assert torch.equal(out, expected)  # bitwise, including untouched rows
+        else:
+            assert torch.equal(out[lo:hi], expected[lo:hi])
 
     def test_install_wraps_routed_experts_once(self, monkeypatch) -> None:
         from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
@@ -1282,27 +1327,153 @@ class TestSwigluInt32Guard:
         original = object()
         fake = SimpleNamespace(swiglu_valid_prefix=original)
         monkeypatch.setitem(sys.modules, "olmo_core.nn.moe.v2.routed_experts", fake)
-        assert moe_fallback.install_swiglu_int32_guard()
-        assert fake.swiglu_valid_prefix.func is moe_fallback.swiglu_valid_prefix_int32_safe
+        assert moe_fallback.install_swiglu_row_buckets()
+        assert fake.swiglu_valid_prefix.func is moe_fallback.swiglu_valid_prefix_bucketed
         assert fake.swiglu_valid_prefix.args == (original,)
-        assert not moe_fallback.install_swiglu_int32_guard()
+        assert not moe_fallback.install_swiglu_row_buckets()
 
-    def test_real_kernel_past_int32_offsets(self) -> None:
-        """GPU: 2**20 + 1 routed rows of width 2048 crashed the unguarded kernel."""
+    def test_real_kernel_bitwise_and_bounded_compiles(self) -> None:
+        """GPU: bitwise equal to one unwrapped launch for many row counts, few compiles."""
         import torch
 
         if not torch.cuda.is_available():
             pytest.skip("needs a CUDA device")
         swiglu = pytest.importorskip("olmo_core.kernels.swiglu")
+        from triton import knobs
+
         from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
 
-        rows = 2**20 + 1
+        compiled: list[int] = []  # ``rows`` of each kernel the wrapper compiled
+        counting = [False]
+        previous = knobs.runtime.jit_post_compile_hook
+
+        def hook(key, repr, fn, compile, **kwargs):
+            if counting[0] and fn.name.endswith("_swiglu_valid_prefix_kernel"):
+                names = [p.name for p in fn.jit_function.params]
+                constants = {names[k[0]]: v for k, v in compile["constants"].items()}
+                compiled.append(constants["rows"])
+
+        def bucketed(*args, **kwargs):
+            counting[0] = True
+            try:
+                return moe_fallback.swiglu_valid_prefix_bucketed(*args, **kwargs)
+            finally:
+                counting[0] = False
+
+        knobs.runtime.jit_post_compile_hook = hook
+        try:
+            torch.manual_seed(0)
+            big = torch.randn(2**20 + 3, 2048, device="cuda", dtype=torch.bfloat16)
+            row_counts = [1, 15, 16383, 16384, 16385, 40000, 65536, 100003, 310528, 310784]
+            row_counts += [524287, 524288, 524289, 1046784, 2**20 - 1]
+            for rows in row_counts:
+                x = big[:rows]
+                for start, count in [(None, rows), (None, rows - rows // 3), (rows // 5, rows)]:
+                    n = torch.tensor(count, device="cuda")
+                    st = None if start is None else torch.tensor(start, device="cuda")
+                    expected = swiglu.swiglu_valid_prefix(
+                        x, n, start=st, out=torch.full((rows, 1024), -7.0, device="cuda").to(x)
+                    )
+                    got = bucketed(
+                        swiglu.swiglu_valid_prefix,
+                        x,
+                        n,
+                        start=st,
+                        out=torch.full((rows, 1024), -7.0, device="cuda").to(x),
+                    )
+                    assert torch.equal(got, expected), (rows, start, count)
+            # Past the int32 limit the wrapper still runs (the unwrapped kernel would crash).
+            n = torch.tensor(big.shape[0], device="cuda")
+            out = bucketed(swiglu.swiglu_valid_prefix, big, n)
+            tail = big[-4096:]
+            assert torch.equal(
+                out[-4096:], swiglu.swiglu_valid_prefix(tail, torch.tensor(4096, device="cuda"))
+            )
+            for rows in range(16000, 1_100_000, 4099):  # decode-like growth
+                bucketed(swiglu.swiglu_valid_prefix, big[:rows], torch.tensor(rows, device="cuda"))
+            torch.cuda.synchronize()
+            # One compile per power-of-two window at most, over ~300 distinct row counts.
+            assert set(compiled) <= {2**k for k in range(14, 20)}
+            assert len(compiled) == len(set(compiled))
+        finally:
+            knobs.runtime.jit_post_compile_hook = previous
+
+
+def _fake_autotuned_kernel(src, keys):
+    launches = []
+
+    class Kernel:
+        def __getitem__(self, grid):
+            return lambda *args, **kwargs: launches.append((grid, args, kwargs)) or "launched"
+
+    kernel = Kernel()
+    kernel.fn = SimpleNamespace(keys=keys, fn=SimpleNamespace(src=src))
+    kernel.launches = launches
+    return kernel
+
+
+_CONV_SRC = """def kernel(x, y, D: tl.constexpr, NB: tl.constexpr):
+    i = tl.program_id(0)
+    tl.store(y + i, tl.load(x + i) * D)
+"""
+
+
+class TestConv1dAutotuneBuckets:
+    def test_key_only_detection(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
+
+        assert moe_fallback._autotune_key_only(_fake_autotuned_kernel(_CONV_SRC, ["D", "NB"]), "NB")
+        reads_nb = _CONV_SRC.replace("* D)", "* NB)")
+        assert not moe_fallback._autotune_key_only(
+            _fake_autotuned_kernel(reads_nb, ["D", "NB"]), "NB"
+        )
+        assert not moe_fallback._autotune_key_only(_fake_autotuned_kernel(_CONV_SRC, ["D"]), "NB")
+        assert not moe_fallback._autotune_key_only(_fake_autotuned_kernel(_CONV_SRC, ["D"]), "D")
+
+    @pytest.mark.parametrize("nb,bucket", [(1, 1), (2, 2), (3, 4), (19, 32), (64, 64), (65, 128)])
+    def test_proxy_rounds_nb_only(self, monkeypatch, nb, bucket) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
+
+        kernel = _fake_autotuned_kernel(_CONV_SRC, ["D", "W", "NB"])
+        fake_ops = SimpleNamespace(causal_conv1d_fwd_kernel=kernel)
+        monkeypatch.setitem(sys.modules, "fla.modules.conv.triton.ops", fake_ops)
+        assert moe_fallback.install_conv1d_autotune_buckets()
+        assert not moe_fallback.install_conv1d_autotune_buckets()
+        proxy = fake_ops.causal_conv1d_fwd_kernel
+        assert proxy.launches is kernel.launches  # attributes pass through
+        assert proxy["grid"]("x", D=4096, W=4, NB=nb, T=1213) == "launched"
+        assert kernel.launches == [("grid", ("x",), {"D": 4096, "W": 4, "NB": bucket, "T": 1213})]
+
+    def test_install_skips_kernel_reading_nb(self, monkeypatch) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
+
+        kernel = _fake_autotuned_kernel(_CONV_SRC.replace("* D)", "* NB)"), ["D", "NB"])
+        fake_ops = SimpleNamespace(causal_conv1d_fwd_kernel=kernel)
+        monkeypatch.setitem(sys.modules, "fla.modules.conv.triton.ops", fake_ops)
+        assert not moe_fallback.install_conv1d_autotune_buckets()
+        assert fake_ops.causal_conv1d_fwd_kernel is kernel
+
+    def test_real_conv_bitwise(self, monkeypatch) -> None:
+        """GPU: fla's short convolution is bitwise unchanged under the bucketed key."""
+        import torch
+
+        if not torch.cuda.is_available():
+            pytest.skip("needs a CUDA device")
+        ops = pytest.importorskip("fla.modules.conv.triton.ops")
+        from olmo_eval.inference.providers.olmo_core_vlm import moe_fallback
+
+        original = ops.causal_conv1d_fwd_kernel
         torch.manual_seed(0)
-        x = torch.randn(rows, 2048, device="cuda", dtype=torch.bfloat16)
-        num = torch.tensor(rows, device="cuda")
-        out = moe_fallback.swiglu_valid_prefix_int32_safe(swiglu.swiglu_valid_prefix, x, num)
-        torch.cuda.synchronize()
-        head = swiglu.swiglu_valid_prefix(x[: 2**20], torch.tensor(2**20, device="cuda"))
-        assert torch.equal(out[: 2**20], head)
-        tail = swiglu.swiglu_valid_prefix(x[-1024:].contiguous(), torch.tensor(1024, device="cuda"))
-        assert torch.equal(out[-1024:], tail)
+        weight = torch.randn(4096, 4, device="cuda", dtype=torch.bfloat16)
+        cases = [(1, 997), (2, 1213), (16, 1213), (16, 1217), (16, 1300), (7, 3999), (16, 4100)]
+        expected = {}
+        for b, t in cases:
+            x = torch.randn(b, t, 4096, device="cuda", dtype=torch.bfloat16)
+            expected[b, t] = (x, ops.causal_conv1d_fwd(x, weight, None, None, activation="silu"))
+        monkeypatch.setattr(ops, "causal_conv1d_fwd_kernel", original)
+        assert moe_fallback.install_conv1d_autotune_buckets()
+        for (b, t), (x, y) in expected.items():
+            got = ops.causal_conv1d_fwd(x, weight, None, None, activation="silu")
+            y = y[0] if isinstance(y, tuple) else y
+            got = got[0] if isinstance(got, tuple) else got
+            assert torch.equal(got, y), (b, t)
