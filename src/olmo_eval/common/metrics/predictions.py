@@ -263,7 +263,7 @@ def _compute_metric_value_from_prediction(
         instance_metrics,
         metric_name=metric.name,
         scorer_name=scorer_name,
-        allow_scorer_fallback=metric.supports_pairwise_scorer_fallback(),
+        allow_scorer_fallback=metric.supports_scorer_fallback(),
     )
 
 

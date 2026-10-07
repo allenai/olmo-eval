@@ -311,11 +311,11 @@ export interface SignArtifactsResponse {
 
 /** Per-metric metadata resolved by olmo-eval from live Metric objects. Keyed by metric name (no scorer). */
 export interface MetricMetaIn {
-    /** Metric.pairwise_higher_is_better(), null when unknown. */
+    /** Metric.higher_is_better(), null when unknown. */
     higher_is_better: boolean | null;
-    /** Metric.pairwise_display_format(). */
+    /** Metric.display_format(). */
     display_format: "percent" | "raw" | null;
-    /** Metric.pairwise_unit(). */
+    /** Metric.metric_unit(). */
     unit: string | null;
 }
 

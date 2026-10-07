@@ -11,6 +11,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.common.metrics.base import display_format_for_name
 
 logger = get_logger("upload.metadata")
 
@@ -45,13 +46,8 @@ def _display_format(value: str | None) -> str | None:
 
 
 def _name_display_format(name: str) -> str:
-    """Same naming rules as Metric.pairwise_display_format, for metrics without an object."""
-    leaf = name.rsplit("__", 1)[-1]
-    if leaf in {"accuracy", "f1", "recall", "tool_accuracy"} or leaf.endswith("_accuracy"):
-        return "percent"
-    if leaf.startswith(("pass_at_", "pass_pow_")):
-        return "percent"
-    return "raw"
+    """The display format of a metric reported without a Metric object."""
+    return _display_format(display_format_for_name(name.rsplit("__", 1)[-1])) or "raw"
 
 
 def _force_direction(meta: dict[str, dict[str, Any]]) -> None:
@@ -77,9 +73,9 @@ def metric_meta_from_metrics(
             continue
         try:
             entry = {
-                "higher_is_better": bool(metric.pairwise_higher_is_better()),
-                "display_format": _display_format(metric.pairwise_display_format()),
-                "unit": metric.pairwise_unit(),
+                "higher_is_better": bool(metric.higher_is_better()),
+                "display_format": _display_format(metric.display_format()),
+                "unit": metric.metric_unit(),
             }
         except Exception:
             continue

@@ -433,3 +433,15 @@ def test_inference_truncation_is_reported(tmp_path: Path, monkeypatch: pytest.Mo
     assert payload is not None and len(payload["batches"]) == 2
     assert len(warnings) == 1 and "left out 1" in warnings[0]
     assert payload["request_latency"]["end_to_end_s"]["n"] == 12
+
+
+def test_name_based_display_format_matches_metric_objects() -> None:
+    from olmo_eval.common.metrics.base import display_format_for_name
+
+    assert display_format_for_name("accuracy") == "percentage"
+    assert display_format_for_name("tool_accuracy") == "percentage"
+    assert display_format_for_name("pass_at_1") == "percentage"
+    assert display_format_for_name("bits_per_byte") == "raw"
+    meta = metric_meta_from_metrics([], ["domain__Law__accuracy", "domain__Law__bleu"])
+    assert meta["domain__Law__accuracy"]["display_format"] == "percent"
+    assert meta["domain__Law__bleu"]["display_format"] == "raw"

@@ -878,7 +878,7 @@
       "description": "Per-metric metadata resolved by olmo-eval from live Metric objects. Keyed by metric name (no scorer).",
       "properties": {
         "display_format": {
-          "description": "Metric.pairwise_display_format().",
+          "description": "Metric.display_format().",
           "enum": [
             "percent",
             "raw",
@@ -890,14 +890,14 @@
           ]
         },
         "higher_is_better": {
-          "description": "Metric.pairwise_higher_is_better(), null when unknown.",
+          "description": "Metric.higher_is_better(), null when unknown.",
           "type": [
             "boolean",
             "null"
           ]
         },
         "unit": {
-          "description": "Metric.pairwise_unit().",
+          "description": "Metric.metric_unit().",
           "type": [
             "string",
             "null"
