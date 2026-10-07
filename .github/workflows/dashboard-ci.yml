@@ -41,8 +41,8 @@ jobs:
         env:
             TEST_DATABASE_URL: postgresql+asyncpg://olmo@localhost:5432/olmo_eval_test
         steps:
-            - uses: actions/checkout@v6
-            - uses: astral-sh/setup-uv@v7
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+            - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
               with:
                   python-version: "3.12"
                   enable-cache: true
@@ -60,7 +60,7 @@ jobs:
             run:
                 working-directory: dashboard/ui
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
             - name: Check that licensed font files are not committed
               working-directory: .
               run: |
@@ -70,7 +70,7 @@ jobs:
                       echo "$files"
                       exit 1
                   fi
-            - uses: actions/setup-node@v6
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
               with:
                   node-version: 24
                   cache: npm
@@ -88,8 +88,8 @@ jobs:
         name: Docker images
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v6
-            - uses: docker/setup-buildx-action@v4
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+            - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
             - name: Build ui image
               run: docker buildx build -f dashboard/ui/Dockerfile dashboard
             - name: Build api image

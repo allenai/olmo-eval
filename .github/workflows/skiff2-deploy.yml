@@ -29,6 +29,7 @@ jobs:
             name: ${{ github.ref_name }}
             url: ${{ steps.deploy-services.outputs.default_url }}
         steps:
+            # Skiff2's shared actions are owned by Ai2 and track the platform, so they stay on main.
             - name: Skiff2 Setup
               id: setup
               uses: allenai/skiff2-actions/shared-actions/setup@main

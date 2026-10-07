@@ -28,6 +28,7 @@ jobs:
               if: env.TRUSTED != 'true'
               run: echo "Fork PRs cannot authenticate to GCP, so the Skiff2 plan is skipped."
 
+            # Skiff2's shared actions are owned by Ai2 and track the platform, so they stay on main.
             - name: Skiff2 Setup
               id: setup
               if: env.TRUSTED == 'true'
