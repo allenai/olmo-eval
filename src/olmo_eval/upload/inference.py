@@ -145,9 +145,15 @@ def find_inference_files(
 
 
 def build_inference_payload(
-    output_dir: Path, started_at: str | None = None, model_names: Sequence[str] = ()
+    output_dir: Path,
+    started_at: str | None = None,
+    model_names: Sequence[str] = (),
+    warnings: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Build InferenceUploadRequest, or None when the run has no inference records."""
+    """Build InferenceUploadRequest, or None when the run has no inference records.
+
+    What does not fit the request's limits is left out and described in ``warnings``.
+    """
     batch_files, vllm_file = find_inference_files(output_dir, model_names)
     if not batch_files and vllm_file is None:
         return None
@@ -156,6 +162,7 @@ def build_inference_payload(
     cutoff = origin - STALE_RECORD_SLACK if origin is not None else None
     used: set[Path] = set()
     batches: list[dict[str, Any]] = []
+    dropped_batches = 0
     gpu_samples: dict[tuple[str, int], list[tuple[datetime, float]]] = {}
     devices: dict[int, dict[str, Any]] = {}
     latencies: dict[str, list[float]] = {"e2e": [], "ttft": [], "tpot": []}
@@ -170,7 +177,9 @@ def build_inference_payload(
             if timestamp is None or (cutoff is not None and timestamp < cutoff):
                 continue
             used.add(path)
-            if len(batches) < MAX_BATCHES:
+            if len(batches) >= MAX_BATCHES:
+                dropped_batches += 1
+            else:
                 batches.append(
                     {
                         "seq": len(batches),
@@ -275,6 +284,14 @@ def build_inference_payload(
             "tpot_s": _quantiles(latencies["tpot"]),
         }
 
+    if warnings is not None:
+        if dropped_batches:
+            warnings.append(
+                f"Inference metrics: kept the first {MAX_BATCHES} batches and left out "
+                f"{dropped_batches}; request latency still covers every batch"
+            )
+        if len(series) > MAX_SERIES:
+            warnings.append(f"Inference metrics: kept {MAX_SERIES} of {len(series)} time series")
     sources = [p for p in [*batch_files, vllm_file] if p is not None and p in used]
     return {
         "source_paths": [p.relative_to(output_dir).as_posix() for p in sources],

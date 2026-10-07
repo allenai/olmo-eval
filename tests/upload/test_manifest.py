@@ -419,3 +419,17 @@ def test_run_secret_in_a_read_only_directory(tmp_path: Path) -> None:
         assert run_secret(tmp_path) is None
     finally:
         tmp_path.chmod(0o700)
+
+
+def test_inference_truncation_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from olmo_eval.upload import inference
+
+    monkeypatch.setattr(inference, "MAX_BATCHES", 2)
+    write_inference(tmp_path, batches=3)
+    warnings: list[str] = []
+
+    payload = build_inference_payload(tmp_path, "2026-10-01T09:59:00+00:00", warnings=warnings)
+
+    assert payload is not None and len(payload["batches"]) == 2
+    assert len(warnings) == 1 and "left out 1" in warnings[0]
+    assert payload["request_latency"]["end_to_end_s"]["n"] == 12

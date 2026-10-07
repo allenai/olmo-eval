@@ -421,7 +421,7 @@ def build_plan(output_dir: str | Path, tags: Sequence[str] = ()) -> UploadPlan:
     inference = None
     try:
         model_names = [str(n) for n in (model.get("name"), model.get("path")) if n]
-        inference = build_inference_payload(out, run.get("started_at"), model_names)
+        inference = build_inference_payload(out, run.get("started_at"), model_names, warnings)
     except Exception as e:
         warnings.append(f"Skipped inference metrics: {e}")
 
