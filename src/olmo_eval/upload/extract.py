@@ -42,10 +42,10 @@ def find_task_file(
     """Locate the predictions or requests file this run wrote for a task.
 
     Files live at ``<kind>/<sanitized model path>/<sanitized spec>[_<hash6>]-<kind>.jsonl``.
-    An output directory can hold files from earlier runs and other models, so the
-    run's own model directory (``model_path``, the provider model) is searched first.
-    Without it, files modified before ``since`` (a POSIX timestamp) are ignored, and
-    an ambiguous match returns None with a warning rather than guessing.
+    An output directory can hold files from earlier runs and other models, so files
+    modified before ``since`` (a POSIX timestamp) are ignored, the run's own model
+    directory (``model_path``, the provider model) is searched first, and an ambiguous
+    match returns None with a warning rather than guessing.
     """
     suffix = PREDICTIONS_SUFFIX if kind == "predictions" else REQUESTS_SUFFIX
     base = sanitize_spec_for_filename(spec)
@@ -54,17 +54,19 @@ def find_task_file(
     root = output_dir / kind
     if not root.is_dir():
         return None
+
+    def fresh(path: Path) -> bool:
+        return path.is_file() and (since is None or path.stat().st_mtime >= since)
+
     if model_path:
         model_dir = root / sanitize_spec_for_filename(model_path)
         if model_dir.is_dir():
             for name in names:
-                if (model_dir / name).is_file():
+                if fresh(model_dir / name):
                     return model_dir / name
             return None
     for name in names:
-        matches = [p for p in root.glob(f"*/{name}") if p.is_file()]
-        if since is not None:
-            matches = [p for p in matches if p.stat().st_mtime >= since]
+        matches = [p for p in root.glob(f"*/{name}") if fresh(p)]
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:

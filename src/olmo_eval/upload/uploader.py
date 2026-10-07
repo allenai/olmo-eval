@@ -213,12 +213,14 @@ def collect_artifacts(
     task_files: Mapping[str, str],
     warnings: list[str],
     since: datetime | None = None,
+    skip: frozenset[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], dict[str, Path]]:
     """ArtifactIn entries for the regular files under the output directory.
 
     An output directory can be reused across runs (the default is /tmp/results/). When
     ``since`` is given, files last modified before it are left out, except metrics.json,
-    manifest.json and the files the run's tasks reference.
+    manifest.json and the files the run's tasks reference. Paths in ``skip`` are never
+    included.
     """
     artifacts: list[dict[str, Any]] = []
     files: dict[str, Path] = {}
@@ -237,6 +239,8 @@ def collect_artifacts(
             ):
                 continue
             rel = path.relative_to(output_dir).as_posix()
+            if rel in skip:
+                continue
             stat = path.stat()
             if cutoff is not None and rel not in always and stat.st_mtime < cutoff:
                 stale += 1
@@ -372,10 +376,18 @@ def build_plan(output_dir: str | Path, tags: Sequence[str] = ()) -> UploadPlan:
     run_id = run.get("run_id")
     if not isinstance(run_id, str) or not run_id:
         raise ManifestError(f"{out / MANIFEST_NAME} has no run_id")
+    warnings: list[str] = []
+    skip: frozenset[str] = frozenset()
+    metrics_run = metrics.get("experiment_id") if metrics is not None else None
+    if metrics_run is not None and metrics_run != run_id:
+        # A reused directory: this run stopped before writing metrics.json, and the file
+        # left there belongs to an earlier run.
+        warnings.append(f"Ignored {METRICS_NAME}: it belongs to run {metrics_run}, not {run_id}")
+        metrics = None
+        skip = frozenset({METRICS_NAME})
     run["tags"] = list(validate_tags([*(run.get("tags") or []), *tags]))
     run.update(run_timing(metrics))
 
-    warnings: list[str] = []
     manifest_tasks = manifest.get("tasks") or {}
     run_errors = {
         str(e["task"]): str(e["error"])
@@ -416,7 +428,9 @@ def build_plan(output_dir: str | Path, tags: Sequence[str] = ()) -> UploadPlan:
         for key in ("predictions_path", "requests_path"):
             if task.payload[key]:
                 task_files[task.payload[key]] = task.payload["task_name"]
-    artifacts, artifact_files = collect_artifacts(out, task_files, warnings, since=started_at)
+    artifacts, artifact_files = collect_artifacts(
+        out, task_files, warnings, since=started_at, skip=skip
+    )
 
     inference = None
     try:

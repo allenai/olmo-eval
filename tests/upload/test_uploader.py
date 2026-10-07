@@ -290,8 +290,39 @@ def test_files_from_earlier_runs_in_a_reused_directory_are_skipped(tmp_path: Pat
 
     paths = {a["path"] for a in plan.artifacts}
     assert stray.relative_to(out).as_posix() not in paths
-    assert referenced.relative_to(out).as_posix() in paths  # tasks reference it
+    # An earlier run's predictions for the same model and task are not this run's.
+    assert referenced.relative_to(out).as_posix() not in paths
+    easy = next(t for t in plan.tasks if t.payload["task_name"] == ARC_EASY)
+    assert easy.payload["predictions_path"] is None
+    assert easy.payload["instance_count"] == 0
     assert any("last modified before this run started" in w for w in plan.warnings)
+
+
+def test_reupload_of_the_same_run_keeps_its_files(tmp_path: Path) -> None:
+    out = make_arc_run(tmp_path / "run")
+    first = build_plan(out)
+
+    again = build_plan(out)
+
+    assert {a["path"] for a in again.artifacts} == {a["path"] for a in first.artifacts}
+    assert [t.payload["predictions_path"] for t in again.tasks] == [
+        t.payload["predictions_path"] for t in first.tasks
+    ]
+
+
+def test_metrics_from_an_earlier_run_are_ignored(tmp_path: Path) -> None:
+    out = make_arc_run(tmp_path / "run")
+    metrics_path = out / "metrics.json"
+    data = json.loads(metrics_path.read_text())
+    data["experiment_id"] = "earlier00001"
+    metrics_path.write_text(json.dumps(data))
+
+    plan = build_plan(out)
+
+    assert plan.run_id == RUN_ID
+    assert plan.tasks == []
+    assert "metrics.json" not in {a["path"] for a in plan.artifacts}
+    assert any("belongs to run earlier00001" in w for w in plan.warnings)
 
 
 def test_missing_directory_never_raises(tmp_path: Path, client) -> None:

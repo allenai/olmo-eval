@@ -291,3 +291,13 @@ def test_values_too_large_for_32_bit_fields_are_dropped(tmp_path: Path) -> None:
     assert rows[0]["doc_id"] is None
     assert rows[0]["completion_tokens"] is None
     _assert_valid(rows)
+
+
+def test_stale_file_in_the_run_model_directory_is_ignored(tmp_path: Path) -> None:
+    path = tmp_path / "predictions" / MODEL_DIR / "gsm8k-predictions.jsonl"
+    write_jsonl(path, [{}])
+    os.utime(path, (1_600_000_000, 1_600_000_000))
+
+    found = find_task_file(tmp_path, "predictions", "gsm8k", None, MODEL_DIR, since=1_700_000_000)
+    assert found is None
+    assert find_task_file(tmp_path, "predictions", "gsm8k", None, MODEL_DIR) == path
