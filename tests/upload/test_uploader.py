@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -417,6 +418,22 @@ def test_mark_run_failed(tmp_path: Path, server: FakeIngest, client) -> None:
     assert server.completed is not None
     assert server.completed["expected_task_results"] == 0
     assert server.schema_errors == []
+
+
+def test_mark_run_failed_ignores_a_manifest_from_an_earlier_run(
+    tmp_path: Path, server, client
+) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    write_manifest(out, status="running")
+    started = json.loads((out / "manifest.json").read_text())["run"]["started_at"]
+    later = datetime.fromisoformat(started) + timedelta(hours=1)
+
+    result = mark_run_failed(out, CONFIG, error="boom", since=later, client=client)
+
+    assert not result.ok
+    assert server.calls == []
+    assert json.loads((out / "manifest.json").read_text())["run"]["status"] == "running"
 
 
 def test_mark_run_failed_ignores_finished_runs(tmp_path: Path, server, client) -> None:

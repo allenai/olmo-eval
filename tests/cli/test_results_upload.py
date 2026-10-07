@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from olmo_eval.cli import main
@@ -101,3 +102,42 @@ def test_run_crash_records_a_failed_run(tmp_path: Path, monkeypatch) -> None:
     assert mark_failed.call_args.args[0] == str(tmp_path)
     assert mark_failed.call_args.args[1].enabled is False
     assert mark_failed.call_args.kwargs["error"] == "worker died"
+    assert mark_failed.call_args.kwargs["since"] is not None
+
+
+@pytest.mark.parametrize(
+    ("crash", "exit_code", "error"),
+    [
+        ("interrupt", 130, "Run interrupted"),
+        ("sigterm", 143, "Run terminated (SIGTERM)"),
+    ],
+)
+def test_run_killed_by_a_signal_records_a_failed_run(
+    tmp_path: Path, monkeypatch, crash: str, exit_code: int, error: str
+) -> None:
+    import os
+    import signal
+    from types import SimpleNamespace
+
+    class KilledRunner(SimpleNamespace):
+        def validate(self) -> None:
+            pass
+
+        def run(self) -> None:
+            if crash == "interrupt":
+                raise KeyboardInterrupt
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    runner = KilledRunner(output_dir=str(tmp_path))
+    argv = ["run", "-m", "mock", "-t", "arc_easy", "-O", str(tmp_path), "--no-upload"]
+    monkeypatch.setattr("sys.argv", ["olmo-eval", *argv])
+    previous = signal.getsignal(signal.SIGTERM)
+    with (
+        patch("olmo_eval.cli.run.factory.RunnerFactory.create", return_value=runner),
+        patch("olmo_eval.upload.mark_run_failed") as mark_failed,
+    ):
+        result = CliRunner().invoke(main, argv)
+
+    assert result.exit_code == exit_code
+    assert mark_failed.call_args.kwargs["error"] == error
+    assert signal.getsignal(signal.SIGTERM) == previous

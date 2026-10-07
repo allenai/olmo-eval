@@ -621,12 +621,14 @@ def mark_run_failed(
     config: UploadConfig,
     error: str,
     *,
+    since: datetime | None = None,
     client: IngestClient | None = None,
 ) -> UploadResult:
     """Record a crash: rewrite the manifest as failed and report it. Never raises.
 
     Only acts when manifest.json exists with status "running" (the run crashed before
-    it could finalize). 30 s budget.
+    it could finalize) and, when ``since`` is given, the run started after it, so a
+    manifest left by an earlier run in a reused directory is not reported. 30 s budget.
     """
     out = Path(output_dir)
     owned = client is None
@@ -635,6 +637,9 @@ def mark_run_failed(
         if manifest is None or manifest.get("run", {}).get("status") != "running":
             return UploadResult(ok=False, error="no running manifest")
         run = manifest["run"]
+        started = _parse_time(run.get("started_at"))
+        if since is not None and (started is None or started < since - STALE_FILE_SLACK):
+            return UploadResult(ok=False, error="manifest is from an earlier run")
         finished = datetime.now(UTC)
         run["status"] = "failed"
         run["finished_at"] = finished.isoformat()
