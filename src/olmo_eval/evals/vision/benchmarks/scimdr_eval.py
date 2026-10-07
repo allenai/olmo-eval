@@ -60,6 +60,11 @@ are reconstructed and may differ from the published numbers:
 * **Image size.** Images over 2048x32x32 pixels are downscaled (aspect ratio kept) to that
   area: lmms-eval's Qwen3-VL default ``max_pixels``, which the paper's lmms-eval runs used.
   Transparent backgrounds are flattened onto white.
+
+Parity: there is no official evaluation code, and the distractor sampling, model prompt and
+judge reply format here are reconstructions. Scores run about 5 points above the paper's
+for both models checked: ``gpt-4o`` 0.298 vs 0.247 and Qwen3-VL-8B 0.391 vs 0.342 (standard
+setting). Model rankings agree with the paper; absolute values are not comparable to it.
 """
 
 from __future__ import annotations

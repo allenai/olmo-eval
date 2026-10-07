@@ -27,6 +27,12 @@ Deviations and choices the official code leaves open:
 
 Data comes from the Hub (``lytang/ChartMuseum``) at a pinned revision, images included; set
 ``CHARTMUSEUM_DIR`` to a local copy of the dataset repository to read it from disk instead.
+
+Parity: rescoring the official repository's Claude-3.7-Sonnet dev outputs gives 0.6296,
+the README's expected number. ``gpt-4o-2024-11-20`` (via LiteLLM) scores 0.349 on the
+visual split against 0.318 in the paper (about 1.5 standard errors). Qwen3-VL-4B / 8B at
+their default sampling settings score 0.237 / 0.261 against the leaderboard's 0.253 / 0.278;
+greedy decoding scores 0.216 / 0.259.
 """
 
 from __future__ import annotations

@@ -36,6 +36,11 @@ Protocol (``inference/generative_inference.py`` + ``eval/eval_utils.py``):
   Questions the release leaves null (stain for ``nirschl_unpub_fluorescence``) are skipped, as the
   official loop only visits the questions an image has.
 
+Parity: ``gpt-4o-2024-05-13`` at the reference's temperature 1, on a 5,000-question random
+sample per split, scores 0.632 coarse against the paper's 0.627 and 0.483 fine against 0.517.
+The fine gap likely comes from ``held_et_al_2010_mt``, which the official total includes but
+the release lacks, and from sampling noise at temperature 1.
+
 Deviations:
 
 * Decoding is greedy with a 128-token cap; the reference ran GPT-4o at temperature 1 and each
