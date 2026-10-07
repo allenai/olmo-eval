@@ -10,6 +10,7 @@ in-run upload share one code path.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -72,8 +73,21 @@ def current_argv() -> list[str]:
 
 
 def json_safe(value: Any) -> Any:
-    """Round-trip through JSON so configs with odd values still serialize."""
-    return json.loads(json.dumps(value, default=str))
+    """Round-trip through JSON so configs with odd values still serialize.
+
+    Non-finite floats become None, since the ingest API only accepts standard JSON.
+    """
+    return _finite_only(json.loads(json.dumps(value, default=str)))
+
+
+def _finite_only(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _finite_only(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_finite_only(item) for item in value]
+    return value
 
 
 def build_run_info(

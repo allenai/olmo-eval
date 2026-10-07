@@ -158,7 +158,8 @@ def _suite_description(name: str) -> str | None:
     return get_suite(name).description or None
 
 
-def _clean_metrics(metrics: Any) -> dict[str, dict[str, float | None]]:
+def clean_metrics(metrics: Any) -> dict[str, dict[str, float | None]]:
+    """Nested metrics with every non-numeric or non-finite value replaced by None."""
     cleaned: dict[str, dict[str, float | None]] = {}
     if not isinstance(metrics, Mapping):
         return cleaned
@@ -178,7 +179,7 @@ def _clean_metrics(metrics: Any) -> dict[str, dict[str, float | None]]:
 
 def _suite_result(raw_name: str, data: Mapping[str, Any]) -> dict[str, Any]:
     name = strip_priority(raw_name)
-    metrics = _clean_metrics(data.get("metrics"))
+    metrics = clean_metrics(data.get("metrics"))
     score = metrics.get("primary_score", {}).get("average")
     parent = data.get("parent_suite")
     num_tasks = data.get("num_tasks")

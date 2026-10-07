@@ -92,6 +92,32 @@ def test_happy_path_uploads_everything(tmp_path: Path, server: FakeIngest, clien
     assert server.completed["suites"][0]["name"] == ARC_SUITE
 
 
+def test_non_finite_task_values_are_uploaded_as_null(
+    tmp_path: Path, server: FakeIngest, client
+) -> None:
+    out = make_arc_run(tmp_path / "run")
+    metrics_path = out / "metrics.json"
+    data = json.loads(metrics_path.read_text())
+    row = data["tasks"][0]
+    row["metrics"]["accuracy"] = {"LogprobScorer": float("nan"), "other": float("inf")}
+    row["config"]["temperature"] = float("-inf")
+    row["config"]["nested"] = [{"value": float("nan")}]
+    row["duration_seconds"] = float("nan")
+    row["error_summary"] = {"rate": float("nan")}
+    metrics_path.write_text(json.dumps(data))
+
+    result = upload_results_dir(out, CONFIG, client=client)
+
+    assert result.ok, result.error
+    assert server.schema_errors == []
+    task = next(t for t in server.task_results.values() if t["task_name"] == row["task"])
+    assert task["metrics"]["accuracy"] == {"LogprobScorer": None, "other": None}
+    assert task["config"]["temperature"] is None
+    assert task["config"]["nested"] == [{"value": None}]
+    assert task["duration_seconds"] is None
+    assert task["error_summary"] == {"rate": None}
+
+
 def test_reupload_skips_existing_artifacts(tmp_path: Path, server: FakeIngest, client) -> None:
     out = make_arc_run(tmp_path / "run")
     assert upload_results_dir(out, CONFIG, client=client).ok
