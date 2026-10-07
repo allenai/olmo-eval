@@ -17,6 +17,7 @@ import { useSearchParams } from "@/state/nav";
 import { addToTray, pushRecent } from "@/state/prefs";
 import { NotFoundPage } from "../NotFoundPage";
 import { RunsTable } from "../runs/RunsTable";
+import { pressable } from "@/lib/pressable";
 
 type ModelSearch = { variant?: string; scope?: string; tasks?: string; x?: string; refs?: string; merge?: string; delta?: string; sel?: string };
 
@@ -43,7 +44,7 @@ function AddReference({ onAdd }: { onAdd: (key: string) => void }) {
             </div>
             <div className={ui.facetList}>
               {items.map((i) => (
-                <div key={`${i.type}:${i.key}`} className={ui.facetItem} onClick={() => (onAdd(i.subject!), setOpen(false))}>
+                <div key={`${i.type}:${i.key}`} className={ui.facetItem} {...pressable(() => (onAdd(i.subject!), setOpen(false)))}>
                   <span className={ui.facetValue}>{i.label}</span>
                   <span className={ui.facetCount}>{i.type}</span>
                 </div>

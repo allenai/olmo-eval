@@ -33,6 +33,7 @@ import { absoluteLocal, relativeTime, utcString } from "@/lib/time";
 import { catColor } from "@/lib/scales";
 import s from "./ui.module.css";
 import { toast } from "./toast";
+import { pressable } from "@/lib/pressable";
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
@@ -407,7 +408,13 @@ export function Chip({
   title?: string;
 }) {
   return (
-    <span className={cx(s.chip, active && s.chipActive)} title={title} onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined}>
+    <span
+      className={cx(s.chip, active && s.chipActive)}
+      title={title}
+      {...(onClick ? pressable(onClick) : {})}
+      aria-pressed={onClick && active !== undefined ? active : undefined}
+      style={onClick ? { cursor: "pointer" } : undefined}
+    >
       <span>
         {label && <span className={s.chipKey}>{label}: </span>}
         {value}

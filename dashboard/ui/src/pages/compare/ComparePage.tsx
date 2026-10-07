@@ -19,6 +19,7 @@ import { useStore } from "@/state/store";
 import { HeatmapView } from "./HeatmapView";
 import c from "./compare.module.css";
 import { type CompareCtx, type CompareSearch, type CompareView, distinctLabels, VIEWS } from "./types";
+import { pressable } from "@/lib/pressable";
 
 const PairwiseView = lazy(() => import("./PairwiseView").then((m) => ({ default: m.PairwiseView })));
 const ScatterView = lazy(() => import("./ScatterView").then((m) => ({ default: m.ScatterView })));
@@ -49,7 +50,7 @@ function AddSubject({ onAdd }: { onAdd: (key: SubjectKey, label: string) => void
             <div className={ui.facetList}>
               {!q &&
                 tray.map((t) => (
-                  <div key={t.key} className={ui.facetItem} onClick={() => (onAdd(t.key, t.label), setOpen(false))}>
+                  <div key={t.key} className={ui.facetItem} {...pressable(() => (onAdd(t.key, t.label), setOpen(false)))}>
                     <ArrowRightLeft size={13} />
                     <span className={ui.facetValue}>{t.label}</span>
                     <span className={ui.facetCount}>tray</span>
@@ -57,7 +58,7 @@ function AddSubject({ onAdd }: { onAdd: (key: SubjectKey, label: string) => void
                 ))}
               {!q && !tray.length && <div className="t-caption" style={{ padding: 8 }}>Type to search runs and models.</div>}
               {results.map((r) => (
-                <div key={`${r.type}:${r.key}`} className={ui.facetItem} onClick={() => (onAdd(r.subject!, r.label), setOpen(false))}>
+                <div key={`${r.type}:${r.key}`} className={ui.facetItem} {...pressable(() => (onAdd(r.subject!, r.label), setOpen(false)))}>
                   <span className={ui.facetValue}>
                     {r.label}
                     <span className="t-caption" style={{ display: "block" }}>

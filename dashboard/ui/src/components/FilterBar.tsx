@@ -15,6 +15,7 @@ import { formatCount } from "@/lib/format";
 import { joinList, parseList } from "@/lib/url";
 import { Button, Checkbox, Chip, cx, Input, SearchInput, uiStyles as ui } from "./primitives";
 import f from "./filterbar.module.css";
+import { pressable } from "@/lib/pressable";
 
 type FacetKey = "model" | "family" | "user" | "group" | "ws" | "tag" | "status";
 
@@ -86,7 +87,7 @@ function FacetPicker({
         {selected
           .filter((s) => !values.some((v) => v.value === s))
           .map((s) => (
-            <div key={s} className={ui.facetItem} onClick={() => toggle(s)} role="option" aria-selected>
+            <div key={s} className={ui.facetItem} {...pressable(() => toggle(s), "option")} aria-selected>
               <Checkbox checked onChange={() => toggle(s)} />
               <span className={ui.facetValue}>{s}</span>
               <span className={ui.facetCount}>custom</span>
@@ -94,7 +95,7 @@ function FacetPicker({
           ))}
         {shown.length === 0 && <div className="t-caption" style={{ padding: 8 }}>No values{allowCustom && query ? " (press Enter to use as a pattern)" : ""}</div>}
         {shown.map((v) => (
-          <div key={v.value} className={ui.facetItem} onClick={() => toggle(v.value)} role="option" aria-selected={selected.includes(v.value)}>
+          <div key={v.value} className={ui.facetItem} {...pressable(() => toggle(v.value), "option")} aria-selected={selected.includes(v.value)}>
             <Checkbox checked={selected.includes(v.value)} onChange={() => toggle(v.value)} />
             <span className={ui.facetValue} title={v.value}>
               {v.value}

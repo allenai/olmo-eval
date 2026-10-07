@@ -16,6 +16,7 @@ import { goodness } from "@/lib/scales";
 import { absoluteLocal } from "@/lib/time";
 import s from "./run.module.css";
 import { type RunCtx, rowMeta, scoreFormat } from "./types";
+import { pressable } from "@/lib/pressable";
 
 // ---------------------------------------------------------------- headline tiles
 
@@ -155,7 +156,7 @@ function TreeRows({
       const d = row?.baseline?.delta;
       return (
         <div key={node.id}>
-          <div id={`ov-${node.id}`} className={cx(s.treeRow, s.treeSuite)} onClick={() => toggle(node.id)}>
+          <div id={`ov-${node.id}`} className={cx(s.treeRow, s.treeSuite)} {...pressable(() => toggle(node.id))} aria-expanded={!closed}>
             <span className={s.treeName} style={pad}>
               <span className={cx(s.treeToggle, closed && s.treeClosed)}>
                 <ChevronDown />
@@ -208,7 +209,7 @@ function TreeRows({
     const b = row.baseline;
     const d = dist.get(row.task_name);
     return (
-      <div key={node.id} id={`ov-${node.id}`} className={s.treeRow} onClick={() => onOpenTask(row)}>
+      <div key={node.id} id={`ov-${node.id}`} className={s.treeRow} {...pressable(() => onOpenTask(row))}>
         <span className={s.treeName} style={pad}>
           <span style={{ width: 16, flex: "none" }} />
           <span>{row.task_name}</span>

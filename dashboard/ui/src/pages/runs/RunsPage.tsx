@@ -19,6 +19,7 @@ import { useBaseline, useSearchParams } from "@/state/nav";
 import { trayStore } from "@/state/prefs";
 import { useStore } from "@/state/store";
 import { type GroupByKey, RunsTable } from "./RunsTable";
+import { pressable } from "@/lib/pressable";
 
 type RunsSearch = RunFilters & { sort?: string; cols?: string; gb?: string; baseline?: string };
 
@@ -54,7 +55,7 @@ function ScoreColumnPicker({ cols, onChange }: { cols: string[]; onChange: (cols
             </div>
             <div className={ui.facetList}>
               {options.map((o) => (
-                <div key={o.key} className={ui.facetItem} onClick={() => toggle(o.key)}>
+                <div key={o.key} className={ui.facetItem} {...pressable(() => toggle(o.key), "option")} aria-selected={cols.includes(o.key)}>
                   <Checkbox checked={cols.includes(o.key)} onChange={() => toggle(o.key)} />
                   <span className={ui.facetValue}>{o.label}</span>
                   <span className={ui.facetCount}>{o.kind}</span>

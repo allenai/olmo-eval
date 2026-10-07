@@ -5,6 +5,7 @@ import { diffSummary, type JsonDiffEntry, jsonDiff } from "@/lib/diff";
 import { Button, Checkbox, cx, SearchInput } from "./primitives";
 import { toast } from "./toast";
 import j from "./json.module.css";
+import { pressable } from "@/lib/pressable";
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
@@ -67,19 +68,19 @@ function Node({
           <span className={j.toggleSpacer} />
         )}
         {name != null && (
-          <span className={j.key} onClick={copyPath} title={`Copy path ${path}`}>
+          <span className={j.key} {...pressable(copyPath)} title={`Copy path ${path}`}>
             {name}
           </span>
         )}
         {name != null && <span className={j.colon}>:</span>}
         {container ? (
-          <span className={j.preview} onClick={() => setOpen(!isOpen)}>
+          <span className={j.preview} {...pressable(() => setOpen(!isOpen))} aria-expanded={isOpen}>
             {Array.isArray(value) ? "[" : "{"}
             {!isOpen && <span className={j.count}>{preview(value)}</span>}
             {!isOpen && (Array.isArray(value) ? "]" : "}")}
           </span>
         ) : (
-          <span className={j.value} onClick={copyValue} title="Copy value">
+          <span className={j.value} {...pressable(copyValue)} title="Copy value">
             <Scalar value={value} />
           </span>
         )}
