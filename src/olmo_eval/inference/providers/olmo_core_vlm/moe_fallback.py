@@ -93,6 +93,92 @@ def install_torch_moe_permutation() -> bool:
     return True
 
 
+# Largest element offset the routed-expert SwiGLU Triton kernel addresses without int32
+# overflow: it builds ``row * stride + col`` from an int32 row index and an i32 stride.
+_INT32_MAX = 2**31 - 1
+
+
+def swiglu_valid_prefix_int32_safe(
+    swiglu_valid_prefix: Any,
+    x: Any,
+    num_elements: Any,
+    *,
+    start: Any = None,
+    out: Any = None,
+    max_elements: int = _INT32_MAX,
+    **kwargs: Any,
+) -> Any:
+    """Call OLMo-core's ``swiglu_valid_prefix`` on row chunks whose offsets fit in int32.
+
+    The kernel computes element offsets as ``row_idx * x.stride(0) + col`` in int32, so an
+    ``(rows, 2H)`` input with ``rows * 2H > 2**31 - 1`` (more than 65,536 tokens per forward
+    for OLMo 3.5's top-16 routing and 2H = 2048) reads before the buffer and raises an
+    illegal memory access that poisons the CUDA context. Inputs within the limit go to the
+    kernel unchanged; larger ones are split into contiguous row chunks, each handed to the
+    same kernel with its share of the ``[start, start + num_elements)`` valid range, so
+    every element gets the same arithmetic and the output is identical.
+
+    :param swiglu_valid_prefix: The original OLMo-core function.
+    :param x: ``(rows, 2H)`` contiguous up/gate rows.
+    :param num_elements: Device scalar, number of valid rows from ``start``.
+    :param start: First valid row (``None``, an int or a device scalar).
+    :param out: Optional ``(rows, H)`` output; rows outside the valid range stay untouched.
+    :param max_elements: Largest element count one kernel call may address.
+    :returns: The ``(rows, H)`` output.
+    """
+    import torch
+
+    if x.ndim != 2 or x.shape[0] * x.shape[1] <= max_elements:
+        return swiglu_valid_prefix(x, num_elements, start=start, out=out, **kwargs)
+    rows, width = x.shape
+    chunk_rows = max_elements // width
+    if out is None:
+        out = x.new_empty((rows, width // 2))
+    count = num_elements.to(torch.int64)
+    begin = count.new_zeros(()) if start is None else count.new_zeros(()) + start
+    end = begin + count
+    for s in range(0, rows, chunk_rows):
+        e = min(s + chunk_rows, rows)
+        chunk_begin = (begin - s).clamp(0, e - s)
+        chunk_end = (end - s).clamp(0, e - s)
+        swiglu_valid_prefix(
+            x[s:e],
+            (chunk_end - chunk_begin).clamp(min=0),
+            start=chunk_begin,
+            out=out[s:e],
+            **kwargs,
+        )
+    return out
+
+
+def install_swiglu_int32_guard() -> bool:
+    """Route OLMo-core's routed-expert SwiGLU kernel through :func:`swiglu_valid_prefix_int32_safe`.
+
+    Only no-grad forwards (eval) use this kernel; it overflows once a single LM forward has
+    more than 65,536 tokens, which uncached decoding of long outputs reaches (16 rows past a
+    span of 4096).
+
+    :returns: Whether the guard was installed (``False`` when the installed OLMo-core has no
+        such kernel, or the guard is already in place).
+    """
+    import functools
+    import importlib
+
+    try:
+        routed_experts = importlib.import_module("olmo_core.nn.moe.v2.routed_experts")
+    except ImportError:
+        return False
+    original = getattr(routed_experts, "swiglu_valid_prefix", None)
+    if original is None or (
+        isinstance(original, functools.partial) and original.func is swiglu_valid_prefix_int32_safe
+    ):
+        return False
+    guarded = functools.partial(swiglu_valid_prefix_int32_safe, original)
+    setattr(routed_experts, "swiglu_valid_prefix", guarded)  # noqa: B010
+    logger.info("Routed-expert SwiGLU kernel calls are split into int32-addressable row chunks")
+    return True
+
+
 def grouped_mm_loop(mat_a: Any, mat_b: Any, *, offs: Any = None, **kwargs: Any) -> Any:
     """Per-group matmul with the semantics OLMo-core's routed experts use from ``F.grouped_mm``.
 
