@@ -22,7 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from olmo_eval_api.errors import bad_request, not_found
 from olmo_eval_api.schemas import api as a
 from olmo_eval_api.services.common import detect_scale, latest_by_task
-from olmo_eval_api.services.queries import fetch_models, fetch_runs, model_ref, run_summary
+from olmo_eval_api.services.queries import (
+    PREFERRED_ORDER,
+    fetch_models,
+    fetch_runs,
+    model_ref,
+    run_summary,
+)
 from olmo_eval_api.services.runtime import RUNTIME_TR_COLUMNS
 from olmo_eval_api.stats.paired import Side
 
@@ -122,8 +128,7 @@ async def models_task_results(
         SELECT DISTINCT ON (tr.model_id, tr.task_name) {TR_COLUMNS}
         FROM task_results tr JOIN runs r ON r.run_id = tr.run_id
         WHERE {" AND ".join(filters)}
-        ORDER BY tr.model_id, tr.task_name, (tr.error IS NOT NULL), tr.run_created_at DESC,
-                 tr.id DESC
+        ORDER BY tr.model_id, tr.task_name, {PREFERRED_ORDER}
     """
     for row in (await session.execute(text(sql), params)).mappings():
         out[row["model_id"]][row["task_name"]] = row

@@ -9,6 +9,7 @@ import httpx
 import numpy as np
 import pytest
 from jsonschema import Draft7Validator, FormatChecker
+from sqlalchemy import text
 
 from tests.factories import seed_contract_example_run, seed_run, suite
 from tests.helpers import load_schema
@@ -89,6 +90,13 @@ async def seeded(client: httpx.AsyncClient, session: Any) -> dict[str, Any]:
         created_at=now - timedelta(hours=1),
     )
     ids["example"] = await seed_contract_example_run(client)
+    # Runs are ordered by when they started; make the contract example the newest.
+    for sql in (
+        "UPDATE runs SET created_at = :t WHERE run_id = :r",
+        "UPDATE task_results SET run_created_at = :t WHERE run_id = :r",
+    ):
+        await session.execute(text(sql), {"t": now, "r": ids["example"]})
+    await session.commit()
     return ids
 
 
@@ -792,3 +800,46 @@ async def test_errors_use_envelope(client: httpx.AsyncClient) -> None:
     response = await client.get("/api/runs", params={"cursor": "!!!"})
     assert response.status_code == 400
     assert (await get(client, "/api/health", "HealthResponse"))["mode"] == "all"
+
+
+async def _latest_arc_score(client: httpx.AsyncClient) -> float:
+    body = await get(client, "/api/tasks/leaderboard", "LeaderboardResponse", task="arc")
+    assert len(body["items"]) == 1
+    return body["items"][0]["score"]
+
+
+async def test_latest_result_is_the_last_to_run_not_the_last_uploaded(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    now = datetime.now(UTC)
+    await seed_run(client, run_id="ran000000002", tasks={"arc": [1.0, 1.0]}, started_at=now)
+    late = now - timedelta(days=2)
+    await seed_run(client, run_id="ran000000001", tasks={"arc": [0.0, 0.0]}, started_at=late)
+
+    assert await _latest_arc_score(client) == 1.0
+    created = await session.scalar(
+        text("SELECT created_at FROM runs WHERE run_id = 'ran000000001'")
+    )
+    assert created == late
+
+
+async def test_latest_result_prefers_runs_without_an_instance_limit(
+    client: httpx.AsyncClient,
+) -> None:
+    now = datetime.now(UTC)
+    await seed_run(
+        client,
+        run_id="full00000001",
+        tasks={"arc": [1.0, 1.0, 1.0]},
+        started_at=now - timedelta(days=1),
+    )
+    await seed_run(
+        client,
+        run_id="smoke0000001",
+        tasks={"arc": [0.0]},
+        task_hashes={"arc": "smoke-hash"},
+        task_limits={"arc": 1},
+        started_at=now,
+    )
+
+    assert await _latest_arc_score(client) == 1.0

@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -32,6 +32,7 @@ def run_payload(
     task_specs: Sequence[str] = (),
     launch_id: str | None = None,
     provider_config: Mapping[str, Any] | None = None,
+    started_at: datetime | None = None,
 ) -> dict[str, Any]:
     base = load_example("ingest/run-upsert-final.request.json")
     payload = copy.deepcopy(base)
@@ -45,6 +46,7 @@ def run_payload(
         author=author,
         tags=list(tags),
         task_specs=list(task_specs),
+        started_at=(started_at or datetime.now(UTC)).isoformat(),
     )
     run["beaker"]["experiment_id"] = f"01EXP{run_id.upper()}"
     config = dict(provider_config or {"kind": "vllm", "model": model_path or model_name})
@@ -71,6 +73,7 @@ def task_payload(
     suites: Sequence[str] = (),
     higher_is_better: bool | None = True,
     display_format: str | None = "percent",
+    limit: int | None = None,
 ) -> dict[str, Any]:
     metric, scorer = primary_metric.rsplit(":", 1)
     return {
@@ -88,11 +91,11 @@ def task_payload(
         },
         "config": {
             "name": task_name,
-            "limit": None,
+            "limit": limit,
             "sampling_params": {"max_tokens": 256},
         },
         "num_fewshot": 0,
-        "limit": None,
+        "limit": limit,
         "split": "test",
         "num_instances": n,
         "instances_processed": n,
@@ -158,6 +161,8 @@ async def seed_run(
     created_at: datetime | None = None,
     launch_id: str | None = None,
     session: Any = None,
+    started_at: datetime | None = None,
+    task_limits: Mapping[str, int] | None = None,
 ) -> str:
     """Upload a synthetic run through the ingest endpoints and return the run_id.
 
@@ -175,6 +180,7 @@ async def seed_run(
         tags=tags,
         task_specs=task_specs,
         launch_id=launch_id,
+        started_at=started_at,
     )
     _check(await client.put(f"/v1/runs/{run_id}", json=body))
     body["run"]["status"] = status
@@ -196,6 +202,7 @@ async def seed_run(
                     corpus_score=corpus,
                     n=len(scores),
                     error=(errors or {}).get(task_name),
+                    limit=(task_limits or {}).get(task_name),
                 ),
             )
         )

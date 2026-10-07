@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from olmo_eval_api.auth.google_token import Principal
-from olmo_eval_api.services.ingest import can_delete, may_change_author
+from olmo_eval_api.services.ingest import can_delete, may_change_author, run_time
 from olmo_eval_api.settings import UPLOADER_SERVICE_ACCOUNT, Settings
 
 ALICE = Principal(email="alice@allenai.org", principal_type="user", exp=0)
@@ -47,3 +49,12 @@ def test_may_change_author(principal: Principal, uploaded_by: str, allowed: bool
 def test_uploader_is_allowlisted_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("INGEST_ALLOWED_SERVICE_ACCOUNTS", raising=False)
     assert Settings().ingest_allowed_service_accounts == [UPLOADER_SERVICE_ACCOUNT]
+
+
+def test_run_time_is_the_start_unless_missing_or_in_the_future() -> None:
+    received = datetime(2026, 10, 7, 12, tzinfo=UTC)
+    started = received - timedelta(days=3)
+    assert run_time(started, received) == started
+    assert run_time(None, received) == received
+    assert run_time(received + timedelta(hours=1), received) == received
+    assert run_time(started.replace(tzinfo=None), received) == started

@@ -17,7 +17,9 @@ from olmo_eval_api.services.cache import cache_key, get_cached, put_cached
 from olmo_eval_api.services.common import latest_by_task
 from olmo_eval_api.services.filters import like_contains
 from olmo_eval_api.services.queries import (
+    LIMITED,
     MODEL_COLUMNS,
+    PREFERRED_ORDER,
     VISIBLE,
     clamp_limit,
     decode_cursor,
@@ -722,11 +724,7 @@ async def task_leaderboard(
         where.append(f"{GPU_TYPE_SQL} = :gpu")
         params["gpu"] = gpu_type
     distinct = "DISTINCT ON (tr.model_id)" if per_model == "latest" else ""
-    order = (
-        "tr.model_id, (tr.error IS NOT NULL), tr.run_created_at DESC, tr.id DESC"
-        if per_model == "latest"
-        else "tr.run_created_at DESC"
-    )
+    order = f"tr.model_id, {PREFERRED_ORDER}" if per_model == "latest" else "tr.run_created_at DESC"
     rows = (
         (
             await session.execute(
@@ -966,8 +964,7 @@ async def suite_leaderboard(
             FROM task_results tr JOIN runs r ON r.run_id = tr.run_id
             JOIN models m ON m.model_id = tr.model_id
             WHERE {" AND ".join(where)}
-            ORDER BY tr.model_id, tr.task_name, (tr.error IS NOT NULL), tr.run_created_at DESC,
-                     tr.id DESC
+            ORDER BY tr.model_id, tr.task_name, {PREFERRED_ORDER}
         """
         group_key = "model_id"
     else:
@@ -1141,7 +1138,8 @@ async def distributions(
                 await session.execute(
                     text(
                         f"""
-                        SELECT {TR_COLUMNS}, {MODEL_COLUMNS} FROM task_results tr
+                        SELECT {TR_COLUMNS}, {MODEL_COLUMNS}, {LIMITED} AS is_limited
+                        FROM task_results tr
                         JOIN runs r ON r.run_id = tr.run_id
                         JOIN models m ON m.model_id = tr.model_id
                         WHERE tr.task_name = ANY(:n) AND tr.finalized_at IS NOT NULL AND {VISIBLE}
@@ -1174,7 +1172,7 @@ async def distributions(
         if per_model == "latest":
             seen: set[str] = set()
             kept = []
-            for r in sorted(selected, key=lambda r: r["error"] is not None):
+            for r in sorted(selected, key=lambda r: (r["error"] is not None, r["is_limited"])):
                 if r["model_id"] not in seen:
                     seen.add(r["model_id"])
                     kept.append(r)

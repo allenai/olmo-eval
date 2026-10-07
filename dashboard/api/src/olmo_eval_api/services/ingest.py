@@ -14,7 +14,7 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import numpy as np
@@ -190,7 +190,7 @@ async def upsert_run(
                 upload_state="uploading",
                 uploaded_by=principal.email,
                 write_secret_hash=hash_run_secret(run_secret) if run_secret else None,
-                created_at=ts,
+                created_at=run_time(req.run.started_at, ts),
                 updated_at=ts,
                 gcs_prefix=settings.gcs_prefix(run_id),
                 search_text="",
@@ -227,6 +227,14 @@ async def upsert_run(
                 setattr(run, key, value)
             run.status = req.run.status
             run.updated_at = ts
+            created_at = run_time(run.started_at, run.created_at)
+            if created_at != run.created_at:
+                run.created_at = created_at
+                await session.execute(
+                    task_results_t.update()
+                    .where(task_results_t.c.run_id == run_id)
+                    .values(run_created_at=created_at)
+                )
     run.search_text = build_search_text(run)
     response = s.RunUpsertResponse(
         run_id=run_id,
@@ -243,6 +251,19 @@ async def upsert_run(
         extra={"run_id": run_id, "run_created": created, "run_status": response.status},
     )
     return response
+
+
+def run_time(started_at: datetime | None, received_at: datetime) -> datetime:
+    """When a run happened: its start, unless that is missing or after ``received_at``.
+
+    Runs are ordered by this time, so a run uploaded long after it ran (a failed start
+    registration, a backfill) does not count as the newest result.
+    """
+    if started_at is None:
+        return received_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=UTC)
+    return min(started_at, received_at)
 
 
 def may_change_author(principal: Principal, uploaded_by: str) -> bool:

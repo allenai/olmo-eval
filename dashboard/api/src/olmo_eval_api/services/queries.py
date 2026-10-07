@@ -24,6 +24,15 @@ MAX_LIMIT = 500
 # Runs that list and aggregate endpoints show (spec 4.1).
 VISIBLE = "(r.upload_state = 'complete' OR r.status = 'running')"
 
+# Whether a task result (alias tr) ran with an instance limit, such as a smoke run.
+LIMITED = (
+    "EXISTS (SELECT 1 FROM task_variants lv WHERE lv.task_name = tr.task_name "
+    "AND lv.task_hash = tr.task_hash AND lv.task_limit IS NOT NULL)"
+)
+# Picks a model's representative task result: one without an error, then one without an
+# instance limit, then the most recent run.
+PREFERRED_ORDER = f"(tr.error IS NOT NULL), {LIMITED}, tr.run_created_at DESC, tr.id DESC"
+
 MODEL_COLUMNS = """
     m.model_id AS m_model_id, m.name AS m_name, m.model_hash AS m_model_hash,
     m.series AS m_series, m.series_label AS m_series_label, m.family AS m_family,
