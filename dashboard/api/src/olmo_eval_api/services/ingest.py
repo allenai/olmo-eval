@@ -7,6 +7,8 @@ stored rows (spec 2.5), so calling it twice gives the same result.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import math
 from collections.abc import Sequence
@@ -159,6 +161,7 @@ async def upsert_run(
     run_id: str,
     req: s.RunUpsertRequest,
     principal: Principal,
+    run_secret: str | None = None,
 ) -> s.RunUpsertResponse:
     if req.run.run_id != run_id:
         raise bad_request(f"body run.run_id {req.run.run_id!r} does not match the URL {run_id!r}")
@@ -185,6 +188,7 @@ async def upsert_run(
                 status=req.run.status,
                 upload_state="uploading",
                 uploaded_by=principal.email,
+                write_secret_hash=hash_run_secret(run_secret) if run_secret else None,
                 created_at=ts,
                 updated_at=ts,
                 gcs_prefix=settings.gcs_prefix(run_id),
@@ -204,6 +208,11 @@ async def upsert_run(
             f"Run {run_id} was uploaded with a different model ({stored_model}); "
             "a run ID belongs to one model"
         )
+    if not created and not can_write(principal, run, run_secret):
+        await session.rollback()
+        raise forbidden(write_denied_message(run_id))
+    if not created and run.write_secret_hash is None and run_secret:
+        run.write_secret_hash = hash_run_secret(run_secret)
     if not created:
         downgrade = run.status in FINAL_STATUSES and req.run.status == "running"
         if not downgrade:
@@ -245,6 +254,55 @@ def may_change_author(principal: Principal, uploaded_by: str) -> bool:
     otherwise rename another job's run to its own user and then delete it.
     """
     return principal.principal_type == "user" and principal.email == uploaded_by
+
+
+def hash_run_secret(secret: str) -> str:
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
+def can_write(principal: Principal, run: Run, run_secret: str | None) -> bool:
+    """Whether a principal may change an existing run.
+
+    The users who may delete a run may also change it. Anyone else, including the shared
+    uploader service account, must present the run's write secret, which the client that
+    first uploaded the run keeps in its results directory.
+    """
+    if can_delete(principal, run.uploaded_by, run.author):
+        return True
+    stored = run.write_secret_hash
+    if not stored or not run_secret:
+        return False
+    return hmac.compare_digest(stored, hash_run_secret(run_secret))
+
+
+def write_denied_message(run_id: str) -> str:
+    return (
+        f"run {run_id} can only be changed by the person who uploaded or launched it, "
+        "or from its original results directory"
+    )
+
+
+async def require_write(
+    session: AsyncSession, run_id: str, principal: Principal, run_secret: str | None
+) -> None:
+    """Raise unless the principal may change the run (see ``can_write``)."""
+    run = await get_run(session, run_id)
+    if not can_write(principal, run, run_secret):
+        raise forbidden(write_denied_message(run_id))
+
+
+async def require_task_result_write(
+    session: AsyncSession, task_result_id: int, principal: Principal, run_secret: str | None
+) -> None:
+    """Raise unless the principal may change the run that owns the task result."""
+    run_id = (
+        await session.execute(
+            select(task_results_t.c.run_id).where(task_results_t.c.id == task_result_id)
+        )
+    ).scalar_one_or_none()
+    if run_id is None:
+        raise not_found(f"Task result {task_result_id} not found")
+    await require_write(session, run_id, principal, run_secret)
 
 
 def can_delete(principal: Principal, uploaded_by: str, author: str | None) -> bool:

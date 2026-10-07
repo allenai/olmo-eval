@@ -14,9 +14,11 @@ from olmo_eval.inference.providers.config import ProviderConfig
 from olmo_eval.runners.asynq.runner import AsyncEvalRunner
 from olmo_eval.upload.inference import build_inference_payload, downsample
 from olmo_eval.upload.manifest import (
+    RUN_SECRET_NAME,
     ManifestError,
     degraded_manifest,
     read_manifest,
+    run_secret,
     run_status,
     to_utc_iso,
 )
@@ -402,3 +404,18 @@ def test_finalize_skips_upload_when_disabled(tmp_path: Path) -> None:
 
     upload.assert_not_called()
     assert read_manifest(tmp_path) is not None
+
+
+def test_run_secret_is_created_once(tmp_path: Path) -> None:
+    first = run_secret(tmp_path)
+    assert first and len(first) >= 32
+    assert run_secret(tmp_path) == first
+    assert (tmp_path / RUN_SECRET_NAME).stat().st_mode & 0o777 == 0o600
+
+
+def test_run_secret_in_a_read_only_directory(tmp_path: Path) -> None:
+    tmp_path.chmod(0o500)
+    try:
+        assert run_secret(tmp_path) is None
+    finally:
+        tmp_path.chmod(0o700)

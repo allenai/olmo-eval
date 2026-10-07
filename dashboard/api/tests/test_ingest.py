@@ -421,12 +421,103 @@ async def test_reupload_cannot_take_over_a_service_account_run(
     spoofed = run_payload(run_id=run_id, model_name="org/model", author="alice")
     for headers in (alice, uploader):
         response = await client.put(f"/v1/runs/{run_id}", json=spoofed, headers=headers)
-        assert response.status_code == 200, response.text
+        assert response.status_code == 403, response.text
         sql = text("SELECT author FROM runs WHERE run_id = :r")
         assert await session.scalar(sql, {"r": run_id}) == "bob"
     assert (await client.delete(f"/v1/runs/{run_id}", headers=alice)).status_code == 403
     bob = {"X-Olmo-Eval-Token": "dev:bob@allenai.org"}
     assert (await client.delete(f"/v1/runs/{run_id}", headers=bob)).status_code == 204
+
+
+async def test_writes_to_another_users_run_are_forbidden(client: httpx.AsyncClient) -> None:
+    await seed_contract_example_run(client)
+    other = {"X-Olmo-Eval-Token": "dev:other@allenai.org"}
+    task_result_id = await _first_task_result_id(client)
+    attempts = [
+        ("PUT", f"/v1/runs/{RUN_ID}", load_example("ingest/run-upsert-final.request.json")),
+        (
+            "POST",
+            f"/v1/runs/{RUN_ID}/artifacts:sign",
+            load_example("ingest/artifacts-sign.request.json"),
+        ),
+        (
+            "POST",
+            f"/v1/runs/{RUN_ID}/task-results",
+            load_example("ingest/task-result.request.json"),
+        ),
+        (
+            "POST",
+            f"/v1/task-results/{task_result_id}/instances",
+            load_example("ingest/instances.request.json"),
+        ),
+        ("PUT", f"/v1/runs/{RUN_ID}/inference", load_example("ingest/inference.request.json")),
+        ("POST", f"/v1/runs/{RUN_ID}/complete", load_example("ingest/complete.request.json")),
+    ]
+    for method, path, body in attempts:
+        response = await client.request(method, path, json=body, headers=other)
+        assert response.status_code == 403, (path, response.text)
+        assert response.json()["error"]["code"] == "forbidden"
+
+
+async def test_service_account_writes_need_the_run_secret(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    uploader = {"X-Olmo-Eval-Token": f"dev:{UPLOADER_SERVICE_ACCOUNT}"}
+    secret = {**uploader, "X-Olmo-Eval-Run-Secret": "s3cret-value"}
+    run_id = "secret000001"
+    body = run_payload(run_id=run_id, model_name="org/model", author="bob")
+    assert (await client.put(f"/v1/runs/{run_id}", json=body, headers=secret)).status_code == 200
+    stored = await session.scalar(
+        text("SELECT write_secret_hash FROM runs WHERE run_id = :r"), {"r": run_id}
+    )
+    assert stored == hashlib.sha256(b"s3cret-value").hexdigest()
+
+    wrong = {**uploader, "X-Olmo-Eval-Run-Secret": "guess"}
+    for headers in (uploader, wrong):
+        response = await client.put(f"/v1/runs/{run_id}", json=body, headers=headers)
+        assert response.status_code == 403
+        response = await client.post(
+            f"/v1/runs/{run_id}/task-results",
+            json=load_example("ingest/task-result.request.json"),
+            headers=headers,
+        )
+        assert response.status_code == 403
+
+    assert (await client.put(f"/v1/runs/{run_id}", json=body, headers=secret)).status_code == 200
+    response = await client.post(
+        f"/v1/runs/{run_id}/task-results",
+        json=load_example("ingest/task-result.request.json"),
+        headers=secret,
+    )
+    assert response.status_code == 200, response.text
+    # The author of a launched run and anyone holding the secret may re-upload it.
+    bob = {"X-Olmo-Eval-Token": "dev:bob@allenai.org"}
+    carol = {"X-Olmo-Eval-Token": "dev:carol@allenai.org", "X-Olmo-Eval-Run-Secret": "s3cret-value"}
+    for headers in (bob, carol):
+        response = await client.put(f"/v1/runs/{run_id}", json=body, headers=headers)
+        assert response.status_code == 200, response.text
+
+
+async def test_first_secret_is_kept(client: httpx.AsyncClient, session: Any) -> None:
+    run_id = "secret000002"
+    body = run_payload(run_id=run_id, model_name="org/model")
+    assert (await client.put(f"/v1/runs/{run_id}", json=body)).status_code == 200
+    sql = text("SELECT write_secret_hash FROM runs WHERE run_id = :r")
+    assert await session.scalar(sql, {"r": run_id}) is None
+    for value in (b"first", b"second"):
+        headers = {"X-Olmo-Eval-Run-Secret": value.decode()}
+        assert (
+            await client.put(f"/v1/runs/{run_id}", json=body, headers=headers)
+        ).status_code == 200
+    assert await session.scalar(sql, {"r": run_id}) == hashlib.sha256(b"first").hexdigest()
+
+
+async def _first_task_result_id(client: httpx.AsyncClient) -> int:
+    response = await client.post(
+        f"/v1/runs/{RUN_ID}/task-results", json=load_example("ingest/task-result.request.json")
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["task_result_id"]
 
 
 async def test_uploader_may_correct_the_author_of_their_own_run(

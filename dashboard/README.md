@@ -56,6 +56,12 @@ recorded as the run's uploader.
   service accounts cannot delete runs. A re-upload keeps the stored author unless it comes from
   the user who uploaded the run.
 
+Only the same people can change an existing run: its uploader, or for a service-account upload,
+its author. Anyone else, including other Beaker jobs, must send the run's write secret in the
+`X-Olmo-Eval-Run-Secret` header. olmo-eval creates the secret in the results directory
+(`.upload-secret`, never uploaded) the first time it uploads, so re-uploading from that directory
+works for anyone who has a copy of it.
+
 Large files go straight to GCS: the ingest service returns V4 signed upload URLs, signed by the
 ingest service account through IAM `signBlob`. Each URL is signed for the declared MD5 and size
 (`x-goog-content-length-range`), so GCS rejects any other body. A run may hold at most 50 GiB of

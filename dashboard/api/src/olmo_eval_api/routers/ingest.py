@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Request, Response
+from fastapi import APIRouter, Depends, Header, Path, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from olmo_eval_api.auth.google_token import Principal, require_principal
@@ -24,6 +24,8 @@ router = APIRouter(prefix="/v1", tags=["ingest"])
 RunIdPath = Annotated[str, Path(pattern=s.RUN_ID_PATTERN)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
+# The run's write secret (services.ingest.can_write). Clients send it on every run write.
+RunSecretDep = Annotated[str | None, Header(alias="X-Olmo-Eval-Run-Secret", max_length=256)]
 
 
 def _settings(request: Request) -> Settings:
@@ -51,8 +53,9 @@ async def put_run(
     request: Request,
     session: SessionDep,
     principal: PrincipalDep,
+    run_secret: RunSecretDep = None,
 ) -> s.RunUpsertResponse:
-    return await svc.upsert_run(session, _settings(request), run_id, body, principal)
+    return await svc.upsert_run(session, _settings(request), run_id, body, principal, run_secret)
 
 
 @router.delete("/runs/{run_id}", status_code=204)
@@ -70,14 +73,21 @@ async def sign_artifacts(
     request: Request,
     session: SessionDep,
     principal: PrincipalDep,
+    run_secret: RunSecretDep = None,
 ) -> s.SignArtifactsResponse:
+    await svc.require_write(session, run_id, principal, run_secret)
     return await svc.sign_artifacts(session, _storage(request), _settings(request), run_id, body)
 
 
 @router.post("/runs/{run_id}/task-results", response_model=s.TaskResultUpsertResponse)
 async def post_task_result(
-    run_id: RunIdPath, body: s.TaskResultIn, session: SessionDep, principal: PrincipalDep
+    run_id: RunIdPath,
+    body: s.TaskResultIn,
+    session: SessionDep,
+    principal: PrincipalDep,
+    run_secret: RunSecretDep = None,
 ) -> s.TaskResultUpsertResponse:
+    await svc.require_write(session, run_id, principal, run_secret)
     return await svc.upsert_task_result(session, run_id, body)
 
 
@@ -87,14 +97,21 @@ async def post_instances(
     body: s.InstanceBatchRequest,
     session: SessionDep,
     principal: PrincipalDep,
+    run_secret: RunSecretDep = None,
 ) -> s.InstanceBatchResponse:
+    await svc.require_task_result_write(session, task_result_id, principal, run_secret)
     return await svc.add_instances(session, task_result_id, body)
 
 
 @router.put("/runs/{run_id}/inference", response_model=s.InferenceUploadResponse)
 async def put_inference(
-    run_id: RunIdPath, body: s.InferenceUploadRequest, session: SessionDep, principal: PrincipalDep
+    run_id: RunIdPath,
+    body: s.InferenceUploadRequest,
+    session: SessionDep,
+    principal: PrincipalDep,
+    run_secret: RunSecretDep = None,
 ) -> s.InferenceUploadResponse:
+    await svc.require_write(session, run_id, principal, run_secret)
     return await svc.put_inference(session, run_id, body)
 
 
@@ -105,5 +122,7 @@ async def complete(
     request: Request,
     session: SessionDep,
     principal: PrincipalDep,
+    run_secret: RunSecretDep = None,
 ) -> s.CompleteResponse:
+    await svc.require_write(session, run_id, principal, run_secret)
     return await svc.complete_run(session, _storage(request), _settings(request), run_id, body)

@@ -16,6 +16,7 @@ from olmo_eval.upload import (
 )
 from olmo_eval.upload.auth import NO_CREDENTIALS_MESSAGE, UploadAuthError
 from olmo_eval.upload.client import IngestClient
+from olmo_eval.upload.manifest import RUN_SECRET_NAME
 from olmo_eval.upload.uploader import build_plan, dry_run
 from tests.upload.fixtures import (
     API_URL,
@@ -116,6 +117,19 @@ def test_non_finite_task_values_are_uploaded_as_null(
     assert task["config"]["nested"] == [{"value": None}]
     assert task["duration_seconds"] is None
     assert task["error_summary"] == {"rate": None}
+
+
+def test_every_request_carries_the_run_secret(tmp_path: Path, server: FakeIngest, client) -> None:
+    out = make_arc_run(tmp_path / "run")
+
+    assert register_run_start(out, CONFIG, client=client)
+    result = upload_results_dir(out, CONFIG, client=client)
+
+    assert result.ok, result.error
+    secret_file = out / RUN_SECRET_NAME
+    assert secret_file.stat().st_mode & 0o777 == 0o600
+    assert set(server.run_secrets) == {secret_file.read_text()}
+    assert RUN_SECRET_NAME not in server.objects
 
 
 def test_reupload_skips_existing_artifacts(tmp_path: Path, server: FakeIngest, client) -> None:

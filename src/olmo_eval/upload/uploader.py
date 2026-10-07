@@ -39,11 +39,13 @@ from olmo_eval.upload.inference import build_inference_payload
 from olmo_eval.upload.manifest import (
     MANIFEST_NAME,
     METRICS_NAME,
+    RUN_SECRET_NAME,
     ManifestError,
     degraded_manifest,
     json_safe,
     read_manifest,
     read_metrics,
+    run_secret,
     run_status,
     to_utc_iso,
     utc_now,
@@ -227,7 +229,12 @@ def collect_artifacts(
         dirs.sort()
         for name in sorted(names):
             path = Path(root) / name
-            if path.is_symlink() or not path.is_file() or name.endswith(".json.tmp"):
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or name.endswith(".json.tmp")
+                or name == RUN_SECRET_NAME
+            ):
                 continue
             rel = path.relative_to(output_dir).as_posix()
             stat = path.stat()
@@ -542,6 +549,7 @@ def upload_results_dir(
         plan = build_plan(out, config.tags)
         if client is None:
             client = make_client(config)
+        client.run_secret = run_secret(out)
         logger.info(
             f"Uploading run {plan.run_id} to {config.api_url}: {len(plan.tasks)} task(s), "
             f"{plan.instance_count} instance(s), {len(plan.artifacts)} file(s)"
@@ -584,6 +592,7 @@ def register_run_start(
         run["tags"] = list(validate_tags([*(run.get("tags") or []), *config.tags]))
         if client is None:
             client = make_client(config, deadline_s=START_BUDGET_S)
+        client.run_secret = run_secret(output_dir)
         client.whoami()
         response = client.upsert_run(
             run["run_id"],
@@ -642,6 +651,7 @@ def mark_run_failed(
         run_upload["tags"] = list(validate_tags([*(run.get("tags") or []), *config.tags]))
         if client is None:
             client = make_client(config, deadline_s=FAILURE_BUDGET_S)
+        client.run_secret = run_secret(out)
         client.upsert_run(
             run["run_id"],
             {

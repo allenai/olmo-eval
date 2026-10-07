@@ -15,6 +15,7 @@ from olmo_eval.common.logging import get_logger
 logger = get_logger("upload.client")
 
 TOKEN_HEADER = "X-Olmo-Eval-Token"
+RUN_SECRET_HEADER = "X-Olmo-Eval-Run-Secret"
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 BACKOFF_SECONDS = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0)
 CONNECT_TIMEOUT_S = 10.0
@@ -81,6 +82,8 @@ class IngestClient:
         transport: Optional httpx transport (tests use httpx.MockTransport).
         sleep: Sleep function used between retries.
         max_retries: Retries after the first attempt.
+        run_secret: The run's write secret, sent with every ingest request. It lets the
+            shared Beaker service account change a run it uploaded earlier.
     """
 
     def __init__(
@@ -92,6 +95,7 @@ class IngestClient:
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
         max_retries: int = len(BACKOFF_SECONDS),
+        run_secret: str | None = None,
     ) -> None:
         from olmo_eval.upload.config import validate_api_url
 
@@ -100,6 +104,7 @@ class IngestClient:
         self._deadline = time.monotonic() + deadline_s if deadline_s is not None else None
         self._sleep = sleep
         self._max_retries = max_retries
+        self.run_secret = run_secret
         self._http = httpx.Client(
             transport=transport,
             timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
@@ -212,6 +217,8 @@ class IngestClient:
     def _json(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         def send() -> httpx.Response:
             headers = {TOKEN_HEADER: self._tokens.token()}
+            if self.run_secret:
+                headers[RUN_SECRET_HEADER] = self.run_secret
             return self._http.request(
                 method,
                 f"{self.api_url}{path}",

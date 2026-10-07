@@ -13,6 +13,7 @@ import json
 import math
 import os
 import re
+import secrets
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -32,6 +33,9 @@ from olmo_eval.upload.metadata import (
 
 MANIFEST_NAME = "manifest.json"
 METRICS_NAME = "metrics.json"
+# Proves to the ingest service that an upload comes from the run's own results directory.
+# Never uploaded.
+RUN_SECRET_NAME = ".upload-secret"
 MANIFEST_VERSION = 1
 RUN_ID_RE = re.compile(r"^[a-z0-9]{6,32}$")
 
@@ -228,6 +232,25 @@ def write_manifest(output_dir: str | Path, manifest: Mapping[str, Any]) -> Path:
     tmp.write_text(json.dumps(manifest, indent=2, default=str) + "\n")
     os.replace(tmp, path)
     return path
+
+
+def run_secret(output_dir: str | Path) -> str | None:
+    """The run's write secret, created on first use. None if the directory is not writable."""
+    path = Path(output_dir) / RUN_SECRET_NAME
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        pass
+    except OSError:
+        return None
+    else:
+        with os.fdopen(fd, "w") as f:
+            f.write(secrets.token_urlsafe(32))
+    try:
+        value = path.read_text().strip()
+    except OSError:
+        return None
+    return value or None
 
 
 def read_manifest(output_dir: str | Path) -> dict[str, Any] | None:

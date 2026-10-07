@@ -166,6 +166,8 @@ class Run(SQLModel, table=True):
     upload_state: str = _str(16, nullable=False)
     author: str | None = _text()
     uploaded_by: str = _text(nullable=False)
+    # SHA-256 hex of the secret the uploading client keeps in the run's results directory.
+    write_secret_hash: str | None = _str(64)
     tags: list[str] = _text_array()
     notes: str | None = _text()
     created_at: datetime = _ts(default_now=True)

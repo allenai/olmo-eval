@@ -410,6 +410,7 @@ class FakeIngest:
         self.validator = PayloadValidator(CONTRACT_SCHEMA)
         self.calls: list[tuple[str, str]] = []
         self.tokens: list[str | None] = []
+        self.run_secrets: list[str | None] = []
         self.schema_errors: list[str] = []
         self.runs: dict[str, dict[str, Any]] = {}
         self.task_results: dict[int, dict[str, Any]] = {}
@@ -438,6 +439,7 @@ class FakeIngest:
             return self._gcs(request)
         self.calls.append((request.method, path))
         self.tokens.append(request.headers.get("X-Olmo-Eval-Token"))
+        self.run_secrets.append(request.headers.get("X-Olmo-Eval-Run-Secret"))
         queued = self.fail.get(key)
         if queued:
             status = queued.pop(0)
