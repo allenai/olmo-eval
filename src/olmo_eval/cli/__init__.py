@@ -15,6 +15,7 @@ from rich.table import Table
 import olmo_eval.evals  # noqa: F401 - triggers suite registration
 import olmo_eval.evals.tasks  # noqa: F401 - triggers task registration
 from olmo_eval.cli.beaker import beaker
+from olmo_eval.cli.removed import DASHBOARD_URL, removed_command
 from olmo_eval.cli.results import results
 from olmo_eval.cli.run import run
 from olmo_eval.cli.run_external import run_external
@@ -39,6 +40,13 @@ main.add_command(results)
 main.add_command(task)
 main.add_command(suite)
 main.add_command(run_external)
+main.add_command(
+    removed_command(
+        "metrics",
+        "Inference metrics are uploaded with each run and shown on its Inference tab in the "
+        f"dashboard: {DASHBOARD_URL}",
+    )
+)
 
 
 @main.command()

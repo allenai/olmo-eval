@@ -7,6 +7,7 @@ from typing import Any
 
 import click
 
+from olmo_eval.cli.removed import removed_storage_options
 from olmo_eval.cli.utils import ConfiguredExternalEval, console, parse_key_value_args
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
 
@@ -98,6 +99,7 @@ class ExternalRunConfig:
     help="Provider kwargs (key=value, e.g., -K enable_chunked_prefill=true)",
 )
 # Dashboard upload options
+@removed_storage_options
 @click.option(
     "--upload/--no-upload",
     "upload",
@@ -230,6 +232,8 @@ def run_external(
         upload_config = resolve_upload_config(upload, api_url, tags)
     except ValueError as e:
         raise click.BadParameter(str(e), param_hint=upload_param_hint(e)) from None
+    if upload_config.notice:
+        console.print(f"[yellow]Note:[/yellow] {upload_config.notice}")
 
     # Build metrics config (matches default harness preset)
     from olmo_eval.inference.metrics import MetricsConfig

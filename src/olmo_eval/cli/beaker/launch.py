@@ -19,6 +19,7 @@ from rich.panel import Panel
 from rich.pretty import Pretty
 from rich.table import Table
 
+from olmo_eval.cli.removed import removed_storage_options
 from olmo_eval.cli.utils import (
     ConfiguredExternalEval,
     ExperimentSummary,
@@ -124,6 +125,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     default=None,
     help="Inject GCP credentials. Auto-detected from gs:// model paths.",
 )
+@removed_storage_options
 @click.option(
     "--upload/--no-upload",
     "upload",
@@ -391,6 +393,8 @@ def launch(
         upload_config = resolve_upload_config(upload, api_url, tags)
     except ValueError as e:
         raise click.BadParameter(str(e), param_hint=upload_param_hint(e)) from None
+    if upload_config.notice:
+        console.print(f"[yellow]Note:[/yellow] {upload_config.notice}")
     job_api_url = api_url or _os.environ.get(API_URL_ENV) or None
 
     # Build CLI args dict

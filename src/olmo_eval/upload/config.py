@@ -26,6 +26,12 @@ _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
+LOCAL_ONLY_NOTICE = (
+    "No Google credentials found, so results are saved locally and not uploaded. "
+    "To upload, run `gcloud auth application-default login`. "
+    f"Set {UPLOAD_ENV}=0 or pass --no-upload to hide this message."
+)
+
 
 @dataclass(frozen=True)
 class UploadConfig:
@@ -36,12 +42,14 @@ class UploadConfig:
         api_url: Base URL of the ingest service.
         tags: Free-form labels attached to the run.
         timeout_s: Overall deadline for one upload, in seconds.
+        notice: Why uploads were turned off without being asked, for the CLI to show.
     """
 
     enabled: bool = True
     api_url: str = DEFAULT_API_URL
     tags: tuple[str, ...] = ()
     timeout_s: float = DEFAULT_TIMEOUT_S
+    notice: str | None = None
 
     @property
     def is_default_api_url(self) -> bool:
@@ -129,6 +137,10 @@ def resolve_upload_config(
 ) -> UploadConfig:
     """Combine CLI flags and environment variables. CLI flags win.
 
+    Uploads are on by default. When neither a flag nor the environment asks for them and
+    no Google credentials are configured, they are turned off and ``notice`` says why, so
+    the eval still runs and keeps its results locally.
+
     Args:
         cli_upload: Value of --upload/--no-upload, or None when not passed.
         cli_api_url: Value of --api-url, or None when not passed.
@@ -147,7 +159,12 @@ def resolve_upload_config(
             timeout_s = max(1.0, float(raw_timeout))
         except ValueError:
             timeout_s = DEFAULT_TIMEOUT_S
-    enabled = True if enabled is None else enabled
+    notice = None
+    if enabled is None:
+        from olmo_eval.upload.auth import has_upload_credentials
+
+        enabled = has_upload_credentials()
+        notice = None if enabled else LOCAL_ONLY_NOTICE
     # Only an enabled upload sends a token, so a disabled one does not fail on the URL.
     api_url = validate_api_url(api_url) if enabled else api_url.rstrip("/")
     return UploadConfig(
@@ -155,6 +172,7 @@ def resolve_upload_config(
         api_url=api_url,
         tags=validate_tags(cli_tags),
         timeout_s=timeout_s,
+        notice=notice,
     )
 
 

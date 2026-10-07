@@ -956,8 +956,16 @@ your Google credentials, so run `gcloud auth application-default login` once. Be
 jobs never get your personal credentials: they upload as the shared
 `olmo-eval-uploader` service account, whose key `olmo-eval beaker launch` reads from
 Secret Manager (with your local credentials) and copies into the workspace's
-`olmo_eval_uploader_key` Beaker secret. The run still records you as its author. The
-launch stops before submitting anything if no local Google credentials exist.
+`olmo_eval_uploader_key` Beaker secret. The run still records you as its author.
+
+Without Google credentials, uploads turn off on their own: the eval runs as usual, keeps
+its results on disk, and prints a note. This applies to `olmo-eval beaker launch` too.
+Passing `--upload` or setting `OLMO_EVAL_UPLOAD=1` asks for an upload explicitly, so a
+missing credential is then an error.
+
+Uploaded predictions and requests are visible to everyone at Ai2 who can open the
+dashboard. For private or licensed datasets whose examples must not be shared, pass
+`--no-upload`.
 
 What is uploaded:
 
@@ -993,7 +1001,7 @@ uv run olmo-eval results upload ./results
 
 | Setting | Flag | Environment variable | Default |
 |---------|------|----------------------|---------|
-| Upload on/off | `--upload/--no-upload` | `OLMO_EVAL_UPLOAD` | on |
+| Upload on/off | `--upload/--no-upload` | `OLMO_EVAL_UPLOAD` | on when Google credentials exist |
 | Ingest service | `--api-url` | `OLMO_EVAL_API_URL` | `https://prod-ingest.olmo-eval.apps.allenai.org` |
 | Run labels | `--tag` (repeatable) | | none |
 | Upload deadline | | `OLMO_EVAL_UPLOAD_TIMEOUT` (seconds) | `1800` |

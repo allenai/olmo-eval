@@ -32,10 +32,41 @@ from olmo_eval.upload.config import (
 
 def test_defaults_upload_to_production(monkeypatch) -> None:
     monkeypatch.delenv("OLMO_EVAL_UPLOAD", raising=False)
+    monkeypatch.setattr("olmo_eval.upload.auth.has_upload_credentials", lambda: True)
     config = resolve_upload_config()
     assert config.enabled is True
+    assert config.notice is None
     assert config.api_url == DEFAULT_API_URL
     assert config.timeout_s == 1800
+
+
+def test_default_upload_falls_back_to_local_without_credentials(monkeypatch) -> None:
+    monkeypatch.delenv("OLMO_EVAL_UPLOAD", raising=False)
+    monkeypatch.setattr("olmo_eval.upload.auth.has_upload_credentials", lambda: False)
+    config = resolve_upload_config()
+    assert config.enabled is False
+    assert config.notice is not None and "gcloud auth application-default login" in config.notice
+
+
+@pytest.mark.parametrize(("env", "cli"), [("1", None), (None, True)])
+def test_requested_upload_stays_on_without_credentials(monkeypatch, env, cli) -> None:
+    if env is None:
+        monkeypatch.delenv("OLMO_EVAL_UPLOAD", raising=False)
+    else:
+        monkeypatch.setenv("OLMO_EVAL_UPLOAD", env)
+    monkeypatch.setattr("olmo_eval.upload.auth.has_upload_credentials", lambda: False)
+    config = resolve_upload_config(cli_upload=cli)
+    assert config.enabled is True and config.notice is None
+
+
+def test_uploader_key_counts_as_credentials(monkeypatch) -> None:
+    from olmo_eval.upload import auth
+
+    monkeypatch.setattr(auth, "has_local_google_credentials", lambda: False)
+    monkeypatch.delenv("OLMO_EVAL_UPLOAD_CREDENTIALS", raising=False)
+    assert auth.has_upload_credentials() is False
+    monkeypatch.setenv("OLMO_EVAL_UPLOAD_CREDENTIALS", "/secrets/key.json")
+    assert auth.has_upload_credentials() is True
 
 
 @pytest.mark.parametrize(

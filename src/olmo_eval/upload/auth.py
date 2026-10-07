@@ -66,6 +66,15 @@ def _service_account_credentials(key: str, env_name: str) -> Any:
         raise UploadAuthError(f"{env_name} does not hold a valid service account key: {e}") from e
 
 
+def has_upload_credentials() -> bool:
+    """Whether an uploader key or Application Default Credentials are configured."""
+    from olmo_eval.upload.config import UPLOAD_CREDENTIALS_ENV
+
+    return bool(os.environ.get(UPLOAD_CREDENTIALS_ENV, "").strip()) or (
+        has_local_google_credentials()
+    )
+
+
 def has_local_google_credentials() -> bool:
     """Whether Application Default Credentials are configured on this machine."""
     import google.auth
