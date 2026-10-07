@@ -51,7 +51,9 @@ recorded as the run's uploader.
   (`infra/terraform/uploader.tf`). `olmo-eval beaker launch` reads its key from the Secret
   Manager secret `olmo-eval-uploader-key` with the launching user's local credentials and copies
   it into the workspace's `olmo_eval_uploader_key` Beaker secret, which the job reads as
-  `OLMO_EVAL_UPLOAD_CREDENTIALS`. Personal credentials never reach Beaker. The run's `author`
+  `OLMO_EVAL_UPLOAD_CREDENTIALS`. The CLI moves the key out of the environment as it starts, so
+  inference servers, sandboxes and other subprocesses never see it. Personal credentials never
+  reach Beaker. The run's `author`
   is the launching Beaker user, and only that user (or a direct uploader) can delete it;
   service accounts cannot delete runs. A re-upload keeps the stored author unless it comes from
   the user who uploaded the run.

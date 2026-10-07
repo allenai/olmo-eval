@@ -1,7 +1,9 @@
 # Identity for Beaker jobs that upload results. It has no Google Cloud roles: the ingest
 # service allowlists it (UPLOADER_SERVICE_ACCOUNT in dashboard/api settings), and
-# artifacts reach GCS through URLs the API signs. A leaked key can only upload results,
-# which any @allenai.org account can already do with its own credentials.
+# artifacts reach GCS through URLs the API signs. A leaked key can create new runs, which
+# any @allenai.org account can already do with its own credentials. It cannot change or
+# delete an existing run: that needs the run's uploader, its author, or the write secret
+# kept in the run's results directory (services/ingest.py can_write).
 resource "google_service_account" "uploader" {
   account_id   = "olmo-eval-uploader"
   display_name = "olmo-eval results uploader (Beaker jobs)"

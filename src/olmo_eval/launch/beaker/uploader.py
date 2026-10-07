@@ -7,7 +7,8 @@ infra/terraform/uploader.tf), and any @allenai.org account can read it.
 
 At launch, the key is read with the launching user's local credentials and written
 to a shared Beaker secret in the job's workspace, so personal credentials never
-reach Beaker. The secret is rewritten when the key rotates.
+reach Beaker. The secret is rewritten when the key rotates. Inside the job, the CLI
+moves the key out of the environment before any subprocess starts.
 """
 
 from __future__ import annotations
