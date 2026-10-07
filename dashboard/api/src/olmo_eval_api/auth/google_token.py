@@ -32,9 +32,15 @@ logger = logging.getLogger(__name__)
 TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 TOKEN_HEADER = "x-olmo-eval-token"
 REQUIRED_USER_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
-POSITIVE_TTL_S = 300.0
+# Short, so a revoked token stops working soon after revocation.
+POSITIVE_TTL_S = 60.0
 NEGATIVE_TTL_S = 30.0
 CACHE_MAX = 10_000
+# tokeninfo answers 400 for a malformed, unknown or expired token. Any other failure, such as
+# rate limiting, says nothing about the token.
+INVALID_TOKEN_STATUSES = frozenset({400, 401})
+MAX_TOKEN_LENGTH = 4096
+_TOKEN_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~+/=")
 
 PrincipalType = Literal["user", "service_account"]
 
@@ -72,7 +78,9 @@ class TokenVerifier:
     def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None) -> None:
         self.settings = settings
         self._client = client
-        self._cache: OrderedDict[str, tuple[float, Principal | _Rejection]] = OrderedDict()
+        # Rejections live in their own cache so a flood of bad tokens cannot evict good ones.
+        self._accepted: OrderedDict[str, tuple[float, Principal | _Rejection]] = OrderedDict()
+        self._rejected: OrderedDict[str, tuple[float, Principal | _Rejection]] = OrderedDict()
 
     async def aclose(self) -> None:
         if self._client is not None:
@@ -91,10 +99,11 @@ class TokenVerifier:
         except httpx.HTTPError as exc:
             logger.warning("tokeninfo unreachable: %s", exc)
             raise ApiError(503, "could not verify the access token; try again") from exc
-        if response.status_code >= 500:
-            raise ApiError(503, "could not verify the access token; try again")
-        if response.status_code != 200:
+        if response.status_code in INVALID_TOKEN_STATUSES:
             return None
+        if response.status_code != 200:
+            logger.warning("tokeninfo returned HTTP %s", response.status_code)
+            raise ApiError(503, "could not verify the access token; try again")
         data = response.json()
         try:
             exp = float(data.get("exp", 0))
@@ -121,6 +130,8 @@ class TokenVerifier:
     async def _verify_uncached(self, token: str) -> Principal | _Rejection:
         if self.settings.dev_auth_enabled and token.startswith("dev:"):
             return self._authorize(token[4:], time.time() + 3600)
+        if len(token) > MAX_TOKEN_LENGTH or not set(token) <= _TOKEN_CHARS:
+            return _Rejection(401, "invalid or expired Google access token")
         info = await self.fetch_tokeninfo(token)
         if info is None or info.exp <= time.time():
             return _Rejection(401, "invalid or expired Google access token")
@@ -146,19 +157,19 @@ class TokenVerifier:
     async def verify(self, token: str) -> Principal:
         key = hashlib.sha256(token.encode()).hexdigest()
         now = time.time()
-        cached = self._cache.get(key)
+        cached = self._accepted.get(key) or self._rejected.get(key)
         if cached is not None and cached[0] > now:
             result = cached[1]
         else:
             result = await self._verify_uncached(token)
             if isinstance(result, Principal):
-                valid_until = min(result.exp, now + POSITIVE_TTL_S)
+                cache, valid_until = self._accepted, min(result.exp, now + POSITIVE_TTL_S)
             else:
-                valid_until = now + NEGATIVE_TTL_S
-            self._cache[key] = (valid_until, result)
-            self._cache.move_to_end(key)
-            while len(self._cache) > CACHE_MAX:
-                self._cache.popitem(last=False)
+                cache, valid_until = self._rejected, now + NEGATIVE_TTL_S
+            cache[key] = (valid_until, result)
+            cache.move_to_end(key)
+            while len(cache) > CACHE_MAX:
+                cache.popitem(last=False)
         if isinstance(result, _Rejection):
             raise ApiError(result.status_code, result.message, headers=_www_authenticate(result))
         return result

@@ -9,6 +9,7 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
+from olmo_eval_api.auth import google_token
 from olmo_eval_api.auth.google_token import TokenVerifier
 from olmo_eval_api.errors import ApiError
 from olmo_eval_api.log_config import configure_logging
@@ -178,6 +179,43 @@ async def test_tokeninfo_unreachable() -> None:
     with pytest.raises(ApiError) as exc:
         await make_verifier(fake).verify("any")
     assert exc.value.status_code == 503
+
+
+@pytest.mark.parametrize("status", [403, 429, 502])
+async def test_tokeninfo_errors_are_not_cached_as_invalid(status: int) -> None:
+    fake = FakeTokenInfo()
+    fake.add("good", "alice@allenai.org")
+    verifier = make_verifier(fake)
+    fake.tokens["good"] = (status, {"error": "rate limited"})
+    with pytest.raises(ApiError) as exc:
+        await verifier.verify("good")
+    assert exc.value.status_code == 503
+    fake.add("good", "alice@allenai.org")
+    assert (await verifier.verify("good")).email == "alice@allenai.org"
+
+
+async def test_malformed_tokens_skip_tokeninfo() -> None:
+    fake = FakeTokenInfo()
+    verifier = make_verifier(fake)
+    for token in ("x" * 5000, "has space", "ya29.\u00e9"):
+        with pytest.raises(ApiError) as exc:
+            await verifier.verify(token)
+        assert exc.value.status_code == 401
+    assert fake.calls == 0
+
+
+async def test_rejections_cannot_evict_accepted_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(google_token, "CACHE_MAX", 3)
+    fake = FakeTokenInfo()
+    fake.add("good", "alice@allenai.org")
+    verifier = make_verifier(fake)
+    await verifier.verify("good")
+    for i in range(10):
+        with pytest.raises(ApiError):
+            await verifier.verify(f"junk{i}")
+    calls = fake.calls
+    await verifier.verify("good")
+    assert fake.calls == calls
 
 
 async def test_dev_tokens_only_in_local() -> None:
