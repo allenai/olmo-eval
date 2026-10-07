@@ -5,7 +5,7 @@
  * The text grammar is `key:value[,value]` tokens (`model:olmo3*`, `-tag:debug`, `step:>=1000`,
  * `has:failures`), anything else is free text.
  */
-import { parseList } from "./url";
+import { joinList, parseList } from "./url";
 
 export const RUN_FILTER_KEYS = [
   "model",
@@ -97,7 +97,7 @@ export const FILTER_LABELS: Record<RunFilterKey, string> = {
 function addListValue(filters: RunFilters, key: RunFilterKey, value: string) {
   const existing = parseList(filters[key]);
   for (const v of parseList(value)) if (!existing.includes(v)) existing.push(v);
-  filters[key] = existing.join(",");
+  filters[key] = joinList(existing);
 }
 
 /** Split on whitespace, keeping quoted phrases together. */
@@ -254,7 +254,7 @@ export function removeFilterValue(filters: RunFilters, key: RunFilterKey, value?
     return next;
   }
   const remaining = parseList(next[key]).filter((v) => v !== value);
-  if (remaining.length) next[key] = remaining.join(",");
+  if (remaining.length) next[key] = joinList(remaining);
   else delete next[key];
   return next;
 }

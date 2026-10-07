@@ -43,12 +43,23 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   let data: unknown = null;
+  let parsed = !text;
   if (text) {
     try {
       data = JSON.parse(text);
+      parsed = true;
     } catch {
       data = null;
     }
+  }
+  if (response.ok && !parsed) {
+    // Usually a sign-in or proxy error page served with status 200.
+    throw new ApiError(
+      response.status,
+      "invalid_response",
+      "The API returned a page instead of data. Your session may have expired; reload the page.",
+      requestId,
+    );
   }
   if (!response.ok) {
     const err = (data as ErrorResponse | null)?.error;

@@ -72,16 +72,18 @@ export function pickStrings<K extends string>(
   return out;
 }
 
+/** Split a comma-separated list param. Items written by `joinList` may contain commas. */
 export function parseList(value: string | undefined | null): string[] {
   if (!value) return [];
   return value
     .split(",")
-    .map((v) => v.trim())
+    .map((v) => v.trim().replace(/%(2C|25)/gi, (m) => (m.toUpperCase() === "%2C" ? "," : "%")))
     .filter(Boolean);
 }
 
+/** Join list items into one param, escaping commas (and %) inside items. */
 export function joinList(values: readonly string[]): string | undefined {
-  const clean = values.filter(Boolean);
+  const clean = values.filter(Boolean).map((v) => v.replace(/%/g, "%25").replace(/,/g, "%2C"));
   return clean.length ? clean.join(",") : undefined;
 }
 

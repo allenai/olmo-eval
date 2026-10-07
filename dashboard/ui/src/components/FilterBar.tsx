@@ -12,7 +12,7 @@ import {
   type RunFilters,
 } from "@/lib/filters";
 import { formatCount } from "@/lib/format";
-import { parseList } from "@/lib/url";
+import { joinList, parseList } from "@/lib/url";
 import { Button, Checkbox, Chip, cx, Input, SearchInput, uiStyles as ui } from "./primitives";
 import f from "./filterbar.module.css";
 
@@ -260,7 +260,7 @@ export const FilterBar = forwardRef<FilterBarHandle, Props>(function FilterBar(
       if (!v) continue;
       if (isListKey(key)) {
         const merged = Array.from(new Set([...parseList(next[key]), ...parseList(v)]));
-        next[key] = merged.join(",");
+        next[key] = joinList(merged);
       } else if (key === "q") next.q = [next.q, v].filter(Boolean).join(" ");
       else next[key] = v;
     }
@@ -335,7 +335,7 @@ export const FilterBar = forwardRef<FilterBarHandle, Props>(function FilterBar(
         values={facetValues(key)}
         selected={selected}
         allowCustom={key === "model" || key === "task"}
-        onApply={(values) => onChange({ ...filters, [key]: values.join(",") || undefined })}
+        onApply={(values) => onChange({ ...filters, [key]: joinList(values) })}
         extra={
           key === "suite" ? (
             <Checkbox

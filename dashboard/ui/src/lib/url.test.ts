@@ -35,6 +35,13 @@ describe("URL state", () => {
     expect(parseNumber("5", 1, { max: 2 })).toBe(1);
   });
 
+  it("keeps commas and percent signs inside list items through the URL", () => {
+    const items = ["org/model,v2", "50% mix", "plain"];
+    const url = stringifySearch({ model: joinList(items) });
+    expect(parseList(parseSearch(url).model)).toEqual(items);
+    expect(parseList(joinList(["%2C literal"]))).toEqual(["%2C literal"]);
+  });
+
   it("builds API queries with repeated keys", () => {
     expect(apiQuery({ model: ["a*", "b"], limit: 50, q: undefined })).toBe("?model=a*&model=b&limit=50");
   });

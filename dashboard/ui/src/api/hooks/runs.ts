@@ -18,6 +18,7 @@ import type {
 } from "@contract/api-types";
 import {
   keepPreviousData,
+  type QueryClient,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -55,10 +56,22 @@ export function useRunsFacets(params: Params) {
   });
 }
 
+/** API path of a run. */
+export function runPath(runId: string): string {
+  return `/runs/${encodeURIComponent(runId)}`;
+}
+
+/** Every cached query that lists runs or counts them, so tag edits show up everywhere. */
+export function invalidateRunLists(qc: QueryClient): void {
+  for (const key of ["runs", "runs-infinite", "runs-facets"]) {
+    qc.invalidateQueries({ queryKey: [key] });
+  }
+}
+
 export function useRun(runId: string) {
   return useQuery({
     queryKey: ["run", runId],
-    queryFn: ({ signal }) => apiGet<RunDetail>(`/runs/${encodeURIComponent(runId)}`, undefined, signal),
+    queryFn: ({ signal }) => apiGet<RunDetail>(runPath(runId), undefined, signal),
   });
 }
 
@@ -66,7 +79,7 @@ export function useTaskResults(runId: string, baseline: string | undefined, enab
   return useQuery({
     queryKey: ["task-results", runId, baseline ?? null],
     queryFn: ({ signal }) =>
-      apiGet<RunTaskResultsResponse>(`/runs/${runId}/task-results`, { baseline }, signal),
+      apiGet<RunTaskResultsResponse>(`${runPath(runId)}/task-results`, { baseline }, signal),
     placeholderData: keepPreviousData,
     enabled,
   });
@@ -75,7 +88,7 @@ export function useTaskResults(runId: string, baseline: string | undefined, enab
 export function useRunSuites(runId: string, baseline: string | undefined, enabled = true) {
   return useQuery({
     queryKey: ["run-suites", runId, baseline ?? null],
-    queryFn: ({ signal }) => apiGet<RunSuitesResponse>(`/runs/${runId}/suites`, { baseline }, signal),
+    queryFn: ({ signal }) => apiGet<RunSuitesResponse>(`${runPath(runId)}/suites`, { baseline }, signal),
     placeholderData: keepPreviousData,
     enabled,
   });
@@ -86,7 +99,7 @@ export function useInstances(runId: string, taskResultId: number | null, params:
     queryKey: ["instances", runId, taskResultId, params],
     queryFn: ({ pageParam, signal }) =>
       apiGet<InstancesResponse>(
-        `/runs/${runId}/task-results/${taskResultId}/instances`,
+        `${runPath(runId)}/task-results/${taskResultId}/instances`,
         { ...params, cursor: pageParam ?? undefined },
         signal,
       ),
@@ -116,7 +129,7 @@ export function useHistograms(runId: string, taskResultId: number | null, baseli
     queryKey: ["histograms", runId, taskResultId, baseline ?? null],
     queryFn: ({ signal }) =>
       apiGet<HistogramsResponse>(
-        `/runs/${runId}/task-results/${taskResultId}/histograms`,
+        `${runPath(runId)}/task-results/${taskResultId}/histograms`,
         { baseline },
         signal,
       ),
@@ -127,14 +140,14 @@ export function useHistograms(runId: string, taskResultId: number | null, baseli
 export function useInference(runId: string, baseline: string | undefined) {
   return useQuery({
     queryKey: ["inference", runId, baseline ?? null],
-    queryFn: ({ signal }) => apiGet<InferenceResponse>(`/runs/${runId}/inference`, { baseline }, signal),
+    queryFn: ({ signal }) => apiGet<InferenceResponse>(`${runPath(runId)}/inference`, { baseline }, signal),
   });
 }
 
 export function useRunConfigs(runId: string | null | undefined) {
   return useQuery({
     queryKey: ["configs", runId],
-    queryFn: ({ signal }) => apiGet<RunConfigsResponse>(`/runs/${runId}/configs`, undefined, signal),
+    queryFn: ({ signal }) => apiGet<RunConfigsResponse>(`${runPath(runId ?? "")}/configs`, undefined, signal),
     enabled: !!runId,
     staleTime: 5 * 60_000,
   });
@@ -143,7 +156,7 @@ export function useRunConfigs(runId: string | null | undefined) {
 export function useArtifacts(runId: string) {
   return useQuery({
     queryKey: ["artifacts", runId],
-    queryFn: ({ signal }) => apiGet<ArtifactsResponse>(`/runs/${runId}/artifacts`, undefined, signal),
+    queryFn: ({ signal }) => apiGet<ArtifactsResponse>(`${runPath(runId)}/artifacts`, undefined, signal),
   });
 }
 
@@ -151,7 +164,7 @@ export function useBaselineSuggestions(runId: string) {
   return useQuery({
     queryKey: ["baseline-suggestions", runId],
     queryFn: ({ signal }) =>
-      apiGet<BaselineSuggestionsResponse>(`/runs/${runId}/baseline-suggestions`, undefined, signal),
+      apiGet<BaselineSuggestionsResponse>(`${runPath(runId)}/baseline-suggestions`, undefined, signal),
     staleTime: 5 * 60_000,
   });
 }
@@ -163,10 +176,10 @@ export function signArtifact(gsUri: string): Promise<SignDownloadResponse> {
 export function usePatchRun(runId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: RunPatchRequest) => apiPatch<RunDetail>(`/runs/${runId}`, body),
+    mutationFn: (body: RunPatchRequest) => apiPatch<RunDetail>(runPath(runId), body),
     onSuccess: (data) => {
       qc.setQueryData(["run", runId], data);
-      qc.invalidateQueries({ queryKey: ["runs"] });
+      invalidateRunLists(qc);
     },
   });
 }
@@ -176,9 +189,7 @@ export function useBulkTag() {
   return useMutation({
     mutationFn: (body: BulkTagRequest) => apiPost<BulkTagResponse>("/runs/tags", body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["runs-infinite"] });
-      qc.invalidateQueries({ queryKey: ["runs-facets"] });
+      invalidateRunLists(qc);
       qc.invalidateQueries({ queryKey: ["run"] });
     },
   });
