@@ -445,3 +445,59 @@ def test_name_based_display_format_matches_metric_objects() -> None:
     meta = metric_meta_from_metrics([], ["domain__Law__accuracy", "domain__Law__bleu"])
     assert meta["domain__Law__accuracy"]["display_format"] == "percent"
     assert meta["domain__Law__bleu"]["display_format"] == "raw"
+
+
+def test_secret_looking_config_values_are_redacted() -> None:
+    from olmo_eval.upload.manifest import REDACTED, json_safe
+
+    config = {
+        "provider": {
+            "kind": "litellm",
+            "api_key": "sk-live-123",
+            "kwargs": {"Authorization": "Bearer abc", "hf-token": "hf_xyz", "max_tokens": 256},
+            "required_secrets": ["OPENAI_API_KEY"],
+        },
+        "eos_token": "</s>",
+        "token": "",
+        "password": None,
+    }
+    cleaned = json_safe(config)
+    assert cleaned["provider"]["api_key"] == REDACTED
+    assert cleaned["provider"]["kwargs"] == {
+        "Authorization": REDACTED,
+        "hf-token": REDACTED,
+        "max_tokens": 256,
+    }
+    # Secret names are references, not values.
+    assert cleaned["provider"]["required_secrets"] == ["OPENAI_API_KEY"]
+    assert cleaned["eos_token"] == "</s>"
+    assert cleaned["token"] == "" and cleaned["password"] is None
+
+
+def test_secret_looking_cli_values_are_redacted() -> None:
+    from olmo_eval.upload.manifest import REDACTED, redact_argv
+
+    argv = [
+        "olmo-eval", "run", "-m", "gpt", "-o", "provider.api_key=sk-1", "--hf-token", "hf_2",
+        "--auth-token=t3", "-o", "limit=10", "--tag", "x",
+    ]  # fmt: skip
+    assert redact_argv(argv) == [
+        "olmo-eval", "run", "-m", "gpt", "-o", f"provider.api_key={REDACTED}", "--hf-token",
+        REDACTED, f"--auth-token={REDACTED}", "-o", "limit=10", "--tag", "x",
+    ]  # fmt: skip
+    # A boolean flag keeps the option after it.
+    assert redact_argv(["--no-hf-token", "-m", "gpt"]) == ["--no-hf-token", "-m", "gpt"]
+
+
+def test_run_info_redacts_argv() -> None:
+    from olmo_eval.upload.manifest import build_run_info
+
+    run = build_run_info(
+        run_id="abc123def456",
+        status="running",
+        started_at=None,
+        argv=["olmo-eval", "run", "-o", "provider.api_key=sk-1"],
+        harness_config={"provider": {"api_key": "sk-1"}},
+        capture_provenance=False,
+    )
+    assert "sk-1" not in json.dumps(run)

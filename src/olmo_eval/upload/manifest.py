@@ -76,21 +76,68 @@ def current_argv() -> list[str]:
     return ["olmo-eval", *sys.argv[1:]]
 
 
+REDACTED = "[redacted]"
+# Config keys and CLI flags whose string values are credentials. Tokenizer special tokens
+# ("eos_token" and the like) are not.
+_SECRET_NAME_RE = re.compile(
+    r"(^|_)(api_?key|access_?key|secret|secret_?key|client_?secret|password|passwd|"
+    r"private_?key|token|auth_?token|access_?token|refresh_?token|bearer|authorization)$"
+)
+_TOKENIZER_TOKENS = frozenset(
+    {"eos_token", "bos_token", "pad_token", "unk_token", "sep_token", "cls_token", "mask_token"}
+)
+
+
+def is_secret_name(name: str) -> bool:
+    """Whether a config key or CLI flag name looks like it holds a credential."""
+    key = name.strip().lstrip("-").rsplit(".", 1)[-1].lower().replace("-", "_")
+    return key not in _TOKENIZER_TOKENS and bool(_SECRET_NAME_RE.search(key))
+
+
+def redact_argv(argv: Sequence[str]) -> list[str]:
+    """argv with the values of secret-looking options replaced.
+
+    Handles ``key=value`` overrides (``-o provider.api_key=...``), ``--flag=value`` and
+    ``--flag value``. An argument after a flag that starts with ``-`` is another option
+    (the flag was boolean, like ``--hf-token``) and is kept.
+    """
+    out: list[str] = []
+    redact_next = False
+    for arg in argv:
+        if redact_next and not arg.startswith("-"):
+            out.append(REDACTED)
+            redact_next = False
+            continue
+        redact_next = False
+        name, sep, _value = arg.partition("=")
+        if sep and is_secret_name(name):
+            out.append(f"{name}={REDACTED}")
+        elif arg.startswith("--") and not sep and is_secret_name(arg):
+            out.append(arg)
+            redact_next = True
+        else:
+            out.append(arg)
+    return out
+
+
 def json_safe(value: Any) -> Any:
     """Round-trip through JSON so configs with odd values still serialize.
 
-    Non-finite floats become None, since the ingest API only accepts standard JSON.
+    Non-finite floats become None, since the ingest API only accepts standard JSON, and
+    string values under secret-looking keys (``api_key``, ``password``...) are redacted.
     """
-    return _finite_only(json.loads(json.dumps(value, default=str)))
+    return _clean(json.loads(json.dumps(value, default=str)))
 
 
-def _finite_only(value: Any) -> Any:
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
+def _clean(value: Any, key: str | None = None) -> Any:
+    if isinstance(value, str) and key is not None and value and is_secret_name(key):
+        return REDACTED
     if isinstance(value, dict):
-        return {key: _finite_only(item) for key, item in value.items()}
+        return {k: _clean(item, str(k)) for k, item in value.items()}
     if isinstance(value, list):
-        return [_finite_only(item) for item in value]
+        return [_clean(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     return value
 
 
@@ -146,7 +193,7 @@ def build_run_info(
         "git": git,
         "beaker": beaker,
         "environment": environment,
-        "argv": list(argv) if argv is not None else current_argv(),
+        "argv": redact_argv(argv if argv is not None else current_argv()),
         "task_specs": list(task_specs),
         "output_dir": output_dir,
         "harness_config": json_safe(dict(harness_config)) if harness_config else None,
