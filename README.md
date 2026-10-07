@@ -963,9 +963,23 @@ its results on disk, and prints a note. This applies to `olmo-eval beaker launch
 Passing `--upload` or setting `OLMO_EVAL_UPLOAD=1` asks for an upload explicitly, so a
 missing credential is then an error.
 
-Uploaded predictions and requests are visible to everyone at Ai2 who can open the
-dashboard. For private or licensed datasets whose examples must not be shared, pass
-`--no-upload`.
+### Who can see uploaded results
+
+Everyone at Ai2 who can sign in to the dashboard can see every uploaded run: its
+configs, command line, metrics, instance previews, and every file in the output
+directory, including predictions, requests and logs. Pass `--no-upload` (or set
+`OLMO_EVAL_UPLOAD=0`) for private or licensed datasets whose examples must not be
+shared.
+
+Keep credentials out of anything that is uploaded. Put API keys in environment
+variables, and on Beaker map them from Beaker secrets (`--secret-env BEAKER_SECRET:ENV_VAR` on
+`olmo-eval beaker launch`). Do not pass them as literal values in `-o` overrides,
+other command-line arguments or harness config files. Secret names, such as a
+provider's `required_secrets`, are references and are safe to upload. Before upload,
+olmo-eval replaces the values of secret-looking keys (`api_key`, `token`, `password`,
+`secret` and similar) in the uploaded configs and command line with `[redacted]`.
+The uploaded files are sent as they are, so a key printed into a log, or written into
+`metrics.json`, is uploaded with it.
 
 What is uploaded:
 
@@ -1005,6 +1019,23 @@ uv run olmo-eval results upload ./results
 | Ingest service | `--api-url` | `OLMO_EVAL_API_URL` | `https://prod-ingest.olmo-eval.apps.allenai.org` |
 | Run labels | `--tag` (repeatable) | | none |
 | Upload deadline | | `OLMO_EVAL_UPLOAD_TIMEOUT` (seconds) | `1800` |
+
+### Migrating from the Postgres results store
+
+The dashboard replaces the Postgres results database, the S3 result uploads and the
+commands built on them. Data in the old database was not migrated, so the dashboard
+holds only runs uploaded since it launched.
+
+| Before | Now |
+|--------|-----|
+| `--store`, `--db-*` | Uploads are on by default; `--no-upload` turns them off |
+| `--s3-bucket`, `--s3-prefix` and the other `--s3-*` result flags | Files upload to the dashboard's GCS bucket with the run |
+| `olmo-eval results query`, `groups`, `group`, `suites` | The Runs, Groups and Suites pages in the dashboard |
+| `olmo-eval results viewer` and the pairwise viewer | The Run and Compare pages in the dashboard |
+| `olmo-eval metrics` | The run's Inference tab (upload with `-o metrics.enabled=true`) |
+
+The removed flags now fail with a usage error. The removed commands exit with a
+pointer to the dashboard. S3 *dataset* loading is unchanged.
 
 The dashboard code lives in `dashboard/` (see `dashboard/README.md`).
 
