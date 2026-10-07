@@ -36,6 +36,15 @@ Protocol (the official ``api_test/base.py``):
   average per stage, and ``overall``, the micro average over all 4,264 questions
   (the paper's "Overall" column).
 
+Parity: ``gpt-4o-2024-11-20`` at temperature 1 (the API default the paper ran) scores 0.623
+with this task's layout and 0.431 with ``spur_paper_layout``, against the paper's 0.540. With
+the official system-turn layout, a quarter of GPT-4o's tags hold "C. 75%"-style text, which
+the exact-match rule scores as wrong (``overall_lenient`` 0.562 vs 0.633). The same model's
+score thus spans the paper's number depending on layout alone; compare models only under one
+layout. The official script also sends its text part under a malformed key (``"{question}:"``
+instead of ``"text"``) and scores failed requests as wrong without retrying them, so what the
+paper's runs received cannot be reconstructed exactly.
+
 Deviations:
 
 * The official script sends the instruction as a system turn. Here it leads the user
