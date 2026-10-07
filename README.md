@@ -1034,8 +1034,8 @@ holds only runs uploaded since it launched.
 | `olmo-eval results viewer` and the pairwise viewer | The Run and Compare pages in the dashboard |
 | `olmo-eval metrics` | The run's Inference tab (upload with `-o metrics.enabled=true`) |
 
-The removed flags now fail with a usage error. The removed commands exit with a
-pointer to the dashboard. S3 *dataset* loading is unchanged.
+The removed flags and commands now fail with a usage error. S3 *dataset* loading is
+unchanged.
 
 The dashboard code lives in `dashboard/` (see `dashboard/README.md`).
 

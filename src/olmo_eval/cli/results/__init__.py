@@ -6,7 +6,6 @@ import functools
 
 import click
 
-from olmo_eval.cli.removed import BROWSE_IN_DASHBOARD, removed_command
 from olmo_eval.cli.utils import console
 
 # Plain numbers and paths: no automatic highlighting.
@@ -16,10 +15,6 @@ echo = functools.partial(console.print, highlight=False)
 @click.group()
 def results() -> None:
     """Work with saved evaluation results."""
-
-
-for _name in ("query", "groups", "group", "suites", "viewer"):
-    results.add_command(removed_command(_name, BROWSE_IN_DASHBOARD))
 
 
 def _format_bytes(size: int) -> str:
