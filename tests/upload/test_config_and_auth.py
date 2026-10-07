@@ -122,6 +122,7 @@ def test_api_url_rejects_non_https(url) -> None:
 
 def test_resolve_rejects_http_api_url_from_env(monkeypatch) -> None:
     monkeypatch.delenv("OLMO_EVAL_UPLOAD", raising=False)
+    monkeypatch.setattr("olmo_eval.upload.auth.has_upload_credentials", lambda: True)
     monkeypatch.setenv("OLMO_EVAL_API_URL", "http://ingest.example")
     with pytest.raises(InvalidApiUrl, match="OLMO_EVAL_API_URL") as error:
         resolve_upload_config()

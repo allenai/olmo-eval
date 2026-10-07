@@ -13,6 +13,8 @@ def _no_results_upload(monkeypatch):
     monkeypatch.delenv("OLMO_EVAL_API_URL", raising=False)
     monkeypatch.delenv("OLMO_EVAL_LAUNCH_ID", raising=False)
     monkeypatch.setattr("olmo_eval.upload.auth._uploader_key", None)
+    # Behave the same with or without Application Default Credentials on this machine.
+    monkeypatch.setattr("olmo_eval.upload.auth.has_local_google_credentials", lambda: False)
 
 
 @pytest.fixture
