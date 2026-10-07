@@ -90,6 +90,21 @@ MALFORMED = [
     ),
     ("ingest/complete.request.json", s.CompleteRequest, ["status"], "running"),
     ("ingest/inference.request.json", s.InferenceUploadRequest, ["batches", 0, "seq"], -1),
+    (
+        "ingest/instances.request.json",
+        s.InstanceBatchRequest,
+        ["instances", 0, "completion_tokens"],
+        2**31,
+    ),
+    ("ingest/instances.request.json", s.InstanceBatchRequest, ["instances", 0, "doc_id"], 2**31),
+    ("ingest/task-result.request.json", s.TaskResultIn, ["instance_count"], 2**31),
+    ("ingest/run-upsert-final.request.json", s.RunUpsertRequest, ["run", "launch_id"], "x" * 65),
+    (
+        "ingest/complete-with-suites.request.json",
+        s.CompleteRequest,
+        ["suites", 0, "aggregation"],
+        "x" * 33,
+    ),
 ]
 
 

@@ -277,3 +277,17 @@ def test_find_task_file_without_model_ignores_stale_and_ambiguous_files(tmp_path
 def test_batched() -> None:
     batches = list(batched(iter([{"i": i} for i in range(5)]), size=2))
     assert [len(b) for b in batches] == [2, 2, 1]
+
+
+def test_values_too_large_for_32_bit_fields_are_dropped(tmp_path: Path) -> None:
+    preds = tmp_path / "p.jsonl"
+    records = mc_predictions(1)
+    records[0]["doc_id"] = 2**40
+    records[0]["model_output"][0]["num_tokens"] = 2**33
+    write_jsonl(preds, records)
+
+    rows = list(iter_instances(preds, None, "accuracy:LogprobScorer"))
+
+    assert rows[0]["doc_id"] is None
+    assert rows[0]["completion_tokens"] is None
+    _assert_valid(rows)

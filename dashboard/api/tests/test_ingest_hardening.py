@@ -35,8 +35,8 @@ async def test_out_of_range_integer_is_a_client_error(client: httpx.AsyncClient)
     response = await client.post(
         f"/v1/task-results/{tid}/instances", json={"batch_index": 0, "instances": rows}
     )
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "bad_request"
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
     rows[0]["completion_tokens"] = 12
     ok = await client.post(
         f"/v1/task-results/{tid}/instances", json={"batch_index": 0, "instances": rows}

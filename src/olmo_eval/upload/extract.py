@@ -170,6 +170,14 @@ def _flat_metrics(instance_metrics: Any, primary_key: str | None) -> dict[str, f
     return {key: flat[key] for key in keys[:MAX_METRICS]}
 
 
+INT32_MAX = 2**31 - 1
+
+
+def _int32(value: int | None) -> int | None:
+    """The value if it fits the ingest API's 32-bit fields, else None."""
+    return value if value is not None and value <= INT32_MAX else None
+
+
 def _nonneg_int(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
@@ -288,13 +296,13 @@ def build_instance_row(
 
     return {
         "native_id": native_id,
-        "doc_id": _nonneg_int(rec.get("doc_id")),
+        "doc_id": _int32(_nonneg_int(rec.get("doc_id"))),
         "primary_score": primary_score,
         "metrics": _flat_metrics(instance_metrics, primary_key),
         "label": _label(rec.get("label")),
         "finish_reason": finish_reason[:32] if isinstance(finish_reason, str) else None,
-        "completion_tokens": completion_tokens,
-        "prompt_tokens": _prompt_tokens(rec, outputs),
+        "completion_tokens": _int32(completion_tokens),
+        "prompt_tokens": _int32(_prompt_tokens(rec, outputs)),
         "num_outputs": len(outputs),
         "extracted_answer": None if extracted is None else str(extracted)[:256],
         "prompt_preview": request.preview[:PREVIEW_CHARS] if request and request.preview else None,
@@ -305,9 +313,9 @@ def build_instance_row(
         "has_judge_result": judge is not None,
         "has_trajectory": rec.get("trajectory") is not None,
         "pred_offset": pred_offset,
-        "pred_length": pred_length,
+        "pred_length": _int32(pred_length),
         "req_offset": request.offset if request else None,
-        "req_length": request.length if request else None,
+        "req_length": _int32(request.length) if request else None,
     }
 
 

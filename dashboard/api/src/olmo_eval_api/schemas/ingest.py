@@ -18,7 +18,9 @@ MAX_ARTIFACT_BYTES = 5 * 1024**3
 
 RunId = Annotated[str, Field(pattern=RUN_ID_PATTERN)]
 Tag = Annotated[str, Field(pattern=TAG_PATTERN)]
-NonNeg = Annotated[int, Field(ge=0)]
+NonNeg = Annotated[int, Field(ge=0, le=2**63 - 1)]
+# Counts and sizes stored in 32-bit columns.
+NonNeg32 = Annotated[int, Field(ge=0, le=2**31 - 1)]
 NestedMetrics = dict[str, dict[str, float | None]]
 FlatMetrics = dict[str, float | None]
 RunStatus = Literal["running", "complete", "partial", "failed"]
@@ -103,7 +105,7 @@ class RunError(_In):
 
 class RunInfo(_In):
     run_id: RunId
-    launch_id: str | None
+    launch_id: str | None = Field(max_length=64)
     experiment_name: str | None
     experiment_group: str | None
     status: RunStatus
@@ -205,12 +207,12 @@ class TaskResultIn(_In):
     metrics: NestedMetrics
     metric_meta: dict[str, MetricMetaIn]
     config: dict[str, Any]
-    num_fewshot: NonNeg | None
-    limit: NonNeg | None
+    num_fewshot: NonNeg32 | None
+    limit: NonNeg32 | None
     split: str | None
-    num_instances: NonNeg
-    instances_processed: NonNeg | None
-    instances_failed: NonNeg | None
+    num_instances: NonNeg32
+    instances_processed: NonNeg32 | None
+    instances_failed: NonNeg32 | None
     error: str | None
     error_summary: dict[str, Any] | None
     duration_seconds: float | None
@@ -222,7 +224,7 @@ class TaskResultIn(_In):
     predictions_path: RelativePath | None
     requests_path: RelativePath | None
     suites: list[str]
-    instance_count: NonNeg
+    instance_count: NonNeg32
 
 
 class TaskResultUpsertResponse(_Out):
@@ -234,13 +236,13 @@ class TaskResultUpsertResponse(_Out):
 
 class InstanceIn(_In):
     native_id: str = Field(min_length=1, max_length=512)
-    doc_id: NonNeg | None
+    doc_id: NonNeg32 | None
     primary_score: float | None
     metrics: FlatMetrics = Field(max_length=200)
     label: str | None = Field(max_length=256)
     finish_reason: str | None
-    completion_tokens: NonNeg | None
-    prompt_tokens: NonNeg | None
+    completion_tokens: NonNeg32 | None
+    prompt_tokens: NonNeg32 | None
     num_outputs: NonNeg
     extracted_answer: str | None = Field(max_length=256)
     prompt_preview: str | None = Field(max_length=300)
@@ -251,9 +253,9 @@ class InstanceIn(_In):
     has_judge_result: bool
     has_trajectory: bool
     pred_offset: NonNeg | None
-    pred_length: NonNeg | None
+    pred_length: NonNeg32 | None
     req_offset: NonNeg | None
-    req_length: NonNeg | None
+    req_length: NonNeg32 | None
 
 
 class InstanceBatchRequest(_In):
@@ -268,12 +270,12 @@ class InstanceBatchResponse(_Out):
 
 
 class InferenceBatchIn(_In):
-    seq: NonNeg
+    seq: NonNeg32
     timestamp: datetime
     task_name: str | None
-    total_requests: NonNeg
-    successful_requests: NonNeg
-    failed_requests: NonNeg
+    total_requests: NonNeg32
+    successful_requests: NonNeg32
+    failed_requests: NonNeg32
     total_prompt_tokens: NonNeg
     total_completion_tokens: NonNeg
     wall_clock_time_s: float
@@ -331,14 +333,14 @@ class SuiteChildIn(_In):
 
 class SuiteResultIn(_In):
     name: str = Field(min_length=1)
-    aggregation: str
+    aggregation: str = Field(max_length=32)
     parent: str | None
     description: str | None
     children: list[SuiteChildIn]
     metrics: NestedMetrics
     primary_metric: str | None
     score: float | None
-    num_tasks: NonNeg | None
+    num_tasks: NonNeg32 | None
 
 
 class CompleteRequest(_In):

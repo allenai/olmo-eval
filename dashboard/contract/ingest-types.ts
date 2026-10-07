@@ -24,8 +24,17 @@ export type Integer = number;
 /**
  * @asType integer
  * @minimum 0
+ * @maximum 9223372036854775807
  */
 export type NonNegativeInteger = number;
+
+/**
+ * A count or size stored in a 32-bit column.
+ * @asType integer
+ * @minimum 0
+ * @maximum 2147483647
+ */
+export type NonNegativeInt32 = number;
 
 /** @format date-time */
 export type DateTime = string;
@@ -155,6 +164,7 @@ export interface RunError {
 export interface RunInfo {
     run_id: RunId;
     /** Shared by all runs created by one `olmo-eval beaker launch`. Null for local runs. */
+    /** @maxLength 64 */
     launch_id: string | null;
     experiment_name: string | null;
     experiment_group: string | null;
@@ -327,13 +337,13 @@ export interface TaskResultIn {
     metric_meta: { [metricName: string]: MetricMetaIn };
     /** TaskConfig.to_dict() (metrics.json tasks[].config). */
     config: JsonObject;
-    num_fewshot: NonNegativeInteger | null;
-    limit: NonNegativeInteger | null;
+    num_fewshot: NonNegativeInt32 | null;
+    limit: NonNegativeInt32 | null;
     split: string | null;
     /** Scored and saved instances (tasks[].num_instances). */
-    num_instances: NonNegativeInteger;
-    instances_processed: NonNegativeInteger | null;
-    instances_failed: NonNegativeInteger | null;
+    num_instances: NonNegativeInt32;
+    instances_processed: NonNegativeInt32 | null;
+    instances_failed: NonNegativeInt32 | null;
     error: string | null;
     error_summary: JsonObject | null;
     /**
@@ -360,7 +370,7 @@ export interface TaskResultIn {
     /** Registered suites that contain this task spec (static membership). */
     suites: string[];
     /** Number of instance rows the client will send for this task result (0 without predictions). */
-    instance_count: NonNegativeInteger;
+    instance_count: NonNegativeInt32;
 }
 
 export interface TaskResultUpsertResponse {
@@ -391,7 +401,7 @@ export interface InstanceIn {
      * @maxLength 512
      */
     native_id: string;
-    doc_id: NonNegativeInteger | null;
+    doc_id: NonNegativeInt32 | null;
     /** Value of the task's primary metric for this instance, null when absent. */
     primary_score: number | null;
     /**
@@ -407,9 +417,9 @@ export interface InstanceIn {
     /** "length" if any sample was truncated, else model_output[0].finish_reason. */
     finish_reason: string | null;
     /** Sum over all generated samples (multiple choice: model_output[0]). */
-    completion_tokens: NonNegativeInteger | null;
+    completion_tokens: NonNegativeInt32 | null;
     /** Prompt tokens for this instance (log-likelihood requests: context plus continuation). */
-    prompt_tokens: NonNegativeInteger | null;
+    prompt_tokens: NonNegativeInt32 | null;
     /** len(model_output). */
     num_outputs: NonNegativeInteger;
     /** @maxLength 256 */
@@ -436,10 +446,10 @@ export interface InstanceIn {
     has_trajectory: boolean;
     /** Byte offset and length (without the newline) of this instance's line in predictions_path. */
     pred_offset: NonNegativeInteger | null;
-    pred_length: NonNegativeInteger | null;
+    pred_length: NonNegativeInt32 | null;
     /** Byte offset and length of the matching line in requests_path, null when not found. */
     req_offset: NonNegativeInteger | null;
-    req_length: NonNegativeInteger | null;
+    req_length: NonNegativeInt32 | null;
 }
 
 export interface InstanceBatchRequest {
@@ -465,13 +475,13 @@ export interface InstanceBatchResponse {
 /** One BatchMetrics line from metrics/*-inference.jsonl without gpu_devices or requests. */
 export interface InferenceBatchIn {
     /** Order within the run, starting at 0. */
-    seq: NonNegativeInteger;
+    seq: NonNegativeInt32;
     timestamp: DateTime;
     /** BatchMetrics.task_name (null today: chunks mix tasks). */
     task_name: string | null;
-    total_requests: NonNegativeInteger;
-    successful_requests: NonNegativeInteger;
-    failed_requests: NonNegativeInteger;
+    total_requests: NonNegativeInt32;
+    successful_requests: NonNegativeInt32;
+    failed_requests: NonNegativeInt32;
     total_prompt_tokens: NonNegativeInteger;
     total_completion_tokens: NonNegativeInteger;
     wall_clock_time_s: number;
@@ -548,6 +558,7 @@ export interface SuiteChildIn {
 export interface SuiteResultIn {
     name: string;
     /** none, average, weighted_average, average_of_averages, display_only. */
+    /** @maxLength 32 */
     aggregation: string;
     /** Parent suite name for nested suites, else null. */
     parent: string | null;
@@ -559,7 +570,7 @@ export interface SuiteResultIn {
     primary_metric: string | null;
     /** Suite primary score, null for display_only/none. */
     score: number | null;
-    num_tasks: NonNegativeInteger | null;
+    num_tasks: NonNegativeInt32 | null;
 }
 
 /**

@@ -464,7 +464,7 @@
       "description": "One BatchMetrics line from metrics/*-inference.jsonl without gpu_devices or requests.",
       "properties": {
         "failed_requests": {
-          "$ref": "#/definitions/NonNegativeInteger"
+          "$ref": "#/definitions/NonNegativeInt32"
         },
         "gpu_summary": {
           "anyOf": [
@@ -490,11 +490,11 @@
           "type": "number"
         },
         "seq": {
-          "$ref": "#/definitions/NonNegativeInteger",
+          "$ref": "#/definitions/NonNegativeInt32",
           "description": "Order within the run, starting at 0."
         },
         "successful_requests": {
-          "$ref": "#/definitions/NonNegativeInteger"
+          "$ref": "#/definitions/NonNegativeInt32"
         },
         "task_name": {
           "description": "BatchMetrics.task_name (null today: chunks mix tasks).",
@@ -513,7 +513,7 @@
           "$ref": "#/definitions/NonNegativeInteger"
         },
         "total_requests": {
-          "$ref": "#/definitions/NonNegativeInteger"
+          "$ref": "#/definitions/NonNegativeInt32"
         },
         "wall_clock_time_s": {
           "type": "number"
@@ -652,7 +652,7 @@
         "completion_tokens": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -663,7 +663,7 @@
         "doc_id": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -738,7 +738,7 @@
         "pred_length": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -774,7 +774,7 @@
         "prompt_tokens": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -785,7 +785,7 @@
         "req_length": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -1000,7 +1000,14 @@
       "description": "Nested metrics exactly as metrics.json stores them: {metric_name: {scorer_name: value}}.",
       "type": "object"
     },
+    "NonNegativeInt32": {
+      "description": "A count or size stored in a 32-bit column.",
+      "maximum": 2147483647,
+      "minimum": 0,
+      "type": "integer"
+    },
     "NonNegativeInteger": {
+      "maximum": 9223372036854776000,
       "minimum": 0,
       "type": "integer"
     },
@@ -1154,7 +1161,7 @@
           "description": "HarnessConfig.to_dict() (metrics.json \"config\")."
         },
         "launch_id": {
-          "description": "Shared by all runs created by one `olmo-eval beaker launch`. Null for local runs.",
+          "maxLength": 64,
           "type": [
             "string",
             "null"
@@ -1495,7 +1502,7 @@
       "description": "One suite aggregation from metrics/results \"suites\", plus its definition.",
       "properties": {
         "aggregation": {
-          "description": "none, average, weighted_average, average_of_averages, display_only.",
+          "maxLength": 32,
           "type": "string"
         },
         "children": {
@@ -1520,7 +1527,7 @@
         "num_tasks": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -1635,13 +1642,13 @@
           "description": "When the task's first request was sent to an inference worker."
         },
         "instance_count": {
-          "$ref": "#/definitions/NonNegativeInteger",
+          "$ref": "#/definitions/NonNegativeInt32",
           "description": "Number of instance rows the client will send for this task result (0 without predictions)."
         },
         "instances_failed": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -1651,7 +1658,7 @@
         "instances_processed": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -1672,7 +1679,7 @@
         "limit": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -1691,7 +1698,7 @@
         "num_fewshot": {
           "anyOf": [
             {
-              "$ref": "#/definitions/NonNegativeInteger"
+              "$ref": "#/definitions/NonNegativeInt32"
             },
             {
               "type": "null"
@@ -1699,7 +1706,7 @@
           ]
         },
         "num_instances": {
-          "$ref": "#/definitions/NonNegativeInteger",
+          "$ref": "#/definitions/NonNegativeInt32",
           "description": "Scored and saved instances (tasks[].num_instances)."
         },
         "predictions_path": {
