@@ -41,10 +41,13 @@ def _image_data_url(image: Any) -> str:
 
 
 def _attach_images(messages: list[dict[str, Any]], images: tuple[Any, ...]) -> None:
-    """Put a request's images in the last user turn, before its text.
+    """Put a request's images in the last user turn.
 
-    Images precede the text, the order the local multimodal providers use, so an
-    API model sees the same prompt layout as a local one.
+    A user turn whose content is a part list may mark image positions with
+    ``{"type": "image"}`` parts (the Hugging Face chat-template convention); the
+    images fill them in order. Otherwise the images precede the text, the order the
+    local multimodal providers use, so an API model sees the same prompt layout as a
+    local one.
     """
     from olmo_eval.common.images import resolve_images
 
@@ -55,13 +58,24 @@ def _attach_images(messages: list[dict[str, Any]], images: tuple[Any, ...]) -> N
     if user_turn is None:
         raise ValueError("A request with images needs a user message to attach them to.")
     content = user_turn.get("content")
-    text_parts = (
+    parts = (
         list(content) if isinstance(content, list) else [{"type": "text", "text": content or ""}]
     )
     image_parts = [
         {"type": "image_url", "image_url": {"url": _image_data_url(image)}} for image in resolved
     ]
-    user_turn["content"] = image_parts + text_parts
+    slots = [i for i, part in enumerate(parts) if part.get("type") == "image"]
+    if not slots:
+        user_turn["content"] = image_parts + parts
+        return
+    if len(slots) != len(image_parts):
+        raise ValueError(
+            f"User turn marks {len(slots)} image position(s) but the request has "
+            f"{len(image_parts)} image(s)."
+        )
+    for slot, image_part in zip(slots, image_parts, strict=True):
+        parts[slot] = image_part
+    user_turn["content"] = parts
 
 
 class LiteLLMProvider(InferenceProvider):

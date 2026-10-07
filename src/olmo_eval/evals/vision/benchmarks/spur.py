@@ -43,7 +43,8 @@ Deviations:
   on the same prompt. The official instruction's unfilled ``{question} {options}
   {image}`` placeholders are kept verbatim.
 * The official script places the image after the text; the providers here place it
-  before the text, as they do for every image task.
+  before the text, as they do for every image task ``spur_paper_layout`` restores the
+  official layout (system-turn instruction, text then image) for API models.
 * Decoding is greedy with a 2,048-token cap. The official runs used each API's default
   sampling with no cap.
 * ``overall_lenient`` and ``no_answer_tag`` are diagnostics, not paper metrics: the
@@ -61,7 +62,15 @@ from pathlib import Path
 
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.types import Instance, LMOutput, Response, SamplingParams, Split
+from olmo_eval.common.types import (
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+    SamplingParams,
+    Split,
+)
 from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.vision.scoring.common import response_text
 from olmo_eval.evals.vision.tasks.image_qa import ImageQATask
@@ -122,6 +131,11 @@ def task_for_tag(stage: str, tag: str) -> str:
 def build_question(question: str, options: str) -> str:
     """The user turn: the official instruction, then the official question/options text."""
     return f"{SPUR_INSTRUCTION}\n{question}\n {{Options}}:{options}"
+
+
+def official_user_text(question: str, options: str) -> str:
+    """The official user text part, without the instruction (sent as a system turn there)."""
+    return f"{question}\n {{Options}}:{options}"
 
 
 def extract_official_answer(text: str) -> str | None:
@@ -268,5 +282,33 @@ class SpurTask(ImageQATask):
                         # QUESTION_INDEX repeats within a file, so the row position is the id.
                         "example_id": f"{stage}_{idx}",
                         "image_path": str(image_path),
+                        "user_text": official_user_text(row["QUESTION"], row["OPTION"]),
                     },
                 )
+
+
+@register("spur_paper_layout")
+class SpurPaperLayoutTask(SpurTask):
+    """SPUR with the official script's message layout, for API models.
+
+    The instruction (with its leading space) is a system turn and the user turn is the
+    question/options text followed by the figure, as in ``api_test/base.py``. Only the
+    LiteLLM provider honors the image position; Molmo2's chat template rejects the
+    system turn, so this task is for checking parity with the paper's API runs.
+    """
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        return LMRequest(
+            request_type=RequestType.CHAT,
+            messages=(
+                {"role": "system", "content": " " + SPUR_INSTRUCTION},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": instance.metadata["user_text"]},
+                        {"type": "image"},
+                    ],
+                },
+            ),
+            images=self._attach_images(instance),
+        )
