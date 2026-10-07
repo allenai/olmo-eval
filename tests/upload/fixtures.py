@@ -401,7 +401,8 @@ class FakeIngest:
     """In-memory ingest service and GCS bucket behind httpx.MockTransport.
 
     Every request body is validated against the contract schema; violations are
-    collected in ``schema_errors``. ``fail`` maps "METHOD /path" to a list of status
+    collected in ``schema_errors``. A task result sent again with the same body is
+    reported as unchanged. ``fail`` maps "METHOD /path" to a list of status
     codes returned (in order) before the real handler runs; ``gcs_fail`` does the
     same for signed uploads keyed by artifact path.
     """
@@ -512,11 +513,18 @@ class FakeIngest:
                 if (t["task_name"], t["task_hash"]) == (body["task_name"], body["task_hash"])
             ]
             tid = existing[0] if existing else len(self.task_results) + 1
-            self.task_results[tid] = body
-            self.instances[tid] = []
+            unchanged = bool(existing) and self.task_results[tid] == body
+            if not unchanged:
+                self.task_results[tid] = body
+                self.instances[tid] = []
             return self._json(
                 200,
-                {"task_result_id": tid, "created": not existing, "instances_cleared": False},
+                {
+                    "task_result_id": tid,
+                    "created": not existing,
+                    "instances_cleared": False,
+                    "unchanged": unchanged,
+                },
             )
         match = re.fullmatch(r"/v1/task-results/(\d+)/instances", path)
         if match:

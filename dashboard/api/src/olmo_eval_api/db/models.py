@@ -298,6 +298,8 @@ class TaskResult(SQLModel, table=True):
     created_at: datetime = _ts()
     updated_at: datetime = _ts()
     finalized_at: datetime | None = _ts(nullable=True)
+    # Hash of the last upload's request and file checksums; an identical re-upload is skipped.
+    content_hash: str | None = _str(64)
 
 
 class InstanceResult(SQLModel, table=True):

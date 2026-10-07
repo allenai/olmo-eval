@@ -368,6 +368,11 @@ export interface TaskResultUpsertResponse {
     created: boolean;
     /** True when previously stored instances were deleted. */
     instances_cleared: boolean;
+    /**
+     * True when the stored task result already matches this request and its files, so its
+     * instances were kept and need not be sent again.
+     */
+    unchanged: boolean;
 }
 
 // ---------------------------------------------------------------------------

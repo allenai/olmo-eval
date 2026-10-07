@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import math
 from collections.abc import Sequence
@@ -225,8 +226,6 @@ async def upsert_run(
             for key, value in fields.items():
                 setattr(run, key, value)
             run.status = req.run.status
-            if req.run.status in FINAL_STATUSES:
-                run.upload_state = "uploading"
             run.updated_at = ts
     run.search_text = build_search_text(run)
     response = s.RunUpsertResponse(
@@ -536,6 +535,7 @@ async def upsert_task_result(
         "updated_at": ts,
         "finalized_at": None,
     }
+    fields["content_hash"] = await _content_hash(session, run_id, req)
     trc = task_results_t.c
     existing = (
         (
@@ -552,6 +552,17 @@ async def upsert_task_result(
         .scalars()
         .first()
     )
+    if (
+        existing is not None
+        and existing.finalized_at is not None
+        and existing.content_hash == fields["content_hash"]
+        and existing.instances_stored == req.instance_count
+    ):
+        task_result_id = int(existing.id or 0)
+        await session.commit()
+        return s.TaskResultUpsertResponse(
+            task_result_id=task_result_id, created=False, instances_cleared=False, unchanged=True
+        )
     if existing is None:
         count = await _count(
             session, select(func.count()).select_from(task_results_t).where(trc.run_id == run_id)
@@ -595,6 +606,20 @@ async def upsert_task_result(
     return s.TaskResultUpsertResponse(
         task_result_id=task_result_id, created=created, instances_cleared=cleared
     )
+
+
+async def _content_hash(session: AsyncSession, run_id: str, req: s.TaskResultIn) -> str:
+    """Hash of the request and the checksums of the files it points to."""
+    paths = [p for p in (req.predictions_path, req.requests_path) if p]
+    checksums: dict[str, str] = {}
+    if paths:
+        ac = artifacts_t.c
+        rows = await session.execute(
+            select(ac.path, ac.md5_b64).where(ac.run_id == run_id, ac.path.in_(paths))
+        )
+        checksums = {path: md5 for path, md5 in rows}
+    body = {"request": req.model_dump(mode="json"), "files": {p: checksums.get(p) for p in paths}}
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------

@@ -1798,12 +1798,17 @@
         },
         "task_result_id": {
           "$ref": "#/definitions/Integer"
+        },
+        "unchanged": {
+          "description": "True when the stored task result already matches this request and its files, so its instances were kept and need not be sent again.",
+          "type": "boolean"
         }
       },
       "required": [
         "task_result_id",
         "created",
-        "instances_cleared"
+        "instances_cleared",
+        "unchanged"
       ],
       "type": "object"
     },

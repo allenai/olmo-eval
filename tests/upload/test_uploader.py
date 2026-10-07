@@ -145,6 +145,20 @@ def test_reupload_skips_existing_artifacts(tmp_path: Path, server: FakeIngest, c
     assert server.schema_errors == []
 
 
+def test_reupload_skips_instances_of_unchanged_task_results(
+    tmp_path: Path, server: FakeIngest, client
+) -> None:
+    out = make_arc_run(tmp_path / "run")
+    assert upload_results_dir(out, CONFIG, client=client).ok
+    instances = {tid: list(rows) for tid, rows in server.instances.items()}
+    server.calls.clear()
+
+    assert upload_results_dir(out, CONFIG, client=client).ok
+
+    assert not any("/instances" in path for _, path in server.calls)
+    assert dict(server.instances) == instances
+
+
 def test_retries_transient_errors(
     tmp_path: Path, server: FakeIngest, client, sleeps: list[float]
 ) -> None:

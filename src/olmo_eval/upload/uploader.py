@@ -503,6 +503,8 @@ def _send(client: IngestClient, plan: UploadPlan) -> UploadResult:
 
     for task in plan.tasks:
         created = client.upsert_task_result(plan.run_id, task.payload)
+        if created.get("unchanged"):
+            continue
         task_result_id = created["task_result_id"]
         for index, rows in enumerate(plan.iter_instance_batches(task)):
             client.post_instances(task_result_id, {"batch_index": index, "instances": rows})

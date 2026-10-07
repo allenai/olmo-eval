@@ -302,12 +302,66 @@ async def test_status_never_downgraded(client: httpx.AsyncClient) -> None:
     assert body["upload_state"] == "complete"
 
 
-async def test_final_reupsert_sets_uploading(client: httpx.AsyncClient) -> None:
+async def test_reupload_keeps_a_complete_run_visible(client: httpx.AsyncClient) -> None:
     await seed_contract_example_run(client)
     final = load_example("ingest/run-upsert-final.request.json")
     final["run"]["status"] = "partial"
     body = (await client.put(f"/v1/runs/{RUN_ID}", json=final)).json()
-    assert body["status"] == "partial" and body["upload_state"] == "uploading"
+    assert body["status"] == "partial" and body["upload_state"] == "complete"
+
+
+async def test_identical_task_result_reupload_keeps_instances(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    run_id = "same00000001"
+    await seed_run(client, run_id=run_id, tasks={"gsm8k": [1.0, 0.0, 1.0]})
+    finalized = text("SELECT finalized_at FROM task_results WHERE run_id = :r")
+    before = await session.scalar(finalized, {"r": run_id})
+    payload = task_payload(
+        "gsm8k",
+        task_hash=hashlib.sha256(b"gsm8k").hexdigest()[:16],
+        primary_metric="acc:default",
+        corpus_score=2 / 3,
+        n=3,
+    )
+    # An interrupted re-upload: the run and the task result are sent again, nothing else.
+    body = run_payload(run_id=run_id, model_name="test-org/test-model", task_specs=["gsm8k"])
+    assert (await client.put(f"/v1/runs/{run_id}", json=body)).json()["upload_state"] == "complete"
+    response = (await client.post(f"/v1/runs/{run_id}/task-results", json=payload)).json()
+    assert response["unchanged"] is True and response["instances_cleared"] is False
+    counts = await table_counts(session)
+    assert counts["instance_results"] == 3 and counts["task_result_vectors"] == 1
+    assert await session.scalar(finalized, {"r": run_id}) == before
+
+    payload["metrics"]["acc"]["default"] = 0.5
+    response = (await client.post(f"/v1/runs/{run_id}/task-results", json=payload)).json()
+    assert response["unchanged"] is False and response["instances_cleared"] is True
+
+
+async def test_changed_predictions_file_is_not_unchanged(client: httpx.AsyncClient) -> None:
+    run_id = "same00000002"
+    await seed_run(client, run_id=run_id, tasks={"gsm8k": [1.0, 0.0]})
+    payload = task_payload(
+        "gsm8k",
+        task_hash=hashlib.sha256(b"gsm8k").hexdigest()[:16],
+        primary_metric="acc:default",
+        corpus_score=0.5,
+        n=2,
+    )
+    artifact = {
+        "path": payload["predictions_path"],
+        "size_bytes": 10,
+        "md5_b64": base64.b64encode(hashlib.md5(b"new").digest()).decode(),
+        "content_type": "application/jsonl",
+        "kind": "predictions",
+        "task_name": "gsm8k",
+    }
+    response = await client.post(
+        f"/v1/runs/{run_id}/artifacts:sign", json={"artifacts": [artifact]}
+    )
+    assert response.status_code == 200, response.text
+    response = (await client.post(f"/v1/runs/{run_id}/task-results", json=payload)).json()
+    assert response["unchanged"] is False
 
 
 async def test_run_id_mismatch_and_protocol(client: httpx.AsyncClient) -> None:

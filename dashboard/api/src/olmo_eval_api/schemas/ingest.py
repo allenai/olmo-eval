@@ -229,6 +229,7 @@ class TaskResultUpsertResponse(_Out):
     task_result_id: int
     created: bool
     instances_cleared: bool
+    unchanged: bool = False
 
 
 class InstanceIn(_In):
