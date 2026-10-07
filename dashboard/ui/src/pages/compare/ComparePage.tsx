@@ -141,12 +141,13 @@ export function ComparePage({ presetGroup }: { presetGroup?: string } = {}) {
   // Phones show the first three subjects until the list is expanded.
   const [allSubjects, setAllSubjects] = useState(false);
 
+  const subjectSignature = keys.join(",");
+  const subjectCount = keys.length;
   useEffect(() => {
-    if (keys.length < 2) return;
-    const label = search.group ? `Compare ${search.group}` : `Compare ${keys.length} subjects`;
+    if (subjectCount < 2) return;
+    const label = search.group ? `Compare ${search.group}` : `Compare ${subjectCount} subjects`;
     pushRecent({ type: "compare", key: window.location.search, label, href: `/compare${window.location.search}` });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keys.join(","), search.group]);
+  }, [subjectSignature, subjectCount, search.group]);
 
   useHotkeys(Object.fromEntries(VIEWS.map((v, i) => [String(i + 1), () => setSearch({ view: v === "heatmap" ? undefined : v })])));
 

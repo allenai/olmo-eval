@@ -1,7 +1,7 @@
 import type { FacetValue, RunsFacetsResponse } from "@contract/api-types";
 import * as Popover from "@radix-ui/react-popover";
 import { Filter, Plus } from "lucide-react";
-import { forwardRef, type KeyboardEvent, type ReactNode, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, type KeyboardEvent, type ReactNode, useCallback, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   FILTER_LABELS,
   isListKey,
@@ -226,12 +226,15 @@ export const FilterBar = forwardRef<FilterBarHandle, Props>(function FilterBar(
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus() }));
 
-  const facetValues = (key: RunFilterKey): FacetValue[] => {
-    if (key === "task") return taskOptions.map((t) => ({ value: t, count: 0 }));
-    if (key === "suite") return suiteOptions.map((t) => ({ value: t, count: 0 }));
-    if (key in FACET_SOURCE && facets) return facets[FACET_SOURCE[key as FacetKey]];
-    return [];
-  };
+  const facetValues = useCallback(
+    (key: RunFilterKey): FacetValue[] => {
+      if (key === "task") return taskOptions.map((t) => ({ value: t, count: 0 }));
+      if (key === "suite") return suiteOptions.map((t) => ({ value: t, count: 0 }));
+      if (key in FACET_SOURCE && facets) return facets[FACET_SOURCE[key as FacetKey]];
+      return [];
+    },
+    [taskOptions, suiteOptions, facets],
+  );
 
   // Autocomplete for the token being typed.
   const lastToken = text.split(/\s+/).pop() ?? "";
@@ -249,8 +252,7 @@ export const FilterBar = forwardRef<FilterBarHandle, Props>(function FilterBar(
     if (!lastToken) return [];
     const keys = ["model:", "family:", "task:", "suite:", "user:", "group:", "ws:", "tag:", "-tag:", "status:", "after:", "before:", "date:", "commit:", "step:>=", "has:failures"];
     return keys.filter((k) => k.startsWith(lastToken.toLowerCase())).slice(0, 6);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastToken, facets, taskOptions, suiteOptions]);
+  }, [lastToken, facetValues]);
 
   const commit = (value: string) => {
     if (!value.trim()) return;

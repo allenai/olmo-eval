@@ -13,7 +13,7 @@ import {
   Search,
   User,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearch } from "@/api/hooks/catalog";
 import { copyText } from "@/lib/csv";
 import { useBaseline } from "@/state/nav";
@@ -90,10 +90,13 @@ export function CommandPalette() {
   const debounced = useDebounced(parsed.text, 120);
   const search = useSearch(state.open && !parsed.commandsOnly ? debounced : "");
 
-  const go = (href: string) => {
-    closePalette();
-    navigate(href);
-  };
+  const go = useCallback(
+    (href: string) => {
+      closePalette();
+      navigate(href);
+    },
+    [navigate],
+  );
 
   const commands: PaletteCommand[] = useMemo(
     () => [
@@ -171,8 +174,7 @@ export function CommandPalette() {
       { id: "go-groups", label: "Go to Groups", hint: ["g", "g"], run: () => go("/groups") },
       { id: "go-views", label: "Go to saved views", run: () => go("/views") },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [navigate, setBaseline],
+    [go, setBaseline],
   );
 
   const pickMode = state.mode !== "default";

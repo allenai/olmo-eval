@@ -200,11 +200,18 @@ function RangeMark({ stats, scale, width, color }: { stats: TaskRuntimeModelRow[
   );
 }
 
+function runtimeStats(r: TaskRuntimeModelRow, mode: RuntimeMode) {
+  return mode === "inference" ? r.inference : r.with_startup;
+}
+
 /** One line per (model, GPUs): median runtime with the p90 and min-max range on a shared axis. */
 export function RuntimeByModel({ rows, mode, colorOf, groupByGpu }: { rows: TaskRuntimeModelRow[]; mode: RuntimeMode; colorOf: ColorOf; groupByGpu: boolean }) {
   const [ref, { width }] = useSize<HTMLDivElement>();
-  const statsOf = (r: TaskRuntimeModelRow) => (mode === "inference" ? r.inference : r.with_startup);
-  const sorted = useMemo(() => [...rows].sort((a, b) => (statsOf(a).median ?? Infinity) - (statsOf(b).median ?? Infinity)), [rows, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  const statsOf = (r: TaskRuntimeModelRow) => runtimeStats(r, mode);
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => (runtimeStats(a, mode).median ?? Infinity) - (runtimeStats(b, mode).median ?? Infinity)),
+    [rows, mode],
+  );
   const groups = useMemo(() => {
     if (!groupByGpu) return [{ gpu: null as string | null, rows: sorted }];
     const map = new Map<string, TaskRuntimeModelRow[]>();

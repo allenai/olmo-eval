@@ -204,7 +204,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
     };
   }, [keyboard, instanceId]);
 
-  const sortList = onSortChange ? parseSortList(sort) : localSort;
+  const sortedOnServer = !!onSortChange;
+  const sortList = useMemo(() => (sortedOnServer ? parseSortList(sort) : localSort), [sortedOnServer, sort, localSort]);
   const visibleColumns = useMemo(() => columns.filter((c) => !hidden.has(c.id)), [columns, hidden]);
   const selectable = !!onSelectionChange;
 
@@ -242,9 +243,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const lastPinned = pinOffsets.reduce<number>((acc, v, i) => (v != null ? i : acc), -1);
 
   const sortedRows = useMemo(
-    () => (props.clientSort || !onSortChange ? sortRows(rows, sortList, columns) : rows),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, sort, localSort, columns, props.clientSort],
+    () => (props.clientSort || !sortedOnServer ? sortRows(rows, sortList, columns) : rows),
+    [rows, sortList, columns, props.clientSort, sortedOnServer],
   );
 
   const items: Item<T>[] = useMemo(() => {

@@ -1,7 +1,7 @@
 import * as Popover from "@radix-ui/react-popover";
 import { useParams } from "@tanstack/react-router";
 import { ArrowRightLeft, Plus, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useModelSeries, useProgression, useSearch, useSuites } from "@/api/hooks/catalog";
 import { useResolveSubjects } from "@/api/hooks/compare";
 import { ChartPanel, Legend } from "@/charts/core";
@@ -82,8 +82,11 @@ export function ModelPage() {
     if (detail.data) pushRecent({ type: "model", key: series, label: detail.data.series_label, href: `/models/${encodeURIComponent(series)}` });
   }, [detail.data, series]);
 
-  const xOf = (p: { step: number | null; tokens_seen: number | null; date: string }) =>
-    xMode === "tokens" ? (p.tokens_seen ?? 0) / 1e9 : xMode === "date" ? new Date(p.date).getTime() : (p.step ?? 0);
+  const xOf = useCallback(
+    (p: { step: number | null; tokens_seen: number | null; date: string }) =>
+      xMode === "tokens" ? (p.tokens_seen ?? 0) / 1e9 : xMode === "date" ? new Date(p.date).getTime() : (p.step ?? 0),
+    [xMode],
+  );
 
   // Variants ordered by run count; a selected variant collapses to one line.
   const variantOf = useMemo(() => new Map((detail.data?.checkpoints ?? []).map((ck) => [ck.model.model_id, ck.settings_hash])), [detail.data]);
@@ -121,8 +124,7 @@ export function ModelPage() {
           refs: p.references.map((r, i) => ({ key: r.subject, label: r.label, value: r.score == null ? null : r.score * k, color: REF_COLORS[i % REF_COLORS.length] })),
         };
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [progression.data, xMode, detail.data, series, variantKeys, variantOf],
+    [progression.data, xMode, xOf, detail.data, series, variantKeys, variantOf],
   );
 
   if (detail.error) return <NotFoundPage what={`Model ${series}`} />;
