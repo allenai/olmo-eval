@@ -52,20 +52,26 @@ jobs:
               if: env.TRUSTED == 'true'
               run: terraform init -input=false -reconfigure
 
-            # The plan goes to the job summary. Sensitive values (the uploader key) are redacted by
-            # Terraform, but the rest is visible to anyone who can see this public repo's Actions.
+            # This repo's Actions logs are public, so only the changed resource addresses and
+            # actions are shown, never attribute values. Run `terraform plan` locally for details.
             - name: Plan
               if: env.TRUSTED == 'true' && github.event_name == 'pull_request'
               run: |
-                  set -o pipefail
-                  terraform plan -input=false -no-color -lock-timeout=10m | tee plan.txt
+                  terraform plan -input=false -no-color -lock-timeout=10m -out=plan.bin > /dev/null
                   {
                       echo '### Terraform plan'
                       echo '```'
-                      head -c 60000 plan.txt
+                      terraform show -json plan.bin | jq -r '
+                          [(.resource_changes // [])[] | select(.change.actions != ["no-op"])
+                           | "\(.change.actions | join("/")) \(.address)"]
+                          | if length == 0 then "No changes." else .[] end'
                       echo '```'
-                  } >> "$GITHUB_STEP_SUMMARY"
+                  } | tee -a "$GITHUB_STEP_SUMMARY"
+                  rm -f plan.bin
 
             - name: Apply
               if: env.TRUSTED == 'true' && github.event_name == 'push'
-              run: terraform apply -input=false -auto-approve -no-color -lock-timeout=10m
+              run: |
+                  terraform apply -input=false -auto-approve -no-color -lock-timeout=10m > apply.txt
+                  grep -E '^(Apply complete!|No changes)' apply.txt || true
+                  rm -f apply.txt
