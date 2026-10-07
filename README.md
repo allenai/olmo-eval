@@ -769,7 +769,9 @@ and download their data from the Hub at a pinned revision:
 - `micro_bench_coarse` / `micro_bench_fine` — the perception splits of
   [μ-Bench](https://github.com/yeung-lab/Micro-Bench) (79,716 coarse-grained and 16,130
   fine-grained microscopy questions), with the prompt and letter matching of the paper's
-  `eVLLM` harness. `accuracy` is pooled over questions (the paper's "macro-average").
+  `eVLLM` harness. `accuracy` is pooled over questions (the paper's "macro-average"); for
+  the fine split it leaves out the two Eulenberg et al. 2017 datasets the official total drops
+  (`accuracy_all_datasets` keeps them).
 - `spur` — the 4,264 questions of [SPUR](https://arxiv.org/abs/2604.27604) (scientific
   experimental images). The official score is an exact letter match inside the first
   `<ANSWER>` tag; `overall_lenient` and `no_answer_tag` are diagnostics for models that

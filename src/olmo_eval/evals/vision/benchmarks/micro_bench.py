@@ -24,8 +24,11 @@ Protocol (``inference/generative_inference.py`` + ``eval/eval_utils.py``):
   ``process_models_question_only`` average ``is_correct`` over the concatenated per-dataset
   outputs), which is what the paper's Table 1 reports as "macro-average accuracy": ``accuracy``
   (primary) plus the five per-question-type accuracies for coarse, and per-dataset accuracies for
-  fine. ``pathology`` is the official pathology-only slice (Table 7), and fine's
-  ``macro_dataset`` is the unweighted mean over datasets (an extra, not an official number).
+  fine. The official fine-grained total (``eval_posthoc_rebutall_finegrained.py``) leaves out
+  the Eulenberg et al. 2017 darkfield and epifluorescence datasets (1,486 questions), so fine's
+  ``accuracy`` does too (14,644 questions); ``accuracy_all_datasets`` pools all 16,130.
+  ``pathology`` is the official pathology-only slice (Table 7), and fine's ``macro_dataset`` is
+  the unweighted mean over datasets (an extra, not an official number).
 * Datasets: the official tables cover the 23 datasets of ``tasks_metadata``. The Hub release
   also ships ``opencell`` (1,105 images) and ``sirinukunwattana_et_al_2016`` (80) outside that
   list, which are excluded here; its Held et al. 2010 rows have a null ``dataset`` and are named
@@ -259,8 +262,21 @@ _COARSE_METRICS: tuple[Metric, ...] = (
     ),
 )
 
+#: ``eval_posthoc_rebutall_finegrained.py`` drops these two before computing the fine-grained
+#: total that Table 1 reports.
+FINE_EXCLUDED_DATASETS: tuple[str, ...] = (
+    "eulenberg_et_al_2017_darkfield",
+    "eulenberg_et_al_2017_epifluorescence",
+)
+
 _FINE_METRICS: tuple[Metric, ...] = (
-    MicroBenchAccuracyMetric(name="accuracy", scorer=_SCORER),
+    MicroBenchAccuracyMetric(
+        name="accuracy",
+        scorer=_SCORER,
+        field="dataset",
+        values=tuple(d for d in DATASETS if d not in FINE_EXCLUDED_DATASETS),
+    ),
+    MicroBenchAccuracyMetric(name="accuracy_all_datasets", scorer=_SCORER),
     MicroBenchMacroMetric(name="macro_dataset", scorer=_SCORER),
     MicroBenchAccuracyMetric(
         name="pathology", scorer=_SCORER, field="dataset", values=PATHOLOGY_DATASETS
