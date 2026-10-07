@@ -129,6 +129,7 @@ def _run_fields(req: s.RunUpsertRequest) -> dict[str, Any]:
         "experiment_group": run.experiment_group,
         "author": run.author,
         "tags": list(dict.fromkeys(run.tags)),
+        "client_tags": list(dict.fromkeys(run.tags)),
         "started_at": run.started_at,
         "finished_at": run.finished_at,
         "duration_seconds": run.duration_seconds,
@@ -217,8 +218,7 @@ async def upsert_run(
     if not created:
         downgrade = run.status in FINAL_STATUSES and req.run.status == "running"
         if not downgrade:
-            # Keep tags added in the dashboard: the client only knows the CLI tags.
-            fields["tags"] = list(dict.fromkeys([*(run.tags or []), *fields["tags"]]))
+            fields["tags"] = merge_tags(run.tags, run.client_tags, fields["client_tags"])
             if not may_change_author(principal, run.uploaded_by):
                 # can_delete trusts the author of service-account uploads, so only the user
                 # who uploaded a run may change it.
@@ -251,6 +251,17 @@ async def upsert_run(
         extra={"run_id": run_id, "run_created": created, "run_status": response.status},
     )
     return response
+
+
+def merge_tags(stored: Sequence[str], sent_before: Sequence[str], sent: Sequence[str]) -> list[str]:
+    """A run's tags after a re-upload.
+
+    The stored tags include edits made in the dashboard, which the client does not know about.
+    Only tags the client had not sent before are added, so a tag removed in the dashboard
+    stays removed.
+    """
+    previous = set(sent_before)
+    return list(dict.fromkeys([*stored, *(tag for tag in sent if tag not in previous)]))
 
 
 def run_time(started_at: datetime | None, received_at: datetime) -> datetime:

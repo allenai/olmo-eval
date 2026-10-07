@@ -732,6 +732,19 @@ async def test_upsert_keeps_tags_added_in_the_dashboard(client: httpx.AsyncClien
     assert detail["tags"] == ["cli", "baseline", "final"]
 
 
+async def test_reupload_does_not_restore_tags_removed_in_the_dashboard(
+    client: httpx.AsyncClient,
+) -> None:
+    body = run_payload(run_id=RUN_ID, model_name="m", tags=["cli", "smoke"])
+    assert (await client.put(f"/v1/runs/{RUN_ID}", json=body)).status_code == 200
+    response = await client.patch(f"/api/runs/{RUN_ID}", json={"tags": ["cli"]})
+    assert response.status_code == 200
+    body["run"]["tags"] = ["cli", "smoke", "new"]
+    assert (await client.put(f"/v1/runs/{RUN_ID}", json=body)).status_code == 200
+    detail = (await client.get(f"/api/runs/{RUN_ID}")).json()
+    assert detail["tags"] == ["cli", "new"]
+
+
 async def test_null_scores_and_failed_task(client: httpx.AsyncClient, session: Any) -> None:
     await seed_run(
         client,

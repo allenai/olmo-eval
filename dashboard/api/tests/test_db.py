@@ -20,7 +20,7 @@ async def test_migrations_are_idempotent(engine: Any) -> None:
     await run_migrations(engine)
     async with engine.connect() as conn:
         version = (await conn.execute(text("SELECT version_num FROM alembic_version"))).scalar()
-        assert version == "0004"
+        assert version == "0005"
         ext = (
             await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'"))
         ).scalar()
