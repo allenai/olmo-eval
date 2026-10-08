@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -14,12 +14,18 @@ class TerminalBenchTask:
         image: Docker image for the task environment.
         working_dir: Working directory inside the container (from Dockerfile WORKDIR).
         instruction: Task instruction content.
-        agent_timeout: Timeout for agent execution in seconds.
+        agent_timeout: Wall-clock budget for the agent in seconds.
         verifier_timeout: Timeout for verification in seconds.
         test_files: Mapping of relative paths to file content (as bytes).
         solution_script: Content of the solution script for oracle mode.
         difficulty: Task difficulty level.
         category: Task category.
+        cpus: CPU limit for the task container.
+        memory_mb: Memory limit for the task container in megabytes.
+        storage_mb: Storage allowance for the task container in megabytes.
+        allow_internet: Whether the task expects network access.
+        solution_files: Mapping of relative paths under the solution directory
+            to file content, for oracle runs that need more than the script.
     """
 
     task_id: str
@@ -32,3 +38,8 @@ class TerminalBenchTask:
     solution_script: str
     difficulty: str
     category: str
+    cpus: int = 1
+    memory_mb: int = 2048
+    storage_mb: int = 10240
+    allow_internet: bool = True
+    solution_files: dict[str, bytes] = field(default_factory=dict)

@@ -3,20 +3,52 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from .task import TerminalBenchTask
 
 logger = logging.getLogger(__name__)
 
+_SIZE_UNITS_MB = {"k": 1 / 1024, "kb": 1 / 1024, "m": 1, "mb": 1, "g": 1024, "gb": 1024}
+
+
+def parse_size_mb(value: Any, default: int) -> int:
+    """Read a size given in megabytes or as a string like ``"2G"``.
+
+    Args:
+        value: An integer number of megabytes, a string with a unit suffix, or None.
+        default: Value to use when nothing usable is given.
+
+    Returns:
+        The size in megabytes.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float):
+        return int(value)
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]*)\s*", str(value))
+    if not match:
+        return default
+    number = float(match.group(1))
+    unit = match.group(2).lower() or "mb"
+    factor = _SIZE_UNITS_MB.get(unit)
+    if factor is None:
+        return default
+    return int(number * factor)
+
 
 class TerminalBenchLoader:
     """Loads Terminal-Bench tasks from a git repository."""
 
-    REPO_URL = "https://github.com/laude-institute/terminal-bench-2.git"
-    DEFAULT_REF = "f5b891cb4f7c20e306f9d05887628b43af740f43"
+    REPO_URL = "https://github.com/harbor-framework/terminal-bench-2-1.git"
+    DEFAULT_REF = "7131e4375048a0e408a8fb404b5f499d726b695b"
+    DATASET_VERSION = "2.1"
 
     def ensure_repo(self, target_dir: Path, ref: str | None = None) -> Path:
         """Clone or update the Terminal-Bench repository.
@@ -58,6 +90,16 @@ class TerminalBenchLoader:
             )
         return target_dir
 
+    @staticmethod
+    def tasks_root(repo_dir: Path) -> Path:
+        """Return the directory holding the task directories.
+
+        Terminal-Bench 2.1 keeps tasks under ``tasks/``; 2.0 kept them at the
+        repository root.
+        """
+        tasks_dir = repo_dir / "tasks"
+        return tasks_dir if tasks_dir.is_dir() else repo_dir
+
     def load_tasks(
         self,
         repo_dir: Path,
@@ -74,8 +116,7 @@ class TerminalBenchLoader:
         """
         tasks = []
 
-        # Tasks are at the repo root (each directory with task.toml is a task)
-        for task_dir in sorted(repo_dir.iterdir()):
+        for task_dir in sorted(self.tasks_root(repo_dir).iterdir()):
             if not task_dir.is_dir():
                 continue
             if not (task_dir / "task.toml").exists():
@@ -94,6 +135,16 @@ class TerminalBenchLoader:
         logger.info(f"Loaded {len(tasks)} tasks: {task_ids}")
         return tasks
 
+    @staticmethod
+    def _read_files(root: Path) -> dict[str, bytes]:
+        """Read every file under a directory, keyed by path relative to it."""
+        files: dict[str, bytes] = {}
+        if root.exists():
+            for path in sorted(root.rglob("*")):
+                if path.is_file():
+                    files[str(path.relative_to(root))] = path.read_bytes()
+        return files
+
     def _load_task(self, task_dir: Path) -> TerminalBenchTask:
         """Load a single task from its directory.
 
@@ -103,7 +154,6 @@ class TerminalBenchLoader:
         Returns:
             A TerminalBenchTask instance.
         """
-        # Parse task.toml
         config = tomllib.loads((task_dir / "task.toml").read_text())
 
         # Parse WORKDIR from Dockerfile
@@ -117,24 +167,13 @@ class TerminalBenchLoader:
                     if len(parts) > 1:
                         workdir = parts[1].strip().strip('"').strip("'")
 
-        # Read instruction
         instruction_path = task_dir / "instruction.md"
         instruction = instruction_path.read_text() if instruction_path.exists() else ""
 
-        # Load test files recursively
-        test_files: dict[str, bytes] = {}
-        tests_dir = task_dir / "tests"
-        if tests_dir.exists():
-            for test_file in tests_dir.rglob("*"):
-                if test_file.is_file():
-                    rel_path = test_file.relative_to(tests_dir)
-                    test_files[str(rel_path)] = test_file.read_bytes()
+        test_files = self._read_files(task_dir / "tests")
+        solution_files = self._read_files(task_dir / "solution")
+        solution_script = solution_files.get("solve.sh", b"").decode("utf-8", errors="replace")
 
-        # Load solution script
-        solution_path = task_dir / "solution" / "solve.sh"
-        solution_script = solution_path.read_text() if solution_path.exists() else ""
-
-        # Extract metadata
         env_config = config.get("environment", {})
         agent_config = config.get("agent", {})
         verifier_config = config.get("verifier", {})
@@ -151,4 +190,13 @@ class TerminalBenchLoader:
             solution_script=solution_script,
             difficulty=metadata.get("difficulty", "unknown"),
             category=metadata.get("category", "unknown"),
+            cpus=int(env_config.get("cpus", 1)),
+            memory_mb=parse_size_mb(
+                env_config.get("memory_mb", env_config.get("memory")), default=2048
+            ),
+            storage_mb=parse_size_mb(
+                env_config.get("storage_mb", env_config.get("storage")), default=10240
+            ),
+            allow_internet=bool(env_config.get("allow_internet", True)),
+            solution_files=solution_files,
         )

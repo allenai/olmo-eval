@@ -1,16 +1,17 @@
-"""Terminal-Bench 2.0 external evaluation."""
+"""Terminal-Bench external evaluation."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from olmo_eval.common.types import LMRequest, RequestType
+from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.network import get_docker_network_args
@@ -20,7 +21,7 @@ from olmo_eval.harness.sandbox.image import get_swerex_image
 
 from .loader import TerminalBenchLoader
 from .task import TerminalBenchTask
-from .verifier import TerminalBenchVerifier
+from .verifier import SOLUTION_DIR, TerminalBenchVerifier
 
 if TYPE_CHECKING:
     from olmo_eval.harness.sandbox import SandboxManager
@@ -29,7 +30,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """\
+DEFAULT_SCAFFOLD = "vanillux"
+
+#: Scaffolds this eval can drive, with the tools each one gets.
+SCAFFOLD_TOOLS: dict[str, tuple[str, ...]] = {
+    "vanillux": ("bash",),
+    "openai_agents": ("execute_bash_session", "submit"),
+}
+
+#: Extra wall-clock time, past a task's agent timeout, before an agent run is
+#: cut off from outside. The scaffold stops itself at the timeout between steps;
+#: this bounds a step that is already in flight.
+AGENT_TIMEOUT_GRACE = 300.0
+
+#: Containers take longer to come up when a task image has to be pulled first.
+SANDBOX_STARTUP_TIMEOUT = 180.0
+
+OPENAI_AGENTS_SYSTEM_PROMPT = """\
 You are an AI assistant helping complete tasks in a Linux terminal.
 You have access to the following tools:
 - execute_bash_session(command): Execute a bash command in a persistent shell session
@@ -40,20 +57,29 @@ checking your progress as you go. When you believe the task is complete, call
 the submit() tool.
 """
 
+_TRUE_VALUES = (True, "true", "True", "1", 1)
+
 
 @dataclass
 class TerminalBenchArgs:
-    """Arguments for Terminal-Bench 2.0 evaluation."""
+    """Arguments for the Terminal-Bench evaluation."""
 
     task_ids: list[str] | None = None
     repo_path: str | None = None
     repo_ref: str = TerminalBenchLoader.DEFAULT_REF
     max_concurrency: int = 1
-    max_turns: int = 50
+    max_turns: int = 64
+    n_attempts: int = 1
     oracle: bool = False
     sandbox_mode: str = "docker"
     enable_compaction: bool = True
-    scaffold: str = "openai_agents"
+    scaffold: str = DEFAULT_SCAFFOLD
+    command_timeout: float = 120.0
+    max_format_errors: int = 64
+    resource_limits: bool = True
+    temperature: float = 0.7
+    top_p: float = 0.95
+    max_tokens: int = 16384
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TerminalBenchArgs:
@@ -65,17 +91,30 @@ class TerminalBenchArgs:
             repo_path=data.get("repo_path"),
             repo_ref=data.get("repo_ref", TerminalBenchLoader.DEFAULT_REF),
             max_concurrency=int(data.get("max_concurrency", 1)),
-            max_turns=int(data.get("max_turns", 50)),
-            oracle=data.get("oracle", False) in (True, "true", "True", "1"),
+            max_turns=int(data.get("max_turns", 64)),
+            n_attempts=max(1, int(data.get("n_attempts", 1))),
+            oracle=data.get("oracle", False) in _TRUE_VALUES,
             sandbox_mode=data.get("sandbox_mode", "docker"),
-            enable_compaction=data.get("enable_compaction", True) in (True, "true", "True", "1", 1),
-            scaffold=data.get("scaffold", "openai_agents"),
+            enable_compaction=data.get("enable_compaction", True) in _TRUE_VALUES,
+            scaffold=data.get("scaffold", DEFAULT_SCAFFOLD),
+            command_timeout=float(data.get("command_timeout", 120.0)),
+            max_format_errors=int(data.get("max_format_errors", 64)),
+            resource_limits=data.get("resource_limits", True) in _TRUE_VALUES,
+            temperature=float(data.get("temperature", 0.7)),
+            top_p=float(data.get("top_p", 0.95)),
+            max_tokens=int(data.get("max_tokens", 16384)),
+        )
+
+    @property
+    def sampling_params(self) -> SamplingParams:
+        return SamplingParams(
+            temperature=self.temperature, top_p=self.top_p, max_tokens=self.max_tokens
         )
 
 
 @dataclass
 class TaskResult:
-    """Result of executing a single Terminal-Bench task."""
+    """Result of one trial: a single attempt at a Terminal-Bench task."""
 
     task_id: str
     reward: float
@@ -87,10 +126,99 @@ class TaskResult:
     error: str | None = None
     difficulty: str = "unknown"
     category: str = "unknown"
+    attempt: int = 0
+    agent_steps: int = 0
+
+    @property
+    def errored(self) -> bool:
+        """Whether the trial failed for a reason other than the agent's work."""
+        return self.error is not None
+
+    @property
+    def native_id(self) -> str:
+        return self.task_id if self.attempt == 0 else f"{self.task_id}__{self.attempt}"
+
+
+def pass_at_k(n: int, c: int, k: int) -> float:
+    """Unbiased pass@k estimate for a task with ``c`` passes out of ``n`` attempts."""
+    if n <= 0 or k <= 0:
+        return 0.0
+    k = min(k, n)
+    if n - c < k:
+        return 1.0
+    return 1.0 - math.comb(n - c, k) / math.comb(n, k)
+
+
+def compute_metrics(results: list[TaskResult], n_attempts: int) -> dict[str, float]:
+    """Aggregate trial results into the eval's metrics.
+
+    ``pass_rate`` is the mean reward over every trial, counting an errored
+    trial as 0. ``pass_rate_adjusted`` leaves errored trials out, so it reads
+    as what the agent scored where the harness worked. With several attempts
+    per task, ``pass@k`` is the unbiased estimate averaged over tasks, and the
+    spread of the per-attempt pass rates gives ``pass_rate_std`` and
+    ``pass_rate_sem``.
+    """
+    rewards = [r.reward for r in results]
+    num_trials = len(results)
+    num_errors = sum(1 for r in results if r.errored)
+    valid = [r.reward for r in results if not r.errored]
+
+    metrics: dict[str, float] = {
+        "pass_rate": sum(rewards) / num_trials if num_trials else 0.0,
+        "pass_rate_adjusted": sum(valid) / len(valid) if valid else 0.0,
+        "error_rate": num_errors / num_trials if num_trials else 0.0,
+        "num_tasks": float(len({r.task_id for r in results})),
+        "num_trials": float(num_trials),
+        "num_passed": float(sum(1 for r in results if r.reward >= 1.0)),
+        "num_errors": float(num_errors),
+        "num_agent_timeouts": float(sum(1 for r in results if r.completion_reason == "timeout")),
+    }
+
+    by_task: dict[str, list[float]] = {}
+    for r in results:
+        by_task.setdefault(r.task_id, []).append(r.reward)
+
+    if n_attempts > 1 and by_task:
+        for k in sorted({1, n_attempts}):
+            estimates = [
+                pass_at_k(len(task_rewards), sum(1 for v in task_rewards if v >= 1.0), k)
+                for task_rewards in by_task.values()
+            ]
+            metrics[f"pass@{k}"] = sum(estimates) / len(estimates)
+
+        by_attempt: dict[int, list[float]] = {}
+        for r in results:
+            by_attempt.setdefault(r.attempt, []).append(r.reward)
+        attempt_means = [sum(v) / len(v) for v in by_attempt.values() if v]
+        if len(attempt_means) > 1:
+            mean = sum(attempt_means) / len(attempt_means)
+            variance = sum((m - mean) ** 2 for m in attempt_means) / (len(attempt_means) - 1)
+            std = math.sqrt(variance)
+            metrics["pass_rate_std"] = std
+            metrics["pass_rate_sem"] = std / math.sqrt(len(attempt_means))
+
+    by_difficulty: dict[str, list[float]] = {}
+    by_category: dict[str, list[float]] = {}
+    for r in results:
+        by_difficulty.setdefault(r.difficulty, []).append(r.reward)
+        by_category.setdefault(r.category, []).append(r.reward)
+    for difficulty, values in by_difficulty.items():
+        metrics[f"pass_rate_{difficulty}"] = sum(values) / len(values)
+    for category, values in by_category.items():
+        safe_name = category.replace(" ", "_").lower()
+        metrics[f"pass_rate_{safe_name}"] = sum(values) / len(values)
+
+    return metrics
+
+
+def resource_docker_args(task: TerminalBenchTask) -> tuple[str, ...]:
+    """Container flags that apply a task's CPU and memory limits."""
+    return (f"--cpus={task.cpus}", f"--memory={task.memory_mb}m")
 
 
 class TerminalBenchExternalEval(ExternalEval):
-    """Terminal-Bench 2.0 evaluation with per-task container orchestration."""
+    """Terminal-Bench evaluation with per-trial container orchestration."""
 
     @property
     def name(self) -> str:
@@ -98,7 +226,10 @@ class TerminalBenchExternalEval(ExternalEval):
 
     @property
     def description(self) -> str:
-        return "Evaluates LLM agents on 89 diverse terminal tasks"
+        return (
+            f"Evaluates LLM agents on the {TerminalBenchLoader.DATASET_VERSION} release "
+            "of Terminal-Bench, 89 diverse terminal tasks"
+        )
 
     @property
     def timeout_seconds(self) -> float:
@@ -111,15 +242,22 @@ class TerminalBenchExternalEval(ExternalEval):
             "repo_path": ("Local repo path (default: clone fresh)", None),
             "repo_ref": ("Git ref to checkout", TerminalBenchLoader.DEFAULT_REF),
             "max_concurrency": ("Max parallel containers", 1),
-            "max_turns": ("Max agent turns per task", 50),
+            "max_turns": ("Max agent steps per trial", 64),
+            "n_attempts": ("Attempts per task, for pass@k", 1),
             "oracle": ("Run solve.sh instead of LLM agent", False),
             "sandbox_mode": ("Sandbox mode: docker, modal", "docker"),
-            "scaffold": ("Scaffold to use for agent execution", "openai_agents"),
+            "scaffold": ("Scaffold: vanillux or openai_agents", DEFAULT_SCAFFOLD),
+            "command_timeout": ("Seconds a single command may run", 120.0),
+            "max_format_errors": ("Replies without a valid tool call before stopping", 64),
+            "resource_limits": ("Apply each task's CPU and memory limits", True),
+            "temperature": ("Sampling temperature", 0.7),
+            "top_p": ("Nucleus sampling threshold", 0.95),
+            "max_tokens": ("Max tokens per model reply", 16384),
         }
 
     @property
     def scaffold(self) -> str | None:
-        return "openai_agents"
+        return DEFAULT_SCAFFOLD
 
     async def execute(
         self,
@@ -137,7 +275,7 @@ class TerminalBenchExternalEval(ExternalEval):
             container_runtime: Container runtime (docker or podman).
 
         Returns:
-            ExternalEvalResult with metrics and per-task results.
+            ExternalEvalResult with metrics and per-trial results.
         """
         start_time = time.time()
         tb_args = TerminalBenchArgs.from_dict(args)
@@ -145,15 +283,19 @@ class TerminalBenchExternalEval(ExternalEval):
         # Validate scaffold early to fail fast before spinning up sandboxes
         from olmo_eval.harness.scaffolds import validate_scaffold
 
+        if tb_args.scaffold not in SCAFFOLD_TOOLS:
+            supported = ", ".join(sorted(SCAFFOLD_TOOLS))
+            raise ValueError(
+                f"Unsupported scaffold {tb_args.scaffold!r} for {self.name}; use one of {supported}"
+            )
         validate_scaffold(tb_args.scaffold)
 
-        # Load tasks
         loader = TerminalBenchLoader()
         if tb_args.repo_path:
             repo_dir = Path(tb_args.repo_path)
         else:
             # Clone to a cache directory (not output_dir to avoid copying repo to results)
-            repo_dir = Path("/tmp") / "terminal-bench-2-cache"
+            repo_dir = Path("/tmp") / "terminal-bench-2-1-cache"
             loader.ensure_repo(repo_dir, tb_args.repo_ref)
 
         tasks = loader.load_tasks(repo_dir, tb_args.task_ids)
@@ -162,71 +304,34 @@ class TerminalBenchExternalEval(ExternalEval):
                 "No tasks found", start_time, f"repo_dir={repo_dir}, task_ids={tb_args.task_ids}"
             )
 
-        # Execute tasks with concurrency limit
+        trials = [(task, attempt) for task in tasks for attempt in range(tb_args.n_attempts)]
         semaphore = asyncio.Semaphore(tb_args.max_concurrency)
 
-        async def run_task(task: TerminalBenchTask) -> TaskResult:
+        async def run_trial(task: TerminalBenchTask, attempt: int) -> TaskResult:
             async with semaphore:
                 return await self._execute_task(
                     task=task,
+                    attempt=attempt,
                     provider=provider,
                     container_runtime=container_runtime,
-                    max_turns=tb_args.max_turns,
-                    oracle_mode=tb_args.oracle,
-                    sandbox_mode=tb_args.sandbox_mode,
-                    enable_compaction=tb_args.enable_compaction,
-                    scaffold_name=tb_args.scaffold,
+                    tb_args=tb_args,
                 )
 
-        results = await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
+        results = await asyncio.gather(
+            *[run_trial(task, attempt) for task, attempt in trials], return_exceptions=True
+        )
 
-        # Process results
         task_results: list[TaskResult] = []
-        for i, result in enumerate(results):
+        for (task, attempt), result in zip(trials, results, strict=True):
             if isinstance(result, BaseException):
-                task = tasks[i]
-                logger.error(f"Task {task.task_id} failed with exception: {result}")
+                logger.error(f"Task {task.task_id} attempt {attempt} failed: {result}")
                 task_results.append(
-                    TaskResult(
-                        task_id=task.task_id,
-                        reward=0.0,
-                        trajectory=AgentTrajectory(turns=()),
-                        completion_reason="error",
-                        agent_duration=0.0,
-                        verification_output="",
-                        verification_exit_code=-1,
-                        error=str(result),
-                        difficulty=task.difficulty,
-                        category=task.category,
-                    )
+                    self._failed_result(task, attempt, str(result), agent_duration=0.0)
                 )
             else:
                 task_results.append(result)
 
-        # Compute metrics
-        rewards = [r.reward for r in task_results]
-        pass_rate = sum(rewards) / len(rewards) if rewards else 0.0
-
-        metrics: dict[str, float] = {
-            "pass_rate": pass_rate,
-            "num_tasks": len(task_results),
-            "num_passed": sum(1 for r in task_results if r.reward == 1.0),
-        }
-
-        # Group by difficulty
-        by_difficulty: dict[str, list[float]] = {}
-        by_category: dict[str, list[float]] = {}
-        for r in task_results:
-            by_difficulty.setdefault(r.difficulty, []).append(r.reward)
-            by_category.setdefault(r.category, []).append(r.reward)
-
-        for difficulty, rewards_list in by_difficulty.items():
-            metrics[f"pass_rate_{difficulty}"] = sum(rewards_list) / len(rewards_list)
-
-        for category, rewards_list in by_category.items():
-            safe_name = category.replace(" ", "_").lower()
-            metrics[f"pass_rate_{safe_name}"] = sum(rewards_list) / len(rewards_list)
-
+        metrics = compute_metrics(task_results, tb_args.n_attempts)
         predictions = self._build_predictions(task_results)
 
         result = ExternalEvalResult(
@@ -235,87 +340,117 @@ class TerminalBenchExternalEval(ExternalEval):
             metrics=metrics,
             metadata={
                 "model_name": provider.model_name,
+                "dataset_version": TerminalBenchLoader.DATASET_VERSION,
+                "repo_ref": tb_args.repo_ref,
+                "scaffold": tb_args.scaffold,
                 "oracle_mode": tb_args.oracle,
                 "max_turns": tb_args.max_turns,
-                "repo_ref": tb_args.repo_ref,
+                "n_attempts": tb_args.n_attempts,
+                "resource_limits": tb_args.resource_limits,
             },
             duration_seconds=time.time() - start_time,
             predictions=predictions,
         )
 
-        # Save results
         if output_dir:
             self._save_results(result, output_dir)
             self._save_task_results(task_results, output_dir)
 
         return result
 
-    async def _execute_task(
-        self,
-        task: TerminalBenchTask,
-        provider: InferenceProvider,
-        container_runtime: str,
-        max_turns: int,
-        oracle_mode: bool,
-        sandbox_mode: str,
-        enable_compaction: bool = True,
-        scaffold_name: str = "openai_agents",
+    @staticmethod
+    def _failed_result(
+        task: TerminalBenchTask, attempt: int, error: str, agent_duration: float
     ) -> TaskResult:
-        """Execute a single Terminal-Bench task.
+        return TaskResult(
+            task_id=task.task_id,
+            reward=0.0,
+            trajectory=AgentTrajectory(turns=()),
+            completion_reason="error",
+            agent_duration=agent_duration,
+            verification_output="",
+            verification_exit_code=-1,
+            error=error,
+            difficulty=task.difficulty,
+            category=task.category,
+            attempt=attempt,
+        )
 
-        Args:
-            task: The task to execute.
-            provider: Inference provider for LLM calls.
-            container_runtime: Container runtime.
-            max_turns: Maximum agent turns.
-            oracle_mode: Whether to run the solution script instead of agent.
-            sandbox_mode: Sandbox mode (docker, modal).
-            enable_compaction: Enable context compaction for long conversations.
-
-        Returns:
-            TaskResult with reward and trajectory.
-        """
-        from olmo_eval.harness.sandbox import SandboxManager
-
-        logger.info(f"Executing task: {task.task_id}")
-        task_start = time.time()
-
-        # Create sandbox config for this task
-        if sandbox_mode == "docker":
+    def _sandbox_config(
+        self, task: TerminalBenchTask, container_runtime: str, tb_args: TerminalBenchArgs
+    ) -> SandboxConfig:
+        """Build the sandbox configuration for one trial of a task."""
+        if tb_args.sandbox_mode == "docker":
             mode = SandboxMode.DOCKER
-        elif sandbox_mode == "modal":
+        elif tb_args.sandbox_mode == "modal":
             mode = SandboxMode.MODAL
         else:
             raise ValueError(
-                f"Invalid sandbox_mode: {sandbox_mode!r}. Must be 'docker' or 'modal'."
+                f"Invalid sandbox_mode: {tb_args.sandbox_mode!r}. Must be 'docker' or 'modal'."
             )
         runtime = cast(ContainerRuntime, container_runtime)
 
         docker_args: tuple[str, ...] = ()
         if mode == SandboxMode.DOCKER:
             docker_args = tuple(get_docker_network_args(runtime))
+            if tb_args.resource_limits:
+                docker_args += resource_docker_args(task)
+        if not task.allow_internet:
+            logger.warning(
+                f"Task {task.task_id} asks for no internet access, which this sandbox "
+                "cannot enforce; the container keeps network access."
+            )
 
-        image = get_swerex_image(task.image, runtime)
+        image = get_swerex_image(task.image, runtime, pristine=True)
 
-        sandbox_config = SandboxConfig(
+        return SandboxConfig(
             image=image,
             mode=mode,
             container_runtime=runtime if mode == SandboxMode.DOCKER else "docker",
             working_dir=task.working_dir,
-            command_timeout=task.agent_timeout,
+            startup_timeout=SANDBOX_STARTUP_TIMEOUT,
+            command_timeout=tb_args.command_timeout,
             docker_args=docker_args,
+            pristine_image=True,
         )
 
-        sandbox_manager = SandboxManager([sandbox_config], owner=f"tb2-{task.task_id}")
+    async def _execute_task(
+        self,
+        task: TerminalBenchTask,
+        attempt: int,
+        provider: InferenceProvider,
+        container_runtime: str,
+        tb_args: TerminalBenchArgs,
+    ) -> TaskResult:
+        """Run one trial: start a container, run the agent, verify, and tear down."""
+        from olmo_eval.harness.sandbox import SandboxManager
+
+        logger.info(f"Executing task: {task.task_id} (attempt {attempt})")
+        task_start = time.time()
+
+        sandbox_config = self._sandbox_config(task, container_runtime, tb_args)
+        sandbox_manager = SandboxManager([sandbox_config], owner=f"tb-{task.task_id}-{attempt}")
 
         try:
             await sandbox_manager.start()
 
-            if oracle_mode:
-                trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
-            else:
-                trajectory, completion_reason = await self._run_agent(
-                    sandbox_manager, task, provider, max_turns, enable_compaction, scaffold_name
+            trajectory = AgentTrajectory(turns=())
+            completion_reason = "timeout"
+            agent_steps = 0
+            try:
+                if tb_args.oracle:
+                    trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
+                else:
+                    trajectory, completion_reason, agent_steps = await asyncio.wait_for(
+                        self._run_agent(sandbox_manager, task, provider, tb_args),
+                        timeout=task.agent_timeout + AGENT_TIMEOUT_GRACE,
+                    )
+            except TimeoutError:
+                # The agent's time is up; what it left in the container still
+                # gets verified, as the reference harness does.
+                logger.warning(
+                    f"Task {task.task_id} agent cut off after "
+                    f"{task.agent_timeout + AGENT_TIMEOUT_GRACE:.0f}s"
                 )
 
             agent_duration = time.time() - task_start
@@ -335,24 +470,16 @@ class TerminalBenchExternalEval(ExternalEval):
                 agent_duration=agent_duration,
                 verification_output=verification.test_output,
                 verification_exit_code=verification.test_exit_code,
+                error=verification.error,
                 difficulty=task.difficulty,
                 category=task.category,
+                attempt=attempt,
+                agent_steps=agent_steps,
             )
 
         except Exception as e:
-            logger.exception(f"Task {task.task_id} failed")
-            return TaskResult(
-                task_id=task.task_id,
-                reward=0.0,
-                trajectory=AgentTrajectory(turns=()),
-                completion_reason="error",
-                agent_duration=time.time() - task_start,
-                verification_output="",
-                verification_exit_code=-1,
-                error=str(e),
-                difficulty=task.difficulty,
-                category=task.category,
-            )
+            logger.exception(f"Task {task.task_id} attempt {attempt} failed")
+            return self._failed_result(task, attempt, str(e), time.time() - task_start)
         finally:
             await sandbox_manager.stop()
 
@@ -361,22 +488,26 @@ class TerminalBenchExternalEval(ExternalEval):
         sandbox_manager: SandboxManager,
         task: TerminalBenchTask,
     ) -> tuple[AgentTrajectory, str]:
-        """Run the oracle (solution script).
+        """Run the reference solution.
 
-        Args:
-            sandbox_manager: The sandbox manager.
-            task: The task to run.
+        The whole solution directory is placed in the container so a script
+        that reads companion files beside it works as it does upstream.
 
         Returns:
             Tuple of (trajectory, completion_reason).
         """
         executor = sandbox_manager.get_executor(frozenset())
+        verifier = TerminalBenchVerifier()
+        solution_files = dict(task.solution_files)
+        if "solve.sh" not in solution_files:
+            solution_files["solve.sh"] = task.solution_script.encode()
+        await verifier.inject_files(executor, solution_files, SOLUTION_DIR)
 
         result = await executor.execute_in_session(
-            f"bash << 'SOLVEEOF'\n{task.solution_script}\nSOLVEOF",
+            f"cd {task.working_dir} && bash {SOLUTION_DIR}/solve.sh",
             timeout=task.agent_timeout,
             stream=True,
-            log_prefix=f"tb2-{task.task_id}-oracle",
+            log_prefix=f"tb-{task.task_id}-oracle",
         )
 
         logger.info(f"Oracle exit code: {result.exit_code}")
@@ -387,35 +518,31 @@ class TerminalBenchExternalEval(ExternalEval):
         sandbox_manager: SandboxManager,
         task: TerminalBenchTask,
         provider: InferenceProvider,
-        max_turns: int,
-        enable_compaction: bool = True,
-        scaffold_name: str = "openai_agents",
-    ) -> tuple[AgentTrajectory, str]:
+        tb_args: TerminalBenchArgs,
+    ) -> tuple[AgentTrajectory, str, int]:
         """Run the LLM agent.
 
-        Args:
-            sandbox_manager: The sandbox manager.
-            task: The task to run.
-            provider: Inference provider for LLM calls.
-            max_turns: Maximum turns.
-            enable_compaction: Enable context compaction for long conversations.
-            scaffold_name: Name of the scaffold to use.
-
         Returns:
-            Tuple of (trajectory, completion_reason).
+            Tuple of (trajectory, completion_reason, steps).
         """
         from olmo_eval.harness.config import HarnessConfig
-        from olmo_eval.harness.scaffolds import get_scaffold, validate_scaffold
+        from olmo_eval.harness.scaffolds import get_scaffold
         from olmo_eval.harness.tools import get_tools
 
-        validate_scaffold(scaffold_name)
-        tools = get_tools(("execute_bash_session", "submit"))
+        scaffold_name = tb_args.scaffold
+        tools = get_tools(SCAFFOLD_TOOLS[scaffold_name])
+        system_prompt = OPENAI_AGENTS_SYSTEM_PROMPT if scaffold_name == "openai_agents" else None
         harness_config = HarnessConfig(
             name=f"terminal_bench_{task.task_id}",
             tools=tools,
-            system_prompt=SYSTEM_PROMPT,
-            max_turns=max_turns,
+            system_prompt=system_prompt,
+            max_turns=tb_args.max_turns,
             scaffold=scaffold_name,
+            scaffold_kwargs={
+                "command_timeout": tb_args.command_timeout,
+                "max_format_errors": tb_args.max_format_errors,
+                "agent_timeout": task.agent_timeout,
+            },
         )
 
         scaffold = get_scaffold(scaffold_name)
@@ -426,26 +553,32 @@ class TerminalBenchExternalEval(ExternalEval):
             messages=({"role": "user", "content": task.instruction},),
         )
 
-        run_config = {
-            "scaffold": scaffold.name,
-            "task_id": task.task_id,
-            "max_turns": max_turns,
-            "enable_compaction": enable_compaction,
-            "tools": [t.name for t in tools],
-        }
-        logger.info(f"Starting agent: {run_config}")
+        run_kwargs: dict[str, Any] = {}
+        if scaffold_name == "openai_agents":
+            run_kwargs["enable_compaction"] = tb_args.enable_compaction
+
+        logger.info(
+            f"Starting agent: scaffold={scaffold_name} task_id={task.task_id} "
+            f"max_turns={tb_args.max_turns} agent_timeout={task.agent_timeout}"
+        )
         harness_result = await scaffold.run(
             provider,
             harness_config,
             request,
+            sampling_params=tb_args.sampling_params,
             trace_metadata={"task_id": task.task_id},
-            enable_compaction=enable_compaction,
+            **run_kwargs,
         )
 
-        completion_reason = "max_turns" if harness_result.max_turns_reached else "complete"
-        logger.info(f"Agent completed task {task.task_id}: {completion_reason}")
         trajectory = harness_result.trajectory or AgentTrajectory(turns=())
-        return trajectory, completion_reason
+        completion_reason = harness_result.metadata.get("completion_reason")
+        if completion_reason is None:
+            completion_reason = "max_turns" if harness_result.max_turns_reached else "complete"
+        steps = harness_result.metadata.get("steps")
+        if steps is None:
+            steps = len(trajectory.assistant_turns)
+        logger.info(f"Agent completed task {task.task_id}: {completion_reason}")
+        return trajectory, str(completion_reason), int(steps)
 
     def _build_predictions(self, task_results: list[TaskResult]) -> list[dict[str, Any]]:
         """Build predictions list from task results."""
@@ -453,10 +586,13 @@ class TerminalBenchExternalEval(ExternalEval):
         for r in task_results:
             predictions.append(
                 {
-                    "native_id": r.task_id,
+                    "native_id": r.native_id,
+                    "task_id": r.task_id,
+                    "attempt": r.attempt,
                     "instance_metrics": {
                         "reward": {"external": r.reward},
                         "agent_duration": {"external": r.agent_duration},
+                        "agent_steps": {"external": float(r.agent_steps)},
                     },
                     "completion_reason": r.completion_reason,
                     "verification_exit_code": r.verification_exit_code,
@@ -483,9 +619,11 @@ class TerminalBenchExternalEval(ExternalEval):
             data.append(
                 {
                     "task_id": result.task_id,
+                    "attempt": result.attempt,
                     "reward": result.reward,
                     "completion_reason": result.completion_reason,
                     "agent_duration": result.agent_duration,
+                    "agent_steps": result.agent_steps,
                     "verification_exit_code": result.verification_exit_code,
                     "verification_output": output,
                     "difficulty": result.difficulty,
@@ -505,16 +643,18 @@ class TerminalBenchExternalEval(ExternalEval):
             if not result.trajectory:
                 continue
 
-            sanitized_id = re.sub(r"[^\w\-]", "_", result.task_id)
+            sanitized_id = re.sub(r"[^\w\-]", "_", result.native_id)
             sanitized_id = re.sub(r"_+", "_", sanitized_id).strip("_").lower()
 
-            hash_input = f"{self.name}:{result.task_id}"
+            hash_input = f"{self.name}:{result.native_id}"
             short_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:6]
 
             trace_file = traces_dir / f"{self.name}_{sanitized_id}_{short_hash}.jsonl"
 
             trajectory_data = {
                 "task_id": result.task_id,
+                "attempt": result.attempt,
+                "completion_reason": result.completion_reason,
                 "trajectory": result.trajectory.to_dict(),
             }
             with open(trace_file, "w") as f:
