@@ -1,7 +1,6 @@
 # BFCL (Berkeley Function Calling Leaderboard)
 
-The BFCL v3 single-turn categories, reformulated as a completion task so a
-pretrained model with no chat template can be measured on them.
+The BFCL v3 single-turn categories.
 
 A prediction is graded by BFCL's own checker: the predicted calls are compared
 against a list of accepted values per parameter, so an answer is right when it
@@ -11,24 +10,59 @@ it matches one reference string.
 Paper: <https://arxiv.org/abs/2502.17858> ·
 Dataset: `gorilla-llm/Berkeley-Function-Calling-Leaderboard`
 
-## Running it
+## Three prompting regimes
 
-Each instance is one block of text — the instruction, the function documents,
-the question — that the model continues with its calls.
+Every category is registered in three regimes, which differ only in how the
+functions reach the model and how its calls are read back.
+
+| Spec | Regime | Use for |
+|------|--------|---------|
+| `bfcl_simple` | Native function calling — functions go out as tool schemas, calls come back as `tool_calls` | An instruction-tuned model behind an OpenAI-compatible endpoint |
+| `bfcl_simple:prompt` | BFCL's prompting mode — functions in a system prompt, calls as `[func(arg=value)]` text | Any chat endpoint, with no server-side tool parsing |
+| `bfcl_simple:base` | Plain completion with curated exemplars | A pretrained model with no chat template |
+
+### Native function calling
+
+Needs no server flags:
 
 ```bash
-uv run olmo-eval run -m my-base-model -t bfcl
-uv run olmo-eval run -m my-base-model -t bfcl_simple
+uv run olmo-eval run -m my-model -t bfcl
 ```
 
-## Exemplars
+vLLM only emits `tool_calls` when started with `--enable-auto-tool-choice`, so a
+vLLM server the run starts itself gets that flag whenever a task sends tool
+schemas. vLLM infers a `--tool-call-parser` from the model name; add
+`-o provider.kwargs.tool_call_parser=<name>` to choose one explicitly. Provider
+overrides follow `--harness`, not `-t`.
 
-Hand-written exemplars carry the answer format; `:0shot` through `:5shot`
-change how many are shown, and the default is five:
+If the server would still answer in plain text, because
+`provider.kwargs.enable_auto_tool_choice=false` was passed, the run stops with
+an error saying so rather than reporting a score of zero. An external server
+given with `base_url` is trusted to have been started with the flag.
+
+A provider that cannot carry tool schemas at all — the in-process `vllm`
+provider and `litellm` both ignore them — is refused the same way, naming the
+provider and pointing at the other regimes. Only `vllm_server` (the default)
+and `mock` accept them.
+
+### Prompting mode
+
+Needs no server flags:
 
 ```bash
-uv run olmo-eval run -m my-base-model -t bfcl_simple:2shot
-uv run olmo-eval run -m my-base-model -t bfcl:0shot
+uv run olmo-eval run -m my-model -t bfcl:prompt
+```
+
+### Base models
+
+The `:base` regime lays the task out as one block of text — instruction,
+functions, question — that the model continues with its calls. Hand-written
+exemplars carry the answer format; `:0shot` through `:5shot` change how many
+are shown, and the default is five:
+
+```bash
+uv run olmo-eval run -m my-base-model -t bfcl:base
+uv run olmo-eval run -m my-base-model -t bfcl_simple:base:2shot
 ```
 
 They are hand-written rather than sampled from the data, so no exemplar is
@@ -41,7 +75,7 @@ measure nothing.
 Each language has its own set, since the Java and JavaScript categories expect
 calls written in those languages.
 
-The expected answer format is BFCL's `[func(arg=value)]` for every model, so
+The expected answer format is BFCL's `[func(arg=value)]` in every text regime, so
 numbers are comparable across models and checkpoints. Because a base model has
 never been taught that format, the decoder also accepts the JSON tool-call
 shapes models pick up during pretraining — a bare list of
@@ -62,6 +96,9 @@ uv run olmo-eval suite inspect bfcl
 | `bfcl:non_live` | Non-live AST summary with irrelevance |
 | `bfcl:non_live_simple` | Simple AST across Python, Java and JavaScript |
 | `bfcl:categories` | Every category reported separately |
+
+Each suite also exists as `:prompt` and `:base` (for example
+`bfcl:non_live_ast:base`).
 
 BFCL weights its live summaries by how many instances each category holds,
 which a suite average cannot express, so those summaries are tasks that pool
