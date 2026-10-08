@@ -189,3 +189,22 @@ class InferenceProvider(ABC):
             f"{type(self).__name__} does not provide an OpenAI client. "
             f"Use a provider with OpenAI API support (e.g., VLLMServerProvider, LiteLLMProvider)."
         )
+
+
+def require_tool_support(provider: InferenceProvider) -> None:
+    """Fail before sending tools to a provider that would drop them.
+
+    A provider that ignores ``tools`` shows the model a question with no
+    functions attached, which it answers in prose, so every instance of a
+    tool-calling task scores zero. That reads like a weak model rather than a
+    misconfigured run.
+    """
+    if getattr(provider, "supports_tools", False):
+        return
+    raise ValueError(
+        f"{type(provider).__name__} does not support tool requests, but this "
+        "request carries function schemas, which would be dropped. Run this task "
+        "with a provider that sends them (e.g. the default provider.kind="
+        "vllm_server), or with a task variant that writes the functions into the "
+        "prompt text instead."
+    )

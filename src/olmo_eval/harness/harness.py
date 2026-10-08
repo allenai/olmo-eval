@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
+from olmo_eval.inference.base import require_tool_support
 
 from .config import HarnessConfig
 from .result import HarnessResult
@@ -93,24 +94,6 @@ class Harness:
     # ─────────────────────────────────────────────────────────
     # Single-turn interface (same as Provider, but with config)
     # ─────────────────────────────────────────────────────────
-
-    def _check_tools_supported(self) -> None:
-        """Fail before sending tools to a provider that would drop them.
-
-        A provider that ignores ``tools`` shows the model a question with no
-        functions attached, which it answers in prose, so every instance of a
-        tool-calling task scores zero. That reads like a weak model rather than
-        a misconfigured run.
-        """
-        if getattr(self.provider, "supports_tools", False):
-            return
-        raise ValueError(
-            f"{type(self.provider).__name__} does not support tool requests, but this "
-            "request carries function schemas, which would be dropped. Run this task "
-            "with a provider that sends them (e.g. the default provider.kind="
-            "vllm_server), or with a task variant that writes the functions into the "
-            "prompt text instead."
-        )
 
     def _check_images_supported(self, requests: list[LMRequest]) -> None:
         if getattr(self.provider, "supports_images", False):
@@ -369,7 +352,7 @@ class Harness:
         # A scaffold sends its tools itself; only a request the provider sends
         # directly depends on the provider honouring its tool schemas.
         if request.tools and not self.config.scaffold:
-            self._check_tools_supported()
+            require_tool_support(self.provider)
 
         return LMRequest(
             request_type=request.request_type,
@@ -381,6 +364,7 @@ class Harness:
             system_prompt=self.config.system_prompt or request.system_prompt,
             max_length=request.max_length,
             images=request.images,
+            metadata=request.metadata,
         )
 
     def _inject_system_prompt(

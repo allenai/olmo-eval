@@ -135,11 +135,61 @@ Every remaining case is a dataset quirk the reference checker fails
 identically, such as `simple_363`, whose possible answer names `find_closest`
 while its function document names `restaurant_search.find_closest`.
 
+## Multi-turn
+
+The multi-turn categories are a different kind of measurement. An entry is a
+conversation against stateful APIs, and a prediction is graded on what its
+calls did: after each turn the involved instances must hold the state the
+ground truth path leaves them in, and everything the ground truth's calls
+returned must also have come back from the model's. Nothing the model said is
+read.
+
+Driving a rollout needs the `bfcl_multi_turn` scaffold, so these tasks run
+under a harness that carries it:
+
+```bash
+uv run olmo-eval run -m my-model --harness bfcl_multi_turn -t bfcl:multi_turn
+
+uv run olmo-eval run -m my-model --harness bfcl_multi_turn -t bfcl:multi_turn:prompt
+```
+
+| Task | What it perturbs |
+|------|------------------|
+| `bfcl_multi_turn_base` | Nothing; decompose a request and carry it out |
+| `bfcl_multi_turn_miss_func` | A needed function is withheld, then offered partway through |
+| `bfcl_multi_turn_miss_param` | A request omits a parameter, so the model should ask rather than guess |
+| `bfcl_multi_turn_long_context` | The same tasks with the state inflated by filler |
+
+`bfcl:multi_turn` averages the four as equals, as the leaderboard does. Each
+also exists as `:prompt`. There is no `:base` regime: a pretrained model is not
+asked to drive a twenty-step tool-executing rollout.
+
+Within a turn the model is asked for calls, the calls are run, and each result
+comes back as a tool message, named after its call when the model was prompted.
+The turn ends when the model stops calling. A turn that runs past twenty steps
+stops the rollout, and an entry stopped before its last turn scores zero, as
+does one whose conversation outgrows the model's context window. The rollout's
+own instances only serve to answer the model; the score comes from replaying
+its calls against fresh ones. As in the reference implementation, a turn whose
+ground truth makes no call is not graded, though its calls still shape the
+state the next turn is compared on.
+
+Each prediction's `scorer_results` records whether the entry passed, why it
+failed if it did, and whether a turn ran out of steps.
+
+The API classes are vendored under
+`olmo_eval/common/scorers/bfcl/multi_turn/api/`, because an instance's
+attributes after a turn are what a prediction is compared against.
+
+`multi_turn_composite` is not registered. Its ground truth calls an older
+signature than the other categories do and some of its calls are not valid
+Python, so it cannot be executed against the classes any version of the
+reference implementation ships; it is also absent from the v3 multi-turn
+summary.
+
 ## What is not implemented
 
-- **Multi-turn** (`multi_turn_base`, `multi_turn_miss_func`,
-  `multi_turn_miss_param`, `multi_turn_long_context`, `multi_turn_composite`):
-  scoring them needs BFCL's stateful API backend.
+- **`multi_turn_composite`**: see above.
 - **Executable and REST** (`exec_*`, `rest`): these grade by running the
   predicted calls against live third-party APIs.
 

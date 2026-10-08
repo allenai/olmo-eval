@@ -104,22 +104,26 @@ def resolve_ast_by_type(value: ast.AST) -> Any:
     raise DecodeError(f"Unsupported AST type: {type(value)}")
 
 
+def call_name(node: ast.Call) -> str:
+    """The dotted name a call node calls, e.g. ``math.factorial``."""
+    parts: list[str] = []
+    func: ast.expr = node.func
+    while isinstance(func, ast.Attribute):
+        parts.append(func.attr)
+        func = func.value
+    if isinstance(func, ast.Name):
+        parts.append(func.id)
+    return ".".join(reversed(parts))
+
+
 def resolve_ast_call(elem: ast.Call) -> dict[str, dict[str, Any]]:
     """Convert one call node to ``{name: {param: value}}``."""
-    func_parts: list[str] = []
-    func_part: ast.expr = elem.func
-    while isinstance(func_part, ast.Attribute):
-        func_parts.append(func_part.attr)
-        func_part = func_part.value
-    if isinstance(func_part, ast.Name):
-        func_parts.append(func_part.id)
-    func_name = ".".join(reversed(func_parts))
     args = {
         keyword.arg: resolve_ast_by_type(keyword.value)
         for keyword in elem.keywords
         if keyword.arg is not None
     }
-    return {func_name: args}
+    return {call_name(elem): args}
 
 
 def parse_python_calls(input_str: str) -> list[dict[str, Any]]:
