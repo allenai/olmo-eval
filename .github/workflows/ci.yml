@@ -75,6 +75,20 @@ jobs:
         run: uv run --frozen --no-group vllm ty check src/ alembic/
 
   # ============================================================================
+  # File Sizes: block tracked files larger than 1 MB
+  # ============================================================================
+  file-sizes:
+    name: File Sizes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check file sizes
+        run: ./scripts/check_file_sizes.sh
+
+  # ============================================================================
   # Unit Tests
   # ============================================================================
   test:
@@ -255,13 +269,14 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, type-check, test, build, integration-test-storage]
+    needs: [lint, type-check, file-sizes, test, build, integration-test-storage]
     if: always()
     steps:
       - name: Check all jobs passed
         run: |
           if [[ "${{ needs.lint.result }}" != "success" ]] || \
              [[ "${{ needs.type-check.result }}" != "success" ]] || \
+             [[ "${{ needs.file-sizes.result }}" != "success" ]] || \
              [[ "${{ needs.test.result }}" != "success" ]] || \
              [[ "${{ needs.build.result }}" != "success" ]] || \
              [[ "${{ needs.integration-test-storage.result }}" != "success" ]]; then
