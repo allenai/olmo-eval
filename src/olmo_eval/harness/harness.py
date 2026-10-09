@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
+from olmo_eval.inference.base import require_tool_support
 
 from .config import HarnessConfig
 from .result import HarnessResult
@@ -356,6 +357,11 @@ class Harness:
         """
 
         messages = self._inject_system_prompt(request.messages)
+        tools = self.config.tool_schemas if self.config.has_tools else request.tools
+        # A scaffold sends its tools itself; only a request the provider sends
+        # directly depends on the provider honouring its tool schemas.
+        if request.tools and not self.config.scaffold:
+            require_tool_support(self.provider)
 
         return LMRequest(
             request_type=request.request_type,
@@ -363,10 +369,11 @@ class Harness:
             prompt=request.prompt,
             continuations=request.continuations,
             continuation_prompts=request.continuation_prompts,
-            tools=self.config.tool_schemas if self.config.has_tools else request.tools,
+            tools=tools,
             system_prompt=self.config.system_prompt or request.system_prompt,
             max_length=request.max_length,
             images=request.images,
+            metadata=request.metadata,
         )
 
     def _inject_system_prompt(

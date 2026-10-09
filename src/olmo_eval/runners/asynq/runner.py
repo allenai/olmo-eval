@@ -618,6 +618,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         # Update harness metrics config with experiment metadata before starting workers
         self._update_metrics_config(experiment_id)
+        self._enable_tool_parsing_for_tool_requests(items)
 
         # Setup multiprocessing
         ctx = mp.get_context("spawn")
@@ -1081,6 +1082,28 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             return torch.cuda.device_count()
         except ImportError:
             return 0
+
+    def _enable_tool_parsing_for_tool_requests(self, items: Sequence[QueueItem]) -> None:
+        """Start a managed vLLM server that returns tool calls when tasks send tools.
+
+        A harness with its own tools already gets this from the worker. A task
+        that puts function schemas on its requests needs it too, or the server
+        answers in plain text. A setting given explicitly is left as it is.
+
+        This must be called before starting workers, which read the setting from
+        the serialized config.
+        """
+        provider = self.harness_config.provider
+        if str(provider.kind) != "vllm_server" or provider.base_url:
+            return
+        if "enable_auto_tool_choice" in (provider.kwargs or {}):
+            return
+        if not any(item.request.tools for item in items):
+            return
+        self.harness_config = self.harness_config.with_provider_overrides(
+            enable_auto_tool_choice=True
+        )
+        runner_logger.info("Tasks send function schemas; enabling tool-call parsing on vLLM")
 
     def _update_metrics_config(self, experiment_id: str) -> None:
         """Update harness metrics config with experiment metadata.

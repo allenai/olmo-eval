@@ -231,6 +231,9 @@ class LMRequest:
     system_prompt: str | None = None
     max_length: int | None = None
     images: tuple[Any, ...] | None = None
+    #: Per-instance payload for a scaffold that needs more than the messages,
+    #: such as the state a multi-turn rollout acts on. Not sent to the model.
+    metadata: dict[str, Any] | None = None
 
 
 @hide_unset()
@@ -248,6 +251,10 @@ class SamplingParams:
     do_sample: bool = True
     truncate_prompt_tokens: int | None = None
     truncation_side: Literal["left", "right"] | None = None
+    #: Shrink ``max_tokens`` so the prompt and the generation together fit the
+    #: model's context window. Without it a prompt that leaves less room than
+    #: ``max_tokens`` makes the server reject the whole request.
+    fit_max_tokens_to_context: bool = False
 
 
 @dataclass(slots=True)
