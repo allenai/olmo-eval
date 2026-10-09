@@ -1258,6 +1258,23 @@ errored trials out; `error_rate` is the share of trials where the harness, not t
 (no reward file, verifier timeout, container failure). An agent that runs out of time is still
 verified and counted under `num_agent_timeouts`.
 
+Models with hybrid attention such as Qwen3.5 need vLLM's Triton kernels on hosts without a CUDA
+compiler, and the Qwen3.5 family needs its XML tool parser:
+`-K gdn_prefill_backend=triton -K tool_call_parser=qwen3_xml`. On Beaker, where Podman runs with
+cgroups disabled, pass `-A resource_limits=false`.
+
+#### OpenThoughts-TBLite
+
+`openthoughts_tblite` runs [OpenThoughts-TBLite](https://github.com/open-thoughts/OpenThoughts-TBLite),
+100 difficulty-calibrated tasks in the Terminal-Bench format, through the same harness, agent,
+arguments and metrics. Its tasks ship a Dockerfile instead of a prebuilt image, so each task's
+image is built once per run from its environment directory (bounded by the task's build timeout)
+and cached by content hash; the swe-rex layer and any registry caching apply on top.
+
+```bash
+uv run olmo-eval run-external -e openthoughts_tblite --model my-model -a n_attempts=5
+```
+
 ### ExternalEvalResult
 
 External evals return structured results:

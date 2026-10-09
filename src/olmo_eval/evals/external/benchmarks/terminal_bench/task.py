@@ -26,6 +26,9 @@ class TerminalBenchTask:
         allow_internet: Whether the task expects network access.
         solution_files: Mapping of relative paths under the solution directory
             to file content, for oracle runs that need more than the script.
+        build_context: Directory holding the Dockerfile to build the task image
+            from, for tasks that ship no prebuilt image.
+        build_timeout: Seconds allowed for building the task image.
     """
 
     task_id: str
@@ -43,3 +46,10 @@ class TerminalBenchTask:
     storage_mb: int = 10240
     allow_internet: bool = True
     solution_files: dict[str, bytes] = field(default_factory=dict)
+    build_context: str | None = None
+    build_timeout: float = 600.0
+
+    @property
+    def needs_build(self) -> bool:
+        """Whether the task image must be built rather than pulled."""
+        return not self.image and self.build_context is not None

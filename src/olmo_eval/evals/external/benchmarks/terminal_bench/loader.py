@@ -43,12 +43,36 @@ def parse_size_mb(value: Any, default: int) -> int:
     return int(number * factor)
 
 
+def normalize_label(value: Any) -> str:
+    """Lower-case a difficulty or category label and unify its separators.
+
+    Task authors write labels inconsistently (``hard``, ``Hard``, ``data_science``,
+    ``data-science``), which would otherwise split one group across metrics.
+    """
+    text = str(value).strip().lower().replace("_", "-").replace(" ", "-")
+    return text or "unknown"
+
+
 class TerminalBenchLoader:
-    """Loads Terminal-Bench tasks from a git repository."""
+    """Loads Terminal-Bench style tasks from a git repository.
+
+    The class attributes describe the Terminal-Bench 2.1 release. Pass other
+    values to load another dataset in the same task format.
+    """
 
     REPO_URL = "https://github.com/harbor-framework/terminal-bench-2-1.git"
     DEFAULT_REF = "7131e4375048a0e408a8fb404b5f499d726b695b"
     DATASET_VERSION = "2.1"
+
+    def __init__(
+        self,
+        repo_url: str | None = None,
+        default_ref: str | None = None,
+        dataset_version: str | None = None,
+    ) -> None:
+        self.repo_url = repo_url or self.REPO_URL
+        self.default_ref = default_ref or self.DEFAULT_REF
+        self.dataset_version = dataset_version or self.DATASET_VERSION
 
     def ensure_repo(self, target_dir: Path, ref: str | None = None) -> Path:
         """Clone or update the Terminal-Bench repository.
@@ -60,7 +84,7 @@ class TerminalBenchLoader:
         Returns:
             Path to the repository.
         """
-        ref = ref or self.DEFAULT_REF
+        ref = ref or self.default_ref
 
         if (target_dir / ".git").exists():
             logger.info(f"Updating Terminal-Bench repo at {target_dir}")
@@ -79,7 +103,7 @@ class TerminalBenchLoader:
             target_dir.parent.mkdir(parents=True, exist_ok=True)
             # Clone without --depth to support checking out specific commits
             subprocess.run(
-                ["git", "clone", self.REPO_URL, str(target_dir)],
+                ["git", "clone", self.repo_url, str(target_dir)],
                 check=True,
                 capture_output=True,
             )
@@ -179,17 +203,25 @@ class TerminalBenchLoader:
         verifier_config = config.get("verifier", {})
         metadata = config.get("metadata", {})
 
+        image = env_config.get("docker_image") or ""
+        environment_dir = task_dir / "environment"
+        build_context = str(environment_dir) if not image and dockerfile_path.exists() else None
+        if not image and build_context is None:
+            raise ValueError("task declares neither a docker_image nor a Dockerfile")
+
         return TerminalBenchTask(
             task_id=task_dir.name,
-            image=env_config.get("docker_image", ""),
+            image=image,
             working_dir=workdir,
             instruction=instruction,
             agent_timeout=float(agent_config.get("timeout_sec", 900.0)),
             verifier_timeout=float(verifier_config.get("timeout_sec", 900.0)),
             test_files=test_files,
             solution_script=solution_script,
-            difficulty=metadata.get("difficulty", "unknown"),
-            category=metadata.get("category", "unknown"),
+            difficulty=normalize_label(metadata.get("difficulty", "unknown")),
+            category=normalize_label(metadata.get("category", "unknown")),
+            build_context=build_context,
+            build_timeout=float(env_config.get("build_timeout_sec", 600.0)),
             cpus=int(env_config.get("cpus", 1)),
             memory_mb=parse_size_mb(
                 env_config.get("memory_mb", env_config.get("memory")), default=2048

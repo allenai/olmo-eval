@@ -17,7 +17,7 @@ from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.network import get_docker_network_args
 from olmo_eval.evals.external.result import ExternalEvalResult
 from olmo_eval.harness.sandbox.config import ContainerRuntime, SandboxConfig, SandboxMode
-from olmo_eval.harness.sandbox.image import get_swerex_image
+from olmo_eval.harness.sandbox.image import build_task_image, get_swerex_image
 
 from .loader import TerminalBenchLoader
 from .task import TerminalBenchTask
@@ -66,6 +66,43 @@ the submit() tool.
 _TRUE_VALUES = (True, "true", "True", "1", 1)
 
 
+@dataclass(frozen=True)
+class TerminalBenchDataset:
+    """Where a Terminal-Bench style dataset lives and how the eval names it.
+
+    Attributes:
+        name: The eval's registered name.
+        description: One-line description shown by the CLI.
+        repo_url: Git repository holding the tasks.
+        repo_ref: Commit, tag or branch to evaluate.
+        version: Dataset version recorded in results.
+        cache_dir: Where a fresh clone is kept between runs.
+        image_prefix: Name prefix for task images built from a Dockerfile.
+    """
+
+    name: str
+    description: str
+    repo_url: str
+    repo_ref: str
+    version: str
+    cache_dir: str
+    image_prefix: str
+
+
+TERMINAL_BENCH_DATASET = TerminalBenchDataset(
+    name="terminal_bench_2",
+    description=(
+        f"Evaluates LLM agents on the {TerminalBenchLoader.DATASET_VERSION} release "
+        "of Terminal-Bench, 89 diverse terminal tasks"
+    ),
+    repo_url=TerminalBenchLoader.REPO_URL,
+    repo_ref=TerminalBenchLoader.DEFAULT_REF,
+    version=TerminalBenchLoader.DATASET_VERSION,
+    cache_dir="/tmp/terminal-bench-2-1-cache",
+    image_prefix="tb-task",
+)
+
+
 @dataclass
 class TerminalBenchArgs:
     """Arguments for the Terminal-Bench evaluation."""
@@ -88,14 +125,16 @@ class TerminalBenchArgs:
     max_tokens: int = 16384
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> TerminalBenchArgs:
+    def from_dict(
+        cls, data: dict[str, Any], default_ref: str = TerminalBenchLoader.DEFAULT_REF
+    ) -> TerminalBenchArgs:
         task_ids = data.get("task_ids")
         if isinstance(task_ids, str):
             task_ids = [t.strip() for t in task_ids.split(",") if t.strip()]
         return cls(
             task_ids=task_ids,
             repo_path=data.get("repo_path"),
-            repo_ref=data.get("repo_ref", TerminalBenchLoader.DEFAULT_REF),
+            repo_ref=data.get("repo_ref", default_ref),
             max_concurrency=int(data.get("max_concurrency", 1)),
             max_turns=int(data.get("max_turns", 64)),
             n_attempts=max(1, int(data.get("n_attempts", 1))),
@@ -224,18 +263,21 @@ def resource_docker_args(task: TerminalBenchTask) -> tuple[str, ...]:
 
 
 class TerminalBenchExternalEval(ExternalEval):
-    """Terminal-Bench evaluation with per-trial container orchestration."""
+    """Terminal-Bench evaluation with per-trial container orchestration.
+
+    Subclasses evaluate other datasets in the same task format by overriding
+    ``dataset``.
+    """
+
+    dataset: TerminalBenchDataset = TERMINAL_BENCH_DATASET
 
     @property
     def name(self) -> str:
-        return "terminal_bench_2"
+        return self.dataset.name
 
     @property
     def description(self) -> str:
-        return (
-            f"Evaluates LLM agents on the {TerminalBenchLoader.DATASET_VERSION} release "
-            "of Terminal-Bench, 89 diverse terminal tasks"
-        )
+        return self.dataset.description
 
     @property
     def timeout_seconds(self) -> float:
@@ -246,7 +288,7 @@ class TerminalBenchExternalEval(ExternalEval):
         return {
             "task_ids": ("Comma-separated task IDs to run (default: all)", None),
             "repo_path": ("Local repo path (default: clone fresh)", None),
-            "repo_ref": ("Git ref to checkout", TerminalBenchLoader.DEFAULT_REF),
+            "repo_ref": ("Git ref to checkout", self.dataset.repo_ref),
             "max_concurrency": ("Max parallel containers", 1),
             "max_turns": ("Max agent steps per trial", 64),
             "n_attempts": ("Attempts per task, for pass@k", 1),
@@ -284,7 +326,7 @@ class TerminalBenchExternalEval(ExternalEval):
             ExternalEvalResult with metrics and per-trial results.
         """
         start_time = time.time()
-        tb_args = TerminalBenchArgs.from_dict(args)
+        tb_args = TerminalBenchArgs.from_dict(args, default_ref=self.dataset.repo_ref)
 
         # Validate scaffold early to fail fast before spinning up sandboxes
         from olmo_eval.harness.scaffolds import validate_scaffold
@@ -296,12 +338,16 @@ class TerminalBenchExternalEval(ExternalEval):
             )
         validate_scaffold(tb_args.scaffold)
 
-        loader = TerminalBenchLoader()
+        loader = TerminalBenchLoader(
+            repo_url=self.dataset.repo_url,
+            default_ref=self.dataset.repo_ref,
+            dataset_version=self.dataset.version,
+        )
         if tb_args.repo_path:
             repo_dir = Path(tb_args.repo_path)
         else:
             # Clone to a cache directory (not output_dir to avoid copying repo to results)
-            repo_dir = Path("/tmp") / "terminal-bench-2-1-cache"
+            repo_dir = Path(self.dataset.cache_dir)
             loader.ensure_repo(repo_dir, tb_args.repo_ref)
 
         tasks = loader.load_tasks(repo_dir, tb_args.task_ids)
@@ -312,6 +358,7 @@ class TerminalBenchExternalEval(ExternalEval):
 
         trials = [(task, attempt) for task in tasks for attempt in range(tb_args.n_attempts)]
         semaphore = asyncio.Semaphore(tb_args.max_concurrency)
+        image_locks = {task.task_id: asyncio.Lock() for task in tasks}
 
         async def run_trial(task: TerminalBenchTask, attempt: int) -> TaskResult:
             async with semaphore:
@@ -321,6 +368,7 @@ class TerminalBenchExternalEval(ExternalEval):
                     provider=provider,
                     container_runtime=container_runtime,
                     tb_args=tb_args,
+                    image_lock=image_locks[task.task_id],
                 )
 
         results = await asyncio.gather(
@@ -346,7 +394,8 @@ class TerminalBenchExternalEval(ExternalEval):
             metrics=metrics,
             metadata={
                 "model_name": provider.model_name,
-                "dataset_version": TerminalBenchLoader.DATASET_VERSION,
+                "dataset": self.dataset.name,
+                "dataset_version": self.dataset.version,
                 "repo_ref": tb_args.repo_ref,
                 "scaffold": tb_args.scaffold,
                 "oracle_mode": tb_args.oracle,
@@ -382,8 +431,35 @@ class TerminalBenchExternalEval(ExternalEval):
             attempt=attempt,
         )
 
+    async def _task_image(
+        self, task: TerminalBenchTask, container_runtime: str, lock: asyncio.Lock | None = None
+    ) -> str:
+        """Return the sandbox image for a task, building it when the task ships none.
+
+        Image work shells out to the container runtime and can take minutes, so
+        it runs off the event loop. The lock keeps several attempts of one task
+        from building the same image at once; the first builds, the rest reuse.
+        """
+        async with lock or asyncio.Lock():
+            if task.needs_build:
+                assert task.build_context is not None
+                base = await asyncio.to_thread(
+                    build_task_image,
+                    Path(task.build_context),
+                    container_runtime,
+                    f"{self.dataset.image_prefix}-{task.task_id.lower()}",
+                    task.build_timeout,
+                )
+            else:
+                base = task.image
+            return await asyncio.to_thread(get_swerex_image, base, container_runtime, pristine=True)
+
     def _sandbox_config(
-        self, task: TerminalBenchTask, container_runtime: str, tb_args: TerminalBenchArgs
+        self,
+        task: TerminalBenchTask,
+        container_runtime: str,
+        tb_args: TerminalBenchArgs,
+        image: str,
     ) -> SandboxConfig:
         """Build the sandbox configuration for one trial of a task."""
         if tb_args.sandbox_mode == "docker":
@@ -409,8 +485,6 @@ class TerminalBenchExternalEval(ExternalEval):
                 "cannot enforce; the container keeps network access."
             )
 
-        image = get_swerex_image(task.image, runtime, pristine=True)
-
         return SandboxConfig(
             image=image,
             mode=mode,
@@ -429,6 +503,7 @@ class TerminalBenchExternalEval(ExternalEval):
         provider: InferenceProvider,
         container_runtime: str,
         tb_args: TerminalBenchArgs,
+        image_lock: asyncio.Lock | None = None,
     ) -> TaskResult:
         """Run one trial: start a container, run the agent, verify, and tear down."""
         from olmo_eval.harness.sandbox import SandboxManager
@@ -436,7 +511,13 @@ class TerminalBenchExternalEval(ExternalEval):
         logger.info(f"Executing task: {task.task_id} (attempt {attempt})")
         task_start = time.time()
 
-        sandbox_config = self._sandbox_config(task, container_runtime, tb_args)
+        try:
+            image = await self._task_image(task, container_runtime, image_lock)
+        except Exception as e:
+            logger.exception(f"Task {task.task_id} attempt {attempt} image failed")
+            return self._failed_result(task, attempt, str(e), time.time() - task_start)
+
+        sandbox_config = self._sandbox_config(task, container_runtime, tb_args, image)
         sandbox_manager = SandboxManager([sandbox_config], owner=f"tb-{task.task_id}-{attempt}")
 
         try:

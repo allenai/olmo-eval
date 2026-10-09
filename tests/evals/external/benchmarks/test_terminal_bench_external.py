@@ -156,11 +156,61 @@ class TestLoader:
         assert task.storage_mb == 10240
         assert task.allow_internet is True
         assert task.difficulty == "hard"
-        assert task.category == "software engineering"
+        assert task.category == "software-engineering"
         assert set(task.test_files) == {"test.sh", "data/fixture.bin"}
         assert task.test_files["data/fixture.bin"] == b"\x00\x01"
         assert set(task.solution_files) == {"solve.sh", "helper.py"}
         assert task.solution_script == "#!/bin/bash\npython helper.py\n"
+
+    def test_a_task_without_a_prebuilt_image_is_built_from_its_dockerfile(
+        self, tmp_path: Path
+    ) -> None:
+        toml = TASK_TOML.replace('docker_image = "example/task:1"\n', "").replace(
+            "cpus = 2\nmemory_mb = 4096\nstorage_mb = 10240\n", ""
+        )
+        write_task(tmp_path, "lite", toml=toml)
+
+        (task,) = TerminalBenchLoader().load_tasks(tmp_path)
+
+        assert task.image == ""
+        assert task.needs_build
+        assert task.build_context == str(tmp_path / "lite" / "environment")
+        assert task.build_timeout == 600.0
+        assert task.cpus == 1
+        assert task.memory_mb == 2048
+
+    def test_a_task_with_neither_image_nor_dockerfile_is_skipped(self, tmp_path: Path) -> None:
+        toml = TASK_TOML.replace('docker_image = "example/task:1"\n', "")
+        task_dir = write_task(tmp_path, "broken", toml=toml)
+        (task_dir / "environment" / "Dockerfile").unlink()
+        write_task(tmp_path, "fine")
+
+        tasks = TerminalBenchLoader().load_tasks(tmp_path)
+
+        assert [t.task_id for t in tasks] == ["fine"]
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("Hard", "hard"),
+            ("data_science", "data-science"),
+            (" Very Hard ", "very-hard"),
+            ("", "unknown"),
+        ],
+    )
+    def test_labels_are_normalized(self, raw, expected) -> None:
+        from olmo_eval.evals.external.benchmarks.terminal_bench.loader import normalize_label
+
+        assert normalize_label(raw) == expected
+
+    def test_loader_takes_another_dataset(self) -> None:
+        loader = TerminalBenchLoader(
+            repo_url="https://example/x.git", default_ref="r1", dataset_version="9"
+        )
+        assert loader.repo_url == "https://example/x.git"
+        assert loader.default_ref == "r1"
+        assert loader.dataset_version == "9"
+        assert TerminalBenchLoader().repo_url == TerminalBenchLoader.REPO_URL
 
     def test_legacy_size_strings_are_accepted(self, tmp_path: Path) -> None:
         toml = TASK_TOML.replace("memory_mb = 4096", 'memory = "8G"').replace(
@@ -361,15 +411,15 @@ class TestSandboxConfig:
         task = make_task(cpus=4, memory_mb=8192)
         assert tb_eval.resource_docker_args(task) == ("--cpus=4", "--memory=8192m")
 
-    @mock.patch.object(tb_eval, "get_swerex_image", return_value="swerex-abc:latest")
     @mock.patch.object(tb_eval, "get_docker_network_args", return_value=("--net",))
-    def test_docker_config_is_pristine_with_limits(self, _net, image) -> None:
+    def test_docker_config_is_pristine_with_limits(self, _net) -> None:
         task = make_task(cpus=2, memory_mb=4096, working_dir="/work", agent_timeout=1200.0)
         args = tb_eval.TerminalBenchArgs.from_dict({"command_timeout": 45})
 
-        config = tb_eval.TerminalBenchExternalEval()._sandbox_config(task, "podman", args)
+        config = tb_eval.TerminalBenchExternalEval()._sandbox_config(
+            task, "podman", args, "swerex-abc:latest"
+        )
 
-        image.assert_called_once_with("example/demo:1", "podman", pristine=True)
         assert config.image == "swerex-abc:latest"
         assert config.mode == SandboxMode.DOCKER
         assert config.container_runtime == "podman"
@@ -383,29 +433,32 @@ class TestSandboxConfig:
             "--memory=4096m",
         )
 
-    @mock.patch.object(tb_eval, "get_swerex_image", return_value="swerex-abc:latest")
     @mock.patch.object(tb_eval, "get_docker_network_args", return_value=("--net",))
-    def test_docker_runtime_gets_no_podman_flags(self, _net, _image) -> None:
+    def test_docker_runtime_gets_no_podman_flags(self, _net) -> None:
         args = tb_eval.TerminalBenchArgs.from_dict({})
 
-        config = tb_eval.TerminalBenchExternalEval()._sandbox_config(make_task(), "docker", args)
+        config = tb_eval.TerminalBenchExternalEval()._sandbox_config(
+            make_task(), "docker", args, "img"
+        )
 
         assert config.docker_args == ("--net", "--cpus=1", "--memory=2048m")
 
-    @mock.patch.object(tb_eval, "get_swerex_image", return_value="swerex-abc:latest")
     @mock.patch.object(tb_eval, "get_docker_network_args", return_value=("--net",))
-    def test_limits_can_be_switched_off(self, _net, _image) -> None:
+    def test_limits_can_be_switched_off(self, _net) -> None:
         args = tb_eval.TerminalBenchArgs.from_dict({"resource_limits": False})
 
-        config = tb_eval.TerminalBenchExternalEval()._sandbox_config(make_task(), "docker", args)
+        config = tb_eval.TerminalBenchExternalEval()._sandbox_config(
+            make_task(), "docker", args, "img"
+        )
 
         assert config.docker_args == ("--net",)
 
-    @mock.patch.object(tb_eval, "get_swerex_image", return_value="swerex-abc:latest")
-    def test_modal_config_has_no_docker_flags(self, _image) -> None:
+    def test_modal_config_has_no_docker_flags(self) -> None:
         args = tb_eval.TerminalBenchArgs.from_dict({"sandbox_mode": "modal"})
 
-        config = tb_eval.TerminalBenchExternalEval()._sandbox_config(make_task(), "podman", args)
+        config = tb_eval.TerminalBenchExternalEval()._sandbox_config(
+            make_task(), "podman", args, "img"
+        )
 
         assert config.mode == SandboxMode.MODAL
         assert config.docker_args == ()
@@ -413,7 +466,142 @@ class TestSandboxConfig:
     def test_unknown_sandbox_mode_is_rejected(self) -> None:
         args = tb_eval.TerminalBenchArgs.from_dict({"sandbox_mode": "cloud"})
         with pytest.raises(ValueError, match="sandbox_mode"):
-            tb_eval.TerminalBenchExternalEval()._sandbox_config(make_task(), "docker", args)
+            tb_eval.TerminalBenchExternalEval()._sandbox_config(make_task(), "docker", args, "img")
+
+
+class TestTaskImage:
+    def test_a_prebuilt_image_only_gets_the_swerex_layer(self) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        with (
+            mock.patch.object(tb_eval, "get_swerex_image", return_value="swerex-1") as swerex,
+            mock.patch.object(tb_eval, "build_task_image") as build,
+        ):
+            image = asyncio.run(eval_obj._task_image(make_task(), "podman"))
+
+        assert image == "swerex-1"
+        swerex.assert_called_once_with("example/demo:1", "podman", pristine=True)
+        build.assert_not_called()
+
+    def test_a_dockerfile_task_is_built_first(self, tmp_path: Path) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        task = make_task(image="", build_context=str(tmp_path), build_timeout=42.0)
+        assert task.needs_build
+        with (
+            mock.patch.object(tb_eval, "get_swerex_image", return_value="swerex-2") as swerex,
+            mock.patch.object(
+                tb_eval, "build_task_image", return_value="tb-task-demo:abc"
+            ) as build,
+        ):
+            image = asyncio.run(eval_obj._task_image(task, "docker"))
+
+        assert image == "swerex-2"
+        build.assert_called_once_with(tmp_path, "docker", "tb-task-demo", 42.0)
+        swerex.assert_called_once_with("tb-task-demo:abc", "docker", pristine=True)
+
+    def test_attempts_of_one_task_build_one_at_a_time(self, tmp_path: Path) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        task = make_task(image="", build_context=str(tmp_path))
+        active = 0
+        peak = 0
+
+        def slow_build(*args, **kwargs):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            import time as _time
+
+            _time.sleep(0.05)
+            active -= 1
+            return "tb-task-demo:abc"
+
+        async def run_all():
+            lock = asyncio.Lock()
+            return await asyncio.gather(
+                *(eval_obj._task_image(task, "docker", lock) for _ in range(3))
+            )
+
+        with (
+            mock.patch.object(tb_eval, "get_swerex_image", return_value="swerex-3"),
+            mock.patch.object(tb_eval, "build_task_image", side_effect=slow_build) as build,
+        ):
+            images = asyncio.run(run_all())
+
+        assert images == ["swerex-3"] * 3
+        assert build.call_count == 3
+        assert peak == 1
+
+    def test_a_failed_build_is_an_errored_trial(self, tmp_path: Path) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        task = make_task(image="", build_context=str(tmp_path))
+        args = tb_eval.TerminalBenchArgs.from_dict({})
+
+        with (
+            mock.patch.object(tb_eval, "build_task_image", side_effect=RuntimeError("no base")),
+            mock.patch("olmo_eval.harness.sandbox.SandboxManager") as manager,
+        ):
+            result = asyncio.run(
+                eval_obj._execute_task(
+                    task=task,
+                    attempt=1,
+                    provider=FakeProvider(),
+                    container_runtime="docker",
+                    tb_args=args,
+                )
+            )
+
+        assert result.error == "no base"
+        assert result.completion_reason == "error"
+        assert result.attempt == 1
+        manager.assert_not_called()
+
+
+class TestDatasets:
+    def test_tblite_is_registered_beside_terminal_bench(self) -> None:
+        from olmo_eval.evals.external import get_external_eval
+        from olmo_eval.evals.external.benchmarks.terminal_bench.tblite import (
+            TBLITE_DATASET,
+            OpenThoughtsTBLiteExternalEval,
+        )
+
+        tb = get_external_eval("terminal_bench_2")
+        lite = get_external_eval("openthoughts_tblite")
+        assert isinstance(lite, OpenThoughtsTBLiteExternalEval)
+        assert isinstance(lite, tb_eval.TerminalBenchExternalEval)
+        assert lite.name == "openthoughts_tblite"
+        assert lite.dataset is TBLITE_DATASET
+        assert "OpenThoughts-TBLite" in lite.description
+        assert lite.dataset.repo_url.endswith("OpenThoughts-TBLite.git")
+        assert len(lite.dataset.repo_ref) == 40
+        assert lite.arguments["repo_ref"][1] == TBLITE_DATASET.repo_ref
+        assert tb.arguments["repo_ref"][1] == TerminalBenchLoader.DEFAULT_REF
+        assert lite.dataset.cache_dir != tb.dataset.cache_dir
+        assert lite.dataset.image_prefix != tb.dataset.image_prefix
+
+    def test_the_default_ref_follows_the_dataset(self) -> None:
+        args = tb_eval.TerminalBenchArgs.from_dict({}, default_ref="abc123")
+        assert args.repo_ref == "abc123"
+        assert (
+            tb_eval.TerminalBenchArgs.from_dict({"repo_ref": "x"}, default_ref="abc").repo_ref
+            == "x"
+        )
+
+    def test_results_record_the_dataset(self, tmp_path: Path) -> None:
+        write_task(tmp_path / "tasks", "alpha")
+        from olmo_eval.evals.external.benchmarks.terminal_bench.tblite import (
+            OpenThoughtsTBLiteExternalEval,
+        )
+
+        eval_obj = OpenThoughtsTBLiteExternalEval()
+
+        async def fake_trial(task, attempt, provider, container_runtime, tb_args, image_lock=None):
+            return make_result(task.task_id, 1.0, attempt=attempt)
+
+        with mock.patch.object(eval_obj, "_execute_task", side_effect=fake_trial):
+            result = asyncio.run(eval_obj.execute(FakeProvider(), {"repo_path": str(tmp_path)}))
+
+        assert result.name == "openthoughts_tblite"
+        assert result.metadata["dataset"] == "openthoughts_tblite"
+        assert result.metadata["dataset_version"] == "2.0"
 
 
 class FakeSandboxManager:
@@ -659,7 +847,7 @@ class TestExecute:
         rewards = {("alpha", 0): 1.0, ("alpha", 1): 0.0, ("beta", 0): 0.0, ("beta", 1): 0.0}
         seen: list[tuple[str, int]] = []
 
-        async def fake_trial(task, attempt, provider, container_runtime, tb_args):
+        async def fake_trial(task, attempt, provider, container_runtime, tb_args, image_lock=None):
             seen.append((task.task_id, attempt))
             return make_result(task.task_id, rewards[(task.task_id, attempt)], attempt=attempt)
 

@@ -7,6 +7,7 @@ import logging
 import shlex
 import shutil
 import subprocess
+from pathlib import Path
 
 from olmo_eval.common.config import get_infra_config
 
@@ -86,6 +87,83 @@ def _image_platform(container_runtime: str, image: str) -> str | None:
     return platform if "/" in platform else None
 
 
+def _image_user(container_runtime: str, image: str) -> str | None:
+    """Return the user an image is configured to run as, if any."""
+    result = subprocess.run(
+        [container_runtime, "image", "inspect", image, "--format", "{{.Config.User}}"],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+    user = result.stdout.decode().strip()
+    return user or None
+
+
+def _image_exists(container_runtime: str, image: str) -> bool:
+    """Return whether an image is present in the local store."""
+    result = subprocess.run([container_runtime, "image", "inspect", image], capture_output=True)
+    return result.returncode == 0
+
+
+def build_context_hash(context_dir: Path) -> str:
+    """Hash a build context's file names and contents.
+
+    The hash names the image built from the context, so a changed Dockerfile or
+    data file produces a new image while an unchanged context reuses the old one.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(p for p in Path(context_dir).rglob("*") if p.is_file()):
+        digest.update(str(path.relative_to(context_dir)).encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:12]
+
+
+def build_task_image(
+    context_dir: Path,
+    container_runtime: str,
+    name: str,
+    timeout: float | None = None,
+) -> str:
+    """Build an image from a directory holding a Dockerfile, reusing a cached one.
+
+    Args:
+        context_dir: Directory with the Dockerfile and build context.
+        container_runtime: Container runtime (docker or podman).
+        name: Short name for the image; the tag carries the context hash.
+        timeout: Seconds to allow the build before failing.
+
+    Returns:
+        The built image's name and tag.
+
+    Raises:
+        RuntimeError: If the build fails or exceeds the timeout.
+    """
+    context_dir = Path(context_dir)
+    if not (context_dir / "Dockerfile").is_file():
+        raise RuntimeError(f"No Dockerfile in build context {context_dir}")
+    image = f"{name}:{build_context_hash(context_dir)}"
+    if _image_exists(container_runtime, image):
+        logger.debug(f"Using cached task image: {image}")
+        return image
+
+    logger.info(f"Building task image {image} from {context_dir}...")
+    try:
+        result = subprocess.run(
+            [container_runtime, "build", "-t", image, str(context_dir)],
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"Building {image} exceeded {timeout}s") from e
+    if result.returncode != 0:
+        stderr = result.stderr.decode(errors="replace") if result.stderr else ""
+        raise RuntimeError(f"Failed to build {image}: {stderr[-4000:]}")
+    logger.info(f"Built task image: {image}")
+    return image
+
+
 def get_swerex_image(
     base_image: str,
     container_runtime: str = "docker",
@@ -136,10 +214,16 @@ def get_swerex_image(
     return result
 
 
+#: Where the pristine variant keeps the swe-rex virtualenv. It sits outside any
+#: home directory so a base image's non-root user can run the server from it.
+PRISTINE_VENV = "/opt/swerex/venv"
+
+
 def build_swerex_dockerfile(
     base_image: str,
     dockerfile_extra: tuple[str, ...] = (),
     pristine: bool = False,
+    user: str | None = None,
 ) -> str:
     """Render the Dockerfile that layers swe-rex onto a base image.
 
@@ -147,12 +231,14 @@ def build_swerex_dockerfile(
     virtualenv and puts it first on PATH so ``python`` and ``pip`` resolve to it.
     The pristine variant only adds the virtualenv and a launcher symlink for the
     swe-rex server, so the image's own interpreters, packages and environment
-    are what commands see.
+    are what commands see, and it hands control back to the base image's user.
 
     Args:
         base_image: The base container image.
         dockerfile_extra: Additional Dockerfile commands to append.
         pristine: Whether to leave the base image's environment untouched.
+        user: The base image's configured user, restored at the end of a
+            pristine build when it is not root.
 
     Returns:
         The Dockerfile contents.
@@ -165,17 +251,19 @@ def build_swerex_dockerfile(
         # virtualenv itself on PATH; the script's shebang points at the venv python.
         # uv is only needed to build the venv and is removed again so the image's
         # own tools are the ones commands find.
+        user_line = f"USER {user}\n" if user and user not in ("root", "0") else ""
         return f"""\
 FROM {base_image}
 USER root
 COPY --from={UV_IMAGE} /uv /usr/local/bin/swerex-uv
-RUN swerex-uv venv /root/venv --python 3.12 --seed && \\
-    swerex-uv pip install --python /root/venv/bin/python --no-cache-dir swe-rex && \\
-    ln -sf /root/venv/bin/swerex-remote /usr/local/bin/swerex-remote && \\
-    ln -sf /root/venv/bin/swerex-remote /usr/bin/swerex-remote && \\
+RUN swerex-uv venv {PRISTINE_VENV} --python 3.12 --seed && \\
+    swerex-uv pip install --python {PRISTINE_VENV}/bin/python --no-cache-dir swe-rex && \\
+    chmod -R a+rX /opt/swerex && \\
+    ln -sf {PRISTINE_VENV}/bin/swerex-remote /usr/local/bin/swerex-remote && \\
+    ln -sf {PRISTINE_VENV}/bin/swerex-remote /usr/bin/swerex-remote && \\
     rm /usr/local/bin/swerex-uv
 {extra_lines}
-"""
+{user_line}"""
 
     # Seed pip into the venv because Modal adds a small builder layer on top of
     # registry images and expects `python -m pip` to work inside the image.
@@ -277,10 +365,11 @@ def _resolve_swerex_image(
 
     logger.info(f"Building swerex image from {base_image}...")
 
-    dockerfile = build_swerex_dockerfile(base_image, dockerfile_extra, pristine)
+    platform = _image_platform(container_runtime, base_image)
+    user = _image_user(container_runtime, base_image) if pristine else None
+    dockerfile = build_swerex_dockerfile(base_image, dockerfile_extra, pristine, user=user)
 
     build_cmd = [container_runtime, "build", "-t", local_image]
-    platform = _image_platform(container_runtime, base_image)
     if platform:
         build_cmd.append(f"--platform={platform}")
     build_cmd.append("-")
