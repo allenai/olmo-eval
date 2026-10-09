@@ -20,7 +20,7 @@ _resolved_images: dict[str, str] = {}
 UV_IMAGE = "ghcr.io/astral-sh/uv:0.11.7"
 
 # Version bump this when changing the Dockerfile to invalidate cached images
-SWEREX_IMAGE_VERSION = "20260505.1"
+SWEREX_IMAGE_VERSION = "20261008.1"
 
 
 def _remote_image_exists(container_runtime: str, image: str) -> bool:
