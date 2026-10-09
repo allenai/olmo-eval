@@ -182,6 +182,24 @@ class TestSessionTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actions[0].command, "sleep 100")
         self.assertEqual(type(actions[1]).__name__, "BashInterruptAction")
 
+    async def test_a_syntax_error_comes_back_as_a_result(self) -> None:
+        executor = self._executor()
+
+        class BashIncorrectSyntaxError(RuntimeError):
+            pass
+
+        executor._runtime.run_in_session = mock.AsyncMock(
+            side_effect=BashIncorrectSyntaxError("bash: line 1: syntax error near `('")
+        )
+
+        result = await executor.execute_in_session("echo (")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.exit_code, 2)
+        self.assertEqual(result.error, "syntax")
+        self.assertIn("syntax error", result.output)
+        self.assertEqual(executor._runtime.run_in_session.await_count, 1)
+
     async def test_other_failures_still_raise(self) -> None:
         executor = self._executor()
         executor._runtime.run_in_session = mock.AsyncMock(side_effect=RuntimeError("gone"))

@@ -48,6 +48,11 @@ class _ControlCommandResult:
     exit_code: int
 
 
+def _is_bash_syntax_error(exc: BaseException) -> bool:
+    """Return whether an exception reports a command that failed swe-rex's syntax check."""
+    return type(exc).__name__ == "BashIncorrectSyntaxError"
+
+
 def _is_command_timeout(exc: BaseException) -> bool:
     """Return whether an exception reports a command exceeding its timeout."""
     return "CommandTimeoutError" in type(exc).__name__ or "timed out" in str(exc).lower()
@@ -992,6 +997,13 @@ class SandboxExecutor:
                 )
             )
         except Exception as e:
+            if _is_bash_syntax_error(e):
+                # swe-rex checks a command's syntax before running it. A model
+                # that writes a malformed command should read bash's complaint,
+                # as it would from a shell, rather than end the run.
+                return ExecutionResult(
+                    success=False, output=str(e).strip(), exit_code=2, error="syntax"
+                )
             if not _is_command_timeout(e):
                 raise
             # The command is still running in the shell; stop it so the session

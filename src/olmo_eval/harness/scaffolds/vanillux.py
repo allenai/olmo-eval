@@ -401,14 +401,18 @@ class VanilluxScaffold(Scaffold):
     ) -> None:
         """Keep the reply and answer it with the format-error message.
 
-        A reply that called some tool gets the error as that call's result, so
-        the conversation stays well formed; a reply with no call gets it as a
-        user message.
+        A reply that called some tool with well-formed arguments gets the error
+        as that call's result, so the conversation stays well formed. A call
+        whose arguments are not a JSON object cannot go back to an
+        OpenAI-compatible server as a tool call: the server re-renders the
+        history through the chat template and rejects the request, which would
+        end the run. Such a call is kept as text in the reply instead, and the
+        error follows as a user message, as it does for a reply with no call.
         """
         text = output.text or ""
         content = format_error_message(NO_TOOL_CALL_ERROR)
         call = action.tool_call
-        if call is not None and call.id:
+        if call is not None and call.id and _arguments_are_an_object(call):
             messages.append(
                 {"role": "assistant", "content": text, "tool_calls": [call.to_openai()]}
             )
@@ -418,7 +422,21 @@ class VanilluxScaffold(Scaffold):
                 AgentTurn.tool([ToolResult(tool_call_id=call.id, content=content, is_error=True)])
             )
             return
+        if call is not None:
+            rendered = f"{call.function.name}({call.function.arguments})"
+            text = "\n".join(part for part in (text, rendered) if part)
         messages.append({"role": "assistant", "content": text})
         messages.append({"role": "user", "content": content})
         turns.append(AgentTurn.assistant(content=text))
         turns.append(AgentTurn.user(content=content))
+
+
+def _arguments_are_an_object(call: ToolCall) -> bool:
+    """True when a call's arguments decode to a JSON object a server can re-render."""
+    raw = call.function.arguments
+    if isinstance(raw, dict):
+        return True
+    try:
+        return isinstance(json.loads(raw), dict)
+    except (TypeError, ValueError):
+        return False

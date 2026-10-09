@@ -256,6 +256,28 @@ async def test_a_call_to_another_tool_is_answered_as_that_call() -> None:
 
 
 @pytest.mark.anyio
+async def test_a_call_with_broken_arguments_goes_back_as_text() -> None:
+    # A truncated reply leaves arguments that are not JSON; sent back as a tool
+    # call, the server would reject the whole conversation.
+    broken = LMOutput(
+        text="THOUGHT: run it",
+        tool_calls=[ToolCall.create("c-7", "bash", '{"command": "cat big')],
+    )
+    provider = ScriptedProvider([broken, bash_reply(f"echo {SUBMIT_MARKER}")])
+
+    result, binding = await run(provider)
+
+    follow_up = provider.requests[1].messages
+    assert follow_up[2]["role"] == "assistant"
+    assert "tool_calls" not in follow_up[2]
+    assert 'bash({"command": "cat big' in follow_up[2]["content"]
+    assert follow_up[3]["role"] == "user"
+    assert follow_up[3]["content"].startswith("Format error:")
+    assert binding.commands == [(f"echo {SUBMIT_MARKER}", 120.0)]
+    assert result.metadata["completion_reason"] == "submitted"
+
+
+@pytest.mark.anyio
 async def test_repeated_format_errors_end_the_run() -> None:
     provider = ScriptedProvider([LMOutput(text="nope")] * 5)
 
