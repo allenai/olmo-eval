@@ -30,6 +30,19 @@ def default_cache_dir() -> Path:
     return Path(os.environ.get("TMPDIR", tempfile.gettempdir())) / CACHE_PARENT_NAME / REPO_DIR_NAME
 
 
+# Variables that point uv or Python at olmo-eval's environment. The
+# OpenHands/benchmarks checkout must use its own ``.venv`` instead.
+_PARENT_ENV_VARS = ("VIRTUAL_ENV", "UV_PROJECT", "UV_PROJECT_ENVIRONMENT")
+
+
+def benchmarks_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Copy of ``base`` (default: ``os.environ``) for commands run in the benchmarks checkout."""
+    env = dict(os.environ if base is None else base)
+    for name in _PARENT_ENV_VARS:
+        env.pop(name, None)
+    return env
+
+
 def ensure_repo(target_dir: Path, ref: str | None = None) -> Path:
     """Clone or update OpenHands/benchmarks at ``ref``, including the SDK submodule."""
     ref = ref or DEFAULT_REF
@@ -58,9 +71,7 @@ def ensure_repo(target_dir: Path, ref: str | None = None) -> Path:
 def sync_repo_env(repo_dir: Path) -> None:
     """Install OpenHands/benchmarks into its own uv environment."""
     logger.info("Running uv sync in %s", repo_dir)
-    env = os.environ.copy()
-    env.pop("VIRTUAL_ENV", None)
-    _run(["uv", "sync"], cwd=repo_dir, env=env)
+    _run(["uv", "sync"], cwd=repo_dir, env=benchmarks_env())
 
 
 def docker_build_context(repo_dir: Path) -> Path:
@@ -228,9 +239,7 @@ def ensure_workspace_image(repo_dir: Path, container_runtime: str = "podman") ->
         image_name,
         context,
     )
-    env = os.environ.copy()
-    env.pop("VIRTUAL_ENV", None)
-    _run(build_cmd, env=env, capture=False)
+    _run(build_cmd, env=benchmarks_env(), capture=False)
     if not _docker_image_exists(image_name):
         raise RuntimeError(f"Built image {image_name} is not present in local Docker/Podman")
     logger.info("Built OAS workspace image %s", image_name)

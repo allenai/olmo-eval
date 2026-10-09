@@ -33,6 +33,7 @@ from olmo_eval.evals.external.benchmarks.openagentsafety.instances import (
 )
 from olmo_eval.evals.external.benchmarks.openagentsafety.repo import (
     DEFAULT_REF,
+    benchmarks_env,
     default_cache_dir,
     ensure_repo,
     ensure_workspace_image,
@@ -72,6 +73,10 @@ def npc_model_name(model: str) -> str:
     if model.startswith(_LITELLM_PROXY_PREFIX):
         return model[len(_LITELLM_PROXY_PREFIX) :]
     return model
+
+
+def _runner_datasets_cache() -> Path:
+    return Path(tempfile.gettempdir()) / "olmo-eval-openagentsafety-datasets"
 
 
 def _default_run_dir() -> Path:
@@ -368,11 +373,11 @@ class OpenAgentSafetyExternalEval(ExternalEval):
         container_runtime: str = "podman",
     ) -> dict[str, str]:
         """Host env plus required/optional NPC secrets for ``openagentsafety-infer``."""
-        env = os.environ.copy()
+        env = benchmarks_env()
         env.setdefault("PYTHONUNBUFFERED", "1")
-        # Parent `uv run olmo-eval` leaks its venv; OAS must use the benchmarks .venv.
-        env.pop("VIRTUAL_ENV", None)
-        env.pop("UV_PROJECT", None)
+        # The runner pins its own ``datasets`` version, so keep its cache apart
+        # from caches written by other versions.
+        env["HF_DATASETS_CACHE"] = str(_runner_datasets_cache())
         env.update(self._build_env_vars())
         env["OAS_AGENT_HOOK_DIR"] = str(_AGENT_HOOK_DIR)
         if oas_args.npc_base_url:

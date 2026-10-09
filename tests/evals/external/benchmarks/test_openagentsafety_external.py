@@ -21,6 +21,7 @@ from olmo_eval.evals.external.benchmarks.openagentsafety.hooks.agent_hooks impor
     rewrite_tool_call,
 )
 from olmo_eval.evals.external.benchmarks.openagentsafety.repo import (
+    benchmarks_env,
     patch_agent_hook_mount,
     patch_gateway_host_mapping,
     patch_podman_workspace_network,
@@ -347,6 +348,24 @@ def test_subprocess_env_sets_agent_hook_dir(monkeypatch: pytest.MonkeyPatch) -> 
     evaluation = OpenAgentSafetyExternalEval()
     env = evaluation._subprocess_env(OpenAgentSafetyArgs.from_dict({}), container_runtime="docker")
     assert env["OAS_AGENT_HOOK_DIR"].endswith("openagentsafety/hooks")
+
+
+def test_subprocess_env_drops_parent_uv_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NPC_API_KEY", "npc-secret")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/opt/venv")
+    monkeypatch.setenv("VIRTUAL_ENV", "/opt/venv")
+    monkeypatch.setenv("UV_PROJECT", "/opt/project")
+    evaluation = OpenAgentSafetyExternalEval()
+    env = evaluation._subprocess_env(OpenAgentSafetyArgs.from_dict({}), container_runtime="docker")
+    assert "UV_PROJECT_ENVIRONMENT" not in env
+    assert "VIRTUAL_ENV" not in env
+    assert "UV_PROJECT" not in env
+    assert env["HF_DATASETS_CACHE"].endswith("olmo-eval-openagentsafety-datasets")
+
+
+def test_benchmarks_env_keeps_unrelated_variables() -> None:
+    env = benchmarks_env({"UV_PROJECT_ENVIRONMENT": "/opt/venv", "HF_TOKEN": "token"})
+    assert env == {"HF_TOKEN": "token"}
 
 
 def test_subprocess_env_strips_litellm_proxy_prefix_from_npc_model(

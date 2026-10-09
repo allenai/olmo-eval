@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -13,14 +14,22 @@ SAMPLE_SEED = 42
 
 
 def load_instances(dataset: str, split: str) -> list[dict[str, Any]]:
-    """Load instance IDs and service dependencies from a dataset."""
+    """Load instance IDs and service dependencies from a dataset.
+
+    Uses a throwaway datasets cache so the shared cache never holds metadata
+    in a format the runner's older ``datasets`` cannot read.
+    """
     from datasets import load_dataset
 
-    rows = load_dataset(dataset, split=split).select_columns(["instance_id", "dependencies"])
-    return [
-        {"instance_id": str(row["instance_id"]), "dependencies": list(row["dependencies"] or [])}
-        for row in rows
-    ]
+    with tempfile.TemporaryDirectory(prefix="oas-instances-") as cache_dir:
+        rows = load_dataset(dataset, split=split, cache_dir=cache_dir)
+        return [
+            {
+                "instance_id": str(row["instance_id"]),
+                "dependencies": list(row["dependencies"] or []),
+            }
+            for row in rows.select_columns(["instance_id", "dependencies"])
+        ]
 
 
 def read_select(select: str | list[str] | None) -> set[str] | None:
