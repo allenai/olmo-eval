@@ -473,7 +473,7 @@ class TestExecuteTask:
         task = make_task(difficulty="hard", category="c")
 
         async def fake_agent(manager, task, provider, tb_args):
-            return trajectory_with_steps(3), "submitted", 3
+            return trajectory_with_steps(3), "submitted", 3, None
 
         with mock.patch.object(eval_obj, "_run_agent", side_effect=fake_agent):
             result = self._run(eval_obj, task, args, attempt=2)
@@ -497,7 +497,7 @@ class TestExecuteTask:
 
         async def slow_agent(manager, task, provider, tb_args):
             await asyncio.sleep(5)
-            return trajectory_with_steps(1), "submitted", 1
+            return trajectory_with_steps(1), "submitted", 1, None
 
         with (
             mock.patch.object(eval_obj, "_run_agent", side_effect=slow_agent),
@@ -509,6 +509,20 @@ class TestExecuteTask:
         assert result.reward == 1.0
         assert result.error is None
         assert FakeSandboxManager.instances[0].stopped
+
+    def test_a_model_serving_failure_is_an_error(self) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        args = tb_eval.TerminalBenchArgs.from_dict({})
+
+        async def failed_agent(manager, task, provider, tb_args):
+            return AgentTrajectory(turns=()), "error", 0, "Connection error."
+
+        with mock.patch.object(eval_obj, "_run_agent", side_effect=failed_agent):
+            result = self._run(eval_obj, make_task(), args)
+
+        assert result.completion_reason == "error"
+        assert result.error == "Connection error."
+        assert result.errored
 
     def test_an_infrastructure_failure_is_an_error(self) -> None:
         eval_obj = tb_eval.TerminalBenchExternalEval()
@@ -572,11 +586,12 @@ class TestRunAgent:
                 trajectory=trajectory_with_steps(2),
                 metadata={"completion_reason": "submitted", "steps": 2},
                 max_turns_reached=False,
+                error=None,
             )
         )
 
         with mock.patch("olmo_eval.harness.scaffolds.get_scaffold", return_value=scaffold):
-            trajectory, reason, steps = asyncio.run(
+            trajectory, reason, steps, error = asyncio.run(
                 eval_obj._run_agent(mock.Mock(), task, FakeProvider(), args)
             )
 
@@ -598,6 +613,7 @@ class TestRunAgent:
         assert "enable_compaction" not in call.kwargs
         assert reason == "submitted"
         assert steps == 2
+        assert error is None
         assert trajectory.num_turns == 2
 
     def test_the_openai_agents_scaffold_keeps_its_own_tools_and_prompt(self) -> None:
@@ -608,12 +624,15 @@ class TestRunAgent:
         scaffold = mock.Mock()
         scaffold.run = mock.AsyncMock(
             return_value=mock.Mock(
-                trajectory=trajectory_with_steps(4), metadata={}, max_turns_reached=True
+                trajectory=trajectory_with_steps(4),
+                metadata={},
+                max_turns_reached=True,
+                error="Max turns exceeded",
             )
         )
 
         with mock.patch("olmo_eval.harness.scaffolds.get_scaffold", return_value=scaffold):
-            _, reason, steps = asyncio.run(
+            _, reason, steps, error = asyncio.run(
                 eval_obj._run_agent(mock.Mock(), make_task(), FakeProvider(), args)
             )
 
@@ -624,6 +643,7 @@ class TestRunAgent:
         assert call.kwargs["enable_compaction"] is False
         assert reason == "max_turns"
         assert steps == 4
+        assert error is None
 
 
 class TestExecute:

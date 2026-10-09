@@ -445,11 +445,17 @@ class TerminalBenchExternalEval(ExternalEval):
             trajectory = AgentTrajectory(turns=())
             completion_reason = "timeout"
             agent_steps = 0
+            agent_error: str | None = None
             if tb_args.oracle:
                 trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
             else:
                 try:
-                    trajectory, completion_reason, agent_steps = await asyncio.wait_for(
+                    (
+                        trajectory,
+                        completion_reason,
+                        agent_steps,
+                        agent_error,
+                    ) = await asyncio.wait_for(
                         self._run_agent(sandbox_manager, task, provider, tb_args),
                         timeout=task.agent_timeout + AGENT_TIMEOUT_GRACE,
                     )
@@ -478,7 +484,7 @@ class TerminalBenchExternalEval(ExternalEval):
                 agent_duration=agent_duration,
                 verification_output=verification.test_output,
                 verification_exit_code=verification.test_exit_code,
-                error=verification.error,
+                error=verification.error or agent_error,
                 difficulty=task.difficulty,
                 category=task.category,
                 attempt=attempt,
@@ -530,11 +536,13 @@ class TerminalBenchExternalEval(ExternalEval):
         task: TerminalBenchTask,
         provider: InferenceProvider,
         tb_args: TerminalBenchArgs,
-    ) -> tuple[AgentTrajectory, str, int]:
+    ) -> tuple[AgentTrajectory, str, int, str | None]:
         """Run the LLM agent.
 
         Returns:
-            Tuple of (trajectory, completion_reason, steps).
+            Tuple of (trajectory, completion_reason, steps, error). The error is
+            set when the run ended because the model could not be served, which
+            is the harness's failure rather than the agent's.
         """
         from olmo_eval.harness.config import HarnessConfig
         from olmo_eval.harness.scaffolds import get_scaffold
@@ -588,8 +596,13 @@ class TerminalBenchExternalEval(ExternalEval):
         steps = harness_result.metadata.get("steps")
         if steps is None:
             steps = len(trajectory.assistant_turns)
+        # A run that used up its turns is the agent's failure; only a run that
+        # ended on an error the harness raised is reported as one.
+        error = harness_result.error if not harness_result.max_turns_reached else None
+        if error:
+            logger.warning(f"Agent for task {task.task_id} failed: {error}")
         logger.info(f"Agent completed task {task.task_id}: {completion_reason}")
-        return trajectory, str(completion_reason), int(steps)
+        return trajectory, str(completion_reason), int(steps), error
 
     def _build_predictions(self, task_results: list[TaskResult]) -> list[dict[str, Any]]:
         """Build predictions list from task results."""
