@@ -6,12 +6,21 @@ HuggingFace dataset repo (see ruler_plus_loader.py) instead of the
 allenai/ruler_data HuggingFace release, and extends context sizes beyond the
 original 131072-token cap. Data is generated with https://github.com/jopetty/RULER
 via scripts/generate-data.sh.
+
+Generation budgets follow upstream RULER's per-task ``tokens_to_generate``,
+and each condition has 512 samples, whereas ruler.py follows HELMET's budgets
+with 100 samples. Scores are therefore not directly comparable between
+``ruler_plus_*`` and ``ruler_*`` tasks at the same context size.
 """
 
 from typing import Any
 
 from olmo_eval.common.types import Instance
-from olmo_eval.data.ruler_plus_loader import get_ruler_plus_data_file, load_ruler_plus_shard
+from olmo_eval.data.ruler_plus_loader import (
+    ROW_FIELD,
+    get_ruler_plus_data_file,
+    load_ruler_plus_shard,
+)
 from olmo_eval.data.ruler_plus_tasks import RULER_PLUS_TASKS
 from olmo_eval.evals.tasks.common.registry import register
 from olmo_eval.evals.tasks.ruler import RulerTask, make_ruler_task_class
@@ -29,6 +38,8 @@ class RulerPlusTask(RulerTask):
     _tasks_registry: dict[str, dict[str, Any]] = RULER_PLUS_TASKS
     _name_prefix: str = "ruler_plus_"
 
+    _data_source: str | None = None
+
     def _load_data(self) -> None:
         """Download only the requested shard and reservoir-sample it.
 
@@ -42,11 +53,12 @@ class RulerPlusTask(RulerTask):
         if self._dataset is not None:
             return
 
-        data_path = get_ruler_plus_data_file(self.ruler_config["data"])
+        data_file = get_ruler_plus_data_file(self.ruler_config["data"])
+        self._data_source = data_file.source
         self._dataset = load_ruler_plus_shard(
-            data_path=data_path,
+            data_path=data_file.path,
             max_samples=self.config.limit,
-            seed=42,
+            seed=self.config.seed,
         )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
@@ -56,10 +68,14 @@ class RulerPlusTask(RulerTask):
 
         answer = doc.get("outputs")
         metadata: dict = {
-            "id": doc.get("index", index),
+            # The shard row, not the generator's `index` field, which repeats
+            # within a shard (for NIAH it is the needle's character offset)
+            "id": doc.get(ROW_FIELD, index),
             "task_type": self.task_type,
             "context_size": self.context_size,
             "tag": self.ruler_config["tag"],
+            # The task hash doesn't cover the data, so record what was read
+            "data_source": self._data_source,
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer

@@ -1,8 +1,8 @@
 """RULER-plus (ruler-plus) task suites organized by category and context size.
 
 Mirrors suites/ruler.py's structure (per-category suites plus a combined
-"all" suite per context size, matching the paper's "average of all 13 tasks"
-methodology) for the ruler-plus task family.
+"all" suite per context size, a flat average over all tasks as in the paper)
+for the ruler-plus task family.
 """
 
 from olmo_eval.data.ruler_plus_tasks import CONTEXT_SIZES as RULER_PLUS_CONTEXT_SIZES
@@ -38,7 +38,7 @@ for size in RULER_PLUS_CONTEXT_SIZES:
         register(suite)
         all_tasks.extend(tasks)
 
-    # Create combined suite: flat average of all 13 tasks, matching the paper
+    # Create combined suite: flat average of all tasks, matching the paper
     if len(all_tasks) > 0:
         all_tasks_suite = Suite(
             name=f"ruler_plus_all__{size}",
