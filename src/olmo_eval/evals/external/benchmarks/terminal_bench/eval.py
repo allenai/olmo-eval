@@ -46,6 +46,12 @@ AGENT_TIMEOUT_GRACE = 300.0
 #: Containers take longer to come up when a task image has to be pulled first.
 SANDBOX_STARTUP_TIMEOUT = 180.0
 
+#: Podman flags for task containers. Rootless Podman maps the container's users
+#: into a namespace whose default size leaves common system ids such as
+#: ``nogroup`` unmapped, which breaks ``apt-get`` in task images and test
+#: scripts. A namespace of 65536 ids covers them.
+PODMAN_DOCKER_ARGS: tuple[str, ...] = ("--userns=auto:size=65536",)
+
 OPENAI_AGENTS_SYSTEM_PROMPT = """\
 You are an AI assistant helping complete tasks in a Linux terminal.
 You have access to the following tools:
@@ -393,6 +399,8 @@ class TerminalBenchExternalEval(ExternalEval):
         docker_args: tuple[str, ...] = ()
         if mode == SandboxMode.DOCKER:
             docker_args = tuple(get_docker_network_args(runtime))
+            if runtime == "podman":
+                docker_args += PODMAN_DOCKER_ARGS
             if tb_args.resource_limits:
                 docker_args += resource_docker_args(task)
         if not task.allow_internet:

@@ -374,7 +374,21 @@ class TestSandboxConfig:
         assert config.pristine_image is True
         assert config.working_dir == "/work"
         assert config.command_timeout == 45.0
-        assert config.docker_args == ("--net", "--cpus=2", "--memory=4096m")
+        assert config.docker_args == (
+            "--net",
+            "--userns=auto:size=65536",
+            "--cpus=2",
+            "--memory=4096m",
+        )
+
+    @mock.patch.object(tb_eval, "get_swerex_image", return_value="swerex-abc:latest")
+    @mock.patch.object(tb_eval, "get_docker_network_args", return_value=("--net",))
+    def test_docker_runtime_gets_no_podman_flags(self, _net, _image) -> None:
+        args = tb_eval.TerminalBenchArgs.from_dict({})
+
+        config = tb_eval.TerminalBenchExternalEval()._sandbox_config(make_task(), "docker", args)
+
+        assert config.docker_args == ("--net", "--cpus=1", "--memory=2048m")
 
     @mock.patch.object(tb_eval, "get_swerex_image", return_value="swerex-abc:latest")
     @mock.patch.object(tb_eval, "get_docker_network_args", return_value=("--net",))
