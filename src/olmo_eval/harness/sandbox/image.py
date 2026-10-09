@@ -58,6 +58,34 @@ def _remote_image_exists(container_runtime: str, image: str) -> bool:
     return result.returncode == 0
 
 
+def _image_platform(container_runtime: str, image: str) -> str | None:
+    """Return the ``os/arch`` an image was built for, pulling it if needed.
+
+    A derived image has to be built for its base image's platform, which on a
+    host of another architecture is not the platform a build defaults to.
+    """
+    inspect = [
+        container_runtime,
+        "image",
+        "inspect",
+        image,
+        "--format",
+        "{{.Os}}/{{.Architecture}}",
+    ]
+    result = subprocess.run(inspect, capture_output=True)
+    if result.returncode != 0:
+        pull = subprocess.run([container_runtime, "pull", image], capture_output=True)
+        if pull.returncode != 0:
+            stderr = pull.stderr.decode() if pull.stderr else ""
+            logger.warning(f"Could not pull {image} to read its platform: {stderr.strip()}")
+            return None
+        result = subprocess.run(inspect, capture_output=True)
+        if result.returncode != 0:
+            return None
+    platform = result.stdout.decode().strip()
+    return platform if "/" in platform else None
+
+
 def get_swerex_image(
     base_image: str,
     container_runtime: str = "docker",
@@ -135,14 +163,17 @@ def build_swerex_dockerfile(
         # swe-rex starts its server as ``swerex-remote`` found on PATH. A symlink in
         # the standard binary directories satisfies that lookup without putting the
         # virtualenv itself on PATH; the script's shebang points at the venv python.
+        # uv is only needed to build the venv and is removed again so the image's
+        # own tools are the ones commands find.
         return f"""\
 FROM {base_image}
 USER root
-COPY --from={UV_IMAGE} /uv /uvx /usr/local/bin/
-RUN uv venv /root/venv --python 3.12 --seed && \\
-    uv pip install --python /root/venv/bin/python --no-cache-dir swe-rex && \\
+COPY --from={UV_IMAGE} /uv /usr/local/bin/swerex-uv
+RUN swerex-uv venv /root/venv --python 3.12 --seed && \\
+    swerex-uv pip install --python /root/venv/bin/python --no-cache-dir swe-rex && \\
     ln -sf /root/venv/bin/swerex-remote /usr/local/bin/swerex-remote && \\
-    ln -sf /root/venv/bin/swerex-remote /usr/bin/swerex-remote
+    ln -sf /root/venv/bin/swerex-remote /usr/bin/swerex-remote && \\
+    rm /usr/local/bin/swerex-uv
 {extra_lines}
 """
 
@@ -248,11 +279,12 @@ def _resolve_swerex_image(
 
     dockerfile = build_swerex_dockerfile(base_image, dockerfile_extra, pristine)
 
-    result = subprocess.run(
-        [container_runtime, "build", "-t", local_image, "-"],
-        input=dockerfile.encode(),
-        capture_output=True,
-    )
+    build_cmd = [container_runtime, "build", "-t", local_image]
+    platform = _image_platform(container_runtime, base_image)
+    if platform:
+        build_cmd.append(f"--platform={platform}")
+    build_cmd.append("-")
+    result = subprocess.run(build_cmd, input=dockerfile.encode(), capture_output=True)
     if result.returncode != 0:
         stderr = result.stderr.decode() if result.stderr else ""
         raise RuntimeError(f"Failed to build swerex image: {stderr}")
