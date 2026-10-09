@@ -19,11 +19,18 @@ import shutil
 import subprocess
 import tempfile
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.benchmarks.openagentsafety.args import OpenAgentSafetyArgs
+from olmo_eval.evals.external.benchmarks.openagentsafety.instances import (
+    load_instances,
+    read_select,
+    required_services,
+    select_instances,
+)
 from olmo_eval.evals.external.benchmarks.openagentsafety.repo import (
     DEFAULT_REF,
     default_cache_dir,
@@ -171,14 +178,46 @@ class OpenAgentSafetyExternalEval(ExternalEval):
         except ValueError as exc:
             return self._error_result(str(exc), start_time)
 
+        try:
+            planned = select_instances(
+                load_instances(oas_args.dataset, oas_args.split),
+                read_select(oas_args.select),
+                oas_args.n_limit,
+            )
+        except Exception as exc:
+            logger.exception("[%s] Failed to load instances", self.name)
+            return self._error_result(
+                f"Failed to load OpenAgentSafety instances: {exc}", start_time
+            )
+        if not planned:
+            return self._error_result(
+                "No OpenAgentSafety instances match select/n_limit", start_time
+            )
+        # Pass the resolved IDs to the runner so it evaluates exactly this set.
+        oas_args = replace(oas_args, select=[row["instance_id"] for row in planned], n_limit=None)
+        services = required_services(planned)
+
         docker_error = self._docker_error()
         if docker_error:
             return self._error_result(docker_error, start_time)
 
-        try:
-            ensure_tac_services()
-        except RuntimeError as exc:
-            return self._error_result(str(exc), start_time)
+        if services:
+            logger.info(
+                "[%s] %d instances need TheAgentCompany services: %s",
+                self.name,
+                len(planned),
+                ", ".join(sorted(services)),
+            )
+            try:
+                ensure_tac_services()
+            except RuntimeError as exc:
+                return self._error_result(str(exc), start_time)
+        else:
+            logger.info(
+                "[%s] %d instances need no TheAgentCompany services; skipping startup",
+                self.name,
+                len(planned),
+            )
         storage_conf = os.environ.get("CONTAINERS_STORAGE_CONF")
         if storage_conf:
             subprocess_env["CONTAINERS_STORAGE_CONF"] = storage_conf
