@@ -590,6 +590,9 @@ def launch(
                 all_required_secrets.update(sandbox.required_secrets)
 
     # Ensure secrets
+    all_required_secrets = _required_secrets_without_overrides(
+        all_required_secrets, launch_config.secret_env_overrides
+    )
     common_secrets, store_secrets, task_secrets = _ensure_secrets(
         launcher, dry_run, launch_config, all_required_secrets
     )
@@ -911,6 +914,21 @@ def _auto_generate_group(prefix: str, existing_groups: list[str]) -> list[str]:
     return [f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
 
 
+def _required_secrets_without_overrides(
+    required_secrets: set[str], secret_env_overrides: dict[str, str]
+) -> set[str]:
+    """Drop required env vars that ``--secret-env`` maps to an explicit Beaker secret.
+
+    Args:
+        required_secrets: Env var names that tasks, evals, or providers require.
+        secret_env_overrides: Mapping of Beaker secret name to env var name.
+
+    Returns:
+        Env var names that still need a default user-prefixed Beaker secret.
+    """
+    return required_secrets - set(secret_env_overrides.values())
+
+
 def _prepare_secrets(
     dry_run: bool,
     workspace: str,
@@ -1124,7 +1142,9 @@ def _launch_external_evals(
     common_secrets, task_secrets, store_secrets = _prepare_secrets(
         dry_run=dry_run,
         workspace=effective_workspace,
-        all_required_secrets=all_required_secrets,
+        all_required_secrets=_required_secrets_without_overrides(
+            all_required_secrets, secret_env_overrides
+        ),
         beaker_username=beaker_username,
         store=store,
     )

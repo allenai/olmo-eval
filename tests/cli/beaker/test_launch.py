@@ -741,3 +741,22 @@ class TestProviderKindOverride:
         merged = merge_model_provider(preset, get_provider_config("olmo-3-1025-7b"), overrides)
 
         assert list(merged.provider.dependencies) == ["example-package==2"]
+
+
+class TestRequiredSecretsWithoutOverrides:
+    """Tests for dropping --secret-env overrides from required secrets."""
+
+    def test_overridden_env_var_is_dropped(self):
+        from olmo_eval.cli.beaker.launch import _required_secrets_without_overrides
+
+        result = _required_secrets_without_overrides(
+            {"NPC_API_KEY", "OPENAI_API_KEY"},
+            {"shared_OPENAI_API_KEY": "NPC_API_KEY"},
+        )
+
+        assert result == {"OPENAI_API_KEY"}
+
+    def test_no_overrides_keeps_all(self):
+        from olmo_eval.cli.beaker.launch import _required_secrets_without_overrides
+
+        assert _required_secrets_without_overrides({"NPC_API_KEY"}, {}) == {"NPC_API_KEY"}
