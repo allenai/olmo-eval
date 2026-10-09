@@ -445,21 +445,21 @@ class TerminalBenchExternalEval(ExternalEval):
             trajectory = AgentTrajectory(turns=())
             completion_reason = "timeout"
             agent_steps = 0
-            try:
-                if tb_args.oracle:
-                    trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
-                else:
+            if tb_args.oracle:
+                trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
+            else:
+                try:
                     trajectory, completion_reason, agent_steps = await asyncio.wait_for(
                         self._run_agent(sandbox_manager, task, provider, tb_args),
                         timeout=task.agent_timeout + AGENT_TIMEOUT_GRACE,
                     )
-            except TimeoutError:
-                # The agent's time is up; what it left in the container still
-                # gets verified, as the reference harness does.
-                logger.warning(
-                    f"Task {task.task_id} agent cut off after "
-                    f"{task.agent_timeout + AGENT_TIMEOUT_GRACE:.0f}s"
-                )
+                except TimeoutError:
+                    # The agent's time is up; what it left in the container still
+                    # gets verified, as the reference harness does.
+                    logger.warning(
+                        f"Task {task.task_id} agent cut off after "
+                        f"{task.agent_timeout + AGENT_TIMEOUT_GRACE:.0f}s"
+                    )
 
             agent_duration = time.time() - task_start
 
@@ -499,7 +499,9 @@ class TerminalBenchExternalEval(ExternalEval):
         """Run the reference solution.
 
         The whole solution directory is placed in the container so a script
-        that reads companion files beside it works as it does upstream.
+        that reads companion files beside it works as it does upstream. The
+        script runs as a plain command with its output streamed, which keeps
+        a solution that takes many minutes from outliving a single request.
 
         Returns:
             Tuple of (trajectory, completion_reason).
@@ -511,7 +513,7 @@ class TerminalBenchExternalEval(ExternalEval):
             solution_files["solve.sh"] = task.solution_script.encode()
         await verifier.inject_files(executor, solution_files, SOLUTION_DIR)
 
-        result = await executor.execute_in_session(
+        result = await executor.execute_command(
             f"cd {task.working_dir} && bash {SOLUTION_DIR}/solve.sh",
             timeout=task.agent_timeout,
             stream=True,
@@ -519,7 +521,8 @@ class TerminalBenchExternalEval(ExternalEval):
         )
 
         logger.info(f"Oracle exit code: {result.exit_code}")
-        return AgentTrajectory(turns=()), "oracle"
+        completion_reason = "timeout" if result.error == "timeout" else "oracle"
+        return AgentTrajectory(turns=()), completion_reason
 
     async def _run_agent(
         self,

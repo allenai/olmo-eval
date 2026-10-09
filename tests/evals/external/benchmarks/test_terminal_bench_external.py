@@ -273,10 +273,12 @@ class FakeExecutor:
     def __init__(self, responses: dict[str, ExecutionResult] | None = None) -> None:
         self.responses = responses or {}
         self.commands: list[str] = []
+        self.timeouts: list[float | None] = []
         self.session_commands: list[tuple[str, float | None]] = []
 
     async def execute_command(self, command: str, timeout: float | None = None, **_: Any):
         self.commands.append(command)
+        self.timeouts.append(timeout)
         for key, result in self.responses.items():
             if key in command:
                 return result
@@ -532,9 +534,29 @@ class TestExecuteTask:
 
         executor = FakeSandboxManager.instances[0].executor
         assert any(f"> {SOLUTION_DIR}/helper.py" in c for c in executor.commands)
-        assert executor.session_commands == [(f"cd /work && bash {SOLUTION_DIR}/solve.sh", 900.0)]
+        solve = f"cd /work && bash {SOLUTION_DIR}/solve.sh"
+        assert solve in executor.commands
+        assert executor.timeouts[executor.commands.index(solve)] == 900.0
+        assert executor.session_commands == []
         assert result.completion_reason == "oracle"
         assert result.reward == 1.0
+
+    def test_a_timed_out_oracle_is_still_verified(self) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        args = tb_eval.TerminalBenchArgs.from_dict({"oracle": True})
+        timed_out = ExecutionResult(success=False, output="", exit_code=-1, error="timeout")
+        original_init = FakeSandboxManager.__init__
+
+        def init_with_slow_solution(self, configs, owner="default"):
+            original_init(self, configs, owner)
+            self.executor.responses["solve.sh"] = timed_out
+
+        with mock.patch.object(FakeSandboxManager, "__init__", init_with_slow_solution):
+            result = self._run(eval_obj, make_task(), args)
+
+        assert result.completion_reason == "timeout"
+        assert result.reward == 1.0
+        assert result.error is None
 
 
 class TestRunAgent:
