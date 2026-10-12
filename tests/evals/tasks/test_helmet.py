@@ -1222,3 +1222,14 @@ def test_multi_lexsum_refuses_incomplete_data(tmp_path, monkeypatch):
     path.write_text("".join(json.dumps(r) + "\n" for r in hosted[1:]), encoding="utf-8")
     with pytest.raises(ValueError, match="missing from"):
         loader.load_multi_lexsum_dataset(max_context_tokens=100, shots=0)
+
+
+def test_recall_suite_is_json_kv_alone_past_standard_lengths():
+    """The RULER recall tasks stop at 128k, so recall's composition changes there."""
+    import olmo_eval.evals.suites.helmet  # noqa: F401 - triggers registration
+    from olmo_eval.evals.suites.registry import get_suite
+
+    longest = max(STANDARD_CONTEXT_SIZES)
+    assert len(get_suite(f"helmet_recall__{longest}").expanded_tasks) == 4
+    for size in (262144, 524288, 1048576, 2097152):
+        assert get_suite(f"helmet_recall__{size}").expanded_tasks == (f"helmet_json_kv__{size}",)
