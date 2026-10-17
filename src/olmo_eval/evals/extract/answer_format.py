@@ -20,8 +20,12 @@ from typing import NamedTuple
 
 # Answer-regex templates used by the OLMO 3 post-training regime. ``$ANS$`` is
 # substituted with a task-specific answer regex by ``extract_answer_with_format``.
-# Mirrors the reference implementation's list verbatim, including the repeated
-# entry below; keep it in step with that list rather than deduplicating it.
+# Mirrors the reference implementation's list, including its repeated entry,
+# except for its final `(?i).*\b($ANS$)\b` fallback. Wherever that greedy
+# template matches, the earlier `\b($ANS$)\b` template matches too and returns
+# first, provided the answer regex cannot match an empty string. The fallback
+# is then unreachable, and it scanned quadratically on a miss. Pass these
+# templates only answer regexes that cannot match an empty string.
 OLMO_3_ANSWER_REGEX_TEMPLATES = (
     r"(?i)therefore,?\s*the\s*answer\s*is:?\s*\(?($ANS$)\b",  # "Therefore, the answer is ..." style
     r"(?i)so\s+the\s+answer\s+is:?\s*($ANS$)\.?",  # "So the answer is ..." style
@@ -34,7 +38,6 @@ OLMO_3_ANSWER_REGEX_TEMPLATES = (
     r"(?i)\(($ANS$)\)",  # Parenthesized answer
     r"(?i)\b($ANS$)\b",  # Answer appearing as a word in a sentence
     r"(?i)\b($ANS$)\b",  # Just the answer itself
-    r"(?i).*\b($ANS$)\b",  # Just the answer anywhere in the text
 )
 
 
