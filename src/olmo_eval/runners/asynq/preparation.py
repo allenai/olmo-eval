@@ -159,7 +159,6 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
     tracker.task.strip_thinking_traces(responses)
     scored = await tracker.task.score_responses(responses)
     metrics = tracker.task.compute_metrics(scored)
-    infrastructure_failures = _count_infrastructure_scoring_errors(scored)
 
     # Build predictions
     predictions = build_predictions(scored, metrics=tracker.task.config.metrics)
@@ -188,7 +187,7 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
         predictions=predictions,
         requests=requests,
         primary_metric=primary_metric,
-        error=_infrastructure_error(infrastructure_failures),
+        error=_scoring_failure_error(scored),
         error_summary=error_summary,
         instances_processed=tracker.total_instances,
         instances_failed=len(tracker.failed_instances),
@@ -247,7 +246,6 @@ def compute_task_metrics(
 
     # Compute metrics from pre-scored responses
     metrics = task.compute_metrics(scored_responses)
-    infrastructure_failures = _count_infrastructure_scoring_errors(scored_responses)
 
     # Build predictions
     predictions = build_predictions(scored_responses, metrics=task.config.metrics)
@@ -280,7 +278,7 @@ def compute_task_metrics(
         predictions=predictions,
         requests=requests,
         primary_metric=primary_metric,
-        error=_combine_errors(gate_error, _infrastructure_error(infrastructure_failures)),
+        error=_combine_errors(gate_error, _scoring_failure_error(scored_responses)),
         error_summary=error_summary,
         instances_processed=total_instances,
         instances_failed=instances_failed,
@@ -350,36 +348,51 @@ def _first_instance_error(failed_instances: dict[int, str]) -> str | None:
     return next(iter(failed_instances.values()), None)
 
 
-def _infrastructure_error(infrastructure_failures: int) -> str | None:
-    """Describe output scores lost to sandbox infrastructure, if any."""
-    if not infrastructure_failures:
-        return None
-    return (
-        f"Incomplete: {infrastructure_failures} output score(s) failed due to "
-        "sandbox infrastructure"
-    )
-
-
 def _combine_errors(*errors: str | None) -> str | None:
     """Join the task-level errors that are set, preserving order."""
     present = [error for error in errors if error]
     return " ".join(present) if present else None
 
 
-def _count_infrastructure_scoring_errors(responses: Sequence[Response]) -> int:
-    """Count output scores that failed specifically because of sandbox infrastructure."""
-    count = 0
+def _scoring_failure_error(responses: Sequence[Response]) -> str | None:
+    """Describe the output scores that could not be computed, if any.
+
+    Any scoring error makes the task incomplete, so its metrics are withheld: a failed
+    score is not a zero. Errors flagged as infrastructure (a lost sandbox, an unavailable
+    judge) are counted per error, as before. An output whose errors carry no such flag is
+    counted once as an unscored output, and its first error is quoted, since it is usually
+    a scorer bug or a misconfiguration that every output shares.
+    """
+    infrastructure = 0
+    unscored = 0
+    first: dict[str, str] | None = None
     for response in responses:
         for output in response.outputs:
-            errors = output.metadata.get("scoring_errors")
-            if not isinstance(errors, dict):
+            errors = (output.metadata or {}).get("scoring_errors")
+            if not isinstance(errors, dict) or not errors:
                 continue
-            count += sum(
-                1
-                for error in errors.values()
-                if isinstance(error, dict) and error.get("infrastructure") == "true"
+            details = [error for error in errors.values() if isinstance(error, dict)]
+            flagged = sum(1 for error in details if error.get("infrastructure") == "true")
+            if flagged:
+                infrastructure += flagged
+                continue
+            unscored += 1
+            if first is None and details:
+                first = details[0]
+    parts = []
+    if infrastructure:
+        parts.append(
+            f"Incomplete: {infrastructure} output score(s) failed due to sandbox infrastructure"
+        )
+    if unscored:
+        detail = ""
+        if first is not None:
+            message = first.get("message")
+            detail = f"; first error: {first.get('type', 'error')}" + (
+                f": {message}" if message else ""
             )
-    return count
+        parts.append(f"Incomplete: {unscored} output(s) could not be scored{detail}")
+    return _combine_errors(*parts)
 
 
 __all__ = [

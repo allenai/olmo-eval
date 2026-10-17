@@ -109,7 +109,8 @@ remain an explicit failure. An eval that quietly scores a crashed instance as ze
 produces a believable wrong number, which is worse than a failed run.
 
 The runner tracks hard failures and applies `max_hard_failure_rate`, a task with no scored
-responses fails the run, and requests and predictions are saved by default so prompts,
+responses fails the run, a task with any output it could not score is marked incomplete
+and its metrics are withheld, and requests and predictions are saved by default so prompts,
 extracted answers, and per-instance scores can be checked before an aggregate is trusted.
 Progress reporting and telemetry are the exception: they must never terminate an
 evaluation, so their errors are caught and logged.
