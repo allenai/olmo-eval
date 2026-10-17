@@ -31,12 +31,17 @@ DEFAULT_MAX_HARD_FAILURE_RATE = 0.05
 #       workers, so a run with N workers attributes up to N x processing_seconds.
 #       This is worker occupancy, not GPU time: agent rollouts include their tool and
 #       sandbox time, and are credited while they wait on them.
+#   scoring_seconds: the task's share of the scoring loop's time. The loop's busy time
+#       is split evenly across the instances being scored at once (judge calls and
+#       sandbox runs included), plus the task's metric computation. Scoring runs in the
+#       main process alongside inference, so this does not add to the inference time.
 TASK_COST_KEYS = (
     "first_request_at",
     "last_completed_at",
     "prompt_tokens_total",
     "completion_tokens_total",
     "attributed_inference_seconds",
+    "scoring_seconds",
 )
 
 # Run-level timing keys written to metrics.json by the async runner.
@@ -85,6 +90,7 @@ class TaskResult:
     prompt_tokens_total: int | None = None
     completion_tokens_total: int | None = None
     attributed_inference_seconds: float | None = None
+    scoring_seconds: float | None = None
 
     @property
     def failure_rate(self) -> float:
