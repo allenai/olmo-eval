@@ -16,6 +16,22 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-10-17: Scoring errors make a task incomplete
+
+- **Affected**: every task run by `AsyncEvalRunner`, when scoring raises for any output.
+  Runs whose scoring never raises are unchanged.
+- **Change**: an output whose score could not be computed now marks the task incomplete,
+  and its metrics are withheld, as infrastructure failures already did. Before, the runner
+  recorded such an output as 0 on every metric and reported the task as a success. A
+  survey of saved predictions found this in runs of `dense_caption_captioner` (judge 401),
+  `deepseek_leetcode`, `humaneval:olmo3base` and `mbpp_plus_pass_at_1` (no sandbox),
+  `ctc_contradiction` at r64k and up (#490), and rarely `omniscience_judge` (judge context
+  overflow).
+- **Identity**: task hashes are unchanged.
+- **Comparability**: an earlier result whose predictions carry `scoring_errors` without
+  `"infrastructure": "true"` counted those outputs as 0. It is lower than the true score
+  and should be rerun. Earlier results without such errors are unaffected.
+
 ## 2026-10-02: Chat-style `ANSWER:` lines in multiple-choice extraction (#433)
 
 - **Affected**: generation variants that extract an answer letter with the shared MCQ
