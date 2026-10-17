@@ -1,9 +1,9 @@
 """Per-task scoring time.
 
+Expand-only: the new column is nullable, so the previous release keeps working.
+
 Revision ID: 0008
 Revises: 0007
-
-Expand-only: the new column is nullable, so the previous release keeps working.
 """
 
 from collections.abc import Sequence
