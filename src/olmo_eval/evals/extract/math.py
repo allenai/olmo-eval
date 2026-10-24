@@ -70,6 +70,41 @@ REMOVED_EXPRESSIONS = [
 ]
 
 
+# Size-only delimiter commands: \left( and ( are the same delimiter typeset at a different size,
+# so they are dropped before the substring cleanup below. ``\left.`` and ``\right.`` are the
+# invisible null delimiter and are dropped with their period. The negative lookahead keeps
+# commands that only share the prefix, such as \leftarrow, \rightarrow and \bigcup.
+_SIZE_DELIMITER_RE = re.compile(r"\\(?:left|right|middle|[bB]igg?[lrm]?)(?![A-Za-z])(?:\s*\.)?")
+
+
+def strip_size_delimiters(text: str) -> str:
+    r"""Remove size-only delimiter commands (\left, \right, \middle, \bigl, \Bigr, ...)."""
+    return _SIZE_DELIMITER_RE.sub("", text)
+
+
+def _unit_pattern(expr: str) -> re.Pattern[str]:
+    # A LaTeX control word (backslash plus letters) is matched as one token and kept, so an
+    # alphabetic unit never matches inside a command name: "ft" no longer turns \left into
+    # \le or \infty into \iny. Outside commands the match is unchanged, because the space
+    # removal in SUBSTITUTIONS runs first ("100 square feet" is "100squarefeet" by then).
+    return re.compile(r"(\\[A-Za-z]+)|" + re.escape(expr))
+
+
+_REMOVED_EXPRESSION_PATTERNS = [
+    (expr, _unit_pattern(expr) if expr.isalpha() else None) for expr in REMOVED_EXPRESSIONS
+]
+
+
+def _remove_expressions(text: str) -> str:
+    for expr, pattern in _REMOVED_EXPRESSION_PATTERNS:
+        if pattern is None:
+            # LaTeX or punctuation expressions (\ldots, \text{}, ^\circ, ...): plain substring.
+            text = text.replace(expr, "")
+        elif expr in text:
+            text = pattern.sub(lambda m: m.group(1) or "", text)
+    return text
+
+
 class MathExtractor:
     @classmethod
     def extract_answer(cls, continuation: str) -> list[str]:
@@ -250,14 +285,19 @@ def normalize_final_answer(final_answer: str) -> str:
     """
     Normalize a final answer to a quantitative reasoning question.
 
-    Copied character for character from appendix D of Lewkowycz et al. (2022)
+    Adapted from appendix D of Lewkowycz et al. (2022). Two deviations, both marked below:
+    size-only delimiters are stripped first, and unit removal skips LaTeX command names.
     """
     final_answer = final_answer.split("=")[-1]
 
+    # Not in the appendix: drop size-only delimiters first, so \left( matches (.
+    final_answer = strip_size_delimiters(final_answer)
+
     for before, after in SUBSTITUTIONS:
         final_answer = final_answer.replace(before, after)
-    for expr in REMOVED_EXPRESSIONS:
-        final_answer = final_answer.replace(expr, "")
+    # Not in the appendix either: the units are removed as substrings outside LaTeX
+    # command names only (see _unit_pattern).
+    final_answer = _remove_expressions(final_answer)
 
     # Extract answer that is in LaTeX math, is bold,
     # is surrounded by a box, etc.
