@@ -6,6 +6,22 @@ variants do not need an entry. See
 [Changing or retiring an existing spec](../CONTRIBUTING.md#changing-or-retiring-an-existing-spec)
 for when a change is allowed in place.
 
+## 2026-10-25: Store exact per-instance IFEval metrics
+
+- **Affected**: saved per-instance metrics for tasks using the four IFEval metrics,
+  including IFBench and IFEval. Aggregate task scores and generation are unchanged.
+- **Change**: strict prompt accuracy and instruction accuracy previously reused the
+  scorer's prompt-level loose value. New predictions derive each metric from its
+  strict or loose instruction flags. Instruction values are the fraction passed for
+  that instance; the task aggregate still weights by instruction count, so an
+  unweighted mean of these fractions need not equal it.
+- **Identity**: task hashes and metric configurations are unchanged.
+- **Comparability**: earlier per-instance strict and instruction values may be wrong
+  even when the aggregate metrics are correct. Rescore saved answers with the original
+  task configuration to recover them. Scorer-only predictions no longer synthesize
+  missing strict or instruction metric keys. The valid prompt-level loose fallback
+  and existing explicit values are preserved, not silently repaired.
+
 Add an entry in the PR that makes the change, newest first. Each entry states:
 
 - **Affected**: task specs, suites, or shared code paths, including suite membership or
