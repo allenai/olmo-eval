@@ -62,7 +62,7 @@ class ProviderConfig:
 
     # Providers that require GPU resources for local inference
     _GPU_PROVIDERS: ClassVar[frozenset[str]] = frozenset(
-        {"vllm", "vllm_server", "hf", "olmo_core", "olmo_core_vlm"}
+        {"sglang", "vllm", "vllm_server", "hf", "olmo_core", "olmo_core_vlm"}
     )
 
     @property
@@ -89,6 +89,14 @@ class ProviderConfig:
 
     # Config fields accepted by each provider kind (fields with non-default values are passed)
     _PROVIDER_FIELDS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "sglang": (
+            "tokenizer",
+            "revision",
+            "trust_remote_code",
+            "dtype",
+            "max_model_len",
+            "max_concurrency",
+        ),
         "vllm": (
             "tokenizer",
             "revision",
