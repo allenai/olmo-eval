@@ -61,3 +61,12 @@ The provider delegates sampling to SGLang. It does not implement a sampler or
 promise identical random draws to another backend for the same seed. Keep task
 definitions and scorer revisions fixed when comparing providers, and record the
 runtime and model-plugin revisions alongside the olmo-eval commit.
+
+Equal weights and seeds also do not fix every numerical choice within an engine.
+Autotuned kernels can select different launch configurations across processes
+and produce different floating-point results. When investigating repeatability,
+record the chosen kernel configurations and cache policy where available, along
+with the runtime settings. Compare token IDs and logprobs on identical input
+histories: after generated tokens differ, later logprobs describe different
+conditional distributions. Repeated accuracy measurements and controlled
+numerical checks answer different questions; neither substitutes for the other.
