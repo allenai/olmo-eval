@@ -29,10 +29,10 @@ are preserved separately from the top-ranked alternatives.
 
 Only the batched generation strategy is supported. Continuation likelihood
 scoring, prompt truncation, automatic fitting of generation length to the context
-window and tool requests fail explicitly. Image requests require explicit multimodal enablement. Aborted generation or
-missing sampled-token probabilities raise errors rather than becoming scored
-answers. Install the
-optimized olmo-sglang preset separately when desired; selecting this provider
+window and tool requests fail explicitly. Image requests require explicit
+multimodal enablement. Aborted generation or missing sampled-token probabilities
+raise errors rather than becoming scored answers. Install the optimized
+olmo-sglang preset separately when desired; selecting this provider
 does not automatically enable model-specific optimization switches.
 
 For top-p evaluations, select `provider.kwargs.sampling_backend=flashinfer`
@@ -118,9 +118,13 @@ its OCR style tag, dataset revision, renderer and official scoring. The provider
 owns transport and model prompt layout. Use the checkpoint/runtime's qualified
 context, memory and attention settings when launching.
 
-Predictions retain sampled-token logprobs and token IDs, plus the unexpanded
-input token IDs, resolved image count and prompt format for multimodal runs.
-Request traces identify the selected prompt format without loading image pixels.
+Returned `LMOutput` objects retain sampled-token logprobs and token IDs, plus
+the unexpanded input token IDs, resolved image count and prompt format for
+multimodal runs. The standard predictions JSONL saves generation text, finish
+reasons and logprob summaries; it does not serialize the full per-token arrays
+or arbitrary provider metadata. Numerical replay tools must save those returned
+fields explicitly. Request traces identify the selected prompt format without
+loading image pixels.
 Generic multimodal chat transport has CPU contract tests; native GPU qualification
 must be recorded per model/processor. Text-only settings retain the original
 provider behavior unless multimodal mode is explicitly enabled.
