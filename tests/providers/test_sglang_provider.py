@@ -7,13 +7,23 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from olmo_eval.common.types import LMRequest, ProviderKind, RequestType, SamplingParams, ToolSchema
+from olmo_eval.common.types import (
+    Instance,
+    LMRequest,
+    ProviderKind,
+    RequestType,
+    Response,
+    SamplingParams,
+    ToolSchema,
+)
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.inference import create_provider
 from olmo_eval.inference.providers.config import ProviderConfig
 from olmo_eval.inference.providers.sglang import SGLangProvider
 from olmo_eval.runners.asynq.batching.config import BatchConfig, BatchStrategy
 from olmo_eval.runners.asynq.workers import inference_worker
+from olmo_eval.runners.io.builders import build_predictions
+from olmo_eval.runners.processing.generation_counts import count_generations
 
 
 @pytest.fixture
@@ -117,10 +127,33 @@ def test_chat_sampling_and_sampled_token_logprobs(setup_engine):
     assert output.logprobs[0]["top_logprobs"] == [{"token": "token99", "logprob": -0.1}]
     assert output.metadata["output_token_ids"] == [17, 18]
     assert output.metadata["sum_logits"] == -1.0
-    assert output.metadata["finish_reason"] == {"type": "stop", "matched": 18}
+    assert output.metadata["finish_reason"] == "stop"
+    assert output.metadata["sglang_finish_reason"] == {"type": "stop", "matched": 18}
     trace = provider.describe_request(request, params)
     assert trace is not None
     assert trace["generation_kwargs"]["top_p"] == 0.95
+
+
+@pytest.mark.parametrize("reason", [{"type": "length", "length": 2}, "length", None])
+def test_finish_reason_reaches_harness_counts_and_predictions(setup_engine, reason):
+    engine, _, _ = setup_engine
+    provider = SGLangProvider("model")
+    raw = engine.generate.side_effect(prompt=["abc"])[0]
+    raw["meta_info"]["finish_reason"] = reason
+    engine.generate.side_effect = None
+    engine.generate.return_value = [raw]
+    request = LMRequest(RequestType.COMPLETION, prompt="abc")
+    output = provider.generate([request])[0][0]
+    response = Response(Instance(question="abc"), request, outputs=[output])
+    counts = count_generations([response])
+    assert counts is not None
+    assert counts["cap_hit"] == int(reason is not None)
+    assert counts["finish_reason_unknown"] == int(reason is None)
+    assert build_predictions([response])[0]["model_output"][0]["finish_reason"] == (
+        "length" if reason is not None else None
+    )
+    assert output.metadata["sglang_finish_reason"] == reason
+    assert raw["meta_info"]["finish_reason"] == reason
 
 
 def test_bos_policy_multiple_samples_and_async(setup_engine):

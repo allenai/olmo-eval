@@ -233,8 +233,13 @@ class SGLangProvider(InferenceProvider):
 
     def _convert_output(self, output: dict[str, Any]) -> LMOutput:
         metadata = dict(output["meta_info"])
-        if metadata.get("finish_reason", {}).get("type") == "abort":
-            raise RuntimeError(f"SGLang aborted generation: {metadata['finish_reason']}")
+        finish_reason = metadata.get("finish_reason")
+        reason = finish_reason.get("type") if isinstance(finish_reason, dict) else finish_reason
+        if reason == "abort":
+            raise RuntimeError(f"SGLang aborted generation: {finish_reason}")
+        # The harness counts cap hits from the normalized string, while replay
+        # diagnostics still need SGLang's matched token or length detail.
+        metadata.update(finish_reason=reason, sglang_finish_reason=finish_reason)
         sampled = metadata["output_token_logprobs"]
         if len(sampled) != metadata["completion_tokens"]:
             raise RuntimeError("SGLang sampled logprobs do not cover every generated token")
