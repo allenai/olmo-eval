@@ -23,7 +23,7 @@ class ProviderConfig:
     a provider via the create_provider factory function.
 
     Attributes:
-        kind: Provider type (vllm, vllm_server, hf, olmo_core, litellm, mock).
+        kind: Provider type (sglang, vllm, vllm_server, hf, olmo_core, litellm, mock).
         model: Model name or path (HuggingFace ID, API model name, or local path).
         alias: Short display name for the model (used in DB and S3 paths).
         base_url: Base URL for API-based providers (vllm_server, litellm).
@@ -69,7 +69,7 @@ class ProviderConfig:
     def requires_gpu(self) -> bool:
         """Whether this provider requires GPU resources.
 
-        Returns True for local inference providers (vllm, vllm_server, hf, olmo_core).
+        Returns True for local inference providers (sglang, vllm, vllm_server, hf, olmo_core).
         Returns False for API-based providers (litellm, mock).
         """
         return str(self.kind) in self._GPU_PROVIDERS
@@ -78,7 +78,7 @@ class ProviderConfig:
     def requires_local_gpu(self) -> bool:
         """Whether this provider needs local GPU resources.
 
-        Returns True for local inference (vllm, vllm_server, hf, olmo_core)
+        Returns True for local inference (sglang, vllm, vllm_server, hf, olmo_core)
         without external base_url.
         Returns False for API-backed providers or configs pointing to external servers.
         """
@@ -92,6 +92,7 @@ class ProviderConfig:
         "sglang": (
             "tokenizer",
             "revision",
+            "force_download",
             "trust_remote_code",
             "dtype",
             "max_model_len",
