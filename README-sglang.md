@@ -23,3 +23,9 @@ Only the batched generation strategy is supported. Continuation likelihood
 scoring, prompt truncation and tool requests fail explicitly. Install the
 optimized olmo-sglang preset separately when desired; selecting this provider
 does not automatically enable model-specific optimization switches.
+
+For top-p evaluations, select `provider.kwargs.sampling_backend=flashinfer`
+in a compatible pinned runtime. This uses SGLang's existing nucleus sampler.
+The olmo-sglang simple fused sampler applies only to unrestricted sampling;
+its narrower coverage does not prevent efficient top-p generation. Preserve
+the task's sampling settings when comparing engines.
