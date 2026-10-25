@@ -180,6 +180,10 @@ class SGLangProvider(InferenceProvider):
         """Run sequential engine calls without blocking the harness event loop."""
         return await asyncio.to_thread(self.generate, requests, sampling_params)
 
+    def close(self) -> None:
+        """Release engine processes when the evaluation worker finishes."""
+        self.engine.shutdown()
+
     def shutdown(self) -> None:
         """Release engine processes and GPU memory."""
-        self.engine.shutdown()
+        self.close()
