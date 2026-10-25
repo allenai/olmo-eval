@@ -1,4 +1,4 @@
-"""Inline SGLang provider for text and chat generation."""
+"""Inline SGLang provider for text and image-conditioned generation."""
 
 from __future__ import annotations
 
@@ -6,11 +6,13 @@ import asyncio
 import math
 import os
 from importlib import import_module
-from typing import Any
+from typing import Any, Literal
 
+from olmo_eval.common.images import resolve_images
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
+from olmo_eval.inference.request_utils import chat_messages_for_request
 
 
 class SGLangProvider(InferenceProvider):
@@ -34,9 +36,19 @@ class SGLangProvider(InferenceProvider):
         tensor_parallel_size: int | None = None,
         add_bos_token: bool | None = None,
         model_registration: str | None = None,
+        enable_multimodal: bool = False,
+        prompt_format: Literal["chat", "document"] = "chat",
         **kwargs: Any,
     ) -> None:
         super().__init__(model_name)
+        if prompt_format not in ("chat", "document"):
+            raise ValueError("prompt_format must be 'chat' or 'document'")
+        if prompt_format == "document" and (not enable_multimodal or add_bos_token is not None):
+            raise ValueError(
+                "Document prompts require enable_multimodal and processor-owned BOS/EOS"
+            )
+        if enable_multimodal and kwargs.get("language_model_only"):
+            raise ValueError("enable_multimodal conflicts with language_model_only")
         if kwargs.get("skip_tokenizer_init"):
             raise ValueError("SGLangProvider requires tokenizer initialization for chat and stops")
         if tensor_parallel_size is not None:
@@ -72,6 +84,10 @@ class SGLangProvider(InferenceProvider):
             if value is not None:
                 options[key] = value
         self._add_bos_token = add_bos_token
+        self.prompt_format = prompt_format
+        self.supports_images = enable_multimodal
+        if enable_multimodal:
+            options["enable_multimodal"] = True
         self.engine = import_module("sglang").Engine(**options)
         self._closed = False
 
@@ -79,18 +95,64 @@ class SGLangProvider(InferenceProvider):
         """Return the engine's tokenizer."""
         return self.engine.tokenizer_manager.tokenizer
 
-    def _format_prompt(self, request: LMRequest) -> str:
-        if request.images:
-            raise NotImplementedError("SGLangProvider supports text-only requests")
+    def _validate_request(self, request: LMRequest) -> None:
         if request.tools or request.request_type == RequestType.LOGLIKELIHOOD:
             raise NotImplementedError("SGLangProvider supports text and chat generation only")
+        if request.images and not self.supports_images:
+            raise NotImplementedError("Image requests require enable_multimodal=True")
+        if request.request_type == RequestType.CHAT and not request.messages:
+            raise ValueError("CHAT requests require messages")
+
+    def _format_prompt(self, request: LMRequest) -> str:
+        self._validate_request(request)
         if request.request_type == RequestType.CHAT:
-            if not request.messages:
-                raise ValueError("CHAT requests require messages")
             return self.get_tokenizer().apply_chat_template(
                 list(request.messages), tokenize=False, add_generation_prompt=True
             )
         return request.prompt
+
+    def _prepare_multimodal_request(self, request: LMRequest) -> tuple[list[int], list[Any] | None]:
+        """Resolve lazy images in the worker and let the model processor own their layout."""
+        images = list(resolve_images(request.images) or ())
+        if request.images and not images:
+            raise ValueError("The image request resolved to no images")
+        processor = self.engine.tokenizer_manager.processor
+        tokenizer = self.get_tokenizer()
+        messages = chat_messages_for_request(request)
+        if any(not isinstance(m.get("content", "") or "", str) for m in messages):
+            raise NotImplementedError(
+                "Supply plain text messages and attach images via LMRequest.images"
+            )
+        if self.prompt_format == "document":
+            build_ids = getattr(processor, "document_prompt_ids", None)
+            if not callable(build_ids):
+                raise NotImplementedError("The model processor must implement document_prompt_ids")
+            texts = [m.get("content", "") for m in messages if m.get("content")]
+            ids = build_ids(texts[0] if texts else "", num_images=len(images))
+            # Core's plain-document format encodes later turns separately with
+            # a leading space; joining before tokenization can change boundaries.
+            for text in texts[1:]:
+                ids.extend(tokenizer.encode(" " + text, add_special_tokens=False))
+        elif images:
+            if processor is None:
+                raise NotImplementedError("The engine did not load a multimodal processor")
+            chat = []
+            attached = False
+            for message in messages:
+                content = [{"type": "text", "text": message.get("content", "") or ""}]
+                if message.get("role") == "user" and not attached:
+                    content = [{"type": "image", "image": image} for image in images] + content
+                    attached = True
+                chat.append({**message, "content": content})
+            if not attached:
+                raise ValueError("An image chat request requires a user turn")
+            text = processor.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+            # Rendered chat templates already contain their special tokens.
+            ids = tokenizer.encode(text, add_special_tokens=False)
+        else:
+            text = self._format_prompt(request)
+            ids = tokenizer.encode(text, add_special_tokens=self._add_bos_token is not False)
+        return ids, images or None
 
     def _build_sampling_params(self, params: SamplingParams) -> dict[str, Any]:
         if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
@@ -122,14 +184,30 @@ class SGLangProvider(InferenceProvider):
         sampling = self._build_sampling_params(params)
         if not requests:
             return []
-        prompts = [self._format_prompt(req) for req in requests for _ in range(params.num_samples)]
-        if self._add_bos_token is False:
+        # Validate every request before resolving images or submitting a partial batch.
+        for request in requests:
+            self._validate_request(request)
+        prepared = None
+        inputs: dict[str, Any]
+        if self.supports_images:
+            prepared = [self._prepare_multimodal_request(req) for req in requests]
+            expanded = [item for item in prepared for _ in range(params.num_samples)]
+            inputs = {"input_ids": [list(ids) for ids, _ in expanded]}
+            if any(images for _, images in expanded):
+                inputs["image_data"] = [images for _, images in expanded]
+        elif self._add_bos_token is False:
+            prompts = [
+                self._format_prompt(req) for req in requests for _ in range(params.num_samples)
+            ]
             inputs = {
                 "input_ids": [
                     self.get_tokenizer().encode(p, add_special_tokens=False) for p in prompts
                 ]
             }
         else:
+            prompts = [
+                self._format_prompt(req) for req in requests for _ in range(params.num_samples)
+            ]
             inputs = {"prompt": prompts}
         outputs = self.engine.generate(
             **inputs,
@@ -137,9 +215,17 @@ class SGLangProvider(InferenceProvider):
             return_logprob=True,
             top_logprobs_num=params.logprobs if params.logprobs is not None else 1,
         )
-        if not isinstance(outputs, list) or len(outputs) != len(prompts):
+        if not isinstance(outputs, list) or len(outputs) != len(requests) * params.num_samples:
             raise RuntimeError("SGLang returned an unexpected number of completions")
         converted = [self._convert_output(output) for output in outputs]
+        if prepared is not None:
+            for index, output in enumerate(converted):
+                ids, images = prepared[index // params.num_samples]
+                output.metadata.update(
+                    input_token_ids=ids,
+                    num_images=len(images or ()),
+                    prompt_format=self.prompt_format,
+                )
         return [
             converted[start : start + params.num_samples]
             for start in range(0, len(converted), params.num_samples)
@@ -187,13 +273,22 @@ class SGLangProvider(InferenceProvider):
     ) -> dict[str, Any]:
         """Record the effective engine request settings."""
         params = self._default_sampling_params(sampling_params)
-        self._format_prompt(request)
+        self._validate_request(request)
+        if not request.images and self.prompt_format != "document":
+            self._format_prompt(request)
         sampling = self._build_sampling_params(params)
         return {
             "provider": type(self).__name__,
             "mode": "generate",
             "endpoint": "engine.generate",
-            "input_mode": "input_ids" if self._add_bos_token is False else "text",
+            "input_mode": "input_ids"
+            if self.supports_images or self._add_bos_token is False
+            else "text",
+            **(
+                {"prompt_format": self.prompt_format, "images_attached": bool(request.images)}
+                if self.supports_images
+                else {}
+            ),
             "generation_kwargs": {
                 "max_gen_toks": sampling["max_new_tokens"],
                 "temperature": sampling["temperature"],
