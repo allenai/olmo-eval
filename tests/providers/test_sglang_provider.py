@@ -67,7 +67,7 @@ def test_provider_factory_and_config(setup_engine, monkeypatch):
         max_running_requests=32,
         mem_fraction_static=0.75,
     )
-    provider.shutdown()
+    provider.close()
     engine.shutdown.assert_called_once_with()
     with pytest.raises(ValueError, match="only supports batched"):
         BatchConfig(strategy=BatchStrategy.STREAMING).validate_for_provider("sglang")
