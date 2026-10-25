@@ -6,7 +6,7 @@ variants do not need an entry. See
 [Changing or retiring an existing spec](../CONTRIBUTING.md#changing-or-retiring-an-existing-spec)
 for when a change is allowed in place.
 
-## 2026-10-25: Store exact per-instance IFEval metrics
+## 2026-10-25: Store exact per-instance IFEval metrics (#509)
 
 - **Affected**: saved per-instance metrics for tasks using the four IFEval metrics,
   including IFBench and IFEval. Aggregate task scores and generation are unchanged.
