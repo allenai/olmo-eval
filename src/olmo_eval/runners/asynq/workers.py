@@ -96,22 +96,26 @@ def inference_worker(
             safe_model = model_name.replace("/", "_").replace("\\", "_")
             log_dir = os.path.join(output_dir, "logs", f"vllm_server_{safe_model}")
 
-        # Only inject vllm-specific kwargs for vllm providers
-        vllm_only_overrides: dict[str, Any] = {}
+        # Map worker allocation to each engine without forwarding unrelated options.
+        engine_overrides: dict[str, Any] = {}
         if provider_kind in ("vllm", "vllm_server"):
-            vllm_only_overrides = dict(
+            engine_overrides = dict(
                 tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
                 load_format=load_format,
                 model_loader_extra_config=extra_loader_config,
                 enable_auto_tool_choice=enable_auto_tool_choice or None,
                 log_dir=log_dir,
             )
+        elif provider_kind == "sglang":
+            engine_overrides = dict(
+                tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+            )
 
         harness_config = harness_config.with_provider_overrides(
             max_model_len=max_model_len,
             max_concurrency=max_concurrency,
             tokenizer=tokenizer,
-            **vllm_only_overrides,
+            **engine_overrides,
         )
 
         # Update metrics config with runtime values (output_dir, provider_kind, model_name)

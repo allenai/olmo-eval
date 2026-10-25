@@ -9,7 +9,7 @@ This project provides a unified workbench for evaluating language models through
 Features:
 
 - Registry of benchmark tasks and composable suites, with named variants for few-shot settings, formatting, and scoring (e.g. humaneval:3shot:bpb).
-- Support for inference via vLLM, LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
+- Support for inference via vLLM, [SGLang](docs/sglang.md), LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
 - Harness abstraction that separates execution policy from task definition, so any task can be run baseline or tool-augmented without modification.
 - Multi-turn agentic evaluation with tool calling, scaffolds, and sandboxed environments via Docker, Podman, or Modal.
 - LLM-as-judge scoring with auxiliary providers, including locally served judge models.

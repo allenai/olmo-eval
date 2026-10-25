@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import os
 from importlib import import_module
 from typing import Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.hf_cache import refresh_hf_cache
 
 
 class SGLangProvider(InferenceProvider):
@@ -23,10 +26,12 @@ class SGLangProvider(InferenceProvider):
         *,
         tokenizer: str | None = None,
         revision: str | None = None,
+        force_download: bool = False,
         trust_remote_code: bool = False,
         dtype: str = "auto",
         max_model_len: int | None = None,
         max_concurrency: int | None = None,
+        tensor_parallel_size: int | None = None,
         add_bos_token: bool | None = None,
         model_registration: str | None = None,
         **kwargs: Any,
@@ -34,6 +39,24 @@ class SGLangProvider(InferenceProvider):
         super().__init__(model_name)
         if kwargs.get("skip_tokenizer_init"):
             raise ValueError("SGLangProvider requires tokenizer initialization for chat and stops")
+        if tensor_parallel_size is not None:
+            if "tp_size" in kwargs and kwargs["tp_size"] != tensor_parallel_size:
+                raise ValueError("tensor_parallel_size and tp_size must agree")
+            kwargs["tp_size"] = tensor_parallel_size
+        if force_download:
+            refresh_hf_cache(
+                model_name,
+                revision=revision,
+                cache_dir=kwargs.get("download_dir"),
+                force_download=True,
+            )
+            if tokenizer and tokenizer != model_name:
+                refresh_hf_cache(
+                    tokenizer,
+                    revision=revision,
+                    cache_dir=kwargs.get("download_dir"),
+                    force_download=True,
+                )
         if model_registration:
             module, name = model_registration.split(":", 1)
             getattr(import_module(module), name)()
@@ -50,12 +73,15 @@ class SGLangProvider(InferenceProvider):
                 options[key] = value
         self._add_bos_token = add_bos_token
         self.engine = import_module("sglang").Engine(**options)
+        self._closed = False
 
     def get_tokenizer(self) -> Any:
         """Return the engine's tokenizer."""
         return self.engine.tokenizer_manager.tokenizer
 
     def _format_prompt(self, request: LMRequest) -> str:
+        if request.images:
+            raise NotImplementedError("SGLangProvider supports text-only requests")
         if request.tools or request.request_type == RequestType.LOGLIKELIHOOD:
             raise NotImplementedError("SGLangProvider supports text and chat generation only")
         if request.request_type == RequestType.CHAT:
@@ -69,6 +95,8 @@ class SGLangProvider(InferenceProvider):
     def _build_sampling_params(self, params: SamplingParams) -> dict[str, Any]:
         if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
             raise NotImplementedError("SGLangProvider does not support prompt truncation")
+        if params.fit_max_tokens_to_context:
+            raise NotImplementedError("SGLangProvider does not support fitting tokens to context")
         if params.num_samples < 1:
             raise ValueError("num_samples must be positive")
         if params.logprobs is not None and params.logprobs < 0:
@@ -89,6 +117,8 @@ class SGLangProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         """Generate completions and retain sampled-token probabilities and engine metadata."""
         params = self._default_sampling_params(sampling_params)
+        if self._closed:
+            raise RuntimeError("SGLangProvider is closed")
         sampling = self._build_sampling_params(params)
         if not requests:
             return []
@@ -117,17 +147,24 @@ class SGLangProvider(InferenceProvider):
 
     def _convert_output(self, output: dict[str, Any]) -> LMOutput:
         metadata = dict(output["meta_info"])
+        if metadata.get("finish_reason", {}).get("type") == "abort":
+            raise RuntimeError(f"SGLang aborted generation: {metadata['finish_reason']}")
         sampled = metadata["output_token_logprobs"]
+        if len(sampled) != metadata["completion_tokens"]:
+            raise RuntimeError("SGLang sampled logprobs do not cover every generated token")
         top = metadata.get("output_top_logprobs", [])
         if top and len(top) != len(sampled):
             raise RuntimeError("SGLang top-logprobs do not align with sampled tokens")
         logprobs: list[LogProbEntry] = []
         for index, (logprob, token_id, *token_text) in enumerate(sampled):
+            if not math.isfinite(float(logprob)):
+                raise RuntimeError("SGLang returned a non-finite sampled-token logprob")
             entry: LogProbEntry = {
                 "token": token_text[0]
                 if token_text and token_text[0] is not None
                 else self.get_tokenizer().decode([token_id]),
                 "logprob": float(logprob),
+                "token_id": token_id,
             }
             if top:
                 entry["top_logprobs"] = [
@@ -141,6 +178,7 @@ class SGLangProvider(InferenceProvider):
             sum_logits=sum(entry["logprob"] for entry in logprobs),
             num_tokens=len(logprobs),
             num_tokens_all=metadata["completion_tokens"],
+            sglang_return_original_logprob=os.environ.get("SGLANG_RETURN_ORIGINAL_LOGPROB", "0"),
         )
         return LMOutput(text=output["text"], logprobs=logprobs, metadata=metadata)
 
@@ -166,6 +204,7 @@ class SGLangProvider(InferenceProvider):
                 "logprobs": params.logprobs if params.logprobs is not None else 1,
             },
             "stop_sequences": sampling["stop"],
+            "sglang_return_original_logprob": os.environ.get("SGLANG_RETURN_ORIGINAL_LOGPROB", "0"),
         }
 
     def logprobs(
@@ -182,7 +221,9 @@ class SGLangProvider(InferenceProvider):
 
     def close(self) -> None:
         """Release engine processes when the evaluation worker finishes."""
-        self.engine.shutdown()
+        if not self._closed:
+            self.engine.shutdown()
+            self._closed = True
 
     def shutdown(self) -> None:
         """Release engine processes and GPU memory."""
