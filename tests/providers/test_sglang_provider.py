@@ -104,13 +104,16 @@ def test_chat_sampling_and_sampled_token_logprobs(setup_engine):
         top_logprobs_num=1,
     )
     assert output.text == "response0"
+    assert output.logprobs is not None
     assert output.logprobs[0]["logprob"] == -0.3  # sampled token, not top-ranked alternative
     assert output.logprobs[0]["token"] == "token17"
     assert output.logprobs[0]["top_logprobs"] == [{"token": "token99", "logprob": -0.1}]
     assert output.metadata["output_token_ids"] == [17, 18]
     assert output.metadata["sum_logits"] == -1.0
     assert output.metadata["finish_reason"] == {"type": "stop", "matched": 18}
-    assert provider.describe_request(request, params)["generation_kwargs"]["top_p"] == 0.95
+    trace = provider.describe_request(request, params)
+    assert trace is not None
+    assert trace["generation_kwargs"]["top_p"] == 0.95
 
 
 def test_bos_policy_multiple_samples_and_async(setup_engine):
