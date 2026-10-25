@@ -25,7 +25,9 @@ unscaled model probabilities are required on the runtime. Set this before any
 SGLang imports: some runtime versions cache the flag at import time. The provider
 records the environment flag in request traces and output metadata; the flag
 alone is not a numerical parity guarantee. Generation samples and their token IDs
-are preserved separately from the top-ranked alternatives.
+are preserved separately from the top-ranked alternatives. Finish reasons use
+the harness's `stop`/`length` strings; `sglang_finish_reason` in returned metadata
+retains the engine's original matched-token or length detail.
 
 Only the batched generation strategy is supported. Continuation likelihood
 scoring, prompt truncation, automatic fitting of generation length to the context
