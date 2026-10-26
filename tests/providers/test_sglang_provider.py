@@ -407,3 +407,131 @@ def test_environment_change_does_not_mislabel_outputs(setup_engine, monkeypatch)
     with pytest.raises(ValueError, match="requires raw model logprobs"):
         provider.generate([LMRequest(RequestType.COMPLETION, prompt="test")])
     engine.generate.assert_not_called()
+
+
+def capacity_info(capacity=512, tokens=1000000):
+    return {
+        "dp_size": 1,
+        "internal_states": [
+            {
+                "effective_max_running_requests_per_dp": capacity,
+                "memory_usage": {"token_capacity": tokens},
+            }
+        ],
+    }
+
+
+def test_concurrency_hint_once_without_changing_generation(setup_engine, caplog):
+    engine, _, _ = setup_engine
+    engine.get_server_info.return_value = capacity_info()
+    provider = SGLangProvider("model")
+    requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
+    params = SamplingParams(max_tokens=100)
+    first = provider.generate(requests, params)
+    assert "Consider increasing concurrency" not in caplog.text
+    engine.get_server_info.assert_not_called()
+    assert provider.generate(requests, params) == first
+    assert provider.generate(requests, params) == first
+    assert caplog.text.count("Consider increasing concurrency") == 1
+    assert "effective engine limit is 512" in caplog.text
+    assert "-o batching.chunk_size=128" in caplog.text
+    engine.get_server_info.assert_called_once_with()
+    assert all(call == engine.generate.call_args_list[0] for call in engine.generate.call_args_list)
+
+
+@pytest.mark.parametrize(
+    "info",
+    [
+        {},
+        None,
+        {"max_running_requests": 512},  # Requested capacity is insufficient evidence.
+        capacity_info(capacity=100),  # The engine reduced the requested limit.
+        capacity_info(tokens=26000),  # Full output budget, not the two-token fixture output.
+        {**capacity_info(), "dp_size": 2},
+        {"internal_states": [None]},
+        {"internal_states": [capacity_info()["internal_states"][0]] * 2},
+    ],
+)
+def test_concurrency_hint_requires_resolved_capacity(setup_engine, caplog, info):
+    engine, _, _ = setup_engine
+    engine.get_server_info.return_value = info
+    provider = SGLangProvider("model")
+    requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
+    for _ in range(2):
+        assert len(provider.generate(requests, SamplingParams(max_tokens=100))) == 64
+    assert "Consider increasing concurrency" not in caplog.text
+
+
+def test_concurrency_hint_counts_samples_and_ignores_small_or_unequal_batches(setup_engine, caplog):
+    engine, _, _ = setup_engine
+    engine.get_server_info.return_value = capacity_info()
+    provider = SGLangProvider("model")
+    request = LMRequest(RequestType.COMPLETION, prompt="test")
+    params = SamplingParams(max_tokens=100, num_samples=4)
+    for count in (2, 2, 16, 32):
+        provider.generate([request] * count, params)
+    engine.get_server_info.assert_not_called()
+    provider.generate([request] * 32, params)
+    assert "supplied 128 sequences" in caplog.text
+    assert "-o batching.chunk_size=64" in caplog.text
+    assert "up to 256 sequences at 4 sample(s)" in caplog.text
+
+
+def test_concurrency_diagnostic_failure_preserves_outputs(setup_engine, caplog):
+    engine, _, _ = setup_engine
+    engine.get_server_info.side_effect = RuntimeError("telemetry unavailable")
+    provider = SGLangProvider("model")
+    requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
+    first = provider.generate(requests, SamplingParams(max_tokens=100))
+    assert provider.generate(requests, SamplingParams(max_tokens=100)) == first
+    assert "Consider increasing concurrency" not in caplog.text
+
+
+def test_concurrency_hint_suppressed_after_retractions(setup_engine, caplog):
+    engine, _, _ = setup_engine
+    generate = engine.generate.side_effect
+
+    def retracted(**kwargs):
+        outputs = generate(**kwargs)
+        outputs[0]["meta_info"]["num_retractions"] = 1
+        return outputs
+
+    engine.generate.side_effect = retracted
+    engine.get_server_info.return_value = capacity_info()
+    provider = SGLangProvider("model")
+    requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
+    for _ in range(2):
+        provider.generate(requests, SamplingParams(max_tokens=100))
+    engine.get_server_info.assert_not_called()
+    assert "Consider increasing concurrency" not in caplog.text
+
+
+def test_concurrency_hint_uses_longest_prompt_across_both_calls(setup_engine, caplog):
+    engine, _, _ = setup_engine
+    generate = engine.generate.side_effect
+    prompt_length = 5000
+
+    def with_prompt_length(**kwargs):
+        outputs = generate(**kwargs)
+        outputs[0]["meta_info"]["prompt_tokens"] = prompt_length
+        return outputs
+
+    engine.generate.side_effect = with_prompt_length
+    engine.get_server_info.return_value = capacity_info(tokens=1000000)
+    provider = SGLangProvider("model")
+    requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
+    provider.generate(requests, SamplingParams(max_tokens=100))
+    prompt_length = 5
+    provider.generate(requests, SamplingParams(max_tokens=100))
+    assert "Consider increasing concurrency" not in caplog.text
+
+
+def test_small_batch_breaks_consecutive_capacity_observations(setup_engine, caplog):
+    engine, _, _ = setup_engine
+    engine.get_server_info.return_value = capacity_info()
+    provider = SGLangProvider("model")
+    request = LMRequest(RequestType.COMPLETION, prompt="test")
+    for count in (64, 1, 64):
+        provider.generate([request] * count, SamplingParams(max_tokens=100))
+    engine.get_server_info.assert_not_called()
+    assert "Consider increasing concurrency" not in caplog.text

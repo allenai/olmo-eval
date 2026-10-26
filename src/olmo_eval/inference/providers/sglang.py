@@ -9,9 +9,13 @@ import sys
 from importlib import import_module
 from typing import Any
 
+from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
+
+
+logger = get_logger(__name__)
 
 
 def _require_original_logprobs() -> None:
@@ -102,6 +106,8 @@ class SGLangProvider(InferenceProvider):
         _require_original_logprobs()
         self.engine = sglang.Engine(**options)
         self._closed = False
+        self._capacity_checked = False
+        self._previous_batch: tuple[int, int, int, int] | None = None
 
     def get_tokenizer(self) -> Any:
         """Return the engine's tokenizer."""
@@ -138,6 +144,71 @@ class SGLangProvider(InferenceProvider):
             "n": 1,
         }
 
+    def _consider_larger_batches(self, outputs: list[LMOutput], params: SamplingParams) -> None:
+        """Offer one conservative hint using resolved pools, never raw free VRAM."""
+        if self._capacity_checked:
+            return
+        if len(outputs) < 16:
+            self._previous_batch = None
+            return
+        prompt_lengths = [output.metadata.get("prompt_tokens") for output in outputs]
+        if any(type(length) is not int or length <= 0 for length in prompt_lengths):
+            self._previous_batch = None
+            return
+        if any(output.metadata.get("num_retractions", 0) for output in outputs):
+            self._previous_batch = None
+            return
+        longest_prompt = max(prompt_lengths)
+        batch = (len(outputs), params.num_samples, params.max_tokens, longest_prompt)
+        previous = self._previous_batch
+        self._previous_batch = batch
+        if previous is None or previous[:3] != batch[:3]:
+            return
+        self._capacity_checked = True
+        # Telemetry is optional across SGLang versions. A failed diagnostic must
+        # never discard successful generations or turn into an inference retry.
+        try:
+            info = self.engine.get_server_info()
+        except Exception:
+            logger.debug("SGLang capacity diagnostic unavailable", exc_info=True)
+            return
+        if not isinstance(info, dict) or info.get("dp_size", 1) != 1:
+            return
+        states = info.get("internal_states")
+        if not isinstance(states, list) or len(states) != 1 or not isinstance(states[0], dict):
+            return
+        state = states[0]
+        # Do not use the requested server_args limit: KDA state pools can lower it.
+        capacity = state.get("effective_max_running_requests_per_dp")
+        memory = state.get("memory_usage")
+        if not isinstance(memory, dict):
+            return
+        tokens = memory.get("token_capacity")
+        if type(capacity) is not int or type(tokens) is not int:
+            return
+        sequences = len(outputs)
+        target = 2 * sequences
+        # Reserve half the token pool, using the largest observed expanded prompt
+        # and the full output cap, rather than the often much shorter actual output.
+        token_budget = target * (max(longest_prompt, previous[3]) + params.max_tokens)
+        if capacity < target or tokens < 2 * token_budget:
+            return
+        chunk_size = target // params.num_samples
+        logger.warning(
+            "Consider increasing concurrency: repeated SGLang calls supplied %d sequences, "
+            "but the effective engine limit is %d and the token-cache capacity is %d. "
+            "Try adding '-o batching.chunk_size=%d' after your existing --harness argument. "
+            "This supplies up to %d sequences at %d sample(s) per example. "
+            "Benchmark throughput and peak memory; this is capacity headroom, not a "
+            "guarantee of a speedup or sufficient transient memory. Settings are unchanged.",
+            sequences,
+            capacity,
+            tokens,
+            chunk_size,
+            target,
+            params.num_samples,
+        )
+
     def generate(
         self,
         requests: list[LMRequest],
@@ -169,6 +240,7 @@ class SGLangProvider(InferenceProvider):
         if not isinstance(outputs, list) or len(outputs) != len(prompts):
             raise RuntimeError("SGLang returned an unexpected number of completions")
         converted = [self._convert_output(output) for output in outputs]
+        self._consider_larger_batches(converted, params)
         return [
             converted[start : start + params.num_samples]
             for start in range(0, len(converted), params.num_samples)

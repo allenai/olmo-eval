@@ -74,3 +74,31 @@ with the runtime settings. Compare token IDs and logprobs on identical input
 histories: after generated tokens differ, later logprobs describe different
 conditional distributions. Repeated accuracy measurements and controlled
 numerical checks answer different questions; neither substitutes for the other.
+
+## Concurrency advice
+
+The harness defaults to `batching.chunk_size=64` examples per call. The SGLang
+provider leaves `provider.max_concurrency` unset unless configured; SGLang chooses
+its effective request limit from its configuration and memory pools. A requested
+limit can be reduced by the engine, including by KDA recurrent-state capacity.
+Multiple samples expand each example into separate engine requests.
+
+After two consecutive successful calls of the same size and generation budget
+(at least 16 sequences), the provider checks the engine's resolved capacity once.
+When the effective request limit allows twice that many sequences, and their
+estimated token budget fits within half the token pool, it logs:
+
+```text
+Consider increasing concurrency: ... Try adding '-o batching.chunk_size=128'
+after your existing --harness argument.
+```
+
+The estimate uses the longest observed expanded prompt in the two calls plus the
+full requested output cap, including repeated samples. Calls reporting request
+retractions do not trigger the hint. Missing/unsupported telemetry and multiple
+data-parallel workers suppress it. It does not infer capacity from free VRAM or
+from the requested concurrency limit alone, and it does not change any settings.
+This is advice to benchmark a larger batch, not an automatic throughput tuner or
+a guarantee that transient allocations (including image processing) will fit.
+If the engine limit itself is the bottleneck, this diagnostic makes no memory
+claim and does not suggest raising it without a separate capacity check.
