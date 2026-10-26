@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from olmo_eval.common.execution.environment import ScoringContext
+from olmo_eval.common.scoring_time import timed
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import Task, TaskConfig
 from olmo_eval.runners.asynq.batching import BatchConfig, BatchedStrategy, StreamingStrategy
@@ -609,49 +610,32 @@ def test_task_spans_fall_within_processing(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
 
-def test_share_clock_keeps_blocking_work_out_of_every_share() -> None:
-    now = _FakeTime()
-    clock = ShareClock(now)
-    unit = clock.start()
-    now.t = 1.0
+class _ScoredTask(_LLTask):
+    """Scores each instance with ``cpu_s`` of loop work and a ``judge_s`` judge call.
 
-    def block() -> str:
-        now.t += 5.0  # the unit in flight makes no progress meanwhile
-        return "done"
-
-    assert clock.exclude(block) == ("done", pytest.approx(5.0))
-    now.t += 2.0
-    assert clock.stop(unit) == pytest.approx(3.0)
-
-
-class _TimedTask(_LLTask):
-    """Scoring advances a fake clock by ``score_s`` per instance; metrics by ``metrics_s``.
-
-    Scoring first waits for ``release`` when given, and yields to the event loop after
-    advancing the clock, so other instances can be in flight meanwhile.
+    Time is a fake clock. The judge call's time passes in another task, as a remote
+    call's would, and metric computation adds ``metrics_s``.
     """
 
-    def __init__(
-        self,
-        now: _FakeTime,
-        score_s: float,
-        metrics_s: float = 0.0,
-        fail: bool = False,
-        release: asyncio.Event | None = None,
-    ):
-        super().__init__(TaskConfig(name="timed", data_source="test/dataset"))
-        self.now, self.score_s, self.metrics_s, self.fail = now, score_s, metrics_s, fail
-        self.release = release
+    def __init__(self, now: _FakeTime, cpu_s: float = 0.0, judge_s: float = 0.0, **kwargs):
+        super().__init__(TaskConfig(name="scored", data_source="test/dataset"))
+        self.now, self.cpu_s, self.judge_s = now, cpu_s, judge_s
+        self.metrics_s: float = kwargs.get("metrics_s", 0.0)
 
     async def score_responses(
         self, responses: Sequence[Response], context: ScoringContext | None = None
     ) -> Sequence[Response]:
-        if self.release is not None:
-            await self.release.wait()
-        self.now.t += self.score_s
-        await asyncio.sleep(0)
-        if self.fail:
-            raise RuntimeError("judge unavailable")
+        self.now.t += self.cpu_s
+        if self.judge_s:
+            with timed("judge"):
+                done = asyncio.get_running_loop().create_future()
+
+                def finish() -> None:
+                    self.now.t += self.judge_s
+                    done.set_result(None)
+
+                asyncio.get_running_loop().call_soon(finish)
+                await done
         return await super().score_responses(responses, context)
 
     def compute_metrics(self, scored_responses: Sequence[Response]) -> dict:
@@ -659,107 +643,53 @@ class _TimedTask(_LLTask):
         return super().compute_metrics(scored_responses)
 
 
-def _score(
-    monkeypatch: pytest.MonkeyPatch, tasks: dict[str, Task], now: _FakeTime, **kwargs: object
-) -> dict[str, TaskResult]:
-    """Run two-instance tasks through process_results with a fake scoring clock."""
+def test_each_task_gets_its_own_judge_and_compute_time(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "olmo_eval.runners.asynq.results.BeakerStatusReporter",
         lambda: SimpleNamespace(
             progress_callback=lambda label: lambda *a, **k: None, flush=lambda: None
         ),
     )
-    monkeypatch.setattr("olmo_eval.runners.asynq.results.ShareClock", lambda: ShareClock(now))
+    now = _FakeTime()
+    monkeypatch.setattr("olmo_eval.common.scoring_time._now", now)
+    tasks: dict[str, Task] = {
+        "rules": _ScoredTask(now, cpu_s=0.05, metrics_s=0.5),
+        "judged": _ScoredTask(now, judge_s=1.0),
+    }
     trackers = {
-        spec: TaskTracker(model_name="m", spec=spec, task=task, total_instances=2)
+        spec: TaskTracker(model_name="m", spec=spec, task=task, total_instances=40)
         for spec, task in tasks.items()
     }
     result_queue: queue.Queue[ResultItem] = queue.Queue()
-    for spec in tasks:
-        for idx in range(2):
+    for idx in range(40):
+        for spec in tasks:
             result_queue.put(_result(idx, [LMOutput("A", metadata=_ll(1, 10))], task_id=spec))
-    options: dict = {
-        "scoring_concurrency": 1,
-        "save_predictions": False,
-        "write_predictions_fn": None,
-        **kwargs,
-    }
-    return asyncio.run(
+
+    results = asyncio.run(
         process_results(
             trackers=trackers,
             result_queue=result_queue,  # type: ignore[arg-type]
             workers=[],
             scoring_context=ScoringContext(),
-            total_tasks=len(tasks),
-            total_instances=2 * len(tasks),
+            scoring_concurrency=80,
+            total_tasks=2,
+            total_instances=80,
             model_name="m",
+            save_predictions=False,
+            write_predictions_fn=None,
             save_requests=False,
             write_requests_fn=None,
-            **options,
         )
     )
 
-
-def test_scoring_seconds_cover_instance_scoring_and_metrics(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = _FakeTime()
-    tasks: dict[str, Task] = {
-        "fast": _TimedTask(now, score_s=1.0),
-        "judged": _TimedTask(now, score_s=3.0, metrics_s=4.0),
-    }
-    results = _score(monkeypatch, tasks, now)
-
-    assert results["fast"].scoring_seconds == pytest.approx(2.0)
-    assert results["judged"].scoring_seconds == pytest.approx(2 * 3.0 + 4.0)
-
-
-def test_failed_scoring_still_counts_its_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    now = _FakeTime()
-    results = _score(monkeypatch, {"t": _TimedTask(now, score_s=1.5, fail=True)}, now)
-    assert results["t"].scoring_seconds == pytest.approx(3.0)
-
-
-def test_concurrent_scoring_splits_loop_time_without_double_counting(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = _FakeTime()
-    tasks: dict[str, Task] = {
-        "fast": _TimedTask(now, score_s=1.0),
-        "judged": _TimedTask(now, score_s=3.0, metrics_s=2.0),
-    }
-    results = _score(monkeypatch, tasks, now, scoring_concurrency=8)
-
-    fast, judged = results["fast"].scoring_seconds, results["judged"].scoring_seconds
-    assert fast is not None and judged is not None
-    # Overlapping instances share the loop's time; together they account for all of it.
-    assert fast + judged == pytest.approx(2 * 1.0 + 2 * 3.0 + 2.0)
-    assert judged > fast
-
-
-def test_writing_predictions_is_not_scoring_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    now = _FakeTime()
-    release = asyncio.Event()
-
-    def write(*_args: object) -> None:
-        now.t += 100.0
-        release.set()  # "late" is still scoring while "early" writes its predictions
-
-    tasks: dict[str, Task] = {
-        "late": _TimedTask(now, 3.0, release=release),
-        "early": _TimedTask(now, 1.0),
-    }
-    results = _score(
-        monkeypatch,
-        tasks,
-        now,
-        scoring_concurrency=8,
-        save_predictions=True,
-        write_predictions_fn=write,
-    )
-
-    total = sum(r.scoring_seconds or 0.0 for r in results.values())
-    assert total == pytest.approx(2 * 3.0 + 2 * 1.0)
+    # The rule-based task's loop work is its own, though judge calls were in flight.
+    rules, judged = results["rules"], results["judged"]
+    assert rules.scoring_compute_seconds == pytest.approx(40 * 0.05 + 0.5)
+    assert rules.scoring_judge_seconds == 0.0
+    assert judged.scoring_compute_seconds == 0.0
+    assert judged.scoring_judge_seconds is not None
+    assert judged.scoring_judge_seconds >= 40 * 1.0 - 1e-9
+    assert rules.scoring_sandbox_seconds == judged.scoring_sandbox_seconds == 0.0
 
 
 def test_processing_seconds_falls_back_without_task_end_times() -> None:
@@ -785,7 +715,9 @@ def test_metrics_json_carries_task_cost_and_run_timing() -> None:
         "prompt_tokens_total": 120,
         "completion_tokens_total": 0,
         "attributed_inference_seconds": 1.25,
-        "scoring_seconds": 0.5,
+        "scoring_judge_seconds": 9.5,
+        "scoring_sandbox_seconds": 0.0,
+        "scoring_compute_seconds": 0.25,
     }
     provider = SimpleNamespace(alias=None, model="m", kind="vllm", to_dict=lambda: {})
     results_dict = aggregate_results({"t": _task_result("t", **cost)}, ["t"], ["t"], provider, None)

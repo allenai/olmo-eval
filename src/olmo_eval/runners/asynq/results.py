@@ -13,11 +13,11 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.progress import ProgressLogger
 from olmo_eval.common.scorers.execution import format_scoring_error
 from olmo_eval.common.scoring_failures import RESPONSE_ERROR_KEY, format_scoring_failures
+from olmo_eval.common.scoring_time import timed, timed_scoring
 from olmo_eval.common.types import Response
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.runners.asynq.monitoring import check_workers_alive
 from olmo_eval.runners.asynq.preparation import compute_task_metrics, finalize_task
-from olmo_eval.runners.asynq.share_clock import ShareClock
 from olmo_eval.runners.asynq.types import (
     WORKER_FATAL,
     ResultItem,
@@ -63,15 +63,26 @@ def utc_iso(timestamp: float | None) -> str | None:
 
 
 def apply_task_cost(result: TaskResult, tracker: TaskTracker, completed_at: float) -> None:
-    """Copy the tracker's request timing, token totals and scoring time onto a TaskResult."""
+    """Copy the tracker's request timing, token totals and scoring times onto a TaskResult."""
     result.last_completed_at = utc_iso(completed_at)
-    result.scoring_seconds = tracker.scoring_seconds
+    result.scoring_judge_seconds = tracker.scoring_times.judge_seconds
+    result.scoring_sandbox_seconds = tracker.scoring_times.sandbox_seconds
+    result.scoring_compute_seconds = tracker.scoring_times.compute_seconds
     if tracker.results_recorded == 0:
         return
     result.first_request_at = utc_iso(tracker.first_request_at)
     result.prompt_tokens_total = tracker.prompt_tokens_total
     result.completion_tokens_total = tracker.completion_tokens_total
     result.attributed_inference_seconds = tracker.attributed_inference_seconds
+
+
+async def _score_response(
+    task: Task, response: Response, context: ScoringContext | None
+) -> Response:
+    """Score one response with its task's scorers."""
+    task.strip_thinking_traces([response])
+    scored = await task.score_responses([response], context=context)
+    return scored[0] if scored else response
 
 
 def _build_pending_instance_keys(trackers: dict[str, TaskTracker]) -> set[InstanceKey]:
@@ -186,8 +197,6 @@ async def process_results(
     # Semaphore to limit concurrent scoring operations
     scoring_semaphore = asyncio.Semaphore(scoring_concurrency)
     in_flight_scoring: set[asyncio.Task[None]] = set()
-    # Splits this loop's scoring time across the instances being scored at once
-    scoring_clock = ShareClock()
 
     # Determine which tasks need the scoring worker (async scorers like sandboxed
     # code execution). All other tasks are scored inline to avoid mp.Queue overhead.
@@ -197,15 +206,6 @@ async def process_results(
             tasks_needing_async_scoring.add(spec)
     if tasks_needing_async_scoring:
         logger.info(f"Tasks using async scoring worker: {tasks_needing_async_scoring}")
-
-    def _write_task_files(task_result: TaskResult) -> None:
-        """Write a finished task's predictions and requests, as configured."""
-        if save_predictions and task_result.predictions:
-            task_hash = compute_task_hash(task_result.config)
-            write_predictions_fn(model_name, task_result.spec, task_result.predictions, task_hash)
-        if save_requests and task_result.requests:
-            task_hash = compute_task_hash(task_result.config)
-            write_requests_fn(model_name, task_result.spec, task_result.requests, task_hash)
 
     def check_task_completion(spec: str) -> None:
         """Check if task is complete and finalize if so."""
@@ -218,27 +218,29 @@ async def process_results(
                 scored_responses[spec][i] for i in sorted(scored_responses[spec].keys())
             ]
             assert tracker.task is not None
-            task = tracker.task
             completed_at = time.time()
-            # Metric computation blocks the loop, so it is this task's time alone.
-            task_result, metrics_seconds = scoring_clock.exclude(
-                lambda: compute_task_metrics(
+            with timed("compute", tracker.scoring_times):
+                task_result = compute_task_metrics(
                     spec=spec,
-                    task=task,
+                    task=tracker.task,
                     scored_responses=responses_list,
                     failed_instances=tracker.failed_instances,
                     total_instances=tracker.total_instances,
                     duration_seconds=completed_at - tracker.start_time,
                     max_hard_failure_rate=max_hard_failure_rate,
                 )
-            )
-            tracker.scoring_seconds += metrics_seconds
             apply_task_cost(task_result, tracker, completed_at)
             results[spec] = task_result
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
-            # Writing files is not scoring; keep it out of every task's scoring time.
-            scoring_clock.exclude(lambda: _write_task_files(task_result))
+            if save_predictions and task_result.predictions:
+                task_hash = compute_task_hash(task_result.config)
+                write_predictions_fn(
+                    model_name, task_result.spec, task_result.predictions, task_hash
+                )
+            if save_requests and task_result.requests:
+                task_hash = compute_task_hash(task_result.config)
+                write_requests_fn(model_name, task_result.spec, task_result.requests, task_hash)
 
     async def score_and_store(
         spec: str,
@@ -248,11 +250,11 @@ async def process_results(
     ) -> None:
         """Score a single response and store the result."""
         async with scoring_semaphore:
-            token = scoring_clock.start()
             try:
-                task.strip_thinking_traces([response])
-                scored_list = await task.score_responses([response], context=scoring_context)
-                scored = scored_list[0] if scored_list else response
+                scored = await timed_scoring(
+                    _score_response(task, response, scoring_context),
+                    trackers[spec].scoring_times,
+                )
             except Exception as e:
                 error = format_scoring_error(e, phase="response")
                 logger.warning(
@@ -262,8 +264,6 @@ async def process_results(
                     error.get("message", error["type"]),
                 )
                 scored = _record_scoring_failure(response, error=error)
-            finally:
-                trackers[spec].scoring_seconds += scoring_clock.stop(token)
 
         scored_responses[spec][instance_idx] = scored
         instances_scored[spec] += 1

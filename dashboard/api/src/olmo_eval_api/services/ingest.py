@@ -558,7 +558,6 @@ async def upsert_task_result(
         "first_request_at": req.first_request_at,
         "last_completed_at": req.last_completed_at,
         "attributed_inference_seconds": derive.finite_or_none(req.attributed_inference_seconds),
-        "scoring_seconds": derive.finite_or_none(req.scoring_seconds),
         "reported_prompt_tokens_total": req.prompt_tokens_total,
         "reported_completion_tokens_total": req.completion_tokens_total,
         # Replaced when the run completes (finalize_task_result).
@@ -658,7 +657,7 @@ async def _content_hash(session: AsyncSession, run_id: str, req: s.TaskResultIn)
     request = req.model_dump(mode="json")
     # Optional fields added after release are left out when unset, so an older
     # client's re-upload keeps its hash.
-    for optional in ("generation_counts", "scoring_failures", "scoring_seconds"):
+    for optional in ("generation_counts", "scoring_failures"):
         if request.get(optional) is None:
             request.pop(optional, None)
     body = {"request": request, "files": {p: checksums.get(p) for p in paths}}

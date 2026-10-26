@@ -31,18 +31,23 @@ DEFAULT_MAX_HARD_FAILURE_RATE = 0.05
 #       workers, so a run with N workers attributes up to N x processing_seconds.
 #       This is worker occupancy, not GPU time: agent rollouts include their tool and
 #       sandbox time, and are credited while they wait on them.
-#   scoring_seconds: the task's share of the scoring loop's wall time. Time while any
-#       instance is being scored is split evenly across the instances in flight (judge
-#       calls and sandbox runs included), plus the task's metric computation. CPU-bound
-#       scorers block the loop, so their time is shared with whatever else is in flight.
-#       Scoring overlaps inference, so this and the inference time don't sum to wall time.
+#   scoring_judge_seconds / scoring_sandbox_seconds: summed durations of the judge
+#       model calls and sandbox operations made while scoring the task. Each call is
+#       timed on its own, so concurrent calls each count in full and the sum can
+#       exceed wall time. Waiting for a free judge or sandbox slot is not counted.
+#   scoring_compute_seconds: time the scoring loop spent running the task's scoring
+#       code (answer extraction, rule-based scorers, metric computation). The loop
+#       runs one piece at a time, so this never overlaps across tasks.
+#   See olmo_eval.common.scoring_time for how each is measured.
 TASK_COST_KEYS = (
     "first_request_at",
     "last_completed_at",
     "prompt_tokens_total",
     "completion_tokens_total",
     "attributed_inference_seconds",
-    "scoring_seconds",
+    "scoring_judge_seconds",
+    "scoring_sandbox_seconds",
+    "scoring_compute_seconds",
 )
 
 # Run-level timing keys written to metrics.json by the async runner.
@@ -91,7 +96,9 @@ class TaskResult:
     prompt_tokens_total: int | None = None
     completion_tokens_total: int | None = None
     attributed_inference_seconds: float | None = None
-    scoring_seconds: float | None = None
+    scoring_judge_seconds: float | None = None
+    scoring_sandbox_seconds: float | None = None
+    scoring_compute_seconds: float | None = None
 
     @property
     def failure_rate(self) -> float:
