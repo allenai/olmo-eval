@@ -369,7 +369,48 @@ class TestSimpleQAJudgeScorer:
         assert scorer.get_grade("B") == "INCORRECT"
         assert scorer.get_grade("C") == "NOT_ATTEMPTED"
         assert scorer.get_grade("CORRECT") == "CORRECT"
-        assert scorer.get_grade("garbage") == "INCORRECT"
+        assert scorer.get_grade("garbage") is None
+
+    @pytest.mark.anyio
+    async def test_asks_again_when_a_reply_names_no_grade(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        replies = ["I am not sure.", "B"]
+
+        async def mock_judge(prompt: str) -> str:
+            return replies.pop(0)
+
+        scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
+        instance = Instance(question="Q", gold_answer="A")
+
+        score = await scorer.ascore_with_context(instance, LMOutput(text="?"), ScoringContext())
+
+        assert score == 0.0
+        assert replies == []
+
+    @pytest.mark.anyio
+    async def test_a_reply_that_never_names_a_grade_leaves_the_output_unscored(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+
+        async def mock_judge(prompt: str) -> str:
+            return "I am not sure."
+
+        scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
+        instance = Instance(question="Q", gold_answer="A")
+
+        with pytest.raises(JudgeParseError) as raised:
+            await scorer.ascore_with_context(instance, LMOutput(text="?"), ScoringContext())
+
+        assert raised.value.raw == "I am not sure."
 
     def test_format_prompt(self):
         """Test prompt formatting."""

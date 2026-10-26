@@ -579,6 +579,9 @@ class LLMJudgeScorer(ContextScorer):
 
         Returns:
             Score between 0.0 and 1.0.
+
+        Raises:
+            JudgeParseError: The response holds no verdict.
         """
         ...
 
@@ -716,16 +719,30 @@ class LLMJudgeScorer(ContextScorer):
         output: LMOutput,
         context: ScoringContext,
     ) -> float:
-        """Score using configured provider or judge_fn."""
+        """Score using configured provider or judge_fn.
+
+        A judge_fn reply that holds no verdict is asked for again; when no attempt
+        parses, :class:`JudgeParseError` leaves the output unscored.
+        """
         self._validate_provider(context)
         prompt = self.format_judge_prompt(instance, output)
 
         if self.provider_name is not None:
             response = await self._score_with_provider(prompt, context)
-        else:
-            response = await self._score_with_judge_fn(prompt, context)
+            return self.parse_judge_response(response)
 
-        return self.parse_judge_response(response)
+        if self.judge_fn is None:
+            raise RuntimeError("No judge_fn configured.")
+        judge = Judge(call=self.judge_fn, label=f"{self.name} judge")
+        score, _ = await judge.ask(prompt, self._parsed_or_none, limiter=context.judge_limiter)
+        return score
+
+    def _parsed_or_none(self, response: str) -> float | None:
+        """Return the response's score, or None if it holds no verdict."""
+        try:
+            return self.parse_judge_response(response)
+        except JudgeParseError:
+            return None
 
 
 @dataclass(frozen=True)
@@ -756,23 +773,23 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
 
         Returns:
             1.0 for CORRECT (A), 0.0 for INCORRECT (B) or NOT_ATTEMPTED (C).
+
+        Raises:
+            JudgeParseError: The response names no grade.
         """
-        response = response.strip().upper()
+        grade = self.get_grade(response)
+        if grade is None:
+            raise JudgeParseError("the SimpleQA judge reply names no grade", raw=response)
+        return 1.0 if grade == "CORRECT" else 0.0
 
-        # Look for letter grade
-        if response.startswith("A") or "CORRECT" in response and "INCORRECT" not in response:
-            return 1.0
-        else:
-            return 0.0
-
-    def get_grade(self, response: str) -> SimpleQAGrade:
+    def get_grade(self, response: str) -> SimpleQAGrade | None:
         """Get the grade category from judge response.
 
         Args:
             response: The judge's response.
 
         Returns:
-            Grade category.
+            Grade category, or None if the response names none.
         """
         response = response.strip().upper()
 
@@ -782,8 +799,7 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
             return "INCORRECT"
         elif response.startswith("C") or "NOT_ATTEMPTED" in response or "NOT ATTEMPTED" in response:
             return "NOT_ATTEMPTED"
-        else:
-            return "INCORRECT"
+        return None
 
 
 @dataclass(frozen=True)
