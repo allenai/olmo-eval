@@ -7,12 +7,17 @@ import pytest
 from olmo_eval.cli.beaker.config_loader import LaunchConfig
 from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
 from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+from olmo_eval.common.constants.infrastructure import BEAKER_DEFAULT_IMAGE, BEAKER_SGLANG_IMAGE
 from olmo_eval.launch.beaker.launcher import BeakerLauncher
 
 
-@pytest.mark.parametrize("custom_package", [None, "sglang==0.5.19"])
-def test_sglang_job_installs_selected_provider(custom_package):
-    overrides = ["provider.kind=sglang"]
+@pytest.mark.parametrize(
+    ("provider_kind", "custom_package"),
+    [("sglang", None), ("sglang", "sglang==0.5.19"), ("vllm", None)],
+)
+@pytest.mark.parametrize("image", [None, "explicit-image"])
+def test_job_installs_selected_provider(provider_kind, custom_package, image):
+    overrides = [f"provider.kind={provider_kind}"]
     if custom_package:
         overrides.append(f"provider.package={custom_package}")
     config = LaunchConfig(
@@ -35,7 +40,7 @@ def test_sglang_job_installs_selected_provider(custom_package):
     )
     assembler = JobConfigAssembler(
         config=config,
-        effective_image="test-cuda13-image",
+        effective_image=image,
         effective_groups=[],
         beaker_username="test-user",
         common_secrets=[],
@@ -45,15 +50,24 @@ def test_sglang_job_installs_selected_provider(custom_package):
     )
     with patch("olmo_eval.cli.beaker.job_assembler.cluster_has_weka", return_value=False):
         job = assembler.assemble(plan)
-    assert "vllm" not in job.extras
+    default_image = BEAKER_SGLANG_IMAGE if provider_kind == "sglang" else BEAKER_DEFAULT_IMAGE
+    assert job.beaker_image == (image or default_image)
+    if image is None and provider_kind == "sglang":
+        assert job.env_vars["LD_LIBRARY_PATH"].startswith("/usr/local/cuda/compat:")
+    else:
+        assert "LD_LIBRARY_PATH" not in job.env_vars
+    assert ("vllm" in job.extras) == (provider_kind == "vllm")
     assert "clients" not in job.extras
     assert not job.vllm_isolated_venv
-    assert ("sglang" in job.extras) == (custom_package is None)
+    assert ("sglang" in job.extras) == (provider_kind == "sglang" and custom_package is None)
     if custom_package:
         assert custom_package in job.provider_packages
     # Render the real installation command without constructing a network client.
     launcher = object.__new__(BeakerLauncher)
     command = launcher._build_install_cmd(job.extras, provider_packages=job.provider_packages)
-    assert "sglang" in command
-    assert "vllm" not in command
+    assert provider_kind in command
+    if provider_kind == "sglang":
+        assert "vllm" not in command
+    else:
+        assert "sglang" not in command
     assert "-c /tmp/cuda-constraints.txt" in command

@@ -1905,19 +1905,19 @@ The script auto-detects the image name from the tag (e.g., `olmo-eval-cu1281-trc
 The image contains:
 - Python 3.12 (via uv)
 - PyTorch with CUDA support
+- Base Python dependencies from `uv.lock`
 - System dependencies (git, uv, ca-certificates)
 
 The image does NOT contain:
 - olmo-eval source code (provided by gantry at runtime)
-- olmo-eval dependencies like click, datasets, rich, etc. (installed at job startup)
 - Storage backends like boto3, psycopg (installed at job startup if needed)
 - Inference providers like vllm, transformers, litellm (installed at job startup)
 
-For the SGLang provider, build with `--cuda-version 13.0.2 --torch-version 2.13.0`
-and select the resulting image with `--image`. Selecting
-`provider.kind=sglang` installs the pinned `sglang` extra (including the Olmo model
-plugin) at startup. See the [SGLang setup guide](docs/sglang.md) for local
-installation, checkpoint registration and a small validation command.
+For the SGLang provider, `provider.kind=sglang` selects a compatible shared
+CUDA 13 / PyTorch 2.13 base and installs the pinned `sglang` extra (including the
+Olmo model plugin) at startup. Explicit image overrides take precedence. See the
+[SGLang setup guide](docs/sglang.md) for local installation, checkpoint registration
+and a small validation command.
 
 ### Installing Inference Providers at Runtime
 

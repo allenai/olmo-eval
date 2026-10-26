@@ -15,26 +15,17 @@ For a local Linux CUDA 13 / PyTorch 2.13 environment:
 uv sync --frozen --no-group vllm --extra sglang
 ```
 
-For remote evaluation, only the launcher is needed locally. The image contains
-Python, PyTorch and CUDA; Gantry installs the provider extra at job startup.
-Build a compatible base through the existing image workflow:
+For remote evaluation, only the launcher is needed locally. Selecting SGLang
+also selects the shared CUDA 13.0.2 / PyTorch 2.13 base image
+`01M5VA8T2R63316D297RPBVCG9`, owned by Ai2 in `open-instruct-dev`. Gantry installs
+the extra at job startup; users do not build an image or install GPU packages on
+their laptop. The launcher selects images per model, so other providers keep
+their existing default. Explicit `--image` or YAML `beaker_image` settings win.
 
-```bash
-./scripts/build_image.sh --cuda-version 13.0.2 --torch-version 2.13.0 \
-    --platform linux/amd64
-./scripts/beaker/push_beaker_image.sh \
-    --source olmo-eval:cu1302-trc2130-amd64 --workspace YOUR_WORKSPACE
-```
-
-Select that image with `--image` when launching. The repository's default
-CUDA 12.8 / PyTorch 2.10 image is not compatible with this SGLang pin. The
-compatibility-library path below supports the older host driver on Jupiter. A
-normal launcher invocation for an exported Olmo KDA MoE Hugging Face checkpoint is:
+For an exported Olmo KDA MoE Hugging Face checkpoint:
 
 ```bash
 uv run --frozen --no-group vllm olmo-eval beaker launch \
-    --image YOUR_CUDA13_TORCH213_IMAGE \
-    --env LD_LIBRARY_PATH=/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64 \
     --harness default -o provider.kind=sglang \
     -o provider.kwargs.model_registration=olmo_sglang:register \
     -o provider.kwargs.tensor_parallel_size=1 \
@@ -66,6 +57,24 @@ multimodal transport: this provider uses the inline Python Engine. No Rust
 compiler is needed. This extra does not qualify Rust-server modes or image
 inference. `provider.package` can replace the bundled engine extra for an
 explicitly managed runtime; compatibility then belongs to that configuration.
+
+### Rebuilding the base image
+
+The shared base uses the existing repository build and publication scripts:
+
+```bash
+./scripts/build_image.sh --cuda-version 13.0.2 --torch-version 2.13.0 \
+    --platform linux/amd64
+./scripts/beaker/push_beaker_image.sh \
+    --source olmo-eval:cu1302-trc2130-amd64 --workspace YOUR_WORKSPACE
+```
+
+Select a replacement with `--image`. The ordinary CUDA 12.8 / PyTorch 2.10 base
+is incompatible with this SGLang pin; installation constraints reject it. The
+shared default also enables `/usr/local/cuda/compat` for older host drivers on
+Jupiter. An explicit image is responsible for its own CUDA/driver compatibility;
+explicit `--env LD_LIBRARY_PATH=...` always takes precedence. Qualify a new base
+with a small GPU evaluation before changing the shared default.
 
 ## Provider settings
 

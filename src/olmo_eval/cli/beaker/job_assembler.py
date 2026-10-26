@@ -7,7 +7,9 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.constants.infrastructure import (
+    BEAKER_DEFAULT_IMAGE,
     BEAKER_RESULT_DIR,
+    BEAKER_SGLANG_IMAGE,
     cluster_has_weka,
 )
 from olmo_eval.launch.beaker.constants import BEAKER_INFRA_ENV_VARS
@@ -483,7 +485,7 @@ class JobConfigAssembler:
     def __init__(
         self,
         config: LaunchConfig,
-        effective_image: str,
+        effective_image: str | None,
         effective_groups: list[str],
         beaker_username: str,
         common_secrets: list[tuple[str, str]],
@@ -536,6 +538,11 @@ class JobConfigAssembler:
 
         # Install for the provider the job will actually run with
         provider_kind = resolve_provider_kind(exp.model_spec, preset, self.config.harness_overrides)
+        # None means the caller left image selection to the resolved provider.
+        # Resolve per experiment so mixed-provider launches can use different bases.
+        effective_image = self.effective_image or (
+            BEAKER_SGLANG_IMAGE if provider_kind == "sglang" else BEAKER_DEFAULT_IMAGE
+        )
         vllm_isolated_venv = provider_kind == "vllm_server"
         model_provider_extras = get_provider_extras(exp.model_spec, default_kind=provider_kind)
 
@@ -637,6 +644,12 @@ class JobConfigAssembler:
                     setup_modal_gcp_secret = True
                     log.info(f"Modal GCP secret setup enabled: {secret_name}")
 
+        if effective_image == BEAKER_SGLANG_IMAGE:
+            # CUDA forward compatibility for H100 hosts with older drivers.
+            # Explicit environment overrides below still take precedence.
+            job_env_vars["LD_LIBRARY_PATH"] = (
+                "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64"
+            )
         # User-supplied env vars win over everything above
         job_env_vars.update(self.config.env_vars)
 
@@ -671,7 +684,7 @@ class JobConfigAssembler:
             budget=self.config.budget,
             extras=install_extras,
             groups=self.effective_groups,
-            beaker_image=self.effective_image,
+            beaker_image=effective_image,
             inject_aws_credentials=self.inject_aws_credentials,
             inject_gcs_credentials=self.inject_gcs_credentials,
             inject_upload_credentials=self.config.upload,
