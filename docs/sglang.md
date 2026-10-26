@@ -28,6 +28,7 @@ For an exported Olmo KDA MoE Hugging Face checkpoint:
 uv run --frozen --no-group vllm olmo-eval beaker launch \
     --harness default -o provider.kind=sglang \
     -o provider.kwargs.model_registration=olmo_sglang:register \
+    -o provider.trust_remote_code=true \
     -o provider.kwargs.tensor_parallel_size=1 \
     -o provider.kwargs.sampling_backend=flashinfer \
     -o provider.max_model_len=8192 \
@@ -38,7 +39,9 @@ uv run --frozen --no-group vllm olmo-eval beaker launch \
     --min-runtime 20m --timeout 20m --no-upload --dry-run
 ```
 
-Replace the uppercase placeholders and remove `--dry-run` to submit. The limit
+Replace the uppercase placeholders and remove `--dry-run` to submit. The example
+trusts the checkpoint's custom Hugging Face configuration code; use that flag only
+for checkpoints whose code you trust. The limit
 and token cap make this an installation check, not an accuracy measurement;
 remove them and choose a suitable timeout for full evaluation. Configure normal
 Beaker/GitHub access and checkpoint mounts as described in the
