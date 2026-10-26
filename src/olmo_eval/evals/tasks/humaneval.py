@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -22,6 +23,25 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 class CodeExecutionScorer3s(CodeExecutionScorer):
     timeout: float = 3.0
     separator: str = "\n"
+
+
+def _with_prompt(metadata: dict[str, Any], code: str) -> str:
+    """Program to execute: the prompt plus the model's code.
+
+    The chat prompt asks for the function body only, but reasoning models often
+    answer with the whole function. Indenting such an answer under the prompt's
+    signature would nest a second definition inside the first and leave the
+    entry point returning None. When the code defines the entry point at top
+    level, it is appended after the prompt unindented instead: the prompt keeps
+    its imports and helpers, its own definition (a docstring only) is valid
+    Python, and the model's definition replaces it.
+    """
+    prefix = metadata["answer_prefix"]
+    entry_point = metadata.get("entry_point")
+    if entry_point and re.search(rf"^def\s+{re.escape(entry_point)}\s*\(", code, re.MULTILINE):
+        return prefix + "\n" + code
+    # Ensure code has proper indentation for function body
+    return prefix + indent_code(code)
 
 
 @register("humaneval")
@@ -136,9 +156,7 @@ class HumanEval(Task):
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
-                    # Ensure code has proper indentation for function body
-                    code = indent_code(code)
-                    output.extracted_answer = response.instance.metadata["answer_prefix"] + code
+                    output.extracted_answer = _with_prompt(response.instance.metadata, code)
                 else:
                     output.extracted_answer = None
 
