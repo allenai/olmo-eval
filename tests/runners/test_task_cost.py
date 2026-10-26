@@ -14,7 +14,6 @@ import pytest
 from olmo_eval.common.execution.environment import ScoringContext
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import Task, TaskConfig
-from olmo_eval.inference.metrics.core.schema import BatchMetrics, RequestMetrics
 from olmo_eval.runners.asynq.batching import BatchConfig, BatchedStrategy, StreamingStrategy
 from olmo_eval.runners.asynq.processing import (
     attribute_batch_seconds,
@@ -209,43 +208,37 @@ def test_share_clock_splits_overlap_and_skips_idle_time() -> None:
     assert share_a + share_b + share_c == pytest.approx(8.0)  # busy time, not 21s
 
 
-def _request_metrics(prompt: int, completion: int) -> RequestMetrics:
-    return RequestMetrics(
-        request_id="r",
-        prompt_tokens=prompt,
-        completion_tokens=completion,
-        end_to_end_latency_s=1.0,
-        tokens_per_second=0.0,
-    )
+def _tokens(prompt: int | None, completion: int | None) -> LMOutput:
+    """A generation output reporting its token counts, as providers record them."""
+    metadata = {}
+    if prompt is not None:
+        metadata["prompt_tokens"] = prompt
+    if completion is not None:
+        metadata["completion_tokens"] = completion
+    return LMOutput("out", metadata=metadata)
 
 
-def _batch(wall: float, requests: Sequence[RequestMetrics]) -> BatchMetrics:
-    return BatchMetrics(
-        total_requests=len(requests),
-        successful_requests=len(requests),
-        failed_requests=0,
-        total_prompt_tokens=sum(r.prompt_tokens for r in requests),
-        total_completion_tokens=sum(r.completion_tokens for r in requests),
-        wall_clock_time_s=wall,
-        output_tokens_per_second=0.0,
-        mean_latency_s=0.0,
-        requests=tuple(requests),
-    )
+def _generated(*outputs: LMOutput) -> ResultItem:
+    return _result(0, list(outputs), request_type=RequestType.COMPLETION)
 
 
 def test_attribution_splits_batch_time_by_token_share() -> None:
-    # The batch's own wall time in its metrics is ignored; the worker clock's share is split.
-    batch = _batch(99.0, [_request_metrics(30, 10), _request_metrics(10, 10)])
-    assert attribute_batch_seconds(4.0, batch, 2) == [pytest.approx(8 / 3), pytest.approx(4 / 3)]
+    results = [_generated(_tokens(30, 10)), _generated(_tokens(10, 10))]
+    assert attribute_batch_seconds(4.0, results) == [pytest.approx(8 / 3), pytest.approx(4 / 3)]
 
 
-def test_attribution_splits_evenly_without_matching_request_metrics() -> None:
-    batch = _batch(4.0, [_request_metrics(30, 10)])
-    assert attribute_batch_seconds(4.0, batch, 2) == [2.0, 2.0]
-    assert attribute_batch_seconds(4.0, None, 2) == [2.0, 2.0]
-    assert attribute_batch_seconds(4.0, Mock(), 1) == [4.0]
-    empty = _batch(3.0, [_request_metrics(0, 0), _request_metrics(0, 0)])
-    assert attribute_batch_seconds(3.0, empty, 2) == [1.5, 1.5]
+def test_attribution_splits_evenly_without_token_counts() -> None:
+    unknown = [_generated(_tokens(30, 10)), _generated(_tokens(None, None))]
+    assert attribute_batch_seconds(4.0, unknown) == [2.0, 2.0]
+    assert attribute_batch_seconds(4.0, [_generated(_tokens(30, 10))]) == [4.0]
+    empty = [_generated(_tokens(0, 0)), _generated(_tokens(0, 0))]
+    assert attribute_batch_seconds(3.0, empty) == [1.5, 1.5]
+
+
+def test_a_failed_request_in_a_counted_batch_gets_no_share() -> None:
+    # A request whose outputs were dropped as an error used no counted tokens.
+    results = [_generated(_tokens(30, 10)), _generated()]
+    assert attribute_batch_seconds(4.0, results) == [4.0, 0.0]
 
 
 def _queue_item(
@@ -273,14 +266,13 @@ def _timed(now: _FakeTime, seconds: float, value: object) -> AsyncMock:
 def test_process_batch_stamps_send_time_and_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("olmo_eval.runners.asynq.processing.time.time", lambda: 1000.0)
     now = _FakeTime()
-    batch = _batch(99.0, [_request_metrics(10, 10), _request_metrics(30, 10)])
     harness = SimpleNamespace(
         provider=SimpleNamespace(
             describe_request=Mock(return_value=None),
-            agenerate=_timed(now, 6.0, [[LMOutput("a")], [LMOutput("b")]]),
+            agenerate=_timed(now, 6.0, [[_tokens(10, 10)], [_tokens(30, 10)]]),
         ),
         _apply_config=lambda request: request,
-        flush_metrics=Mock(return_value=batch),
+        flush_metrics=Mock(return_value=None),
     )
     result_queue: queue.Queue[ResultItem] = queue.Queue()
 
@@ -493,15 +485,18 @@ def test_cancelled_batch_leaves_the_clock() -> None:
 
 
 @pytest.mark.parametrize(
-    "strategy",
+    "make_strategy",
     [
-        BatchedStrategy(BatchConfig(chunk_size=2, chunk_timeout=0.05)),
-        StreamingStrategy(BatchConfig.streaming()),
+        lambda: BatchedStrategy(BatchConfig(chunk_size=2, chunk_timeout=0.05)),
+        lambda: StreamingStrategy(BatchConfig.streaming()),
     ],
+    ids=["batched", "streaming"],
 )
 def test_strategies_share_one_clock_per_worker(
-    strategy: BatchedStrategy | StreamingStrategy, monkeypatch: pytest.MonkeyPatch
+    make_strategy: Callable[[], BatchedStrategy | StreamingStrategy],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    strategy = make_strategy()
     clocks: list[ShareClock | None] = []
 
     async def capture(*_args: object, clock: ShareClock | None = None, **_kwargs: object) -> None:

@@ -388,7 +388,8 @@ export interface TaskResultIn {
     /**
      * Inference worker seconds attributed to this task. Each worker's busy time is split evenly
      * across the batches and agent rollouts in flight, and a batch's share across its requests by
-     * token share. Agent rollouts include their tool and sandbox time. Summed over workers, so a
+     * token share. This is the worker's occupancy, not GPU time: agent rollouts include their tool
+     * and sandbox time, and are credited while they wait on them. Summed over workers, so a
      * run with N inference workers attributes up to N times its processing time. Null unless
      * recorded.
      */

@@ -29,7 +29,8 @@ DEFAULT_MAX_HARD_FAILURE_RATE = 0.05
 #       worker's busy time is split evenly across the batches and agent rollouts in
 #       flight, and a batch's share across its requests by token share. Summed over
 #       workers, so a run with N workers attributes up to N x processing_seconds.
-#       Agent rollouts include their tool and sandbox time.
+#       This is worker occupancy, not GPU time: agent rollouts include their tool and
+#       sandbox time, and are credited while they wait on them.
 TASK_COST_KEYS = (
     "first_request_at",
     "last_completed_at",

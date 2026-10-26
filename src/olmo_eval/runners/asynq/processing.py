@@ -38,22 +38,33 @@ def _flush_batch_metrics(harness: Harness, items: list[QueueItem], log: logging.
         return None
 
 
-def attribute_batch_seconds(seconds: float, batch: object, num_requests: int) -> list[float]:
+def attribute_batch_seconds(seconds: float, results: list[ResultItem]) -> list[float]:
     """Split a batch's share of worker time across its requests.
 
     Each request gets seconds * (its prompt + completion tokens) / (the batch's
-    tokens), using the per-request metrics the provider recorded for this batch.
-    Without such metrics, or when they do not line up one to one with the batch's
-    requests, every request gets an equal share.
+    tokens), counted from its outputs the same way as the task's token totals.
+    When any request's count is unknown, or the batch has no tokens, every request
+    gets an equal share.
     """
-    from olmo_eval.inference.metrics.core.schema import BatchMetrics
+    from olmo_eval.common.types import RequestType
+    from olmo_eval.runners.common.usage import request_token_usage
 
-    if isinstance(batch, BatchMetrics) and len(batch.requests) == num_requests:
-        tokens = [r.prompt_tokens + r.completion_tokens for r in batch.requests]
+    tokens: list[int] = []
+    for result in results:
+        loglikelihood = (
+            result.request is not None and result.request.request_type == RequestType.LOGLIKELIHOOD
+        )
+        prompt, completion = request_token_usage(
+            [output.metadata or {} for output in result.outputs], loglikelihood=loglikelihood
+        )
+        if prompt is None or completion is None:
+            break
+        tokens.append(prompt + completion)
+    else:
         total = sum(tokens)
         if total > 0:
             return [seconds * count / total for count in tokens]
-    return [seconds / num_requests] * num_requests
+    return [seconds / len(results)] * len(results)
 
 
 def _format_cause(cause: BaseException) -> str:
@@ -141,7 +152,7 @@ async def process_chat_request(
     if clock is None:
         clock = ShareClock()
     token = clock.start()
-    seconds: float | None = None
+    seconds = 0.0
 
     try:
         try:
@@ -327,9 +338,9 @@ async def process_batch(
         raise
     else:
         batch_seconds = clock.stop(token)
-        batch = _flush_batch_metrics(harness, items, log)
+        _flush_batch_metrics(harness, items, log)
         for result, share in zip(
-            results, attribute_batch_seconds(batch_seconds, batch, len(results)), strict=True
+            results, attribute_batch_seconds(batch_seconds, results), strict=True
         ):
             result.attributed_seconds = share
             result_queue.put(result)
