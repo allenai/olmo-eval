@@ -9,8 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 from olmo_eval.common.types import SamplingParams
+from olmo_eval.inference.model_profiles import MODEL_SHAPES
 from olmo_eval.inference.providers.sglang_profiles import (
-    MODEL_SHAPE,
+    ENGINE_PROFILES,
+    EngineProfile,
     prepare_profile,
     resolve_profile,
 )
@@ -19,7 +21,7 @@ from olmo_eval.runners.asynq.batching import BatchConfig, get_strategy
 
 def model():
     return dict(
-        copy.deepcopy(MODEL_SHAPE),
+        copy.deepcopy(MODEL_SHAPES["olmo3.5-12.5b"]),
         dtype="bfloat16",
         architectures=["Olmo3MoeForCausalLM"],
         max_position_embeddings=65536,
@@ -36,13 +38,16 @@ def model():
         ("NVIDIA H100 80GB HBM3", 81559, False, (320, 4456448, 1920, False)),
     ],
 )
-def test_selected_pools(gpu, total, cache, expected):
+@pytest.mark.parametrize("selector", ["auto", "olmo3.5-12.5b"])
+def test_selected_pools(gpu, total, cache, expected, selector):
     options = {"context_length": 8192}
     if cache is not None:
         options["disable_radix_cache"] = cache
-    report = resolve_profile("auto", model(), options, [(gpu, total, total)])
+    report = resolve_profile(selector, model(), options, [(gpu, total, total)])
     effective = report["defaults"] | options
-    assert report["selected"] != "generic"
+    assert report["selected"].startswith("olmo3.5-12.5b-sglang-")
+    assert report["model_profile"] == "olmo3.5-12.5b"
+    assert report["requested"] == selector
     assert (
         tuple(
             effective[k]
@@ -74,6 +79,13 @@ def test_other_models_fall_back(change):
         "auto", model() | change, {"context_length": 8192}, [("NVIDIA H100", 81559, 81559)]
     )
     assert report["selected"] == "generic" and not report["defaults"]
+    with pytest.raises(ValueError, match="not qualified"):
+        resolve_profile(
+            "olmo3.5-12.5b",
+            model() | change,
+            {"context_length": 8192},
+            [("NVIDIA H100", 81559, 81559)],
+        )
 
 
 @pytest.mark.parametrize(
@@ -92,9 +104,12 @@ def test_other_models_fall_back(change):
 )
 def test_unqualified_context_topology_or_hardware_falls_back(options, devices):
     assert resolve_profile("auto", model(), options, devices)["selected"] == "generic"
+    with pytest.raises(ValueError, match="not qualified"):
+        resolve_profile("olmo3.5-12.5b", model(), options, devices)
 
 
-def test_explicit_overrides_and_generic():
+@pytest.mark.parametrize("selector", ["auto", "olmo3.5-12.5b"])
+def test_explicit_overrides_and_generic(selector):
     options = {
         "context_length": 34816,
         "max_running_requests": 128,
@@ -102,7 +117,7 @@ def test_explicit_overrides_and_generic():
         "mem_fraction_static": 0.8,
         "cuda_graph_backend_decode": "disabled",
     }
-    report = resolve_profile("auto", model(), options, [("NVIDIA H100", 81559, 81559)])
+    report = resolve_profile(selector, model(), options, [("NVIDIA H100", 81559, 81559)])
     assert not set(options) & set(report["defaults"])
     assert report["defaults"]["max_mamba_cache_size"] == 128
     assert resolve_profile("generic", model(), options, [])["defaults"] == {}
@@ -110,7 +125,8 @@ def test_explicit_overrides_and_generic():
         resolve_profile("bogus", model(), options, [])
 
 
-def test_hardware_is_selected_after_visible_device_mapping(tmp_path, monkeypatch):
+@pytest.mark.parametrize("selector", ["auto", "olmo3.5-12.5b"])
+def test_hardware_is_selected_after_visible_device_mapping(tmp_path, monkeypatch, selector):
     (tmp_path / "config.json").write_text(json.dumps(model()))
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-assigned,GPU-other")
     commands = []
@@ -123,9 +139,9 @@ def test_hardware_is_selected_after_visible_device_mapping(tmp_path, monkeypatch
         "olmo_eval.inference.providers.sglang_profiles.subprocess.check_output", query
     )
     report = prepare_profile(
-        "auto", {"model_path": str(tmp_path), "context_length": 8192}, "olmo_sglang:register"
+        selector, {"model_path": str(tmp_path), "context_length": 8192}, "olmo_sglang:register"
     )
-    assert report["selected"] == "olmo35-h100-v1"
+    assert report["selected"] == "olmo3.5-12.5b-sglang-h100-v1"
     assert "--id=GPU-assigned" in commands[0]
 
 
@@ -140,6 +156,79 @@ def test_generic_does_not_probe_hardware(monkeypatch):
         prepare_profile("generic", {"model_path": "unused"}, "olmo_sglang:register")["selected"]
         == "generic"
     )
+
+
+def test_named_profile_requires_registration_without_probing(monkeypatch):
+    def fail(*args, **kwargs):
+        pytest.fail("Hardware must not be queried")
+
+    monkeypatch.setattr(
+        "olmo_eval.inference.providers.sglang_profiles.subprocess.check_output", fail
+    )
+    options = {"model_path": "unused"}
+    assert prepare_profile("auto", options, None)["selected"] == "generic"
+    with pytest.raises(ValueError, match="model registration"):
+        prepare_profile("olmo3.5-12.5b", options, None)
+    with pytest.raises(ValueError, match="Unknown SGLang profile"):
+        prepare_profile("olmo3.5-typo", options, None)
+
+
+@pytest.mark.parametrize("failure", ["config", "hardware"])
+def test_named_profile_cannot_silently_fall_back_when_probe_fails(tmp_path, monkeypatch, failure):
+    (tmp_path / "config.json").write_text("invalid" if failure == "config" else json.dumps(model()))
+
+    def query(*args, **kwargs):
+        raise OSError("GPU telemetry unavailable")
+
+    monkeypatch.setattr(
+        "olmo_eval.inference.providers.sglang_profiles.subprocess.check_output", query
+    )
+    options = {"model_path": str(tmp_path), "context_length": 8192}
+    assert prepare_profile("auto", options, "olmo_sglang:register")["selected"] == "generic"
+    with pytest.raises(ValueError, match="metadata/hardware unavailable"):
+        prepare_profile("olmo3.5-12.5b", options, "olmo_sglang:register")
+
+
+def test_shared_geometry_requires_engine_registration(monkeypatch):
+    # A model family entry alone must not borrow another shape's engine defaults.
+    monkeypatch.setitem(MODEL_SHAPES, "another-size", model() | {"hidden_size": 2048})
+    options = {"context_length": 8192}
+    devices = [("NVIDIA H100", 81559, 81559)]
+    assert (
+        resolve_profile("auto", model() | {"hidden_size": 2048}, options, devices)["selected"]
+        == "generic"
+    )
+    with pytest.raises(ValueError, match="Unknown SGLang profile"):
+        resolve_profile("another-size", model() | {"hidden_size": 2048}, options, devices)
+
+
+def test_registered_shape_dispatches_its_own_defaults_and_requires_its_hook(tmp_path, monkeypatch):
+    shape = model() | {"hidden_size": 2048}
+    monkeypatch.setitem(MODEL_SHAPES, "another-size", shape)
+    monkeypatch.setitem(
+        ENGINE_PROFILES,
+        "another-size",
+        EngineProfile(
+            "another_plugin:register",
+            lambda model, options, devices: {
+                "selected": "another-size-sglang-test-v1",
+                "defaults": {"max_running_requests": 7},
+            },
+        ),
+    )
+    (tmp_path / "config.json").write_text(json.dumps(shape))
+    monkeypatch.setattr(
+        "olmo_eval.inference.providers.sglang_profiles.subprocess.check_output",
+        lambda *args, **kwargs: "NVIDIA H100, 81559, 81000",
+    )
+    options = {"model_path": str(tmp_path)}
+    for selector in ("auto", "another-size"):
+        report = prepare_profile(selector, options, "another_plugin:register")
+        assert report["selected"] == "another-size-sglang-test-v1"
+        assert report["defaults"] == {"max_running_requests": 7}
+    assert prepare_profile("auto", options, "olmo_sglang:register")["selected"] == "generic"
+    with pytest.raises(ValueError, match="model registration"):
+        prepare_profile("another-size", options, "olmo_sglang:register")
 
 
 def test_auto_batching_counts_samples_without_losing_or_reordering_requests():

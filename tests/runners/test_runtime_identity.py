@@ -23,7 +23,7 @@ def requested(kind="sglang"):
     )
 
 
-def resolved(profile="olmo35-h100-v1", cache=False, free=81000, commit="abc"):
+def resolved(profile="olmo3.5-12.5b-sglang-h100-v1", cache=False, free=81000, commit="abc"):
     return resolved_worker_config(
         requested(),
         BatchConfig(chunk_size=512),
@@ -122,7 +122,7 @@ def test_worker_metrics_and_parent_results_share_resolved_hash():
         config,
         BatchConfig(chunk_size=512),
         profile={
-            "selected": "olmo35-h100-v1",
+            "selected": "olmo3.5-12.5b-sglang-h100-v1",
             "effective_options": {"attention_backend": "triton"},
         },
     )

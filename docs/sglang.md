@@ -173,20 +173,34 @@ histories: after generated tokens differ, later logprobs describe different
 conditional distributions. Repeated accuracy measurements and controlled
 numerical checks answer different questions; neither substitutes for the other.
 
-## Automatic serving profiles
+## Named serving profiles
 
-`provider.kwargs.profile=auto` is the default. With `olmo_sglang:register`,
-the provider reads checkpoint geometry and the assigned GPU's name and memory
-before constructing the engine. It does not execute checkpoint configuration
-code to select a profile or guess hardware from the cluster name.
+`olmo3.5-12.5b` names the qualified model geometry. SGLang registers its own
+hardware-dependent defaults for that shape; other engines do not inherit them.
+Select it with `-o provider.kwargs.profile=olmo3.5-12.5b` after your
+`--harness` argument, alongside `-o provider.kind=sglang` and
+`-o provider.kwargs.model_registration=olmo_sglang:register`.
+
+| Selection | Behavior |
+| --- | --- |
+| `auto` (default) | Discover a registered profile; otherwise use generic defaults and log the reason. |
+| `olmo3.5-12.5b` | Require the registered shape and supported runtime/hardware; fail before engine construction if qualification or metadata checks fail. |
+| `generic` | Skip profile selection and hardware probing; use engine defaults plus explicit options. |
+
+Automatic and named selection use the same settings. The provider reads checkpoint
+geometry and the assigned GPU's name and memory before constructing the engine.
+It does not execute checkpoint configuration code to select a profile or guess
+hardware from the cluster name. Explicit selection still requires the registration
+hook, BF16, supported context and hardware; it is not a way to bypass these checks.
 
 The initial profiles cover the measured BF16, 16-layer Olmo 3.5 KDA MoE shape
 (hidden size 1024, 512 routed experts, top-16, latent width 512), dedicated TP1,
 nonquantized text inference and an explicitly configured context up to 34,816.
 All cache, attention and recurrent-state dimensions must match, not just the
 model name. The GPU must have at least 95% of its memory free at startup.
-This is one exact model geometry, not a preset for every Olmo 3.5 size. Other
-sizes fall back to `generic` without applying these tuned defaults. Check the
+This is one exact model geometry, not a preset for every Olmo 3.5 size. Under
+`auto`, other sizes fall back to `generic` without applying these tuned defaults.
+Explicitly requesting `olmo3.5-12.5b` on another size raises an error. Check the
 startup profile log or `runtime/sglang-profile-<worker>.json` for the selected
 profile and fallback reason.
 
@@ -211,10 +225,17 @@ Explicit engine settings always win. For example, `provider.max_concurrency=128`
 reduces default pool and graph sizing to that admission; explicit pool or graph
 settings remain unchanged. Use `provider.kwargs.disable_radix_cache=false` to
 request caching, or `provider.kwargs.profile=generic` to opt out of all profile
-defaults. Unknown GPUs (including A100 40 GB), A100 prefix caching, model shapes, vision,
+defaults. In `auto`, unknown GPUs (including A100 40 GB), A100 prefix caching, model shapes, vision,
 tensor parallelism, quantization, larger contexts and occupied GPUs retain
 engine defaults with a logged fallback reason. No context limit or task sampling
 setting is silently changed.
+
+To qualify another shape, add its exact configuration contract to
+`inference/model_profiles.py` and register its measured resolver and required
+model hook in the engine's registry (`ENGINE_PROFILES` in
+`inference/providers/sglang_profiles.py` for SGLang). A shared shape entry alone
+does not enable defaults. Each engine recipe needs its own hardware validation
+and versioned resolved identifier, such as `olmo3.5-12.5b-sglang-h100-v1`.
 
 `batching.chunk_size=auto` is the harness default. With a selected SGLang profile,
 it feeds the resolved engine admission and counts expanded samples: pass@16

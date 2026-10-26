@@ -22,6 +22,7 @@ from olmo_eval.common.types import (
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.inference import create_provider
 from olmo_eval.inference.errors import REQUEST_ERROR_KEY, is_context_overflow_output, request_error
+from olmo_eval.inference.model_profiles import MODEL_SHAPES
 from olmo_eval.inference.providers.config import ProviderConfig
 from olmo_eval.inference.providers.sglang import SGLangProvider
 from olmo_eval.runners.asynq.batching.config import BatchConfig, BatchStrategy
@@ -92,6 +93,64 @@ def test_provider_factory_and_config(setup_engine, monkeypatch):
         provider.generate([LMRequest(RequestType.COMPLETION, prompt="abc")])
     with pytest.raises(ValueError, match="only supports batched"):
         BatchConfig(strategy=BatchStrategy.STREAMING).validate_for_provider("sglang")
+
+
+@pytest.mark.parametrize(
+    "device",
+    ["NVIDIA H100, 81559, 81000", "NVIDIA B300, 288000, 287000", "NVIDIA A100, 81251, 81000"],
+)
+def test_named_and_auto_profiles_produce_identical_engine_options(
+    setup_engine, monkeypatch, tmp_path, device
+):
+    _, constructor, _ = setup_engine
+    (tmp_path / "config.json").write_text(
+        json.dumps(MODEL_SHAPES["olmo3.5-12.5b"] | {"dtype": "bfloat16"})
+    )
+    monkeypatch.setitem(sys.modules, "olmo_sglang", SimpleNamespace(register=Mock()))
+    monkeypatch.setattr(
+        "olmo_eval.inference.providers.sglang_profiles.subprocess.check_output",
+        lambda *args, **kwargs: device,
+    )
+    calls = []
+    for selector in ("auto", "olmo3.5-12.5b"):
+        config = ProviderConfig(
+            kind="sglang",
+            model=str(tmp_path),
+            max_model_len=8192,
+            max_concurrency=128,
+            kwargs={"model_registration": "olmo_sglang:register", "profile": selector},
+        )
+        provider = ProviderConfig.from_dict(config.to_dict()).create_provider()
+        assert provider.profile_report["requested"] == selector
+        assert provider.profile_report["model_profile"] == "olmo3.5-12.5b"
+        assert provider.recommended_batch_sequences == 128
+        calls.append(constructor.call_args.kwargs)
+        provider.close()
+    assert calls[0] == calls[1]
+    assert calls[0]["max_running_requests"] == 128
+    assert "profile" not in calls[0]
+
+
+def test_named_profile_mismatch_fails_before_engine_construction(
+    setup_engine, monkeypatch, tmp_path
+):
+    _, constructor, _ = setup_engine
+    (tmp_path / "config.json").write_text(
+        json.dumps(MODEL_SHAPES["olmo3.5-12.5b"] | {"hidden_size": 2048, "dtype": "bfloat16"})
+    )
+    monkeypatch.setitem(sys.modules, "olmo_sglang", SimpleNamespace(register=Mock()))
+    monkeypatch.setattr(
+        "olmo_eval.inference.providers.sglang_profiles.subprocess.check_output",
+        lambda *args, **kwargs: "NVIDIA H100, 81559, 81000",
+    )
+    with pytest.raises(ValueError, match="geometry/architecture"):
+        SGLangProvider(
+            str(tmp_path),
+            profile="olmo3.5-12.5b",
+            model_registration="olmo_sglang:register",
+            max_model_len=8192,
+        )
+    constructor.assert_not_called()
 
 
 def test_chat_sampling_and_sampled_token_logprobs(setup_engine):
@@ -627,7 +686,7 @@ def test_worker_applies_profile_and_preserves_explicit_batch(
     monkeypatch.setattr(
         "olmo_eval.inference.providers.sglang.prepare_profile",
         lambda *args: {
-            "selected": "olmo35-h100-v1",
+            "selected": "olmo3.5-12.5b-sglang-h100-v1",
             "defaults": {"max_running_requests": 512, "max_total_tokens": 6684672},
             "reason": "test fixture",
         },
@@ -675,7 +734,7 @@ def test_worker_applies_profile_and_preserves_explicit_batch(
     message = ready.put.call_args.args[0]
     assert message.harness_config["batching"]["chunk_size"] == expected
     runtime = message.harness_config["provider"]["resolved_runtime"]
-    assert runtime["profile"] == "olmo35-h100-v1"
+    assert runtime["profile"] == "olmo3.5-12.5b-sglang-h100-v1"
     assert runtime["effective_max_running_requests"] == 128
     assert "devices" not in runtime
     results.put.assert_not_called()

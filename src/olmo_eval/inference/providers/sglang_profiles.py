@@ -6,67 +6,26 @@ import hashlib
 import json
 import os
 import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# Geometry from the measured BF16 Olmo 3.5 TP1 profile (open-instruct PR #2076).
-MODEL_SHAPE = {
-    "model_type": "olmo3moe",
-    "hidden_size": 1024,
-    "num_hidden_layers": 16,
-    "num_attention_heads": 8,
-    "num_key_value_heads": 4,
-    "head_dim": 128,
-    "attention_hidden_size": 1024,
-    "vocab_size": 100278,
-    "tie_word_embeddings": False,
-    "n_routed_experts": 512,
-    "num_experts_per_tok": 16,
-    "moe_intermediate_size": 1024,
-    "latent_moe_dim": 512,
-    "dense_layers_indices": [0],
-    "dense_mlp_intermediate_size": 8192,
-    "dense_layers_use_shared_expert": True,
-    "shared_expert_intermediate_size": 1024,
-    "linear_num_key_heads": 8,
-    "linear_num_value_heads": 8,
-    "linear_key_head_dim": 128,
-    "linear_value_head_dim": 256,
-    "linear_conv_kernel_dim": 4,
-    "number_of_conv_states": 3,
-    "layer_types": ["full_attention" if i in (7, 15) else "linear_attention" for i in range(16)],
-}
+from olmo_eval.inference.model_profiles import MODEL_SHAPES
 
 
-def resolve_profile(
-    selector: str,
+def _olmo35_defaults(
     model: dict[str, Any],
     options: dict[str, Any],
     devices: list[tuple[str, float, float]],
 ) -> dict[str, Any]:
-    """Pure resolver. Explicit engine options win; unknown configurations keep defaults."""
-    if selector not in ("auto", "generic"):
-        raise ValueError("SGLang profile must be 'auto' or 'generic'")
-    report: dict[str, Any] = {
-        "requested": selector,
-        "selected": "generic",
-        "reason": "Explicit generic profile",
-        "defaults": {},
-        "devices": devices,
-    }
+    """Measured SGLang settings for the 12.5B shape; geometry is checked by the resolver."""
+    report: dict[str, Any] = {"selected": "generic", "defaults": {}}
 
     def fallback(reason: str) -> dict[str, Any]:
         report["reason"] = reason
         return report
 
-    if selector == "generic":
-        return report
-    shape = {k: model.get(k) for k in MODEL_SHAPE}
-    report["model_shape_sha256"] = hashlib.sha256(
-        json.dumps(shape, sort_keys=True).encode()
-    ).hexdigest()
-    if shape != MODEL_SHAPE or model.get("architectures") != ["Olmo3MoeForCausalLM"]:
-        return fallback("No qualified profile for this model geometry/architecture")
     if model.get("dtype", model.get("torch_dtype")) != "bfloat16" or options.get(
         "dtype", "auto"
     ) not in ("auto", "bfloat16"):
@@ -122,26 +81,89 @@ def resolve_profile(
     if not cache_off:
         defaults["mamba_radix_cache_strategy"] = "extra_buffer"
     report.update(
-        selected=f"olmo35-{gpu}-v1",
+        selected=f"olmo3.5-12.5b-sglang-{gpu}-v1",
         reason="Matched BF16 geometry, dedicated GPU and context range",
         defaults={k: v for k, v in defaults.items() if k not in options},
     )
     return report
 
 
+@dataclass(frozen=True)
+class EngineProfile:
+    registration: str
+    resolve: Callable[
+        [dict[str, Any], dict[str, Any], list[tuple[str, float, float]]], dict[str, Any]
+    ]
+
+
+# Engine-specific qualification: adding a shared geometry does not automatically
+# opt it into SGLang defaults (or qualify these settings for another engine).
+ENGINE_PROFILES = {
+    "olmo3.5-12.5b": EngineProfile("olmo_sglang:register", _olmo35_defaults),
+}
+
+
+def _validate_selector(selector: str) -> None:
+    if selector not in ("auto", "generic") and selector not in ENGINE_PROFILES:
+        choices = ", ".join(("auto", "generic", *sorted(ENGINE_PROFILES)))
+        raise ValueError(f"Unknown SGLang profile {selector!r}; choose one of: {choices}")
+
+
+def _fallback(selector: str, reason: str) -> dict[str, Any]:
+    if selector not in ("auto", "generic"):
+        raise ValueError(f"SGLang profile {selector!r} is not qualified: {reason}")
+    return {"requested": selector, "selected": "generic", "defaults": {}, "reason": reason}
+
+
+def resolve_profile(
+    selector: str,
+    model: dict[str, Any],
+    options: dict[str, Any],
+    devices: list[tuple[str, float, float]],
+) -> dict[str, Any]:
+    """Discover a registered shape or require an explicitly named, qualified profile."""
+    _validate_selector(selector)
+    if selector == "generic":
+        return _fallback(selector, "Explicit generic profile")
+    candidates = ENGINE_PROFILES if selector == "auto" else {selector: ENGINE_PROFILES[selector]}
+    matches = [
+        name
+        for name in candidates
+        if all(model.get(key) == value for key, value in MODEL_SHAPES[name].items())
+    ]
+    if not matches:
+        return _fallback(selector, "No qualified profile for this model geometry/architecture")
+    if len(matches) != 1:
+        raise ValueError(f"Multiple SGLang profiles match {matches}; select one by name")
+    name = matches[0]
+    report = ENGINE_PROFILES[name].resolve(model, options, devices)
+    if report["selected"] == "generic":
+        report = _fallback(selector, report["reason"])
+    shape = {key: model.get(key) for key in MODEL_SHAPES[name]}
+    return {
+        **report,
+        "requested": selector,
+        "model_profile": name,
+        "devices": devices,
+        "model_shape_sha256": hashlib.sha256(
+            json.dumps(shape, sort_keys=True).encode()
+        ).hexdigest(),
+    }
+
+
 def prepare_profile(
     selector: str, options: dict[str, Any], registration: str | None
 ) -> dict[str, Any]:
     """Read metadata without executing checkpoint code or initializing CUDA."""
-    if selector not in ("auto", "generic"):
-        raise ValueError("SGLang profile must be 'auto' or 'generic'")
-    if selector == "generic" or registration != "olmo_sglang:register":
-        return {
-            "requested": selector,
-            "selected": "generic",
-            "defaults": {},
-            "reason": "Generic profile or no Olmo model registration",
-        }
+    _validate_selector(selector)
+    if selector == "generic":
+        return _fallback(selector, "Explicit generic profile")
+    candidates = ENGINE_PROFILES if selector == "auto" else {selector: ENGINE_PROFILES[selector]}
+    qualified = {
+        name for name, profile in candidates.items() if profile.registration == registration
+    }
+    if not qualified:
+        return _fallback(selector, "No qualified profile for this model registration")
     model_path = Path(options["model_path"]) / "config.json"
     try:
         if not model_path.is_file():
@@ -173,10 +195,8 @@ def prepare_profile(
             for name, total, free in (line.rsplit(",", 2) for line in output.splitlines())
         ]
     except (OSError, ValueError, IndexError, subprocess.SubprocessError) as error:
-        return {
-            "requested": selector,
-            "selected": "generic",
-            "defaults": {},
-            "reason": f"Profile metadata/hardware unavailable: {error}",
-        }
-    return resolve_profile(selector, model, options, devices)
+        return _fallback(selector, f"Profile metadata/hardware unavailable: {error}")
+    report = resolve_profile(selector, model, options, devices)
+    if report.get("model_profile") not in qualified and report["selected"] != "generic":
+        return _fallback(selector, "No qualified profile for this model registration")
+    return report
