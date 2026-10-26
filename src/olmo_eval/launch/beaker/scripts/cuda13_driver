@@ -2,6 +2,12 @@
 # Run before Python imports CUDA. Newer drivers use native libcuda; older
 # datacenter drivers need the CUDA 13 base image's compatibility package.
 set -euo pipefail
+# NVIDIA CUDA base images advertise this independently of the Beaker image alias.
+# Custom images without a recognized CUDA version retain their own library setup.
+if [[ "${CUDA_VERSION:-}" != 13.* ]]; then
+    echo "CUDA ${CUDA_VERSION:-unknown}: preserving image library configuration" >&2
+    exec "$@"
+fi
 driver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader)
 driver=${driver%%$'\n'*}
 major=${driver%%.*}

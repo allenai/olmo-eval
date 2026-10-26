@@ -22,7 +22,9 @@ uv sync --frozen --no-group vllm --extra sglang
 
 For remote evaluation, only the launcher is needed locally. Selecting SGLang
 also selects the shared CUDA 13.0.2 / PyTorch 2.13 compiler-equipped base image
-`01M5VBMKPG8BX4BVJBGVBMF64V`, owned by Ai2 in `open-instruct-dev`. Gantry installs
+`01M5VBMKPG8BX4BVJBGVBMF64V`, owned by Ai2 in `open-instruct-dev`
+(name: `robertb/olmo-eval-cu1302-trc2130-amd64-devel`). The author namespace
+records who published it; the immutable ID selects the shared image. Gantry installs
 the extra at job startup; users do not build an image or install GPU packages on
 their laptop. The launcher selects images per model, so other providers keep
 their existing default. Explicit `--image` or YAML `beaker_image` settings win.
@@ -88,11 +90,13 @@ SGLang compiles CUDA kernels during startup, so `--cuda-devel` is required even
 when all Python packages install successfully. Select a replacement with `--image`.
 The ordinary CUDA 12.8 / PyTorch 2.10 base
 is incompatible with this SGLang pin; installation constraints reject it. The
-shared default selects `/usr/local/cuda/compat` on hosts with drivers older than
-R580, and native driver libraries on R580 or newer, before starting Python.
+launcher checks `CUDA_VERSION` inside SGLang images, including explicit images
+and aliases. For CUDA 13 images it selects `/usr/local/cuda/compat` on hosts with
+drivers older than R580, and native libraries on R580 or newer, before Python.
 This follows the [CUDA 13 driver requirements](https://docs.nvidia.com/cuda/archive/13.0.2/cuda-toolkit-release-notes/).
-An explicit image is responsible for its own CUDA/driver compatibility;
-explicit `--env LD_LIBRARY_PATH=...` always takes precedence. Qualify a new base
+CUDA 12 images and images without `CUDA_VERSION` retain their own library
+configuration; custom images must supply compatible driver libraries. An explicit
+`--env LD_LIBRARY_PATH=...` always takes precedence. Qualify a new base
 with a small GPU evaluation before changing the shared default.
 
 ## Provider settings
@@ -130,9 +134,12 @@ Numerical replay tools must save those returned fields explicitly.
 
 Only the batched generation strategy is supported. Continuation likelihood
 scoring, prompt truncation, automatic fitting of generation length to the context
-window, image requests and tool requests fail explicitly. Aborted generation or
-missing sampled-token probabilities raise errors rather than becoming scored
-answers. The extra includes olmo-sglang; select its registration hook for Olmo
+window, image requests and tool requests fail explicitly. Request-specific
+preparation errors and engine aborts leave the affected request unscored without
+discarding other requests in the batch. If any sample aborts, its entire logical
+request fails: pass@k never scores a reduced sample budget. All-output aborts,
+engine failures and malformed or missing logprobs still raise errors.
+The extra includes olmo-sglang; select its registration hook for Olmo
 checkpoints. Model-specific optimization defaults come from the pinned plugin.
 
 For top-p evaluations, select `provider.kwargs.sampling_backend=flashinfer`

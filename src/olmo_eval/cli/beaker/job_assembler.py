@@ -645,7 +645,7 @@ class JobConfigAssembler:
                     log.info(f"Modal GCP secret setup enabled: {secret_name}")
 
         if (
-            effective_image == BEAKER_SGLANG_IMAGE
+            (provider_kind == "sglang" or effective_image == BEAKER_SGLANG_IMAGE)
             and "LD_LIBRARY_PATH" not in self.config.env_vars
             and not any(secret.name == "LD_LIBRARY_PATH" for secret in env_secrets)
         ):

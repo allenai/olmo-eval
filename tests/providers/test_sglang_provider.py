@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from jinja2 import TemplateError
 
 from olmo_eval.common.types import (
     Instance,
@@ -20,6 +21,7 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.inference import create_provider
+from olmo_eval.inference.errors import REQUEST_ERROR_KEY, is_context_overflow_output, request_error
 from olmo_eval.inference.providers.config import ProviderConfig
 from olmo_eval.inference.providers.sglang import SGLangProvider
 from olmo_eval.runners.asynq.batching.config import BatchConfig, BatchStrategy
@@ -344,6 +346,52 @@ def test_zero_top_logprobs_and_runtime_trace(setup_engine, monkeypatch):
     assert "top_logprobs" not in result.logprobs[0]
     assert result.metadata["sglang_return_original_logprob"] == "1"
     assert provider.describe_request(request, params)["sglang_return_original_logprob"] == "1"
+
+
+def test_abort_isolates_request_and_marks_incomplete_sample_group(setup_engine):
+    engine, _, _ = setup_engine
+    provider = SGLangProvider("model")
+    outputs = engine.generate(prompt=["x"] * 4)
+    outputs[1] = {
+        "meta_info": {
+            "finish_reason": {"type": "abort", "message": "input length exceeds context length"}
+        }
+    }
+    engine.generate.side_effect = None
+    engine.generate.return_value = outputs
+    results = provider.generate(
+        [LMRequest(RequestType.COMPLETION, prompt=p) for p in ("a", "b")],
+        SamplingParams(num_samples=2),
+    )
+    assert request_error(results[0]) is not None
+    assert all(REQUEST_ERROR_KEY in output.metadata for output in results[0])
+    assert is_context_overflow_output(results[0])
+    assert request_error(results[1]) is None
+    assert [output.text for output in results[1]] == ["response2", "response3"]
+
+
+def test_template_failure_is_request_local_and_rendered_only_once(setup_engine):
+    engine, _, tokenizer = setup_engine
+    provider = SGLangProvider("model")
+    requests = [
+        LMRequest(RequestType.CHAT, messages=({"role": "user", "content": p},))
+        for p in ("bad", "good")
+    ]
+
+    def render(messages, **kwargs):
+        if messages[0]["content"] == "bad":
+            raise TemplateError("unsupported turn")
+        return "rendered"
+
+    tokenizer.apply_chat_template.side_effect = render
+    for request in requests:
+        provider.describe_request(request)
+    tokenizer.apply_chat_template.assert_not_called()
+    results = provider.generate(requests, SamplingParams(num_samples=2))
+    assert request_error(results[0]) == "unsupported turn"
+    assert request_error(results[1]) is None
+    assert tokenizer.apply_chat_template.call_count == 2
+    assert engine.generate.call_args.kwargs["prompt"] == ["rendered", "rendered"]
 
 
 def test_raw_logprobs_default_precedes_model_registration(setup_engine, monkeypatch):

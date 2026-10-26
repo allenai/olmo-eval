@@ -9,9 +9,12 @@ import sys
 from importlib import import_module
 from typing import Any
 
+from jinja2 import TemplateError
+
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.providers.sglang_profiles import prepare_profile
 
@@ -175,18 +178,27 @@ class SGLangProvider(InferenceProvider):
         """Return the engine's tokenizer."""
         return self.engine.tokenizer_manager.tokenizer
 
-    def _format_prompt(self, request: LMRequest) -> str:
+    def _validate_request(self, request: LMRequest) -> None:
         if request.images:
             raise NotImplementedError("SGLangProvider supports text-only requests")
         if request.tools or request.request_type == RequestType.LOGLIKELIHOOD:
             raise NotImplementedError("SGLangProvider supports text and chat generation only")
+        if request.request_type == RequestType.CHAT and not request.messages:
+            raise ValueError("CHAT requests require messages")
+
+    def _format_prompt(self, request: LMRequest) -> str:
+        self._validate_request(request)
         if request.request_type == RequestType.CHAT:
-            if not request.messages:
-                raise ValueError("CHAT requests require messages")
             return self.get_tokenizer().apply_chat_template(
                 list(request.messages), tokenize=False, add_generation_prompt=True
             )
         return request.prompt
+
+    def _prepare_request(self, request: LMRequest) -> tuple[dict[str, Any], dict[str, Any]]:
+        prompt = self._format_prompt(request)
+        if self._add_bos_token is False:
+            return {"input_ids": self.get_tokenizer().encode(prompt, add_special_tokens=False)}, {}
+        return {"prompt": prompt}, {}
 
     def _build_sampling_params(self, params: SamplingParams) -> dict[str, Any]:
         if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
@@ -284,36 +296,89 @@ class SGLangProvider(InferenceProvider):
         _require_original_logprobs()
         if not requests:
             return []
-        prompts = [self._format_prompt(req) for req in requests for _ in range(params.num_samples)]
-        if self._add_bos_token is False:
-            inputs = {
-                "input_ids": [
-                    self.get_tokenizer().encode(p, add_special_tokens=False) for p in prompts
+        grouped: list[list[LMOutput]] = [[] for _ in requests]
+        prepared = []
+        positions = []
+        first_error: Exception | None = None
+        for index, request in enumerate(requests):
+            try:
+                item = self._prepare_request(request)
+            except (ValueError, TypeError, OSError, TemplateError, NotImplementedError) as error:
+                first_error = first_error or error
+                grouped[index] = [
+                    LMOutput(text="", metadata={REQUEST_ERROR_KEY: str(error)})
+                    for _ in range(params.num_samples)
                 ]
-            }
-        else:
-            inputs = {"prompt": prompts}
+            else:
+                prepared.append(item)
+                positions.append(index)
+        if not prepared:
+            assert first_error is not None
+            raise first_error
+        inputs = {
+            key: [item[0][key] for item in prepared for _ in range(params.num_samples)]
+            for key in prepared[0][0]
+        }
+        if "image_data" in inputs and not any(inputs["image_data"]):
+            del inputs["image_data"]
         outputs = self.engine.generate(
             **inputs,
             sampling_params=sampling,
             return_logprob=True,
             top_logprobs_num=params.logprobs if params.logprobs is not None else 1,
         )
-        if not isinstance(outputs, list) or len(outputs) != len(prompts):
+        if not isinstance(outputs, list) or len(outputs) != len(prepared) * params.num_samples:
             raise RuntimeError("SGLang returned an unexpected number of completions")
         converted = [self._convert_output(output) for output in outputs]
-        self._consider_larger_batches(converted, params)
-        return [
-            converted[start : start + params.num_samples]
-            for start in range(0, len(converted), params.num_samples)
-        ]
+        if all(REQUEST_ERROR_KEY in output.metadata for output in converted):
+            raise RuntimeError(
+                f"SGLang aborted every generation: {converted[0].metadata[REQUEST_ERROR_KEY]}"
+            )
+        for offset, position in enumerate(positions):
+            samples = converted[offset * params.num_samples : (offset + 1) * params.num_samples]
+            failures = [
+                o.metadata[REQUEST_ERROR_KEY] for o in samples if REQUEST_ERROR_KEY in o.metadata
+            ]
+            overflow = bool(failures) and all(
+                o.metadata.get(CONTEXT_OVERFLOW_KEY, False)
+                for o in samples
+                if REQUEST_ERROR_KEY in o.metadata
+            )
+            for output in samples:
+                output.metadata.update(prepared[offset][1])
+                if failures:
+                    # The scorer expects the complete requested sample budget.
+                    # Mark the whole request, including any successful samples,
+                    # rather than silently scoring an incomplete pass@k panel.
+                    output.metadata[REQUEST_ERROR_KEY] = str(failures[0])
+                    if overflow:
+                        output.metadata[CONTEXT_OVERFLOW_KEY] = True
+            grouped[position] = samples
+        self._consider_larger_batches(
+            [o for o in converted if REQUEST_ERROR_KEY not in o.metadata], params
+        )
+        return grouped
 
     def _convert_output(self, output: dict[str, Any]) -> LMOutput:
         metadata = dict(output["meta_info"])
         finish_reason = metadata.get("finish_reason")
         reason = finish_reason.get("type") if isinstance(finish_reason, dict) else finish_reason
         if reason == "abort":
-            raise RuntimeError(f"SGLang aborted generation: {finish_reason}")
+            message = f"SGLang aborted generation: {finish_reason}"
+            metadata.update(
+                {
+                    REQUEST_ERROR_KEY: message,
+                    "finish_reason": "abort",
+                    "sglang_finish_reason": finish_reason,
+                }
+            )
+            # Only classify explicit length diagnostics, never generic aborts.
+            if any(
+                s in message.lower()
+                for s in ("context length", "context overflow", "input length", "prompt length")
+            ):
+                metadata[CONTEXT_OVERFLOW_KEY] = True
+            return LMOutput(text=output.get("text", ""), metadata=metadata)
         # The harness counts cap hits from the normalized string, while replay
         # diagnostics still need SGLang's matched token or length detail.
         metadata.update(finish_reason=reason, sglang_finish_reason=finish_reason)
@@ -355,7 +420,7 @@ class SGLangProvider(InferenceProvider):
     ) -> dict[str, Any]:
         """Record the effective engine request settings."""
         params = self._default_sampling_params(sampling_params)
-        self._format_prompt(request)
+        self._validate_request(request)
         sampling = self._build_sampling_params(params)
         return {
             "provider": type(self).__name__,

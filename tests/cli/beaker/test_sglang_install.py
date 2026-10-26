@@ -15,7 +15,9 @@ from olmo_eval.launch.beaker.launcher import BeakerLauncher
     ("provider_kind", "custom_package"),
     [("sglang", None), ("sglang", "sglang==0.5.19"), ("vllm", None)],
 )
-@pytest.mark.parametrize("image", [None, "explicit-image"])
+@pytest.mark.parametrize(
+    "image", [None, "explicit-image", "author/olmo-eval-cu1302-trc2130-amd64-devel"]
+)
 @pytest.mark.parametrize("library_path", [None, "/custom/driver", "secret"])
 def test_job_installs_selected_provider(provider_kind, custom_package, image, library_path):
     overrides = [f"provider.kind={provider_kind}"]
@@ -58,7 +60,7 @@ def test_job_installs_selected_provider(provider_kind, custom_package, image, li
         job = assembler.assemble(plan)
     default_image = BEAKER_SGLANG_IMAGE if provider_kind == "sglang" else BEAKER_DEFAULT_IMAGE
     assert job.beaker_image == (image or default_image)
-    if image is None and provider_kind == "sglang" and library_path is None:
+    if provider_kind == "sglang" and library_path is None:
         assert job.command[:2] == [
             "bash",
             "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/cuda13_driver",
