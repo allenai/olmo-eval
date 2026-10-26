@@ -97,8 +97,8 @@ The estimate uses the longest observed expanded prompt in the two calls plus the
 full requested output cap, including repeated samples. Calls reporting request
 retractions do not trigger the hint. Uncapped generation (`max_tokens=None`),
 missing/unsupported telemetry and multiple data-parallel workers suppress it.
-It does not infer capacity from free VRAM or from the requested concurrency limit
-alone, and it does not change any settings.
+It does not infer capacity from free VRAM or the requested concurrency limit,
+and does not change any settings.
 This is advice to benchmark a larger batch, not an automatic throughput tuner or
 a guarantee that transient allocations (including image processing) will fit.
 If the engine limit itself is the bottleneck, this diagnostic makes no memory
