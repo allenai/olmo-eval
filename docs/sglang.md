@@ -59,15 +59,11 @@ olmo-sglang `94ba0d5036c8ea7794636009d4ef233b0f3db32f`, and FLA 0.5.2.
 SGLang requires Transformers 5.12.1 and PyTorch 2.13.0; the tested CUDA 13 build
 uses Triton 3.7.1. The extra also pins tqdm 4.67.3 to avoid a dataset-download
 regression. These are a qualified combination, not interchangeable latest
-versions. The optional fused routing arithmetic (#10) remains off by default.
+versions. The optional [fused routing arithmetic (olmo-sglang #10)](https://github.com/allenai/olmo-sglang/pull/10)
+remains off by default.
 For this KDA plugin pin, keep `cuda_graph_backend_prefill=disabled`: the
 upstream default prefill graph backend pads tensors incompatibly with the KDA
 prefill path. Decode CUDA graphs remain enabled.
-
-This image and extra passed an [H100 installation and inference check](
-https://beaker.org/ex/01M5VCVKAX69WBDS7AQWGB93A5): eight GSM8K requests,
-256-token cap, eight saved generations with finite logprob summaries and zero
-failed requests. This bounded check qualifies the setup, not model accuracy.
 
 The uv build configuration skips SGLang's optional Rust HTTP/gRPC servers and
 multimodal transport: this provider uses the inline Python Engine. No Rust
@@ -243,36 +239,13 @@ automatic decisions across hardware; they do not promise identical random draws
 or numerical results across batch sizes. Existing saved integer batch settings
 retain their behavior on replay.
 
-### Hardware validation
+### Validation scope
 
-On the same 1,024 GSM8K examples (eight-shot, temperature 0, 256-token output
-cap, 34,816 context limit), all three automatic profiles resolved to 512 running
-sequences and completed with zero failed or empty responses. Saved requests,
-generations, finite logprob summaries and resolved profiles were audited.
-
-| Automatic profile | Warm output tokens/s | Capped accuracy | Run |
-| --- | ---: | ---: | --- |
-| B300, cache on | 9,869 | 621/1,024 | [Beaker](https://beaker.org/ex/01M5WGG7GRZC5H12NR5417DTYS) |
-| H100, cache off | 5,639 | 618/1,024 | [Beaker](https://beaker.org/ex/01M5WFRJQNEEF4YD6EYWA4W6B3) |
-| A100 80 GB, cache off | 3,674 | 625/1,024 | [Beaker](https://beaker.org/ex/01M5WGEMFB0NCHT8QENAPPREN8) |
-
-Rates use the final 512 examples after first-use compilation, including prefill,
-output conversion and batch tails. They are not native steady decode rates or
-an accuracy-equivalence result. Startup was 197/80/64 seconds for B300/H100/A100;
-first batches also incurred compilation and are excluded from the warm rate.
-The B300 run uses native R590 driver libraries; A100 uses R570 compatibility
-libraries. The first B300 attempt exposed the unconditional-compatibility-path
-bug; the final launcher selects the libraries before Python imports CUDA.
-
-The A100 shortlist used identical inputs and fixed KV/state pools: admission
-[128](https://beaker.org/ex/01M5WG1WP0ZGEA92WFM4HZK09F),
-[256](https://beaker.org/ex/01M5WG0DWA7GWJNZ5A8FW375EH), and
-[512](https://beaker.org/ex/01M5WFS56JTHXMTNNJY863NW5Q) achieved 2,697 / 3,237 /
-3,694 warm output tokens/s. The automatic 512 follow-up was within 1% of that
-512 trial. The 256 arm had fewer allocated CPU cores, hosts differed, and this
-short panel has no confidence interval. Generations and capped scores varied;
-these measurements establish a usable starting configuration, not numerical
-parity, a long-response optimum, or resolution of the separate fidelity study.
+These profiles are starting configurations, not guarantees of optimal throughput
+or numerical equivalence across hardware and batch sizes. Requalify changes to
+the checkpoint shape, context, runtime or image on representative workloads.
+The [provider PR's validation record](https://github.com/allenai/olmo-eval/pull/506)
+contains the measured hardware panel and its limitations.
 
 ## Concurrency advice
 

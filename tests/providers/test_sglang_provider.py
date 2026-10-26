@@ -667,3 +667,26 @@ def test_worker_applies_profile_and_preserves_explicit_batch(
     assert runtime["effective_max_running_requests"] == 128
     assert "devices" not in runtime
     results.put.assert_not_called()
+
+
+def test_request_trace_keeps_only_profile_identity_and_options(setup_engine):
+    provider = SGLangProvider("model")
+    provider.profile_report.update(
+        devices=[{"free_memory": 123}], engine_memory={"token_capacity": 456}
+    )
+    trace = provider.describe_request(LMRequest(RequestType.COMPLETION, prompt="test"))
+    assert trace["serving_profile"] == {
+        "selected": provider.profile_report["selected"],
+        "effective_options": provider.profile_report["effective_options"],
+    }
+    assert "devices" in provider.profile_report
+
+
+def test_output_does_not_duplicate_raw_logprob_arrays(setup_engine):
+    provider = SGLangProvider("model")
+    output = provider.generate([LMRequest(RequestType.COMPLETION, prompt="test")])[0][0]
+    assert [entry["logprob"] for entry in output.logprobs] == [-0.3, -0.7]
+    assert output.logprobs[0]["top_logprobs"] == [{"token": "token99", "logprob": -0.1}]
+    assert "output_token_logprobs" not in output.metadata
+    assert "output_top_logprobs" not in output.metadata
+    assert output.metadata["sum_logits"] == -1.0

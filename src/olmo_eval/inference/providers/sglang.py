@@ -382,10 +382,10 @@ class SGLangProvider(InferenceProvider):
         # The harness counts cap hits from the normalized string, while replay
         # diagnostics still need SGLang's matched token or length detail.
         metadata.update(finish_reason=reason, sglang_finish_reason=finish_reason)
-        sampled = metadata["output_token_logprobs"]
+        sampled = metadata.pop("output_token_logprobs")
         if len(sampled) != metadata["completion_tokens"]:
             raise RuntimeError("SGLang sampled logprobs do not cover every generated token")
-        top = metadata.get("output_top_logprobs", [])
+        top = metadata.pop("output_top_logprobs", [])
         if top and len(top) != len(sampled):
             raise RuntimeError("SGLang top-logprobs do not align with sampled tokens")
         logprobs: list[LogProbEntry] = []
@@ -438,7 +438,10 @@ class SGLangProvider(InferenceProvider):
             },
             "stop_sequences": sampling["stop"],
             "sglang_return_original_logprob": "1",
-            "serving_profile": self.profile_report,
+            "serving_profile": {
+                "selected": self.profile_report["selected"],
+                "effective_options": dict(self.profile_report["effective_options"]),
+            },
         }
 
     def logprobs(
