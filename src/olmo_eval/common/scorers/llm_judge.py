@@ -11,7 +11,7 @@ import os
 import re
 from abc import abstractmethod
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from olmo_eval.common.execution import ScoringContext
@@ -396,17 +396,18 @@ class JudgeSettings:
 
         ``config`` is a ``TaskConfig``; its ``judge_model``, ``judge_reasoning_effort``
         and ``judge_max_tokens`` replace the matching setting when they are not None.
+        The default effort belongs to the default model, so a config that names
+        another model and no effort gets none.
         """
-        overrides = {
-            name: value
-            for name, value in (
-                ("model", config.judge_model),
-                ("reasoning_effort", config.judge_reasoning_effort),
-                ("max_tokens", config.judge_max_tokens),
-            )
-            if value is not None
-        }
-        return replace(self, **overrides)
+        model = config.judge_model or self.model
+        reasoning_effort = config.judge_reasoning_effort
+        if reasoning_effort is None and model == self.model:
+            reasoning_effort = self.reasoning_effort
+        return JudgeSettings(
+            model=model,
+            max_tokens=config.judge_max_tokens or self.max_tokens,
+            reasoning_effort=reasoning_effort,
+        )
 
     def build_fn(self, scorer_name: str) -> ConfiguredJudgeFn:
         """Build the OpenAI-compatible judge function these settings describe, at temperature 0."""

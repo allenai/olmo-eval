@@ -5,6 +5,7 @@ import logging
 
 import pytest
 
+from olmo_eval.common.scorers.llm_judge import JudgeSettings
 from olmo_eval.common.types import (
     AgentTrajectory,
     AgentTurn,
@@ -803,3 +804,13 @@ def _trajectory_with_search_and_fetch(
             ),
         )
     )
+
+
+def test_an_environment_judge_without_an_effort_sends_none(monkeypatch):
+    built: list[JudgeSettings] = []
+    monkeypatch.setattr(expertqa_module, "_build_judge_fn", built.append)
+    monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5-mini")
+
+    get_task("expertqa")._get_judge_fn()
+
+    assert built == [JudgeSettings(model="gpt-5-mini", max_tokens=4096)]

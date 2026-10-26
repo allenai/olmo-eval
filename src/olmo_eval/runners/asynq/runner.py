@@ -1094,8 +1094,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             if provider is None:
                 raise ValueError(
                     f"{spec} is judged by the auxiliary provider {name!r}, which harness "
-                    f"{self.harness_config.name!r} does not define; set it with "
-                    f"`-o auxiliary_providers.{name}.model={judge_model}`."
+                    f"{self.harness_config.name!r} does not define. Add a provider {name!r} "
+                    f"that serves {judge_model!r}; the task module shows a launch command."
                 )
             if provider.served_model != judge_model:
                 raise ValueError(
