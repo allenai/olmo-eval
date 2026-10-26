@@ -119,4 +119,5 @@ register_variant(
     "simpleqa",
     "judge",
     metrics=(AccuracyMetric(scorer=SimpleQAJudgeScorer),),
+    required_secrets=("OPENAI_API_KEY",),
 )

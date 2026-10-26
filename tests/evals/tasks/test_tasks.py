@@ -356,3 +356,7 @@ class TestMultilingualMBPPTask:
         answer = task.extract_answer(output)
         assert "def add" in answer
         assert "return a + b" in answer
+
+
+def test_simpleqa_judge_declares_the_judge_api_key():
+    assert get_task("simpleqa:judge").config.required_secrets == ("OPENAI_API_KEY",)
