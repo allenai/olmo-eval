@@ -309,7 +309,7 @@ config = HarnessConfig(
 | `scaffold_kwargs` | `dict[str, Any]` | `{}` | Scaffold-specific options (e.g., `enable_compaction`) |
 | `metrics` | `MetricsConfig \| None` | `None` | Inference metrics collection config |
 | `batching` | `BatchConfig \| None` | `None` | Batching strategy configuration |
-| `max_hard_failure_rate` | `float \| None` | `None` | Fraction of a task's instances allowed to hard-fail before the task is marked failed and the run exits non-zero (default `0.05`). `1.0` never fails a run on partial instance failures; a task that saves zero instances still fails |
+| `max_hard_failure_rate` | `float \| None` | `None` | The failure budget: fraction of a task's instances allowed to produce no output or have no scored output before the task is marked failed, its metrics are withheld and the run exits non-zero (default `0.05`). `1.0` never fails a run on partial failures; a task with nothing scored still fails |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
 
 #### Scaffolds
@@ -1556,6 +1556,7 @@ budget: ai2/oe-other
 | `--provider-kwarg` | `-K` | none | Provider kwargs for external evals (`key=value`) |
 | `--force-download-model` | | `false` | Refresh Hugging Face model/tokenizer cache before loading |
 | `--uv-cache-dir` | | default | UV cache directory for package downloads |
+| `--weka-bucket` | | none | Extra Weka bucket to mount at `/weka/<bucket>`, on top of `oe-training-default`, `oe-eval-default` and `oe-adapt-default` (can specify multiple) |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--yes` | `-y` | `false` | Skip confirmation prompt |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |

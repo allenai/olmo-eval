@@ -417,7 +417,7 @@ export interface RunDetail extends RunSummary {
 /**
  * How inference_seconds was obtained:
  * - measured: the run contained only this task, so its processing time is the task's time.
- * - attributed: from per-batch inference metrics split by the task's share of each batch.
+ * - attributed: the client's attributed worker time divided by the run's inference workers.
  * - estimated: the run's processing time times the task's share of the run's tokens.
  * - not_recorded: the run predates runtime recording or lacks token counts.
  */
@@ -464,6 +464,27 @@ export interface BaselineCell {
     contingency: Contingency | null;
 }
 
+/**
+ * A task's scoring failures. An unscored instance has no scored output and is left out
+ * of the metrics; with instances that produced no output it counts against the task's
+ * failure budget. A partially scored instance is scored from the outputs that were.
+ */
+export interface ScoringFailures {
+    instances_unscored: Count;
+    instances_partially_scored: Count;
+    /** Outputs with a scoring error, across all instances. */
+    outputs_unscored: Count;
+    /** Unscored outputs whose failure was flagged as infrastructure (judge, sandbox). */
+    infrastructure: Count;
+    /** Unscored outputs by exception type, from each output's first error. */
+    by_type: { [type: string]: Count };
+    /**
+     * The first scoring error as "Type: message", capped at 500 characters.
+     * @maxLength 500
+     */
+    first_error?: string | null;
+}
+
 export interface TaskResultRow {
     task_result_id: TaskResultId;
     run_id: RunId;
@@ -484,6 +505,8 @@ export interface TaskResultRow {
     instances_failed: Count | null;
     /** Per-generation diagnostics, available even when predictions were not uploaded. */
     generation_counts?: { [count: string]: Count } | null;
+    /** Outputs and instances whose scores could not be computed; null when none failed. */
+    scoring_failures?: ScoringFailures | null;
     instances_stored: Count;
     metrics: FlatMetrics;
     error: string | null;
