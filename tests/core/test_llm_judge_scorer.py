@@ -779,3 +779,32 @@ class TestSafetyScorerVerdicts:
 
         assert score == 1.0
         assert replies == []
+
+    @pytest.mark.anyio
+    async def test_each_sample_keeps_its_own_result(self):
+        replies = {"first": "1. yes\n2. yes\n3. no", "": "1. yes\n2. no\n3. no"}
+
+        async def judge(prompt: str) -> str:
+            await asyncio.sleep(0)
+            return next(
+                reply for answer, reply in replies.items() if f"Assistant: {answer}\n" in prompt
+            )
+
+        scorer = SafetyScorer(judge_fn=judge)
+        instance = Instance(question="Q", gold_answer="response_refusal=yes")
+        answered, empty = LMOutput(text="first"), LMOutput(text="")
+        answered.extracted_answer, empty.extracted_answer = "first", ""
+
+        scores = await asyncio.gather(
+            scorer.ascore_with_context(instance, answered, ScoringContext()),
+            scorer.ascore_with_context(instance, empty, ScoringContext()),
+        )
+
+        assert scores == [1.0, 0.0]
+        assert answered.metadata["judge_result"]["response_refusal"] == "yes"
+        assert empty.metadata["judge_result"]["response_refusal"] == "no"
+        assert (answered.metadata["is_empty_response"], empty.metadata["is_empty_response"]) == (
+            False,
+            True,
+        )
+        assert "judge_result" not in instance.metadata
