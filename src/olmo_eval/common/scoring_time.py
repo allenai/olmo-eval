@@ -9,17 +9,17 @@ tasks the scorers start (``asyncio.gather``, ``create_task``) are timed too.
   includes the client's own retries and connection waits, but not waits for a
   scorer-level judge or sandbox slot.
 - Compute is the event loop's time running the instance's scoring code between awaits,
-  in every task it starts, plus scoring work run in a process pool (not counting each
-  worker's start-up) or a thread.
+  in every task it starts, plus scoring work run in a process pool or a thread. A pool
+  worker's start-up is left out by ``ProcessScorer.warmup``, though a library's
+  first-call costs for inputs the warmup didn't cover still count.
 
 Each piece is timed on its own and the durations are summed, so concurrent calls each
 count in full: a task's judge time can exceed the wall time its scoring took. A call
 also lasts longer while the event loop is busy with other instances' compute. The
 client-side work of a judge or sandbox call counts both in that call's time and as
 compute, and a background task a library starts while scoring an instance counts as
-that instance's compute. Calls
-made outside scoring, such as an agent rollout's tool calls in an inference worker, or
-an external benchmark's own judge, are not recorded.
+that instance's compute. Calls made outside scoring, such as an agent rollout's tool
+calls in an inference worker, or an external benchmark's own judge, are not recorded.
 """
 
 from __future__ import annotations
