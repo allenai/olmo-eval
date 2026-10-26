@@ -252,11 +252,38 @@ async def process_batch(
 
     request_type = items[0].request.request_type
     sampling_params = items[0].sampling_params
-    requests = [item.request for item in items]
-    prepared_requests = [harness._apply_config(request) for request in requests]
-    request_traces = [
-        harness.provider.describe_request(request, sampling_params) for request in prepared_requests
-    ]
+    prepared_requests = []
+    request_traces = []
+    ready_items = []
+    for item in items:
+        prepared_request = item.request
+        try:
+            prepared_request = harness._apply_config(item.request)
+            trace = harness.provider.describe_request(prepared_request, sampling_params)
+        except Exception as error:
+            terminal_error = classify_terminal_provider_error(error)
+            if terminal_error is not None:
+                raise terminal_error from error
+            result_queue.put(
+                ResultItem(
+                    model_name=item.model_name,
+                    task_id=item.task_id,
+                    instance_idx=item.instance_idx,
+                    instance=item.instance,
+                    request=prepared_request,
+                    outputs=[],
+                    error=_format_error_detail(error),
+                    attempt=item.attempt,
+                    sent_at=time.time(),
+                )
+            )
+        else:
+            ready_items.append(item)
+            prepared_requests.append(prepared_request)
+            request_traces.append(trace)
+    items = ready_items
+    if not items:
+        return
 
     # Results are queued after the batch ends, so each one can carry its share of
     # the batch's worker time.

@@ -28,9 +28,11 @@ class BatchingStrategy(ABC):
     worker's time.
     """
 
-    def __init__(self, config: BatchConfig):
+    def __init__(self, config: BatchConfig, max_batch_sequences: int | None = None):
         self.config = config
         self.clock = ShareClock()
+        self.max_batch_sequences = max_batch_sequences
+        self._pending_item = None
 
     @abstractmethod
     async def run(
@@ -74,13 +76,28 @@ class BatchingStrategy(ABC):
         deadline = time.time() + self.config.chunk_timeout
 
         def collect_sync() -> tuple[list[QueueItem], bool]:
-            while len(items) < self.config.chunk_size:
+            sequences = 0
+            while len(items) < self.config.resolved_chunk_size:
                 remaining = max(0.01, deadline - time.time())
                 try:
-                    item = item_queue.get(timeout=remaining)
+                    item = self._pending_item
+                    if item is None:
+                        item = item_queue.get(timeout=remaining)
+                    self._pending_item = None
                     if item is None:
                         return items, True
+                    count = item.sampling_params.num_samples if item.sampling_params else 1
+                    if (
+                        items
+                        and self.max_batch_sequences
+                        and sequences + count > self.max_batch_sequences
+                    ):
+                        self._pending_item = item
+                        break
                     items.append(item)
+                    sequences += count
+                    if self.max_batch_sequences and sequences >= self.max_batch_sequences:
+                        break
                 except queue.Empty:
                     break
             return items, False
