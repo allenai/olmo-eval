@@ -129,9 +129,26 @@ class SGLangProvider(InferenceProvider):
                 "cuda_graph_backend_prefill",
                 "mamba_radix_cache_strategy",
                 "context_length",
+                "attention_backend",
+                "sampling_backend",
+                "moe_runner_backend",
+                "moe_a2a_backend",
             )
             if key in options
         }
+        # ServerArgs resolves defaults that were omitted from the constructor,
+        # including the generic/fallback path. Avoid importing GPU modules here.
+        server_args = getattr(self.engine.tokenizer_manager, "server_args", None)
+        for key in (
+            "attention_backend",
+            "sampling_backend",
+            "disable_radix_cache",
+            "moe_runner_backend",
+            "moe_a2a_backend",
+        ):
+            value = getattr(server_args, key, None)
+            if type(value) in (str, bool, int, float):
+                self.profile_report["effective_options"][key] = value
         if self.recommended_batch_sequences is not None:
             # Persist resolved capacity as well as requested settings; state pools
             # can lower admission. Older runtimes may not expose this diagnostic.

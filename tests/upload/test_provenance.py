@@ -6,6 +6,7 @@ import os
 import sys
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,26 @@ BEAKER_ENV = {
     "GIT_REF": "e81a69bf44a4d7a86033d7ccc7fb7d0e41db48a7",
     "GIT_BRANCH": "maliam/omniscience",
 }
+
+
+def test_plugin_version_records_installed_git_revision(monkeypatch):
+    monkeypatch.setattr("olmo_eval.upload.provenance.TRACKED_PACKAGES", ("olmo-sglang",))
+    monkeypatch.setattr("olmo_eval.upload.provenance.version", lambda name: "0.1.0")
+    monkeypatch.setattr(
+        "olmo_eval.upload.provenance.distribution",
+        lambda name: SimpleNamespace(read_text=lambda path: '{"vcs_info":{"commit_id":"abc"}}'),
+    )
+    assert package_versions() == {"olmo-sglang": "0.1.0@abc"}
+
+
+def test_published_plugin_without_direct_url_keeps_version(monkeypatch):
+    monkeypatch.setattr("olmo_eval.upload.provenance.TRACKED_PACKAGES", ("olmo-sglang",))
+    monkeypatch.setattr("olmo_eval.upload.provenance.version", lambda name: "0.1.0")
+    monkeypatch.setattr(
+        "olmo_eval.upload.provenance.distribution",
+        lambda name: SimpleNamespace(read_text=lambda path: None),
+    )
+    assert package_versions() == {"olmo-sglang": "0.1.0"}
 
 
 def test_beaker_info_from_job_env() -> None:

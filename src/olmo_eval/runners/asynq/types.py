@@ -19,6 +19,13 @@ WORKER_FATAL = "__WORKER_FATAL__"
 DEFAULT_SCORING_CONCURRENCY = 8
 
 
+@dataclass(frozen=True)
+class WorkerReady:
+    worker_id: str
+    init_time: float
+    harness_config: dict[str, Any]
+
+
 def summarize_failed_instances(failed_instances: dict[int, str]) -> str | None:
     """Summarize hard-failed instances as one human-readable line.
 

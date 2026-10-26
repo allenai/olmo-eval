@@ -40,6 +40,8 @@ class ProviderConfig:
         package: Package specifier that overrides the default provider extra (e.g., vllm fork).
         dependencies: Additional package specifiers for runtime installation.
         kwargs: Additional arguments passed to the provider constructor.
+        resolved_runtime: Observed runtime identity, refreshed by workers after initialization.
+            Stored and hashed, but never forwarded to an engine constructor.
     """
 
     kind: str = ProviderKind.VLLM_SERVER
@@ -59,6 +61,7 @@ class ProviderConfig:
     package: str | None = None
     dependencies: tuple[str, ...] = ()
     kwargs: Mapping[str, Any] = field(default_factory=dict)
+    resolved_runtime: Mapping[str, Any] = field(default_factory=dict)
 
     # Providers that require GPU resources for local inference
     _GPU_PROVIDERS: ClassVar[frozenset[str]] = frozenset(
@@ -218,6 +221,8 @@ class ProviderConfig:
             d["dependencies"] = list(self.dependencies)
         if self.kwargs:
             d["kwargs"] = dict(self.kwargs)
+        if self.resolved_runtime:
+            d["resolved_runtime"] = dict(self.resolved_runtime)
         return d
 
     @classmethod
@@ -264,6 +269,7 @@ class ProviderConfig:
             package=data.get("package"),
             dependencies=tuple(deps),
             kwargs=merged_kwargs,
+            resolved_runtime=data.get("resolved_runtime", {}),
         )
 
     def with_overrides(self, **overrides: Any) -> ProviderConfig:

@@ -593,7 +593,17 @@ def test_worker_applies_profile_and_preserves_explicit_batch(
         batching=BatchConfig(chunk_size=chunk_size),
     )
     results = Mock()
-    inference_worker("profile", [0], Mock(), results, config.to_dict(), 0, output_dir=str(tmp_path))
+    ready = Mock()
+    inference_worker(
+        "profile",
+        [0],
+        Mock(),
+        results,
+        config.to_dict(),
+        0,
+        init_queue=ready,
+        output_dir=str(tmp_path),
+    )
     assert constructor.call_args.kwargs["max_running_requests"] == 512
     assert factory.call_args.args[0].chunk_size == expected
     assert factory.call_args.kwargs["max_batch_sequences"] == sequences
@@ -602,4 +612,10 @@ def test_worker_applies_profile_and_preserves_explicit_batch(
     assert report["batch_size"] == expected
     assert report["effective_max_running_requests"] == 128
     assert report["engine_memory"]["token_capacity"] == 1234
+    message = ready.put.call_args.args[0]
+    assert message.harness_config["batching"]["chunk_size"] == expected
+    runtime = message.harness_config["provider"]["resolved_runtime"]
+    assert runtime["profile"] == "olmo35-h100-v1"
+    assert runtime["effective_max_running_requests"] == 128
+    assert "devices" not in runtime
     results.put.assert_not_called()

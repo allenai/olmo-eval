@@ -211,7 +211,19 @@ more samples than the limit is submitted intact and queued by the engine.
 Explicit integer batch sizes, including 64, are preserved exactly. Other
 providers and generic SGLang retain the historical 64-example batch behavior.
 
-The requested configuration remains in the manifest. Each worker additionally
+Requested provider options remain in the manifest. Before generation starts,
+workers return their selected profile, effective engine settings and installed
+engine/plugin revisions to the runner. These are stored in
+`provider.resolved_runtime` and participate in the final model hash and uploaded
+configuration. Available memory and device ordinals do not affect the hash.
+Replicas with different resolved profiles/settings or batch sizes fail before
+evaluation; use homogeneous GPUs or evaluate those configurations separately.
+The saved harness batching configuration contains the resolved integer size
+(including 64 for other providers) and `max_batch_sequences` when expanded
+samples count against admission. Stored runtime metadata is refreshed on replay
+and is never passed to engine constructors.
+
+Each worker additionally
 saves `runtime/sglang-profile-<worker>.json` with hardware, model-shape hash,
 selection/fallback reason, applied defaults, effective engine options and resolved
 batch limit. Request traces include the provider profile. These records distinguish
