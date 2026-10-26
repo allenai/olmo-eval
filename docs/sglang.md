@@ -219,8 +219,38 @@ automatic decisions across hardware; they do not promise identical random draws
 or numerical results across batch sizes. Existing saved integer batch settings
 retain their behavior on replay.
 
-## Concurrency advice
+### Hardware validation
 
+On the same 1,024 GSM8K examples (eight-shot, temperature 0, 256-token output
+cap, 34,816 context limit), all three automatic profiles resolved to 512 running
+sequences and completed with zero failed or empty responses. Saved requests,
+generations, finite logprob summaries and resolved profiles were audited.
+
+| Automatic profile | Warm output tokens/s | Capped accuracy | Run |
+| --- | ---: | ---: | --- |
+| B300, cache on | 9,869 | 621/1,024 | [Beaker](https://beaker.org/ex/01M5WGG7GRZC5H12NR5417DTYS) |
+| H100, cache off | 5,639 | 618/1,024 | [Beaker](https://beaker.org/ex/01M5WFRJQNEEF4YD6EYWA4W6B3) |
+| A100 80 GB, cache off | 3,674 | 625/1,024 | [Beaker](https://beaker.org/ex/01M5WGEMFB0NCHT8QENAPPREN8) |
+
+Rates use the final 512 examples after first-use compilation, including prefill,
+output conversion and batch tails. They are not native steady decode rates or
+an accuracy-equivalence result. Startup was 197/80/64 seconds for B300/H100/A100;
+first batches also incurred compilation and are excluded from the warm rate.
+The B300 run uses native R590 driver libraries; A100 uses R570 compatibility
+libraries. The first B300 attempt exposed the unconditional-compatibility-path
+bug; the final launcher selects the libraries before Python imports CUDA.
+
+The A100 shortlist used identical inputs and fixed KV/state pools: admission
+[128](https://beaker.org/ex/01M5WG1WP0ZGEA92WFM4HZK09F),
+[256](https://beaker.org/ex/01M5WG0DWA7GWJNZ5A8FW375EH), and
+[512](https://beaker.org/ex/01M5WFS56JTHXMTNNJY863NW5Q) achieved 2,697 / 3,237 /
+3,694 warm output tokens/s. The automatic 512 follow-up was within 1% of that
+512 trial. The 256 arm had fewer allocated CPU cores, hosts differed, and this
+short panel has no confidence interval. Generations and capped scores varied;
+these measurements establish a usable starting configuration, not numerical
+parity, a long-response optimum, or resolution of the separate fidelity study.
+
+## Concurrency advice
 
 For generic configurations, the harness uses 64 examples per call and SGLang
 chooses its effective request limit from its configuration and memory pools.
