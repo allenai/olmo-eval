@@ -6232,21 +6232,21 @@
           ]
         },
         "scoring_compute_seconds": {
-          "description": "Time running the task's scoring code, summed across scoring threads and processes.",
+          "description": "Time running the task's scoring code, summed across scoring threads and processes. Null means not recorded.",
           "type": [
             "number",
             "null"
           ]
         },
         "scoring_judge_seconds": {
-          "description": "Summed judge model call time while scoring this task. Concurrent calls each count, so it can exceed wall time.",
+          "description": "Summed judge model call time while scoring this task. Concurrent calls each count, so it can exceed wall time. Null means not recorded; 0 means measured with no judge calls.",
           "type": [
             "number",
             "null"
           ]
         },
         "scoring_sandbox_seconds": {
-          "description": "Summed sandbox operation time while scoring; can exceed wall time.",
+          "description": "Summed sandbox operation time while scoring; can exceed wall time. Null means not recorded; 0 means measured with none.",
           "type": [
             "number",
             "null"

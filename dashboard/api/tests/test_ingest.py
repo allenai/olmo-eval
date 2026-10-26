@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from olmo_eval_api.schemas import ingest as s
 from olmo_eval_api.services.derive import instance_key_hash
+from olmo_eval_api.services.ingest import HASH_OPTIONAL_FIELDS
 from olmo_eval_api.settings import UPLOADER_SERVICE_ACCOUNT
 from tests.factories import (
     instance_rows,
@@ -122,6 +123,26 @@ async def test_scoring_seconds_are_stored_and_updated_on_reupload(
             {"id": response.json()["task_result_id"]},
         )
         assert tuple(stored.one()) == (judge, 0.0, 3.4)
+
+
+async def test_negative_scoring_seconds_are_stored_as_null(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    await seed_contract_example_run(client)
+    payload = load_example("ingest/task-result.request.json")
+    payload.update(
+        scoring_judge_seconds=-1.0, scoring_sandbox_seconds=0.0, scoring_compute_seconds=2.0
+    )
+    response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
+    assert response.status_code == 200, response.text
+    stored = await session.execute(
+        text(
+            "SELECT scoring_judge_seconds, scoring_sandbox_seconds, scoring_compute_seconds"
+            " FROM task_results WHERE id = :id"
+        ),
+        {"id": response.json()["task_result_id"]},
+    )
+    assert tuple(stored.one()) == (None, 0.0, 2.0)
 
 
 async def test_request_id_passthrough(client: httpx.AsyncClient) -> None:
@@ -393,9 +414,7 @@ async def test_identical_task_result_reupload_keeps_instances(
     if legacy_hash:
         request = s.TaskResultIn.model_validate(payload)
         legacy_body = {
-            "request": request.model_dump(
-                mode="json", exclude={"generation_counts", "scoring_failures"}
-            ),
+            "request": request.model_dump(mode="json", exclude=set(HASH_OPTIONAL_FIELDS)),
             "files": {
                 path: None for path in (request.predictions_path, request.requests_path) if path
             },

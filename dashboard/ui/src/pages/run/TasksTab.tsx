@@ -7,7 +7,7 @@ import { DeltaValue, MetricName, ScoreValue, SigLegend } from "@/components/cell
 import { type Column, DataTable, parseSortList, sortRows } from "@/components/DataTable";
 import { Badge, Checkbox, EmptyState, ErrorPanel, IconButton, Kbd, Panel, SearchInput, Segmented, Select, Tip, uiStyles as ui } from "@/components/primitives";
 import { formatCount, formatDuration, formatP, formatRate, formatRuntime, formatScore, metricLabel, shortHash } from "@/lib/format";
-import { BASIS_HELP, BASIS_LABEL, basisMark, parseRuntimeMode, SCORING_COLUMN_HELP, SCORING_LABEL, RUNTIME_MODE_HELP, RUNTIME_MODE_OPTIONS, runtimeModeParam, runtimeValue, shares } from "@/lib/runtime";
+import { BASIS_HELP, BASIS_LABEL, basisMark, parseRuntimeMode, RUNTIME_MODE_HELP, RUNTIME_MODE_OPTIONS, runtimeModeParam, runtimeValue, SCORING_COLUMN_HELP, SCORING_KINDS, SCORING_LABEL, scoringValue, shares } from "@/lib/runtime";
 import { useHotkeys } from "@/lib/keyboard";
 import { parseList } from "@/lib/url";
 import s from "./run.module.css";
@@ -229,23 +229,24 @@ export function TasksTab(ctx: RunCtx) {
         ),
         csv: (r) => r.runtime.basis,
       },
-      ...(["judge", "sandbox", "compute"] as const).map((kind): Column<TaskResultRow> => {
-        const value = (r: TaskResultRow) => r.runtime[`scoring_${kind}_seconds`];
-        return {
-          id: `scoring_${kind}`,
-          header: (
-            <Tip content={<span style={{ display: "block", maxWidth: 260 }}>{SCORING_COLUMN_HELP[kind]}</span>}>
-              <span>{SCORING_LABEL[kind]}</span>
-            </Tip>
-          ),
-          title: `${SCORING_LABEL[kind]} time`,
-          width: 84,
-          align: "right",
-          sortValue: value,
-          cell: (r) => <span className="mono muted">{formatRuntime(value(r))}</span>,
-          csv: value,
-        };
-      }),
+      // Scoring times are left out when no row recorded them (older runs, external runners).
+      ...SCORING_KINDS.filter((kind) => items.some((r) => scoringValue(r.runtime, kind) != null)).map((kind): Column<TaskResultRow> => ({
+        id: `scoring_${kind}`,
+        header: (
+          <Tip content={<span style={{ display: "block", maxWidth: 260 }}>{SCORING_COLUMN_HELP[kind]}</span>}>
+            <span>{SCORING_LABEL[kind]}</span>
+          </Tip>
+        ),
+        title: SCORING_LABEL[kind],
+        width: 100,
+        align: "right",
+        sortValue: (r) => scoringValue(r.runtime, kind),
+        cell: (r) => {
+          const v = scoringValue(r.runtime, kind);
+          return <span className="mono">{v == null ? <span className="faint">—</span> : formatRuntime(v)}</span>;
+        },
+        csv: (r) => scoringValue(r.runtime, kind),
+      })),
       {
         id: "duration",
         header: (
@@ -315,7 +316,7 @@ export function TasksTab(ctx: RunCtx) {
       }
     }
     return cols;
-  }, [allMetrics, metricKeys, mode, shareById, maxShare]);
+  }, [allMetrics, metricKeys, mode, shareById, maxShare, items]);
 
   // [ and ] step through the rows in the order the table shows them.
   const sortedRows = useMemo(() => sortRows(rows, parseSortList(search.ts), columns), [rows, search.ts, columns]);

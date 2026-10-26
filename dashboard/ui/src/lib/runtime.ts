@@ -49,31 +49,37 @@ export const BASIS_HELP: Record<RuntimeBasis, string> = {
   not_recorded: "This run predates runtime recording or lacks token counts.",
 };
 
-export const SCORING_HELP =
-  "Time spent scoring this task, summed over every call and worker. Concurrent calls each count, so it can exceed wall time.";
-
 export const SCORING_LABEL = {
   judge: "Judge",
   sandbox: "Sandbox",
-  compute: "Scoring",
+  compute: "Scoring code",
 } as const;
 
-export const SCORING_COLUMN_HELP: Record<keyof typeof SCORING_LABEL, string> = {
-  judge: `Judge model call time. ${SCORING_HELP}`,
-  sandbox: `Sandbox operation time. ${SCORING_HELP}`,
-  compute: `Scoring code time (answer extraction, scorers, metrics). ${SCORING_HELP}`,
+export type ScoringKind = keyof typeof SCORING_LABEL;
+
+export const SCORING_KINDS = Object.keys(SCORING_LABEL) as ScoringKind[];
+
+export const SCORING_COLUMN_HELP: Record<ScoringKind, string> = {
+  judge:
+    "Time in judge model calls while scoring this task. Each call counts in full, so the total can exceed wall time. 0 s means no judge calls; — means not recorded.",
+  sandbox:
+    "Time in sandbox operations while scoring this task. Sandbox use during agent rollouts counts toward Runtime instead. Each operation counts in full, so the total can exceed wall time. 0 s means none; — means not recorded.",
+  compute:
+    "Time running answer extraction, scorers and metrics, summed across threads and processes, so it can exceed wall time. — means not recorded.",
 };
 
-/** "Scoring: judge 1m 2s, sandbox 0 s, compute 3.4 s." or "" when nothing was recorded. */
+export function scoringValue(rt: TaskRuntime, kind: ScoringKind): number | null {
+  return rt[`scoring_${kind}_seconds`];
+}
+
+/** "Scoring: judge 1m 02s, sandbox 0 s, scoring code 3.4 s." or "" when nothing was recorded. */
 export function formatScoringSummary(rt: TaskRuntime | null | undefined): string {
   if (!rt) return "";
-  const parts: [string, number | null][] = [
-    ["judge", rt.scoring_judge_seconds],
-    ["sandbox", rt.scoring_sandbox_seconds],
-    ["compute", rt.scoring_compute_seconds],
-  ];
-  const known = parts.filter((p): p is [string, number] => p[1] != null);
-  return known.length ? `Scoring: ${known.map(([label, v]) => `${label} ${formatRuntime(v)}`).join(", ")}.` : "";
+  const parts = SCORING_KINDS.flatMap((kind) => {
+    const v = scoringValue(rt, kind);
+    return v == null ? [] : [`${SCORING_LABEL[kind].toLowerCase()} ${formatRuntime(v)}`];
+  });
+  return parts.length ? `Scoring: ${parts.join(", ")}.` : "";
 }
 
 /** Short prefix for values that are estimates. */

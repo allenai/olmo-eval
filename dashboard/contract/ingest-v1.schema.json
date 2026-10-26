@@ -1805,7 +1805,7 @@
           ]
         },
         "scoring_compute_seconds": {
-          "description": "Time spent running the task's scoring code (answer extraction, scorers and metrics) on the event loop, in a scoring thread or in a process pool. Pool work runs in parallel, so the total can exceed wall time. Null unless recorded.",
+          "description": "Time spent running the task's scoring code (answer extraction, scorers and metrics) on the event loop, in a scoring thread or in a process pool. Pool work runs in parallel, so the total can exceed wall time. Null means not recorded.",
           "type": [
             "number",
             "null"
@@ -1823,14 +1823,14 @@
           "description": "Outputs and instances whose scores could not be computed; absent when none failed."
         },
         "scoring_judge_seconds": {
-          "description": "Summed durations of the judge model calls made while scoring this task. Each call is timed on its own, so concurrent calls all count and the total can exceed wall time. Null unless recorded.",
+          "description": "Summed durations of the judge model calls made while scoring this task. Each call is timed on its own, so concurrent calls all count and the total can exceed wall time. Null means not recorded; 0 means measured with no judge calls.",
           "type": [
             "number",
             "null"
           ]
         },
         "scoring_sandbox_seconds": {
-          "description": "Summed durations of the sandbox operations made while scoring this task. Concurrent operations all count, so the total can exceed wall time. Null unless recorded.",
+          "description": "Summed durations of the sandbox operations made while scoring this task. Concurrent operations all count, so the total can exceed wall time. Null means not recorded; 0 means measured with no sandbox operations.",
           "type": [
             "number",
             "null"

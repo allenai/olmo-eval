@@ -4,7 +4,6 @@ Expand-only: every new column is nullable, so the previous release keeps working
 
 Revision ID: 0008
 Revises: 0007
-Create Date: 2026-10-26
 """
 
 from collections.abc import Sequence
