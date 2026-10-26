@@ -134,6 +134,10 @@ clients = [
 ]
 # Inline SGLang plus the Olmo architecture plugin. Keep the engine/plugin pins
 # together: olmo-sglang uses SGLang internals. CUDA 13 / Torch 2.13 runtime.
+# TODO: Replace these Git pins with qualified published SGLang/olmo-sglang
+# releases. SGLang already uses the official upstream repo; the model plugin
+# remains separate while the architecture evolves. Revisit upstreaming model
+# support once it stabilizes, independently of publishing the plugin package.
 sglang = [
     "flash-linear-attention==0.5.2 ; sys_platform == 'linux'",
     "olmo-sglang @ git+https://github.com/allenai/olmo-sglang.git@94ba0d5036c8ea7794636009d4ef233b0f3db32f ; sys_platform == 'linux'",
