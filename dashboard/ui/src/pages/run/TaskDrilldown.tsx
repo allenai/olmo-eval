@@ -9,7 +9,7 @@ import { JsonDiff, JsonTree } from "@/components/Json";
 import { Badge, Button, Checkbox, CopyText, EmptyState, ErrorPanel, Panel, Skeleton, Tip } from "@/components/primitives";
 import { toast } from "@/components/toast";
 import { formatCI, formatCount, formatDelta, formatDuration, formatP, formatRate, formatRuntime, formatScore, metricLabel, sig3 } from "@/lib/format";
-import { BASIS_LABEL, basisMark } from "@/lib/runtime";
+import { BASIS_LABEL, basisMark, formatScoringSummary } from "@/lib/runtime";
 import { rowMeta, scoreFormat } from "./types";
 
 export async function openSigned(gsUri: string): Promise<void> {
@@ -306,6 +306,7 @@ export function TaskDrilldown({
                     {formatRuntime(row.runtime.inference_seconds)} ({BASIS_LABEL[row.runtime.basis].toLowerCase()}).{" "}
                   </>
                 )}
+                {formatScoringSummary(row.runtime) && <>{formatScoringSummary(row.runtime)} </>}
                 {row.duration_seconds != null && <>Done {formatDuration(row.duration_seconds)} after processing started. </>}
                 {row.num_fewshot != null && <>{row.num_fewshot}-shot. </>}
                 {row.limit != null && <>Limit {formatCount(row.limit)}. </>}

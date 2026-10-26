@@ -49,6 +49,33 @@ export const BASIS_HELP: Record<RuntimeBasis, string> = {
   not_recorded: "This run predates runtime recording or lacks token counts.",
 };
 
+export const SCORING_HELP =
+  "Time spent scoring this task, summed over every call and worker. Concurrent calls each count, so it can exceed wall time.";
+
+export const SCORING_LABEL = {
+  judge: "Judge",
+  sandbox: "Sandbox",
+  compute: "Scoring",
+} as const;
+
+export const SCORING_COLUMN_HELP: Record<keyof typeof SCORING_LABEL, string> = {
+  judge: `Judge model call time. ${SCORING_HELP}`,
+  sandbox: `Sandbox operation time. ${SCORING_HELP}`,
+  compute: `Scoring code time (answer extraction, scorers, metrics). ${SCORING_HELP}`,
+};
+
+/** "Scoring: judge 1m 2s, sandbox 0 s, compute 3.4 s." or "" when nothing was recorded. */
+export function formatScoringSummary(rt: TaskRuntime | null | undefined): string {
+  if (!rt) return "";
+  const parts: [string, number | null][] = [
+    ["judge", rt.scoring_judge_seconds],
+    ["sandbox", rt.scoring_sandbox_seconds],
+    ["compute", rt.scoring_compute_seconds],
+  ];
+  const known = parts.filter((p): p is [string, number] => p[1] != null);
+  return known.length ? `Scoring: ${known.map(([label, v]) => `${label} ${formatRuntime(v)}`).join(", ")}.` : "";
+}
+
 /** Short prefix for values that are estimates. */
 export function basisMark(basis: RuntimeBasis | null | undefined): string {
   return basis === "estimated" ? "~" : "";

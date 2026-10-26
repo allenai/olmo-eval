@@ -20,6 +20,8 @@ async def test_absent_diagnostics_preserve_the_legacy_content_hash(explicit_null
     if explicit_null:
         payload["generation_counts"] = None
         payload["scoring_failures"] = None
+        for key in ("scoring_judge_seconds", "scoring_sandbox_seconds", "scoring_compute_seconds"):
+            payload[key] = None
     request = s.TaskResultIn.model_validate(payload)
 
     assert await _content_hash(AsyncMock(), "legacy", request) == LEGACY_HASH
@@ -51,3 +53,14 @@ async def test_scoring_failures_change_upload_identity() -> None:
     request = s.TaskResultIn.model_validate(payload)
 
     assert await _content_hash(AsyncMock(), "legacy", request) != LEGACY_HASH
+
+
+async def test_scoring_seconds_change_upload_identity() -> None:
+    payload = load_example("ingest/task-result.request.json")
+    payload.update(predictions_path=None, requests_path=None, scoring_judge_seconds=1.5)
+    request = s.TaskResultIn.model_validate(payload)
+    first = await _content_hash(AsyncMock(), "legacy", request)
+    request.scoring_judge_seconds = 2.5
+    second = await _content_hash(AsyncMock(), "legacy", request)
+
+    assert first != LEGACY_HASH and second != first

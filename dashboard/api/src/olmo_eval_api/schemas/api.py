@@ -637,6 +637,9 @@ class TaskRuntime(_Response):
     completion_tokens_total: int | None
     inference_seconds: float | None
     prompt_tokens_total: int | None
+    scoring_compute_seconds: float | None
+    scoring_judge_seconds: float | None
+    scoring_sandbox_seconds: float | None
     seconds_per_1k_instances: float | None
     span_end_s: float | None
     span_start_s: float | None

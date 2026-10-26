@@ -232,6 +232,9 @@ class TaskResultIn(_In):
     prompt_tokens_total: NonNeg | None = None
     completion_tokens_total: NonNeg | None = None
     attributed_inference_seconds: float | None = None
+    scoring_judge_seconds: float | None = None
+    scoring_sandbox_seconds: float | None = None
+    scoring_compute_seconds: float | None = None
     predictions_path: RelativePath | None
     requests_path: RelativePath | None
     suites: list[str]

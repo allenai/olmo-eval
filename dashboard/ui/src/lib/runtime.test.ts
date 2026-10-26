@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { formatRuntime, formatRuntimeDelta } from "./format";
 import {
   basisMark,
+  formatScoringSummary,
   formatTaskRuntime,
   gpuLabel,
   gpuShort,
@@ -29,6 +30,9 @@ function rt(partial: Partial<TaskRuntime>): TaskRuntime {
     seconds_per_1k_instances: null,
     span_start_s: null,
     span_end_s: null,
+    scoring_judge_seconds: null,
+    scoring_sandbox_seconds: null,
+    scoring_compute_seconds: null,
     ...partial,
   };
 }
@@ -132,5 +136,21 @@ describe("runtime axis ticks", () => {
     expect(runtimeTicks(0, 50, 6)).toEqual([0, 10, 20, 30, 40, 50]);
     expect(runtimeTicks(8, 4000, 6, true)).toEqual([10, 30, 120, 600, 1800]);
     expect(runtimeTicks(5, 5)).toEqual([5]);
+  });
+});
+
+describe("formatScoringSummary", () => {
+  it("lists the recorded scoring times", () => {
+    const summary = formatScoringSummary(rt({ scoring_judge_seconds: 62, scoring_sandbox_seconds: 0, scoring_compute_seconds: 3.4 }));
+    expect(summary).toBe("Scoring: judge 1m 02s, sandbox 0 s, compute 3.4 s.");
+  });
+
+  it("skips times that were not recorded", () => {
+    expect(formatScoringSummary(rt({ scoring_compute_seconds: 3.4 }))).toBe("Scoring: compute 3.4 s.");
+  });
+
+  it("is empty when none was recorded", () => {
+    expect(formatScoringSummary(rt({}))).toBe("");
+    expect(formatScoringSummary(null)).toBe("");
   });
 });

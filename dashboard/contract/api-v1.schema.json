@@ -6231,6 +6231,27 @@
             }
           ]
         },
+        "scoring_compute_seconds": {
+          "description": "Time running the task's scoring code, summed across scoring threads and processes.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "scoring_judge_seconds": {
+          "description": "Summed judge model call time while scoring this task. Concurrent calls each count, so it can exceed wall time.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "scoring_sandbox_seconds": {
+          "description": "Summed sandbox operation time while scoring; can exceed wall time.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "seconds_per_1k_instances": {
           "description": "inference_seconds per 1,000 instances.",
           "type": [
@@ -6283,7 +6304,10 @@
         "completion_tokens_total",
         "seconds_per_1k_instances",
         "span_start_s",
-        "span_end_s"
+        "span_end_s",
+        "scoring_judge_seconds",
+        "scoring_sandbox_seconds",
+        "scoring_compute_seconds"
       ],
       "type": "object"
     },

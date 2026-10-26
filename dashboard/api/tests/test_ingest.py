@@ -103,6 +103,27 @@ async def test_scoring_failures_are_stored_with_the_task_result(
     assert stored.scalar_one() == payload["scoring_failures"]
 
 
+async def test_scoring_seconds_are_stored_and_updated_on_reupload(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    await seed_contract_example_run(client)
+    payload = load_example("ingest/task-result.request.json")
+    for judge in (62.0, 70.5):
+        payload.update(
+            scoring_judge_seconds=judge, scoring_sandbox_seconds=0.0, scoring_compute_seconds=3.4
+        )
+        response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
+        assert response.status_code == 200, response.text
+        stored = await session.execute(
+            text(
+                "SELECT scoring_judge_seconds, scoring_sandbox_seconds, scoring_compute_seconds"
+                " FROM task_results WHERE id = :id"
+            ),
+            {"id": response.json()["task_result_id"]},
+        )
+        assert tuple(stored.one()) == (judge, 0.0, 3.4)
+
+
 async def test_request_id_passthrough(client: httpx.AsyncClient) -> None:
     response = await client.get("/health", headers={"X-Request-Id": "abcdef12-3456"})
     assert response.headers["x-request-id"] == "abcdef12-3456"
@@ -235,6 +256,7 @@ async def test_contract_example_round_trip(client: httpx.AsyncClient, session: A
     assert row["reported_completion_tokens_total"] == 398112
     assert row["first_request_at"] is not None and row["last_completed_at"] is not None
     assert row["attributed_inference_seconds"] is None
+    assert row["scoring_judge_seconds"] is None and row["scoring_compute_seconds"] is None
     assert row["finalized_at"] is not None
     assert run["startup_seconds"] == 78.4
     assert run["processing_seconds"] == 1266.1
@@ -254,6 +276,9 @@ async def test_old_client_payloads_ingest(client: httpx.AsyncClient, session: An
         "prompt_tokens_total",
         "completion_tokens_total",
         "attributed_inference_seconds",
+        "scoring_judge_seconds",
+        "scoring_sandbox_seconds",
+        "scoring_compute_seconds",
     ):
         del task[key]
     tr = (await client.post(f"/v1/runs/{RUN_ID}/task-results", json=task)).json()
