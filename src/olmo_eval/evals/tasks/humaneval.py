@@ -48,7 +48,7 @@ def _with_prompt(metadata: dict[str, Any], code: str) -> str:
 class HumanEval(Task):
     """HumanEval code generation task."""
 
-    data_source = DataSource(path="openai_humaneval")
+    data_source = DataSource(path="openai/openai_humaneval")  # canonical id; the legacy alias fails on current hub
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.0,
