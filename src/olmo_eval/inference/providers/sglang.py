@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 import os
+import sys
 from importlib import import_module
 from typing import Any, Literal
 
@@ -16,6 +17,30 @@ from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.request_utils import chat_messages_for_request
 
 logger = get_logger(__name__)
+
+
+def _require_original_logprobs() -> None:
+    """Establish raw model logprobs before plugins can import the sampler."""
+    value = os.environ.setdefault("SGLANG_RETURN_ORIGINAL_LOGPROB", "1")
+    if value.lower() not in ("1", "true"):
+        raise ValueError(
+            "SGLangProvider requires raw model logprobs: set "
+            "SGLANG_RETURN_ORIGINAL_LOGPROB=1 before starting the worker."
+        )
+    for name in (
+        "sglang.srt.layers.sampler",
+        "sglang.srt.speculative.standalone_worker_v2",
+    ):
+        module = sys.modules.get(name)
+        if (
+            module is not None
+            and getattr(module, "SGLANG_RETURN_ORIGINAL_LOGPROB", None) is not True
+        ):
+            raise RuntimeError(
+                f"{name} was already imported without raw model logprobs. "
+                "Restart the worker with SGLANG_RETURN_ORIGINAL_LOGPROB=1; "
+                "changing the environment after import cannot repair its cached convention."
+            )
 
 
 class SGLangProvider(InferenceProvider):
@@ -72,6 +97,7 @@ class SGLangProvider(InferenceProvider):
                     cache_dir=kwargs.get("download_dir"),
                     force_download=True,
                 )
+        _require_original_logprobs()
         if model_registration:
             module, name = model_registration.split(":", 1)
             getattr(import_module(module), name)()
@@ -91,7 +117,9 @@ class SGLangProvider(InferenceProvider):
         self.supports_images = enable_multimodal
         if enable_multimodal:
             options["enable_multimodal"] = True
-        self.engine = import_module("sglang").Engine(**options)
+        sglang = import_module("sglang")
+        _require_original_logprobs()
+        self.engine = sglang.Engine(**options)
         self._closed = False
         self._capacity_checked = False
         self._previous_batch: tuple[int, int, int, int] | None = None
@@ -252,6 +280,7 @@ class SGLangProvider(InferenceProvider):
         if self._closed:
             raise RuntimeError("SGLangProvider is closed")
         sampling = self._build_sampling_params(params)
+        _require_original_logprobs()
         if not requests:
             return []
         # Validate every request before resolving images or submitting a partial batch.
@@ -340,7 +369,7 @@ class SGLangProvider(InferenceProvider):
             sum_logits=sum(entry["logprob"] for entry in logprobs),
             num_tokens=len(logprobs),
             num_tokens_all=metadata["completion_tokens"],
-            sglang_return_original_logprob=os.environ.get("SGLANG_RETURN_ORIGINAL_LOGPROB", "0"),
+            sglang_return_original_logprob="1",
         )
         return LMOutput(text=output["text"], logprobs=logprobs, metadata=metadata)
 
@@ -375,7 +404,7 @@ class SGLangProvider(InferenceProvider):
                 "logprobs": params.logprobs if params.logprobs is not None else 1,
             },
             "stop_sequences": sampling["stop"],
-            "sglang_return_original_logprob": os.environ.get("SGLANG_RETURN_ORIGINAL_LOGPROB", "0"),
+            "sglang_return_original_logprob": "1",
         }
 
     def logprobs(
