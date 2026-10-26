@@ -959,6 +959,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 configured = get_task(spec, overrides or None)
                 self._check_scaffold(spec, configured)
                 self._check_sandbox(spec, configured)
+                self._check_judge_provider(spec, configured)
                 task, task_items = prepare_task_items(
                     spec,
                     self.model_name,
@@ -1075,6 +1076,33 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             f"for example `--harness codex_universal`; harness {self.harness_config.name!r} "
             "has none."
         )
+
+    def _check_judge_provider(self, spec: str, task: Task) -> None:
+        """Fail before generation if an auxiliary judge provider serves another model.
+
+        A task judged by a provider in this run's harness records the judge model in
+        its config, and so in its task hash; the provider must serve that model.
+        """
+        from olmo_eval.common.scorers import LLMJudgeScorer
+
+        judge_model = task.config.judge_model
+        for scorer in task._get_scorers().values():
+            name = getattr(scorer, "provider_name", None)
+            if not isinstance(scorer, LLMJudgeScorer) or name is None or judge_model is None:
+                continue
+            provider = self.harness_config.auxiliary_providers.get(name)
+            if provider is None:
+                raise ValueError(
+                    f"{spec} is judged by the auxiliary provider {name!r}, which harness "
+                    f"{self.harness_config.name!r} does not define; set it with "
+                    f"`-o auxiliary_providers.{name}.model={judge_model}`."
+                )
+            if provider.served_model != judge_model:
+                raise ValueError(
+                    f"{spec} is judged by {judge_model!r}, but auxiliary provider {name!r} "
+                    f"serves {provider.served_model!r}. Serve {judge_model!r}, or pass "
+                    f"`-o judge_model={provider.served_model}` to record the judge you use."
+                )
 
     def _build_task_overrides(self, spec: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """Build task and sampling overrides for a given task spec.

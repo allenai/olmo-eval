@@ -25,6 +25,9 @@ from olmo_eval.evals.tasks.common import Task, register_variant
 
 logger = logging.getLogger(__name__)
 
+#: Model the ``wg_judge`` provider must serve.
+WILDGUARD_JUDGE_MODEL = "allenai/wildguard"
+
 judge_sampling = SamplingParams(max_tokens=None, temperature=0.6, top_p=0.95)
 base_sampling = SamplingParams(
     max_tokens=1024,
@@ -112,12 +115,16 @@ def register_safety_variants(
     scorer=None,
     scorer_name=None,
     macro_subsets: tuple[str, ...] = (),
+    judge_model: str = WILDGUARD_JUDGE_MODEL,
 ):
     """
     Build the four variants that the base wildguard safety tasks use.
 
     ``macro_subsets`` makes the primary metric an unweighted mean over those
     subsets instead of an instance-weighted mean across the whole task.
+    ``judge_model`` is the model the judge provider must serve; it is recorded in
+    the config of the variants that judge with that provider, so it reaches their
+    task hash, and the runner checks it against the harness before generating.
     """
 
     # Initialize the safety scorer
@@ -152,6 +159,7 @@ def register_safety_variants(
         metrics=safety_metrics(scorer, subsets, macro_subsets),
         primary_metric=primary_metric(scorer),
         sampling_params=judge_sampling,
+        judge_model=judge_model,
     )
 
     register_variant(
@@ -161,6 +169,7 @@ def register_safety_variants(
         primary_metric=primary_metric(scorer),
         sampling_params=judge_sampling,
         answer_extractor=extract_think_answer_only,
+        judge_model=judge_model,
     )
 
     register_variant(
@@ -170,4 +179,5 @@ def register_safety_variants(
         primary_metric=primary_metric(scorer),
         sampling_params=base_sampling,
         formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
+        judge_model=judge_model,
     )
