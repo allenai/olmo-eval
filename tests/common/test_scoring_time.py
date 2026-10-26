@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import Iterator
+from dataclasses import dataclass
 
 import pytest
 
-from olmo_eval.common.scoring_time import ScoringTimes, timed, timed_scoring
+from olmo_eval.common.execution import ProcessPoolManager, ProcessScoringPoolConfig
+from olmo_eval.common.execution.environment import ScoringContext
+from olmo_eval.common.metrics import AccuracyMetric
+from olmo_eval.common.scorers import ProcessScorer
+from olmo_eval.common.scorers.execution import ContextScorer
+from olmo_eval.common.scoring_time import ScoringTimes, time_child_tasks, timed, timed_scoring
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
+from olmo_eval.evals.tasks.common import Task, TaskConfig
 
 
 class _FakeTime:
@@ -137,8 +147,83 @@ def test_cancellation_reaches_the_scoring_coroutine(now: _FakeTime) -> None:
     assert cleaned_up == [True]
 
 
-def test_compute_time_can_be_added_outside_an_instance(now: _FakeTime) -> None:
+_CLOCK = _FakeTime()
+
+
+@dataclass(frozen=True, slots=True)
+class _SlowContextScorer(ContextScorer):
+    """A context scorer that spends 0.2 s of CPU per output on the fake clock."""
+
+    name: str = "slow_context"
+
+    async def ascore_with_context(self, instance, output, context) -> float:
+        _CLOCK.t += 0.2
+        await asyncio.sleep(0)
+        return 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class _SleepingProcessScorer(ProcessScorer):
+    """A process scorer that takes 0.05 s of real time per output."""
+
+    name: str = "sleeping_process"
+
+    def process_score(self, instance: Instance, output: LMOutput) -> float:
+        time.sleep(0.05)
+        return 1.0
+
+
+class _Task(Task):
+    @property
+    def instances(self) -> Iterator[Instance]:
+        yield Instance(question="Q", gold_answer="A")
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        return LMRequest(request_type=RequestType.COMPLETION, prompt=instance.question)
+
+
+def _response(outputs: int) -> Response:
+    return Response(
+        instance=Instance(question="Q", gold_answer="A"),
+        request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q"),
+        outputs=[LMOutput(text="A") for _ in range(outputs)],
+    )
+
+
+def test_scorers_run_as_child_tasks_count_as_compute(monkeypatch: pytest.MonkeyPatch) -> None:
+    _CLOCK.t = 0.0
+    monkeypatch.setattr("olmo_eval.common.scoring_time._now", _CLOCK)
+    task = _Task(
+        TaskConfig(
+            name="t",
+            data_source="test/dataset",
+            metrics=(AccuracyMetric(scorer=_SlowContextScorer),),
+        )
+    )
     times = ScoringTimes()
-    with timed("compute", times):
-        now.t += 0.5  # computing the task's metrics
-    assert times.compute_seconds == pytest.approx(0.5)
+
+    async def run() -> None:
+        restore = time_child_tasks()
+        try:
+            # Task.score_responses gathers context scorers, one child task per output.
+            await timed_scoring(task.score_responses([_response(3)], ScoringContext()), times)
+        finally:
+            restore()
+        assert asyncio.get_running_loop().get_task_factory() is None
+
+    asyncio.run(run())
+    assert times.compute_seconds == pytest.approx(3 * 0.2)
+
+
+def test_process_pool_scoring_counts_as_compute() -> None:
+    metric = AccuracyMetric(scorer=_SleepingProcessScorer)
+    task = _Task(TaskConfig(name="t", data_source="test/dataset", metrics=(metric,)))
+    manager = ProcessPoolManager({"cpu": ProcessScoringPoolConfig(workers=2)})
+    context = ScoringContext(process_pool_manager=manager)
+    times = ScoringTimes()
+    try:
+        asyncio.run(timed_scoring(task.score_responses([_response(2)], context), times))
+    finally:
+        manager.shutdown()
+    # Time in the worker counts; the scoring loop's own steps add a little more.
+    assert times.compute_seconds >= 2 * 0.05

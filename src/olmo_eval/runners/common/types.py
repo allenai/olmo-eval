@@ -34,10 +34,12 @@ DEFAULT_MAX_HARD_FAILURE_RATE = 0.05
 #   scoring_judge_seconds / scoring_sandbox_seconds: summed durations of the judge
 #       model calls and sandbox operations made while scoring the task. Each call is
 #       timed on its own, so concurrent calls each count in full and the sum can
-#       exceed wall time. Waiting for a free judge or sandbox slot is not counted.
-#   scoring_compute_seconds: time the scoring loop spent running the task's scoring
-#       code (answer extraction, rule-based scorers, metric computation). The loop
-#       runs one piece at a time, so this never overlaps across tasks.
+#       exceed wall time. A call's time includes the client's own retries, but not
+#       waiting for a scorer's judge or sandbox slot.
+#   scoring_compute_seconds: time spent running the task's scoring code (answer
+#       extraction, scorers, metric computation) on the event loop, in a scoring
+#       thread, or in a scoring process pool. Pool work runs in parallel, so this too
+#       can exceed wall time.
 #   See olmo_eval.common.scoring_time for how each is measured.
 TASK_COST_KEYS = (
     "first_request_at",
