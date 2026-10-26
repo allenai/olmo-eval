@@ -34,7 +34,7 @@ from olmo_eval.runners.processing.generation_counts import count_generations
 @pytest.fixture
 def setup_engine(monkeypatch):
     monkeypatch.setenv("SGLANG_RETURN_ORIGINAL_LOGPROB", "1")
-    tokenizer = Mock()
+    tokenizer = Mock(bos_token_id=99, eos_token_id=98)
     tokenizer.apply_chat_template.return_value = "<user>question<assistant><think>"
     tokenizer.encode.return_value = [10, 20]
     tokenizer.decode.side_effect = lambda ids: f"token{ids[0]}"
@@ -752,6 +752,193 @@ def test_uncapped_generation_abstains_from_capacity_estimate(setup_engine, caplo
     assert "Consider increasing concurrency" not in caplog.text
 
 
+@pytest.fixture
+def multimodal_engine(setup_engine):
+    engine, constructor, tokenizer = setup_engine
+    processor = SimpleNamespace(
+        document_prompt_ids=Mock(
+            side_effect=lambda text, num_images: [
+                99,
+                *([70] * num_images),
+                *tokenizer.encode(text, add_special_tokens=False),
+            ]
+        ),
+        apply_chat_template=Mock(return_value="<image>question<assistant>"),
+    )
+    engine.tokenizer_manager.processor = processor
+    return engine, constructor, tokenizer, processor
+
+
+def test_document_images_samples_and_mixed_requests(multimodal_engine, tmp_path):
+    from PIL import Image
+
+    engine, constructor, tokenizer, processor = multimodal_engine
+    path = tmp_path / "page.png"
+    Image.new("RGB", (2, 3), "red").save(path)
+    second = Image.new("RGB", (4, 5), "blue")
+    lazy = Mock(return_value=[path, second, None])
+    requests = [
+        LMRequest(
+            RequestType.CHAT, messages=({"role": "user", "content": "olmocr:"},), images=(lazy,)
+        ),
+        LMRequest(RequestType.COMPLETION, prompt="text control"),
+    ]
+    config = ProviderConfig(
+        kind="sglang",
+        model="model",
+        kwargs={"enable_multimodal": True, "prompt_format": "document"},
+    )
+    provider = ProviderConfig.from_dict(config.to_dict()).create_provider()
+    assert provider.supports_images
+    result = provider.generate(requests, SamplingParams(num_samples=2, max_tokens=32))
+    assert [[o.text for o in group] for group in result] == [
+        ["response0", "response1"],
+        ["response2", "response3"],
+    ]
+    lazy.assert_called_once_with()
+    kwargs = engine.generate.call_args.kwargs
+    assert kwargs["input_ids"] == [[99, 70, 70, 10, 20]] * 2 + [[99, 10, 20]] * 2
+    assert [image.size for image in kwargs["image_data"][0]] == [(2, 3), (4, 5)]
+    assert kwargs["image_data"][0][1] is second
+    assert kwargs["image_data"][2:] == [None, None]
+    assert result[0][0].metadata["input_token_ids"] == [99, 70, 70, 10, 20]
+    assert result[0][0].metadata["num_images"] == 2
+    assert result[1][0].metadata["num_images"] == 0
+    assert result[0][0].metadata["prompt_format"] == "document"
+    processor.apply_chat_template.assert_not_called()
+    tokenizer.apply_chat_template.assert_not_called()
+    assert constructor.call_args.kwargs["enable_multimodal"] is True
+    assert "prompt_format" not in constructor.call_args.kwargs
+
+
+def test_document_turn_boundaries_match_core(multimodal_engine):
+    engine, _, tokenizer, processor = multimodal_engine
+    provider = SGLangProvider("model", enable_multimodal=True, prompt_format="document")
+    request = LMRequest(
+        RequestType.COMPLETION,
+        prompt="question",
+        messages=({"role": "system", "content": "instructions"},),
+    )
+    provider.generate([request])
+    processor.document_prompt_ids.assert_called_once_with("instructions", num_images=0)
+    assert [call.args for call in tokenizer.encode.call_args_list] == [
+        ("instructions",),
+        (" question",),
+    ]
+    assert engine.generate.call_args.kwargs["input_ids"] == [[99, 10, 20, 10, 20]]
+    assert "image_data" not in engine.generate.call_args.kwargs
+
+
+def test_image_chat_uses_processor_and_preserves_system_turn(multimodal_engine):
+    from PIL import Image
+
+    engine, _, tokenizer, processor = multimodal_engine
+    image = Image.new("RGB", (2, 2))
+    request = LMRequest(
+        RequestType.CHAT,
+        messages=(
+            {"role": "system", "content": "instruction"},
+            {"role": "user", "content": "question"},
+        ),
+        images=(image,),
+    )
+    provider = SGLangProvider("model", enable_multimodal=True)
+    provider.generate([request])
+    processor.apply_chat_template.assert_called_once_with(
+        [
+            {"role": "system", "content": [{"type": "text", "text": "instruction"}]},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image},
+                    {"type": "text", "text": "question"},
+                ],
+            },
+        ],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    tokenizer.encode.assert_called_once_with("<image>question<assistant>", add_special_tokens=False)
+    tokenizer.apply_chat_template.assert_not_called()
+    assert engine.generate.call_args.kwargs["image_data"] == [[image]]
+
+
+def test_multimodal_trace_does_not_decode_images(multimodal_engine):
+    loader = Mock(side_effect=AssertionError("trace must not resolve pixels"))
+    provider = SGLangProvider("model", enable_multimodal=True, prompt_format="document")
+    request = LMRequest(
+        RequestType.CHAT, messages=({"role": "user", "content": "olmocr:"},), images=(loader,)
+    )
+    trace = provider.describe_request(request)
+    assert trace["input_mode"] == "input_ids"
+    assert trace["prompt_format"] == "document" and trace["images_attached"]
+    loader.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"prompt_format": "unknown"},
+        {"prompt_format": "document"},
+        {"prompt_format": "document", "enable_multimodal": True, "add_bos_token": False},
+        {"enable_multimodal": True, "language_model_only": True},
+    ],
+)
+def test_invalid_image_configuration_fails_before_engine(setup_engine, kwargs):
+    _, constructor, _ = setup_engine
+    with pytest.raises(ValueError):
+        SGLangProvider("model", **kwargs)
+    constructor.assert_not_called()
+
+
+def test_empty_lazy_image_is_not_silently_dropped(multimodal_engine):
+    engine, _, _, _ = multimodal_engine
+    provider = SGLangProvider("model", enable_multimodal=True, prompt_format="document")
+    with pytest.raises(ValueError, match="no images"):
+        provider.generate(
+            [LMRequest(RequestType.COMPLETION, prompt="question", images=(lambda: None,))]
+        )
+    engine.generate.assert_not_called()
+
+
+def test_document_requires_processor_protocol(multimodal_engine):
+    engine, _, _, _ = multimodal_engine
+    engine.tokenizer_manager.processor = SimpleNamespace()
+    provider = SGLangProvider("model", enable_multimodal=True, prompt_format="document")
+    with pytest.raises(NotImplementedError, match="document_prompt_ids"):
+        provider.generate([LMRequest(RequestType.COMPLETION, prompt="question")])
+    engine.generate.assert_not_called()
+
+
+def test_multimodal_rejects_tools_without_discarding_other_requests(multimodal_engine):
+    engine, _, _, _ = multimodal_engine
+    from PIL import Image
+
+    loader = Mock(return_value=Image.new("RGB", (2, 2)))
+    provider = SGLangProvider("model", enable_multimodal=True, prompt_format="document")
+    valid = LMRequest(RequestType.COMPLETION, prompt="question", images=(loader,))
+    invalid = LMRequest(
+        RequestType.COMPLETION, prompt="tool", tools=(ToolSchema(name="f", description="test"),)
+    )
+    results = provider.generate([valid, invalid])
+    assert request_error(results[0]) is None
+    assert request_error(results[1]) is not None
+    loader.assert_called_once()
+    assert len(engine.generate.call_args.kwargs["input_ids"]) == 1
+
+
+def test_image_request_rejects_embedded_media_content(multimodal_engine):
+    engine, _, _, _ = multimodal_engine
+    provider = SGLangProvider("model", enable_multimodal=True, prompt_format="document")
+    request = LMRequest(
+        RequestType.CHAT,
+        messages=({"role": "user", "content": [{"type": "image_url", "image_url": "unbound"}]},),
+    )
+    with pytest.raises(NotImplementedError, match="plain text"):
+        provider.generate([request])
+    engine.generate.assert_not_called()
+
+
 @pytest.mark.parametrize("chunk_size,expected,sequences", [("auto", 128, 128), (64, 64, None)])
 def test_worker_applies_profile_and_preserves_explicit_batch(
     setup_engine, monkeypatch, tmp_path, chunk_size, expected, sequences
@@ -817,6 +1004,72 @@ def test_worker_applies_profile_and_preserves_explicit_batch(
     assert runtime["effective_max_running_requests"] == 128
     assert "devices" not in runtime
     results.put.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "prefix,bos,eos,expected",
+    [
+        ([], 99, 98, [99, 10]),
+        ([99], 99, 98, [99, 10]),
+        ([], None, 98, [98, 10]),
+        ([], 0, 98, [0, 10]),
+    ],
+)
+def test_multimodal_chat_has_one_boundary_with_or_without_images(
+    multimodal_engine, prefix, bos, eos, expected
+):
+    from PIL import Image
+
+    engine, _, tokenizer, processor = multimodal_engine
+    tokenizer.bos_token_id, tokenizer.eos_token_id = bos, eos
+    tokenizer.encode.side_effect = lambda *args, **kwargs: [*prefix, 10]
+    provider = SGLangProvider("model", enable_multimodal=True)
+    requests = [
+        LMRequest(
+            RequestType.CHAT, messages=({"role": "user", "content": "question"},), images=images
+        )
+        for images in ((Image.new("RGB", (2, 2)),), ())
+    ]
+    outputs = provider.generate(requests)
+    assert engine.generate.call_args.kwargs["input_ids"] == [expected, expected]
+    assert [o[0].metadata["input_token_ids"] for o in outputs] == [expected, expected]
+    assert processor.apply_chat_template.call_count == 2
+    tokenizer.apply_chat_template.assert_not_called()
+    assert all(
+        call.kwargs == {"add_special_tokens": False} for call in tokenizer.encode.call_args_list
+    )
+
+
+def test_bad_image_is_request_local(multimodal_engine):
+    from PIL import Image
+
+    engine, _, _, _ = multimodal_engine
+    provider = SGLangProvider("model", enable_multimodal=True, prompt_format="document")
+    broken = Mock(side_effect=OSError("corrupt image"))
+    requests = [
+        LMRequest(RequestType.COMPLETION, prompt="question", images=(image,))
+        for image in (broken, Image.new("RGB", (2, 2)))
+    ]
+    outputs = provider.generate(requests, SamplingParams(num_samples=2))
+    assert request_error(outputs[0]) == "corrupt image"
+    assert request_error(outputs[1]) is None
+    assert len(engine.generate.call_args.kwargs["input_ids"]) == 2
+
+
+def test_document_system_turn_with_image_matches_core(multimodal_engine):
+    from PIL import Image
+
+    engine, _, tokenizer, processor = multimodal_engine
+    provider = SGLangProvider("model", enable_multimodal=True, prompt_format="document")
+    request = LMRequest(
+        RequestType.CHAT,
+        messages=({"role": "system", "content": "SYS"}, {"role": "user", "content": "Q"}),
+        images=(Image.new("RGB", (2, 2)),),
+    )
+    provider.generate([request])
+    processor.document_prompt_ids.assert_called_once_with("SYS", num_images=1)
+    assert [call.args for call in tokenizer.encode.call_args_list] == [("SYS",), (" Q",)]
+    assert engine.generate.call_args.kwargs["input_ids"] == [[99, 70, 10, 20, 10, 20]]
 
 
 def test_request_trace_keeps_only_profile_identity_and_options(setup_engine):
