@@ -230,7 +230,8 @@ export function TasksTab(ctx: RunCtx) {
         csv: (r) => r.runtime.basis,
       },
       // Scoring times are left out when no row recorded them (older runs, external runners).
-      ...SCORING_KINDS.filter((kind) => items.some((r) => scoringValue(r.runtime, kind) != null)).map((kind): Column<TaskResultRow> => ({
+      // Only components some task spent time on; most runs use no judge or sandbox.
+      ...SCORING_KINDS.filter((kind) => items.some((r) => (scoringValue(r.runtime, kind) ?? 0) > 0)).map((kind): Column<TaskResultRow> => ({
         id: `scoring_${kind}`,
         header: (
           <Tip content={<span style={{ display: "block", maxWidth: 260 }}>{SCORING_COLUMN_HELP[kind]}</span>}>
