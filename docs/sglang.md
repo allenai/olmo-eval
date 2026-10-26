@@ -30,12 +30,7 @@ uv run --frozen --no-group vllm olmo-eval beaker launch \
     -o provider.kwargs.model_registration=olmo_sglang:register \
     -o provider.trust_remote_code=true \
     -o provider.kwargs.tensor_parallel_size=1 \
-    -o provider.kwargs.sampling_backend=flashinfer \
-    -o provider.kwargs.attention_backend=triton -o provider.dtype=bfloat16 \
-    -o provider.max_model_len=8192 -o provider.max_concurrency=64 \
-    -o provider.kwargs.mem_fraction_static=0.8 \
-    -o provider.kwargs.cuda_graph_backend_prefill=disabled \
-    -o 'provider.kwargs.cuda_graph_bs_decode=[1,2,4,8,16,32,64]' \
+    -o provider.dtype=bfloat16 -o provider.max_model_len=8192 \
     -m /weka/MODEL_BUCKET/path/to/hf-checkpoint --weka-bucket MODEL_BUCKET \
     -t gsm8k -o limit=5 -o max_tokens=256 \
     -w YOUR_WORKSPACE -B YOUR_BUDGET \
@@ -168,13 +163,64 @@ histories: after generated tokens differ, later logprobs describe different
 conditional distributions. Repeated accuracy measurements and controlled
 numerical checks answer different questions; neither substitutes for the other.
 
+## Automatic serving profiles
+
+`provider.kwargs.profile=auto` is the default. With `olmo_sglang:register`,
+the provider reads checkpoint geometry and the assigned GPU's name and memory
+before constructing the engine. It does not execute checkpoint configuration
+code to select a profile or guess hardware from the cluster name.
+
+The initial profiles cover the measured BF16, 16-layer Olmo 3.5 KDA MoE shape
+(hidden size 1024, 512 routed experts, top-16, latent width 512), dedicated TP1,
+nonquantized text inference and an explicitly configured context up to 34,816.
+All cache, attention and recurrent-state dimensions must match, not just the
+model name. The GPU must have at least 95% of its memory free at startup.
+
+| Hardware / cache choice | Running sequences | KV token pool | Recurrent slots | Memory fraction |
+| --- | ---: | ---: | ---: | ---: |
+| B300 288 GB, cache on (default) | 512 | 17,825,792 | 3,072 | 0.7 |
+| B300, explicit cache off | 512 | 17,825,792 | 1,024 | 0.7 |
+| H100 80 GB, cache off (default) | 512 | 6,684,672 | 512 | 0.9 |
+| H100, explicit cache on | 320 | 4,456,448 | 1,920 | 0.9 |
+
+These are measured starting configurations transferred from the RL study, not
+universal throughput optima. Profiles also select 8,192-token prefill chunks,
+full decode graphs through admission, disabled prefill graphs, Triton attention
+and FlashInfer sampling. H100's KV pool cannot hold all admitted requests at the
+maximum context simultaneously; actual lengths and prefix reuse determine
+occupancy. The engine may reduce admission further.
+
+Explicit engine settings always win. For example, `provider.max_concurrency=128`
+reduces default pool and graph sizing to that admission; explicit pool or graph
+settings remain unchanged. Use `provider.kwargs.disable_radix_cache=false` to
+request caching, or `provider.kwargs.profile=generic` to opt out of all profile
+defaults. Unknown GPUs (including unqualified A100s), model shapes, vision,
+tensor parallelism, quantization, larger contexts and occupied GPUs retain
+engine defaults with a logged fallback reason. No context limit or task sampling
+setting is silently changed.
+
+`batching.chunk_size=auto` is the harness default. With a selected SGLang profile,
+it feeds the resolved engine admission and counts expanded samples: pass@16
+with 512 slots normally submits 32 examples per call. A single example requesting
+more samples than the limit is submitted intact and queued by the engine.
+Explicit integer batch sizes, including 64, are preserved exactly. Other
+providers and generic SGLang retain the historical 64-example batch behavior.
+
+The requested configuration remains in the manifest. Each worker additionally
+saves `runtime/sglang-profile-<worker>.json` with hardware, model-shape hash,
+selection/fallback reason, applied defaults, effective engine options and resolved
+batch limit. Request traces include the provider profile. These records distinguish
+automatic decisions across hardware; they do not promise identical random draws
+or numerical results across batch sizes. Existing saved integer batch settings
+retain their behavior on replay.
+
 ## Concurrency advice
 
-The harness defaults to `batching.chunk_size=64` examples per call. The SGLang
-provider leaves `provider.max_concurrency` unset unless configured; SGLang chooses
-its effective request limit from its configuration and memory pools. A requested
-limit can be reduced by the engine, including by KDA recurrent-state capacity.
-Multiple samples expand each example into separate engine requests.
+
+For generic configurations, the harness uses 64 examples per call and SGLang
+chooses its effective request limit from its configuration and memory pools.
+A requested limit can be reduced by the engine, including by KDA recurrent-state
+capacity. Multiple samples expand each example into separate engine requests.
 
 After two consecutive successful calls of the same size and generation budget
 (at least 16 sequences), the provider checks the engine's resolved capacity once.

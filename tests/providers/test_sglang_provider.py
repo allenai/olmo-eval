@@ -1,6 +1,7 @@
 """Contract tests for the inline SGLang generation provider."""
 
 import asyncio
+import json
 import os
 import sys
 from types import SimpleNamespace
@@ -551,3 +552,51 @@ def test_uncapped_generation_abstains_from_capacity_estimate(setup_engine, caplo
     provider.generate(requests, SamplingParams(max_tokens=100))
     engine.get_server_info.assert_not_called()
     assert "Consider increasing concurrency" not in caplog.text
+
+
+@pytest.mark.parametrize("chunk_size,expected,sequences", [("auto", 128, 128), (64, 64, None)])
+def test_worker_applies_profile_and_preserves_explicit_batch(
+    setup_engine, monkeypatch, tmp_path, chunk_size, expected, sequences
+):
+    engine, constructor, _ = setup_engine
+    engine.get_server_info.return_value = {
+        "internal_states": [{"effective_max_running_requests_per_dp": 128}]
+    }
+    monkeypatch.setattr(
+        "olmo_eval.inference.providers.sglang.prepare_profile",
+        lambda *args: {
+            "selected": "olmo35-h100-v1",
+            "defaults": {"max_running_requests": 512, "max_total_tokens": 6684672},
+            "reason": "test fixture",
+        },
+    )
+    monkeypatch.setattr("olmo_eval.common.logging.configure_logging", Mock())
+    monkeypatch.setattr(
+        "olmo_eval.common.logging.configure_worker_logging", Mock(return_value=Mock())
+    )
+    strategy = SimpleNamespace(run=AsyncMock())
+    factory = Mock(return_value=strategy)
+    monkeypatch.setattr("olmo_eval.runners.asynq.batching.get_strategy", factory)
+    monkeypatch.setattr(
+        "olmo_eval.harness.Harness",
+        lambda config: SimpleNamespace(
+            provider=config.provider.create_provider(),
+            initialize_reporters=Mock(),
+            cleanup=AsyncMock(),
+        ),
+    )
+    config = HarnessConfig(
+        name="test",
+        provider=ProviderConfig(kind="sglang", model="model"),
+        batching=BatchConfig(chunk_size=chunk_size),
+    )
+    results = Mock()
+    inference_worker("profile", [0], Mock(), results, config.to_dict(), 0, output_dir=str(tmp_path))
+    assert constructor.call_args.kwargs["max_running_requests"] == 512
+    assert factory.call_args.args[0].chunk_size == expected
+    assert factory.call_args.kwargs["max_batch_sequences"] == sequences
+
+    report = json.loads((tmp_path / "runtime/sglang-profile-profile.json").read_text())
+    assert report["batch_size"] == expected
+    assert report["effective_max_running_requests"] == 128
+    results.put.assert_not_called()

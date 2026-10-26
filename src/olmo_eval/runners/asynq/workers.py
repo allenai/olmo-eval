@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import multiprocessing as mp
 import os
 import time
-from typing import Any
+from dataclasses import replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.inference.gpu_planner import resolve_visible_devices
@@ -14,6 +17,9 @@ from olmo_eval.runners.asynq.types import (
     WORKER_FATAL,
     ResultItem,
 )
+
+if TYPE_CHECKING:
+    from olmo_eval.inference.providers.sglang import SGLangProvider
 
 logger = get_logger(__name__)
 
@@ -161,7 +167,27 @@ def inference_worker(
 
             batch_config = harness_config.batching or BatchConfig()
             batch_config.validate_for_provider(provider_kind)
-            strategy = get_strategy(batch_config)
+            max_batch_sequences = None
+            if batch_config.chunk_size == "auto":
+                if provider_kind == "sglang":
+                    max_batch_sequences = cast(
+                        "SGLangProvider", harness.provider
+                    ).recommended_batch_sequences
+                batch_config = replace(
+                    batch_config, chunk_size=max_batch_sequences or batch_config.resolved_chunk_size
+                )
+            strategy = get_strategy(batch_config, max_batch_sequences=max_batch_sequences)
+            if provider_kind == "sglang" and output_dir:
+                profile_dir = Path(output_dir) / "runtime"
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                report = dict(
+                    cast("SGLangProvider", harness.provider).profile_report,
+                    batch_size=batch_config.chunk_size,
+                    max_batch_sequences=max_batch_sequences,
+                )
+                (profile_dir / f"sglang-profile-{worker_id}.json").write_text(
+                    json.dumps(report, indent=2) + "\n"
+                )
 
             concurrency_str = max_concurrency or "unlimited"
             if batch_config.strategy == "streaming":

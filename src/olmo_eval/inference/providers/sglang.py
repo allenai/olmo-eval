@@ -13,6 +13,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
+from olmo_eval.inference.providers.sglang_profiles import prepare_profile
 
 logger = get_logger(__name__)
 
@@ -62,6 +63,7 @@ class SGLangProvider(InferenceProvider):
         tensor_parallel_size: int | None = None,
         add_bos_token: bool | None = None,
         model_registration: str | None = None,
+        profile: str = "auto",
         **kwargs: Any,
     ) -> None:
         super().__init__(model_name)
@@ -89,7 +91,7 @@ class SGLangProvider(InferenceProvider):
         if model_registration:
             module, name = model_registration.split(":", 1)
             getattr(import_module(module), name)()
-        options = dict(
+        options: dict[str, Any] = dict(
             kwargs, model_path=model_name, dtype=dtype, trust_remote_code=trust_remote_code
         )
         for key, value in (
@@ -100,10 +102,51 @@ class SGLangProvider(InferenceProvider):
         ):
             if value is not None:
                 options[key] = value
+        self.profile_report = prepare_profile(profile, options, model_registration)
+        options = {**self.profile_report["defaults"], **options}
+        logger.info("SGLang profile: %s", self.profile_report)
         self._add_bos_token = add_bos_token
         sglang = import_module("sglang")
         _require_original_logprobs()
         self.engine = sglang.Engine(**options)
+        self.recommended_batch_sequences: int | None = (
+            options["max_running_requests"]
+            if self.profile_report["selected"] != "generic"
+            else None
+        )
+        self.profile_report["effective_options"] = {
+            key: options[key]
+            for key in (
+                "max_running_requests",
+                "max_total_tokens",
+                "max_mamba_cache_size",
+                "mem_fraction_static",
+                "disable_radix_cache",
+                "chunked_prefill_size",
+                "cuda_graph_backend_decode",
+                "cuda_graph_max_bs_decode",
+                "cuda_graph_bs_decode",
+                "cuda_graph_backend_prefill",
+                "mamba_radix_cache_strategy",
+                "context_length",
+            )
+            if key in options
+        }
+        if self.recommended_batch_sequences is not None:
+            # Persist resolved capacity as well as requested settings; state pools
+            # can lower admission. Older runtimes may not expose this diagnostic.
+            try:
+                info = self.engine.get_server_info()
+                states = info.get("internal_states", []) if isinstance(info, dict) else []
+                if len(states) == 1 and isinstance(states[0], dict):
+                    capacity = states[0].get("effective_max_running_requests_per_dp")
+                    if type(capacity) is int and capacity > 0:
+                        self.recommended_batch_sequences = min(
+                            self.recommended_batch_sequences, capacity
+                        )
+                        self.profile_report["effective_max_running_requests"] = capacity
+            except Exception:
+                logger.debug("Resolved SGLang capacity unavailable", exc_info=True)
         self._closed = False
         self._capacity_checked = False
         self._previous_batch: tuple[int, int, int, int] | None = None
@@ -310,6 +353,7 @@ class SGLangProvider(InferenceProvider):
             },
             "stop_sequences": sampling["stop"],
             "sglang_return_original_logprob": "1",
+            "serving_profile": self.profile_report,
         }
 
     def logprobs(

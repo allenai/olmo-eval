@@ -42,7 +42,7 @@ class BatchedStrategy(BatchingStrategy):
         from olmo_eval.runners.asynq.processing import process_items
 
         worker_instances = math.ceil(total_instances / num_workers)
-        total_batches = math.ceil(worker_instances / self.config.chunk_size)
+        total_batches = math.ceil(worker_instances / self.config.resolved_chunk_size)
         current_batch = 0
 
         while True:
