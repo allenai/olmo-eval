@@ -34,6 +34,7 @@ uv run --frozen --no-group vllm olmo-eval beaker launch \
     -o provider.kwargs.attention_backend=triton -o provider.dtype=bfloat16 \
     -o provider.max_model_len=8192 -o provider.max_concurrency=64 \
     -o provider.kwargs.mem_fraction_static=0.8 \
+    -o provider.kwargs.cuda_graph_backend_prefill=disabled \
     -o 'provider.kwargs.cuda_graph_bs_decode=[1,2,4,8,16,32,64]' \
     -m /weka/MODEL_BUCKET/path/to/hf-checkpoint --weka-bucket MODEL_BUCKET \
     -t gsm8k -o limit=5 -o max_tokens=256 \
@@ -57,6 +58,9 @@ SGLang requires Transformers 5.12.1 and PyTorch 2.13.0; the tested CUDA 13 build
 uses Triton 3.7.1. The extra also pins tqdm 4.67.3 to avoid a dataset-download
 regression. These are a qualified combination, not interchangeable latest
 versions. The optional fused routing arithmetic (#10) remains off by default.
+For this KDA plugin pin, keep `cuda_graph_backend_prefill=disabled`: the
+upstream default prefill graph backend pads tensors incompatibly with the KDA
+prefill path. Decode CUDA graphs remain enabled.
 
 The uv build configuration skips SGLang's optional Rust HTTP/gRPC servers and
 multimodal transport: this provider uses the inline Python Engine. No Rust
