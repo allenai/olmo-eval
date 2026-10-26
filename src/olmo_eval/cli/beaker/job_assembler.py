@@ -599,7 +599,7 @@ class JobConfigAssembler:
         }
         # Add infrastructure config for olmo-eval
         job_env_vars.update(BEAKER_INFRA_ENV_VARS)
-        job_env_vars.update(self._upload_settings(exp)[1])
+        job_env_vars.update(self._upload_settings(exp, image=effective_image)[1])
 
         if cluster_has_weka(self.config.cluster):
             job_env_vars.update(
@@ -705,7 +705,9 @@ class JobConfigAssembler:
             weka_buckets=weka_buckets_with(self.config.weka_buckets),
         )
 
-    def _upload_settings(self, exp: ExperimentPlan) -> tuple[list[str], dict[str, str]]:
+    def _upload_settings(
+        self, exp: ExperimentPlan, *, image: str | None = None
+    ) -> tuple[list[str], dict[str, str]]:
         return upload_job_settings(
             upload=self.config.upload,
             launch_id=self.config.launch_id,
@@ -713,7 +715,7 @@ class JobConfigAssembler:
             tags=self.config.tags,
             clusters=_resolved_clusters(self.config.cluster),
             priority=exp.priority,
-            image=self.effective_image,
+            image=image or self.effective_image,
             budget=self.config.budget,
         )
 
