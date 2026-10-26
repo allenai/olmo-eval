@@ -14,7 +14,6 @@ from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
 from olmo_eval.common.metrics import (
     AccuracyMetric,
     MacroSubsetAccuracyMetric,
-    SafetyErrorMetric,
     SubsetAccuracyMetric,
 )
 from olmo_eval.common.scorers import SafetyScorer
@@ -91,7 +90,6 @@ def safety_metrics(scorer, subsets: tuple[str, ...], macro_subsets: tuple[str, .
     """
     metrics = (
         AccuracyMetric(scorer=scorer),
-        SafetyErrorMetric(scorer=scorer),
         *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in subsets),
     )
     if macro_subsets:
