@@ -8,12 +8,14 @@ resolved provider is `sglang`, just as vLLM jobs select the `vllm` extra.
 Use separate environments for these backends; their dependency pins conflict.
 
 The root lock resolves these mutually exclusive extras separately. Compatibility
-pins preserve the existing locked vLLM package selections. Beaker's `vllm_server`
-installation consumes constraints exported from that lock. Inline `vllm` Beaker
-jobs currently constrain only Torch/CUDA and resolve the remaining packages from
-the extra, so these pins can change their environment relative to earlier runs.
-When upgrading vLLM, update the extra and dependency-group pins together and check
-exported dependency profiles for unintended changes.
+pins in the vLLM dependency group preserve its qualified locked selections.
+Bundled Beaker `vllm` and `vllm_server` installs consume constraints exported from
+the vLLM extra's lock resolution. Inline jobs also retain the image's Torch/CUDA
+constraints; task-package installs cannot replace locked packages in that shared
+environment. Custom provider packages keep their explicit installation behavior,
+and standalone pip installs resolve declared ranges rather than consuming the
+lock. When upgrading vLLM, review the group's compatibility pins and check both
+group and extra exports for unintended changes.
 
 ## Installation and Beaker jobs
 

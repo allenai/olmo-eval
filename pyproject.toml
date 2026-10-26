@@ -95,19 +95,10 @@ vllm = [
     "torch-c-dlpack-ext ; platform_system != 'Darwin'",  # Required for TVM tensor allocation in vLLM
     # transformers 5.13 nests rope_parameters per layer type; vLLM 0.19.1 reads it flat,
     # so Olmo-3 (mixed sliding/full attention) fails to load with a rope_theta KeyError.
-    # Keep the previously locked vLLM dependency versions below. Without these
-    # bounds, a fresh uv lock can reuse SGLang's newer transitive dependencies
-    # even in the mutually exclusive vLLM resolution. The lock alone also cannot
-    # constrain Beaker's uv pip install, which installs the published extra.
-    # Both that extra and local uv sync --group vllm need these constraints.
-    # Update both lists together when qualifying a vLLM upgrade.
-    "transformers==5.8.1 ; sys_platform != 'darwin'",
-    "apache-tvm-ffi==0.1.9 ; sys_platform != 'darwin'",
-    "cuda-pathfinder==1.5.3 ; sys_platform != 'darwin'",
-    "grpcio==1.80.0 ; sys_platform != 'darwin'",
-    "mistral-common==1.11.0 ; sys_platform != 'darwin'",
-    "protobuf==5.29.6 ; sys_platform != 'darwin'",
-    "xgrammar==0.1.34 ; sys_platform != 'darwin'",
+    "transformers>=5.8.0,<5.13 ; sys_platform != 'darwin'",
+    # Compatibility version pins live in the vllm dependency group below.
+    # Bundled Beaker installs consume the extra's exported lock constraints.
+    # Standalone pip installs resolve these ranges rather than consuming uv.lock.
 ]
 litellm = [
     "litellm~=1.80.11",
@@ -237,7 +228,9 @@ vllm = [
     "vllm[runai]==0.19.1 ; platform_system != 'Darwin'",
     "opencv-python-headless==4.13.0.92 ; platform_system != 'Darwin'",
     "torch-c-dlpack-ext ; platform_system != 'Darwin'",
-    # Mirror the vllm extra's compatibility pins; see the rationale above.
+    # Keep the previously qualified versions when resolving alongside SGLang.
+    # These are the single maintained compatibility-pin list; check both the
+    # group and extra lock exports when qualifying an upgrade.
     "apache-tvm-ffi==0.1.9 ; sys_platform != 'darwin'",
     "cuda-pathfinder==1.5.3 ; sys_platform != 'darwin'",
     "grpcio==1.80.0 ; sys_platform != 'darwin'",
