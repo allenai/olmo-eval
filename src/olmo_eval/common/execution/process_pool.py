@@ -15,7 +15,7 @@ from typing import Any
 
 from olmo_eval.common.scorers.base import ProcessScorer
 from olmo_eval.common.scorers.execution import format_scoring_error
-from olmo_eval.common.scoring_time import add_time
+from olmo_eval.common.scoring_time import add_scoring_seconds
 from olmo_eval.common.types import Instance, LMOutput
 
 
@@ -228,7 +228,7 @@ class ProcessPoolManager:
             instance,
             list(outputs),
         )
-        add_time("compute", sum(result.seconds for result in results))
+        add_scoring_seconds("compute", sum(result.seconds for result in results))
         return results
 
     def shutdown(self, *, wait: bool = True, cancel_futures: bool = True) -> None:

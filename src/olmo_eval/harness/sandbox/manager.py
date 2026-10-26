@@ -15,7 +15,7 @@ from typing import TypeVar
 
 from olmo_eval.common.execution.environment import ExecutionResult
 from olmo_eval.common.logging import configure_worker_logging
-from olmo_eval.common.scoring_time import timed
+from olmo_eval.common.scoring_time import measure_scoring
 
 from .config import Capability, SandboxConfig, SandboxMode
 from .errors import SandboxInfrastructureError
@@ -615,7 +615,7 @@ class SandboxManager:
                     excluded=excluded,
                 ) as executor:
                     try:
-                        with timed("sandbox"):
+                        with measure_scoring("sandbox"):
                             return await operation(executor)
                     except Exception as exc:
                         if not failover_on_quarantine or executor.is_running:

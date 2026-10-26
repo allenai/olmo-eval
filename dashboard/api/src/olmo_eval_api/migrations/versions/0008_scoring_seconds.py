@@ -1,4 +1,4 @@
-"""Scoring times: judge, sandbox and compute seconds spent scoring a task.
+"""Scoring seconds: judge, sandbox and compute seconds spent scoring a task.
 
 Expand-only: every new column is nullable, so the previous release keeps working.
 

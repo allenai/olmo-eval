@@ -28,7 +28,7 @@ from olmo_eval.common.openai_credentials import (
 )
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.execution import ContextScorer
-from olmo_eval.common.scoring_time import timed
+from olmo_eval.common.scoring_time import measure_scoring
 from olmo_eval.common.types import Instance, LMOutput
 from olmo_eval.evals.vision.scoring.charxiv import (
     build_dummy_output,
@@ -144,7 +144,7 @@ async def _cached_gpt_call(
         raise ValueError(f"Cache miss (cache_only=True) for key {key[:16]}…")
 
     client, request_model = _get_client(model, "DenseCaptionJudgeScorer on a cache miss")
-    with timed("judge"):
+    with measure_scoring("judge"):
         response = await client.chat.completions.create(
             model=request_model,
             messages=[{"role": "user", "content": prompt}],
@@ -463,7 +463,7 @@ async def _charxiv_chat_json(
     response: str | None = None
     while curr_retries < max_retries:
         try:
-            with timed("judge"):
+            with measure_scoring("judge"):
                 completion = await client.chat.completions.create(
                     messages=[{"role": "user", "content": prompt}],
                     model=request_model,

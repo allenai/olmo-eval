@@ -6,9 +6,10 @@ import asyncio
 
 import pytest
 
-from olmo_eval.common.scoring_time import ScoringTimes, timed_scoring
+from olmo_eval.common.scoring_time import ScoringTimes, measure_instance_scoring
 from olmo_eval.harness.sandbox import Capability
 from olmo_eval.harness.sandbox.errors import SandboxTransportError
+from tests.conftest import ScoringClock
 from tests.core.harness.sandbox_stubs import TrackingExecutor, make_manager
 
 
@@ -71,24 +72,21 @@ async def test_scoring_environment_does_not_fail_over_from_healthy_sandbox() -> 
 
 @pytest.mark.anyio
 async def test_scoring_records_sandbox_time_but_not_waits_for_a_slot(
-    monkeypatch: pytest.MonkeyPatch,
+    scoring_clock: ScoringClock,
 ) -> None:
-    now = [0.0]
-    monkeypatch.setattr("olmo_eval.common.scoring_time._now", lambda: now[0])
-
     class OneSecondExecutor(TrackingExecutor):
         async def _run(self) -> None:
             await super()._run()
-            now[0] += 1.0
+            scoring_clock.t += 1.0
 
     manager = make_manager(OneSecondExecutor("only", max_concurrency=1))
     environment = manager.for_capabilities(Capability.DEFAULT)
-    times = ScoringTimes()
+    totals = ScoringTimes()
 
     async def score() -> None:
         await asyncio.gather(*(environment.execute_code("pass") for _ in range(3)))
 
-    await timed_scoring(score(), times)
+    await measure_instance_scoring(score(), totals)
 
     # The second and third calls waited 1 and 2 seconds for the one slot.
-    assert times.sandbox_seconds == pytest.approx(3.0)
+    assert totals.sandbox == pytest.approx(3.0)

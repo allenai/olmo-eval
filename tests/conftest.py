@@ -1,5 +1,7 @@
 """Root pytest configuration."""
 
+import asyncio
+
 import pytest
 
 # Register anyio plugin for async tests
@@ -74,3 +76,33 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "integration" in item.keywords:
                 item.add_marker(skip_integration)
+
+
+class ScoringClock:
+    """A settable stand-in for the clock that times scoring."""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    async def wait_elsewhere(self, seconds: float) -> None:
+        """Wait while another task advances the clock, as a remote call would."""
+        loop = asyncio.get_running_loop()
+        done = loop.create_future()
+
+        def finish() -> None:
+            self.t += seconds
+            done.set_result(None)
+
+        loop.call_soon(finish)
+        await done
+
+
+@pytest.fixture
+def scoring_clock(monkeypatch) -> ScoringClock:
+    """Replace the scoring-time clock with one a test advances by hand."""
+    clock = ScoringClock()
+    monkeypatch.setattr("olmo_eval.common.scoring_time._now", clock)
+    return clock

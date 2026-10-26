@@ -7,7 +7,7 @@ import { DeltaValue, MetricName, ScoreValue, SigLegend } from "@/components/cell
 import { type Column, DataTable, parseSortList, sortRows } from "@/components/DataTable";
 import { Badge, Checkbox, EmptyState, ErrorPanel, IconButton, Kbd, Panel, SearchInput, Segmented, Select, Tip, uiStyles as ui } from "@/components/primitives";
 import { formatCount, formatDuration, formatP, formatRate, formatRuntime, formatScore, metricLabel, shortHash } from "@/lib/format";
-import { BASIS_HELP, BASIS_LABEL, basisMark, parseRuntimeMode, RUNTIME_MODE_HELP, RUNTIME_MODE_OPTIONS, runtimeModeParam, runtimeValue, SCORING_COLUMN_HELP, SCORING_KINDS, SCORING_LABEL, scoringValue, shares } from "@/lib/runtime";
+import { BASIS_HELP, BASIS_LABEL, basisMark, parseRuntimeMode, RUNTIME_MODE_HELP, RUNTIME_MODE_OPTIONS, runtimeModeParam, runtimeValue, SCORING_KIND_HELP, SCORING_KINDS, SCORING_KIND_LABEL, scoringValue, shares } from "@/lib/runtime";
 import { useHotkeys } from "@/lib/keyboard";
 import { parseList } from "@/lib/url";
 import s from "./run.module.css";
@@ -234,11 +234,11 @@ export function TasksTab(ctx: RunCtx) {
       ...SCORING_KINDS.filter((kind) => items.some((r) => (scoringValue(r.runtime, kind) ?? 0) > 0)).map((kind): Column<TaskResultRow> => ({
         id: `scoring_${kind}`,
         header: (
-          <Tip content={<span style={{ display: "block", maxWidth: 260 }}>{SCORING_COLUMN_HELP[kind]}</span>}>
-            <span>{SCORING_LABEL[kind]}</span>
+          <Tip content={<span style={{ display: "block", maxWidth: 260 }}>{SCORING_KIND_HELP[kind]}</span>}>
+            <span>{SCORING_KIND_LABEL[kind]}</span>
           </Tip>
         ),
-        title: SCORING_LABEL[kind],
+        title: SCORING_KIND_LABEL[kind],
         width: 100,
         align: "right",
         sortValue: (r) => scoringValue(r.runtime, kind),

@@ -13,7 +13,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.progress import ProgressLogger
 from olmo_eval.common.scorers.execution import format_scoring_error
 from olmo_eval.common.scoring_failures import RESPONSE_ERROR_KEY, format_scoring_failures
-from olmo_eval.common.scoring_time import time_child_tasks, timed_scoring
+from olmo_eval.common.scoring_time import install_child_task_timing, measure_instance_scoring
 from olmo_eval.common.types import Response
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.runners.asynq.monitoring import check_workers_alive
@@ -65,9 +65,9 @@ def utc_iso(timestamp: float | None) -> str | None:
 def apply_task_cost(result: TaskResult, tracker: TaskTracker, completed_at: float) -> None:
     """Copy the tracker's request timing, token totals and scoring times onto a TaskResult."""
     result.last_completed_at = utc_iso(completed_at)
-    result.scoring_judge_seconds = tracker.scoring_times.judge_seconds
-    result.scoring_sandbox_seconds = tracker.scoring_times.sandbox_seconds
-    result.scoring_compute_seconds = tracker.scoring_times.compute_seconds
+    result.scoring_judge_seconds = tracker.scoring_times.judge
+    result.scoring_sandbox_seconds = tracker.scoring_times.sandbox
+    result.scoring_compute_seconds = tracker.scoring_times.compute
     if tracker.results_recorded == 0:
         return
     result.first_request_at = utc_iso(tracker.first_request_at)
@@ -219,7 +219,7 @@ async def process_results(
             ]
             assert tracker.task is not None
             completed_at = time.time()
-            with tracker.scoring_times.timing("compute"):
+            with tracker.scoring_times.measure("compute"):
                 task_result = compute_task_metrics(
                     spec=spec,
                     task=tracker.task,
@@ -251,7 +251,7 @@ async def process_results(
         """Score a single response and store the result."""
         async with scoring_semaphore:
             try:
-                scored = await timed_scoring(
+                scored = await measure_instance_scoring(
                     _score_response(task, response, scoring_context),
                     trackers[spec].scoring_times,
                 )
@@ -300,7 +300,7 @@ async def process_results(
     health_check_interval = 5.0
     workers_exited = False
 
-    restore_task_factory = time_child_tasks()
+    uninstall_child_task_timing = install_child_task_timing()
     try:
         # Collect instance results and score each inline
         while pending_instances:
@@ -406,7 +406,7 @@ async def process_results(
                 if spec not in results:
                     check_task_completion(spec)
     finally:
-        restore_task_factory()
+        uninstall_child_task_timing()
         scoring_progress.close()
         report_progress(total_instances - len(pending_instances), total_instances, force=True)
         reporter.flush()

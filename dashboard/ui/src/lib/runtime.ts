@@ -49,17 +49,23 @@ export const BASIS_HELP: Record<RuntimeBasis, string> = {
   not_recorded: "This run predates runtime recording or lacks token counts.",
 };
 
-export const SCORING_LABEL = {
+export const SCORING_KIND_LABEL = {
   judge: "Judge",
   sandbox: "Sandbox",
   compute: "Scoring code",
 } as const;
 
-export type ScoringKind = keyof typeof SCORING_LABEL;
+export type ScoringKind = keyof typeof SCORING_KIND_LABEL;
 
-export const SCORING_KINDS = Object.keys(SCORING_LABEL) as ScoringKind[];
+const SCORING_KIND_SHORT: Record<ScoringKind, string> = {
+  judge: "judge",
+  sandbox: "sandbox",
+  compute: "code",
+};
 
-export const SCORING_COLUMN_HELP: Record<ScoringKind, string> = {
+export const SCORING_KINDS = Object.keys(SCORING_KIND_LABEL) as ScoringKind[];
+
+export const SCORING_KIND_HELP: Record<ScoringKind, string> = {
   judge:
     "Time in judge model calls while scoring this task. Each call counts in full, so the total can exceed wall time. 0 s means no judge calls; — means not recorded.",
   sandbox:
@@ -72,12 +78,12 @@ export function scoringValue(rt: TaskRuntime, kind: ScoringKind): number | null 
   return rt[`scoring_${kind}_seconds`];
 }
 
-/** "Scoring: judge 1m 02s, sandbox 0 s, scoring code 3.4 s." or "" when nothing was recorded. */
+/** "Scoring: judge 1m 02s, sandbox 0 s, code 3.4 s." or "" when nothing was recorded. */
 export function formatScoringSummary(rt: TaskRuntime | null | undefined): string {
   if (!rt) return "";
   const parts = SCORING_KINDS.flatMap((kind) => {
     const v = scoringValue(rt, kind);
-    return v == null ? [] : [`${SCORING_LABEL[kind].toLowerCase()} ${formatRuntime(v)}`];
+    return v == null ? [] : [`${SCORING_KIND_SHORT[kind]} ${formatRuntime(v)}`];
   });
   return parts.length ? `Scoring: ${parts.join(", ")}.` : "";
 }

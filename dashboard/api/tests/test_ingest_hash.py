@@ -7,21 +7,19 @@ from unittest.mock import AsyncMock
 import pytest
 
 from olmo_eval_api.schemas import ingest as s
-from olmo_eval_api.services.ingest import _content_hash
+from olmo_eval_api.services.ingest import HASH_OPTIONAL_FIELDS, _content_hash
 from tests.helpers import load_example
 
 LEGACY_HASH = "3c39b95e373799588fefbcff9c621445d645f2bed5415451ffc247e6fca76e5e"
 
 
 @pytest.mark.parametrize("explicit_null", [False, True])
-async def test_absent_diagnostics_preserve_the_legacy_content_hash(explicit_null: bool) -> None:
+async def test_unset_optional_fields_preserve_the_legacy_content_hash(explicit_null: bool) -> None:
     payload = load_example("ingest/task-result.request.json")
     payload.update(predictions_path=None, requests_path=None)
     if explicit_null:
-        payload["generation_counts"] = None
-        payload["scoring_failures"] = None
-        for key in ("scoring_judge_seconds", "scoring_sandbox_seconds", "scoring_compute_seconds"):
-            payload[key] = None
+        for field in HASH_OPTIONAL_FIELDS:
+            payload[field] = None
     request = s.TaskResultIn.model_validate(payload)
 
     assert await _content_hash(AsyncMock(), "legacy", request) == LEGACY_HASH

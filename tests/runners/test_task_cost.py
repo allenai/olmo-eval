@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from olmo_eval.common.execution.environment import ScoringContext
-from olmo_eval.common.scoring_time import timed
+from olmo_eval.common.scoring_time import measure_scoring
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import Task, TaskConfig
 from olmo_eval.runners.asynq.batching import BatchConfig, BatchedStrategy, StreamingStrategy
@@ -34,6 +34,7 @@ from olmo_eval.runners.common.usage import (
 )
 from olmo_eval.runners.io.builders import build_predictions
 from olmo_eval.runners.processing.metrics import build_single_model_metrics
+from tests.conftest import ScoringClock
 
 # ---------------------------------------------------------------------------
 # Token counting rules
@@ -611,56 +612,59 @@ def test_task_spans_fall_within_processing(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 class _ScoredTask(_LLTask):
-    """Scores each instance with ``cpu_s`` of loop work and a ``judge_s`` judge call.
+    """Scores each instance with ``compute_s`` of loop work and a ``judge_s`` judge call.
 
     Time is a fake clock. Half the loop work runs in a gathered child task, as
     Task.score_responses runs its async scorers. The judge call's time passes in
     another task, as a remote call's would, and metric computation adds ``metrics_s``.
     """
 
-    def __init__(self, now: _FakeTime, cpu_s: float = 0.0, judge_s: float = 0.0, **kwargs):
+    def __init__(
+        self,
+        clock: ScoringClock,
+        compute_s: float = 0.0,
+        judge_s: float = 0.0,
+        metrics_s: float = 0.0,
+    ):
         super().__init__(TaskConfig(name="scored", data_source="test/dataset"))
-        self.now, self.cpu_s, self.judge_s = now, cpu_s, judge_s
-        self.metrics_s: float = kwargs.get("metrics_s", 0.0)
+        self.clock, self.compute_s, self.judge_s, self.metrics_s = (
+            clock,
+            compute_s,
+            judge_s,
+            metrics_s,
+        )
 
     async def score_responses(
         self, responses: Sequence[Response], context: ScoringContext | None = None
     ) -> Sequence[Response]:
-        self.now.t += self.cpu_s / 2
+        self.clock.t += self.compute_s / 2
 
         async def scorer() -> None:
-            self.now.t += self.cpu_s / 2
+            self.clock.t += self.compute_s / 2
 
         await asyncio.gather(scorer())
         if self.judge_s:
-            with timed("judge"):
-                done = asyncio.get_running_loop().create_future()
-
-                def finish() -> None:
-                    self.now.t += self.judge_s
-                    done.set_result(None)
-
-                asyncio.get_running_loop().call_soon(finish)
-                await done
+            with measure_scoring("judge"):
+                await self.clock.wait_elsewhere(self.judge_s)
         return await super().score_responses(responses, context)
 
     def compute_metrics(self, scored_responses: Sequence[Response]) -> dict:
-        self.now.t += self.metrics_s
+        self.clock.t += self.metrics_s
         return super().compute_metrics(scored_responses)
 
 
-def test_each_task_gets_its_own_judge_and_compute_time(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_each_task_gets_its_own_judge_and_compute_time(
+    scoring_clock: ScoringClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(
         "olmo_eval.runners.asynq.results.BeakerStatusReporter",
         lambda: SimpleNamespace(
             progress_callback=lambda label: lambda *a, **k: None, flush=lambda: None
         ),
     )
-    now = _FakeTime()
-    monkeypatch.setattr("olmo_eval.common.scoring_time._now", now)
     tasks: dict[str, Task] = {
-        "rules": _ScoredTask(now, cpu_s=0.05, metrics_s=0.5),
-        "judged": _ScoredTask(now, judge_s=1.0),
+        "rules": _ScoredTask(scoring_clock, compute_s=0.05, metrics_s=0.5),
+        "judged": _ScoredTask(scoring_clock, judge_s=1.0),
     }
     trackers = {
         spec: TaskTracker(model_name="m", spec=spec, task=task, total_instances=40)

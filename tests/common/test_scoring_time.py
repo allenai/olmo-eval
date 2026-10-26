@@ -14,120 +14,98 @@ from olmo_eval.common.execution.environment import ScoringContext
 from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers import ProcessScorer
 from olmo_eval.common.scorers.execution import ContextScorer
-from olmo_eval.common.scoring_time import ScoringTimes, time_child_tasks, timed, timed_scoring
+from olmo_eval.common.scoring_time import (
+    ScoringKind,
+    ScoringTimes,
+    install_child_task_timing,
+    measure_instance_scoring,
+    measure_scoring,
+)
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import Task, TaskConfig
+from tests.conftest import ScoringClock
 
 
-class _FakeTime:
-    """A settable stand-in for time.perf_counter."""
-
-    def __init__(self) -> None:
-        self.t = 0.0
-
-    def __call__(self) -> float:
-        return self.t
-
-
-@pytest.fixture
-def now(monkeypatch: pytest.MonkeyPatch) -> _FakeTime:
-    fake = _FakeTime()
-    monkeypatch.setattr("olmo_eval.common.scoring_time._now", fake)
-    return fake
-
-
-async def _elsewhere(now: _FakeTime, seconds: float) -> None:
-    """Wait while another task advances the clock, as a remote call would."""
-    done = asyncio.get_running_loop().create_future()
-
-    async def finish() -> None:
-        now.t += seconds
-        done.set_result(None)
-
-    pending = asyncio.ensure_future(finish())
-    await done
-    await pending
-
-
-def test_steps_count_as_compute_and_awaits_do_not(now: _FakeTime) -> None:
+def test_steps_count_as_compute_and_awaits_do_not(scoring_clock: ScoringClock) -> None:
     async def score() -> str:
-        now.t += 0.5  # extracting the answer
-        await _elsewhere(now, 10.0)
-        now.t += 0.25  # applying a rule-based scorer
+        scoring_clock.t += 0.5  # extracting the answer
+        await scoring_clock.wait_elsewhere(10.0)
+        scoring_clock.t += 0.25  # applying a rule-based scorer
         return "scored"
 
-    times = ScoringTimes()
-    assert asyncio.run(timed_scoring(score(), times)) == "scored"
-    assert times == ScoringTimes(compute_seconds=pytest.approx(0.75))
+    totals = ScoringTimes()
+    assert asyncio.run(measure_instance_scoring(score(), totals)) == "scored"
+    assert totals == ScoringTimes(compute=pytest.approx(0.75))
 
 
-def test_calls_add_their_full_durations_even_when_concurrent(now: _FakeTime) -> None:
-    async def call(component: str, seconds: float) -> None:
-        with timed(component):  # type: ignore[arg-type]
-            await _elsewhere(now, seconds)
+def test_calls_add_their_full_durations_even_when_concurrent(scoring_clock: ScoringClock) -> None:
+    async def call(kind: ScoringKind, seconds: float) -> None:
+        with measure_scoring(kind):
+            await scoring_clock.wait_elsewhere(seconds)
 
     async def score() -> None:
         # Judge calls run as their own tasks, as asyncio.gather schedules them.
         await asyncio.gather(call("judge", 2.0), call("judge", 3.0), call("sandbox", 1.0))
 
-    times = ScoringTimes()
-    asyncio.run(timed_scoring(score(), times))
+    totals = ScoringTimes()
+    asyncio.run(measure_instance_scoring(score(), totals))
     # Each call is timed from its start, while the others' time also passes.
-    assert times.judge_seconds >= 2.0 + 3.0
-    assert times.sandbox_seconds >= 1.0
-    assert times.compute_seconds == 0.0
+    assert totals.judge >= 2.0 + 3.0
+    assert totals.sandbox >= 1.0
+    assert totals.compute == 0.0
 
 
-def test_calls_outside_scoring_are_not_recorded(now: _FakeTime) -> None:
+def test_calls_outside_scoring_are_not_recorded(scoring_clock: ScoringClock) -> None:
     async def outside() -> None:
-        with timed("judge"):
-            await _elsewhere(now, 4.0)
+        with measure_scoring("judge"):
+            await scoring_clock.wait_elsewhere(4.0)
 
-    times = ScoringTimes()
+    totals = ScoringTimes()
 
     async def run() -> None:
-        await timed_scoring(asyncio.sleep(0), times)
+        await measure_instance_scoring(asyncio.sleep(0), totals)
         await outside()
 
     asyncio.run(run())
-    assert times == ScoringTimes()
+    assert totals == ScoringTimes()
 
 
-def test_concurrent_instances_record_to_their_own_task(now: _FakeTime) -> None:
+def test_concurrent_instances_record_to_their_own_task(scoring_clock: ScoringClock) -> None:
     async def judged() -> None:
-        with timed("judge"):
-            await _elsewhere(now, 5.0)
+        with measure_scoring("judge"):
+            await scoring_clock.wait_elsewhere(5.0)
 
     async def computed() -> None:
-        now.t += 2.0
+        scoring_clock.t += 2.0
         await asyncio.sleep(0)
 
-    judge_task, cpu_task = ScoringTimes(), ScoringTimes()
+    judged_totals, computed_totals = ScoringTimes(), ScoringTimes()
 
     async def run() -> None:
         await asyncio.gather(
-            timed_scoring(judged(), judge_task), timed_scoring(computed(), cpu_task)
+            measure_instance_scoring(judged(), judged_totals),
+            measure_instance_scoring(computed(), computed_totals),
         )
 
     asyncio.run(run())
-    assert cpu_task == ScoringTimes(compute_seconds=pytest.approx(2.0))
-    assert judge_task.compute_seconds == 0.0
-    assert judge_task.judge_seconds >= 5.0
+    assert computed_totals == ScoringTimes(compute=pytest.approx(2.0))
+    assert judged_totals.compute == 0.0
+    assert judged_totals.judge >= 5.0
 
 
-def test_a_failing_scorer_keeps_its_time_and_raises(now: _FakeTime) -> None:
+def test_a_failing_scorer_keeps_its_time_and_raises(scoring_clock: ScoringClock) -> None:
     async def score() -> None:
-        now.t += 1.5
+        scoring_clock.t += 1.5
         await asyncio.sleep(0)
         raise ValueError("unparseable answer")
 
-    times = ScoringTimes()
+    totals = ScoringTimes()
     with pytest.raises(ValueError, match="unparseable"):
-        asyncio.run(timed_scoring(score(), times))
-    assert times.compute_seconds == pytest.approx(1.5)
+        asyncio.run(measure_instance_scoring(score(), totals))
+    assert totals.compute == pytest.approx(1.5)
 
 
-def test_cancellation_reaches_the_scoring_coroutine(now: _FakeTime) -> None:
+def test_cancellation_reaches_the_scoring_coroutine(scoring_clock: ScoringClock) -> None:
     cleaned_up = []
 
     async def score() -> None:
@@ -137,7 +115,7 @@ def test_cancellation_reaches_the_scoring_coroutine(now: _FakeTime) -> None:
             cleaned_up.append(True)
 
     async def run() -> None:
-        task = asyncio.create_task(timed_scoring(score(), ScoringTimes()))
+        task = asyncio.create_task(measure_instance_scoring(score(), ScoringTimes()))
         await asyncio.sleep(0)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -147,7 +125,7 @@ def test_cancellation_reaches_the_scoring_coroutine(now: _FakeTime) -> None:
     assert cleaned_up == [True]
 
 
-_CLOCK = _FakeTime()
+_scorer_clock = ScoringClock()  # the scoring_clock fixture replaces it for each test
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +135,7 @@ class _SlowContextScorer(ContextScorer):
     name: str = "slow_context"
 
     async def ascore_with_context(self, instance, output, context) -> float:
-        _CLOCK.t += 0.2
+        _scorer_clock.t += 0.2
         await asyncio.sleep(0)
         return 1.0
 
@@ -185,17 +163,18 @@ class _Task(Task):
         return LMRequest(request_type=RequestType.COMPLETION, prompt=instance.question)
 
 
-def _response(outputs: int) -> Response:
+def _response(num_outputs: int) -> Response:
     return Response(
         instance=Instance(question="Q", gold_answer="A"),
         request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q"),
-        outputs=[LMOutput(text="A") for _ in range(outputs)],
+        outputs=[LMOutput(text="A") for _ in range(num_outputs)],
     )
 
 
-def test_scorers_run_as_child_tasks_count_as_compute(monkeypatch: pytest.MonkeyPatch) -> None:
-    _CLOCK.t = 0.0
-    monkeypatch.setattr("olmo_eval.common.scoring_time._now", _CLOCK)
+def test_scorers_run_as_child_tasks_count_as_compute(
+    scoring_clock: ScoringClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(f"{__name__}._scorer_clock", scoring_clock)
     task = _Task(
         TaskConfig(
             name="t",
@@ -203,19 +182,21 @@ def test_scorers_run_as_child_tasks_count_as_compute(monkeypatch: pytest.MonkeyP
             metrics=(AccuracyMetric(scorer=_SlowContextScorer),),
         )
     )
-    times = ScoringTimes()
+    totals = ScoringTimes()
 
     async def run() -> None:
-        restore = time_child_tasks()
+        uninstall = install_child_task_timing()
         try:
             # Task.score_responses gathers context scorers, one child task per output.
-            await timed_scoring(task.score_responses([_response(3)], ScoringContext()), times)
+            await measure_instance_scoring(
+                task.score_responses([_response(3)], ScoringContext()), totals
+            )
         finally:
-            restore()
+            uninstall()
         assert asyncio.get_running_loop().get_task_factory() is None
 
     asyncio.run(run())
-    assert times.compute_seconds == pytest.approx(3 * 0.2)
+    assert totals.compute == pytest.approx(3 * 0.2)
 
 
 def test_process_pool_scoring_counts_as_compute() -> None:
@@ -223,21 +204,21 @@ def test_process_pool_scoring_counts_as_compute() -> None:
     task = _Task(TaskConfig(name="t", data_source="test/dataset", metrics=(metric,)))
     manager = ProcessPoolManager({"cpu": ProcessScoringPoolConfig(workers=2)})
     context = ScoringContext(process_pool_manager=manager)
-    times = ScoringTimes()
+    totals = ScoringTimes()
     try:
-        asyncio.run(timed_scoring(task.score_responses([_response(2)], context), times))
+        asyncio.run(measure_instance_scoring(task.score_responses([_response(2)], context), totals))
     finally:
         manager.shutdown()
     # Time in the worker counts, but not its warmup; the loop's own steps add a little.
-    assert 2 * 0.05 <= times.compute_seconds < 0.4
+    assert 2 * 0.05 <= totals.compute < 0.4
 
 
 def test_child_task_timing_leaves_an_existing_task_factory_alone() -> None:
     async def run() -> None:
         loop = asyncio.get_running_loop()
         loop.set_task_factory(asyncio.eager_task_factory)
-        restore = time_child_tasks()
-        restore()
+        uninstall = install_child_task_timing()
+        uninstall()
         assert loop.get_task_factory() is asyncio.eager_task_factory
         loop.set_task_factory(None)
 

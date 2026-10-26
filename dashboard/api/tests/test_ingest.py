@@ -104,6 +104,18 @@ async def test_scoring_failures_are_stored_with_the_task_result(
     assert stored.scalar_one() == payload["scoring_failures"]
 
 
+async def _stored_scoring_seconds(session: Any, task_result_id: int) -> tuple[Any, ...]:
+    """The judge, sandbox and compute seconds stored for a task result."""
+    stored = await session.execute(
+        text(
+            "SELECT scoring_judge_seconds, scoring_sandbox_seconds, scoring_compute_seconds"
+            " FROM task_results WHERE id = :id"
+        ),
+        {"id": task_result_id},
+    )
+    return tuple(stored.one())
+
+
 async def test_scoring_seconds_are_stored_and_updated_on_reupload(
     client: httpx.AsyncClient, session: Any
 ) -> None:
@@ -115,14 +127,8 @@ async def test_scoring_seconds_are_stored_and_updated_on_reupload(
         )
         response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
         assert response.status_code == 200, response.text
-        stored = await session.execute(
-            text(
-                "SELECT scoring_judge_seconds, scoring_sandbox_seconds, scoring_compute_seconds"
-                " FROM task_results WHERE id = :id"
-            ),
-            {"id": response.json()["task_result_id"]},
-        )
-        assert tuple(stored.one()) == (judge, 0.0, 3.4)
+        stored = await _stored_scoring_seconds(session, response.json()["task_result_id"])
+        assert stored == (judge, 0.0, 3.4)
 
 
 async def test_negative_scoring_seconds_are_stored_as_null(
@@ -135,14 +141,8 @@ async def test_negative_scoring_seconds_are_stored_as_null(
     )
     response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
     assert response.status_code == 200, response.text
-    stored = await session.execute(
-        text(
-            "SELECT scoring_judge_seconds, scoring_sandbox_seconds, scoring_compute_seconds"
-            " FROM task_results WHERE id = :id"
-        ),
-        {"id": response.json()["task_result_id"]},
-    )
-    assert tuple(stored.one()) == (None, 0.0, 2.0)
+    stored = await _stored_scoring_seconds(session, response.json()["task_result_id"])
+    assert stored == (None, 0.0, 2.0)
 
 
 async def test_request_id_passthrough(client: httpx.AsyncClient) -> None:

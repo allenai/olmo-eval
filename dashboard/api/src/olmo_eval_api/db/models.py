@@ -287,8 +287,7 @@ class TaskResult(SQLModel, table=True):
     first_request_at: datetime | None = _ts(nullable=True)
     last_completed_at: datetime | None = _ts(nullable=True)
     attributed_inference_seconds: float | None = _float()
-    # Summed work done while scoring, not wall time (concurrent calls and pool work each
-    # count); null for older clients.
+    # Summed time of each scoring call and step; can exceed wall time. Null for older clients.
     scoring_judge_seconds: float | None = _float()
     scoring_sandbox_seconds: float | None = _float()
     scoring_compute_seconds: float | None = _float()

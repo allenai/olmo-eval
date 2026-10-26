@@ -69,7 +69,7 @@ class TaskTracker:
     prompt_tokens_total: int | None = 0  # None once any result's count is unknown
     completion_tokens_total: int | None = 0
     attributed_inference_seconds: float | None = 0.0
-    # Summed by the scoring loop for each instance it scores
+    # Seconds summed by the scoring loop for each instance it scores
     scoring_times: ScoringTimes = field(default_factory=ScoringTimes)
 
     def record_usage(self, result: ResultItem) -> None:

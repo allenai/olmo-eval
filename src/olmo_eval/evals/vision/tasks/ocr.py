@@ -16,7 +16,7 @@ import asyncio
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from olmo_eval.common.scoring_time import timed
+from olmo_eval.common.scoring_time import measure_scoring
 from olmo_eval.common.types import Response
 from olmo_eval.evals.vision.scoring.prompts import apply_style_prefix
 from olmo_eval.evals.vision.tasks.image_qa import ImageQATask
@@ -78,7 +78,7 @@ class OcrTask(ImageQATask):
         self._extract_answers(responses)
 
         def apply_scorers() -> None:
-            with timed("compute"):  # the thread runs in a copy of this context
+            with measure_scoring("compute"):  # the thread runs in a copy of this context
                 self._apply_scorers(responses)
 
         await asyncio.to_thread(apply_scorers)

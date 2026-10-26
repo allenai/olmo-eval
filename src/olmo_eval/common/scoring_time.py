@@ -1,25 +1,16 @@
 """Time spent in each part of scoring, summed per task.
 
-The async runner scores each instance through ``timed_scoring``, which makes the task's
-``ScoringTimes`` current for that instance, and installs ``time_child_tasks`` so that
-tasks the scorers start (``asyncio.gather``, ``create_task``) are timed too.
+The async runner scores each instance through ``measure_instance_scoring``, and calls
+``install_child_task_timing`` first so that tasks the scorers start are timed too.
 
-- Judge and sandbox call sites wrap each call in ``timed("judge")`` or
-  ``timed("sandbox")``. A call is timed from when it is made until it returns, so it
-  includes the client's own retries and connection waits, but not waits for a
-  scorer-level judge or sandbox slot.
-- Compute is the event loop's time running the instance's scoring code between awaits,
-  in every task it starts, plus scoring work run in a process pool or a thread. A pool
-  worker's start-up is left out by ``ProcessScorer.warmup``, though a library's
-  first-call costs for inputs the warmup didn't cover still count.
+- Judge and sandbox time runs from when a call is made until it returns. It includes the
+  client's own retries and excludes waits for a scorer-level judge or sandbox slot.
+- Compute time is the scoring code running on the event loop, in tasks it starts, in a
+  thread, or in the process pool. Pool worker warmup is excluded.
 
-Each piece is timed on its own and the durations are summed, so concurrent calls each
-count in full: a task's judge time can exceed the wall time its scoring took. A call
-also lasts longer while the event loop is busy with other instances' compute. The
-client-side work of a judge or sandbox call counts both in that call's time and as
-compute, and a background task a library starts while scoring an instance counts as
-that instance's compute. Calls made outside scoring, such as an agent rollout's tool
-calls in an inference worker, or an external benchmark's own judge, are not recorded.
+Each value is a sum of separately timed pieces, so it can exceed the wall time of scoring.
+Calls outside scoring are not recorded, such as agent rollouts in inference workers and
+the judges of external benchmarks.
 """
 
 from __future__ import annotations
@@ -32,64 +23,63 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Literal
 
-Component = Literal["judge", "sandbox", "compute"]
+ScoringKind = Literal["judge", "sandbox", "compute"]
 
 _now = time.perf_counter
 
 
 @dataclass
 class ScoringTimes:
-    """Summed seconds of one task's scoring, by component."""
+    """Summed seconds of one task's scoring, by kind."""
 
-    judge_seconds: float = 0.0
-    sandbox_seconds: float = 0.0
-    compute_seconds: float = 0.0
+    judge: float = 0.0
+    sandbox: float = 0.0
+    compute: float = 0.0
 
-    def add(self, component: Component, seconds: float) -> None:
-        attr = f"{component}_seconds"
-        setattr(self, attr, getattr(self, attr) + seconds)
+    def add(self, kind: ScoringKind, seconds: float) -> None:
+        setattr(self, kind, getattr(self, kind) + seconds)
 
     @contextmanager
-    def timing(self, component: Component) -> Iterator[None]:
-        """Add the block's duration to ``component``."""
+    def measure(self, kind: ScoringKind) -> Iterator[None]:
+        """Add the block's duration to ``kind``."""
         start = _now()
         try:
             yield
         finally:
-            self.add(component, _now() - start)
+            self.add(kind, _now() - start)
 
 
-_current: ContextVar[ScoringTimes | None] = ContextVar("scoring_times", default=None)
+_current_totals: ContextVar[ScoringTimes | None] = ContextVar("scoring_times", default=None)
 
 
-def add_time(component: Component, seconds: float) -> None:
-    """Add ``seconds`` to the current task's ``component`` time, if any."""
-    times = _current.get()
-    if times is not None:
-        times.add(component, seconds)
+def add_scoring_seconds(kind: ScoringKind, seconds: float) -> None:
+    """Add ``seconds`` to the current task's ``kind`` time, if any."""
+    totals = _current_totals.get()
+    if totals is not None:
+        totals.add(kind, seconds)
 
 
 @contextmanager
-def timed(component: Component) -> Iterator[None]:
-    """Add the block's duration to the current task's ``component`` time, if any."""
-    times = _current.get()
-    if times is None:
+def measure_scoring(kind: ScoringKind) -> Iterator[None]:
+    """Add the block's duration to the current task's ``kind`` time, if any."""
+    totals = _current_totals.get()
+    if totals is None:
         yield
         return
-    with times.timing(component):
+    with totals.measure(kind):
         yield
 
 
-async def timed_scoring[T](coro: Coroutine[Any, Any, T], times: ScoringTimes) -> T:
-    """Await ``coro`` with ``times`` current, adding its synchronous steps to compute time."""
-    token = _current.set(times)
+async def measure_instance_scoring[T](coro: Coroutine[Any, Any, T], totals: ScoringTimes) -> T:
+    """Await ``coro`` with ``totals`` current, adding its synchronous steps to compute time."""
+    token = _current_totals.set(totals)
     try:
-        return await _StepTimed(coro, times)
+        return await _ComputeTimedCoroutine(coro, totals)
     finally:
-        _current.reset(token)
+        _current_totals.reset(token)
 
 
-def time_child_tasks() -> Callable[[], None]:
+def install_child_task_timing() -> Callable[[], None]:
     """Step-time every task started while a task's ``ScoringTimes`` is current.
 
     Installs a task factory on the running loop and returns a function that removes it.
@@ -103,26 +93,28 @@ def time_child_tasks() -> Callable[[], None]:
 
     def factory(loop: asyncio.AbstractEventLoop, coro: Any, **kwargs: Any) -> asyncio.Task:
         context = kwargs.get("context")
-        times = context.get(_current) if context is not None else _current.get()
-        if times is not None:
-            coro = _step_timed(coro, times)
-        # Python 3.13's create_task names a factory-made task "None" when given no name.
+        totals = context.get(_current_totals) if context is not None else _current_totals.get()
+        if totals is not None:
+            coro = _time_compute(coro, totals)
+        # On Python 3.13, create_task names an unnamed factory-made task "None";
+        # nothing here can prevent that.
         return asyncio.Task(coro, loop=loop, **kwargs)
 
     loop.set_task_factory(factory)
     return lambda: loop.set_task_factory(None)
 
 
-async def _step_timed[T](coro: Coroutine[Any, Any, T], times: ScoringTimes) -> T:
-    return await _StepTimed(coro, times)
+async def _time_compute[T](coro: Coroutine[Any, Any, T], totals: ScoringTimes) -> T:
+    """Wrap `_ComputeTimedCoroutine` in a coroutine, which `asyncio.Task` requires."""
+    return await _ComputeTimedCoroutine(coro, totals)
 
 
-class _StepTimed[T]:
-    """Drives a coroutine step by step, timing each step it runs."""
+class _ComputeTimedCoroutine[T]:
+    """Drives a coroutine step by step, adding each step's duration to compute time."""
 
-    def __init__(self, coro: Coroutine[Any, Any, T], times: ScoringTimes) -> None:
+    def __init__(self, coro: Coroutine[Any, Any, T], totals: ScoringTimes) -> None:
         self._coro = coro
-        self._times = times
+        self._totals = totals
 
     def __await__(self) -> Generator[Any, Any, T]:
         value: Any = None
@@ -134,11 +126,18 @@ class _StepTimed[T]:
             except StopIteration as stop:
                 return stop.value
             finally:
-                self._times.compute_seconds += _now() - start
+                self._totals.add("compute", _now() - start)
             try:
                 value, error = (yield yielded), None
             except BaseException as exc:  # forwarded into the coroutine, e.g. cancellation
                 value, error = None, exc
 
 
-__all__ = ["ScoringTimes", "add_time", "time_child_tasks", "timed", "timed_scoring"]
+__all__ = [
+    "ScoringKind",
+    "ScoringTimes",
+    "add_scoring_seconds",
+    "install_child_task_timing",
+    "measure_instance_scoring",
+    "measure_scoring",
+]
