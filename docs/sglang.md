@@ -70,8 +70,9 @@ prefill path. Decode CUDA graphs remain enabled.
 
 The uv build configuration skips SGLang's optional Rust HTTP/gRPC servers and
 multimodal transport: this provider uses the inline Python Engine. No Rust
-compiler is needed. This extra does not qualify Rust-server modes or image
-inference. `provider.package` can replace the bundled engine extra for an
+compiler is needed. Rust-server modes are not qualified. Image requests require
+the additional model preprocessing runtime described below.
+`provider.package` can replace the bundled engine extra for an
 explicitly managed runtime; compatibility then belongs to that configuration.
 
 ### Rebuilding the base image
@@ -133,7 +134,8 @@ Numerical replay tools must save those returned fields explicitly.
 
 Only the batched generation strategy is supported. Continuation likelihood
 scoring, prompt truncation, automatic fitting of generation length to the context
-window, image requests and tool requests fail explicitly. Request-specific
+window and tool requests fail explicitly. Image requests require explicit
+multimodal enablement. Request-specific
 preparation errors and engine aborts leave the affected request unscored without
 discarding other requests in the batch. If any sample aborts, its entire logical
 request fails: pass@k never scores a reduced sample budget. All-output aborts,
@@ -175,6 +177,95 @@ with the runtime settings. Compare token IDs and logprobs on identical input
 histories: after generated tokens differ, later logprobs describe different
 conditional distributions. Repeated accuracy measurements and controlled
 numerical checks answer different questions; neither substitutes for the other.
+
+
+## Image requests
+
+Set `provider.kwargs.enable_multimodal=true` to accept `LMRequest.images`.
+For Olmo vision checkpoints, the SGLang extra also needs the pinned OLMo-core
+image preprocessing code. On Beaker, add:
+
+```bash
+-o 'provider.dependencies=["ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@8f8ae5df42de590268b87b3701679f8c21aecfcf"]'
+```
+
+This installs Core and its preprocessing dependencies alongside the pinned
+SGLang runtime; the launcher retains its CUDA/Torch constraints. Generic
+image-chat mode additionally requires a processor with a compatible
+multimodal chat template; a document-trained checkpoint alone does not establish
+chat accuracy.
+
+The provider resolves olmo-eval's lazy image references inside the inference
+worker, preserves their order, and forwards one image list per engine request.
+Repeated samples reuse the resolved images; mixed text/image batches use empty
+image slots for text requests. A declared image request that resolves to no
+images fails. Tasks and scoring code are unchanged.
+
+With the default `provider.kwargs.prompt_format=chat`, the engine's model
+processor renders structured image/text messages. Images attach to the first
+user turn, after any system turn. Image and text-only rows both use the processor
+template and encode without automatic special tokens. Following Core/Molmo2,
+BOS (or EOS if BOS is unavailable) is prepended only when missing, unless
+`add_bos_token=false` explicitly disables insertion. Put images in `LMRequest.images`,
+not embedded media objects in message content.
+
+For checkpoints trained on a plain document stream, explicitly set
+`provider.kwargs.prompt_format=document`. The model processor must implement
+`document_prompt_ids(text, num_images=...)`; the Olmo vision processor provides
+this interface. It owns the document boundary and image placeholders, while
+SGLang owns image expansion and preprocessing. Later nonempty turns are encoded
+separately with a leading space. Role labels are discarded; message **contents**
+remain in order. For `[system "SYS", user "Q"]` and one image, the token order is
+`EOS, image block, encode("SYS"), encode(" Q")`, without a chat template.
+The underlying Core rule is
+[`document_prompt_ids` / `message_ids` at `8f8ae5d`](https://github.com/allenai/OLMo-core/blob/8f8ae5df42de590268b87b3701679f8c21aecfcf/src/olmo_core/data/multimodal/document_layout.py).
+This matches the reference provider's
+[`_document_ids` at `2f383bc`](https://github.com/allenai/olmo-eval/blob/2f383bc7d26aa413a99ad2a97b7b8c7e099ddc0c/src/olmo_eval/inference/providers/olmo_core_vlm/provider.py#L476),
+the OLMo-core inference integration used in Jason's reference run. Do not set
+`add_bos_token`: the processor owns BOS/EOS.
+The provider does not infer the prompt format from the task name or inherited
+chat template.
+
+For example, with a complete Olmo vision checkpoint and the qualified model
+plugin installed:
+
+```bash
+uv run --no-sync olmo-eval run \
+  --harness default -o provider.kind=sglang \
+  -o provider.kwargs.model_registration=olmo_sglang:register \
+  -o provider.trust_remote_code=true \
+  -o provider.kwargs.enable_multimodal=true \
+  -o provider.kwargs.prompt_format=document \
+  -o provider.kwargs.tensor_parallel_size=1 \
+  -o provider.dtype=bfloat16 -o provider.max_model_len=8192 \
+  -o provider.max_concurrency=2 -o batching.chunk_size=2 \
+  -o provider.kwargs.mem_fraction_static=0.65 \
+  -o provider.kwargs.disable_cuda_graph=true \
+  -o provider.kwargs.chunked_prefill_size=256 \
+  -o provider.kwargs.attention_backend=triton \
+  -o provider.kwargs.mm_feature_transport=cpu \
+  -m /path/to/restored-vision-checkpoint \
+  -t olmocr_bench -o prompt_templates=none \
+  -o system_prompt_style=style_and_length_v2 -o limit=4 -o max_tokens=512 \
+  --no-upload
+```
+
+This is a capped integration trial, not a benchmark score. The task still owns
+its OCR style tag, dataset revision, renderer and official scoring. The provider
+owns transport and model prompt layout. Use the checkpoint/runtime's qualified
+context, memory and attention settings when launching.
+
+For multimodal runs, returned `LMOutput` metadata also includes the unexpanded
+input token IDs, resolved image count and prompt format. Request traces identify
+the selected prompt format without loading image pixels.
+The saved PixMo-Count comparison used this document layout with user-only
+requests. It does not validate system-turn behavior; that layout has separate
+contract tests. Results and run links are in the vision PR's validation section.
+Chat transport validation does not establish chat accuracy for document-trained
+weights. Qualify the model and processor together; checkpoints without a
+multimodal chat template reject chat mode. Text-only settings retain the original
+provider behavior unless multimodal mode is explicitly enabled.
+
 
 ## Named serving profiles
 

@@ -1,4 +1,4 @@
-"""Inline SGLang provider for text and chat generation."""
+"""Inline SGLang provider for text and image-conditioned generation."""
 
 from __future__ import annotations
 
@@ -7,16 +7,18 @@ import math
 import os
 import sys
 from importlib import import_module
-from typing import Any
+from typing import Any, Literal
 
 from jinja2 import TemplateError
 
+from olmo_eval.common.images import resolve_images
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.providers.sglang_profiles import prepare_profile
+from olmo_eval.inference.request_utils import chat_messages_for_request
 
 logger = get_logger(__name__)
 
@@ -82,10 +84,20 @@ class SGLangProvider(InferenceProvider):
         tensor_parallel_size: int | None = None,
         add_bos_token: bool | None = None,
         model_registration: str | None = None,
+        enable_multimodal: bool = False,
+        prompt_format: Literal["chat", "document"] = "chat",
         profile: str = "auto",
         **kwargs: Any,
     ) -> None:
         super().__init__(model_name)
+        if prompt_format not in ("chat", "document"):
+            raise ValueError("prompt_format must be 'chat' or 'document'")
+        if prompt_format == "document" and (not enable_multimodal or add_bos_token is not None):
+            raise ValueError(
+                "Document prompts require enable_multimodal and processor-owned BOS/EOS"
+            )
+        if enable_multimodal and kwargs.get("language_model_only"):
+            raise ValueError("enable_multimodal conflicts with language_model_only")
         if kwargs.get("skip_tokenizer_init"):
             raise ValueError("SGLangProvider requires tokenizer initialization for chat and stops")
         if tensor_parallel_size is not None:
@@ -121,6 +133,8 @@ class SGLangProvider(InferenceProvider):
         ):
             if value is not None:
                 options[key] = value
+        if enable_multimodal:
+            options["enable_multimodal"] = True
         self.profile_report = prepare_profile(profile, options, model_registration)
         options = {**self.profile_report["defaults"], **options}
         self.profile_report["arithmetic_environment"] = {
@@ -128,6 +142,8 @@ class SGLangProvider(InferenceProvider):
         }
         logger.info("SGLang profile: %s", self.profile_report)
         self._add_bos_token = add_bos_token
+        self.prompt_format = prompt_format
+        self.supports_images = enable_multimodal
         sglang = import_module("sglang")
         _require_original_logprobs()
         self.engine = sglang.Engine(**options)
@@ -198,10 +214,10 @@ class SGLangProvider(InferenceProvider):
         return self.engine.tokenizer_manager.tokenizer
 
     def _validate_request(self, request: LMRequest) -> None:
-        if request.images:
-            raise NotImplementedError("SGLangProvider supports text-only requests")
         if request.tools or request.request_type == RequestType.LOGLIKELIHOOD:
             raise NotImplementedError("SGLangProvider supports text and chat generation only")
+        if request.images and not self.supports_images:
+            raise NotImplementedError("Image requests require enable_multimodal=True")
         if request.request_type == RequestType.CHAT and not request.messages:
             raise ValueError("CHAT requests require messages")
 
@@ -213,7 +229,62 @@ class SGLangProvider(InferenceProvider):
             )
         return request.prompt
 
+    def _prepare_multimodal_request(self, request: LMRequest) -> tuple[list[int], list[Any] | None]:
+        """Resolve lazy images in the worker and let the model processor own their layout."""
+        images = list(resolve_images(request.images) or ())
+        if request.images and not images:
+            raise ValueError("The image request resolved to no images")
+        processor = self.engine.tokenizer_manager.processor
+        tokenizer = self.get_tokenizer()
+        messages = chat_messages_for_request(request)
+        if any(not isinstance(m.get("content", "") or "", str) for m in messages):
+            raise NotImplementedError(
+                "Supply plain text messages and attach images via LMRequest.images"
+            )
+        if self.prompt_format == "document":
+            build_ids = getattr(processor, "document_prompt_ids", None)
+            if not callable(build_ids):
+                raise NotImplementedError("The model processor must implement document_prompt_ids")
+            texts = [m.get("content", "") for m in messages if m.get("content")]
+            ids = build_ids(texts[0] if texts else "", num_images=len(images))
+            # Core's plain-document format encodes later turns separately with
+            # a leading space; joining before tokenization can change boundaries.
+            for text in texts[1:]:
+                ids.extend(tokenizer.encode(" " + text, add_special_tokens=False))
+        else:
+            if processor is None:
+                raise NotImplementedError("The engine did not load a multimodal processor")
+            chat = []
+            attached = False
+            for message in messages:
+                content = [{"type": "text", "text": message.get("content", "") or ""}]
+                if message.get("role") == "user" and not attached:
+                    content = [{"type": "image", "image": image} for image in images] + content
+                    attached = True
+                chat.append({**message, "content": content})
+            if images and not attached:
+                raise ValueError("An image chat request requires a user turn")
+            text = processor.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+            ids = tokenizer.encode(text, add_special_tokens=False)
+            # Match Core/Molmo2: the template may already contain the boundary.
+            # Use the same rule for image and text-only rows in multimodal mode.
+            if self._add_bos_token is not False:
+                bos = tokenizer.bos_token_id
+                if bos is None:
+                    bos = tokenizer.eos_token_id
+                if bos is not None and (not ids or ids[0] != bos):
+                    ids.insert(0, bos)
+        return ids, images or None
+
     def _prepare_request(self, request: LMRequest) -> tuple[dict[str, Any], dict[str, Any]]:
+        self._validate_request(request)
+        if self.supports_images:
+            ids, images = self._prepare_multimodal_request(request)
+            return {"input_ids": ids, "image_data": images}, {
+                "input_token_ids": ids,
+                "num_images": len(images or ()),
+                "prompt_format": self.prompt_format,
+            }
         prompt = self._format_prompt(request)
         if self._add_bos_token is False:
             return {"input_ids": self.get_tokenizer().encode(prompt, add_special_tokens=False)}, {}
@@ -449,7 +520,14 @@ class SGLangProvider(InferenceProvider):
             "provider": type(self).__name__,
             "mode": "generate",
             "endpoint": "engine.generate",
-            "input_mode": "input_ids" if self._add_bos_token is False else "text",
+            "input_mode": "input_ids"
+            if self.supports_images or self._add_bos_token is False
+            else "text",
+            **(
+                {"prompt_format": self.prompt_format, "images_attached": bool(request.images)}
+                if self.supports_images
+                else {}
+            ),
             "generation_kwargs": {
                 "max_gen_toks": sampling["max_new_tokens"],
                 "temperature": sampling["temperature"],
