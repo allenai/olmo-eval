@@ -27,12 +27,14 @@ Build a compatible base through the existing image workflow:
 ```
 
 Select that image with `--image` when launching. The repository's default
-CUDA 12.8 / PyTorch 2.10 image is not compatible with this SGLang pin. A normal
-launcher invocation for an exported Olmo KDA MoE Hugging Face checkpoint is:
+CUDA 12.8 / PyTorch 2.10 image is not compatible with this SGLang pin. The
+compatibility-library path below supports the older host driver on Jupiter. A
+normal launcher invocation for an exported Olmo KDA MoE Hugging Face checkpoint is:
 
 ```bash
 uv run --frozen --no-group vllm olmo-eval beaker launch \
     --image YOUR_CUDA13_TORCH213_IMAGE \
+    --env LD_LIBRARY_PATH=/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64 \
     --harness default -o provider.kind=sglang \
     -o provider.kwargs.model_registration=olmo_sglang:register \
     -o provider.kwargs.tensor_parallel_size=1 \
