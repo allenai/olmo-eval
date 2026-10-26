@@ -148,22 +148,6 @@ class ConfiguredJudgeFn(Protocol):
     ) -> Coroutine[Any, Any, str]: ...
 
 
-# Rubric-based judge prompt template
-RUBRIC_JUDGE_PROMPT_TEMPLATE = """\
-You are evaluating an AI assistant's response using the following rubric.
-
-Question: {question}
-
-Reference Answer: {gold_answer}
-
-AI Assistant's Answer: {model_answer}
-
-Rubric:
-{rubric_text}
-
-Provide your evaluation and end with a score in the format "Score: X" \
-where X is a number from 0 to {max_score}."""
-
 # SimpleQA-style judge prompt template
 SIMPLEQA_JUDGE_PROMPT_TEMPLATE = """\
 You are a judge evaluating the correctness of an AI assistant's response.
@@ -800,78 +784,6 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
         elif response.startswith("C") or "NOT_ATTEMPTED" in response or "NOT ATTEMPTED" in response:
             return "NOT_ATTEMPTED"
         return None
-
-
-@dataclass(frozen=True)
-class RubricJudgeScorer(LLMJudgeScorer):
-    """LLM judge with custom rubric and configurable score extraction.
-
-    Allows defining custom evaluation rubrics and score patterns.
-    """
-
-    name: str = "rubric_judge"
-    judge_fn: JudgeFn = field(
-        default_factory=lambda: build_openai_judge_fn(scorer_name="RubricJudgeScorer")
-    )
-    rubric: str = ""
-    score_pattern: str = r"Score:\s*(\d+(?:\.\d+)?)"
-    max_score: float = 10.0
-    default_score: float = 0.0
-
-    def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
-        """Format rubric-based judge prompt."""
-        return RUBRIC_JUDGE_PROMPT_TEMPLATE.format(
-            question=instance.question,
-            gold_answer=instance.gold_answer or "N/A",
-            model_answer=output.extracted_answer or output.text,
-            rubric_text=self.rubric or self._default_rubric(),
-            max_score=self.max_score,
-        )
-
-    def _default_rubric(self) -> str:
-        """Default rubric when none provided."""
-        return f"""Evaluate the response on a scale of 0 to {self.max_score}:
-- {self.max_score}: Perfect, completely correct and comprehensive
-- {self.max_score * 0.8}: Mostly correct with minor issues
-- {self.max_score * 0.5}: Partially correct
-- {self.max_score * 0.2}: Mostly incorrect with some relevant content
-- 0: Completely incorrect or irrelevant"""
-
-    def parse_judge_response(self, response: str) -> float:
-        """Extract score from judge response using pattern.
-
-        Args:
-            response: The judge's response.
-
-        Returns:
-            Normalized score (0.0 to 1.0).
-        """
-        match = re.search(self.score_pattern, response, re.IGNORECASE)
-        if match:
-            try:
-                raw_score = float(match.group(1))
-                # Normalize to 0-1 range
-                return min(1.0, max(0.0, raw_score / self.max_score))
-            except ValueError:
-                return self.default_score / self.max_score
-        return self.default_score / self.max_score
-
-    def get_raw_score(self, response: str) -> float:
-        """Get the raw (unnormalized) score from response.
-
-        Args:
-            response: The judge's response.
-
-        Returns:
-            Raw score value.
-        """
-        match = re.search(self.score_pattern, response, re.IGNORECASE)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                return self.default_score
-        return self.default_score
 
 
 @dataclass(frozen=True)

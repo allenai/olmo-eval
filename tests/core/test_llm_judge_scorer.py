@@ -10,7 +10,6 @@ import pytest
 
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers import (
-    RubricJudgeScorer,
     SafetyScorer,
     SimpleQAJudgeScorer,
 )
@@ -433,119 +432,6 @@ class TestSimpleQAJudgeScorer:
         assert scorer.name == "simpleqa_judge"
 
 
-class TestRubricJudgeScorer:
-    """Tests for RubricJudgeScorer."""
-
-    @pytest.mark.anyio
-    async def test_extract_score(self):
-        """Test extracting score from response."""
-
-        async def mock_judge(prompt: str) -> str:
-            return "The response is good. Score: 8"
-
-        scorer = RubricJudgeScorer(judge_fn=mock_judge, max_score=10.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.8
-
-    @pytest.mark.anyio
-    async def test_extract_decimal_score(self):
-        """Test extracting decimal score."""
-
-        async def mock_judge(prompt: str) -> str:
-            return "Score: 7.5"
-
-        scorer = RubricJudgeScorer(judge_fn=mock_judge, max_score=10.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.75
-
-    @pytest.mark.anyio
-    async def test_custom_score_pattern(self):
-        """Test custom score pattern."""
-
-        async def mock_judge(prompt: str) -> str:
-            return "Rating: 4/5"
-
-        scorer = RubricJudgeScorer(
-            judge_fn=mock_judge,
-            score_pattern=r"Rating:\s*(\d+)/5",
-            max_score=5.0,
-        )
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.8
-
-    @pytest.mark.anyio
-    async def test_no_score_found(self):
-        """Test when no score is found."""
-
-        async def mock_judge(prompt: str) -> str:
-            return "Good response with no score"
-
-        scorer = RubricJudgeScorer(judge_fn=mock_judge, default_score=5.0, max_score=10.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.5
-
-    def test_get_raw_score(self):
-        """Test getting raw score."""
-        scorer = RubricJudgeScorer(max_score=10.0)
-        raw = scorer.get_raw_score("The Score: 7 is given")
-        assert raw == 7.0
-
-    @pytest.mark.anyio
-    async def test_custom_rubric(self):
-        """Test with custom rubric."""
-        custom_rubric = "Rate 0-5 based on accuracy"
-
-        async def mock_judge(prompt: str) -> str:
-            assert custom_rubric in prompt
-            return "Score: 4"
-
-        scorer = RubricJudgeScorer(judge_fn=mock_judge, rubric=custom_rubric, max_score=5.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.8
-
-    def test_format_prompt(self):
-        """Test prompt formatting."""
-        scorer = RubricJudgeScorer(rubric="Custom rubric here")
-        instance = Instance(question="Test question", gold_answer="Expected answer")
-        output = LMOutput(text="Model response")
-
-        prompt = scorer.format_judge_prompt(instance, output)
-        assert "Test question" in prompt
-        assert "Expected answer" in prompt
-        assert "Model response" in prompt
-        assert "Custom rubric here" in prompt
-
-    def test_default_rubric_used(self):
-        """Test default rubric when none provided."""
-        scorer = RubricJudgeScorer(max_score=10.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        prompt = scorer.format_judge_prompt(instance, output)
-        assert "10" in prompt
-        assert "0" in prompt
-
-    def test_scorer_name(self):
-        """Test scorer name."""
-        scorer = RubricJudgeScorer()
-        assert scorer.name == "rubric_judge"
-
-
 class TestLLMJudgeScorerIntegration:
     """Integration tests for LLM judge scorers."""
 
@@ -578,26 +464,6 @@ class TestLLMJudgeScorerIntegration:
         assert score1 == 1.0
         assert score2 == 0.0
         assert len(responses) == 2
-
-    @pytest.mark.anyio
-    async def test_rubric_different_scales(self):
-        """Test rubric scorer with different score scales."""
-        scales = [(5.0, 4), (10.0, 8), (100.0, 80)]
-        ctx = ScoringContext()
-
-        for max_score, raw_score in scales:
-
-            async def make_judge(rs):
-                return f"Score: {rs}"
-
-            scorer = RubricJudgeScorer(
-                judge_fn=lambda p, rs=raw_score: make_judge(rs), max_score=max_score
-            )
-            instance = Instance(question="Q", gold_answer="A")
-            output = LMOutput(text="R")
-
-            score = await scorer.ascore_with_context(instance, output, ctx)
-            assert score == 0.8
 
 
 class TestJudgeSettings:

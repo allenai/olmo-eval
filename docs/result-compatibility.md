@@ -16,6 +16,46 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-10-26: One judge base: judge identity in the hash, no verdict leaves an output unscored (#PR)
+
+- **Affected**:
+  - `simpleqa:judge`.
+  - The `openai_judge`, `wg_judge` (`sr_judge` for strongreject), `*_thinking` and `base`
+    variants of `do_anything_now`, `harmbench`, `strongreject`,
+    `trustllm_jailbreaktrigger`, `wildguardtest`, `wildjailbreak` and `xstest`, and the
+    safety suites that include them.
+  - Runs that set `OLMO_EVAL_JUDGE`, or `-o judge_*` on `omniscience:judge`, `expertqa`,
+    `astabench_scholarqa` and `researchqa`.
+- **Change**:
+  - A judge reply that names no verdict is asked for again and then leaves the output
+    unscored, counted against the failure budget. Before, SimpleQA scored it as
+    incorrect and the safety judges scored it, an answer outside the allowed ones, or a
+    StrongREJECT judge with no grade logprobs, as 0.0.
+  - The safety variants drop their `parsing_error` metric, which would now always read
+    0; the run's scoring failures count these replies instead. Safety subset metrics
+    leave out unscored responses, and an empty subset reports 0.0 instead of -1.
+  - The safety variants that judge with an auxiliary provider record the model it must
+    serve as `judge_model` (`allenai/wildguard`, or the `qylu4156/strongreject-15k-v1`
+    adapter), and the runner refuses a provider that serves another model.
+  - `OLMO_EVAL_JUDGE` is applied when the task is built, to every judged task whose `-o`
+    overrides name no judge model, and takes `model[:effort[:max_tokens]]`. Before, an
+    explicit `-o judge_model` equal to a task's default lost to it, FrontierScience let
+    it override `-o`, and ExpertQA, AstaBench SQA and ResearchQA read it while scoring.
+  - `-o judge_*` on `omniscience:judge` now changes the judge that scores the run. Before,
+    the runner applied it after building the scorer, so the default judge scored while
+    the config recorded the override.
+  - Judge API calls are retried on transient failures for judge scorers and the
+    attributed-QA tasks, which made one attempt before.
+- **Identity**: the task hash changes for the 28 safety specs listed above. It does not
+  change for `simpleqa:judge`, or for any spec run with its default judge. Runs with
+  another judge on `expertqa`, `astabench_scholarqa` and `researchqa` now get their own
+  hash; before, they shared the default judge's hash.
+- **Comparability**: a `simpleqa:judge` result is affected only if its judge gave a reply
+  with no grade; leaving those out raises its accuracy. Safety results before this change
+  counted unparseable judge replies as unsafe, so a run with such replies scores higher
+  now; earlier `parsing_error` values say how many there were. An earlier
+  `omniscience:judge` run with `-o judge_*` was scored by the default judge.
+
 ## 2026-10-22: Scoring failures are left out and budgeted, not scored as zero (#492)
 
 - **Affected**: every task run by `AsyncEvalRunner` whose scoring failed for some output:
