@@ -7,6 +7,11 @@ model plugin and FLA. Beaker jobs select this extra automatically when the
 resolved provider is `sglang`, just as vLLM jobs select the `vllm` extra.
 Use separate environments for these backends; their dependency pins conflict.
 
+The root lock resolves these mutually exclusive extras separately. Compatibility
+pins in the vLLM extra and dependency group preserve its existing package versions
+instead of inheriting SGLang's newer dependencies. When upgrading vLLM, update both
+sets of pins together and check exported dependency profiles for unintended changes.
+
 ## Installation and Beaker jobs
 
 For a local Linux CUDA 13 / PyTorch 2.13 environment:
