@@ -8,6 +8,7 @@ import {
   formatP,
   formatRate,
   formatScore,
+  formatStack,
   formatStderr,
   formatStep,
   metricLabel,
@@ -60,5 +61,11 @@ describe("format", () => {
     expect(metricLabel("exact_match:flex")).toBe("exact_match (flex)");
     expect(metricLabel("acc_raw:default")).toBe("acc_raw");
     expect(metricLabel(null)).toBe("—");
+  });
+
+  it("prefers the vLLM venv's versions for the stack", () => {
+    const packages = { vllm: "0.19.0", torch: "2.9.0", transformers: "5.8.0", "vllm-venv/torch": "2.10.0" };
+    expect(formatStack(packages)).toBe("vllm 0.19.0 · torch 2.10.0 · transformers 5.8.0");
+    expect(formatStack({})).toBe("");
   });
 });
