@@ -148,7 +148,7 @@ class SGLangProvider(InferenceProvider):
         """Offer one conservative hint using resolved pools, never raw free VRAM."""
         if self._capacity_checked:
             return
-        if len(outputs) < 16:
+        if params.max_tokens is None or len(outputs) < 16:
             self._previous_batch = None
             return
         prompt_lengths = [output.metadata.get("prompt_tokens") for output in outputs]

@@ -535,3 +535,19 @@ def test_small_batch_breaks_consecutive_capacity_observations(setup_engine, capl
         provider.generate([request] * count, SamplingParams(max_tokens=100))
     engine.get_server_info.assert_not_called()
     assert "Consider increasing concurrency" not in caplog.text
+
+
+def test_uncapped_generation_abstains_from_capacity_estimate(setup_engine, caplog):
+    engine, _, _ = setup_engine
+    engine.get_server_info.return_value = capacity_info()
+    provider = SGLangProvider("model")
+    requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
+    # Include a bounded call first to ensure an uncapped call resets history.
+    provider.generate(requests, SamplingParams(max_tokens=100))
+    for _ in range(2):
+        outputs = provider.generate(requests, SamplingParams(max_tokens=None))
+        assert len(outputs) == 64
+        assert engine.generate.call_args.kwargs["sampling_params"]["max_new_tokens"] is None
+    provider.generate(requests, SamplingParams(max_tokens=100))
+    engine.get_server_info.assert_not_called()
+    assert "Consider increasing concurrency" not in caplog.text
