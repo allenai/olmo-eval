@@ -62,6 +62,11 @@ For this KDA plugin pin, keep `cuda_graph_backend_prefill=disabled`: the
 upstream default prefill graph backend pads tensors incompatibly with the KDA
 prefill path. Decode CUDA graphs remain enabled.
 
+This image and extra passed an [H100 installation and inference check](
+https://beaker.org/ex/01M5VCVKAX69WBDS7AQWGB93A5): eight GSM8K requests,
+256-token cap, eight saved generations with finite logprob summaries and zero
+failed requests. This bounded check qualifies the setup, not model accuracy.
+
 The uv build configuration skips SGLang's optional Rust HTTP/gRPC servers and
 multimodal transport: this provider uses the inline Python Engine. No Rust
 compiler is needed. This extra does not qualify Rust-server modes or image
