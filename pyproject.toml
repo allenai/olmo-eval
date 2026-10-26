@@ -46,6 +46,7 @@ dependencies = [
     # ruler_loader uses huggingface_hub.utils.silent_tqdm, added in 1.10.0. Without a
     # floor, an unlocked resolve can drop to transformers 4.x and hub 0.x.
     "huggingface-hub>=1.10.0",
+    "sacrebleu>=2.6.0",
 ]
 
 [project.urls]
