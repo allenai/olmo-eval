@@ -9,11 +9,15 @@ tasks the scorers start (``asyncio.gather``, ``create_task``) are timed too.
   includes the client's own retries and connection waits, but not waits for a
   scorer-level judge or sandbox slot.
 - Compute is the event loop's time running the instance's scoring code between awaits,
-  in every task it starts, plus scoring work run in a process pool or a thread.
+  in every task it starts, plus scoring work run in a process pool (not counting each
+  worker's start-up) or a thread.
 
 Each piece is timed on its own and the durations are summed, so concurrent calls each
 count in full: a task's judge time can exceed the wall time its scoring took. A call
-also lasts longer while the event loop is busy with other instances' compute. Calls
+also lasts longer while the event loop is busy with other instances' compute. The
+client-side work of a judge or sandbox call counts both in that call's time and as
+compute, and a background task a library starts while scoring an instance counts as
+that instance's compute. Calls
 made outside scoring, such as an agent rollout's tool calls in an inference worker, or
 an external benchmark's own judge, are not recorded.
 """
@@ -88,23 +92,25 @@ async def timed_scoring[T](coro: Coroutine[Any, Any, T], times: ScoringTimes) ->
 def time_child_tasks() -> Callable[[], None]:
     """Step-time every task started while a task's ``ScoringTimes`` is current.
 
-    Installs a task factory on the running loop and returns a function that restores
-    the previous one. Steps of different tasks never overlap, so none is counted twice.
+    Installs a task factory on the running loop and returns a function that removes it.
+    Steps of different tasks never overlap, so none is counted twice. A loop that already
+    has a task factory, which might run a child's first step inside its parent's, is left
+    alone, and child tasks then go untimed.
     """
     loop = asyncio.get_running_loop()
-    previous = loop.get_task_factory()
+    if loop.get_task_factory() is not None:
+        return lambda: None
 
     def factory(loop: asyncio.AbstractEventLoop, coro: Any, **kwargs: Any) -> asyncio.Task:
         context = kwargs.get("context")
         times = context.get(_current) if context is not None else _current.get()
         if times is not None:
             coro = _step_timed(coro, times)
-        if previous is not None:
-            return previous(loop, coro, **kwargs)  # ty: ignore[invalid-return-type]
+        # Python 3.13's create_task names a factory-made task "None" when given no name.
         return asyncio.Task(coro, loop=loop, **kwargs)
 
     loop.set_task_factory(factory)
-    return lambda: loop.set_task_factory(previous)
+    return lambda: loop.set_task_factory(None)
 
 
 async def _step_timed[T](coro: Coroutine[Any, Any, T], times: ScoringTimes) -> T:

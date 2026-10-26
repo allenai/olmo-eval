@@ -156,6 +156,7 @@ def _get_cached_process_scorer(spec: SerializedProcessScorer) -> ProcessScorer:
     scorer = scorer_cls(**spec.params)
     if not isinstance(scorer, ProcessScorer):
         raise TypeError(f"{spec.module}.{spec.qualname} did not reconstruct as a ProcessScorer")
+    scorer.warmup()  # keeps the worker's start-up out of the first output's time
     _SCORER_CACHE[cache_key] = scorer
     return scorer
 

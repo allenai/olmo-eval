@@ -613,8 +613,9 @@ def test_task_spans_fall_within_processing(monkeypatch: pytest.MonkeyPatch) -> N
 class _ScoredTask(_LLTask):
     """Scores each instance with ``cpu_s`` of loop work and a ``judge_s`` judge call.
 
-    Time is a fake clock. The judge call's time passes in another task, as a remote
-    call's would, and metric computation adds ``metrics_s``.
+    Time is a fake clock. Half the loop work runs in a gathered child task, as
+    Task.score_responses runs its async scorers. The judge call's time passes in
+    another task, as a remote call's would, and metric computation adds ``metrics_s``.
     """
 
     def __init__(self, now: _FakeTime, cpu_s: float = 0.0, judge_s: float = 0.0, **kwargs):
@@ -625,7 +626,12 @@ class _ScoredTask(_LLTask):
     async def score_responses(
         self, responses: Sequence[Response], context: ScoringContext | None = None
     ) -> Sequence[Response]:
-        self.now.t += self.cpu_s
+        self.now.t += self.cpu_s / 2
+
+        async def scorer() -> None:
+            self.now.t += self.cpu_s / 2
+
+        await asyncio.gather(scorer())
         if self.judge_s:
             with timed("judge"):
                 done = asyncio.get_running_loop().create_future()
@@ -665,8 +671,8 @@ def test_each_task_gets_its_own_judge_and_compute_time(monkeypatch: pytest.Monke
         for spec in tasks:
             result_queue.put(_result(idx, [LMOutput("A", metadata=_ll(1, 10))], task_id=spec))
 
-    results = asyncio.run(
-        process_results(
+    async def run() -> dict[str, TaskResult]:
+        results = await process_results(
             trackers=trackers,
             result_queue=result_queue,  # type: ignore[arg-type]
             workers=[],
@@ -680,7 +686,10 @@ def test_each_task_gets_its_own_judge_and_compute_time(monkeypatch: pytest.Monke
             save_requests=False,
             write_requests_fn=None,
         )
-    )
+        assert asyncio.get_running_loop().get_task_factory() is None
+        return results
+
+    results = asyncio.run(run())
 
     # The rule-based task's loop work is its own, though judge calls were in flight.
     rules, judged = results["rules"], results["judged"]

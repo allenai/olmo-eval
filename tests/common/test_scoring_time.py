@@ -164,9 +164,12 @@ class _SlowContextScorer(ContextScorer):
 
 @dataclass(frozen=True, slots=True)
 class _SleepingProcessScorer(ProcessScorer):
-    """A process scorer that takes 0.05 s of real time per output."""
+    """A process scorer that takes 0.05 s of real time per output, after a 0.5 s warmup."""
 
     name: str = "sleeping_process"
+
+    def warmup(self) -> None:
+        time.sleep(0.5)
 
     def process_score(self, instance: Instance, output: LMOutput) -> float:
         time.sleep(0.05)
@@ -225,5 +228,17 @@ def test_process_pool_scoring_counts_as_compute() -> None:
         asyncio.run(timed_scoring(task.score_responses([_response(2)], context), times))
     finally:
         manager.shutdown()
-    # Time in the worker counts; the scoring loop's own steps add a little more.
-    assert times.compute_seconds >= 2 * 0.05
+    # Time in the worker counts, but not its warmup; the loop's own steps add a little.
+    assert 2 * 0.05 <= times.compute_seconds < 0.4
+
+
+def test_child_task_timing_leaves_an_existing_task_factory_alone() -> None:
+    async def run() -> None:
+        loop = asyncio.get_running_loop()
+        loop.set_task_factory(asyncio.eager_task_factory)
+        restore = time_child_tasks()
+        restore()
+        assert loop.get_task_factory() is asyncio.eager_task_factory
+        loop.set_task_factory(None)
+
+    asyncio.run(run())
