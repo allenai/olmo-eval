@@ -49,6 +49,12 @@ def pytest_addoption(parser):
         default=False,
         help="Skip Docker-based integration tests",
     )
+    parser.addoption(
+        "--update-task-hashes",
+        action="store_true",
+        default=False,
+        help="Rewrite tests/evals/tasks/task_hashes.json from the current task configs",
+    )
 
 
 def pytest_configure(config):
