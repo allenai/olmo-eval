@@ -34,9 +34,10 @@ from olmo_eval.common.scorers import ScoringIncompleteError
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.execution import format_scoring_error
 from olmo_eval.common.scorers.llm_judge import (
-    JudgeFn,
-    build_openai_judge_fn,
-    judge_with_retries,
+    JUDGE_ATTEMPTS,
+    Judge,
+    JudgeParseError,
+    JudgeSettings,
     parse_judge_spec,
 )
 from olmo_eval.common.types import Instance, LMOutput, Response
@@ -51,8 +52,6 @@ V = TypeVar("V")
 #: for scores in their own units.
 DisplayFormat = Literal["percentage", "raw"]
 
-#: Judge calls per output before an unparseable reply is given up on.
-JUDGE_ATTEMPTS = 3
 #: Judge concurrency when the scoring context does not set one.
 DEFAULT_JUDGE_CONCURRENCY = 16
 
@@ -61,10 +60,6 @@ _THINK_CLOSE = "</think>"
 
 #: Where the run-wide judge limiter is kept on the scoring context.
 _JUDGE_SEMAPHORE_ATTR = "_judged_task_semaphore"
-
-
-class JudgeParseError(ScoringIncompleteError):
-    """The judge gave no parseable verdict after every attempt."""
 
 
 def visible_response(text: str) -> str:
@@ -247,7 +242,7 @@ class JudgedTask(Task):
         self._judge_limiter: asyncio.Semaphore | None = None
 
     @abstractmethod
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn: JudgeFn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge: Judge) -> float:
         """Judge one output, record its judge details, and return its score.
 
         Implementations record their result with :meth:`_record_judgement` and call
@@ -264,21 +259,24 @@ class JudgedTask(Task):
         answer = output.extracted_answer
         return answer if isinstance(answer, str) else visible_response(output.text)
 
-    def _get_judge_fn(self) -> JudgeFn:
+    def _get_judge(self) -> Judge:
         """Return this task's judge, built once so its request-shape cache persists."""
-        judge_fn = getattr(self, "_judge_fn", None)
-        if judge_fn is None:
+        judge = getattr(self, "_judge_instance", None)
+        if judge is None:
             if self.config.judge_model is None or self.config.judge_max_tokens is None:
                 raise ValueError(f"{type(self).__name__} requires a complete judge configuration")
-            judge_fn = build_openai_judge_fn(
+            settings = JudgeSettings(
                 model=self.config.judge_model,
-                scorer_name=type(self).__name__,
                 max_tokens=self.config.judge_max_tokens,
-                temperature=0.0,
                 reasoning_effort=self.config.judge_reasoning_effort,
             )
-            self._judge_fn = judge_fn
-        return judge_fn
+            judge = Judge(
+                call=settings.build_fn(type(self).__name__),
+                label=f"{self.config.name} judge",
+                attempts=JUDGE_ATTEMPTS,
+            )
+            self._judge_instance = judge
+        return judge
 
     def _get_judge_semaphore(self, context: Any) -> asyncio.Semaphore:
         """Return the judge limiter, shared by every judged task in the run when possible.
@@ -294,31 +292,10 @@ class JudgedTask(Task):
             setattr(owner, _JUDGE_SEMAPHORE_ATTR, semaphore)
         return semaphore
 
-    async def _judge(
-        self,
-        judge_fn: JudgeFn,
-        prompt: str,
-        parse: Callable[[str], V | None],
-        system_prompt: str | None = None,
-    ) -> tuple[V | None, str]:
-        """Call the judge, retrying API failures and unparseable replies.
-
-        Returns the parsed verdict, or None if no attempt parsed, with the last raw reply.
-        """
-        return await judge_with_retries(
-            judge_fn,
-            prompt,
-            parse,
-            limiter=self._judge_limiter or self._get_judge_semaphore(None),
-            system_prompt=system_prompt,
-            attempts=JUDGE_ATTEMPTS,
-            context=f"{self.config.name} judge",
-        )
-
     async def _judge_output(
         self,
         output: LMOutput,
-        judge_fn: JudgeFn,
+        judge: Judge,
         prompt: str,
         parse: Callable[[str], V | None],
         judge_result: dict[str, Any],
@@ -332,12 +309,19 @@ class JudgedTask(Task):
         :class:`JudgeParseError`, after recording ``judge_result`` on the output, when
         no attempt gives a parseable verdict.
         """
-        verdict, raw = await self._judge(judge_fn, prompt, parse, system_prompt)
-        judge_result[raw_key] = raw
-        if verdict is None:
+        try:
+            verdict, raw = await judge.ask(
+                prompt,
+                parse,
+                limiter=self._judge_limiter or self._get_judge_semaphore(None),
+                system_prompt=system_prompt,
+            )
+        except JudgeParseError as exc:
+            judge_result[raw_key] = exc.raw
             judge_result["parse_error"] = True
             output.metadata["judge_result"] = judge_result
-            raise JudgeParseError(f"no parseable verdict after {JUDGE_ATTEMPTS} judge attempts")
+            raise
+        judge_result[raw_key] = raw
         return verdict
 
     @staticmethod
@@ -414,7 +398,7 @@ class JudgedTask(Task):
     ) -> Sequence[Response]:
         """Judge every output concurrently, then aggregate each instance over its samples."""
         self._extract_answers(responses)
-        judge_fn = self._get_judge_fn()
+        judge = self._get_judge()
         self._judge_limiter = self._get_judge_semaphore(context)
         self._warn_about_missing_responses(responses)
 
@@ -427,7 +411,7 @@ class JudgedTask(Task):
         async def run(response_index: int, output_index: int) -> float:
             response = responses[response_index]
             try:
-                return await self._score_output(response, response.outputs[output_index], judge_fn)
+                return await self._score_output(response, response.outputs[output_index], judge)
             except ScoringIncompleteError:
                 raise
             except Exception as exc:

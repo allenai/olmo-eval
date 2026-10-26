@@ -28,7 +28,7 @@ from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import Metric, SafetyErrorMetric
 from olmo_eval.common.scorers import Scorer
-from olmo_eval.common.scorers.llm_judge import JudgeFn, LLMJudgeScorer, build_openai_judge_fn
+from olmo_eval.common.scorers.llm_judge import JudgeFn, JudgeSettings, LLMJudgeScorer
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SAMPLING = SamplingParams(max_tokens=None, temperature=0.6, top_p=0.95)
 SINGLE_SAMPLE_ERROR = "Omniscience grades a single answer per question; num_samples must be 1."
+#: The judge used when the task config sets no judge field.
+OMNISCIENCE_JUDGE = JudgeSettings(model="gpt-4o-mini", max_tokens=10)
 SYSTEM_PROMPT = """\
 You are answering questions about {topic}, and in particular {category}. \
 You will be given a question, answer with JUST the answer (no explanation). \
@@ -232,7 +234,7 @@ class OmniscienceScorer(LLMJudgeScorer):
 
     name: str = "omniscience_judge"
     judge_fn: JudgeFn = field(
-        default_factory=lambda: build_openai_judge_fn(scorer_name="OmniscienceScorer")
+        default_factory=lambda: OMNISCIENCE_JUDGE.build_fn("OmniscienceScorer")
     )
 
     def final_answer(self, output: LMOutput) -> str | None:
@@ -466,18 +468,16 @@ class Omniscience(Task):
 
         Settings left unset keep the default judge's values.
         """
-        judge_settings: dict[str, Any] = {
-            name: value
-            for name, value in (
-                ("model", config.judge_model),
-                ("reasoning_effort", config.judge_reasoning_effort),
-                ("max_tokens", config.judge_max_tokens),
+        if any(
+            value is not None
+            for value in (
+                config.judge_model,
+                config.judge_reasoning_effort,
+                config.judge_max_tokens,
             )
-            if value is not None
-        }
-        if judge_settings:
+        ):
             judge = OmniscienceScorer(
-                judge_fn=build_openai_judge_fn(scorer_name="OmniscienceScorer", **judge_settings)
+                judge_fn=OMNISCIENCE_JUDGE.with_config(config).build_fn("OmniscienceScorer")
             )
             primary = config.primary_metric
             if isinstance(primary, Metric):

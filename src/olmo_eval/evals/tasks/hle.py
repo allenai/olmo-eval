@@ -92,7 +92,7 @@ from typing import Any
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.scorers.llm_judge import JudgeFn
+from olmo_eval.common.scorers.llm_judge import Judge
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -379,7 +379,7 @@ class _HLE(JudgedTask):
             ),
         )
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn: JudgeFn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge: Judge) -> float:
         """Judge one output; an unfinished response scores wrong without the judge."""
         answer = self._judged_answer(output)
         truncated = is_truncated(output)
@@ -396,7 +396,7 @@ class _HLE(JudgedTask):
                 correct_answer=response.instance.gold_answer or "",
             )
             verdict = await self._judge_output(
-                output, judge_fn, prompt, parse_judge_reply, judge_result
+                output, judge, prompt, parse_judge_reply, judge_result
             )
 
         judge_result.update(

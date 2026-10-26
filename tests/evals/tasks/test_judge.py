@@ -51,11 +51,11 @@ class _PassFailTask(JudgedTask):
     def format_request(self, instance: Instance) -> LMRequest:
         return LMRequest(request_type=RequestType.CHAT, messages=())
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge) -> float:
         judge_result: dict[str, Any] = {"scorer": self.judge_scorer_name}
         verdict = await self._judge_output(
             output,
-            judge_fn,
+            judge,
             self._judged_answer(output),
             lambda raw: raw if raw in {"PASS", "FAIL"} else None,
             judge_result,
@@ -76,13 +76,13 @@ class _RatingTask(_PassFailTask):
     judge_extra_score_keys = ("forward", "reversed")
     unanswered_score = 1.0
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge) -> float:
         judge_result: dict[str, Any] = {}
         ratings = await self._judge_together(
             *(
                 self._judge_output(
                     output,
-                    judge_fn,
+                    judge,
                     f"{self._judged_answer(output)} ({order})",
                     lambda raw: float(raw) if raw.isdigit() else None,
                     judge_result,
@@ -219,10 +219,10 @@ class TestJudgeConfiguration:
             built.append(kwargs)
             return object()
 
-        monkeypatch.setattr(judge_module, "build_openai_judge_fn", builder)
+        monkeypatch.setattr(llm_judge, "build_openai_judge_fn", builder)
         task = _PassFailTask(_config(judge_reasoning_effort="low"))
 
-        assert task._get_judge_fn() is task._get_judge_fn()
+        assert task._get_judge() is task._get_judge()
         assert len(built) == 1
         assert built[0]["model"] == DEFAULT_JUDGE
         assert built[0]["max_tokens"] == 64
@@ -233,7 +233,7 @@ class TestJudgeConfiguration:
         task = _PassFailTask(_config(judge_max_tokens=None))
 
         with pytest.raises(ValueError, match="complete judge configuration"):
-            task._get_judge_fn()
+            task._get_judge()
 
     def test_judge_limiter_is_shared_through_the_scoring_context(self):
         context = types.SimpleNamespace(scoring_concurrency=2)

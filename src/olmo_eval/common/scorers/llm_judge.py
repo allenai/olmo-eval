@@ -10,7 +10,7 @@ import math
 import re
 from abc import abstractmethod
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from olmo_eval.common.execution import ScoringContext
@@ -18,7 +18,7 @@ from olmo_eval.common.openai_credentials import (
     create_async_openai_client,
     require_openai_credentials,
 )
-from olmo_eval.common.scorers.execution import ContextScorer
+from olmo_eval.common.scorers.execution import ContextScorer, ScoringIncompleteError
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.retry import retry_with_backoff
 
@@ -326,6 +326,114 @@ def build_openai_judge_fn(
     if response_format is not None:
         configured.judge_config["response_format"] = response_format
     return configured
+
+
+#: Judge calls per prompt before an unparseable reply is given up on.
+JUDGE_ATTEMPTS = 3
+
+
+class JudgeParseError(ScoringIncompleteError):
+    """The judge gave no parseable verdict after every attempt.
+
+    ``raw`` is the last reply, kept so the failure can be audited.
+    """
+
+    def __init__(self, message: str, raw: str = "") -> None:
+        super().__init__(message)
+        self.raw = raw
+
+
+@dataclass(frozen=True)
+class JudgeSettings:
+    """The settings that change what an OpenAI-compatible judge replies.
+
+    A task keeps these in its configuration so they reach the task hash.
+    """
+
+    model: str
+    max_tokens: int
+    reasoning_effort: str | None = None
+    temperature: float = 0.0
+    response_format: dict[str, Any] | None = None
+
+    def with_config(self, config: Any) -> "JudgeSettings":
+        """Return these settings with the judge fields a task config sets.
+
+        ``config`` is a ``TaskConfig``; its ``judge_model``, ``judge_reasoning_effort``
+        and ``judge_max_tokens`` replace the matching setting when they are not None.
+        """
+        overrides = {
+            name: value
+            for name, value in (
+                ("model", config.judge_model),
+                ("reasoning_effort", config.judge_reasoning_effort),
+                ("max_tokens", config.judge_max_tokens),
+            )
+            if value is not None
+        }
+        return replace(self, **overrides)
+
+    def build_fn(self, scorer_name: str) -> ConfiguredJudgeFn:
+        """Build the OpenAI-compatible judge function these settings describe."""
+        return build_openai_judge_fn(
+            model=self.model,
+            scorer_name=scorer_name,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            reasoning_effort=self.reasoning_effort,
+            response_format=self.response_format,
+        )
+
+
+@dataclass(frozen=True)
+class Judge:
+    """A judge function and how to ask it for a verdict.
+
+    :meth:`ask` retries failed calls with backoff, asks again when a reply does not
+    parse, and raises :class:`JudgeParseError` when no attempt parses.
+    """
+
+    call: JudgeFn
+    label: str = "judge"
+    attempts: int = JUDGE_ATTEMPTS
+    max_retries: int = 3
+    retry_delay: float = 1.0
+
+    @classmethod
+    def from_settings(cls, settings: JudgeSettings, name: str) -> "Judge":
+        """Build an OpenAI-compatible judge; ``name`` labels its errors and logs."""
+        return cls(call=settings.build_fn(name), label=f"{name} judge")
+
+    async def ask[V](
+        self,
+        prompt: JudgeContent,
+        parse: Callable[[str], V | None],
+        *,
+        limiter: asyncio.Semaphore,
+        system_prompt: str | None = None,
+    ) -> tuple[V, str]:
+        """Return the parsed verdict for ``prompt`` and the reply it came from.
+
+        Raises:
+            JudgeParseError: No attempt gave a reply that parses.
+            Exception: The last error of a call that failed on every retry.
+        """
+        verdict, raw = await judge_with_retries(
+            self.call,
+            prompt,
+            parse,
+            limiter=limiter,
+            system_prompt=system_prompt,
+            attempts=self.attempts,
+            max_retries=self.max_retries,
+            retry_delay=self.retry_delay,
+            context=self.label,
+        )
+        if verdict is None:
+            raise JudgeParseError(
+                f"no parseable verdict after {self.attempts} judge attempts", raw=raw
+            )
+        return verdict, raw
 
 
 # Default judge for attributed-QA scoring (citation / precision / rubric).

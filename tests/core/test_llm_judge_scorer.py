@@ -13,7 +13,13 @@ from olmo_eval.common.scorers import (
     RubricJudgeScorer,
     SimpleQAJudgeScorer,
 )
-from olmo_eval.common.scorers.llm_judge import ConfiguredJudgeFn, build_openai_judge_fn
+from olmo_eval.common.scorers.llm_judge import (
+    ConfiguredJudgeFn,
+    Judge,
+    JudgeParseError,
+    JudgeSettings,
+    build_openai_judge_fn,
+)
 from olmo_eval.common.types import Instance, LMOutput
 
 _MAX_TOKENS_REJECTION = (
@@ -550,3 +556,60 @@ class TestLLMJudgeScorerIntegration:
 
             score = await scorer.ascore_with_context(instance, output, ctx)
             assert score == 0.8
+
+
+class TestJudgeSettings:
+    def test_a_config_replaces_only_the_judge_fields_it_sets(self):
+        default = JudgeSettings(model="judge-a", max_tokens=10, reasoning_effort="low")
+        config = types.SimpleNamespace(
+            judge_model="judge-b", judge_reasoning_effort=None, judge_max_tokens=None
+        )
+
+        assert default.with_config(config) == JudgeSettings(
+            model="judge-b", max_tokens=10, reasoning_effort="low"
+        )
+
+    def test_builds_a_judge_that_records_its_settings(self):
+        settings = JudgeSettings(model="judge-a", max_tokens=64, reasoning_effort="high")
+
+        assert settings.build_fn("Scorer").judge_config == {
+            "model": "judge-a",
+            "max_tokens": 64,
+            "temperature": 0.0,
+            "reasoning_effort": "high",
+        }
+
+
+class TestJudge:
+    @pytest.mark.anyio
+    async def test_returns_the_verdict_and_the_reply_it_came_from(self):
+        async def call(prompt, *, system_prompt=None):
+            return f"{system_prompt}: {prompt}"
+
+        judge = Judge(call=call)
+
+        verdict, raw = await judge.ask(
+            "grade", str.upper, limiter=asyncio.Semaphore(1), system_prompt="strict"
+        )
+
+        assert (verdict, raw) == ("STRICT: GRADE", "strict: grade")
+
+    @pytest.mark.anyio
+    async def test_raises_with_the_last_reply_when_nothing_parses(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        replies = iter(["first", "last"])
+
+        async def call(prompt, *, system_prompt=None):
+            return next(replies)
+
+        judge = Judge(call=call, attempts=2)
+
+        with pytest.raises(JudgeParseError, match="after 2 judge attempts") as raised:
+            await judge.ask("grade", lambda _: None, limiter=asyncio.Semaphore(1))
+
+        assert raised.value.raw == "last"

@@ -75,7 +75,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.scorers.llm_judge import JudgeFn
+from olmo_eval.common.scorers.llm_judge import Judge
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -244,7 +244,7 @@ class MultiChallenge(JudgedTask):
             messages=tuple(instance.metadata["messages"]),
         )
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn: JudgeFn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge: Judge) -> float:
         """Judge one output; an unfinished response fails without the judge."""
         answer = self._judged_answer(output)
         truncated = is_truncated(output)
@@ -261,9 +261,7 @@ class MultiChallenge(JudgedTask):
             prompt = MULTICHALLENGE_JUDGE_PROMPT.format(
                 response=answer, criteria=response.instance.question
             )
-            verdict = await self._judge_output(
-                output, judge_fn, prompt, parse_verdict, judge_result
-            )
+            verdict = await self._judge_output(output, judge, prompt, parse_verdict, judge_result)
             judge_result["verdict"] = verdict
             passed = verdict == pass_criteria
 
