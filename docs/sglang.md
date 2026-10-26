@@ -49,7 +49,7 @@ For a small generation trial in an environment where compatible SGLang and
 olmo-eval are already installed:
 
 ```bash
-SGLANG_RETURN_ORIGINAL_LOGPROB=1 uv run --no-sync olmo-eval run \
+uv run --no-sync olmo-eval run \
     --harness default -o provider.kind=sglang \
     -o provider.kwargs.tensor_parallel_size=1 \
     -m /path/to/model -t gsm8k -o limit=5 --no-upload
@@ -95,9 +95,10 @@ after your existing --harness argument.
 
 The estimate uses the longest observed expanded prompt in the two calls plus the
 full requested output cap, including repeated samples. Calls reporting request
-retractions do not trigger the hint. Uncapped generation (`max_tokens=None`), missing/unsupported telemetry and multiple
-data-parallel workers suppress it. It does not infer capacity from free VRAM or
-from the requested concurrency limit alone, and it does not change any settings.
+retractions do not trigger the hint. Uncapped generation (`max_tokens=None`),
+missing/unsupported telemetry and multiple data-parallel workers suppress it.
+It does not infer capacity from free VRAM or from the requested concurrency limit
+alone, and it does not change any settings.
 This is advice to benchmark a larger batch, not an automatic throughput tuner or
 a guarantee that transient allocations (including image processing) will fit.
 If the engine limit itself is the bottleneck, this diagnostic makes no memory
