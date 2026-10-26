@@ -185,7 +185,7 @@ Select it with `-o provider.kwargs.profile=olmo3.5-12.5b` after your
 | --- | --- |
 | `auto` (default) | Discover a registered profile; otherwise use generic defaults and log the reason. |
 | `olmo3.5-12.5b` | Require the registered shape and supported runtime/hardware; fail before engine construction if qualification or metadata checks fail. |
-| `generic` | Skip profile selection and hardware probing; use engine defaults plus explicit options. |
+| `generic` | Manual configuration: skip profiles and hardware probing; use engine defaults plus explicit options. |
 
 Automatic and named selection use the same settings. The provider reads checkpoint
 geometry and the assigned GPU's name and memory before constructing the engine.
@@ -207,9 +207,7 @@ profile and fallback reason.
 | Hardware / cache choice | Running sequences | KV token pool | Recurrent slots | Memory fraction |
 | --- | ---: | ---: | ---: | ---: |
 | B300 288 GB, cache on (default) | 512 | 17,825,792 | 3,072 | 0.7 |
-| B300, explicit cache off | 512 | 17,825,792 | 1,024 | 0.7 |
 | H100 80 GB, cache off (default) | 512 | 6,684,672 | 512 | 0.9 |
-| H100, explicit cache on | 320 | 4,456,448 | 1,920 | 0.9 |
 | A100 80 GB, cache off | 512 | 6,684,672 | 512 | 0.9 |
 
 The H100/B300 configurations come from the RL study; A100 comes from a bounded
@@ -221,14 +219,21 @@ and FlashInfer sampling. H100's KV pool cannot hold all admitted requests at the
 maximum context simultaneously; actual lengths and prefix reuse determine
 occupancy. The engine may reduce admission further.
 
-Explicit engine settings always win. For example, `provider.max_concurrency=128`
-reduces default pool and graph sizing to that admission; explicit pool or graph
-settings remain unchanged. Use `provider.kwargs.disable_radix_cache=false` to
-request caching, or `provider.kwargs.profile=generic` to opt out of all profile
-defaults. In `auto`, unknown GPUs (including A100 40 GB), A100 prefix caching, model shapes, vision,
-tensor parallelism, quantization, larger contexts and occupied GPUs retain
-engine defaults with a logged fallback reason. No context limit or task sampling
-setting is silently changed.
+Profiles own the settings they supply. For both `auto` and a named profile,
+an explicit matching value is accepted; a conflicting value raises an error
+listing the setting and the profile's required value. For example,
+`provider.max_concurrency=128` conflicts with the profile's 512, and
+`provider.kwargs.disable_cuda_graph=true` conflicts with its full decode graphs.
+Graph aliases and structured `cuda_graph_config` values are checked too.
+Settings outside the profile, such as the random seed, remain configurable.
+
+To tune settings manually, select `-o provider.kwargs.profile=generic` before
+adding your desired engine options. This disables all profile defaults; it does
+not retain the profile's pool sizes or graph settings. The generic engine then
+chooses defaults for anything you leave unspecified. In `auto`, unsupported
+model shapes, vision, tensor parallelism, quantization, contexts and hardware
+retain engine defaults with a logged fallback reason. No context limit or task
+sampling setting is silently changed.
 
 To qualify another shape, add its exact configuration contract to
 `inference/model_profiles.py` and register its measured resolver and required
@@ -249,6 +254,17 @@ workers return their selected profile, effective engine settings and installed
 engine/plugin revisions to the runner. These are stored in
 `provider.resolved_runtime` and participate in the final model hash and uploaded
 configuration. Available memory and device ordinals do not affect the hash.
+`provider.resolved_runtime.arithmetic_environment` records an allowlist of the
+Olmo plugin's startup switches: Core compatibility, rounding kernels, full and
+tail routing, router input, shared-add norm, KDA/gate/MoE projection packing and
+sampling. These values also participate in model identity, so enabling fused
+routing cannot silently share an identity with the tensor implementation.
+Values are captured before engine construction; JSON `null` means unset and
+the recorded plugin revision defines the default. This is the inherited
+configuration, not proof of which conditional kernel executed in every layer.
+The snapshot neither changes the environment nor replays it automatically;
+restore the desired environment before relaunching. Unrelated environment
+variables and secrets are not captured.
 Replicas with different resolved profiles/settings or batch sizes fail before
 evaluation; use homogeneous GPUs or evaluate those configurations separately.
 The saved harness batching configuration contains the resolved integer size

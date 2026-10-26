@@ -23,7 +23,9 @@ def requested(kind="sglang"):
     )
 
 
-def resolved(profile="olmo3.5-12.5b-sglang-h100-v1", cache=False, free=81000, commit="abc"):
+def resolved(
+    profile="olmo3.5-12.5b-sglang-h100-v1", cache=False, free=81000, commit="abc", routing="torch"
+):
     return resolved_worker_config(
         requested(),
         BatchConfig(chunk_size=512),
@@ -31,6 +33,7 @@ def resolved(profile="olmo3.5-12.5b-sglang-h100-v1", cache=False, free=81000, co
             "selected": profile,
             "effective_options": {"attention_backend": "triton", "disable_radix_cache": not cache},
             "devices": [["H100", 81559, free]],
+            "arithmetic_environment": {"OLMO_SGLANG_ROUTING_KERNELS": routing},
         },
         packages={"olmo-sglang": f"0.1.0@{commit}"},
     )
@@ -45,6 +48,7 @@ def test_profile_cache_and_package_revision_change_identity_but_free_memory_does
     assert baseline != identity(resolved(profile="generic"))
     assert baseline != identity(resolved(cache=True))
     assert baseline != identity(resolved(commit="def"))
+    assert baseline != identity(resolved(routing="fused"))
     assert baseline == identity(resolved(free=80500))
 
 
@@ -63,6 +67,7 @@ def test_runtime_config_roundtrip_does_not_forward_metadata_to_engine(monkeypatc
     [
         resolved(profile="generic"),
         resolved(cache=True),
+        resolved(routing="fused"),
         replace(resolved(), batching=BatchConfig(chunk_size=64)),
     ],
 )
@@ -88,6 +93,9 @@ def test_worker_handshake_carries_runtime_into_final_manifest(tmp_path):
         config.provider.resolved_runtime
     )
     assert manifest["run"]["harness_config"]["batching"]["chunk_size"] == 512
+    assert manifest["model"]["provider_config"]["resolved_runtime"]["arithmetic_environment"] == {
+        "OLMO_SGLANG_ROUTING_KERNELS": "torch",
+    }
 
 
 def test_other_provider_hash_stays_unchanged_and_effective_batch_is_saved():
@@ -96,6 +104,19 @@ def test_other_provider_hash_stays_unchanged_and_effective_batch_is_saved():
     parent = apply_worker_configs(config, {"0": worker.to_dict()})
     assert parent.to_dict()["batching"]["chunk_size"] == 64
     assert parent.provider.to_dict() == config.provider.to_dict()
+
+
+def test_vllm_server_metrics_keep_parent_identity_after_worker_local_overrides():
+    config = requested("vllm_server")
+    expected = compute_model_hash(config.provider.to_dict())
+    config = replace(config, metrics=MetricsConfig(model_hash=expected))
+    local = config.with_provider_overrides(
+        tensor_parallel_size=1, log_dir="/results/run-a/logs/vllm_server_model"
+    )
+    worker = resolved_worker_config(local, BatchConfig(chunk_size=64))
+    parent = apply_worker_configs(config, {"0": worker.to_dict()})
+    assert worker.metrics.model_hash == expected
+    assert compute_model_hash(parent.provider.to_dict()) == expected
 
 
 def test_replayed_runtime_is_refreshed():
@@ -107,6 +128,7 @@ def test_replayed_runtime_is_refreshed():
     )
     assert config.provider.resolved_runtime["profile"] == "generic"
     assert config.provider.resolved_runtime["packages"] == {}
+    assert config.provider.resolved_runtime["arithmetic_environment"] == {}
 
 
 def test_resolved_batch_roundtrip_retains_expanded_sample_budget():

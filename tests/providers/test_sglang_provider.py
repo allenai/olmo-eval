@@ -96,6 +96,45 @@ def test_provider_factory_and_config(setup_engine, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "name,value",
+    [
+        ("OLMO_SGLANG_CORE_COMPAT", "rounding"),
+        ("OLMO_SGLANG_ROUNDING_KERNELS", "torch"),
+        ("OLMO_SGLANG_ROUTING_KERNELS", "fused"),
+        ("OLMO_SGLANG_ROUTING_TAIL", "fused"),
+        ("OLMO_SGLANG_ROUTER_INPUT", "fused"),
+        ("OLMO_SGLANG_SHARED_ADD_NORM", "fused"),
+        ("OLMO_SGLANG_KDA_PROJECTIONS", "packed"),
+        ("OLMO_SGLANG_KDA_GATE_PROJECTIONS", "packed"),
+        ("OLMO_SGLANG_MOE_PROJECTIONS", "packed"),
+        ("OLMO_SGLANG_SAMPLER", "fused"),
+    ],
+)
+def test_arithmetic_environment_is_captured_at_engine_startup(
+    setup_engine, monkeypatch, name, value
+):
+    _, constructor, _ = setup_engine
+    monkeypatch.setenv(name, value)
+    monkeypatch.setenv("OLMO_SGLANG_UNRELATED_SECRET", "must-not-be-saved")
+    provider = SGLangProvider("model")
+    snapshot = provider.profile_report["arithmetic_environment"]
+    assert snapshot[name] == value
+    assert "OLMO_SGLANG_UNRELATED_SECRET" not in snapshot
+    assert "arithmetic_environment" not in constructor.call_args.kwargs
+    # Changing the parent environment later cannot rewrite engine-startup provenance.
+    monkeypatch.setenv(name, "changed-after-startup")
+    assert snapshot[name] == value
+
+
+def test_unset_arithmetic_option_is_preserved_as_null(setup_engine, monkeypatch):
+    monkeypatch.delenv("OLMO_SGLANG_ROUTING_KERNELS", raising=False)
+    provider = SGLangProvider("model")
+    report = json.loads(json.dumps(provider.profile_report))
+    assert "OLMO_SGLANG_ROUTING_KERNELS" in report["arithmetic_environment"]
+    assert report["arithmetic_environment"]["OLMO_SGLANG_ROUTING_KERNELS"] is None
+
+
+@pytest.mark.parametrize(
     "device",
     ["NVIDIA H100, 81559, 81000", "NVIDIA B300, 288000, 287000", "NVIDIA A100, 81251, 81000"],
 )
@@ -117,17 +156,17 @@ def test_named_and_auto_profiles_produce_identical_engine_options(
             kind="sglang",
             model=str(tmp_path),
             max_model_len=8192,
-            max_concurrency=128,
+            max_concurrency=512,
             kwargs={"model_registration": "olmo_sglang:register", "profile": selector},
         )
         provider = ProviderConfig.from_dict(config.to_dict()).create_provider()
         assert provider.profile_report["requested"] == selector
         assert provider.profile_report["model_profile"] == "olmo3.5-12.5b"
-        assert provider.recommended_batch_sequences == 128
+        assert provider.recommended_batch_sequences == 512
         calls.append(constructor.call_args.kwargs)
         provider.close()
     assert calls[0] == calls[1]
-    assert calls[0]["max_running_requests"] == 128
+    assert calls[0]["max_running_requests"] == 512
     assert "profile" not in calls[0]
 
 
@@ -151,6 +190,46 @@ def test_named_profile_mismatch_fails_before_engine_construction(
             max_model_len=8192,
         )
     constructor.assert_not_called()
+
+
+@pytest.mark.parametrize("selector", ["auto", "olmo3.5-12.5b"])
+@pytest.mark.parametrize("conflict", [{"max_concurrency": 128}, {"disable_cuda_graph": True}])
+def test_profile_conflict_fails_before_engine_construction(
+    setup_engine, monkeypatch, tmp_path, selector, conflict
+):
+    _, constructor, _ = setup_engine
+    (tmp_path / "config.json").write_text(
+        json.dumps(MODEL_SHAPES["olmo3.5-12.5b"] | {"dtype": "bfloat16"})
+    )
+    monkeypatch.setitem(sys.modules, "olmo_sglang", SimpleNamespace(register=Mock()))
+    monkeypatch.setattr(
+        "olmo_eval.inference.providers.sglang_profiles.subprocess.check_output",
+        lambda *args, **kwargs: "NVIDIA H100, 81559, 81000",
+    )
+    with pytest.raises(ValueError, match="Settings conflict.*profile=generic"):
+        SGLangProvider(
+            str(tmp_path),
+            profile=selector,
+            model_registration="olmo_sglang:register",
+            max_model_len=8192,
+            **conflict,
+        )
+    constructor.assert_not_called()
+
+
+def test_generic_profile_allows_manual_engine_settings(setup_engine, monkeypatch):
+    _, constructor, _ = setup_engine
+    monkeypatch.setitem(sys.modules, "olmo_sglang", SimpleNamespace(register=Mock()))
+    SGLangProvider(
+        "model",
+        profile="generic",
+        model_registration="olmo_sglang:register",
+        max_concurrency=128,
+        disable_cuda_graph=True,
+    )
+    assert constructor.call_args.kwargs["max_running_requests"] == 128
+    assert constructor.call_args.kwargs["disable_cuda_graph"] is True
+    assert "cuda_graph_backend_decode" not in constructor.call_args.kwargs
 
 
 def test_chat_sampling_and_sampled_token_logprobs(setup_engine):

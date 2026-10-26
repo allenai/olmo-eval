@@ -20,6 +20,22 @@ from olmo_eval.inference.providers.sglang_profiles import prepare_profile
 
 logger = get_logger(__name__)
 
+# Keep this allowlist aligned with the pinned olmo-sglang arithmetic options.
+# Record exact startup values (None means unset), rather than duplicating the
+# plugin's defaults or claiming that an automatic/per-layer choice is resolved.
+_ARITHMETIC_ENVIRONMENT = (
+    "OLMO_SGLANG_CORE_COMPAT",
+    "OLMO_SGLANG_ROUNDING_KERNELS",
+    "OLMO_SGLANG_ROUTING_KERNELS",
+    "OLMO_SGLANG_ROUTING_TAIL",
+    "OLMO_SGLANG_ROUTER_INPUT",
+    "OLMO_SGLANG_SHARED_ADD_NORM",
+    "OLMO_SGLANG_KDA_PROJECTIONS",
+    "OLMO_SGLANG_KDA_GATE_PROJECTIONS",
+    "OLMO_SGLANG_MOE_PROJECTIONS",
+    "OLMO_SGLANG_SAMPLER",
+)
+
 
 def _require_original_logprobs() -> None:
     """Establish raw model logprobs before plugins can import the sampler."""
@@ -107,6 +123,9 @@ class SGLangProvider(InferenceProvider):
                 options[key] = value
         self.profile_report = prepare_profile(profile, options, model_registration)
         options = {**self.profile_report["defaults"], **options}
+        self.profile_report["arithmetic_environment"] = {
+            name: os.environ.get(name) for name in _ARITHMETIC_ENVIRONMENT
+        }
         logger.info("SGLang profile: %s", self.profile_report)
         self._add_bos_token = add_bos_token
         sglang = import_module("sglang")

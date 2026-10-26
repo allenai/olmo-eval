@@ -1,4 +1,4 @@
-"""Hardware/shape gating and explicit-override contracts, without a CUDA runtime."""
+"""Hardware/shape gating and profile-conflict contracts, without a CUDA runtime."""
 
 import asyncio
 import copy
@@ -32,10 +32,10 @@ def model():
     "gpu,total,cache,expected",
     [
         ("NVIDIA B300", 288000, None, (512, 17825792, 3072, False)),
-        ("NVIDIA B300", 288000, True, (512, 17825792, 1024, True)),
+        ("NVIDIA B300", 288000, False, (512, 17825792, 3072, False)),
         ("NVIDIA H100 80GB HBM3", 81559, None, (512, 6684672, 512, True)),
         ("NVIDIA A100-SXM4-80GB", 81251, None, (512, 6684672, 512, True)),
-        ("NVIDIA H100 80GB HBM3", 81559, False, (320, 4456448, 1920, False)),
+        ("NVIDIA H100 80GB HBM3", 81559, True, (512, 6684672, 512, True)),
     ],
 )
 @pytest.mark.parametrize("selector", ["auto", "olmo3.5-12.5b"])
@@ -97,7 +97,6 @@ def test_other_models_fall_back(change):
         ({"context_length": 8192, "dtype": "float32"}, [("NVIDIA H100", 81559, 81559)]),
         ({"context_length": 8192, "enable_multimodal": True}, [("NVIDIA H100", 81559, 81559)]),
         ({"context_length": 8192}, [("NVIDIA A100", 40960, 40960)]),
-        ({"context_length": 8192, "disable_radix_cache": False}, [("NVIDIA A100", 81251, 81251)]),
         ({"context_length": 8192}, [("NVIDIA H100", 81559, 60000)]),
         ({"context_length": 8192}, [("NVIDIA H100 MIG", 40000, 40000)]),
     ],
@@ -109,19 +108,46 @@ def test_unqualified_context_topology_or_hardware_falls_back(options, devices):
 
 
 @pytest.mark.parametrize("selector", ["auto", "olmo3.5-12.5b"])
-def test_explicit_overrides_and_generic(selector):
+@pytest.mark.parametrize(
+    "option",
+    [
+        {"max_running_requests": 128},
+        {"max_running_requests": 1024},
+        {"max_total_tokens": 12345},
+        {"mem_fraction_static": 0.8},
+        {"disable_radix_cache": False},
+        {"cuda_graph_backend_decode": "disabled"},
+        {"disable_cuda_graph": True},
+        {"disable_decode_cuda_graph": True},
+        {"cuda_graph_config": {"decode": {"backend": "disabled"}}},
+        {"cuda_graph_config": {"prefill": {"backend": "full"}}},
+        {"cuda_graph_config": {"decode": {"max_bs": 128}}},
+        {"cuda_graph_bs_decode": [1, 64, 128]},
+        {"cuda_graph_config": {"decode": {"bs": [1, 64, 128]}}},
+    ],
+)
+def test_conflicting_options_require_manual_profile(selector, option):
+    options = {"context_length": 8192} | option
+    with pytest.raises(ValueError, match="Settings conflict.*profile=generic"):
+        resolve_profile(selector, model(), options, [("NVIDIA H100", 81559, 81559)])
+    assert resolve_profile("generic", model(), options, [])["defaults"] == {}
+
+
+@pytest.mark.parametrize("selector", ["auto", "olmo3.5-12.5b"])
+def test_matching_and_unmanaged_options_are_preserved(selector):
     options = {
-        "context_length": 34816,
-        "max_running_requests": 128,
-        "max_total_tokens": 12345,
-        "mem_fraction_static": 0.8,
-        "cuda_graph_backend_decode": "disabled",
+        "context_length": 8192,
+        "max_running_requests": 512,
+        "disable_prefill_cuda_graph": True,
+        "random_seed": 42,
+        "cuda_graph_config": {"decode": {"backend": "full", "max_bs": 512}},
+        "cuda_graph_bs_decode": [1, 128, 512],
     }
     report = resolve_profile(selector, model(), options, [("NVIDIA H100", 81559, 81559)])
     assert not set(options) & set(report["defaults"])
-    assert report["defaults"]["max_mamba_cache_size"] == 128
-    assert resolve_profile("generic", model(), options, [])["defaults"] == {}
-    with pytest.raises(ValueError, match="profile"):
+    assert report["defaults"]["max_mamba_cache_size"] == 512
+    assert (report["defaults"] | options)["random_seed"] == 42
+    with pytest.raises(ValueError, match="Unknown SGLang profile"):
         resolve_profile("bogus", model(), options, [])
 
 

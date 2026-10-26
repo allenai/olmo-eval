@@ -32,12 +32,13 @@ def resolved_worker_config(
             "engine_options": profile["effective_options"],
             "packages": packages or {},
             "logprobs": "original",
+            "arithmetic_environment": dict(profile.get("arithmetic_environment", {})),
         }
         if "effective_max_running_requests" in profile:
             runtime["effective_max_running_requests"] = profile["effective_max_running_requests"]
         provider = replace(provider, resolved_runtime=runtime)
     resolved = replace(config, provider=provider, batching=batch)
-    if resolved.metrics is not None and resolved.metrics.enabled:
+    if str(provider.kind) == "sglang" and resolved.metrics is not None and resolved.metrics.enabled:
         resolved = resolved.with_metrics(
             resolved.metrics.with_metadata(model_hash=compute_model_hash(provider.to_dict()))
         )
