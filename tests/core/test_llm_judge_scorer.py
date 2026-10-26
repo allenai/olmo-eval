@@ -141,6 +141,42 @@ class TestBuildOpenAIJudgeFn:
         with pytest.raises(ValueError, match="OPENAI_API_KEY or OPENROUTER_API_KEY .*MyScorer"):
             await judge("grade this")
 
+    @pytest.mark.anyio
+    async def test_gemini_models_use_the_gemini_endpoint(self, monkeypatch):
+        reply = []
+
+        async def create(**kwargs):
+            return reply[0]
+
+        clients: list[dict] = []
+        calls, make_message = _stub_openai(monkeypatch, create, clients)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+        reply.append(make_message("VERDICT: CORRECT"))
+
+        judge = build_openai_judge_fn(model="gemini-3.6-flash", max_tokens=64)
+
+        assert await judge("grade this") == "VERDICT: CORRECT"
+        assert clients == [
+            {
+                "api_key": "gemini-key",
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+            }
+        ]
+        assert calls[0]["model"] == "gemini-3.6-flash"
+
+    @pytest.mark.anyio
+    async def test_a_gemini_model_needs_the_gemini_key(self, monkeypatch):
+        async def create(**kwargs):
+            raise AssertionError("no request should be sent")
+
+        _stub_openai(monkeypatch, create)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        judge = build_openai_judge_fn(model="gemini-4-argon", scorer_name="MyScorer")
+
+        with pytest.raises(ValueError, match="GEMINI_API_KEY is required for MyScorer"):
+            await judge("grade this")
+
     def test_records_the_settings_that_affect_judge_output(self):
         judge = build_openai_judge_fn(
             model="gpt-5", max_tokens=64, temperature=0.5, reasoning_effort="low"

@@ -245,6 +245,9 @@ select = [
 "src/olmo_eval/evals/tasks/squad.py" = ["E501"]
 # Static fewshot data with long string literals
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
+# HalluLens judge prompts are copied byte-for-byte from the reference; their trailing
+# whitespace is part of the prompts and must not be stripped.
+"src/olmo_eval/evals/tasks/constants/hallulens.py" = ["W291"]
 # Verbatim prompt template from the oe-eval/ZeroEval reference implementation
 "src/olmo_eval/evals/tasks/zebralogic.py" = ["E501", "W291"]
 # Verbatim prompt templates vendored from the mm_olmo reference implementation

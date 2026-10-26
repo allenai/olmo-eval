@@ -125,6 +125,16 @@ class TestTaskConfig:
         assert judged["judge_reasoning_effort"] == "high"
         assert judged["judge_max_tokens"] == 8192
 
+    def test_serializes_a_judge_panel_only_when_set(self):
+        plain = TaskConfig(name="plain").to_dict()
+        single = TaskConfig(name="judged", judge_model="judge-snapshot").to_dict()
+        panel = TaskConfig(name="judged", judge_models=("judge-a", "judge-b")).to_dict()
+
+        assert "judge_models" not in plain
+        assert "judge_models" not in single
+        assert panel["judge_models"] == ["judge-a", "judge-b"]
+        assert "judge_model" not in panel
+
 
 class TestTask:
     """Tests for Task base class."""

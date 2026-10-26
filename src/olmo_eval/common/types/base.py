@@ -222,6 +222,10 @@ class Instance:
 #: conversation sends after each of the model's replies.
 FOLLOW_UP_TURNS_KEY = "follow_up_turns"
 
+#: ``LMRequest.metadata`` key that, when true, asks each follow-up user message as a new
+#: conversation of its own instead of after the model's earlier replies.
+INDEPENDENT_TURNS_KEY = "independent_turns"
+
 #: ``LMOutput.metadata`` key holding one record per user turn the model answered, in
 #: order: the reply as ``text``, plus the ``finish_reason``, ``prompt_tokens`` and
 #: ``completion_tokens`` the provider reported for that turn.

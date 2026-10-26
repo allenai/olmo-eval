@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from olmo_eval.common.multi_turn import turn_replies
+from olmo_eval.common.multi_turn import independent_chat_request, turn_replies
 from olmo_eval.common.types import (
     FOLLOW_UP_TURNS_KEY,
     TURNS_KEY,
@@ -235,3 +235,15 @@ async def test_any_other_failed_turn_fails_the_instance() -> None:
 
 def test_preset_runs_the_scaffold() -> None:
     assert get_harness_preset("multi_turn_chat").scaffold == "multi_turn_chat"
+
+
+@pytest.mark.anyio
+async def test_independent_turns_are_each_a_new_conversation():
+    provider = ScriptedProvider([LMOutput(text="first"), LMOutput(text="second")])
+    request = independent_chat_request(["one", "two"])
+
+    result = await run(provider, request, HarnessConfig(name="test", system_prompt="Be brief."))
+
+    assert [r.messages for r in provider.requests] == [(user("one"),), (user("two"),)]
+    assert all(r.system_prompt == "Be brief." for r in provider.requests)
+    assert turn_replies(result.final_output) == ["first", "second"]

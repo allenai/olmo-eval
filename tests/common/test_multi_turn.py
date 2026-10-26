@@ -3,6 +3,7 @@
 import pytest
 
 from olmo_eval.common.multi_turn import (
+    independent_chat_request,
     missing_replies_error,
     scripted_chat_request,
     turn_count,
@@ -10,6 +11,7 @@ from olmo_eval.common.multi_turn import (
 )
 from olmo_eval.common.types import (
     FOLLOW_UP_TURNS_KEY,
+    INDEPENDENT_TURNS_KEY,
     TURNS_KEY,
     LMOutput,
     LMRequest,
@@ -52,3 +54,14 @@ def test_turn_replies_reads_the_scaffolds_replies():
 def test_missing_replies_error_names_the_benchmark_and_the_scaffold():
     with pytest.raises(ValueError, match=r"A Multi-IF output .*--harness multi_turn_chat"):
         raise missing_replies_error("Multi-IF")
+
+
+def test_an_independent_request_marks_its_turns_as_separate_conversations():
+    request = independent_chat_request(["one", "two"])
+
+    assert request.messages == ({"role": "user", "content": "one"},)
+    assert request.metadata == {
+        FOLLOW_UP_TURNS_KEY: [{"role": "user", "content": "two"}],
+        INDEPENDENT_TURNS_KEY: True,
+    }
+    assert turn_count(request) == 2

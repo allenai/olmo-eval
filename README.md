@@ -584,6 +584,7 @@ documents the rest.
 | `strip_thinking` | `bool` | `False` | Drop `<think>...</think>` traces before scoring |
 | `dependencies` | `list[str] \| None` | `None` | Runtime packages to install (e.g., `["pkg==1.0"]`) |
 | `judge_model` | `str \| None` | `None` | Judge model for LLM-as-judge scoring |
+| `judge_models` | `tuple[str, ...] \| None` | `None` | Judge panel for tasks that support one (HalluLens, WildBench, EQ-Bench 3, Sycophancy Eval); each judge grades every output |
 
 ### Data Sources
 

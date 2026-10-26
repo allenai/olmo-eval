@@ -2,7 +2,9 @@
 
 A task that writes every user turn in advance sends the first turn as the request
 and the rest as follow-ups; the ``multi_turn_chat`` scaffold asks each one with the
-model's own earlier replies in the conversation and records one entry per turn.
+model's own earlier replies in the conversation and records one entry per turn. A task
+that needs several unrelated replies to score one instance asks them as independent
+turns, each a conversation of its own.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from collections.abc import Sequence
 
 from olmo_eval.common.types import (
     FOLLOW_UP_TURNS_KEY,
+    INDEPENDENT_TURNS_KEY,
     TURNS_KEY,
     LMOutput,
     LMRequest,
@@ -25,6 +28,16 @@ def scripted_chat_request(user_turns: Sequence[str]) -> LMRequest:
         request_type=RequestType.CHAT,
         messages=({"role": "user", "content": first},),
         metadata={FOLLOW_UP_TURNS_KEY: [{"role": "user", "content": turn} for turn in follow_ups]},
+    )
+
+
+def independent_chat_request(prompts: Sequence[str]) -> LMRequest:
+    """Build a chat request that asks each of ``prompts`` as a conversation of its own."""
+    request = scripted_chat_request(prompts)
+    return LMRequest(
+        request_type=request.request_type,
+        messages=request.messages,
+        metadata={**(request.metadata or {}), INDEPENDENT_TURNS_KEY: True},
     )
 
 

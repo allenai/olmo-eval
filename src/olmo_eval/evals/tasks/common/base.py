@@ -173,6 +173,8 @@ class TaskConfig:
     judge_model: str | None = None
     judge_reasoning_effort: str | None = None
     judge_max_tokens: int | None = None
+    #: Judges that each grade every output, for tasks that grade with a judge panel.
+    judge_models: tuple[str, ...] | None = None
 
     #: How a task that builds its prompt from a bare label should render it. The
     #: vision tasks read these; they follow the checkpoint, since instruction-tuned
@@ -331,6 +333,8 @@ class TaskConfig:
                     "judge_max_tokens": self.judge_max_tokens,
                 }
             )
+        if self.judge_models is not None:
+            serialized["judge_models"] = list(self.judge_models)
         return serialized
 
     def get_primary_metric(self) -> Metric | None:

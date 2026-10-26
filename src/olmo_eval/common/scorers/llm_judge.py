@@ -16,7 +16,7 @@ from typing import Any, Literal, Protocol, cast, runtime_checkable
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.openai_credentials import (
     create_async_openai_client,
-    require_openai_credentials,
+    require_judge_credentials,
 )
 from olmo_eval.common.scorers.execution import ContextScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
@@ -224,7 +224,8 @@ def build_openai_judge_fn(
     """Build a lazy async judge function using OpenAI API.
 
     The returned function looks up OPENAI_API_KEY (or OPENROUTER_API_KEY) on first
-    call, not at construction. This allows scorers to be instantiated before the
+    call, not at construction; a ``gemini-*`` model instead uses GEMINI_API_KEY and
+    Google's OpenAI-compatible endpoint. This allows scorers to be instantiated before the
     environment variable is set. Its ``judge_config`` attribute records the settings
     that affect judge output, so scorers can include them when serialized.
 
@@ -254,7 +255,7 @@ def build_openai_judge_fn(
         nonlocal _token_param, _send_temperature, _send_reasoning_effort
 
         if not _client:
-            credentials = require_openai_credentials(scorer_name)
+            credentials = require_judge_credentials(model, scorer_name)
             try:
                 client = create_async_openai_client(credentials)
             except ImportError:

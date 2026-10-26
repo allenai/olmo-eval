@@ -5,6 +5,9 @@ registry models) accepts either ``OPENAI_API_KEY`` or ``OPENROUTER_API_KEY``.
 An OpenAI key wins when both are set. With only an OpenRouter key, requests go
 to OpenRouter's OpenAI-compatible endpoint and bare OpenAI model names are
 rewritten to OpenRouter's ``openai/<model>`` slugs.
+
+LLM judges named ``gemini-*`` go instead to Google's OpenAI-compatible endpoint for
+the Gemini API, with ``GEMINI_API_KEY``.
 """
 
 from __future__ import annotations
@@ -18,6 +21,8 @@ if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
 __all__ = [
+    "GEMINI_API_KEY_ENV",
+    "GEMINI_OPENAI_BASE_URL",
     "OPENAI_API_KEY_ENV",
     "OPENAI_BASE_URL",
     "OPENROUTER_API_KEY_ALIASES",
@@ -27,11 +32,14 @@ __all__ = [
     "OpenAICredentials",
     "create_async_openai_client",
     "describe_secret",
+    "is_gemini_model",
     "is_openai_model",
+    "judge_secret",
     "litellm_model_name",
     "openai_endpoint_model_name",
     "openai_sandbox_env",
     "openrouter_model_slug",
+    "require_judge_credentials",
     "require_openai_credentials",
     "resolve_openai_credentials",
     "secret_available",
@@ -43,6 +51,9 @@ OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 OPENROUTER_API_KEY_ALIASES: tuple[str, ...] = ("OPEN_ROUTER_KEY",)
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
+GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
+# Google's OpenAI-compatible endpoint for the Gemini API
+GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 # Secrets that may stand in for a required secret, in order of preference.
 SECRET_ALTERNATIVES: Mapping[str, tuple[str, ...]] = {
@@ -53,6 +64,7 @@ SECRET_ALTERNATIVES: Mapping[str, tuple[str, ...]] = {
 _OPENROUTER_OPENAI_PREFIX = "openai/"
 _LITELLM_OPENROUTER_PREFIX = "openrouter/"
 _BARE_OPENAI_MODEL_PREFIXES = ("gpt-", "chatgpt-", "o1", "o3", "o4")
+_GEMINI_MODEL_PREFIX = "gemini-"
 
 # Dated OpenAI snapshots that OpenRouter serves only under the undated slug.
 # Each target's canonical snapshot on OpenRouter is the same model.
@@ -137,6 +149,34 @@ def require_openai_credentials(purpose: str) -> OpenAICredentials:
             f"{OPENAI_API_KEY_ENV} or {OPENROUTER_API_KEY_ENV} is required for {purpose}."
         )
     return credentials
+
+
+def is_gemini_model(model: str) -> bool:
+    """Whether a judge model is a Gemini model, served by Google's OpenAI-compatible endpoint."""
+    return model.startswith(_GEMINI_MODEL_PREFIX)
+
+
+def judge_secret(model: str) -> str:
+    """The secret a judge model needs: ``GEMINI_API_KEY`` for Gemini, else ``OPENAI_API_KEY``."""
+    return GEMINI_API_KEY_ENV if is_gemini_model(model) else OPENAI_API_KEY_ENV
+
+
+def require_judge_credentials(model: str, purpose: str) -> OpenAICredentials:
+    """Credentials for the endpoint that serves a judge model through the OpenAI client.
+
+    Gemini models go to Google's OpenAI-compatible endpoint with ``GEMINI_API_KEY``;
+    other models use ``require_openai_credentials``.
+
+    Args:
+        model: The judge model.
+        purpose: What needs the key, used in the error message.
+    """
+    if not is_gemini_model(model):
+        return require_openai_credentials(purpose)
+    api_key = os.environ.get(GEMINI_API_KEY_ENV)
+    if not api_key:
+        raise ValueError(f"{GEMINI_API_KEY_ENV} is required for {purpose} with {model}.")
+    return OpenAICredentials(api_key=api_key, base_url=GEMINI_OPENAI_BASE_URL)
 
 
 def create_async_openai_client(credentials: OpenAICredentials) -> AsyncOpenAI:

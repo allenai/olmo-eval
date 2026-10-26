@@ -6,6 +6,8 @@ the conversation. This scaffold sends the request's messages, then each
 follow-up user message in turn, carrying every reply forward as an assistant
 message. Each reply goes back as the model wrote it, so the chat template
 decides what an earlier turn shows, such as whether a reasoning trace is kept.
+A request marked with ``INDEPENDENT_TURNS_KEY`` instead asks each follow-up as a new
+conversation of its own, for a task that scores several unrelated replies together.
 
 The final output records each turn under ``turns``, in order, for the task to
 score and the predictions file to keep. Its own fields describe the whole
@@ -24,6 +26,7 @@ from typing import Any
 
 from olmo_eval.common.types import (
     FOLLOW_UP_TURNS_KEY,
+    INDEPENDENT_TURNS_KEY,
     TURNS_KEY,
     LMOutput,
     LMRequest,
@@ -83,12 +86,15 @@ class MultiTurnChatScaffold(Scaffold):
             (request.metadata or {}).get(FOLLOW_UP_TURNS_KEY, ())
         )
         messages: list[dict[str, Any]] = [dict(m) for m in request.messages]
+        independent = bool((request.metadata or {}).get(INDEPENDENT_TURNS_KEY))
         system_prompt = config.system_prompt or request.system_prompt
         turns: list[dict[str, Any]] = []
         last_output = LMOutput(text="")
 
         for turn_index in range(len(follow_ups) + 1):
-            if turn_index > 0:
+            if turn_index > 0 and independent:
+                messages = [dict(follow_ups[turn_index - 1])]
+            elif turn_index > 0:
                 messages.append({"role": "assistant", "content": last_output.text})
                 messages.append(dict(follow_ups[turn_index - 1]))
 
@@ -105,7 +111,8 @@ class MultiTurnChatScaffold(Scaffold):
             generated = outputs[0] if outputs else []
             if is_context_overflow_output(generated):
                 # Later turns only add to the conversation, so none of them can
-                # be asked; the task scores them as unanswered.
+                # be asked; the task scores them as unanswered. Independent turns
+                # stop too, so a conversation is answered whole or cut short.
                 logger.warning(
                     "Conversation %s outgrew the context window on turn %s: %s",
                     (trace_metadata or {}).get("instance_id", "?"),
