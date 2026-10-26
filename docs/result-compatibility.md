@@ -16,7 +16,7 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
-## 2026-10-26: One judge base: judge identity in the hash, no verdict leaves an output unscored (#PR)
+## 2026-10-26: One judge base: judge identity in the hash, no verdict leaves an output unscored (#512)
 
 - **Affected**:
   - `simpleqa:judge`.
