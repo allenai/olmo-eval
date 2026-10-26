@@ -8,9 +8,12 @@ resolved provider is `sglang`, just as vLLM jobs select the `vllm` extra.
 Use separate environments for these backends; their dependency pins conflict.
 
 The root lock resolves these mutually exclusive extras separately. Compatibility
-pins in the vLLM extra and dependency group preserve its existing package versions
-instead of inheriting SGLang's newer dependencies. When upgrading vLLM, update both
-sets of pins together and check exported dependency profiles for unintended changes.
+pins preserve the existing locked vLLM package selections. Beaker's `vllm_server`
+installation consumes constraints exported from that lock. Inline `vllm` Beaker
+jobs currently constrain only Torch/CUDA and resolve the remaining packages from
+the extra, so these pins can change their environment relative to earlier runs.
+When upgrading vLLM, update the extra and dependency-group pins together and check
+exported dependency profiles for unintended changes.
 
 ## Installation and Beaker jobs
 
