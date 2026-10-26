@@ -317,7 +317,7 @@ class OmniscienceScorer(LLMJudgeScorer):
             if self.provider_name is not None:
                 response = await self._score_with_provider(prompt, context)
             else:
-                response = await self._score_with_judge_fn(prompt)
+                response = await self._score_with_judge_fn(prompt, context)
 
             return self.parse_judge_response(response, instance=instance)
 

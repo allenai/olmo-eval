@@ -69,10 +69,16 @@ from functools import cache
 from importlib.resources import files
 from typing import Any
 
+from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers.base import LogprobScorer, Scorer
 from olmo_eval.common.scorers.execution import format_scoring_error
-from olmo_eval.common.scorers.llm_judge import JudgeFn, build_openai_judge_fn, parse_judge_spec
+from olmo_eval.common.scorers.llm_judge import (
+    JudgeFn,
+    build_openai_judge_fn,
+    judge_with_retries,
+    parse_judge_spec,
+)
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -91,7 +97,6 @@ from olmo_eval.evals.tasks.common import (
     register_variant,
 )
 from olmo_eval.evals.tasks.common.base import _store_output_score
-from olmo_eval.inference.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -253,47 +258,6 @@ def build_frontierscience_judge_fn(
         scorer_name=scorer_name,
         reasoning_effort=reasoning_effort,
     )
-
-
-#: Where the shared judge limiter is stashed on the scoring context.
-#:
-#: Judge concurrency is one budget per run, not per task: every FrontierScience track
-#: talks to the same judge API and both tracks are typically scored at once. The
-#: scoring context is the object with exactly that lifetime -- shared across tasks,
-#: discarded with the run. A module-level cache keyed by event loop would instead
-#: leak, because a contended semaphore binds its own loop and the cached value then
-#: keeps its weak key alive, and it would hand a second run on the same loop the
-#: first run's concurrency setting.
-_JUDGE_SEMAPHORE_ATTR = "_frontierscience_judge_semaphore"
-
-
-def get_judge_semaphore(context: Any, concurrency: int) -> asyncio.Semaphore:
-    """Return the judge limiter shared by every FrontierScience task in this run."""
-    semaphore = getattr(context, _JUDGE_SEMAPHORE_ATTR, None)
-    if semaphore is None:
-        semaphore = asyncio.Semaphore(max(1, concurrency))
-        setattr(context, _JUDGE_SEMAPHORE_ATTR, semaphore)
-    return semaphore
-
-
-async def judge_with_retries(
-    judge_fn: JudgeFn,
-    prompt: str,
-    parse: Callable[[str], float | None],
-) -> tuple[float | None, str]:
-    """Retry transient API failures within each parse attempt."""
-    raw = ""
-    for attempt in range(FRONTIERSCIENCE_JUDGE_ATTEMPTS):
-        raw = await retry_with_backoff(
-            lambda: judge_fn(prompt),
-            context="frontierscience judge",
-        )
-        value = parse(raw)
-        if value is not None:
-            return value, raw
-        if attempt < FRONTIERSCIENCE_JUDGE_ATTEMPTS - 1:
-            await asyncio.sleep(2**attempt)
-    return None, raw
 
 
 @dataclass(frozen=True)
@@ -532,18 +496,31 @@ class _FrontierScience(Task, ABC):
             self._judge_fn = judge_fn
         return judge_fn
 
-    def _get_judge_semaphore(self, context: Any) -> asyncio.Semaphore:
-        """Return the judge limiter, shared run-wide when a scoring context exists."""
+    def _get_judge_semaphore(self, context: ScoringContext | None) -> asyncio.Semaphore:
+        """Return the run's judge limiter, or this task's own when scored without a context."""
         if context is not None:
-            return get_judge_semaphore(context, context.scoring_concurrency)
-
-        # Without a scoring context there is no run-scoped object to hang the limiter
-        # on, so fall back to one per task. Bounded, just not shared across tracks.
+            return context.judge_limiter
         semaphore = getattr(self, "_judge_semaphore", None)
         if semaphore is None:
             semaphore = asyncio.Semaphore(FRONTIERSCIENCE_DEFAULT_SCORING_CONCURRENCY)
             self._judge_semaphore = semaphore
         return semaphore
+
+    async def _ask_judge(
+        self, judge_fn: JudgeFn, prompt: str, parse: Callable[[str], float | None]
+    ) -> tuple[float | None, str]:
+        """Call the judge, retrying API failures and unparseable replies.
+
+        The limiter is held for each call only, so backoff waits leave the slot free.
+        """
+        return await judge_with_retries(
+            judge_fn,
+            prompt,
+            parse,
+            limiter=getattr(self, "_judge_limiter", None) or self._get_judge_semaphore(None),
+            attempts=FRONTIERSCIENCE_JUDGE_ATTEMPTS,
+            context="frontierscience judge",
+        )
 
     @abstractmethod
     async def _score_output(
@@ -563,7 +540,7 @@ class _FrontierScience(Task, ABC):
         """Judge every output concurrently, then average each instance over its samples."""
         self._extract_answers(responses)
         judge_fn = self._get_judge_fn()
-        semaphore = self._get_judge_semaphore(context)
+        self._judge_limiter = self._get_judge_semaphore(context)
 
         jobs = [
             (response_index, output_index)
@@ -592,8 +569,7 @@ class _FrontierScience(Task, ABC):
 
         async def run(response_index: int, output_index: int) -> dict[str, float]:
             response = responses[response_index]
-            async with semaphore:
-                return await self._score_output(response, response.outputs[output_index], judge_fn)
+            return await self._score_output(response, response.outputs[output_index], judge_fn)
 
         # A judge call can still fail after its own retries (rate limit, timeout). Keep
         # the exceptions so one bad call costs its own sample rather than every sample
@@ -723,7 +699,7 @@ class FrontierScienceOlympiad(_FrontierScience):
             reference_answer=response.instance.gold_answer or "",
             answer=answer,
         )
-        verdict, raw = await judge_with_retries(judge_fn, prompt, parse_olympiad_verdict)
+        verdict, raw = await self._ask_judge(judge_fn, prompt, parse_olympiad_verdict)
         scores = {"accuracy": 0.0 if verdict is None else verdict}
         self._record(
             output,
@@ -886,7 +862,7 @@ class FrontierScienceResearch(_FrontierScience):
             rubric=response.instance.gold_answer or "",
             answer=answer,
         )
-        points, raw = await judge_with_retries(judge_fn, prompt, parse_research_points)
+        points, raw = await self._ask_judge(judge_fn, prompt, parse_research_points)
         earned = 0.0 if points is None else points
         scores = {
             "success_rate": 1.0 if earned >= self.success_threshold else 0.0,

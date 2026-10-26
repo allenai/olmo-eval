@@ -1,12 +1,12 @@
 """Tests for the shared judged-task base."""
 
 import asyncio
-import types
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
 
+from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.multi_turn import scripted_chat_request
 from olmo_eval.common.scorers import llm_judge
 from olmo_eval.common.scorers.llm_judge import parse_judge_spec
@@ -236,7 +236,7 @@ class TestJudgeConfiguration:
             task._get_judge()
 
     def test_judge_limiter_is_shared_through_the_scoring_context(self):
-        context = types.SimpleNamespace(scoring_concurrency=2)
+        context = ScoringContext(scoring_concurrency=2)
         first = _PassFailTask(_config())
         second = _PassFailTask(_config(name="other"))
 
@@ -415,7 +415,7 @@ class TestJudgeCalls:
         responses = [_response("a", "b"), _response("c", "d", group="b")]
 
         await _RatingTask(_config()).score_responses(
-            responses, context=types.SimpleNamespace(scoring_concurrency=3)
+            responses, context=ScoringContext(scoring_concurrency=3)
         )
 
         assert peak == 3

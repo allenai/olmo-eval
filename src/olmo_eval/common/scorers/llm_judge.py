@@ -610,11 +610,17 @@ class LLMJudgeScorer(ContextScorer):
             if output.logprobs
         }
 
-    async def _score_with_judge_fn(self, prompt: str) -> str:
-        """Score using configured judge function."""
+    async def _score_with_judge_fn(self, prompt: str, context: ScoringContext | None = None) -> str:
+        """Score using configured judge function.
+
+        With a scoring context, the call holds the run's judge limiter.
+        """
         if self.judge_fn is None:
             raise RuntimeError("No judge_fn configured.")
-        return await self.judge_fn(prompt)
+        if context is None:
+            return await self.judge_fn(prompt)
+        async with context.judge_limiter:
+            return await self.judge_fn(prompt)
 
     def _validate_provider(self, context: ScoringContext) -> None:
         """Validate that the required provider is available in the inference pool.
@@ -649,7 +655,7 @@ class LLMJudgeScorer(ContextScorer):
         if self.provider_name is not None:
             response = await self._score_with_provider(prompt, context)
         else:
-            response = await self._score_with_judge_fn(prompt)
+            response = await self._score_with_judge_fn(prompt, context)
 
         return self.parse_judge_response(response)
 
@@ -1036,7 +1042,7 @@ class SafetyScorer(LLMJudgeScorer):
                         request_type=self.judge_request_type,
                     )
             else:
-                response = await self._score_with_judge_fn(prompt)
+                response = await self._score_with_judge_fn(prompt, context)
 
             return self.parse_judge_response(
                 response, instance=instance, grade_logprobs=grade_logprobs

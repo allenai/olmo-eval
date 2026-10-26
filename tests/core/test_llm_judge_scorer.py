@@ -613,3 +613,30 @@ class TestJudge:
             await judge.ask("grade", lambda _: None, limiter=asyncio.Semaphore(1))
 
         assert raised.value.raw == "last"
+
+
+class TestJudgeLimiter:
+    @pytest.mark.anyio
+    async def test_judge_scorer_calls_share_the_run_limiter(self):
+        in_flight = 0
+        peak = 0
+
+        async def judge(prompt: str) -> str:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            try:
+                await asyncio.sleep(0.01)
+                return "A"
+            finally:
+                in_flight -= 1
+
+        scorer = SimpleQAJudgeScorer(judge_fn=judge)
+        context = ScoringContext(scoring_concurrency=2)
+        instance = Instance(question="Q?", gold_answer="A")
+
+        await asyncio.gather(
+            *(scorer.ascore_with_context(instance, LMOutput(text="A"), context) for _ in range(6))
+        )
+
+        assert peak == 2

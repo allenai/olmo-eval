@@ -4,7 +4,6 @@ import asyncio
 import gc
 import logging
 import math
-import types
 import weakref
 from collections import Counter
 
@@ -606,7 +605,7 @@ class TestRunnerShapedScoring:
 
     @pytest.mark.anyio
     async def test_judge_concurrency_is_bounded_across_calls(self, olympiad, monkeypatch):
-        context = types.SimpleNamespace(scoring_concurrency=2)
+        context = ScoringContext(scoring_concurrency=2)
         in_flight = 0
         peak = 0
 
@@ -652,7 +651,7 @@ class TestRunnerShapedScoring:
     @pytest.mark.anyio
     async def test_concurrency_is_shared_across_tracks(self, olympiad, research, monkeypatch):
         """Both tracks are scored in the same run and share one judge budget."""
-        context = types.SimpleNamespace(scoring_concurrency=2)
+        context = ScoringContext(scoring_concurrency=2)
         in_flight = 0
         peak = 0
 
@@ -689,16 +688,14 @@ class TestRunnerShapedScoring:
         await olympiad.score_responses([_response(olympiad)], context=first)
         await olympiad.score_responses([_response(olympiad)], context=second)
 
-        first_limiter = frontierscience.get_judge_semaphore(first, 2)
-        second_limiter = frontierscience.get_judge_semaphore(second, 5)
-        assert first_limiter is not second_limiter
-        assert first_limiter._value == 2
-        assert second_limiter._value == 5
+        assert first.judge_limiter is not second.judge_limiter
+        assert first.judge_limiter._value == 2
+        assert second.judge_limiter._value == 5
 
     def test_limiter_does_not_outlive_its_run(self):
         """The limiter must not be reachable from module state once the run is gone."""
         context = ScoringContext(scoring_concurrency=3)
-        semaphore = frontierscience.get_judge_semaphore(context, 3)
+        semaphore = context.judge_limiter
         ref = weakref.ref(semaphore)
 
         del semaphore, context

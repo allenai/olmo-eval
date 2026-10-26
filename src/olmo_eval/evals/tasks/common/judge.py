@@ -9,8 +9,9 @@ judged task in a run whose judge was left at its default. A task override wins. 
 task's default reasoning effort goes with its default model, so the environment
 override replaces it; an effort override equal to the task default counts as unset.
 
-``scoring_concurrency`` bounds the judge calls in flight across every judged task in
-a run, however many calls each output needs.
+The scoring context's ``judge_limiter``, sized by ``scoring_concurrency``, bounds the
+judge calls in flight across every judged task in a run, however many calls each
+output needs.
 
 Judge failures are kept apart from low scores. A judge call that fails after its
 retries, or a reply that never parses, is recorded as an incomplete score with the
@@ -28,6 +29,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar, Literal, TypeVar
 
+from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.multi_turn import turn_count, turn_replies
 from olmo_eval.common.scorers import ScoringIncompleteError
@@ -57,9 +59,6 @@ DEFAULT_JUDGE_CONCURRENCY = 16
 
 _THINK_OPEN = "<think>"
 _THINK_CLOSE = "</think>"
-
-#: Where the run-wide judge limiter is kept on the scoring context.
-_JUDGE_SEMAPHORE_ATTR = "_judged_task_semaphore"
 
 
 def visible_response(text: str) -> str:
@@ -278,18 +277,14 @@ class JudgedTask(Task):
             self._judge_instance = judge
         return judge
 
-    def _get_judge_semaphore(self, context: Any) -> asyncio.Semaphore:
-        """Return the judge limiter, shared by every judged task in the run when possible.
-
-        The scoring context lives exactly as long as the run, so the limiter is kept
-        there; without one, each task gets its own.
-        """
-        owner = context if context is not None else self
-        semaphore = getattr(owner, _JUDGE_SEMAPHORE_ATTR, None)
+    def _get_judge_semaphore(self, context: ScoringContext | None) -> asyncio.Semaphore:
+        """Return the run's judge limiter, or this task's own when scored without a context."""
+        if context is not None:
+            return context.judge_limiter
+        semaphore = getattr(self, "_own_judge_limiter", None)
         if semaphore is None:
-            concurrency = getattr(context, "scoring_concurrency", DEFAULT_JUDGE_CONCURRENCY)
-            semaphore = asyncio.Semaphore(max(1, concurrency))
-            setattr(owner, _JUDGE_SEMAPHORE_ATTR, semaphore)
+            semaphore = asyncio.Semaphore(DEFAULT_JUDGE_CONCURRENCY)
+            self._own_judge_limiter = semaphore
         return semaphore
 
     async def _judge_output(
