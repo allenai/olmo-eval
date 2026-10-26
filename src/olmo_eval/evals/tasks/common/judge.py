@@ -278,6 +278,10 @@ class JudgedTask(Task):
             self._own_judge_limiter = semaphore
         return semaphore
 
+    def _limiter(self) -> asyncio.Semaphore:
+        """Return the limiter judge calls hold: the run's while scoring, else this task's own."""
+        return self._judge_limiter or self._get_judge_semaphore(None)
+
     async def _judge_output(
         self,
         output: LMOutput,
@@ -297,10 +301,7 @@ class JudgedTask(Task):
         """
         try:
             verdict, raw = await judge.ask(
-                prompt,
-                parse,
-                limiter=self._judge_limiter or self._get_judge_semaphore(None),
-                system_prompt=system_prompt,
+                prompt, parse, limiter=self._limiter(), system_prompt=system_prompt
             )
         except JudgeParseError as exc:
             judge_result[raw_key] = exc.raw

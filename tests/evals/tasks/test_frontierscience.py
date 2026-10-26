@@ -10,6 +10,7 @@ from collections import Counter
 import pytest
 
 from olmo_eval.common.execution import ScoringContext
+from olmo_eval.common.scorers import llm_judge
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks import frontierscience
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, get_task, task_exists
@@ -24,6 +25,7 @@ from olmo_eval.evals.tasks.frontierscience import (
 )
 from olmo_eval.runners.io.builders import build_predictions
 from olmo_eval.runners.processing.utils import compute_task_hash
+from tests.evals.tasks.judge_stubs import use_judge
 
 OLYMPIAD_INSTRUCTION = (
     "Think step by step and solve the problem below. At the end of your response, write your "
@@ -103,7 +105,7 @@ def _no_backoff_sleep(monkeypatch):
     async def sleep(_delay):
         return None
 
-    monkeypatch.setattr(frontierscience.asyncio, "sleep", sleep)
+    monkeypatch.setattr(llm_judge.asyncio, "sleep", sleep)
 
 
 class TestRegistration:
@@ -347,7 +349,7 @@ class TestOlympiadScoring:
     async def test_judges_the_extracted_answer_against_the_reference(self, olympiad, monkeypatch):
         response = _response(olympiad, text="<think>x</think>\nWork.\n\nFINAL ANSWER\n42")
         judge, calls = _replies(olympiad, "reasoning\nVERDICT: CORRECT")
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await olympiad.score_responses([response])
 
@@ -378,7 +380,7 @@ class TestOlympiadScoring:
             "VERDICT: INCORRECT",
             "VERDICT: CORRECT",
         )
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await olympiad.score_responses(responses)
 
@@ -395,7 +397,7 @@ class TestOlympiadScoring:
     ):
         response = _response(olympiad)
         judge, calls = _replies(olympiad, "garbage", "still garbage", "nope")
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         with caplog.at_level(logging.WARNING, logger=frontierscience.__name__):
             await olympiad.score_responses([response])
@@ -416,7 +418,7 @@ class TestOlympiadScoring:
         for response in responses:
             response.outputs = []
         judge, calls = _replies(olympiad)
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         with caplog.at_level(logging.WARNING, logger=frontierscience.__name__):
             await olympiad.score_responses(responses)
@@ -434,7 +436,7 @@ class TestOlympiadScoring:
         answered = _response(olympiad, text="Work.\n\nFINAL ANSWER\n42")
         truncated = _response(olympiad, text="")
         judge, calls = _replies(olympiad, "VERDICT: CORRECT", "VERDICT: INCORRECT")
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         with caplog.at_level(logging.WARNING, logger=frontierscience.__name__):
             await olympiad.score_responses([answered, truncated])
@@ -450,7 +452,7 @@ class TestOlympiadScoring:
     async def test_recovers_on_a_retry(self, olympiad, monkeypatch):
         response = _response(olympiad)
         judge, calls = _replies(olympiad, "garbage", "VERDICT: CORRECT")
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await olympiad.score_responses([response])
 
@@ -478,7 +480,7 @@ class TestOlympiadScoring:
                 raise error
             return "VERDICT: CORRECT"
 
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await olympiad.score_responses([response])
 
@@ -504,7 +506,7 @@ class TestOlympiadScoring:
                 raise reply
             return reply
 
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await olympiad.score_responses([response])
 
@@ -527,7 +529,7 @@ class TestOlympiadScoring:
             "VERDICT: INCORRECT",
             "VERDICT: INCORRECT",
         )
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await olympiad.score_responses([response])
 
@@ -539,7 +541,7 @@ class TestResearchScoring:
     async def test_grades_the_whole_answer_against_the_rubric(self, research, monkeypatch):
         response = _response(research, text="<think>x</think>\nA full derivation.")
         judge, calls = _replies(research, "item-by-item\nVERDICT: 7.5")
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await research.score_responses([response])
 
@@ -561,7 +563,7 @@ class TestResearchScoring:
     ):
         response = _response(research)
         judge, _ = _replies(research, f"VERDICT: {points}")
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await research.score_responses([response])
 
@@ -576,7 +578,7 @@ class TestResearchScoring:
             _response(research, subject="chemistry"),
         ]
         judge, _ = _replies(research, "VERDICT: 8", "VERDICT: 2", "VERDICT: 10")
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await research.score_responses(responses)
 
@@ -592,12 +594,12 @@ class TestResearchScoring:
     async def test_unparseable_verdict_scores_zero_on_both_metrics(self, research, monkeypatch):
         response = _response(research)
         judge, calls = _replies(research, "garbage", "garbage", "garbage")
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await research.score_responses([response])
 
         assert len(calls) == 3
-        assert response.scores == {"success_rate": 0.0, "rubric_score": 0.0}
+        assert response.scores == {"success_rate": 0.0, "rubric_score": 0.0, "truncation_rate": 0.0}
 
 
 class TestRunnerShapedScoring:
@@ -620,7 +622,7 @@ class TestRunnerShapedScoring:
             finally:
                 in_flight -= 1
 
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         # Six separate score_responses calls, as the runner would issue them.
         await asyncio.gather(
@@ -641,7 +643,7 @@ class TestRunnerShapedScoring:
             builds += 1
             return judge
 
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", build)
+        monkeypatch.setattr(llm_judge, "build_openai_judge_fn", build)
 
         for _ in range(3):
             await olympiad.score_responses([_response(olympiad)])
@@ -665,7 +667,7 @@ class TestRunnerShapedScoring:
             finally:
                 in_flight -= 1
 
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await asyncio.gather(
             *(olympiad.score_responses([_response(olympiad)], context=context) for _ in range(3)),
@@ -681,7 +683,7 @@ class TestRunnerShapedScoring:
         async def judge(_prompt: str, **_kwargs) -> str:
             return "VERDICT: CORRECT"
 
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         first = ScoringContext(scoring_concurrency=2)
         second = ScoringContext(scoring_concurrency=5)
@@ -710,7 +712,7 @@ class TestRunnerShapedScoring:
         async def judge(_prompt: str, **_kwargs) -> str:
             raise asyncio.CancelledError()
 
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         with pytest.raises(asyncio.CancelledError):
             await olympiad.score_responses([response])
@@ -732,7 +734,7 @@ class TestRunnerShapedScoring:
                 raise BadRequestError("invalid request")
             return "VERDICT: CORRECT"
 
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await olympiad.score_responses([response])
 
@@ -762,7 +764,7 @@ class TestRunnerShapedScoring:
             calls += 1
             raise RuntimeError("rate limit exceeded")
 
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await olympiad.score_responses([response])
 
@@ -780,7 +782,7 @@ class TestComputeMetrics:
     async def test_metrics_land_under_the_shared_scorer_channel(self, research, monkeypatch):
         response = _response(research)
         judge, _ = _replies(research, "VERDICT: 8")
-        monkeypatch.setattr(frontierscience, "build_frontierscience_judge_fn", lambda **_: judge)
+        use_judge(monkeypatch, judge)
 
         await research.score_responses([response])
         computed = research.compute_metrics([response])
@@ -800,7 +802,7 @@ def test_judge_builder_uses_serialized_config(monkeypatch):
         return sentinel
 
     monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
-    monkeypatch.setattr(frontierscience, "build_openai_judge_fn", fake_builder)
+    monkeypatch.setattr(llm_judge, "build_openai_judge_fn", fake_builder)
     task = get_task(
         "frontierscience_olympiad",
         config_overrides={
@@ -811,15 +813,16 @@ def test_judge_builder_uses_serialized_config(monkeypatch):
     )
     assert isinstance(task, frontierscience.FrontierScienceOlympiad)
 
-    built = task._get_judge_fn()
+    built = task._get_judge()
 
-    assert built is sentinel
+    assert built.call is sentinel
     assert captured == {
         "model": "serialized-judge",
         "temperature": 0.0,
         "max_tokens": 1234,
         "scorer_name": "FrontierScienceOlympiad",
         "reasoning_effort": "medium",
+        "response_format": None,
     }
 
 
