@@ -22,8 +22,8 @@ BEAKER_DEFAULT_PRIORITY = "normal"
 BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 
-BEAKER_SGLANG_IMAGE = "01M5VA8T2R63316D297RPBVCG9"
-"""Ai2 shared CUDA 13.0.2 / PyTorch 2.13 base, built by scripts/build_image.sh."""
+BEAKER_SGLANG_IMAGE = "01M5VBMKPG8BX4BVJBGVBMF64V"
+"""Ai2 shared CUDA 13.0.2 devel / PyTorch 2.13 base, built by scripts/build_image.sh."""
 
 BEAKER_SANDBOX_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64-sandbox"
 """Docker image for Beaker evaluation jobs with sandbox support (includes Podman)."""

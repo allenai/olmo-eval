@@ -121,7 +121,7 @@ PLATFORM_ARCH=$(echo "$PLATFORM" | cut -d'/' -f2)
 
 # Auto-generate tag if not specified
 if [[ -z "$TAG" ]]; then
-    # Format: cu{version}-trc{version}-{arch}[-sandbox]
+    # Format: cu{version}-trc{version}-{arch}[-devel][-sandbox]
     # Example: cu1281-trc2100-amd64 (for CUDA 12.8.1, PyTorch 2.10.0)
     # Example: cu1281-trc2100-amd64-sandbox (with Podman support)
     CUDA_SHORT=$(cuda_short "$CUDA_VERSION")

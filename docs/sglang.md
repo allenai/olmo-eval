@@ -16,8 +16,8 @@ uv sync --frozen --no-group vllm --extra sglang
 ```
 
 For remote evaluation, only the launcher is needed locally. Selecting SGLang
-also selects the shared CUDA 13.0.2 / PyTorch 2.13 base image
-`01M5VA8T2R63316D297RPBVCG9`, owned by Ai2 in `open-instruct-dev`. Gantry installs
+also selects the shared CUDA 13.0.2 / PyTorch 2.13 compiler-equipped base image
+`01M5VBMKPG8BX4BVJBGVBMF64V`, owned by Ai2 in `open-instruct-dev`. Gantry installs
 the extra at job startup; users do not build an image or install GPU packages on
 their laptop. The launcher selects images per model, so other providers keep
 their existing default. Explicit `--image` or YAML `beaker_image` settings win.
@@ -31,7 +31,10 @@ uv run --frozen --no-group vllm olmo-eval beaker launch \
     -o provider.trust_remote_code=true \
     -o provider.kwargs.tensor_parallel_size=1 \
     -o provider.kwargs.sampling_backend=flashinfer \
-    -o provider.max_model_len=8192 \
+    -o provider.kwargs.attention_backend=triton -o provider.dtype=bfloat16 \
+    -o provider.max_model_len=8192 -o provider.max_concurrency=64 \
+    -o provider.kwargs.mem_fraction_static=0.8 \
+    -o 'provider.kwargs.cuda_graph_bs_decode=[1,2,4,8,16,32,64]' \
     -m /weka/MODEL_BUCKET/path/to/hf-checkpoint --weka-bucket MODEL_BUCKET \
     -t gsm8k -o limit=5 -o max_tokens=256 \
     -w YOUR_WORKSPACE -B YOUR_BUDGET \
@@ -66,13 +69,15 @@ explicitly managed runtime; compatibility then belongs to that configuration.
 The shared base uses the existing repository build and publication scripts:
 
 ```bash
-./scripts/build_image.sh --cuda-version 13.0.2 --torch-version 2.13.0 \
+./scripts/build_image.sh --cuda-devel --cuda-version 13.0.2 --torch-version 2.13.0 \
     --platform linux/amd64
 ./scripts/beaker/push_beaker_image.sh \
-    --source olmo-eval:cu1302-trc2130-amd64 --workspace YOUR_WORKSPACE
+    --source olmo-eval:cu1302-trc2130-amd64-devel --workspace YOUR_WORKSPACE
 ```
 
-Select a replacement with `--image`. The ordinary CUDA 12.8 / PyTorch 2.10 base
+SGLang compiles CUDA kernels during startup, so `--cuda-devel` is required even
+when all Python packages install successfully. Select a replacement with `--image`.
+The ordinary CUDA 12.8 / PyTorch 2.10 base
 is incompatible with this SGLang pin; installation constraints reject it. The
 shared default also enables `/usr/local/cuda/compat` for older host drivers on
 Jupiter. An explicit image is responsible for its own CUDA/driver compatibility;
