@@ -198,7 +198,7 @@ OE_EVAL_LAUNCH_COMMAND = "oe_eval/launch.py"
 # =============================================================================
 
 BACKEND_OPTIONAL_GROUPS: dict[str, str | None] = {
-    "sglang": None,  # Use the separately installed, model-compatible runtime.
+    "sglang": "sglang",
     "vllm": "vllm",
     "vllm_server": "vllm",
     "hf": "hf",

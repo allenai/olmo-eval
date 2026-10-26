@@ -543,6 +543,7 @@ class JobConfigAssembler:
         # Keep companion extras like clients for vllm_server.
         provider_extra_override = (
             {
+                "sglang": "sglang",
                 "olmo_core": "olmo_core",
                 "olmo_core_vlm": "olmo_core_vlm",
                 "vllm": "vllm",

@@ -132,6 +132,14 @@ clients = [
     # unsatisfiable rather than protective. Track the same floor and the 3.x major boundary.
     "openai>=2.45,<3",
 ]
+# Inline SGLang plus the Olmo architecture plugin. Keep the engine/plugin pins
+# together: olmo-sglang uses SGLang internals. CUDA 13 / Torch 2.13 runtime.
+sglang = [
+    "flash-linear-attention==0.5.2 ; sys_platform == 'linux'",
+    "olmo-sglang @ git+https://github.com/allenai/olmo-sglang.git@94ba0d5036c8ea7794636009d4ef233b0f3db32f ; sys_platform == 'linux'",
+    "sglang @ git+https://github.com/sgl-project/sglang.git@3145136dcd1238754e0ea2b2ffd546532119c71c#subdirectory=python ; sys_platform == 'linux'",
+    "tqdm==4.67.3 ; sys_platform == 'linux'",
+]
 
 [project.scripts]
 olmo-eval = "olmo_eval.cli:main"
@@ -146,6 +154,12 @@ package = true
 default-groups = ["dev", "vllm"]
 # These extras/groups have incompatible transitive dependencies and cannot be installed together
 conflicts = [
+    [{ extra = "sglang" }, { extra = "litellm" }],
+    [{ extra = "sglang" }, { extra = "vllm" }],
+    [{ extra = "sglang" }, { group = "vllm" }],
+    [{ extra = "sglang" }, { extra = "openhands" }],
+    [{ extra = "sglang" }, { extra = "agents" }],
+    [{ extra = "sglang" }, { extra = "clients" }],
     [
         { extra = "agents" },
         { extra = "openhands" },
@@ -171,6 +185,15 @@ conflicts = [
         { extra = "openhands" },
     ],
 ]
+
+# This provider uses the Python Engine, not SGLang's optional Rust HTTP/gRPC
+# servers or Rust multimodal transport. Do not require a Rust toolchain merely
+# to install the inline provider. Configure both uv project and pip commands.
+[tool.uv.extra-build-variables]
+sglang = { SGLANG_BUILD_RUST_EXTS = "none" }
+
+[tool.uv.pip.extra-build-variables]
+sglang = { SGLANG_BUILD_RUST_EXTS = "none" }
 
 [tool.setuptools.package-data]
 "olmo_eval.evals.tasks" = ["*.jsonl", "*.json"]

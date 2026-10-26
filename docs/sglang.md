@@ -2,8 +2,70 @@
 
 Select `-o provider.kind=sglang` to use a local SGLang engine with the existing
 olmo-eval tasks, generation harness, scoring, prediction saving and metrics.
-Install a compatible SGLang runtime separately; this provider does not install
-or upgrade CUDA dependencies. Use an isolated environment from inline vLLM.
+The `sglang` dependency extra installs the pinned SGLang engine, olmo-sglang
+model plugin and FLA. Beaker jobs select this extra automatically when the
+resolved provider is `sglang`, just as vLLM jobs select the `vllm` extra.
+Use separate environments for these backends; their dependency pins conflict.
+
+## Installation and Beaker jobs
+
+For a local Linux CUDA 13 / PyTorch 2.13 environment:
+
+```bash
+uv sync --frozen --no-group vllm --extra sglang
+```
+
+For remote evaluation, only the launcher is needed locally. The image contains
+Python, PyTorch and CUDA; Gantry installs the provider extra at job startup.
+Build a compatible base through the existing image workflow:
+
+```bash
+./scripts/build_image.sh --cuda-version 13.0.2 --torch-version 2.13.0 \
+    --platform linux/amd64
+./scripts/beaker/push_beaker_image.sh \
+    --source olmo-eval:cu1302-trc2130-amd64 --workspace YOUR_WORKSPACE
+```
+
+Select that image with `--beaker-image` when launching. The repository's default
+CUDA 12.8 / PyTorch 2.10 image is not compatible with this SGLang pin. A normal
+launcher invocation for an exported Olmo KDA MoE Hugging Face checkpoint is:
+
+```bash
+uv run --frozen --no-group vllm olmo-eval beaker launch \
+    --beaker-image YOUR_CUDA13_TORCH213_IMAGE \
+    --harness default -o provider.kind=sglang \
+    -o provider.kwargs.model_registration=olmo_sglang:register \
+    -o provider.kwargs.tensor_parallel_size=1 \
+    -o provider.kwargs.sampling_backend=flashinfer \
+    -o provider.max_model_len=8192 \
+    -m /weka/MODEL_BUCKET/path/to/hf-checkpoint --weka-bucket MODEL_BUCKET \
+    -t gsm8k -o limit=5 -o max_tokens=256 \
+    -w YOUR_WORKSPACE -B YOUR_BUDGET \
+    --cluster ai2/jupiter --gpus 1 --priority high \
+    --min-runtime 20m --timeout 20m --no-upload --dry-run
+```
+
+Replace the uppercase placeholders and remove `--dry-run` to submit. The limit
+and token cap make this an installation check, not an accuracy measurement;
+remove them and choose a suitable timeout for full evaluation. Configure normal
+Beaker/GitHub access and checkpoint mounts as described in the
+[launcher guide](../README.md#launching-on-beaker). Omit `--no-upload` for normal
+evaluations after configuring Google Application Default Credentials.
+
+The extra pins SGLang source `3145136dcd1238754e0ea2b2ffd546532119c71c`,
+olmo-sglang `94ba0d5036c8ea7794636009d4ef233b0f3db32f`, and FLA 0.5.2.
+SGLang requires Transformers 5.12.1 and PyTorch 2.13.0; the tested CUDA 13 build
+uses Triton 3.7.1. The extra also pins tqdm 4.67.3 to avoid a dataset-download
+regression. These are a qualified combination, not interchangeable latest
+versions. The optional fused routing arithmetic (#10) remains off by default.
+
+The uv build configuration skips SGLang's optional Rust HTTP/gRPC servers and
+multimodal transport: this provider uses the inline Python Engine. No Rust
+compiler is needed. This extra does not qualify Rust-server modes or image
+inference. `provider.package` can replace the bundled engine extra for an
+explicitly managed runtime; compatibility then belongs to that configuration.
+
+## Provider settings
 
 `provider.max_model_len` maps to `context_length`; `provider.max_concurrency`
 maps to `max_running_requests`. Use `provider.kwargs.tensor_parallel_size` for
@@ -35,9 +97,8 @@ Only the batched generation strategy is supported. Continuation likelihood
 scoring, prompt truncation, automatic fitting of generation length to the context
 window, image requests and tool requests fail explicitly. Aborted generation or
 missing sampled-token probabilities raise errors rather than becoming scored
-answers. Install the
-optimized olmo-sglang preset separately when desired; selecting this provider
-does not automatically enable model-specific optimization switches.
+answers. The extra includes olmo-sglang; select its registration hook for Olmo
+checkpoints. Model-specific optimization defaults come from the pinned plugin.
 
 For top-p evaluations, select `provider.kwargs.sampling_backend=flashinfer`
 in a compatible pinned runtime. This uses SGLang's existing nucleus sampler.
@@ -55,11 +116,10 @@ uv run --no-sync olmo-eval run \
     -m /path/to/model -t gsm8k -o limit=5 --no-upload
 ```
 
-For remote jobs, provide a compatible runtime through the image or the existing
-`provider.package` / `provider.dependencies` settings. There is no default
-SGLang dependency extra: selecting this backend does not replace CUDA, PyTorch,
-or Transformers in an existing runtime. Keep SGLang and inline vLLM in separate
-environments when their dependency pins differ.
+Remote jobs install the SGLang extra into the selected compatible base image.
+The launcher's CUDA/PyTorch constraints prevent silently replacing the base GPU
+stack. Use `provider.package` / `provider.dependencies` for intentional overrides,
+and retain the exact image, package pins and effective settings with results.
 
 The provider delegates sampling to SGLang. It does not implement a sampler or
 promise identical random draws to another backend for the same seed. Keep task

@@ -44,8 +44,8 @@ def _require_original_logprobs() -> None:
 class SGLangProvider(InferenceProvider):
     """Run generation with a locally installed SGLang engine.
 
-    Install the engine and any model registration package separately. Continuation
-    likelihood scoring and tool requests are not supported by this provider.
+    Install the `sglang` extra in a compatible GPU runtime. Continuation likelihood
+    scoring and tool requests are not supported by this provider.
     """
 
     def __init__(

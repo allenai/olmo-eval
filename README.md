@@ -1884,7 +1884,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/build_image.sh --help
 ```
 
-**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1
+**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1, 13.0.2
 **PyTorch version**: Configurable via `--torch-version`
 **Configuration**: See `scripts/build_config.sh`
 
@@ -1912,6 +1912,12 @@ The image does NOT contain:
 - olmo-eval dependencies like click, datasets, rich, etc. (installed at job startup)
 - Storage backends like boto3, psycopg (installed at job startup if needed)
 - Inference providers like vllm, transformers, litellm (installed at job startup)
+
+For the SGLang provider, build with `--cuda-version 13.0.2 --torch-version 2.13.0`
+and select the resulting image with `--beaker-image`. Selecting
+`provider.kind=sglang` installs the pinned `sglang` extra (including the Olmo model
+plugin) at startup. See the [SGLang setup guide](docs/sglang.md) for local
+installation, checkpoint registration and a small validation command.
 
 ### Installing Inference Providers at Runtime
 
