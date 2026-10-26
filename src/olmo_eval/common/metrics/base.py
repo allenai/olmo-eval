@@ -905,7 +905,7 @@ class MacroSubsetAccuracyMetric(Metric):
 @dataclass(frozen=True, slots=True)
 class SafetyErrorMetric(Metric):
     """
-    Counts the responses an LLM judge could not grade, as flagged by
+    Counts the responses whose answer could not be parsed, as flagged by
     ``is_parsing_error`` in the instance metadata
     """
 

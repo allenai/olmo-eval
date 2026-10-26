@@ -407,10 +407,16 @@ class TestSimpleQAJudgeScorer:
         scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
         instance = Instance(question="Q", gold_answer="A")
 
+        output = LMOutput(text="?")
+
         with pytest.raises(JudgeParseError) as raised:
-            await scorer.ascore_with_context(instance, LMOutput(text="?"), ScoringContext())
+            await scorer.ascore_with_context(instance, output, ScoringContext())
 
         assert raised.value.raw == "I am not sure."
+        assert output.metadata["judge_result"] == {
+            "raw_judge_response": "I am not sure.",
+            "parse_error": True,
+        }
 
     def test_format_prompt(self):
         """Test prompt formatting."""
@@ -681,8 +687,7 @@ class TestSafetyScorerVerdicts:
         assert scores == [1.0, 0.0]
         assert answered.metadata["judge_result"]["response_refusal"] == "yes"
         assert empty.metadata["judge_result"]["response_refusal"] == "no"
-        assert (answered.metadata["is_empty_response"], empty.metadata["is_empty_response"]) == (
-            False,
-            True,
-        )
+        assert answered.metadata["judge_result"]["is_empty_response"] is False
+        assert empty.metadata["judge_result"]["is_empty_response"] is True
+        assert empty.metadata["judge_result"]["is_parsing_error"] is False
         assert "judge_result" not in instance.metadata

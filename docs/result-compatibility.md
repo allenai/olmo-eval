@@ -24,16 +24,23 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
     variants of `do_anything_now`, `harmbench`, `strongreject`,
     `trustllm_jailbreaktrigger`, `wildguardtest`, `wildjailbreak` and `xstest`, and the
     safety suites that include them.
+  - `wmdp:mcq`, whose subset metrics change for empty subsets only.
   - Runs that set `OLMO_EVAL_JUDGE`, or `-o judge_*` on `omniscience:judge`, `expertqa`,
     `astabench_scholarqa` and `researchqa`.
 - **Change**:
-  - A judge reply that names no verdict is asked for again and then leaves the output
-    unscored, counted against the failure budget. Before, SimpleQA scored it as
-    incorrect and the safety judges scored it, an answer outside the allowed ones, or a
-    StrongREJECT judge with no grade logprobs, as 0.0.
+  - A judge reply that names no verdict leaves the output unscored, counted against the
+    failure budget; an API judge (SimpleQA, the safety `openai_judge` variants) is asked
+    again first. Before, SimpleQA scored it as incorrect and the safety judges scored it,
+    an answer outside the allowed ones, or a StrongREJECT judge with no grade logprobs,
+    as 0.0.
   - The safety variants drop their `parsing_error` metric, which would now always read
-    0; the run's scoring failures count these replies instead. Safety subset metrics
-    leave out unscored responses, and an empty subset reports 0.0 instead of -1.
+    0; the run's scoring failures count these replies instead. Subset metrics leave out
+    unscored responses, and an empty subset reports 0.0 instead of -1.
+  - Saved predictions keep each safety sample's judge result under its
+    `model_output[i].judge_result`, with `is_empty_response`, `is_truncated_response`
+    and `is_parsing_error` inside it. Before, one result per instance was saved at the
+    top level of the prediction and the flags in the request's `doc`. SimpleQA
+    predictions now keep the judge's raw reply.
   - The safety variants that judge with an auxiliary provider record the model it must
     serve as `judge_model` (`allenai/wildguard`, or the `qylu4156/strongreject-15k-v1`
     adapter), and the runner refuses a provider that serves another model.
@@ -47,14 +54,15 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   - Judge API calls are retried on transient failures for judge scorers and the
     attributed-QA tasks, which made one attempt before.
 - **Identity**: the task hash changes for the 28 safety specs listed above. It does not
-  change for `simpleqa:judge`, or for any spec run with its default judge. Runs with
-  another judge on `expertqa`, `astabench_scholarqa` and `researchqa` now get their own
-  hash; before, they shared the default judge's hash.
+  change for any other spec run with its default judge, including `simpleqa:judge` and
+  `wmdp:mcq`. Runs with another judge on `expertqa`, `astabench_scholarqa` and
+  `researchqa` now get their own hash; before, they shared the default judge's hash.
 - **Comparability**: a `simpleqa:judge` result is affected only if its judge gave a reply
   with no grade; leaving those out raises its accuracy. Safety results before this change
   counted unparseable judge replies as unsafe, so a run with such replies scores higher
-  now; earlier `parsing_error` values say how many there were. An earlier
-  `omniscience:judge` run with `-o judge_*` was scored by the default judge.
+  now; earlier `parsing_error` values say how many there were. An earlier subset value of
+  -1 meant the subset had no instances. An earlier `omniscience:judge` run with
+  `-o judge_*` was scored by the default judge.
 
 ## 2026-10-22: Scoring failures are left out and budgeted, not scored as zero (#492)
 

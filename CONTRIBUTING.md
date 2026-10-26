@@ -159,11 +159,14 @@ results and hashed to identify it.
   the runner checks it before generating.
 - Call the judge through `Judge.ask` or `call_judge`. They retry transient API failures,
   hold the run's `judge_limiter` for each call, and raise `ScoringIncompleteError` when
-  the judge stays unavailable. A reply with no verdict is asked for again and then raises
-  `JudgeParseError`, which leaves the output unscored. Scoring an unparseable reply as
-  wrong needs a parity reason, an explicit `except JudgeParseError`, and a logged count.
-- Record `judge_result`, with the raw reply, and the scores on each judged output, so
-  every sample keeps its own.
+  the judge stays unavailable. `Judge.ask` asks an API judge again for a reply with no
+  verdict and then raises `JudgeParseError`, which leaves the output unscored; a judge
+  served from the inference pool at temperature 0 raises on the first such reply.
+  Scoring an unparseable reply as wrong needs a parity reason, an explicit
+  `except JudgeParseError`, and a logged count.
+- Record `judge_result`, with the raw reply and any flags the score depends on, and the
+  scores on each judged output, so every sample keeps its own. Of the output metadata,
+  saved predictions keep `judge_result` and scores, not arbitrary keys.
 
 ### Shared interfaces and environment
 

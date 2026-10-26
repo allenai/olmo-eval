@@ -719,7 +719,14 @@ class LLMJudgeScorer(ContextScorer):
         if self.judge_fn is None:
             raise RuntimeError("No judge_fn configured.")
         judge = Judge(call=self.judge_fn, label=f"{self.name} judge")
-        score, _ = await judge.ask(prompt, self._parsed_or_none, limiter=context.judge_limiter)
+        try:
+            score, raw = await judge.ask(
+                prompt, self._parsed_or_none, limiter=context.judge_limiter
+            )
+        except JudgeParseError as exc:
+            output.metadata["judge_result"] = {"raw_judge_response": exc.raw, "parse_error": True}
+            raise
+        output.metadata["judge_result"] = {"raw_judge_response": raw, "parse_error": False}
         return score
 
     def _parsed_or_none(self, response: str, **kwargs: Any) -> float | None:
@@ -1073,3 +1080,10 @@ class SafetyScorer(LLMJudgeScorer):
         except Exception:
             output.metadata["is_parsing_error"] = True
             raise
+        finally:
+            # Saved predictions keep judge_result but not other output metadata.
+            judge_result = output.metadata.get("judge_result")
+            if isinstance(judge_result, dict):
+                for flag in ("is_empty_response", "is_truncated_response", "is_parsing_error"):
+                    if flag in output.metadata:
+                        judge_result[flag] = output.metadata[flag]
