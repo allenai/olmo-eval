@@ -185,6 +185,10 @@ The initial profiles cover the measured BF16, 16-layer Olmo 3.5 KDA MoE shape
 nonquantized text inference and an explicitly configured context up to 34,816.
 All cache, attention and recurrent-state dimensions must match, not just the
 model name. The GPU must have at least 95% of its memory free at startup.
+This is one exact model geometry, not a preset for every Olmo 3.5 size. Other
+sizes fall back to `generic` without applying these tuned defaults. Check the
+startup profile log or `runtime/sglang-profile-<worker>.json` for the selected
+profile and fallback reason.
 
 | Hardware / cache choice | Running sequences | KV token pool | Recurrent slots | Memory fraction |
 | --- | ---: | ---: | ---: | ---: |

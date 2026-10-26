@@ -96,9 +96,11 @@ vllm = [
     # transformers 5.13 nests rope_parameters per layer type; vLLM 0.19.1 reads it flat,
     # so Olmo-3 (mixed sliding/full attention) fails to load with a rope_theta KeyError.
     # Keep the previously locked vLLM dependency versions below. Without these
-    # bounds, uv can reuse SGLang's newer transitive dependencies even in the
-    # mutually exclusive vLLM resolution. Update these pins when qualifying a
-    # vLLM upgrade, and keep the dependency-group mirror below in sync.
+    # bounds, a fresh uv lock can reuse SGLang's newer transitive dependencies
+    # even in the mutually exclusive vLLM resolution. The lock alone also cannot
+    # constrain Beaker's uv pip install, which installs the published extra.
+    # Both that extra and local uv sync --group vllm need these constraints.
+    # Update both lists together when qualifying a vLLM upgrade.
     "transformers==5.8.1 ; sys_platform != 'darwin'",
     "apache-tvm-ffi==0.1.9 ; sys_platform != 'darwin'",
     "cuda-pathfinder==1.5.3 ; sys_platform != 'darwin'",

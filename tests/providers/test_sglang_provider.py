@@ -348,7 +348,8 @@ def test_zero_top_logprobs_and_runtime_trace(setup_engine, monkeypatch):
     assert provider.describe_request(request, params)["sglang_return_original_logprob"] == "1"
 
 
-def test_abort_isolates_request_and_marks_incomplete_sample_group(setup_engine):
+@pytest.mark.parametrize("partial_logprobs", [False, True])
+def test_abort_isolates_request_and_marks_incomplete_sample_group(setup_engine, partial_logprobs):
     engine, _, _ = setup_engine
     provider = SGLangProvider("model")
     outputs = engine.generate(prompt=["x"] * 4)
@@ -357,6 +358,11 @@ def test_abort_isolates_request_and_marks_incomplete_sample_group(setup_engine):
             "finish_reason": {"type": "abort", "message": "input length exceeds context length"}
         }
     }
+    if partial_logprobs:
+        outputs[1]["meta_info"].update(
+            output_token_logprobs=[(-0.3, 10, "partial")],
+            output_top_logprobs=[[(-0.1, 20, "alternative")]],
+        )
     engine.generate.side_effect = None
     engine.generate.return_value = outputs
     results = provider.generate(
@@ -366,6 +372,12 @@ def test_abort_isolates_request_and_marks_incomplete_sample_group(setup_engine):
     assert request_error(results[0]) is not None
     assert all(REQUEST_ERROR_KEY in output.metadata for output in results[0])
     assert is_context_overflow_output(results[0])
+    aborted = results[0][1]
+    assert aborted.metadata["finish_reason"] == "abort"
+    assert aborted.metadata["sglang_finish_reason"] == outputs[1]["meta_info"]["finish_reason"]
+    assert "output_token_logprobs" not in aborted.metadata
+    assert "output_top_logprobs" not in aborted.metadata
+    assert ("output_token_logprobs" in outputs[1]["meta_info"]) is partial_logprobs
     assert request_error(results[1]) is None
     assert [output.text for output in results[1]] == ["response2", "response3"]
 

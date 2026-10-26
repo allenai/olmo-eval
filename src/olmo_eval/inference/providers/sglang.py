@@ -364,6 +364,10 @@ class SGLangProvider(InferenceProvider):
         finish_reason = metadata.get("finish_reason")
         reason = finish_reason.get("type") if isinstance(finish_reason, dict) else finish_reason
         if reason == "abort":
+            # Failed requests are unscored; retain diagnostics, not partial
+            # probability arrays in every result-queue payload.
+            metadata.pop("output_token_logprobs", None)
+            metadata.pop("output_top_logprobs", None)
             message = f"SGLang aborted generation: {finish_reason}"
             metadata.update(
                 {
