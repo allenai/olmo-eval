@@ -211,6 +211,18 @@ def test_package_versions_records_the_serving_vllm(monkeypatch, fake_vllm_python
     assert versions["vllm-venv/vllm"] == "0.19.0"
 
 
+def test_environment_info_reads_vllm_python_from_the_environment(
+    monkeypatch, fake_vllm_python
+) -> None:
+    monkeypatch.setattr(provenance, "_run", lambda *a, **k: ISOLATED_OUTPUT)
+    monkeypatch.setenv("VLLM_PYTHON", fake_vllm_python)
+
+    packages = environment_info()["packages"]
+
+    assert packages["vllm"] == "0.19.0"
+    assert packages["vllm-venv/torch"] == "2.10.0"
+
+
 def test_package_versions_without_vllm_python(monkeypatch) -> None:
     def fail_run(*args, **kwargs):
         raise AssertionError("no interpreter should be spawned")

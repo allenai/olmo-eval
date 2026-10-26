@@ -67,7 +67,10 @@ print(json.dumps(out))
 
 @lru_cache(maxsize=4)
 def interpreter_package_versions(python: str, names: tuple[str, ...]) -> dict[str, str]:
-    """Versions of ``names`` installed for another Python interpreter; empty on failure."""
+    """Versions of ``names`` installed for another Python interpreter; empty on failure.
+
+    A failure is cached too, so a timeout at run start doesn't stall the final manifest.
+    """
     out = _run([python, "-I", "-c", _VERSIONS_SCRIPT, *names], timeout=15.0)
     if not out:
         return {}
