@@ -1,6 +1,7 @@
 """Contract tests for the inline SGLang generation provider."""
 
 import asyncio
+import os
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -28,6 +29,7 @@ from olmo_eval.runners.processing.generation_counts import count_generations
 
 @pytest.fixture
 def setup_engine(monkeypatch):
+    monkeypatch.setenv("SGLANG_RETURN_ORIGINAL_LOGPROB", "1")
     tokenizer = Mock()
     tokenizer.apply_chat_template.return_value = "<user>question<assistant><think>"
     tokenizer.encode.return_value = [10, 20]
@@ -249,10 +251,19 @@ def test_worker_maps_allocated_gpus_and_closes_provider(setup_engine, monkeypatc
         )
 
     monkeypatch.setattr("olmo_eval.harness.Harness", make_harness)
-    config = HarnessConfig(name="test", provider=ProviderConfig(kind="sglang", model="model"))
+    config = HarnessConfig(
+        name="test",
+        provider=ProviderConfig(
+            kind="sglang",
+            model="model",
+            kwargs={"load_format": "safetensors", "model_loader_extra_config": '{"threads": 2}'},
+        ),
+    )
     results = Mock()
     inference_worker("test", [0, 1], Mock(), results, config.to_dict(), 0)
     assert constructor.call_args.kwargs["tp_size"] == 2
+    assert constructor.call_args.kwargs["load_format"] == "safetensors"
+    assert constructor.call_args.kwargs["model_loader_extra_config"] == '{"threads": 2}'
     strategy.run.assert_awaited_once()
     engine.shutdown.assert_called_once_with()
     results.put.assert_not_called()
@@ -332,3 +343,67 @@ def test_zero_top_logprobs_and_runtime_trace(setup_engine, monkeypatch):
     assert "top_logprobs" not in result.logprobs[0]
     assert result.metadata["sglang_return_original_logprob"] == "1"
     assert provider.describe_request(request, params)["sglang_return_original_logprob"] == "1"
+
+
+def test_raw_logprobs_default_precedes_model_registration(setup_engine, monkeypatch):
+    _, constructor, _ = setup_engine
+    monkeypatch.delenv("SGLANG_RETURN_ORIGINAL_LOGPROB")
+
+    def register():
+        assert os.environ["SGLANG_RETURN_ORIGINAL_LOGPROB"] == "1"
+        monkeypatch.setitem(
+            sys.modules,
+            "sglang.srt.layers.sampler",
+            SimpleNamespace(SGLANG_RETURN_ORIGINAL_LOGPROB=True),
+        )
+
+    monkeypatch.setitem(sys.modules, "plugin", SimpleNamespace(register=register))
+    provider = SGLangProvider("model", model_registration="plugin:register")
+    constructor.assert_called_once()
+    request = LMRequest(RequestType.COMPLETION, prompt="test")
+    assert provider.generate([request])[0][0].metadata["sglang_return_original_logprob"] == "1"
+
+
+@pytest.mark.parametrize("value", ["0", "false", "invalid"])
+def test_conflicting_logprob_environment_rejected(setup_engine, monkeypatch, value):
+    _, constructor, _ = setup_engine
+    monkeypatch.setenv("SGLANG_RETURN_ORIGINAL_LOGPROB", value)
+    with pytest.raises(ValueError, match="requires raw model logprobs"):
+        SGLangProvider("model")
+    constructor.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "module", ["sglang.srt.layers.sampler", "sglang.srt.speculative.standalone_worker_v2"]
+)
+def test_preimported_sampler_convention_rejected(setup_engine, monkeypatch, module):
+    _, constructor, _ = setup_engine
+    monkeypatch.setitem(sys.modules, module, SimpleNamespace(SGLANG_RETURN_ORIGINAL_LOGPROB=False))
+    with pytest.raises(RuntimeError, match="Restart the worker"):
+        SGLangProvider("model")
+    constructor.assert_not_called()
+
+
+def test_plugin_cannot_change_logprob_convention(setup_engine, monkeypatch):
+    _, constructor, _ = setup_engine
+
+    def register():
+        monkeypatch.setitem(
+            sys.modules,
+            "sglang.srt.layers.sampler",
+            SimpleNamespace(SGLANG_RETURN_ORIGINAL_LOGPROB=False),
+        )
+
+    monkeypatch.setitem(sys.modules, "plugin", SimpleNamespace(register=register))
+    with pytest.raises(RuntimeError, match="Restart the worker"):
+        SGLangProvider("model", model_registration="plugin:register")
+    constructor.assert_not_called()
+
+
+def test_environment_change_does_not_mislabel_outputs(setup_engine, monkeypatch):
+    engine, _, _ = setup_engine
+    provider = SGLangProvider("model")
+    monkeypatch.setenv("SGLANG_RETURN_ORIGINAL_LOGPROB", "0")
+    with pytest.raises(ValueError, match="requires raw model logprobs"):
+        provider.generate([LMRequest(RequestType.COMPLETION, prompt="test")])
+    engine.generate.assert_not_called()
