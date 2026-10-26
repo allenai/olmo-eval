@@ -184,9 +184,11 @@ model name. The GPU must have at least 95% of its memory free at startup.
 | B300, explicit cache off | 512 | 17,825,792 | 1,024 | 0.7 |
 | H100 80 GB, cache off (default) | 512 | 6,684,672 | 512 | 0.9 |
 | H100, explicit cache on | 320 | 4,456,448 | 1,920 | 0.9 |
+| A100 80 GB, cache off | 512 | 6,684,672 | 512 | 0.9 |
 
-These are measured starting configurations transferred from the RL study, not
-universal throughput optima. Profiles also select 8,192-token prefill chunks,
+The H100/B300 configurations come from the RL study; A100 comes from a bounded
+olmo-eval admission comparison. These are starting configurations, not universal
+throughput optima. Profiles also select 8,192-token prefill chunks,
 full decode graphs through admission, disabled prefill graphs, Triton attention
 and FlashInfer sampling. H100's KV pool cannot hold all admitted requests at the
 maximum context simultaneously; actual lengths and prefix reuse determine
@@ -196,7 +198,7 @@ Explicit engine settings always win. For example, `provider.max_concurrency=128`
 reduces default pool and graph sizing to that admission; explicit pool or graph
 settings remain unchanged. Use `provider.kwargs.disable_radix_cache=false` to
 request caching, or `provider.kwargs.profile=generic` to opt out of all profile
-defaults. Unknown GPUs (including unqualified A100s), model shapes, vision,
+defaults. Unknown GPUs (including A100 40 GB), A100 prefix caching, model shapes, vision,
 tensor parallelism, quantization, larger contexts and occupied GPUs retain
 engine defaults with a logged fallback reason. No context limit or task sampling
 setting is silently changed.

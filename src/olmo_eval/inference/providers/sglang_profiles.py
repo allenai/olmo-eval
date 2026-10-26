@@ -85,16 +85,21 @@ def resolve_profile(
     if len(devices) != 1:
         return fallback("Could not identify the engine GPU")
     name, total, free = devices[0]
-    gpu = (
-        "b300"
-        if "b300" in name.lower() and total >= 270000
-        else ("h100" if "h100" in name.lower() and total >= 80000 else None)
+    gpu = next(
+        (
+            family
+            for family, minimum in (("b300", 270000), ("h100", 80000), ("a100", 80000))
+            if family in name.lower() and total >= minimum
+        ),
+        None,
     )
     if gpu is None or "mig" in name.lower():
         return fallback("No qualified profile for this GPU/memory capacity")
     if free < total * 0.95:
         return fallback("Profiles require a dedicated GPU with at least 95% memory free at startup")
     cache_off = options.get("disable_radix_cache", gpu != "b300")
+    if gpu == "a100" and not cache_off:
+        return fallback("A100 prefix caching is not qualified")
     running = options.get("max_running_requests", 512 if gpu == "b300" or cache_off else 320)
     if not isinstance(running, int) or isinstance(running, bool) or running <= 0:
         raise ValueError("max_running_requests must be a positive integer")
