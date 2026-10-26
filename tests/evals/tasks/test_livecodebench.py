@@ -496,6 +496,20 @@ class TestGraderStdinMode:
         solution = "a, b = map(int, input().split())\nprint(a + b)\n"
         assert _grade(solution, SUM_TESTS)["passed"] is True
 
+    @pytest.mark.parametrize(
+        "solution",
+        [
+            "import sys\na, b = map(int, sys.stdin.read().split())\nprint(a + b)\n",
+            "import sys\na, b = map(int, sys.stdin.buffer.read().split())\nprint(a + b)\n",
+            # The prelude's `from builtins import *` used to bind the real open before the patch.
+            "a, b = map(int, open(0).read().split())\nprint(a + b)\n",
+            "import sys\nfor line in sys.stdin:\n    a, b = map(int, line.split())\n    print(a + b)\n",
+        ],
+        ids=["stdin.read", "stdin.buffer", "open(0)", "iterate-stdin"],
+    )
+    def test_common_stdin_idioms_pass(self, solution: str) -> None:
+        assert _grade(solution, SUM_TESTS)["passed"] is True
+
     def test_wrong_program_fails(self) -> None:
         verdict = _grade("a, b = map(int, input().split())\nprint(a - b)\n", SUM_TESTS)
         assert verdict["passed"] is False

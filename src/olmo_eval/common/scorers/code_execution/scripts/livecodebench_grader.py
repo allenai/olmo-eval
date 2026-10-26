@@ -126,6 +126,10 @@ class MockStdin:
     def readlines(self, *args):
         return self.stringio.readlines()
 
+    def __iter__(self):
+        # `for line in sys.stdin` (a __getattr__ fallback does not cover dunder lookups)
+        return iter(self.stringio)
+
     def __getattr__(self, name):
         return getattr(self.stringio, name)
 
@@ -176,8 +180,12 @@ def call_method(method, inputs):
 
     line_iterator = iter(inputs.split("\n"))
     mock_stdin = MockStdin(inputs)
+    mocked_open = mock_open(read_data=inputs)
 
-    @patch("builtins.open", mock_open(read_data=inputs))
+    # IMPORT_PRELUDE's `from builtins import *` binds the real open in the solution's globals before the patch
+    # below runs, so `open(0).read()` would read the grader's own stdin; patch that binding too.
+    @patch.dict(getattr(method, "__globals__", {}), {"open": mocked_open})
+    @patch("builtins.open", mocked_open)
     @patch("sys.stdin", mock_stdin)
     @patch("sys.stdin.readline", lambda *args: next(line_iterator))
     @patch("sys.stdin.readlines", lambda *args: inputs.split("\n"))
