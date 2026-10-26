@@ -644,12 +644,14 @@ class JobConfigAssembler:
                     setup_modal_gcp_secret = True
                     log.info(f"Modal GCP secret setup enabled: {secret_name}")
 
-        if effective_image == BEAKER_SGLANG_IMAGE:
-            # CUDA forward compatibility for H100 hosts with older drivers.
-            # Explicit environment overrides below still take precedence.
-            job_env_vars["LD_LIBRARY_PATH"] = (
-                "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64"
-            )
+        if effective_image == BEAKER_SGLANG_IMAGE and "LD_LIBRARY_PATH" not in self.config.env_vars:
+            # Select compatibility libraries on the actual host, before Python
+            # imports CUDA. Explicit library paths remain authoritative.
+            command = [
+                "bash",
+                "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/cuda13_driver",
+                *command,
+            ]
         # User-supplied env vars win over everything above
         job_env_vars.update(self.config.env_vars)
 

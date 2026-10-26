@@ -53,7 +53,10 @@ def test_job_installs_selected_provider(provider_kind, custom_package, image):
     default_image = BEAKER_SGLANG_IMAGE if provider_kind == "sglang" else BEAKER_DEFAULT_IMAGE
     assert job.beaker_image == (image or default_image)
     if image is None and provider_kind == "sglang":
-        assert job.env_vars["LD_LIBRARY_PATH"].startswith("/usr/local/cuda/compat:")
+        assert job.command[:2] == [
+            "bash",
+            "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/cuda13_driver",
+        ]
     else:
         assert "LD_LIBRARY_PATH" not in job.env_vars
     assert ("vllm" in job.extras) == (provider_kind == "vllm")

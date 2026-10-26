@@ -57,3 +57,31 @@ def test_build_script_forwards_cuda_flavor(tmp_path, devel, sandbox):
         tag += "-sandbox"
     assert build[build.index("-t") + 1] == tag
     assert build[build.index("--target") + 1] == ("runtime-sandbox" if sandbox else "runtime")
+
+
+@pytest.mark.parametrize(
+    "driver,compat", [("570.124.06", True), ("580.65.06", False), ("590.48.01", False)]
+)
+def test_cuda13_driver_selection_before_python(tmp_path, driver, compat):
+    script = Path(__file__).parents[3] / "src/olmo_eval/launch/beaker/scripts/cuda13_driver"
+    smi = tmp_path / "nvidia-smi"
+    smi.write_text(f"#!/bin/sh\nprintf '%s\\n' '{driver}'\n")
+    smi.chmod(0o755)
+    result = subprocess.run(
+        [
+            "bash",
+            str(script),
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['LD_LIBRARY_PATH'])",
+        ],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "LD_LIBRARY_PATH": "/native",
+        },
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    assert result.stdout.strip() == ("/usr/local/cuda/compat:/native" if compat else "/native")

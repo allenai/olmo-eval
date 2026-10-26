@@ -83,8 +83,10 @@ SGLang compiles CUDA kernels during startup, so `--cuda-devel` is required even
 when all Python packages install successfully. Select a replacement with `--image`.
 The ordinary CUDA 12.8 / PyTorch 2.10 base
 is incompatible with this SGLang pin; installation constraints reject it. The
-shared default also enables `/usr/local/cuda/compat` for older host drivers on
-Jupiter. An explicit image is responsible for its own CUDA/driver compatibility;
+shared default selects `/usr/local/cuda/compat` on hosts with drivers older than
+R580, and native driver libraries on R580 or newer, before starting Python.
+This follows the [CUDA 13 driver requirements](https://docs.nvidia.com/cuda/archive/13.0.2/cuda-toolkit-release-notes/).
+An explicit image is responsible for its own CUDA/driver compatibility;
 explicit `--env LD_LIBRARY_PATH=...` always takes precedence. Qualify a new base
 with a small GPU evaluation before changing the shared default.
 

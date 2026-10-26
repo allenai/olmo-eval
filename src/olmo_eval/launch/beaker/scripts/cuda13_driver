@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Run before Python imports CUDA. Newer drivers use native libcuda; older
+# datacenter drivers need the CUDA 13 base image's compatibility package.
+set -euo pipefail
+driver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader)
+driver=${driver%%$'\n'*}
+major=${driver%%.*}
+if [[ ! "$major" =~ ^[0-9]+$ ]]; then
+    echo "Cannot determine NVIDIA driver version: $driver" >&2
+    exit 1
+fi
+if (( major < 580 )); then
+    export LD_LIBRARY_PATH="/usr/local/cuda/compat${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    echo "CUDA 13: using compatibility libraries for driver $driver" >&2
+else
+    echo "CUDA 13: using native libraries for driver $driver" >&2
+fi
+exec "$@"
