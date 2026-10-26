@@ -822,7 +822,6 @@ def test_judge_builder_uses_serialized_config(monkeypatch):
         "max_tokens": 1234,
         "scorer_name": "FrontierScienceOlympiad",
         "reasoning_effort": "medium",
-        "response_format": None,
     }
 
 

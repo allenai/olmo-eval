@@ -406,8 +406,6 @@ class JudgeSettings:
     model: str
     max_tokens: int
     reasoning_effort: str | None = None
-    temperature: float = 0.0
-    response_format: dict[str, Any] | None = None
 
     def with_config(self, config: Any) -> "JudgeSettings":
         """Return these settings with the judge fields a task config sets.
@@ -427,14 +425,13 @@ class JudgeSettings:
         return replace(self, **overrides)
 
     def build_fn(self, scorer_name: str) -> ConfiguredJudgeFn:
-        """Build the OpenAI-compatible judge function these settings describe."""
+        """Build the OpenAI-compatible judge function these settings describe, at temperature 0."""
         return build_openai_judge_fn(
             model=self.model,
             scorer_name=scorer_name,
             max_tokens=self.max_tokens,
-            temperature=self.temperature,
+            temperature=0.0,
             reasoning_effort=self.reasoning_effort,
-            response_format=self.response_format,
         )
 
 
@@ -451,11 +448,6 @@ class Judge:
     attempts: int = JUDGE_ATTEMPTS
     max_retries: int = 3
     retry_delay: float = 1.0
-
-    @classmethod
-    def from_settings(cls, settings: JudgeSettings, name: str) -> "Judge":
-        """Build an OpenAI-compatible judge; ``name`` labels its errors and logs."""
-        return cls(call=settings.build_fn(name), label=f"{name} judge")
 
     async def ask[V](
         self,

@@ -462,7 +462,6 @@ class Omniscience(Task):
     sampling_params: SamplingParams = DEFAULT_SAMPLING
     formatter = ChatFormatter()
     answer_extractor = extract_final_answer
-    judged = True
 
     def __init__(self, config: TaskConfig) -> None:
         """Build the task, grading with the config's judge settings when any are set.

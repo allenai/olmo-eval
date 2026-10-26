@@ -1,7 +1,8 @@
 """Pin the task hash of every registered spec.
 
 A task hash identifies stored results, so a change that moves one makes earlier
-results incomparable. This test fails on any hash that differs from
+results incomparable. The hashes are of the config the runner stores, built by
+``configure_task``. This test fails on any hash that differs from
 ``task_hashes.json``. When a change is meant to move hashes, regenerate the file
 with ``uv run pytest tests/evals/tasks/test_task_hashes.py --update-task-hashes``,
 check that only the intended specs changed, and add an entry to
@@ -21,12 +22,13 @@ import pytest
 import olmo_eval.evals.tasks  # noqa: F401  (registers every task)
 import olmo_eval.evals.vision.benchmarks  # noqa: F401  (registers the vision tasks)
 from olmo_eval.common.types.base import compute_task_hash
-from olmo_eval.evals.tasks.common.registry import _tasks, _variants, get_task
+from olmo_eval.evals.tasks.common.registry import _tasks, _variants
+from olmo_eval.runners.asynq.preparation import configure_task
 
 HASHES_FILE = Path(__file__).with_name("task_hashes.json")
 
 #: Judge spec set for the environment-override hashes.
-JUDGE_ENV_SPEC = "pinned-judge-model:high"
+JUDGE_ENV_SPEC = "pinned-judge-model:high:12345"
 
 
 def _specs() -> list[str]:
@@ -43,7 +45,7 @@ def _hashes(monkeypatch: pytest.MonkeyPatch, judge_env: str | None) -> dict[str,
         monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
     else:
         monkeypatch.setenv("OLMO_EVAL_JUDGE", judge_env)
-    return {spec: compute_task_hash(get_task(spec).config.to_dict()) for spec in _specs()}
+    return {spec: compute_task_hash(configure_task(spec).config.to_dict()) for spec in _specs()}
 
 
 def test_task_hashes_are_unchanged(request: pytest.FixtureRequest, monkeypatch) -> None:

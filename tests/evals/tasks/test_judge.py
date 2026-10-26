@@ -33,6 +33,7 @@ from olmo_eval.evals.tasks.common.judge import (
 )
 from olmo_eval.evals.tasks.hle import HLEAccuracyMetric, HLETruncationRateMetric
 from olmo_eval.inference.retry import retry_with_backoff
+from olmo_eval.runners.asynq.preparation import configure_task
 from tests.evals.tasks.judge_stubs import use_judge
 
 pytestmark = pytest.mark.usefixtures("judge_test_env")
@@ -554,3 +555,26 @@ class TestMetrics:
         assert metric.compute(responses) == 0.5
         assert metric.compute_instance(responses[0]) is None
         assert metric.compute([]) == 0.0
+
+
+class TestRunnerConfiguration:
+    """The runner builds the stored task config with configure_task, not get_task."""
+
+    def test_a_judge_model_override_wins_over_the_environment(self, monkeypatch):
+        monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
+        overrides = {"judge_model": "gpt-4.1-2025-04-14"}
+        expected = configure_task("mt_bench", overrides).config
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high:16384")
+
+        config = configure_task("mt_bench", overrides).config
+
+        assert config == expected
+        assert config.judge_reasoning_effort == mt_bench.MT_BENCH_DEFAULT_JUDGE_REASONING_EFFORT
+        assert config.judge_max_tokens == mt_bench.MT_BENCH_JUDGE_MAX_TOKENS
+
+    def test_the_task_is_constructed_with_its_judge_overrides(self):
+        task = configure_task("omniscience:judge", {"judge_model": "judge-b"})
+
+        scorer = task.config.metrics[0].scorer
+        assert task.config.judge_model == "judge-b"
+        assert scorer.judge_fn.judge_config["model"] == "judge-b"

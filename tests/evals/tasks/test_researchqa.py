@@ -387,7 +387,6 @@ def test_judge_spec_resolution(monkeypatch, env_spec, expected_model, expected_e
         "max_tokens": 4096,
         "scorer_name": "ResearchQA",
         "reasoning_effort": expected_effort,
-        "response_format": None,
     }
 
 
