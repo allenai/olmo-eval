@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.common.scoring_time import ScoringTimes
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 
 if TYPE_CHECKING:
@@ -68,6 +69,8 @@ class TaskTracker:
     prompt_tokens_total: int | None = 0  # None once any result's count is unknown
     completion_tokens_total: int | None = 0
     attributed_inference_seconds: float | None = 0.0
+    # Seconds summed by the scoring loop for each instance it scores
+    scoring_times: ScoringTimes = field(default_factory=ScoringTimes)
 
     def record_usage(self, result: ResultItem) -> None:
         """Fold one worker result into the task's request timing and token totals.

@@ -14,6 +14,7 @@ from olmo_eval.common.scorers import (
     SimpleQAJudgeScorer,
 )
 from olmo_eval.common.scorers.llm_judge import ConfiguredJudgeFn, build_openai_judge_fn
+from olmo_eval.common.scoring_time import ScoringTimes, measure_instance_scoring
 from olmo_eval.common.types import Instance, LMOutput
 
 _MAX_TOKENS_REJECTION = (
@@ -108,6 +109,26 @@ class TestBuildOpenAIJudgeFn:
 
         with pytest.raises(RuntimeError, match="rate limit exceeded"):
             await judge("grade this")
+
+    @pytest.mark.anyio
+    async def test_scoring_records_every_judge_request(self, monkeypatch, scoring_clock):
+        reply = []
+
+        async def create(**kwargs):
+            await asyncio.sleep(0)
+            scoring_clock.t += 1.5
+            if "max_tokens" in kwargs:
+                raise RuntimeError(_MAX_TOKENS_REJECTION)
+            return reply[0]
+
+        _, make_message = _stub_openai(monkeypatch, create)
+        reply.append(make_message("VERDICT: CORRECT"))
+        judge = build_openai_judge_fn(model="gpt-5", max_tokens=64)
+        totals = ScoringTimes()
+
+        assert await measure_instance_scoring(judge("grade this"), totals) == "VERDICT: CORRECT"
+        # The rejected request took time too.
+        assert totals.judge == pytest.approx(3.0)
 
     @pytest.mark.anyio
     async def test_falls_back_to_openrouter(self, monkeypatch):

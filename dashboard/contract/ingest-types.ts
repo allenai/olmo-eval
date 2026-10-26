@@ -394,6 +394,24 @@ export interface TaskResultIn {
      * recorded.
      */
     attributed_inference_seconds?: number | null;
+    /**
+     * Summed durations of the judge model calls made while scoring this task. Each call is timed
+     * on its own, so concurrent calls all count and the total can exceed wall time. Null means not
+     * recorded; 0 means measured with no judge calls.
+     */
+    scoring_judge_seconds?: number | null;
+    /**
+     * Summed durations of the sandbox operations made while scoring this task. Concurrent
+     * operations all count, so the total can exceed wall time. Null means not recorded; 0 means
+     * measured with no sandbox operations.
+     */
+    scoring_sandbox_seconds?: number | null;
+    /**
+     * Time spent running the task's scoring code (answer extraction, scorers and metrics) on the
+     * event loop, in a scoring thread or in a process pool. Pool work runs in parallel, so the
+     * total can exceed wall time. Null means not recorded.
+     */
+    scoring_compute_seconds?: number | null;
     predictions_path: RelativePath | null;
     requests_path: RelativePath | null;
     /** Registered suites that contain this task spec (static membership). */

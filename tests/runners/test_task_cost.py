@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from olmo_eval.common.execution.environment import ScoringContext
+from olmo_eval.common.scoring_time import measure_scoring
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import Task, TaskConfig
 from olmo_eval.runners.asynq.batching import BatchConfig, BatchedStrategy, StreamingStrategy
@@ -33,6 +34,7 @@ from olmo_eval.runners.common.usage import (
 )
 from olmo_eval.runners.io.builders import build_predictions
 from olmo_eval.runners.processing.metrics import build_single_model_metrics
+from tests.conftest import ScoringClock
 
 # ---------------------------------------------------------------------------
 # Token counting rules
@@ -609,6 +611,100 @@ def test_task_spans_fall_within_processing(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
 
+class _ScoredTask(_LLTask):
+    """Scores each instance with ``compute_s`` of loop work and a ``judge_s`` judge call.
+
+    Time is a fake clock. Half the loop work runs in a gathered child task, as
+    Task.score_responses runs its async scorers. The judge call's time passes in
+    another task, as a remote call's would, and metric computation adds ``metrics_s``.
+    """
+
+    def __init__(
+        self,
+        clock: ScoringClock,
+        compute_s: float = 0.0,
+        judge_s: float = 0.0,
+        metrics_s: float = 0.0,
+    ):
+        super().__init__(TaskConfig(name="scored", data_source="test/dataset"))
+        self.clock, self.compute_s, self.judge_s, self.metrics_s = (
+            clock,
+            compute_s,
+            judge_s,
+            metrics_s,
+        )
+
+    async def score_responses(
+        self, responses: Sequence[Response], context: ScoringContext | None = None
+    ) -> Sequence[Response]:
+        self.clock.t += self.compute_s / 2
+
+        async def scorer() -> None:
+            self.clock.t += self.compute_s / 2
+
+        await asyncio.gather(scorer())
+        if self.judge_s:
+            with measure_scoring("judge"):
+                await self.clock.wait_elsewhere(self.judge_s)
+        return await super().score_responses(responses, context)
+
+    def compute_metrics(self, scored_responses: Sequence[Response]) -> dict:
+        self.clock.t += self.metrics_s
+        return super().compute_metrics(scored_responses)
+
+
+def test_each_task_gets_its_own_judge_and_compute_time(
+    scoring_clock: ScoringClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "olmo_eval.runners.asynq.results.BeakerStatusReporter",
+        lambda: SimpleNamespace(
+            progress_callback=lambda label: lambda *a, **k: None, flush=lambda: None
+        ),
+    )
+    tasks: dict[str, Task] = {
+        "rules": _ScoredTask(scoring_clock, compute_s=0.05, metrics_s=0.5),
+        "judged": _ScoredTask(scoring_clock, judge_s=1.0),
+    }
+    trackers = {
+        spec: TaskTracker(model_name="m", spec=spec, task=task, total_instances=40)
+        for spec, task in tasks.items()
+    }
+    result_queue: queue.Queue[ResultItem] = queue.Queue()
+    for idx in range(40):
+        for spec in tasks:
+            result_queue.put(_result(idx, [LMOutput("A", metadata=_ll(1, 10))], task_id=spec))
+
+    async def run() -> dict[str, TaskResult]:
+        results = await process_results(
+            trackers=trackers,
+            result_queue=result_queue,  # type: ignore[arg-type]
+            workers=[],
+            scoring_context=ScoringContext(),
+            scoring_concurrency=80,
+            total_tasks=2,
+            total_instances=80,
+            model_name="m",
+            save_predictions=False,
+            write_predictions_fn=None,
+            save_requests=False,
+            write_requests_fn=None,
+        )
+        assert asyncio.get_running_loop().get_task_factory() is None
+        return results
+
+    results = asyncio.run(run())
+
+    # The rule-based task's loop work is its own, though judge calls were in flight.
+    rules, judged = results["rules"], results["judged"]
+    assert rules.scoring_compute_seconds == pytest.approx(40 * 0.05 + 0.5)
+    assert rules.scoring_judge_seconds == 0.0
+    assert judged.scoring_compute_seconds == 0.0
+    assert judged.scoring_judge_seconds is not None
+    assert judged.scoring_judge_seconds >= 40 * 1.0 - 1e-9
+    assert rules.scoring_sandbox_seconds == judged.scoring_sandbox_seconds == 0.0
+
+
 def test_processing_seconds_falls_back_without_task_end_times() -> None:
     assert _processing_seconds({}, 100.0, 130.0) == 30.0
 
@@ -632,6 +728,9 @@ def test_metrics_json_carries_task_cost_and_run_timing() -> None:
         "prompt_tokens_total": 120,
         "completion_tokens_total": 0,
         "attributed_inference_seconds": 1.25,
+        "scoring_judge_seconds": 9.5,
+        "scoring_sandbox_seconds": 0.0,
+        "scoring_compute_seconds": 0.25,
     }
     provider = SimpleNamespace(alias=None, model="m", kind="vllm", to_dict=lambda: {})
     results_dict = aggregate_results({"t": _task_result("t", **cost)}, ["t"], ["t"], provider, None)
