@@ -7,6 +7,7 @@ responses, following patterns from benchmarks like SimpleQA.
 import asyncio
 import logging
 import math
+import os
 import re
 from abc import abstractmethod
 from collections.abc import Callable, Coroutine
@@ -444,32 +445,63 @@ class Judge:
 DEFAULT_JUDGE_SPEC = "gpt-5.5:medium"
 
 
-def parse_judge_spec(spec: str) -> tuple[str, str | None]:
-    """Split a ``model[:reasoning_effort]`` judge spec into a model and an optional effort."""
-    model, separator, effort = spec.partition(":")
+def parse_judge_spec(spec: str) -> tuple[str, str | None, int | None]:
+    """Split a ``model[:reasoning_effort[:max_tokens]]`` judge spec into its parts.
+
+    The effort and token budget are None when the spec leaves them out.
+    """
+    model, _, rest = spec.partition(":")
     if not model:
         raise ValueError("OLMO_EVAL_JUDGE must name a judge model")
-    return model, effort if separator and effort else None
+    effort, _, tokens = rest.partition(":")
+    max_tokens: int | None = None
+    if tokens:
+        try:
+            max_tokens = int(tokens)
+        except ValueError:
+            max_tokens = 0
+        if max_tokens < 1:
+            raise ValueError(
+                f"OLMO_EVAL_JUDGE max_tokens must be a positive integer, got {tokens!r}"
+            )
+    return model, effort or None, max_tokens
+
+
+def judge_env_overrides() -> dict[str, Any]:
+    """Return the ``TaskConfig`` judge fields that ``$OLMO_EVAL_JUDGE`` sets.
+
+    The spec's model and effort replace the task's, since a task's default effort
+    belongs to its default model. The task keeps its token budget unless the spec
+    names one. Returns an empty dict when the variable is unset.
+    """
+    spec = os.getenv("OLMO_EVAL_JUDGE")
+    if not spec:
+        return {}
+    model, reasoning_effort, max_tokens = parse_judge_spec(spec)
+    overrides: dict[str, Any] = {"judge_model": model, "judge_reasoning_effort": reasoning_effort}
+    if max_tokens is not None:
+        overrides["judge_max_tokens"] = max_tokens
+    return overrides
 
 
 def build_default_judge_fn(scorer_name: str, max_tokens: int = 4096) -> JudgeFn:
     """Build the default attributed-QA judge, overridable via ``$OLMO_EVAL_JUDGE``.
 
-    The spec is ``"model"`` or ``"model:effort"`` (reasoning effort for the gpt-5
-    series). Defaults to ``gpt-5.5:medium``; for cheap iteration set
+    The spec is ``"model"``, ``"model:effort"`` or ``"model:effort:max_tokens"``.
+    Defaults to ``gpt-5.5:medium``; for cheap iteration set
     ``OLMO_EVAL_JUDGE=gpt-5-mini`` (or e.g. ``gpt-5.5:high`` for a stricter run).
 
     Args:
         scorer_name: Name of the calling scorer/task (for error messages).
-        max_tokens: Maximum tokens in the judge response.
+        max_tokens: Maximum tokens in the judge response, unless the spec sets one.
     """
-    import os
-
-    model, reasoning_effort = parse_judge_spec(os.getenv("OLMO_EVAL_JUDGE", DEFAULT_JUDGE_SPEC))
+    model, reasoning_effort, spec_max_tokens = parse_judge_spec(
+        os.getenv("OLMO_EVAL_JUDGE", DEFAULT_JUDGE_SPEC)
+    )
     return build_openai_judge_fn(
         model=model,
         scorer_name=scorer_name,
-        max_tokens=max_tokens,
+        max_tokens=spec_max_tokens or max_tokens,
         reasoning_effort=reasoning_effort,
     )
 

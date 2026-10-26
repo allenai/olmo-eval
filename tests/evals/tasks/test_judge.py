@@ -19,7 +19,8 @@ from olmo_eval.common.types import (
     RequestType,
     Response,
 )
-from olmo_eval.evals.tasks.common import OutputScoreAggregation, TaskConfig
+from olmo_eval.evals.tasks import mt_bench
+from olmo_eval.evals.tasks.common import OutputScoreAggregation, TaskConfig, get_task
 from olmo_eval.evals.tasks.common import judge as judge_module
 from olmo_eval.evals.tasks.common.judge import (
     JUDGE_ATTEMPTS,
@@ -143,14 +144,21 @@ def _scripted_judge(replies: dict[str, list[str]]):
 
 
 class TestHelpers:
-    def test_parse_judge_spec_splits_model_and_effort(self):
-        assert parse_judge_spec("gpt-5:high") == ("gpt-5", "high")
-        assert parse_judge_spec("gpt-4o") == ("gpt-4o", None)
-        assert parse_judge_spec("gpt-4o:") == ("gpt-4o", None)
+    def test_parse_judge_spec_splits_model_effort_and_budget(self):
+        assert parse_judge_spec("gpt-5:high") == ("gpt-5", "high", None)
+        assert parse_judge_spec("gpt-4o") == ("gpt-4o", None, None)
+        assert parse_judge_spec("gpt-4o:") == ("gpt-4o", None, None)
+        assert parse_judge_spec("gpt-5:high:16384") == ("gpt-5", "high", 16384)
+        assert parse_judge_spec("gpt-4o::512") == ("gpt-4o", None, 512)
 
     def test_parse_judge_spec_requires_a_model(self):
         with pytest.raises(ValueError, match="must name a judge model"):
             parse_judge_spec(":high")
+
+    @pytest.mark.parametrize("budget", ["lots", "0", "-5"])
+    def test_parse_judge_spec_requires_a_positive_budget(self, budget):
+        with pytest.raises(ValueError, match="max_tokens must be a positive integer"):
+            parse_judge_spec(f"gpt-5:high:{budget}")
 
     def test_visible_response_drops_a_closed_reasoning_block(self):
         assert visible_response("<think>work</think>\nAnswer: 42") == "Answer: 42"
@@ -168,49 +176,55 @@ class TestHelpers:
 
 
 class TestJudgeConfiguration:
-    def test_environment_override_replaces_the_default_judge(self, monkeypatch):
+    def test_environment_override_replaces_the_default_model_and_effort(self, monkeypatch):
         monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high")
 
-        config = _PassFailTask(_config()).config
-
-        assert config.judge_model == "gpt-5"
-        assert config.judge_reasoning_effort == "high"
-
-    def test_task_override_wins_over_the_environment(self, monkeypatch):
-        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high")
-
-        config = _PassFailTask(_config(judge_model="judge-a")).config
-
-        assert config.judge_model == "judge-a"
-        assert config.judge_reasoning_effort is None
-
-    def test_environment_effort_replaces_a_task_default_effort(self, monkeypatch):
-        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high")
-
-        config = _RatingTask(_config(judge_reasoning_effort="medium")).config
+        config = get_task("mt_bench").config
 
         assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-5", "high")
+        assert config.judge_max_tokens == mt_bench.MT_BENCH_JUDGE_MAX_TOKENS
 
-    def test_environment_model_without_an_effort_drops_a_task_default_effort(self, monkeypatch):
+    def test_environment_model_without_an_effort_drops_the_default_effort(self, monkeypatch):
         monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-4o")
 
-        config = _RatingTask(_config(judge_reasoning_effort="medium")).config
+        config = get_task("mt_bench").config
 
         assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-4o", None)
 
-    def test_an_effort_override_equal_to_the_default_counts_as_unset(self, monkeypatch):
+    def test_environment_sets_the_judge_token_budget(self, monkeypatch):
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high:16384")
+
+        config = get_task("multichallenge").config
+
+        assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-5", "high")
+        assert config.judge_max_tokens == 16384
+
+    def test_a_task_judge_model_override_wins_even_when_it_is_the_default(self, monkeypatch):
+        monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
+        unchanged = get_task("mt_bench").config
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high:16384")
+        overrides = {"judge_model": unchanged.judge_model}
+
+        config = get_task("mt_bench", config_overrides=overrides).config
+
+        assert config == unchanged
+
+    def test_task_effort_and_budget_overrides_apply_over_the_environment(self, monkeypatch):
         monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-4o")
+        default_effort = mt_bench.MT_BENCH_DEFAULT_JUDGE_REASONING_EFFORT
 
-        config = _RatingTask(_config(judge_reasoning_effort="medium")).config
+        config = get_task(
+            "mt_bench",
+            config_overrides={"judge_reasoning_effort": default_effort, "judge_max_tokens": 99},
+        ).config
 
-        assert config.judge_reasoning_effort is None
+        assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-4o", default_effort)
+        assert config.judge_max_tokens == 99
 
-    def test_task_effort_override_wins_over_the_environment(self, monkeypatch):
+    def test_environment_leaves_tasks_without_a_judge_alone(self, monkeypatch):
         monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high")
 
-        config = _RatingTask(_config(judge_reasoning_effort="low")).config
-
-        assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-5", "low")
+        assert get_task("gsm8k").config.judge_model is None
 
     def test_judge_is_built_once_from_the_config(self, monkeypatch):
         built: list[dict[str, Any]] = []

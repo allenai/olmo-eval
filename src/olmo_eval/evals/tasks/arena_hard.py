@@ -31,7 +31,7 @@ leaderboard, called at temperature 0 with upstream's prompts. Upstream's officia
 judge is Gemini 2.5, whose scores run higher; compare a score only with others from
 the same judge. Change the judge with ``-o judge_model=<model>`` (and
 ``-o judge_reasoning_effort=<effort>``), or for every judge task in a run with
-``OLMO_EVAL_JUDGE=<model>[:<effort>]``; a task override wins. The judge settings
+``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]``; a task override wins. The judge settings
 are part of the task configuration and hash.
 
 Scoring

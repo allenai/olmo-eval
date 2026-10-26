@@ -3,11 +3,13 @@
 A judged task generates as usual and grades every output in ``score_responses``.
 The judge model, reasoning effort, and token budget are task configuration, so they
 are part of the task hash: runs with different judges are stored and compared as
-separate results. ``-o judge_model=<model>`` (and ``-o judge_reasoning_effort=<effort>``)
-changes the judge of one task; ``OLMO_EVAL_JUDGE=<model>[:<effort>]`` changes every
-judged task in a run whose judge was left at its default. A task override wins. A
-task's default reasoning effort goes with its default model, so the environment
-override replaces it; an effort override equal to the task default counts as unset.
+separate results. ``-o judge_model=<model>`` (and ``-o judge_reasoning_effort=<effort>``
+or ``-o judge_max_tokens=<n>``) changes the judge of one task;
+``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]`` changes the judge of every task
+in a run whose ``-o`` overrides name no judge model. A task's default reasoning
+effort goes with its default model, so the environment override replaces it; the
+task keeps its token budget unless the override names one. ``get_task`` applies the
+environment override, after variants and before ``-o`` overrides.
 
 The scoring context's ``judge_limiter``, sized by ``scoring_concurrency``, bounds the
 judge calls in flight across every judged task in a run, however many calls each
@@ -23,10 +25,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from abc import abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, TypeVar
 
 from olmo_eval.common.execution import ScoringContext
@@ -40,7 +41,6 @@ from olmo_eval.common.scorers.llm_judge import (
     Judge,
     JudgeParseError,
     JudgeSettings,
-    parse_judge_spec,
 )
 from olmo_eval.common.types import Instance, LMOutput, Response
 
@@ -225,18 +225,9 @@ class JudgedTask(Task):
     #: Every score of an instance the model gave no output for.
     unanswered_score: ClassVar[float] = 0.0
 
+    judged = True
+
     def __init__(self, config: TaskConfig) -> None:
-        # The environment override applies only where the task's own judge model was
-        # left at its default, so ``-o judge_model=...`` wins. A task's default effort
-        # belongs to its default model, so the override's effort replaces it unless
-        # the effort was overridden too.
-        spec = os.getenv("OLMO_EVAL_JUDGE")
-        task_type = type(self)
-        if spec and config.judge_model == getattr(task_type, "judge_model", None):
-            model, reasoning_effort = parse_judge_spec(spec)
-            if config.judge_reasoning_effort != getattr(task_type, "judge_reasoning_effort", None):
-                reasoning_effort = config.judge_reasoning_effort
-            config = replace(config, judge_model=model, judge_reasoning_effort=reasoning_effort)
         super().__init__(config)
         self._judge_limiter: asyncio.Semaphore | None = None
 

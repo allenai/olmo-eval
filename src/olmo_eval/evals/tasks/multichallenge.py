@@ -32,7 +32,7 @@ Gemini 2.5 Pro, so its numbers are not directly comparable. The paper asks for a
 structured reply; here the verdict is read from plain text, so any chat model can
 judge. Change the judge with ``-o judge_model=<model>`` (and
 ``-o judge_reasoning_effort=<effort>`` for reasoning judges), or for every judge task
-in a run with ``OLMO_EVAL_JUDGE=<model>[:<effort>]``; a task override wins. The
+in a run with ``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]``; a task override wins. The
 judge settings are part of the task hash.
 
 Examples::

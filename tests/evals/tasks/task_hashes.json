@@ -2464,6 +2464,8 @@
   "hle:text:verified": "b774e1d50ba49e09",
   "mt_bench": "f56e9ade545c760b",
   "mt_bench:paper": "e583c7de5056b98d",
-  "multichallenge": "1cbbc1aa0367e542"
+  "multichallenge": "1cbbc1aa0367e542",
+  "omniscience": "a436214c2cceddf0",
+  "omniscience:judge": "e6c26258094b4722"
  }
 }

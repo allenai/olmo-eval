@@ -34,7 +34,7 @@ model behind it can change without the task hash changing; pass a dated model wi
 ``-o judge_model`` when results must stay comparable across time. Change the judge
 for one task with ``-o judge_model=<model>`` (and ``-o judge_reasoning_effort=<effort>``
 for reasoning judges), or for every judge task in a run with
-``OLMO_EVAL_JUDGE=<model>[:<effort>]``; a task override wins. The judge
+``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]``; a task override wins. The judge
 settings are part of the task configuration and hash, so runs with different judges
 are stored and compared as separate results.
 

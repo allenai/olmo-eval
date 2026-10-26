@@ -60,7 +60,6 @@ import asyncio
 import json
 import logging
 import math
-import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
@@ -77,7 +76,6 @@ from olmo_eval.common.scorers.llm_judge import (
     JudgeFn,
     build_openai_judge_fn,
     judge_with_retries,
-    parse_judge_spec,
 )
 from olmo_eval.common.types import (
     Instance,
@@ -92,7 +90,6 @@ from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import (
     OutputScoreAggregation,
     Task,
-    TaskConfig,
     register,
     register_variant,
 )
@@ -423,18 +420,7 @@ class _FrontierScience(Task, ABC):
     judge_model = FRONTIERSCIENCE_DEFAULT_JUDGE_MODEL
     judge_reasoning_effort = FRONTIERSCIENCE_DEFAULT_JUDGE_REASONING_EFFORT
     judge_max_tokens = 8192
-
-    def __init__(self, config: TaskConfig) -> None:
-        # Preserve the project-wide environment override, but resolve it before
-        # hashing/artifact creation rather than consulting it during scoring.
-        if spec := os.getenv("OLMO_EVAL_JUDGE"):
-            model, reasoning_effort = parse_judge_spec(spec)
-            config = replace(
-                config,
-                judge_model=model,
-                judge_reasoning_effort=reasoning_effort,
-            )
-        super().__init__(config)
+    judged = True
 
     @property
     def instances(self) -> Iterator[Instance]:
