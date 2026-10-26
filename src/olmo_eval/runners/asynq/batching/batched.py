@@ -58,9 +58,13 @@ class BatchedStrategy(BatchingStrategy):
                 batch_hash = _compute_batch_hash(batch)
                 batch_size = len(batch)
 
+                label = (
+                    str(current_batch)
+                    if self.max_batch_sequences
+                    else f"{current_batch}/{total_batches}"
+                )
                 worker_logger.info(
-                    f"Starting batch {current_batch}/{total_batches} ({batch_hash}) "
-                    f"with {batch_size} item(s)"
+                    f"Starting batch {label} ({batch_hash}) with {batch_size} item(s)"
                 )
                 start_time = time.perf_counter()
                 await process_items(
@@ -75,7 +79,7 @@ class BatchedStrategy(BatchingStrategy):
                 elapsed = time.perf_counter() - start_time
                 rate = batch_size / elapsed if elapsed > 0 else 0
                 worker_logger.info(
-                    f"Processed batch {current_batch}/{total_batches} ({batch_hash}) "
+                    f"Processed batch {label} ({batch_hash}) "
                     f"in {elapsed:.1f}s ({rate:.1f} items/sec)"
                 )
 

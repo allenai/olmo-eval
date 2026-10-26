@@ -139,6 +139,9 @@ class SGLangProvider(InferenceProvider):
                 info = self.engine.get_server_info()
                 states = info.get("internal_states", []) if isinstance(info, dict) else []
                 if len(states) == 1 and isinstance(states[0], dict):
+                    memory = states[0].get("memory_usage")
+                    if isinstance(memory, dict):
+                        self.profile_report["engine_memory"] = memory
                     capacity = states[0].get("effective_max_running_requests_per_dp")
                     if type(capacity) is int and capacity > 0:
                         self.recommended_batch_sequences = min(

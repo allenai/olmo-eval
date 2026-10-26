@@ -644,7 +644,11 @@ class JobConfigAssembler:
                     setup_modal_gcp_secret = True
                     log.info(f"Modal GCP secret setup enabled: {secret_name}")
 
-        if effective_image == BEAKER_SGLANG_IMAGE and "LD_LIBRARY_PATH" not in self.config.env_vars:
+        if (
+            effective_image == BEAKER_SGLANG_IMAGE
+            and "LD_LIBRARY_PATH" not in self.config.env_vars
+            and not any(secret.name == "LD_LIBRARY_PATH" for secret in env_secrets)
+        ):
             # Select compatibility libraries on the actual host, before Python
             # imports CUDA. Explicit library paths remain authoritative.
             command = [

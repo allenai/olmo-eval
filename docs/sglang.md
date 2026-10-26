@@ -188,7 +188,8 @@ model name. The GPU must have at least 95% of its memory free at startup.
 
 The H100/B300 configurations come from the RL study; A100 comes from a bounded
 olmo-eval admission comparison. These are starting configurations, not universal
-throughput optima. Profiles also select 8,192-token prefill chunks,
+throughput optima. A100 validation used short capped generations; long-response
+throughput has not been qualified there. Profiles also select 8,192-token prefill chunks,
 full decode graphs through admission, disabled prefill graphs, Triton attention
 and FlashInfer sampling. H100's KV pool cannot hold all admitted requests at the
 maximum context simultaneously; actual lengths and prefix reuse determine

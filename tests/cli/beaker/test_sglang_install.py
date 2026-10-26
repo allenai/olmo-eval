@@ -16,7 +16,7 @@ from olmo_eval.launch.beaker.launcher import BeakerLauncher
     [("sglang", None), ("sglang", "sglang==0.5.19"), ("vllm", None)],
 )
 @pytest.mark.parametrize("image", [None, "explicit-image"])
-@pytest.mark.parametrize("library_path", [None, "/custom/driver"])
+@pytest.mark.parametrize("library_path", [None, "/custom/driver", "secret"])
 def test_job_installs_selected_provider(provider_kind, custom_package, image, library_path):
     overrides = [f"provider.kind={provider_kind}"]
     if custom_package:
@@ -28,7 +28,9 @@ def test_job_installs_selected_provider(provider_kind, custom_package, image, li
         cluster="h100",
         workspace="ai2/test",
         harness="default",
-        env_vars={"LD_LIBRARY_PATH": library_path} if library_path else {},
+        env_vars={"LD_LIBRARY_PATH": library_path}
+        if library_path and library_path != "secret"
+        else {},
         harness_overrides=overrides,
     )
     plan = ExperimentPlan(
@@ -45,7 +47,9 @@ def test_job_installs_selected_provider(provider_kind, custom_package, image, li
         effective_image=image,
         effective_groups=[],
         beaker_username="test-user",
-        common_secrets=[],
+        common_secrets=[("LD_LIBRARY_PATH", "custom-library-path")]
+        if library_path == "secret"
+        else [],
         task_secrets=[],
         inject_aws_credentials=False,
         inject_gcs_credentials=False,
@@ -61,7 +65,9 @@ def test_job_installs_selected_provider(provider_kind, custom_package, image, li
         ]
     else:
         assert job.command[0] == "olmo-eval"
-    assert job.env_vars.get("LD_LIBRARY_PATH") == library_path
+    assert job.env_vars.get("LD_LIBRARY_PATH") == (
+        None if library_path == "secret" else library_path
+    )
     assert ("vllm" in job.extras) == (provider_kind == "vllm")
     assert "clients" not in job.extras
     assert not job.vllm_isolated_venv

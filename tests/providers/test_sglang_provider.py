@@ -560,7 +560,9 @@ def test_worker_applies_profile_and_preserves_explicit_batch(
 ):
     engine, constructor, _ = setup_engine
     engine.get_server_info.return_value = {
-        "internal_states": [{"effective_max_running_requests_per_dp": 128}]
+        "internal_states": [
+            {"effective_max_running_requests_per_dp": 128, "memory_usage": {"token_capacity": 1234}}
+        ]
     }
     monkeypatch.setattr(
         "olmo_eval.inference.providers.sglang.prepare_profile",
@@ -599,4 +601,5 @@ def test_worker_applies_profile_and_preserves_explicit_batch(
     report = json.loads((tmp_path / "runtime/sglang-profile-profile.json").read_text())
     assert report["batch_size"] == expected
     assert report["effective_max_running_requests"] == 128
+    assert report["engine_memory"]["token_capacity"] == 1234
     results.put.assert_not_called()
