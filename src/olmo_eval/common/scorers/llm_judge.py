@@ -442,7 +442,7 @@ class Judge:
 # test 6/6 across 5 runs (see common/scorers/citation_validation.py). gpt-5-mini
 # is a decent cheaper alternative for frequent iteration (reliable on the
 # score-inflating cases; loses only the conservative stuffed-recall edge).
-DEFAULT_JUDGE_SPEC = "gpt-5.5:medium"
+ATTRIBUTED_QA_JUDGE = JudgeSettings(model="gpt-5.5", max_tokens=4096, reasoning_effort="medium")
 
 
 def parse_judge_spec(spec: str) -> tuple[str, str | None, int | None]:
@@ -482,28 +482,6 @@ def judge_env_overrides() -> dict[str, Any]:
     if max_tokens is not None:
         overrides["judge_max_tokens"] = max_tokens
     return overrides
-
-
-def build_default_judge_fn(scorer_name: str, max_tokens: int = 4096) -> JudgeFn:
-    """Build the default attributed-QA judge, overridable via ``$OLMO_EVAL_JUDGE``.
-
-    The spec is ``"model"``, ``"model:effort"`` or ``"model:effort:max_tokens"``.
-    Defaults to ``gpt-5.5:medium``; for cheap iteration set
-    ``OLMO_EVAL_JUDGE=gpt-5-mini`` (or e.g. ``gpt-5.5:high`` for a stricter run).
-
-    Args:
-        scorer_name: Name of the calling scorer/task (for error messages).
-        max_tokens: Maximum tokens in the judge response, unless the spec sets one.
-    """
-    model, reasoning_effort, spec_max_tokens = parse_judge_spec(
-        os.getenv("OLMO_EVAL_JUDGE", DEFAULT_JUDGE_SPEC)
-    )
-    return build_openai_judge_fn(
-        model=model,
-        scorer_name=scorer_name,
-        max_tokens=spec_max_tokens or max_tokens,
-        reasoning_effort=reasoning_effort,
-    )
 
 
 @dataclass(frozen=True)

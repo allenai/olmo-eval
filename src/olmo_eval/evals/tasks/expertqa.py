@@ -42,7 +42,7 @@ from olmo_eval.common.scorers.citation import (
     parse_cite_tag_response,
     score_citations_for_sections,
 )
-from olmo_eval.common.scorers.llm_judge import JudgeFn, build_default_judge_fn
+from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, JudgeFn, JudgeSettings
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -164,9 +164,9 @@ EXPERTQA_METRICS = (
 )
 
 
-def _build_judge_fn() -> JudgeFn:
+def _build_judge_fn(settings: JudgeSettings) -> JudgeFn:
     """Build the ExpertQA judge function; kept as a small test hook."""
-    return build_default_judge_fn(scorer_name="ExpertQA")
+    return settings.build_fn("ExpertQA")
 
 
 def _trajectory_source_text(response: Response) -> str:
@@ -307,6 +307,7 @@ class ExpertQA(Task):
     # The LLM-judge scorer needs an OpenAI key at scoring time; the launcher
     # mounts {user}_OPENAI_API_KEY, or {user}_OPENROUTER_API_KEY in its place.
     required_secrets = ("OPENAI_API_KEY",)
+    judged = True
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -346,6 +347,14 @@ class ExpertQA(Task):
         output.metadata["parsed_response"] = parsed
         return parsed
 
+    def _get_judge_fn(self) -> JudgeFn:
+        """Return the judge the config names, or the attributed-QA default, built once."""
+        judge_fn = getattr(self, "_judge_fn", None)
+        if judge_fn is None:
+            judge_fn = _build_judge_fn(ATTRIBUTED_QA_JUDGE.with_config(self.config))
+            self._judge_fn = judge_fn
+        return judge_fn
+
     async def score_responses(
         self,
         responses: Sequence[Response],
@@ -354,7 +363,7 @@ class ExpertQA(Task):
         """Score responses for citation precision/recall and answer precision."""
         self._extract_answers(responses)
 
-        judge_fn = _build_judge_fn()
+        judge_fn = self._get_judge_fn()
         missing_trajectory = 0
 
         for response in responses:

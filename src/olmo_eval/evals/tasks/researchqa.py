@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from abc import ABC
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -30,7 +29,7 @@ from typing import Any, cast
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.scorers.llm_judge import JudgeFn, build_openai_judge_fn
+from olmo_eval.common.scorers.llm_judge import JudgeFn, JudgeSettings
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -46,7 +45,8 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 logger = logging.getLogger(__name__)
 
 RESEARCHQA_REPO = "realliyifei/ResearchQA"
-RESEARCHQA_DEFAULT_JUDGE_SPEC = "gpt-5.4-mini"
+# A reasoning judge can spend this budget and truncate the label list; that batch scores 0.
+RESEARCHQA_JUDGE = JudgeSettings(model="gpt-5.4-mini", max_tokens=4096)
 RESEARCHQA_RUBRIC_BATCH_SIZE = 8
 RESEARCHQA_JUDGE_ATTEMPTS = 3
 
@@ -129,18 +129,9 @@ def parse_coverage_labels(raw: str, expected_count: int) -> list[str] | None:
     return labels
 
 
-def build_researchqa_judge_fn() -> JudgeFn:
-    """Build the task-local judge from ``$OLMO_EVAL_JUDGE`` or its own default."""
-    spec = os.getenv("OLMO_EVAL_JUDGE", RESEARCHQA_DEFAULT_JUDGE_SPEC)
-    model, separator, effort = spec.partition(":")
-    return build_openai_judge_fn(
-        model=model,
-        temperature=0.0,
-        # A reasoning judge can spend this budget and truncate the label list; that batch scores 0.
-        max_tokens=4096,
-        scorer_name="ResearchQA",
-        reasoning_effort=(effort if separator else None),
-    )
+def build_researchqa_judge_fn(settings: JudgeSettings) -> JudgeFn:
+    """Build the ResearchQA judge function; kept as a small test hook."""
+    return settings.build_fn("ResearchQA")
 
 
 def _type_item_count(response: Response, rubric_type: str) -> int:
@@ -277,6 +268,7 @@ class ResearchQA(Task):
     primary_metric = RUBRIC_COVERAGE_METRIC
     sampling_params = SamplingParams(temperature=0.0, max_tokens=4096)
     required_secrets = ("OPENAI_API_KEY",)
+    judged = True
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -342,6 +334,14 @@ class ResearchQA(Task):
             text = text[think_end + len("</think>") :]
         return text.strip()
 
+    def _get_judge_fn(self) -> JudgeFn:
+        """Return the judge the config names, or the ResearchQA default, built once."""
+        judge_fn = getattr(self, "_judge_fn", None)
+        if judge_fn is None:
+            judge_fn = build_researchqa_judge_fn(RESEARCHQA_JUDGE.with_config(self.config))
+            self._judge_fn = judge_fn
+        return judge_fn
+
     async def score_responses(
         self,
         responses: Sequence[Response],
@@ -349,7 +349,7 @@ class ResearchQA(Task):
     ) -> Sequence[Response]:
         """Judge rubric coverage, retaining zero-scored parse failures."""
         self._extract_answers(responses)
-        judge_fn = build_researchqa_judge_fn()
+        judge_fn = self._get_judge_fn()
 
         failed_batches = 0
         failed_items = 0

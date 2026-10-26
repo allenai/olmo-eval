@@ -23,7 +23,7 @@ from olmo_eval.common.scorers.citation import (
     extract_json_from_response,
     score_citations_for_sections,
 )
-from olmo_eval.common.scorers.llm_judge import JudgeFn, build_default_judge_fn
+from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, JudgeFn
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -371,6 +371,7 @@ class AstaBenchSQA(Task):
     # The LLM-judge scorer needs an OpenAI key at scoring time; the launcher
     # mounts {user}_OPENAI_API_KEY, or {user}_OPENROUTER_API_KEY in its place.
     required_secrets = ("OPENAI_API_KEY",)
+    judged = True
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -416,6 +417,14 @@ class AstaBenchSQA(Task):
         output.metadata["parsed_response"] = parsed
         return parsed
 
+    def _get_judge_fn(self) -> JudgeFn:
+        """Return the judge the config names, or the attributed-QA default, built once."""
+        judge_fn = getattr(self, "_judge_fn", None)
+        if judge_fn is None:
+            judge_fn = ATTRIBUTED_QA_JUDGE.with_config(self.config).build_fn("AstaBenchSQA")
+            self._judge_fn = judge_fn
+        return judge_fn
+
     async def score_responses(
         self,
         responses: Sequence[Response],
@@ -429,7 +438,7 @@ class AstaBenchSQA(Task):
         """
         self._extract_answers(responses)
 
-        judge_fn = build_default_judge_fn(scorer_name="AstaBenchSQA")
+        judge_fn = self._get_judge_fn()
 
         for response in responses:
             scores = await self._score_single(response, judge_fn)

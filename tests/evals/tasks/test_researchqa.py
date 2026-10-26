@@ -5,14 +5,15 @@ from collections.abc import Sequence
 
 import pytest
 
+from olmo_eval.common.scorers import llm_judge
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
+from olmo_eval.common.types.base import compute_task_hash
 from olmo_eval.evals.tasks import researchqa
 from olmo_eval.evals.tasks.common import get_task, task_exists
 from olmo_eval.evals.tasks.researchqa import (
     RESEARCHQA_GENERATION_PROMPT,
     RESEARCHQA_LABEL_SCORES,
     build_coverage_judge_prompt,
-    build_researchqa_judge_fn,
     normalize_coverage_label,
     parse_coverage_labels,
 )
@@ -249,7 +250,7 @@ class TestParsingAndScoring:
             prompts.append(prompt)
             return next(outputs)
 
-        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda: judge)
+        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda _: judge)
         await task.score_responses([response])
 
         assert len(prompts) == 2
@@ -277,7 +278,7 @@ class TestParsingAndScoring:
         async def judge(_prompt):
             return next(outputs)
 
-        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda: judge)
+        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda _: judge)
         await task.score_responses(responses)
 
         primary = task.config.get_primary_metric()
@@ -302,7 +303,7 @@ class TestParsingAndScoring:
         async def judge(_prompt):
             return next(outputs)
 
-        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda: judge)
+        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda _: judge)
         await task.score_responses(responses)
 
         assert responses[0].scores["coverage_comparison"] == 0.75
@@ -338,7 +339,7 @@ class TestParsingAndScoring:
         async def sleep(delay):
             delays.append(delay)
 
-        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda: judge)
+        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda _: judge)
         monkeypatch.setattr(researchqa.asyncio, "sleep", sleep)
         with caplog.at_level(logging.WARNING, logger=researchqa.__name__):
             scored = await task.score_responses([response])
@@ -376,13 +377,27 @@ def test_judge_spec_resolution(monkeypatch, env_spec, expected_model, expected_e
         monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
     else:
         monkeypatch.setenv("OLMO_EVAL_JUDGE", env_spec)
-    monkeypatch.setattr(researchqa, "build_openai_judge_fn", fake_builder)
+    monkeypatch.setattr(llm_judge, "build_openai_judge_fn", fake_builder)
 
-    assert build_researchqa_judge_fn() is sentinel
+    assert get_task("researchqa")._get_judge_fn() is sentinel
     assert captured == {
         "model": expected_model,
         "temperature": 0.0,
         "max_tokens": 4096,
         "scorer_name": "ResearchQA",
         "reasoning_effort": expected_effort,
+        "response_format": None,
     }
+
+
+@pytest.mark.parametrize("spec", ["researchqa", "expertqa", "astabench_scholarqa"])
+def test_an_environment_judge_reaches_the_task_hash(monkeypatch, spec):
+    monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
+    default = get_task(spec).config
+    monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-4.1-mini")
+
+    with_env = get_task(spec).config
+
+    assert default.judge_model is None
+    assert with_env.judge_model == "gpt-4.1-mini"
+    assert compute_task_hash(with_env.to_dict()) != compute_task_hash(default.to_dict())

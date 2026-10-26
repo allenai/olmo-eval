@@ -2454,6 +2454,10 @@
  "with_judge_env": {
   "arena_hard_v2:creative_writing": "1a8efbf3fdf09be7",
   "arena_hard_v2:hard_prompt": "51ab629a45b27208",
+  "astabench_scholarqa": "aac7dadc58c851cf",
+  "astabench_scholarqa:test": "18ad2eee75eebeec",
+  "expertqa": "87dba69cfa16f096",
+  "expertqa:cite": "d65573fa8d54b7f4",
   "frontierscience_olympiad": "14cd13b044286fe2",
   "frontierscience_olympiad:paper": "74600fd1ac098635",
   "frontierscience_olympiad:verified": "da2148bc749e0c8a",
@@ -2466,6 +2470,8 @@
   "mt_bench:paper": "e583c7de5056b98d",
   "multichallenge": "1cbbc1aa0367e542",
   "omniscience": "a436214c2cceddf0",
-  "omniscience:judge": "e6c26258094b4722"
+  "omniscience:judge": "e6c26258094b4722",
+  "researchqa": "9b70d42f0b5f7e6c",
+  "researchqa:mini": "47ba8f450cf39087"
  }
 }
