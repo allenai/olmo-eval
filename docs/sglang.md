@@ -19,12 +19,14 @@ must also be able to import the model package.
 Chat requests use the model tokenizer's chat template with a generation prompt.
 The provider forwards temperature, top-p, top-k, generation length and string
 stops; EOS handling remains with SGLang. It retains sampled-token logprobs,
-engine metadata, token IDs and finish reasons. The logprob convention follows
-the runtime; set `SGLANG_RETURN_ORIGINAL_LOGPROB=1` before process startup when
-unscaled model probabilities are required on the runtime. Set this before any
-SGLang imports: some runtime versions cache the flag at import time. The provider
-records the environment flag in request traces and output metadata; the flag
-alone is not a numerical parity guarantee. Generation samples and their token IDs
+engine metadata, token IDs and finish reasons. The provider defaults
+`SGLANG_RETURN_ORIGINAL_LOGPROB=1` before model registration or engine imports,
+so sampled-token logprobs and `sum_logits` use raw model probabilities rather
+than temperature-scaled probabilities. An explicitly conflicting flag or an
+already-imported sampler with the other convention fails with a restart message.
+Set the flag before importing SGLang in applications that initialize it elsewhere.
+The enforced convention is recorded in request traces and output metadata;
+it does not imply cross-engine numerical parity. Generation samples and their token IDs
 are preserved separately from the top-ranked alternatives. Finish reasons use
 the harness's `stop`/`length` strings; `sglang_finish_reason` in returned metadata
 retains the engine's original matched-token or length detail.
