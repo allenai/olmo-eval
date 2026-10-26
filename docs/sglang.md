@@ -116,6 +116,11 @@ are preserved separately from the top-ranked alternatives. Finish reasons use
 the harness's `stop`/`length` strings; `sglang_finish_reason` in returned metadata
 retains the engine's original matched-token or length detail.
 
+Returned `LMOutput` objects contain sampled-token logprobs and token IDs. The
+standard predictions JSONL saves generation text, finish reasons and logprob
+summaries, not the full per-token arrays or arbitrary provider metadata.
+Numerical replay tools must save those returned fields explicitly.
+
 Only the batched generation strategy is supported. Continuation likelihood
 scoring, prompt truncation, automatic fitting of generation length to the context
 window, image requests and tool requests fail explicitly. Aborted generation or
