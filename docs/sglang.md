@@ -26,13 +26,13 @@ Build a compatible base through the existing image workflow:
     --source olmo-eval:cu1302-trc2130-amd64 --workspace YOUR_WORKSPACE
 ```
 
-Select that image with `--beaker-image` when launching. The repository's default
+Select that image with `--image` when launching. The repository's default
 CUDA 12.8 / PyTorch 2.10 image is not compatible with this SGLang pin. A normal
 launcher invocation for an exported Olmo KDA MoE Hugging Face checkpoint is:
 
 ```bash
 uv run --frozen --no-group vllm olmo-eval beaker launch \
-    --beaker-image YOUR_CUDA13_TORCH213_IMAGE \
+    --image YOUR_CUDA13_TORCH213_IMAGE \
     --harness default -o provider.kind=sglang \
     -o provider.kwargs.model_registration=olmo_sglang:register \
     -o provider.kwargs.tensor_parallel_size=1 \
