@@ -640,3 +640,39 @@ class TestJudgeLimiter:
         )
 
         assert peak == 2
+
+
+class TestCallJudge:
+    @pytest.mark.anyio
+    async def test_retries_a_transient_failure(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        replies: list[str | Exception] = [RuntimeError("rate limit exceeded"), "A"]
+
+        async def judge(prompt):
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        assert await llm_judge.call_judge(judge, "grade", label="test judge") == "A"
+        assert replies == []
+
+    @pytest.mark.anyio
+    async def test_a_failed_call_is_recorded_as_an_infrastructure_failure(self):
+        from olmo_eval.common.scorers import llm_judge
+        from olmo_eval.common.scorers.execution import format_scoring_error
+
+        async def judge(prompt):
+            raise RuntimeError("judge unavailable")
+
+        with pytest.raises(llm_judge.ScoringIncompleteError) as raised:
+            await llm_judge.call_judge(judge, "grade", label="test judge")
+
+        error = format_scoring_error(raised.value, phase="judge")
+        assert error["infrastructure"] == "true"
+        assert error["message"] == "test judge call failed: RuntimeError: judge unavailable"

@@ -758,7 +758,12 @@ class TestEndToEnd:
             scored = await task.score_responses(responses, ScoringContext())
 
         assert len(scored) == 2
-        warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+        # The retry helper also logs the failed call; this counts the scoring warnings.
+        warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if r.levelno >= logging.WARNING and r.name != "olmo_eval.inference.retry"
+        ]
         assert len(warnings) == 1
         assert "omniscience_judge" in warnings[0]
         assert "judge unavailable" in warnings[0]

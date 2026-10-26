@@ -202,12 +202,13 @@ async def grade_check(
             context=f"aa_briefcase_lite {check.check_id}",
         )
     except Exception as e:
-        logger.warning(f"Judge call for {check.check_id} failed: {e}")
+        cause = e.__cause__ or e
+        logger.warning(f"Judge call for {check.check_id} failed: {cause}")
         return CheckVerdict(
             check_id=check.check_id,
             check_type=check.check_type,
             passed=None,
-            error=f"judge_error: {e}",
+            error=f"judge_error: {cause}",
         )
     if verdict is None:
         return CheckVerdict(

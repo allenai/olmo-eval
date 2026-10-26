@@ -32,6 +32,57 @@ JudgeFn = Callable[..., Coroutine[Any, Any, str]]
 JudgeContent = str | list[dict[str, Any]]
 
 
+async def call_judge(
+    judge_fn: JudgeFn,
+    prompt: JudgeContent,
+    *,
+    label: str,
+    limiter: asyncio.Semaphore | None = None,
+    system_prompt: str | None = None,
+    max_retries: int = 3,
+    retry_delay: float = 1.0,
+) -> str:
+    """Call a judge once, retrying transient API failures with backoff.
+
+    The limiter, when given, is held for each attempt only, so backoff waits leave
+    the slot to other calls. A call that still fails raises
+    :class:`ScoringIncompleteError`, so the output is recorded as unscored because
+    the judge was unavailable rather than because of the output.
+
+    Args:
+        judge_fn: The judge to call.
+        prompt: The judge's user message.
+        label: Names the judge in retry logs and the error, e.g. ``"hle:text judge"``.
+        limiter: Bounds the judge calls in flight.
+        system_prompt: The judge's system message, if any.
+        max_retries: Retries of a call that fails, as ``retry_with_backoff`` makes them.
+        retry_delay: Base wait in seconds between those retries.
+    """
+    kwargs = {} if system_prompt is None else {"system_prompt": system_prompt}
+
+    async def attempt() -> str:
+        if limiter is None:
+            return await judge_fn(prompt, **kwargs)
+        async with limiter:
+            return await judge_fn(prompt, **kwargs)
+
+    try:
+        return await retry_with_backoff(
+            attempt, max_retries=max_retries, retry_delay=retry_delay, context=label
+        )
+    except Exception as exc:
+        raise ScoringIncompleteError(f"{label} call failed: {type(exc).__name__}: {exc}") from exc
+
+
+def with_call_retries(judge_fn: JudgeFn, label: str) -> JudgeFn:
+    """Wrap a judge so each call goes through :func:`call_judge`."""
+
+    async def judge(prompt: JudgeContent, *, system_prompt: str | None = None) -> str:
+        return await call_judge(judge_fn, prompt, label=label, system_prompt=system_prompt)
+
+    return judge
+
+
 async def judge_with_retries[V](
     judge_fn: JudgeFn,
     prompt: JudgeContent,
@@ -65,17 +116,18 @@ async def judge_with_retries[V](
         The parsed verdict, or None if no attempt parsed, with the last raw reply.
 
     Raises:
-        Exception: The last error of a call that failed on every retry.
+        ScoringIncompleteError: A call failed on every retry.
     """
-
-    async def call() -> str:
-        async with limiter:
-            return await judge_fn(prompt, system_prompt=system_prompt)
-
     raw = ""
     for attempt in range(attempts):
-        raw = await retry_with_backoff(
-            call, max_retries=max_retries, retry_delay=retry_delay, context=context
+        raw = await call_judge(
+            judge_fn,
+            prompt,
+            label=context or "judge",
+            limiter=limiter,
+            system_prompt=system_prompt,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
         )
         verdict = parse(raw)
         if verdict is not None:
@@ -417,7 +469,7 @@ class Judge:
 
         Raises:
             JudgeParseError: No attempt gave a reply that parses.
-            Exception: The last error of a call that failed on every retry.
+            ScoringIncompleteError: A call failed on every retry.
         """
         verdict, raw = await judge_with_retries(
             self.call,
@@ -584,11 +636,20 @@ class LLMJudgeScorer(ContextScorer):
             )
         from olmo_eval.inference.errors import first_output
 
-        results = await provider.agenerate([request], sampling_params)
-        outputs = results[0] if results else []
-        if not outputs:
-            return ""
-        return first_output(outputs).text
+        try:
+            results = await provider.agenerate([request], sampling_params)
+            outputs = results[0] if results else []
+            if not outputs:
+                return ""
+            return first_output(outputs).text
+        except Exception as exc:
+            raise self._provider_failure(exc) from exc
+
+    def _provider_failure(self, exc: Exception) -> ScoringIncompleteError:
+        """Describe a failed call to the judge provider as incomplete scoring."""
+        return ScoringIncompleteError(
+            f"{self.name} judge provider {self.provider_name!r} failed: {type(exc).__name__}: {exc}"
+        )
 
     async def _choice_logprobs_with_provider(
         self,
@@ -608,11 +669,14 @@ class LLMJudgeScorer(ContextScorer):
             prompt=prompt,
             continuations=choices,
         )
-        results = await provider.alogprobs([request], SamplingParams(temperature=0, top_p=1))
-        outputs = results[0] if results else []
         from olmo_eval.inference.errors import first_output
 
-        first_output(outputs)
+        try:
+            results = await provider.alogprobs([request], SamplingParams(temperature=0, top_p=1))
+            outputs = results[0] if results else []
+            first_output(outputs)
+        except Exception as exc:
+            raise self._provider_failure(exc) from exc
 
         return {
             output.text: sum(entry["logprob"] for entry in output.logprobs)
@@ -621,16 +685,18 @@ class LLMJudgeScorer(ContextScorer):
         }
 
     async def _score_with_judge_fn(self, prompt: str, context: ScoringContext | None = None) -> str:
-        """Score using configured judge function.
+        """Score using configured judge function, retrying transient API failures.
 
-        With a scoring context, the call holds the run's judge limiter.
+        With a scoring context, each attempt holds the run's judge limiter.
         """
         if self.judge_fn is None:
             raise RuntimeError("No judge_fn configured.")
-        if context is None:
-            return await self.judge_fn(prompt)
-        async with context.judge_limiter:
-            return await self.judge_fn(prompt)
+        return await call_judge(
+            self.judge_fn,
+            prompt,
+            label=f"{self.name} judge",
+            limiter=None if context is None else context.judge_limiter,
+        )
 
     def _validate_provider(self, context: ScoringContext) -> None:
         """Validate that the required provider is available in the inference pool.

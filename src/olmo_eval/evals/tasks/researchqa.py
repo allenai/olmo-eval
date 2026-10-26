@@ -29,7 +29,7 @@ from typing import Any, cast
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.scorers.llm_judge import JudgeFn, JudgeSettings
+from olmo_eval.common.scorers.llm_judge import JudgeFn, JudgeSettings, with_call_retries
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -335,10 +335,17 @@ class ResearchQA(Task):
         return text.strip()
 
     def _get_judge_fn(self) -> JudgeFn:
-        """Return the judge the config names, or the ResearchQA default, built once."""
+        """Return this task's judge, built once.
+
+        It is the judge the config names, or the ResearchQA default, and it retries calls
+        that fail transiently.
+        """
         judge_fn = getattr(self, "_judge_fn", None)
         if judge_fn is None:
-            judge_fn = build_researchqa_judge_fn(RESEARCHQA_JUDGE.with_config(self.config))
+            judge_fn = with_call_retries(
+                build_researchqa_judge_fn(RESEARCHQA_JUDGE.with_config(self.config)),
+                "ResearchQA judge",
+            )
             self._judge_fn = judge_fn
         return judge_fn
 

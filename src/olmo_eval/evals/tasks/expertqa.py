@@ -42,7 +42,12 @@ from olmo_eval.common.scorers.citation import (
     parse_cite_tag_response,
     score_citations_for_sections,
 )
-from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, JudgeFn, JudgeSettings
+from olmo_eval.common.scorers.llm_judge import (
+    ATTRIBUTED_QA_JUDGE,
+    JudgeFn,
+    JudgeSettings,
+    with_call_retries,
+)
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -348,10 +353,16 @@ class ExpertQA(Task):
         return parsed
 
     def _get_judge_fn(self) -> JudgeFn:
-        """Return the judge the config names, or the attributed-QA default, built once."""
+        """Return this task's judge, built once.
+
+        It is the judge the config names, or the attributed-QA default, and it retries calls
+        that fail transiently.
+        """
         judge_fn = getattr(self, "_judge_fn", None)
         if judge_fn is None:
-            judge_fn = _build_judge_fn(ATTRIBUTED_QA_JUDGE.with_config(self.config))
+            judge_fn = with_call_retries(
+                _build_judge_fn(ATTRIBUTED_QA_JUDGE.with_config(self.config)), "ExpertQA judge"
+            )
             self._judge_fn = judge_fn
         return judge_fn
 

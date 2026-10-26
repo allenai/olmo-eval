@@ -379,7 +379,8 @@ def test_judge_spec_resolution(monkeypatch, env_spec, expected_model, expected_e
         monkeypatch.setenv("OLMO_EVAL_JUDGE", env_spec)
     monkeypatch.setattr(llm_judge, "build_openai_judge_fn", fake_builder)
 
-    assert get_task("researchqa")._get_judge_fn() is sentinel
+    get_task("researchqa")._get_judge_fn()
+
     assert captured == {
         "model": expected_model,
         "temperature": 0.0,
