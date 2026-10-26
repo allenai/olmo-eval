@@ -14,7 +14,6 @@ from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestTyp
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 
-
 logger = get_logger(__name__)
 
 
