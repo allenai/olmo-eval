@@ -702,7 +702,7 @@ def test_suite_counts_include_derived_scores_even_without_corpus_metrics_or_with
 
 
 @pytest.mark.parametrize("aggregation", ["none", "display_only"])
-def test_no_score_matrix_suites_keep_paired_deltas_and_metadata(aggregation):
+def test_no_score_matrix_suites_keep_metadata_without_paired_deltas(aggregation):
     from types import SimpleNamespace
 
     import numpy as np
@@ -758,8 +758,6 @@ def test_no_score_matrix_suites_keep_paired_deltas_and_metadata(aggregation):
         SimpleNamespace(alpha=0.05, n_boot=200, seed=0),
     )
     assert row.cells[1].score is None
-    assert row.cells[1].delta is not None
-    assert row.cells[1].delta.method == "paired_bootstrap"
-    assert row.cells[1].delta.delta == pytest.approx(0.2)
+    assert row.cells[1].delta is None
     assert row.meta is not None and row.meta.display_format == "percent"
     assert row.meta.higher_is_better is True

@@ -631,6 +631,44 @@ async def test_compare_matrix(client: httpx.AsyncClient, seeded: dict) -> None:
 
 
 @pytest.mark.parametrize("aggregation", ["none", "display_only"])
+async def test_matrix_unscored_headings_have_no_delta(
+    client: httpx.AsyncClient, aggregation: str
+) -> None:
+    for run_id, values in [
+        ("headingbase01", [0.0, 1.0] * 20),
+        ("headingnext01", [1.0, 1.0] * 20),
+    ]:
+        await seed_run(
+            client,
+            run_id=run_id,
+            tasks={name: values for name in ("a", "b", "guard")},
+            suites=[
+                suite("heading", ["suite:scored", "guard"], aggregation=aggregation),
+                suite("scored", ["a", "b"], score=sum(values) / len(values), parent="heading"),
+            ],
+        )
+    body = await post(
+        client,
+        "/api/compare/matrix",
+        {
+            "subjects": ["r:headingbase01", "r:headingnext01"],
+            "scope": "suite:heading",
+            "metric": "primary",
+            "baseline": "r:headingbase01",
+        },
+        "MatrixResponse",
+    )
+    rows = {row["key"]: row for row in body["rows"]}
+    assert all(cell["score"] is None for cell in rows["suite:heading"]["cells"])
+    assert all(cell["delta"] is None for cell in rows["suite:heading"]["cells"])
+    assert rows["suite:scored"]["cells"][1]["score"] == 1.0
+    for key in ("suite:scored", "task:a", "task:b", "task:guard"):
+        delta = rows[key]["cells"][1]["delta"]
+        assert delta["method"] == "paired_bootstrap"
+        assert delta["delta"] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("aggregation", ["none", "display_only"])
 async def test_pairwise_rejects_unscored_suite_roots(
     client: httpx.AsyncClient, aggregation: str
 ) -> None:
