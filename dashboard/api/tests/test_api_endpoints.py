@@ -1351,13 +1351,16 @@ async def test_generated_gap_task_panel_survives_a_missing_companion(client):
 
 @pytest.mark.parametrize("merge", ["latest", "all"])
 @pytest.mark.parametrize(
-    ("aggregation", "metric"),
+    ("aggregation", "metric", "mixed_primary"),
     [
-        ("gap", "primary"),
-        ("gap", "strict:default"),
-        ("average", "strict:default"),
-        ("weighted_average", "strict:default"),
-        ("average_of_averages", "strict:default"),
+        ("gap", "primary", True),
+        ("gap", "strict:default", True),
+        ("average", "strict:default", True),
+        ("weighted_average", "strict:default", True),
+        ("average_of_averages", "strict:default", True),
+        ("average", "strict:default", False),
+        ("weighted_average", "strict:default", False),
+        ("average_of_averages", "strict:default", False),
     ],
 )
 @pytest.mark.parametrize(
@@ -1369,6 +1372,7 @@ async def test_progression_uses_selected_primary_metadata_from_later_checkpoint(
     merge: str,
     aggregation: str,
     metric: str,
+    mixed_primary: bool,
     display_format: str,
     higher_is_better: bool,
 ) -> None:
@@ -1389,21 +1393,23 @@ async def test_progression_uses_selected_primary_metadata_from_later_checkpoint(
             session=session,
         )
     # The earlier checkpoint can supply strict scores, but not their metadata.
-    # Mixed primaries keep it from anchoring GAP requests to flex.
+    # GAP cases use mixed primaries to avoid anchoring to flex; the others also
+    # cover strict being secondary on every earlier task.
     await session.execute(
         text(
             "UPDATE task_results SET "
             "metrics = metrics || jsonb_build_object('strict:default', "
             "CASE WHEN task_name = 'in' THEN 0.2 ELSE 0.4 END), "
-            "primary_metric = CASE WHEN task_name = 'out' THEN 'strict:default' "
-            "ELSE primary_metric END, "
-            "score = CASE WHEN task_name = 'out' THEN 0.4 ELSE score END, "
+            "primary_metric = CASE WHEN :mixed_primary AND task_name = 'out' "
+            "THEN 'strict:default' ELSE primary_metric END, "
+            "score = CASE WHEN :mixed_primary AND task_name = 'out' THEN 0.4 ELSE score END, "
             "metric_meta = '{}'::jsonb, display_format = :format, higher_is_better = :direction "
             "WHERE run_id = 'secondarymeta01'"
         ),
         {
             "format": "raw" if display_format == "percent" else "percent",
             "direction": not higher_is_better,
+            "mixed_primary": mixed_primary,
         },
     )
     await session.execute(
