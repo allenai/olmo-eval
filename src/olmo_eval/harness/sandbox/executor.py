@@ -291,9 +291,9 @@ class SandboxExecutor:
                         "command -v python3 >/dev/null && "
                         "setsid --help | grep -q -- --wait && "
                         "timeout --help | grep -q -- --kill-after && "
-                        "python3 -I -c 'import ctypes, os; from pathlib import Path; "
+                        "python3 -I -c 'import ctypes; from pathlib import Path; "
                         "assert ctypes.CDLL(None).prctl(36, 1, 0, 0, 0) == 0; "
-                        'Path(f"/proc/self/task/{os.getpid()}/children").read_text()\'',
+                        'Path("/proc/self/stat").read_text()\'',
                     ],
                     5.0,
                 )
