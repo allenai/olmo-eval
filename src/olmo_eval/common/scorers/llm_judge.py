@@ -84,60 +84,6 @@ def with_call_retries(judge_fn: JudgeFn, label: str) -> JudgeFn:
     return judge
 
 
-async def judge_with_retries[V](
-    judge_fn: JudgeFn,
-    prompt: JudgeContent,
-    parse: Callable[[str], V | None],
-    *,
-    limiter: asyncio.Semaphore,
-    system_prompt: str | None = None,
-    attempts: int = 3,
-    max_retries: int = 3,
-    retry_delay: float = 1.0,
-    context: str = "",
-) -> tuple[V | None, str]:
-    """Call a judge, retrying failed calls with backoff and unparseable replies.
-
-    The limiter is held for each call only, so backoff waits leave the slot to
-    other calls. A reply that does not parse is asked for again, up to
-    ``attempts`` calls, with a growing wait between them.
-
-    Args:
-        judge_fn: The judge to call.
-        prompt: The judge's user message.
-        parse: Reads a verdict from a reply, or returns None if it holds none.
-        limiter: Bounds the judge calls in flight.
-        system_prompt: The judge's system message, if any.
-        attempts: Calls before an unparseable reply is given up on.
-        max_retries: Retries of a call that fails, as ``retry_with_backoff`` makes them.
-        retry_delay: Base wait in seconds between those retries.
-        context: Label for retry logs.
-
-    Returns:
-        The parsed verdict, or None if no attempt parsed, with the last raw reply.
-
-    Raises:
-        ScoringIncompleteError: A call failed on every retry.
-    """
-    raw = ""
-    for attempt in range(attempts):
-        raw = await call_judge(
-            judge_fn,
-            prompt,
-            label=context or "judge",
-            limiter=limiter,
-            system_prompt=system_prompt,
-            max_retries=max_retries,
-            retry_delay=retry_delay,
-        )
-        verdict = parse(raw)
-        if verdict is not None:
-            return verdict, raw
-        if attempt < attempts - 1:
-            await asyncio.sleep(2**attempt)
-    return None, raw
-
-
 @runtime_checkable
 class ConfiguredJudgeFn(Protocol):
     """A judge function that records the settings that affect its output."""
@@ -441,31 +387,36 @@ class Judge:
         prompt: JudgeContent,
         parse: Callable[[str], V | None],
         *,
-        limiter: asyncio.Semaphore,
+        limiter: asyncio.Semaphore | None = None,
         system_prompt: str | None = None,
     ) -> tuple[V, str]:
         """Return the parsed verdict for ``prompt`` and the reply it came from.
+
+        Each call goes through :func:`call_judge`, holding ``limiter`` when given. A
+        reply that does not parse is asked for again, up to ``attempts`` calls, with a
+        growing wait between them.
 
         Raises:
             JudgeParseError: No attempt gave a reply that parses.
             ScoringIncompleteError: A call failed on every retry.
         """
-        verdict, raw = await judge_with_retries(
-            self.call,
-            prompt,
-            parse,
-            limiter=limiter,
-            system_prompt=system_prompt,
-            attempts=self.attempts,
-            max_retries=self.max_retries,
-            retry_delay=self.retry_delay,
-            context=self.label,
-        )
-        if verdict is None:
-            raise JudgeParseError(
-                f"no parseable verdict after {self.attempts} judge attempts", raw=raw
+        raw = ""
+        for attempt in range(self.attempts):
+            raw = await call_judge(
+                self.call,
+                prompt,
+                label=self.label,
+                limiter=limiter,
+                system_prompt=system_prompt,
+                max_retries=self.max_retries,
+                retry_delay=self.retry_delay,
             )
-        return verdict, raw
+            verdict = parse(raw)
+            if verdict is not None:
+                return verdict, raw
+            if attempt < self.attempts - 1:
+                await asyncio.sleep(2**attempt)
+        raise JudgeParseError(f"no parseable verdict after {self.attempts} judge attempts", raw=raw)
 
 
 # Default judge for attributed-QA scoring (citation / precision / rubric).
