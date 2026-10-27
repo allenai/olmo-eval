@@ -5,7 +5,6 @@ import logging
 
 import pytest
 
-from olmo_eval.common.scorers.llm_judge import JudgeSettings
 from olmo_eval.common.types import (
     AgentTrajectory,
     AgentTurn,
@@ -21,6 +20,7 @@ from olmo_eval.evals.suites import get_suite
 from olmo_eval.evals.tasks import expertqa as expertqa_module
 from olmo_eval.evals.tasks.common import get_task, list_tasks
 from olmo_eval.evals.tasks.expertqa import EXPERTQA_OUTPUT_LABELS
+from tests.evals.tasks.judge_stubs import use_judge
 
 
 @pytest.fixture(autouse=True)
@@ -193,7 +193,7 @@ class TestScoreResponses:
 
     @pytest.mark.anyio
     async def test_no_parsed_response_scores_zero(self, task, monkeypatch):
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: _unused_judge)
+        use_judge(monkeypatch, _unused_judge)
         response = self._response(None, _trajectory_with_source(""))
 
         await task.score_responses([response])
@@ -209,7 +209,7 @@ class TestScoreResponses:
 
     @pytest.mark.anyio
     async def test_global_avg_is_mean_of_three_axes(self, task, monkeypatch):
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: _citation_split_judge)
+        use_judge(monkeypatch, _citation_split_judge)
         snippet = "Evidence from a fetched source supports the first claim."
         parsed = {
             "sections": [
@@ -236,7 +236,7 @@ class TestScoreResponses:
     async def test_grounded_snippet_reaches_judge(self, task, monkeypatch):
         snippet = "This fetched passage exactly supports the grounded ExpertQA answer."
         judge = _RecordingJudge()
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         parsed = {
             "sections": [
                 {
@@ -273,7 +273,7 @@ class TestScoreResponses:
         snippet = "Crawl4ai fetched passage exactly supports the grounded ExpertQA answer."
         page_content = f"Fetched text: {snippet}"
         judge = _RecordingJudge()
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         parsed = {
             "sections": [
                 {
@@ -318,7 +318,7 @@ class TestScoreResponses:
         grounded_snippet = "Fetched evidence appears verbatim in the trajectory source text."
         fabricated_snippet = "Fabricated evidence never appeared in any fetched page."
         judge = _RecordingJudge()
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         parsed = {
             "sections": [
                 {
@@ -348,7 +348,7 @@ class TestScoreResponses:
     ):
         fabricated_snippet = "Fabricated ExpertQA evidence never appeared in retrieved sources."
         judge = _EverythingSupportingJudge()
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         parsed = {
             "sections": [
                 {
@@ -381,7 +381,7 @@ class TestScoreResponses:
 
     @pytest.mark.anyio
     async def test_missing_trajectory_warns_and_ungrounds_snippets(self, task, monkeypatch, caplog):
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: _citation_split_judge)
+        use_judge(monkeypatch, _citation_split_judge)
         caplog.set_level(logging.WARNING, logger=expertqa_module.__name__)
         parsed = {
             "sections": [
@@ -408,7 +408,7 @@ class TestScoreResponses:
     @pytest.mark.anyio
     async def test_multi_output_scores_metadata_and_uses_configured_aggregation(self, monkeypatch):
         task = get_task("expertqa", config_overrides={"output_score_aggregation": "first"})
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: _citation_split_judge)
+        use_judge(monkeypatch, _citation_split_judge)
         grounded_snippet = "Grounded multi-output evidence appears in fetched content."
         fabricated = {
             "sections": [
@@ -452,7 +452,7 @@ class TestScoreResponses:
     async def test_cite_grounded_fetched_url_reaches_judge(self, cite_task, monkeypatch):
         page_excerpt = "Fetched page evidence supports the cite-tag ExpertQA claim."
         judge = _RecordingJudge()
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         response = _cite_response(
             '<cite url="https://example.com/source">Grounded cite claim.</cite>',
             _trajectory_with_search_and_fetch(
@@ -480,7 +480,7 @@ class TestScoreResponses:
         self, cite_task, monkeypatch
     ):
         judge = _EverythingSupportingJudge()
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         response = _cite_response(
             '<cite url="https://invented.example/missing">Invented cite claim.</cite>',
             _trajectory_with_search_and_fetch(
@@ -506,7 +506,7 @@ class TestScoreResponses:
     @pytest.mark.anyio
     async def test_cite_empty_url_scores_zero_with_supporting_judge(self, cite_task, monkeypatch):
         judge = _EverythingSupportingJudge()
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         response = _cite_response(
             '<cite url="">Empty-url cite claim.</cite>',
             _trajectory_with_search_and_fetch(
@@ -532,7 +532,7 @@ class TestScoreResponses:
     @pytest.mark.anyio
     async def test_cite_fetch_error_routes_to_half_credit(self, cite_task, monkeypatch):
         judge = _RecordingJudge()
-        monkeypatch.setattr(expertqa_module, "_build_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         response = _cite_response(
             '<cite url="https://example.com/source">Error-fetch cite claim.</cite>',
             _trajectory_with_search_and_fetch(
@@ -804,13 +804,3 @@ def _trajectory_with_search_and_fetch(
             ),
         )
     )
-
-
-def test_an_environment_judge_without_an_effort_sends_none(monkeypatch):
-    built: list[JudgeSettings] = []
-    monkeypatch.setattr(expertqa_module, "_build_judge_fn", built.append)
-    monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5-mini")
-
-    get_task("expertqa")._get_judge_fn()
-
-    assert built == [JudgeSettings(model="gpt-5-mini", max_tokens=4096)]

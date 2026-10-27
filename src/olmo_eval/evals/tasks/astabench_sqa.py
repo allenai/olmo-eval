@@ -15,6 +15,7 @@ import re
 from abc import ABC
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 from olmo_eval.common.metrics import Metric
@@ -23,7 +24,7 @@ from olmo_eval.common.scorers.citation import (
     extract_json_from_response,
     score_citations_for_sections,
 )
-from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, JudgeFn, with_call_retries
+from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, JudgeFn
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -417,20 +418,10 @@ class AstaBenchSQA(Task):
         output.metadata["parsed_response"] = parsed
         return parsed
 
-    def _get_judge_fn(self) -> JudgeFn:
-        """Return this task's judge, built once.
-
-        It is the judge the config names, or the attributed-QA default, and it retries calls
-        that fail transiently.
-        """
-        judge_fn = getattr(self, "_judge_fn", None)
-        if judge_fn is None:
-            judge_fn = with_call_retries(
-                ATTRIBUTED_QA_JUDGE.with_config(self.config).build_fn("AstaBenchSQA"),
-                "AstaBenchSQA judge",
-            )
-            self._judge_fn = judge_fn
-        return judge_fn
+    @cached_property
+    def _judge_fn(self) -> JudgeFn:
+        """The judge the config names, or the attributed-QA default; it retries failed calls."""
+        return ATTRIBUTED_QA_JUDGE.with_config(self.config).build_retrying_fn("AstaBenchSQA")
 
     async def score_responses(
         self,
@@ -445,7 +436,7 @@ class AstaBenchSQA(Task):
         """
         self._extract_answers(responses)
 
-        judge_fn = self._get_judge_fn()
+        judge_fn = self._judge_fn
 
         for response in responses:
             scores = await self._score_single(response, judge_fn)

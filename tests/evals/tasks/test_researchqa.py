@@ -17,6 +17,7 @@ from olmo_eval.evals.tasks.researchqa import (
     normalize_coverage_label,
     parse_coverage_labels,
 )
+from tests.evals.tasks.judge_stubs import use_judge
 
 
 @pytest.fixture
@@ -250,7 +251,7 @@ class TestParsingAndScoring:
             prompts.append(prompt)
             return next(outputs)
 
-        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         await task.score_responses([response])
 
         assert len(prompts) == 2
@@ -278,7 +279,7 @@ class TestParsingAndScoring:
         async def judge(_prompt):
             return next(outputs)
 
-        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         await task.score_responses(responses)
 
         primary = task.config.get_primary_metric()
@@ -303,7 +304,7 @@ class TestParsingAndScoring:
         async def judge(_prompt):
             return next(outputs)
 
-        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda _: judge)
+        use_judge(monkeypatch, judge)
         await task.score_responses(responses)
 
         assert responses[0].scores["coverage_comparison"] == 0.75
@@ -339,8 +340,8 @@ class TestParsingAndScoring:
         async def sleep(delay):
             delays.append(delay)
 
-        monkeypatch.setattr(researchqa, "build_researchqa_judge_fn", lambda _: judge)
-        monkeypatch.setattr(researchqa.asyncio, "sleep", sleep)
+        use_judge(monkeypatch, judge)
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", sleep)
         with caplog.at_level(logging.WARNING, logger=researchqa.__name__):
             scored = await task.score_responses([response])
 
@@ -379,7 +380,7 @@ def test_judge_spec_resolution(monkeypatch, env_spec, expected_model, expected_e
         monkeypatch.setenv("OLMO_EVAL_JUDGE", env_spec)
     monkeypatch.setattr(llm_judge, "build_openai_judge_fn", fake_builder)
 
-    get_task("researchqa")._get_judge_fn()
+    assert get_task("researchqa")._judge.call is sentinel
 
     assert captured == {
         "model": expected_model,

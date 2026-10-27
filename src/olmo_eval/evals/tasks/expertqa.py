@@ -33,6 +33,7 @@ import logging
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 from olmo_eval.common.scorers.citation import (
@@ -42,12 +43,7 @@ from olmo_eval.common.scorers.citation import (
     parse_cite_tag_response,
     score_citations_for_sections,
 )
-from olmo_eval.common.scorers.llm_judge import (
-    ATTRIBUTED_QA_JUDGE,
-    JudgeFn,
-    JudgeSettings,
-    with_call_retries,
-)
+from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, JudgeFn
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -167,11 +163,6 @@ EXPERTQA_METRICS = (
     AnswerPrecisionMetric(),
     SnippetGroundingMetric(),
 )
-
-
-def _build_judge_fn(settings: JudgeSettings) -> JudgeFn:
-    """Build the ExpertQA judge function; kept as a small test hook."""
-    return settings.build_fn("ExpertQA")
 
 
 def _trajectory_source_text(response: Response) -> str:
@@ -352,19 +343,10 @@ class ExpertQA(Task):
         output.metadata["parsed_response"] = parsed
         return parsed
 
-    def _get_judge_fn(self) -> JudgeFn:
-        """Return this task's judge, built once.
-
-        It is the judge the config names, or the attributed-QA default, and it retries calls
-        that fail transiently.
-        """
-        judge_fn = getattr(self, "_judge_fn", None)
-        if judge_fn is None:
-            judge_fn = with_call_retries(
-                _build_judge_fn(ATTRIBUTED_QA_JUDGE.with_config(self.config)), "ExpertQA judge"
-            )
-            self._judge_fn = judge_fn
-        return judge_fn
+    @cached_property
+    def _judge_fn(self) -> JudgeFn:
+        """The judge the config names, or the attributed-QA default; it retries failed calls."""
+        return ATTRIBUTED_QA_JUDGE.with_config(self.config).build_retrying_fn("ExpertQA")
 
     async def score_responses(
         self,
@@ -374,7 +356,7 @@ class ExpertQA(Task):
         """Score responses for citation precision/recall and answer precision."""
         self._extract_answers(responses)
 
-        judge_fn = self._get_judge_fn()
+        judge_fn = self._judge_fn
         missing_trajectory = 0
 
         for response in responses:

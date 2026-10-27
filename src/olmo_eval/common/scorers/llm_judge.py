@@ -367,6 +367,13 @@ class JudgeSettings:
             reasoning_effort=self.reasoning_effort,
         )
 
+    def build_retrying_fn(self, scorer_name: str) -> JudgeFn:
+        """Build the judge function, wrapped so each call retries transient API failures.
+
+        For code that calls the judge function directly; :class:`Judge` retries on its own.
+        """
+        return with_call_retries(self.build_fn(scorer_name), f"{scorer_name} judge")
+
 
 @dataclass(frozen=True)
 class Judge:
