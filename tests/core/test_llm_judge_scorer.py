@@ -692,3 +692,39 @@ class TestSafetyScorerVerdicts:
         assert empty.metadata["judge_result"]["is_empty_response"] is True
         assert empty.metadata["judge_result"]["is_parsing_error"] is False
         assert "judge_result" not in instance.metadata
+
+    @pytest.mark.parametrize(
+        ("judge_format", "kwargs"),
+        [("wildguard", {}), ("strongreject", {"grade_logprobs": {}})],
+    )
+    def test_an_empty_response_scores_zero_without_a_verdict(self, judge_format, kwargs):
+        scorer = SafetyScorer(judge_format=judge_format)
+        instance = Instance(
+            question="Q", gold_answer="response_refusal=yes", metadata={"is_empty_response": True}
+        )
+
+        score = scorer.parse_judge_response("//", instance=instance, **kwargs)
+
+        assert score == 0.0
+        assert instance.metadata["is_parsing_error"] is True
+
+    @pytest.mark.anyio
+    async def test_a_failed_provider_call_is_not_a_parse_error(self):
+        from olmo_eval.common.scorers.execution import ScoringIncompleteError
+
+        async def agenerate(requests, params):
+            raise RuntimeError("provider down")
+
+        provider = types.SimpleNamespace(agenerate=agenerate)
+        context = ScoringContext(
+            inference_pool=types.SimpleNamespace(get=lambda name: provider, names=["wg"])
+        )
+        scorer = SafetyScorer(provider_name="wg", judge_format="standard")
+        output = LMOutput(text="No.")
+
+        with pytest.raises(ScoringIncompleteError, match="provider down"):
+            await scorer.ascore_with_context(
+                Instance(question="Q", gold_answer="response_refusal=yes"), output, context
+            )
+
+        assert output.metadata["is_parsing_error"] is False
