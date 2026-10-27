@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 
 class BatchStrategy(StrEnum):
@@ -27,16 +27,31 @@ class BatchConfig:
         strategy: Batching strategy to use.
         chunk_size: Maximum items per batch.
         chunk_timeout: Seconds to wait for batch to fill before processing partial.
+        max_batch_sequences: Optional budget counting expanded samples, retained on replay.
     """
 
     # Providers that only support sequential (LLM() is not thread-safe)
     _SEQUENTIAL_ONLY: ClassVar[frozenset[str]] = frozenset(
-        {"vllm", "hf", "olmo_core", "olmo_core_vlm"}
+        {"sglang", "vllm", "hf", "olmo_core", "olmo_core_vlm"}
     )
 
     strategy: BatchStrategy = BatchStrategy.BATCHED
-    chunk_size: int = DEFAULT_CHUNK_SIZE
+    chunk_size: int | Literal["auto"] = "auto"
     chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT
+    max_batch_sequences: int | None = None
+
+    @property
+    def resolved_chunk_size(self) -> int:
+        """Automatic batching keeps the historical size unless a provider recommends more."""
+        return DEFAULT_CHUNK_SIZE if self.chunk_size == "auto" else self.chunk_size
+
+    def __post_init__(self) -> None:
+        if self.max_batch_sequences is not None and (
+            type(self.max_batch_sequences) is not int or self.max_batch_sequences < 1
+        ):
+            raise ValueError("max_batch_sequences must be a positive integer or None")
+        if self.chunk_size != "auto" and (type(self.chunk_size) is not int or self.chunk_size < 1):
+            raise ValueError("chunk_size must be 'auto' or a positive integer")
 
     def validate_for_provider(self, provider_kind: str) -> None:
         """Validate that this batching config is compatible with the provider.
@@ -55,11 +70,14 @@ class BatchConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
+        data: dict[str, Any] = {
             "strategy": str(self.strategy),
             "chunk_size": self.chunk_size,
             "chunk_timeout": self.chunk_timeout,
         }
+        if self.max_batch_sequences is not None:
+            data["max_batch_sequences"] = self.max_batch_sequences
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BatchConfig:
@@ -69,12 +87,13 @@ class BatchConfig:
             strategy = BatchStrategy(strategy)
         return cls(
             strategy=strategy,
-            chunk_size=data.get("chunk_size", DEFAULT_CHUNK_SIZE),
+            chunk_size=data.get("chunk_size", "auto"),
             chunk_timeout=data.get("chunk_timeout", DEFAULT_CHUNK_TIMEOUT),
+            max_batch_sequences=data.get("max_batch_sequences"),
         )
 
     @classmethod
-    def batched(cls, chunk_size: int = DEFAULT_CHUNK_SIZE) -> BatchConfig:
+    def batched(cls, chunk_size: int | Literal["auto"] = "auto") -> BatchConfig:
         """Create batched config with continuous dispatch within each chunk."""
         return cls(strategy=BatchStrategy.BATCHED, chunk_size=chunk_size)
 

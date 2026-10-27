@@ -27,6 +27,9 @@ def tr(**kw: Any) -> dict[str, Any]:
         "prompt_tokens_total": None,
         "completion_tokens_total": None,
         "attributed_inference_seconds": None,
+        "scoring_judge_seconds": None,
+        "scoring_sandbox_seconds": None,
+        "scoring_compute_seconds": None,
         "first_request_at": None,
         "last_completed_at": None,
         "num_instances": 200,
@@ -90,6 +93,24 @@ def test_attributed_worker_time_becomes_wall_time() -> None:
     assert rt.basis == "attributed"
     assert rt.inference_seconds == 50.0
     assert rt.seconds_per_1k_instances == 250.0
+
+
+def test_scoring_seconds_pass_through_without_worker_division() -> None:
+    run = RunTiming(processing_seconds=100.0, n_task_results=3, inference_workers=4)
+    rt = derive_runtime(
+        tr(scoring_judge_seconds=62.0, scoring_sandbox_seconds=0.0, scoring_compute_seconds=3.4),
+        run,
+    )
+    assert rt.scoring_judge_seconds == 62.0
+    assert rt.scoring_sandbox_seconds == 0.0
+    assert rt.scoring_compute_seconds == 3.4
+
+
+def test_scoring_seconds_unrecorded_or_not_finite_are_null() -> None:
+    rt = derive_runtime(tr(scoring_compute_seconds=float("inf")), RunTiming())
+    assert rt.scoring_judge_seconds is None
+    assert rt.scoring_sandbox_seconds is None
+    assert rt.scoring_compute_seconds is None
 
 
 def test_worker_count_comes_from_provider_init() -> None:
