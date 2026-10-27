@@ -24,6 +24,7 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
     variants of `do_anything_now`, `harmbench`, `strongreject`,
     `trustllm_jailbreaktrigger`, `wildguardtest`, `wildjailbreak` and `xstest`, and the
     safety suites that include them.
+  - `expertqa`, `expertqa:cite`, `astabench_scholarqa` and `astabench_scholarqa:test`.
   - `wmdp:mcq`, whose subset metrics change for empty subsets only.
   - Runs that set `OLMO_EVAL_JUDGE`, or `-o judge_*` on `omniscience:judge`, `expertqa`,
     `astabench_scholarqa` and `researchqa`.
@@ -31,9 +32,11 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   - A judge reply that names no verdict leaves the output unscored, counted against the
     failure budget; an API judge (SimpleQA, the safety `openai_judge` variants) is asked
     again first. An empty safety response still scores 0.0, since that score does not
-    depend on the verdict. Before, SimpleQA scored it as incorrect and the safety judges scored it,
-    an answer outside the allowed ones, or a StrongREJECT judge with no grade logprobs,
-    as 0.0.
+    depend on the verdict. Before, SimpleQA scored it as incorrect; the safety judges
+    scored it, an answer outside the allowed ones, or a StrongREJECT judge with no grade
+    logprobs, as 0.0; and ExpertQA and AstaBench SQA scored an unparseable answer
+    precision reply as 1.0, an unparseable ingredient reply as 0.0, and a citation
+    section with no claims as empty.
   - The safety variants drop their `parsing_error` metric, which would now always read
     0; the run's scoring failures count these replies instead. Subset metrics leave out
     unscored responses, and an empty subset reports 0.0 instead of -1.
@@ -41,7 +44,11 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
     `model_output[i].judge_result`, with `is_empty_response`, `is_truncated_response`
     and `is_parsing_error` inside it. Before, one result per instance was saved at the
     top level of the prediction and the flags in the request's `doc`. SimpleQA
-    predictions now keep the judge's raw reply.
+    predictions now keep the judge's raw reply, and ExpertQA and AstaBench SQA
+    predictions keep every judge reply under `judge_result.raw_judge_responses`.
+  - The safety `openai_judge` variants and `simpleqa:judge` record their judge
+    (`gpt-4o-mini`, with its token budget) as `judge_model` and `judge_max_tokens`, and
+    `-o judge_*` changes the judge that grades them.
   - The safety variants that judge with an auxiliary provider record the model it must
     serve as `judge_model` (`allenai/wildguard`, or the `qylu4156/strongreject-15k-v1`
     adapter), and the runner refuses a provider that serves another model.
@@ -55,15 +62,18 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
     the runner applied it after building the scorer, so the default judge scored while
     the config recorded the override.
   - Judge API calls are retried on transient failures for judge scorers and the
-    attributed-QA tasks, which made one attempt before.
+    attributed-QA tasks, which made one attempt before, and the attributed-QA tasks'
+    judge calls share the run's judge concurrency limit.
   - FrontierScience instances also record a `truncation_rate` score, as other judged
     tasks do; its metrics are unchanged.
-- **Identity**: the task hash changes for the 28 safety specs listed above. It does not
-  change for any other spec run with its default judge, including `simpleqa:judge` and
-  `wmdp:mcq`. Runs with another judge on `expertqa`, `astabench_scholarqa` and
+- **Identity**: the task hash changes for the 28 safety specs listed above and for
+  `simpleqa:judge`. It does not change for any other spec run with its default judge,
+  including the attributed-QA tasks and `wmdp:mcq`. Runs with another judge on `expertqa`, `astabench_scholarqa` and
   `researchqa` now get their own hash; before, they shared the default judge's hash.
 - **Comparability**: a `simpleqa:judge` result is affected only if its judge gave a reply
-  with no grade; leaving those out raises its accuracy. Safety results before this change
+  with no grade; leaving those out raises its accuracy. An ExpertQA or AstaBench SQA
+  result is affected only if a judge reply did not parse: such an output was scored with
+  answer precision 1.0 and is now unscored. Safety results before this change
   counted unparseable judge replies as unsafe, so a run with such replies scores higher
   now; earlier `parsing_error` values say how many there were. An earlier subset value of
   -1 meant the subset had no instances. An earlier `omniscience:judge` run with
