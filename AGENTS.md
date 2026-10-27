@@ -88,6 +88,13 @@ for an open PR. Those results can be uploaded after merge with
 - **Task hash.** Every setting that changes requests or scores must reach
   `TaskConfig.to_dict()`. A new optional field must be serialized only when set, so
   existing hashes don't move. Test both directions.
+- **Pinned hashes.** `tests/evals/tasks/test_task_hashes.py` pins the stored task hash
+  of every registered spec in `task_hashes.json`. When it fails, a change moved a hash.
+  If the move is unintended, fix the change. If it is intended, regenerate the file with
+  `uv run pytest tests/evals/tasks/test_task_hashes.py --update-task-hashes`, check that
+  only the intended specs changed, and add an entry to
+  [docs/result-compatibility.md](docs/result-compatibility.md) naming them. A new task
+  or variant only adds lines; regenerate the file, and no entry is needed.
 - **Pins.** Pin a new dataset's `revision=` and judge models to dated snapshots when the
   task is introduced.
 - **Failures aren't scores.** No broad `except` around provider, judge, or scoring calls
