@@ -16,6 +16,22 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-10-25: Store exact per-instance IFEval metrics (#509)
+
+- **Affected**: saved per-instance metrics for tasks using the four IFEval metrics,
+  including IFBench and IFEval. Aggregate task scores and generation are unchanged.
+- **Change**: strict prompt accuracy and instruction accuracy previously reused the
+  scorer's prompt-level loose value. New predictions derive each metric from its
+  strict or loose instruction flags. Instruction values are the fraction passed for
+  that instance; the task aggregate still weights by instruction count, so an
+  unweighted mean of these fractions need not equal it.
+- **Identity**: task hashes and metric configurations are unchanged.
+- **Comparability**: earlier per-instance strict and instruction values may be wrong
+  even when the aggregate metrics are correct. Rescore saved answers with the original
+  task configuration to recover them. Scorer-only predictions no longer synthesize
+  missing strict or instruction metric keys. The valid prompt-level loose fallback
+  and existing explicit values are preserved, not silently repaired.
+
 ## 2026-10-22: Scoring failures are left out and budgeted, not scored as zero (#492)
 
 - **Affected**: every task run by `AsyncEvalRunner` whose scoring failed for some output:

@@ -45,8 +45,24 @@ def _instruction_level(results: list[list[bool]]) -> float:
     return correct / total
 
 
+class _IFEvalMetric(Metric):
+    """Derive stored instance values from instruction flags, not the loose scorer."""
+
+    def compute_instance(self, response: Response) -> float | None:
+        if not response.outputs:
+            return None
+        result = (response.outputs[0].metadata or {}).get("ifeval") or {}
+        if not result.get("strict") or not result.get("loose"):
+            return None
+        return self.compute([response])
+
+    def supports_scorer_fallback(self) -> bool:
+        # Scorer-only predictions cannot recover strict or instruction accuracy.
+        return False
+
+
 @dataclass(frozen=True, slots=True)
-class IFEvalPromptStrictAccuracy(Metric):
+class IFEvalPromptStrictAccuracy(_IFEvalMetric):
     """Fraction of prompts where every instruction passes under strict scoring."""
 
     name: str = "prompt_level_strict_acc"
@@ -57,7 +73,7 @@ class IFEvalPromptStrictAccuracy(Metric):
 
 
 @dataclass(frozen=True, slots=True)
-class IFEvalPromptLooseAccuracy(Metric):
+class IFEvalPromptLooseAccuracy(_IFEvalMetric):
     """Fraction of prompts where every instruction passes under loose scoring."""
 
     name: str = "prompt_level_loose_acc"
@@ -66,9 +82,13 @@ class IFEvalPromptLooseAccuracy(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         return _prompt_level(_iter_results(responses, "loose"))
 
+    def supports_scorer_fallback(self) -> bool:
+        # This is the one metric equal to IFEvalScorer's scalar return value.
+        return True
+
 
 @dataclass(frozen=True, slots=True)
-class IFEvalInstStrictAccuracy(Metric):
+class IFEvalInstStrictAccuracy(_IFEvalMetric):
     """Fraction of individual instructions passing under strict scoring."""
 
     name: str = "inst_level_strict_acc"
@@ -79,7 +99,7 @@ class IFEvalInstStrictAccuracy(Metric):
 
 
 @dataclass(frozen=True, slots=True)
-class IFEvalInstLooseAccuracy(Metric):
+class IFEvalInstLooseAccuracy(_IFEvalMetric):
     """Fraction of individual instructions passing under loose scoring."""
 
     name: str = "inst_level_loose_acc"
