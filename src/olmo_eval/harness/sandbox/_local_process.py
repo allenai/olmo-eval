@@ -27,6 +27,27 @@ def interrupt(signum, frame):
 signal.signal(signal.SIGUSR1, interrupt)
 cleanup_started = False
 
+def direct_children(deadline):
+    parent = os.getpid()
+    try:
+        return [int(pid) for pid in Path(f"/proc/self/task/{parent}/children").read_text().split()]
+    except FileNotFoundError:
+        pass
+    children = []
+    for entry in Path("/proc").iterdir():
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Command descendant enumeration exceeded cleanup deadline")
+        if not entry.name.isdecimal():
+            continue
+        try:
+            stat = (entry / "stat").read_text()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        fields = stat.rsplit(") ", 1)[1].split()
+        if int(fields[1]) == parent:
+            children.append(int(entry.name))
+    return children
+
 def clean_children():
     deadline = time.monotonic() + 2.0
     while True:
@@ -36,10 +57,10 @@ def clean_children():
         except ChildProcessError:
             Path(record + ".clean").touch()
             return
-        children = Path(f"/proc/self/task/{os.getpid()}/children").read_text().split()
-        for pid in children:
+        # Do not reap between enumeration and signaling: owned child PIDs cannot be reused.
+        for pid in direct_children(deadline):
             try:
-                os.kill(int(pid), signal.SIGKILL)
+                os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
         if time.monotonic() >= deadline:

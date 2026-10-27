@@ -297,7 +297,18 @@ async def test_background_process_survives_successful_command(sandbox):
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("interrupt", ["timeout", "cancel"])
-async def test_interruption_kills_double_forked_new_session(sandbox, interrupt):
+@pytest.mark.parametrize("missing_children", [False, True])
+async def test_interruption_kills_double_forked_new_session(
+    sandbox, monkeypatch, interrupt, missing_children
+):
+    if missing_children:
+        from olmo_eval.harness.sandbox._local_process import COMMAND_SUPERVISOR
+        from tests.core.harness.test_local_process_supervisor import _without_children_file
+
+        monkeypatch.setattr(
+            "olmo_eval.harness.sandbox.executor.COMMAND_SUPERVISOR",
+            _without_children_file(COMMAND_SUPERVISOR),
+        )
     code = (
         "import os, signal, time\n"
         "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
