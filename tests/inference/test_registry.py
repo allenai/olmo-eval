@@ -547,7 +547,6 @@ class TestValidateGPUPlan:
         ({}, "google/gemma-2b"),
         ({"lora_modules": ["sr=org/adapter"]}, "google/gemma-2b"),
         ({"enable_lora": True, "lora_modules": ["sr=org/adapter"]}, "org/adapter"),
-        ({"enable_lora": True, "lora_modules": "[sr=org/adapter]"}, "org/adapter"),
     ],
 )
 def test_served_model_is_the_loaded_adapter_or_the_model(kwargs, served):

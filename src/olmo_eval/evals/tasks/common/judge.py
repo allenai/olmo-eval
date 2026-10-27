@@ -6,10 +6,11 @@ are part of the task hash: runs with different judges are stored and compared as
 separate results. ``-o judge_model=<model>`` (and ``-o judge_reasoning_effort=<effort>``
 or ``-o judge_max_tokens=<n>``) changes the judge of one task;
 ``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]`` changes the judge of every task
-in a run whose ``-o`` overrides name no judge model. A task's default reasoning
-effort goes with its default model, so the environment override replaces it; the
-task keeps its token budget unless the override names one. ``get_task`` applies the
-environment override, after variants and before ``-o`` overrides.
+with ``judged = True`` in a run whose ``-o`` overrides name no judge model. A task's
+default reasoning effort goes with its default model, so the environment override
+replaces it; the task keeps its token budget unless the override names one.
+``get_task`` applies the environment override, after variants and before ``-o``
+overrides.
 
 The scoring context's ``judge_limiter``, sized by ``scoring_concurrency``, bounds the
 judge calls in flight across every judged task in a run, however many calls each

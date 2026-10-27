@@ -1,7 +1,10 @@
-"""LLM-as-judge scorers for open-ended evaluation.
+"""Shared LLM-as-judge code and judge scorers.
 
-This module provides scorers that use language models to evaluate
-responses, following patterns from benchmarks like SimpleQA.
+``JudgeSettings``, ``call_judge`` and ``Judge`` build and call a judge for any task,
+scorer, or external eval: retries, re-asks for a verdict, the run's limiter, and
+failures raised as ``ScoringIncompleteError``. ``LLMJudgeScorer`` and its subclasses
+are scorers that grade one output per judge call, such as SimpleQA's and the safety
+judges.
 """
 
 import asyncio

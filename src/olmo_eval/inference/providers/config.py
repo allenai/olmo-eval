@@ -72,8 +72,6 @@ class ProviderConfig:
     def served_model(self) -> str:
         """The model requests reach: the LoRA adapter's path when one is loaded, else ``model``."""
         modules = self.kwargs.get("lora_modules") if self.kwargs.get("enable_lora") else None
-        if isinstance(modules, str):
-            modules = [modules.strip("[]")]
         if modules:
             name, separator, path = str(modules[0]).partition("=")
             return path if separator else name

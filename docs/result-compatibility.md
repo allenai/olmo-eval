@@ -16,7 +16,7 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
-## 2026-10-26: One judge base: judge identity in the hash, no verdict leaves an output unscored (#512)
+## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
 
 - **Affected**:
   - `simpleqa:judge`.
@@ -30,7 +30,8 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Change**:
   - A judge reply that names no verdict leaves the output unscored, counted against the
     failure budget; an API judge (SimpleQA, the safety `openai_judge` variants) is asked
-    again first. Before, SimpleQA scored it as incorrect and the safety judges scored it,
+    again first. An empty safety response still scores 0.0, since that score does not
+    depend on the verdict. Before, SimpleQA scored it as incorrect and the safety judges scored it,
     an answer outside the allowed ones, or a StrongREJECT judge with no grade logprobs,
     as 0.0.
   - The safety variants drop their `parsing_error` metric, which would now always read
@@ -44,15 +45,19 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   - The safety variants that judge with an auxiliary provider record the model it must
     serve as `judge_model` (`allenai/wildguard`, or the `qylu4156/strongreject-15k-v1`
     adapter), and the runner refuses a provider that serves another model.
-  - `OLMO_EVAL_JUDGE` is applied when the task is built, to every judged task whose `-o`
-    overrides name no judge model, and takes `model[:effort[:max_tokens]]`. Before, an
-    explicit `-o judge_model` equal to a task's default lost to it, FrontierScience let
-    it override `-o`, and ExpertQA, AstaBench SQA and ResearchQA read it while scoring.
+  - `OLMO_EVAL_JUDGE` is applied when the task is built, to HLE, MultiChallenge,
+    MT-Bench, Arena-Hard, FrontierScience, ExpertQA, AstaBench SQA and ResearchQA unless
+    their `-o` overrides name a judge model, and takes `model[:effort[:max_tokens]]`.
+    Before, an explicit `-o judge_model` equal to a task's default lost to it,
+    FrontierScience let it override `-o`, and ExpertQA, AstaBench SQA and ResearchQA
+    read it while scoring.
   - `-o judge_*` on `omniscience:judge` now changes the judge that scores the run. Before,
     the runner applied it after building the scorer, so the default judge scored while
     the config recorded the override.
   - Judge API calls are retried on transient failures for judge scorers and the
     attributed-QA tasks, which made one attempt before.
+  - FrontierScience instances also record a `truncation_rate` score, as other judged
+    tasks do; its metrics are unchanged.
 - **Identity**: the task hash changes for the 28 safety specs listed above. It does not
   change for any other spec run with its default judge, including `simpleqa:judge` and
   `wmdp:mcq`. Runs with another judge on `expertqa`, `astabench_scholarqa` and

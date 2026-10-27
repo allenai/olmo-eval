@@ -154,7 +154,9 @@ results and hashed to identify it.
 - Keep judge settings in `TaskConfig` (`judge_model`, `judge_reasoning_effort`,
   `judge_max_tokens`): set them as class defaults, or leave them unset to mean a
   `JudgeSettings` default named in the task module. Set `judged = True` so `get_task`
-  applies `OLMO_EVAL_JUDGE`, and don't read the variable while scoring. A judge served by
+  applies `OLMO_EVAL_JUDGE`, and don't read the variable while scoring; leave it unset
+  only when the task's judge settings cannot take an arbitrary judge, as for
+  Omniscience's 10-token letter grade. A judge served by
   an auxiliary provider records the model that provider must serve in `judge_model`, and
   the runner checks it before generating.
 - Call the judge through `Judge.ask` or `call_judge`. They retry transient API failures,
@@ -163,7 +165,8 @@ results and hashed to identify it.
   verdict and then raises `JudgeParseError`, which leaves the output unscored; a judge
   served from the inference pool at temperature 0 raises on the first such reply.
   Scoring an unparseable reply as wrong needs a parity reason, an explicit
-  `except JudgeParseError`, and a logged count.
+  `except JudgeParseError`, and a logged count. A score that does not depend on the
+  verdict, such as 0.0 for an empty response, can stand without one.
 - Record `judge_result`, with the raw reply and any flags the score depends on, and the
   scores on each judged output, so every sample keeps its own. Of the output metadata,
   saved predictions keep `judge_result` and scores, not arbitrary keys.
