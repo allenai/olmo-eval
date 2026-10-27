@@ -6,6 +6,16 @@ variants do not need an entry. See
 [Changing or retiring an existing spec](../CONTRIBUTING.md#changing-or-retiring-an-existing-spec)
 for when a change is allowed in place.
 
+Add an entry in the PR that makes the change, newest first. Each entry states:
+
+- **Affected**: task specs, suites, or shared code paths, including suite membership or
+  aggregation changes.
+- **Change**: what is measured differently.
+- **Identity**: whether the task hash changes. When it does not, results from before and
+  after share a hash and can only be told apart by commit or date.
+- **Comparability**: which earlier results remain comparable and what replaces the old
+  behavior, if anything.
+
 ## 2026-10-25: Store exact per-instance IFEval metrics (#509)
 
 - **Affected**: saved per-instance metrics for tasks using the four IFEval metrics,
@@ -21,16 +31,6 @@ for when a change is allowed in place.
   task configuration to recover them. Scorer-only predictions no longer synthesize
   missing strict or instruction metric keys. The valid prompt-level loose fallback
   and existing explicit values are preserved, not silently repaired.
-
-Add an entry in the PR that makes the change, newest first. Each entry states:
-
-- **Affected**: task specs, suites, or shared code paths, including suite membership or
-  aggregation changes.
-- **Change**: what is measured differently.
-- **Identity**: whether the task hash changes. When it does not, results from before and
-  after share a hash and can only be told apart by commit or date.
-- **Comparability**: which earlier results remain comparable and what replaces the old
-  behavior, if anything.
 
 ## 2026-10-22: Scoring failures are left out and budgeted, not scored as zero (#492)
 
