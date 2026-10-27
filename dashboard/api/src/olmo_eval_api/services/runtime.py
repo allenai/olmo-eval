@@ -17,6 +17,10 @@ inference time and the basis it rests on, in this order of precedence:
   prompt plus completion tokens.
 - ``not_recorded``: none of the above; ``inference_seconds`` is null.
 
+The scoring seconds (judge calls, sandbox operations and scoring compute) are passed through as
+recorded. They are totals of work done while scoring, not wall time, so they are not divided by
+the worker count and can exceed the task's wall time.
+
 ``startup_seconds`` is the run's ``startup_seconds``. Runs uploaded before it was recorded fall
 back to the largest ``provider_init_seconds`` value (the slowest worker's start, which is when
 every worker was ready).
@@ -39,7 +43,8 @@ from olmo_eval_api.schemas import api as a
 # Task result columns derive_runtime reads (with tr.num_instances from TR_COLUMNS).
 RUNTIME_TR_COLUMNS = """
     tr.first_request_at, tr.last_completed_at, tr.prompt_tokens_total,
-    tr.completion_tokens_total, tr.attributed_inference_seconds
+    tr.completion_tokens_total, tr.attributed_inference_seconds, tr.scoring_judge_seconds,
+    tr.scoring_sandbox_seconds, tr.scoring_compute_seconds
 """
 
 # GPU type and count of a run (``runs r``): what olmo-eval detected, else the Beaker allocation.
@@ -166,6 +171,9 @@ def derive_runtime(tr: Mapping[Any, Any], run: RunTiming) -> a.TaskRuntime:
         seconds_per_1k_instances=inference / n * 1000 if inference is not None and n else None,
         span_start_s=_offset(tr["first_request_at"], run.processing_started_at),
         span_end_s=_offset(tr["last_completed_at"], run.processing_started_at),
+        scoring_judge_seconds=_finite(tr["scoring_judge_seconds"]),
+        scoring_sandbox_seconds=_finite(tr["scoring_sandbox_seconds"]),
+        scoring_compute_seconds=_finite(tr["scoring_compute_seconds"]),
     )
 
 

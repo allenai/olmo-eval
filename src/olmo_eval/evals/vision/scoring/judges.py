@@ -28,6 +28,7 @@ from olmo_eval.common.openai_credentials import (
 )
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.execution import ContextScorer
+from olmo_eval.common.scoring_time import measure_scoring
 from olmo_eval.common.types import Instance, LMOutput
 from olmo_eval.evals.vision.scoring.charxiv import (
     build_dummy_output,
@@ -143,11 +144,12 @@ async def _cached_gpt_call(
         raise ValueError(f"Cache miss (cache_only=True) for key {key[:16]}…")
 
     client, request_model = _get_client(model, "DenseCaptionJudgeScorer on a cache miss")
-    response = await client.chat.completions.create(
-        model=request_model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-    )
+    with measure_scoring("judge"):
+        response = await client.chat.completions.create(
+            model=request_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+        )
     completion = response.model_dump()
 
     # Atomic write: tmp → rename, identical to legacy Gpt4WithCache.
@@ -461,22 +463,18 @@ async def _charxiv_chat_json(
     response: str | None = None
     while curr_retries < max_retries:
         try:
-            response = (
-                (
-                    await client.chat.completions.create(
-                        messages=[{"role": "user", "content": prompt}],
-                        model=request_model,
-                        response_format={"type": "json_object"},
-                        n=1,
-                        max_tokens=max_tokens,
-                        temperature=0,
-                        top_p=1,
-                        seed=42,
-                    )
+            with measure_scoring("judge"):
+                completion = await client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    model=request_model,
+                    response_format={"type": "json_object"},
+                    n=1,
+                    max_tokens=max_tokens,
+                    temperature=0,
+                    top_p=1,
+                    seed=42,
                 )
-                .choices[0]
-                .message.content
-            )
+            response = completion.choices[0].message.content
             content = json.loads(response)
             validate(content)
             break

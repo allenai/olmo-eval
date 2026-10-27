@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.common.beaker_status import BeakerStatusReporter
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.progress import ProgressLogger
-from olmo_eval.common.scorers.execution import format_scoring_error as _format_scoring_error
+from olmo_eval.common.scorers.execution import format_scoring_error
+from olmo_eval.common.scoring_failures import RESPONSE_ERROR_KEY, format_scoring_failures
+from olmo_eval.common.scoring_time import install_child_task_timing, measure_instance_scoring
 from olmo_eval.common.types import Response
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.runners.asynq.monitoring import check_workers_alive
@@ -21,7 +23,7 @@ from olmo_eval.runners.asynq.types import (
     ResultItem,
     TaskTracker,
 )
-from olmo_eval.runners.common.constants import HardFailureRateExceeded
+from olmo_eval.runners.common.constants import FailureBudgetExceeded
 from olmo_eval.runners.common.types import (
     DEFAULT_MAX_HARD_FAILURE_RATE,
     TASK_COST_KEYS,
@@ -61,14 +63,26 @@ def utc_iso(timestamp: float | None) -> str | None:
 
 
 def apply_task_cost(result: TaskResult, tracker: TaskTracker, completed_at: float) -> None:
-    """Copy the tracker's request timing and token totals onto a finished TaskResult."""
+    """Copy the tracker's request timing, token totals and scoring times onto a TaskResult."""
     result.last_completed_at = utc_iso(completed_at)
+    result.scoring_judge_seconds = tracker.scoring_times.judge
+    result.scoring_sandbox_seconds = tracker.scoring_times.sandbox
+    result.scoring_compute_seconds = tracker.scoring_times.compute
     if tracker.results_recorded == 0:
         return
     result.first_request_at = utc_iso(tracker.first_request_at)
     result.prompt_tokens_total = tracker.prompt_tokens_total
     result.completion_tokens_total = tracker.completion_tokens_total
     result.attributed_inference_seconds = tracker.attributed_inference_seconds
+
+
+async def _score_response(
+    task: Task, response: Response, context: ScoringContext | None
+) -> Response:
+    """Score one response with its task's scorers."""
+    task.strip_thinking_traces([response])
+    scored = await task.score_responses([response], context=context)
+    return scored[0] if scored else response
 
 
 def _build_pending_instance_keys(trackers: dict[str, TaskTracker]) -> set[InstanceKey]:
@@ -107,33 +121,27 @@ def _format_worker_failure(error: object, pending_instances: set[InstanceKey]) -
     return f"Worker process crashed with {_format_pending_instances(pending_instances)}: {error}"
 
 
-def _record_scoring_failure(
-    response: Response,
-    *,
-    scorer_names: list[str],
-    error: dict[str, str],
-) -> Response:
-    """Annotate a response when scoring aborts before per-output results exist."""
-    for scorer_name in scorer_names:
-        response.scores.setdefault(scorer_name, 0.0)
+def _record_scoring_failure(response: Response, *, error: dict[str, str]) -> Response:
+    """Leave a response unscored after its ``score_responses`` raised.
 
+    The raise interrupted scoring, so no score the response may have received is
+    trusted: its scores are dropped, and every output gets the error under
+    ``__response__``. A response with no outputs keeps the error on the response itself.
+    """
+    response.scores.clear()
+    if not response.outputs:
+        response.scoring_error = error
+        return response
     for output in response.outputs:
         if output.metadata is None:
             output.metadata = {}
+        for key in [key for key in output.metadata if key.startswith("score:")]:
+            del output.metadata[key]
         existing = output.metadata.get("scoring_errors")
         if not isinstance(existing, dict):
             existing = {}
             output.metadata["scoring_errors"] = existing
-        response_error = dict(error)
-        if any(
-            isinstance(detail, dict) and detail.get("infrastructure") == "true"
-            for detail in existing.values()
-        ) or (scorer_names and all(f"score:{name}" in output.metadata for name in scorer_names)):
-            response_error.pop("infrastructure", None)
-        existing["__response__"] = response_error
-        for scorer_name in scorer_names:
-            output.metadata.setdefault(f"score:{scorer_name}", 0.0)
-
+        existing[RESPONSE_ERROR_KEY] = dict(error)
     return response
 
 
@@ -168,8 +176,8 @@ async def process_results(
         model_name: Model name for reporting.
         save_predictions: Whether to save predictions.
         write_predictions_fn: Function to write predictions.
-        max_hard_failure_rate: Fraction of a task's instances allowed to hard-fail
-            before the task is marked failed.
+        max_hard_failure_rate: Fraction of a task's instances allowed to have no
+            output or no scored output before the task is marked failed.
 
     Returns:
         Dict mapping task spec to TaskResult.
@@ -211,15 +219,16 @@ async def process_results(
             ]
             assert tracker.task is not None
             completed_at = time.time()
-            task_result = compute_task_metrics(
-                spec=spec,
-                task=tracker.task,
-                scored_responses=responses_list,
-                failed_instances=tracker.failed_instances,
-                total_instances=tracker.total_instances,
-                duration_seconds=completed_at - tracker.start_time,
-                max_hard_failure_rate=max_hard_failure_rate,
-            )
+            with tracker.scoring_times.measure("compute"):
+                task_result = compute_task_metrics(
+                    spec=spec,
+                    task=tracker.task,
+                    scored_responses=responses_list,
+                    failed_instances=tracker.failed_instances,
+                    total_instances=tracker.total_instances,
+                    duration_seconds=completed_at - tracker.start_time,
+                    max_hard_failure_rate=max_hard_failure_rate,
+                )
             apply_task_cost(task_result, tracker, completed_at)
             results[spec] = task_result
             tasks_complete += 1
@@ -242,22 +251,19 @@ async def process_results(
         """Score a single response and store the result."""
         async with scoring_semaphore:
             try:
-                task.strip_thinking_traces([response])
-                scored_list = await task.score_responses([response], context=scoring_context)
-                scored = scored_list[0] if scored_list else response
+                scored = await measure_instance_scoring(
+                    _score_response(task, response, scoring_context),
+                    trackers[spec].scoring_times,
+                )
             except Exception as e:
-                error = _format_scoring_error(e, phase="response")
+                error = format_scoring_error(e, phase="response")
                 logger.warning(
                     "Failed to score %s[%s]: %s",
                     spec,
                     instance_idx,
                     error.get("message", error["type"]),
                 )
-                scored = _record_scoring_failure(
-                    response,
-                    scorer_names=list(task._get_scorers()),
-                    error=error,
-                )
+                scored = _record_scoring_failure(response, error=error)
 
         scored_responses[spec][instance_idx] = scored
         instances_scored[spec] += 1
@@ -276,7 +282,7 @@ async def process_results(
     # Pre-add error tasks to results (these don't need scoring)
     for spec, tracker in trackers.items():
         if tracker.error:
-            task_result = await finalize_task(tracker)
+            task_result = await finalize_task(tracker, max_hard_failure_rate)
             results[spec] = task_result
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
@@ -294,6 +300,7 @@ async def process_results(
     health_check_interval = 5.0
     workers_exited = False
 
+    uninstall_child_task_timing = install_child_task_timing()
     try:
         # Collect instance results and score each inline
         while pending_instances:
@@ -399,6 +406,7 @@ async def process_results(
                 if spec not in results:
                     check_task_completion(spec)
     finally:
+        uninstall_child_task_timing()
         scoring_progress.close()
         report_progress(total_instances - len(pending_instances), total_instances, force=True)
         reporter.flush()
@@ -417,6 +425,9 @@ def _format_instance_accounting(result: TaskResult) -> str:
     accounting = f"{result.num_instances}/{result.instances_processed} instances saved"
     if result.instances_failed:
         accounting += f", {result.instances_failed} hard-failed"
+    scoring = format_scoring_failures(result.scoring_failures)
+    if scoring:
+        accounting += f", {scoring}"
     return accounting
 
 
@@ -506,6 +517,8 @@ def aggregate_results(
         task_data["instances_saved"] = task_result.num_instances
         task_data["instances_processed"] = task_result.instances_processed
         task_data["instances_failed"] = task_result.instances_failed
+        if task_result.scoring_failures is not None:
+            task_data["scoring_failures"] = task_result.scoring_failures
         if task_result.error_summary:
             task_data["error_summary"] = task_result.error_summary
         if task_result.generation_counts is not None:
@@ -528,8 +541,8 @@ def aggregate_results(
     return results_dict
 
 
-def check_hard_failure_gate(results: dict[str, TaskResult]) -> None:
-    """Fail the run when any task exceeded its hard-failure-rate budget.
+def check_failure_budget(results: dict[str, TaskResult]) -> None:
+    """Fail the run when any task exceeded its failure budget or scored nothing.
 
     Call this only after results have been written, so the failing run still leaves
     metrics.json and predictions behind for diagnosis.
@@ -538,15 +551,13 @@ def check_hard_failure_gate(results: dict[str, TaskResult]) -> None:
         results: Dict mapping task spec to TaskResult.
 
     Raises:
-        HardFailureRateExceeded: If at least one task tripped the gate.
+        FailureBudgetExceeded: If at least one task tripped the gate.
     """
     tripped = sorted(
-        (result for result in results.values() if result.hard_failure_rate_exceeded),
+        (result for result in results.values() if result.failure_budget_exceeded),
         key=lambda result: result.spec,
     )
     if not tripped:
         return
     details = "; ".join(f"{result.spec}: {result.error}" for result in tripped)
-    raise HardFailureRateExceeded(
-        f"{len(tripped)} task(s) exceeded the hard failure rate threshold: {details}"
-    )
+    raise FailureBudgetExceeded(f"{len(tripped)} task(s) exceeded their failure budget: {details}")
