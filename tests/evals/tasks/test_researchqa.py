@@ -1,10 +1,12 @@
 """Tests for the ResearchQA agentic scholarly-QA task."""
 
+import asyncio
 import logging
 from collections.abc import Sequence
 
 import pytest
 
+from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers import llm_judge
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.common.types.base import compute_task_hash
@@ -354,6 +356,33 @@ class TestParsingAndScoring:
         assert response.outputs[0].metadata["researchqa_rubric_labels"] == [None]
         assert "1 unparseable batch(es) covering 1 rubric item(s)" in caplog.text
         assert "kept every instance in the denominator" in caplog.text
+        assert response.outputs[0].metadata["judge_result"] == {
+            "raw_judge_responses": ["garbage"] * 3
+        }
+
+    @pytest.mark.anyio
+    async def test_judge_calls_hold_the_run_limiter(self, task, monkeypatch):
+        responses = [
+            _response(_instance_with_rubric([_rubric_item(f"Item {i}?", ("Impact",))]))
+            for i in range(4)
+        ]
+        in_flight = 0
+        peak = 0
+
+        async def judge(_prompt):
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return "Completely"
+
+        use_judge(monkeypatch, judge)
+        context = ScoringContext(scoring_concurrency=1)
+
+        await asyncio.gather(*(task.score_responses([r], context) for r in responses))
+
+        assert peak == 1
 
 
 @pytest.mark.parametrize(

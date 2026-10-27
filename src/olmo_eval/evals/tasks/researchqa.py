@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property, partial
 from typing import Any, cast
 
@@ -341,13 +341,16 @@ class ResearchQA(Task):
     ) -> Sequence[Response]:
         """Judge rubric coverage, retaining zero-scored parse failures."""
         self._extract_answers(responses)
+        judge = self._judge
+        if context is not None:
+            judge = replace(judge, limiter=context.judge_limiter)
 
         failed_batches = 0
         failed_items = 0
         affected_instances = 0
         for response in responses:
             scores, labels, item_scores, response_failed_batches = await self._score_single(
-                response
+                response, judge
             )
             response.scores.update(scores)
             failed_batches += response_failed_batches
@@ -377,8 +380,12 @@ class ResearchQA(Task):
     async def _score_single(
         self,
         response: Response,
+        judge: Judge,
     ) -> tuple[dict[str, float], list[str | None], list[float], int]:
-        """Score one answer and return metrics plus per-rubric judge details."""
+        """Score one answer and return metrics plus per-rubric judge details.
+
+        Every judge reply is kept in the output's ``judge_result``.
+        """
         rubric = response.instance.metadata.get("rubric", [])
         if not isinstance(rubric, list) or not rubric:
             return self._scores_from_items([], []), [], [], 0
@@ -395,13 +402,16 @@ class ResearchQA(Task):
         all_labels: list[str | None] = []
         all_scores: list[float] = []
         failed_batches = 0
+        replies: list[str] = []
+        judge = judge.recording_into(replies)
+        output.metadata["judge_result"] = {"raw_judge_responses": replies}
         for start in range(0, len(rubric), RESEARCHQA_RUBRIC_BATCH_SIZE):
             batch = rubric[start : start + RESEARCHQA_RUBRIC_BATCH_SIZE]
             rubric_items = [item["rubric_item"] for item in batch]
             prompt = build_coverage_judge_prompt(answer, rubric_items)
 
             try:
-                labels, _ = await self._judge.ask(
+                labels, _ = await judge.ask(
                     prompt, partial(parse_coverage_labels, expected_count=len(batch))
                 )
             except JudgeParseError:
