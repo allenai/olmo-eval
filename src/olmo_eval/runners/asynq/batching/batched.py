@@ -42,7 +42,7 @@ class BatchedStrategy(BatchingStrategy):
         from olmo_eval.runners.asynq.processing import process_items
 
         worker_instances = math.ceil(total_instances / num_workers)
-        total_batches = math.ceil(worker_instances / self.config.chunk_size)
+        total_batches = math.ceil(worker_instances / self.config.resolved_chunk_size)
         current_batch = 0
 
         while True:
@@ -58,17 +58,28 @@ class BatchedStrategy(BatchingStrategy):
                 batch_hash = _compute_batch_hash(batch)
                 batch_size = len(batch)
 
+                label = (
+                    str(current_batch)
+                    if self.max_batch_sequences
+                    else f"{current_batch}/{total_batches}"
+                )
                 worker_logger.info(
-                    f"Starting batch {current_batch}/{total_batches} ({batch_hash}) "
-                    f"with {batch_size} item(s)"
+                    f"Starting batch {label} ({batch_hash}) with {batch_size} item(s)"
                 )
                 start_time = time.perf_counter()
-                await process_items(batch, harness, result_queue, max_concurrency, worker_logger)
+                await process_items(
+                    batch,
+                    harness,
+                    result_queue,
+                    max_concurrency,
+                    worker_logger,
+                    clock=self.clock,
+                )
 
                 elapsed = time.perf_counter() - start_time
                 rate = batch_size / elapsed if elapsed > 0 else 0
                 worker_logger.info(
-                    f"Processed batch {current_batch}/{total_batches} ({batch_hash}) "
+                    f"Processed batch {label} ({batch_hash}) "
                     f"in {elapsed:.1f}s ({rate:.1f} items/sec)"
                 )
 

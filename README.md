@@ -9,7 +9,7 @@ This project provides a unified workbench for evaluating language models through
 Features:
 
 - Registry of benchmark tasks and composable suites, with named variants for few-shot settings, formatting, and scoring (e.g. humaneval:3shot:bpb).
-- Support for inference via vLLM, LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
+- Support for inference via vLLM, [SGLang](docs/sglang.md), LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
 - Harness abstraction that separates execution policy from task definition, so any task can be run baseline or tool-augmented without modification.
 - Multi-turn agentic evaluation with tool calling, scaffolds, and sandboxed environments via Docker, Podman, or Modal.
 - LLM-as-judge scoring with auxiliary providers, including locally served judge models.
@@ -309,7 +309,7 @@ config = HarnessConfig(
 | `scaffold_kwargs` | `dict[str, Any]` | `{}` | Scaffold-specific options (e.g., `enable_compaction`) |
 | `metrics` | `MetricsConfig \| None` | `None` | Inference metrics collection config |
 | `batching` | `BatchConfig \| None` | `None` | Batching strategy configuration |
-| `max_hard_failure_rate` | `float \| None` | `None` | Fraction of a task's instances allowed to hard-fail before the task is marked failed and the run exits non-zero (default `0.05`). `1.0` never fails a run on partial instance failures; a task that saves zero instances still fails |
+| `max_hard_failure_rate` | `float \| None` | `None` | The failure budget: fraction of a task's instances allowed to produce no output or have no scored output before the task is marked failed, its metrics are withheld and the run exits non-zero (default `0.05`). `1.0` never fails a run on partial failures; a task with nothing scored still fails |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
 
 #### Scaffolds
@@ -1884,7 +1884,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/build_image.sh --help
 ```
 
-**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1
+**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1, 13.0.2
 **PyTorch version**: Configurable via `--torch-version`
 **Configuration**: See `scripts/build_config.sh`
 
@@ -1905,13 +1905,19 @@ The script auto-detects the image name from the tag (e.g., `olmo-eval-cu1281-trc
 The image contains:
 - Python 3.12 (via uv)
 - PyTorch with CUDA support
+- Base Python dependencies from `uv.lock`
 - System dependencies (git, uv, ca-certificates)
 
 The image does NOT contain:
 - olmo-eval source code (provided by gantry at runtime)
-- olmo-eval dependencies like click, datasets, rich, etc. (installed at job startup)
 - Storage backends like boto3, psycopg (installed at job startup if needed)
 - Inference providers like vllm, transformers, litellm (installed at job startup)
+
+For the SGLang provider, `provider.kind=sglang` selects a compatible shared
+CUDA 13 / PyTorch 2.13 base and installs the pinned `sglang` extra (including the
+Olmo model plugin) at startup. Explicit image overrides take precedence. See the
+[SGLang setup guide](docs/sglang.md) for local installation, checkpoint registration
+and a small validation command.
 
 ### Installing Inference Providers at Runtime
 

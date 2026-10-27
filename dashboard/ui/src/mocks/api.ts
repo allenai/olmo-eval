@@ -80,6 +80,7 @@ function taskRuntime(t: MockTaskResult): T.TaskRuntime {
   const run = getRun(t.runId);
   const rt = t.runtime;
   const recorded = rt.basis !== "not_recorded";
+  const recordsScoring = rt.basis === "attributed" || rt.basis === "measured";
   return {
     inference_seconds: rt.inferenceS,
     basis: rt.basis,
@@ -91,6 +92,11 @@ function taskRuntime(t: MockTaskResult): T.TaskRuntime {
     seconds_per_1k_instances: rt.inferenceS != null && t.n ? (rt.inferenceS / t.n) * 1000 : null,
     span_start_s: rt.spanStart,
     span_end_s: rt.spanEnd,
+    // Only newer clients record scoring times. The work scales with the instance count: judge
+    // calls for judge and omni tasks, sandbox time for code tasks.
+    scoring_judge_seconds: recordsScoring ? (t.task.type === "judge" || t.task.type === "omni" ? Math.round(t.n * 2 * 10) / 10 : 0) : null,
+    scoring_sandbox_seconds: recordsScoring ? (t.task.type === "code" ? Math.round(t.n * 0.8 * 10) / 10 : 0) : null,
+    scoring_compute_seconds: recordsScoring ? Math.round(t.n * 0.01 * 10) / 10 : null,
   };
 }
 

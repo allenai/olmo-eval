@@ -116,6 +116,27 @@ def test_marked_chat_request_fails_its_instance() -> None:
     assert result.error == "prompt too long" and result.outputs == []
 
 
+def test_request_trace_failure_does_not_kill_other_requests():
+    harness = _harness(ValueError("unused"))
+    harness.provider.describe_request.side_effect = [ValueError("bad request"), {}]
+    harness.provider.agenerate.side_effect = None
+    harness.provider.agenerate.return_value = [[LMOutput(text="ok")]]
+    result_queue = queue.Queue()
+    asyncio.run(process_batch([_queue_item(0), _queue_item(1)], harness, result_queue))
+    results = {r.instance_idx: r for r in (result_queue.get_nowait() for _ in range(2))}
+    assert "bad request" in results[0].error
+    assert results[0].outputs == []
+    assert results[1].error is None and results[1].outputs[0].text == "ok"
+    assert len(harness.provider.agenerate.call_args.args[0]) == 1
+
+
+def test_terminal_request_trace_failure_still_propagates():
+    harness = _harness(ValueError("unused"))
+    harness.provider.describe_request.side_effect = _engine_dead_error()
+    with pytest.raises(TerminalProviderError):
+        asyncio.run(process_batch([_queue_item(0)], harness, queue.Queue()))
+
+
 def test_streaming_strategy_propagates_fast_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
