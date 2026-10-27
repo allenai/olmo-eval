@@ -19,7 +19,7 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 ## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
 
 - **Affected**:
-  - `simpleqa:judge`.
+  - `simpleqa:judge` and `omniscience:judge`.
   - The `openai_judge`, `wg_judge` (`sr_judge` for strongreject), `*_thinking` and `base`
     variants of `do_anything_now`, `harmbench`, `strongreject`,
     `trustllm_jailbreaktrigger`, `wildguardtest`, `wildjailbreak` and `xstest`, and the
@@ -34,9 +34,11 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
     again first. An empty safety response still scores 0.0, since that score does not
     depend on the verdict. Before, SimpleQA scored it as incorrect; the safety judges
     scored it, an answer outside the allowed ones, or a StrongREJECT judge with no grade
-    logprobs, as 0.0; and ExpertQA and AstaBench SQA scored an unparseable answer
+    logprobs, as 0.0; ExpertQA and AstaBench SQA scored an unparseable answer
     precision reply as 1.0, an unparseable ingredient reply as 0.0, and a citation
-    section with no claims as empty.
+    section with no claims as empty; and Omniscience graded it `PARSING_ERROR`, left it
+    out of its metrics without counting it against the failure budget, and counted it in
+    `judge_parsing_errors`, which `omniscience:judge` drops.
   - The safety variants drop their `parsing_error` metric, which would now always read
     0; the run's scoring failures count these replies instead. Subset metrics leave out
     unscored responses, and an empty subset reports 0.0 instead of -1.
@@ -46,6 +48,8 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
     top level of the prediction and the flags in the request's `doc`. SimpleQA
     predictions now keep the judge's raw reply, and ExpertQA and AstaBench SQA
     predictions keep every judge reply under `judge_result.raw_judge_responses`.
+    Omniscience and ResearchQA predictions keep the judge result on each output,
+    Omniscience's with the grade and raw reply, which were on the instance before.
   - The safety `openai_judge` variants and `simpleqa:judge` record their judge
     (`gpt-4o-mini`, with its token budget) as `judge_model` and `judge_max_tokens`, and
     `-o judge_*` changes the judge that grades them.
@@ -63,17 +67,20 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
     the config recorded the override.
   - Judge API calls are retried on transient failures for judge scorers and the
     attributed-QA tasks, which made one attempt before, and the attributed-QA tasks'
-    judge calls share the run's judge concurrency limit.
+    judge calls share the run's judge concurrency limit. A failed Omniscience judge call
+    is no longer graded `PARSING_ERROR`.
   - FrontierScience instances also record a `truncation_rate` score, as other judged
     tasks do; its metrics are unchanged.
-- **Identity**: the task hash changes for the 28 safety specs listed above and for
-  `simpleqa:judge`. It does not change for any other spec run with its default judge,
+- **Identity**: the task hash changes for the 28 safety specs listed above,
+  `simpleqa:judge` and `omniscience:judge`. It does not change for any other spec run with its default judge,
   including the attributed-QA tasks and `wmdp:mcq`. Runs with another judge on `expertqa`, `astabench_scholarqa` and
   `researchqa` now get their own hash; before, they shared the default judge's hash.
 - **Comparability**: a `simpleqa:judge` result is affected only if its judge gave a reply
   with no grade; leaving those out raises its accuracy. An ExpertQA or AstaBench SQA
   result is affected only if a judge reply did not parse: such an output was scored with
-  answer precision 1.0 and is now unscored. Safety results before this change
+  answer precision 1.0 and is now unscored. `omniscience:judge`'s metrics are unchanged,
+  since they already left unparseable grades out, but a run whose judge often fails to
+  grade can now exceed the failure budget. Safety results before this change
   counted unparseable judge replies as unsafe, so a run with such replies scores higher
   now; earlier `parsing_error` values say how many there were. An earlier subset value of
   -1 meant the subset had no instances. An earlier `omniscience:judge` run with

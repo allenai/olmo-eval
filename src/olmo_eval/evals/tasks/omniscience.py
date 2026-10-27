@@ -26,9 +26,15 @@ from typing import Any, ClassVar, Literal
 
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.formatters import ChatFormatter
-from olmo_eval.common.metrics import Metric, SafetyErrorMetric
+from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers import Scorer
-from olmo_eval.common.scorers.llm_judge import JudgeFn, JudgeSettings, LLMJudgeScorer
+from olmo_eval.common.scorers.llm_judge import (
+    Judge,
+    JudgeFn,
+    JudgeParseError,
+    JudgeSettings,
+    LLMJudgeScorer,
+)
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -200,26 +206,30 @@ GRADE_DECORATION = re.compile(r"[\"'`*()\[\]“”‘’]")
 
 
 def _record_grade(
-    instance: Instance,
+    output: LMOutput,
     grade: OmniscienceGrade,
     *,
     raw_response: str | None,
     empty_response: bool = False,
 ) -> None:
-    """Store a judge grade, the judge's raw response and the parsing-error flag on an instance.
+    """Store a judge grade and the judge's raw response on the graded output.
 
     ``empty_response`` marks outputs graded NOT_ATTEMPTED without a judge call
     because the model never gave a final answer, so they can be told apart from
     abstentions.
     """
-    instance.metadata["judge_raw_response"] = raw_response
-    instance.metadata["judge_result"] = {"grade": grade, "empty_response": empty_response}
-    instance.metadata["is_parsing_error"] = grade == "PARSING_ERROR"
+    output.metadata["judge_result"] = {
+        "grade": grade,
+        "empty_response": empty_response,
+        "raw_judge_response": raw_response,
+    }
 
 
 def _judge_grade(response: Response) -> str | None:
     """Return the recorded judge grade of a response, or None if it was never graded."""
-    judge_result = response.instance.metadata.get("judge_result")
+    if not response.outputs:
+        return None
+    judge_result = response.outputs[0].metadata.get("judge_result")
     if not isinstance(judge_result, dict):
         return None
     return judge_result.get("grade")
@@ -260,24 +270,25 @@ class OmniscienceScorer(LLMJudgeScorer):
             model_answer=answer,
         )
 
-    def parse_judge_response(self, response: str, instance: Instance | None = None) -> float:
-        """Parse an A/B/C/D grade from the judge response, recording it on the instance if given.
-
-        A response that does not identify exactly one grade is graded PARSING_ERROR
-        and excluded from the Omniscience metrics.
+    def parse_judge_response(self, response: str, output: LMOutput | None = None) -> float:
+        """Parse an A/B/C/D grade from the judge response, recording it on the output if given.
 
         Args:
             response: The judge's response.
-            instance: The graded instance; when given, the raw response and grade
-                are stored in its metadata.
+            output: The graded output; when given, the grade and raw response are
+                stored in its ``judge_result``.
 
         Returns:
             1.0 for CORRECT, otherwise 0.0.
+
+        Raises:
+            JudgeParseError: The response does not identify exactly one grade.
         """
         grade = self.get_grade(response)
-        if instance is not None:
-            _record_grade(instance, grade, raw_response=response)
-
+        if output is not None:
+            _record_grade(output, grade, raw_response=response)
+        if grade == "PARSING_ERROR":
+            raise JudgeParseError("the Omniscience judge reply names no single grade", raw=response)
         return 1.0 if grade == "CORRECT" else 0.0
 
     def get_grade(self, response: str) -> OmniscienceGrade:
@@ -305,26 +316,29 @@ class OmniscienceScorer(LLMJudgeScorer):
         output: LMOutput,
         context: ScoringContext,
     ) -> float:
-        """Score using configured provider or judge_fn."""
+        """Grade the output's final answer; an empty answer is NOT_ATTEMPTED without a call.
+
+        An API judge reply with no single grade is asked for again; when no attempt
+        parses, :class:`JudgeParseError` leaves the output unscored.
+        """
         answer = self.final_answer(output)
         if answer is None:
-            _record_grade(instance, "NOT_ATTEMPTED", raw_response=None, empty_response=True)
+            _record_grade(output, "NOT_ATTEMPTED", raw_response=None, empty_response=True)
             return 0.0
 
-        try:
-            self._validate_provider(context)
-            prompt = self._judge_prompt(instance, answer)
+        self._validate_provider(context)
+        prompt = self._judge_prompt(instance, answer)
+        if self.provider_name is not None:
+            response = await self._score_with_provider(prompt, context)
+            return self.parse_judge_response(response, output=output)
 
-            if self.provider_name is not None:
-                response = await self._score_with_provider(prompt, context)
-            else:
-                response = await self._score_with_judge_fn(prompt, context)
-
-            return self.parse_judge_response(response, instance=instance)
-
-        except Exception:
-            _record_grade(instance, "PARSING_ERROR", raw_response=None)
-            raise
+        judge = Judge(call=self.judge_fn, label=f"{self.name} judge")
+        score, _ = await judge.ask(
+            prompt,
+            lambda reply: self._parsed_or_none(reply, output=output),
+            limiter=context.judge_limiter,
+        )
+        return score
 
 
 @dataclass(frozen=True, slots=True)
@@ -543,7 +557,6 @@ register_variant(
             )
             for name in SUBSET_METRICS
         ),
-        SafetyErrorMetric(name="judge_parsing_errors", scorer=_JUDGE_SCORER),
     ),
     primary_metric=OmniscienceIndexMetric(scorer=_JUDGE_SCORER),
     required_secrets=("OPENAI_API_KEY",),
