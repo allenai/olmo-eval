@@ -7,8 +7,10 @@ import threading
 
 import pytest
 
+from olmo_eval.common.scoring_time import ScoringTimes, measure_instance_scoring
 from olmo_eval.harness.sandbox import Capability
 from olmo_eval.harness.sandbox.errors import SandboxTransportError
+from tests.conftest import ScoringClock
 from tests.core.harness.sandbox_stubs import TrackingExecutor, make_manager
 
 
@@ -437,3 +439,25 @@ async def test_real_session_transport_failure_recovers_on_binding_release(
     finally:
         await binding.release()
         await manager.stop()
+
+
+@pytest.mark.anyio
+async def test_scoring_records_sandbox_time_but_not_waits_for_a_slot(
+    scoring_clock: ScoringClock,
+) -> None:
+    class OneSecondExecutor(TrackingExecutor):
+        async def _run(self) -> None:
+            await super()._run()
+            scoring_clock.t += 1.0
+
+    manager = make_manager(OneSecondExecutor("only", max_concurrency=1))
+    environment = manager.for_capabilities(Capability.DEFAULT)
+    totals = ScoringTimes()
+
+    async def score() -> None:
+        await asyncio.gather(*(environment.execute_code("pass") for _ in range(3)))
+
+    await measure_instance_scoring(score(), totals)
+
+    # The second and third calls waited 1 and 2 seconds for the one slot.
+    assert totals.sandbox == pytest.approx(3.0)

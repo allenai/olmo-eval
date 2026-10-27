@@ -94,6 +94,9 @@ results and hashed to identify it.
 - A new optional field must leave existing hashes unchanged when unused, so serialize it
   only when set. Test both that changing the field changes the hash and that an unrelated
   existing task keeps its hash.
+- `tests/evals/tasks/test_task_hashes.py` pins every spec's stored hash. When it fails,
+  regenerate `task_hashes.json` with `--update-task-hashes` and follow the "Pinned
+  hashes" rule in AGENTS.md for when a moved or removed hash needs a compatibility entry.
 - Pin a new dataset's `revision=` when the task is introduced, and pin judge models to
   dated snapshots. Adding a pin later changes the task's identity after results exist.
 - Variant names describe the measurement or regime (`mc`, `rc`, `bpb`, `gen`, `cot`,
@@ -123,6 +126,11 @@ results and hashed to identify it.
 - Don't catch broad exceptions around provider, judge, or scoring calls and substitute a
   score. Exhausted retries and judge parse failures need explicit failure accounting and
   the raw response preserved. Catch narrowly when the recovery is defined.
+- A scorer returns 0 for a wrong or unparseable answer and raises when it cannot decide.
+  The runner records the error on the output, leaves it unscored, and counts instances
+  with no scored output against the task's failure budget (`max_hard_failure_rate`).
+  Raise `ScoringIncompleteError` for a judge or grader that gave no verdict, and let
+  sandbox failures raise `SandboxInfrastructureError`, so the counts say why.
 - Missing logprobs are never logprob zero. Don't use sentinel scores such as `-1` or NaN
   without an explicit error. A task with no scored responses must fail the run.
 - Diagnostics such as format correctness, judge results, and raw output must reach saved

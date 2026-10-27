@@ -30,20 +30,24 @@ class ScoringIncompleteError(RuntimeError):
     """
 
 
+class SandboxInfrastructureError(RuntimeError):
+    """A sandbox operation could not be completed because infrastructure failed."""
+
+
 def format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
-    """Describe a scoring failure and identify scores lost to infrastructure."""
+    """Describe a scoring failure for an output's ``scoring_errors``.
+
+    ``infrastructure`` is set to ``"true"`` when the failure came from the
+    environment rather than from the output: a judge or grader that gave no
+    verdict (``ScoringIncompleteError``), no sandbox (``SandboxRequiredError``),
+    or a sandbox that failed (``SandboxInfrastructureError``). The flag is a
+    diagnostic; every scoring failure counts against the task's failure budget.
+    """
     error = {"phase": phase, "type": type(exc).__qualname__}
     message = str(exc).strip()
     if message:
         error["message"] = message
-    infrastructure = isinstance(exc, (ScoringIncompleteError, SandboxRequiredError))
-    try:
-        from olmo_eval.harness.sandbox.errors import SandboxInfrastructureError
-
-        infrastructure |= isinstance(exc, SandboxInfrastructureError)
-    except ImportError:
-        pass
-    if infrastructure:
+    if isinstance(exc, (ScoringIncompleteError, SandboxRequiredError, SandboxInfrastructureError)):
         error["infrastructure"] = "true"
     return error
 

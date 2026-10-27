@@ -353,7 +353,6 @@ def launch(
     from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
     from olmo_eval.cli.beaker.task_validator import TaskValidator
     from olmo_eval.common.constants.infrastructure import (
-        BEAKER_DEFAULT_IMAGE,
         BEAKER_SANDBOX_IMAGE,
     )
 
@@ -569,6 +568,7 @@ def launch(
             )
         harness_needs_sandbox = bool(harness_preset.sandboxes)
 
+    effective_image: str | None
     if image:
         effective_image = image
     elif eval_config and eval_config.beaker_image:
@@ -576,7 +576,7 @@ def launch(
     elif harness_needs_sandbox:
         effective_image = BEAKER_SANDBOX_IMAGE
     else:
-        effective_image = BEAKER_DEFAULT_IMAGE
+        effective_image = None  # JobConfigAssembler selects per resolved provider.
 
     # Handle group creation
     _handle_group_creation(launcher, effective_groups, dry_run, yes)
