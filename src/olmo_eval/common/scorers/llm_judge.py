@@ -14,7 +14,7 @@ import os
 import re
 from abc import abstractmethod
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from olmo_eval.common.execution import ScoringContext
@@ -76,15 +76,6 @@ async def call_judge(
         )
     except Exception as exc:
         raise ScoringIncompleteError(f"{label} call failed: {type(exc).__name__}: {exc}") from exc
-
-
-def with_call_retries(judge_fn: JudgeFn, label: str) -> JudgeFn:
-    """Wrap a judge so each call goes through :func:`call_judge`."""
-
-    async def judge(prompt: JudgeContent, *, system_prompt: str | None = None) -> str:
-        return await call_judge(judge_fn, prompt, label=label, system_prompt=system_prompt)
-
-    return judge
 
 
 @runtime_checkable
@@ -370,13 +361,6 @@ class JudgeSettings:
             reasoning_effort=self.reasoning_effort,
         )
 
-    def build_retrying_fn(self, scorer_name: str) -> JudgeFn:
-        """Build the judge function, wrapped so each call retries transient API failures.
-
-        For code that calls the judge function directly; :class:`Judge` retries on its own.
-        """
-        return with_call_retries(self.build_fn(scorer_name), f"{scorer_name} judge")
-
 
 @dataclass(frozen=True)
 class Judge:
@@ -391,6 +375,20 @@ class Judge:
     attempts: int = JUDGE_ATTEMPTS
     max_retries: int = 3
     retry_delay: float = 1.0
+    #: Limiter :meth:`ask` holds when the caller passes none.
+    limiter: asyncio.Semaphore | None = None
+
+    def recording_into(self, replies: list[str]) -> "Judge":
+        """Return this judge with every reply it gets appended to ``replies``."""
+        call = self.call
+
+        async def recorded(prompt: JudgeContent, *, system_prompt: str | None = None) -> str:
+            kwargs = {} if system_prompt is None else {"system_prompt": system_prompt}
+            reply = await call(prompt, **kwargs)
+            replies.append(reply)
+            return reply
+
+        return replace(self, call=recorded)
 
     async def ask[V](
         self,
@@ -416,7 +414,7 @@ class Judge:
                 self.call,
                 prompt,
                 label=self.label,
-                limiter=limiter,
+                limiter=limiter if limiter is not None else self.limiter,
                 system_prompt=system_prompt,
                 max_retries=self.max_retries,
                 retry_delay=self.retry_delay,

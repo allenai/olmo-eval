@@ -5,6 +5,8 @@ import logging
 
 import pytest
 
+from olmo_eval.common.scorers import llm_judge
+from olmo_eval.common.scorers.llm_judge import JUDGE_ATTEMPTS, JudgeParseError
 from olmo_eval.common.types import (
     AgentTrajectory,
     AgentTurn,
@@ -231,6 +233,57 @@ class TestScoreResponses:
         assert scores["answer_precision"] == pytest.approx(1.0)
         assert scores["snippet_grounding_rate"] == pytest.approx(1.0)
         assert scores["global_avg"] == pytest.approx((0.5 + 0.5 + 1.0) / 3)
+
+    @pytest.mark.anyio
+    async def test_each_output_keeps_its_judge_replies(self, task, monkeypatch):
+        use_judge(monkeypatch, _citation_split_judge)
+        snippet = "Evidence from a fetched source supports the first claim."
+        parsed = {
+            "sections": [
+                {
+                    "text": "Claim A [1]. Claim B [1].",
+                    "citations": [{"id": "[1]", "snippets": [snippet], "title": "Paper"}],
+                }
+            ]
+        }
+        response = self._response(parsed, _trajectory_with_source(snippet))
+
+        await task.score_responses([response])
+
+        replies = response.outputs[0].metadata["judge_result"]["raw_judge_responses"]
+        assert len(replies) == 2
+        assert any("irrelevant_paragraphs" in reply for reply in replies)
+
+    @pytest.mark.anyio
+    async def test_a_precision_reply_that_never_parses_leaves_the_output_unscored(
+        self, task, monkeypatch
+    ):
+        async def no_sleep(_):
+            return None
+
+        async def judge(prompt, **kwargs):
+            if "irrelevant paragraphs" in prompt:
+                return "I could not decide."
+            return await _citation_split_judge(prompt)
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        use_judge(monkeypatch, judge)
+        snippet = "Evidence from a fetched source supports the first claim."
+        parsed = {
+            "sections": [
+                {
+                    "text": "Claim A [1].",
+                    "citations": [{"id": "[1]", "snippets": [snippet], "title": "Paper"}],
+                }
+            ]
+        }
+        response = self._response(parsed, _trajectory_with_source(snippet))
+
+        with pytest.raises(JudgeParseError):
+            await task.score_responses([response])
+
+        replies = response.outputs[0].metadata["judge_result"]["raw_judge_responses"]
+        assert replies == ["I could not decide."] * JUDGE_ATTEMPTS
 
     @pytest.mark.anyio
     async def test_grounded_snippet_reaches_judge(self, task, monkeypatch):

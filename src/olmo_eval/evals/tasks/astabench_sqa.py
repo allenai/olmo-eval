@@ -14,7 +14,7 @@ import logging
 import re
 from abc import ABC
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from typing import Any
 
@@ -24,7 +24,7 @@ from olmo_eval.common.scorers.citation import (
     extract_json_from_response,
     score_citations_for_sections,
 )
-from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, JudgeFn
+from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, Judge
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -419,9 +419,10 @@ class AstaBenchSQA(Task):
         return parsed
 
     @cached_property
-    def _judge_fn(self) -> JudgeFn:
-        """The judge the config names, or the attributed-QA default; it retries failed calls."""
-        return ATTRIBUTED_QA_JUDGE.with_config(self.config).build_retrying_fn("AstaBenchSQA")
+    def _judge(self) -> Judge:
+        """The judge the config names, or the attributed-QA default."""
+        settings = ATTRIBUTED_QA_JUDGE.with_config(self.config)
+        return Judge(call=settings.build_fn("AstaBenchSQA"), label="AstaBenchSQA judge")
 
     async def score_responses(
         self,
@@ -436,16 +437,21 @@ class AstaBenchSQA(Task):
         """
         self._extract_answers(responses)
 
-        judge_fn = self._judge_fn
+        judge = self._judge
+        if context is not None:
+            judge = replace(judge, limiter=context.judge_limiter)
 
         for response in responses:
-            scores = await self._score_single(response, judge_fn)
+            scores = await self._score_single(response, judge)
             response.scores.update(scores)
 
         return responses
 
-    async def _score_single(self, response: Response, judge_fn: JudgeFn) -> dict[str, float]:
-        """Score a single response across all 4 metrics + global_avg."""
+    async def _score_single(self, response: Response, judge: Judge) -> dict[str, float]:
+        """Score a single response across all 4 metrics + global_avg.
+
+        A judge reply that never parses leaves the response unscored.
+        """
         output = response.outputs[0] if response.outputs else None
         if output is None:
             return {k: 0.0 for k in SQA_METRIC_LABELS + ["global_avg"]}
@@ -458,16 +464,21 @@ class AstaBenchSQA(Task):
         question = response.instance.question
         answer_text = format_report(parsed)
 
-        # 1. Ingredient recall
-        ingredient_score = await self._score_ingredients(
-            judge_fn, question, answer_text, rubric_config
-        )
+        replies: list[str] = []
+        judge = judge.recording_into(replies)
+        try:
+            # 1. Ingredient recall
+            ingredient_score = await self._score_ingredients(
+                judge, question, answer_text, rubric_config
+            )
 
-        # 2. Answer precision
-        precision_score = await self._score_precision(judge_fn, question, answer_text)
+            # 2. Answer precision
+            precision_score = await self._score_precision(judge, question, answer_text)
 
-        # 3. Citation precision & recall
-        citation_scores = await self._score_citations(judge_fn, parsed)
+            # 3. Citation precision & recall
+            citation_scores = await self._score_citations(judge, parsed)
+        finally:
+            output.metadata["judge_result"] = {"raw_judge_responses": replies}
 
         scores = {
             "ingredient_recall": ingredient_score,
@@ -480,7 +491,7 @@ class AstaBenchSQA(Task):
 
     async def _score_ingredients(
         self,
-        judge_fn: JudgeFn,
+        judge: Judge,
         question: str,
         answer: str,
         rubric_config: dict[str, Any],
@@ -503,8 +514,9 @@ class AstaBenchSQA(Task):
         user_prompt = (
             f"<question>{question}</question>\n<response>{answer}</response>\nCriteria:\n{criteria}"
         )
-        raw = await judge_fn(user_prompt, system_prompt=INGREDIENT_SYSTEM_PROMPT)
-        parsed = extract_json_from_response(raw)
+        parsed, _ = await judge.ask(
+            user_prompt, extract_json_from_response, system_prompt=INGREDIENT_SYSTEM_PROMPT
+        )
         if not parsed:
             return 0.0
 
@@ -512,14 +524,13 @@ class AstaBenchSQA(Task):
 
     async def _score_precision(
         self,
-        judge_fn: JudgeFn,
+        judge: Judge,
         question: str,
         answer: str,
     ) -> float:
         """Score answer precision. From astabench precision_eval.py:PrecisionEval."""
         prompt = PRECISION_EVAL_PROMPT.format(query=question, answer=answer)
-        raw = await judge_fn(prompt)
-        parsed = extract_json_from_response(raw)
+        parsed, _ = await judge.ask(prompt, extract_json_from_response)
         if not parsed:
             return 1.0  # No irrelevant paragraphs identified = perfect precision
 
@@ -528,11 +539,11 @@ class AstaBenchSQA(Task):
 
     async def _score_citations(
         self,
-        judge_fn: JudgeFn,
+        judge: Judge,
         parsed_response: dict[str, Any],
     ) -> dict[str, float]:
         """Score citation precision and recall via the shared citation scorer."""
-        return await score_citations_for_sections(judge_fn, parsed_response)
+        return await score_citations_for_sections(judge, parsed_response)
 
 
 # =============================================================================
