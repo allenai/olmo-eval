@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.common.scoring_time import ScoringTimes
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 
 if TYPE_CHECKING:
@@ -16,6 +17,13 @@ WORKER_FATAL = "__WORKER_FATAL__"
 
 # Default concurrency for scoring worker
 DEFAULT_SCORING_CONCURRENCY = 8
+
+
+@dataclass(frozen=True)
+class WorkerReady:
+    worker_id: str
+    init_time: float
+    harness_config: dict[str, Any]
 
 
 def summarize_failed_instances(failed_instances: dict[int, str]) -> str | None:
@@ -68,12 +76,14 @@ class TaskTracker:
     prompt_tokens_total: int | None = 0  # None once any result's count is unknown
     completion_tokens_total: int | None = 0
     attributed_inference_seconds: float | None = 0.0
+    # Seconds summed by the scoring loop for each instance it scores
+    scoring_times: ScoringTimes = field(default_factory=ScoringTimes)
 
     def record_usage(self, result: ResultItem) -> None:
         """Fold one worker result into the task's request timing and token totals.
 
         Hard-failed results (no outputs) add no tokens. A result whose outputs do
-        not report a count, or that has no batch attribution, makes that total None.
+        not report a count, or that carries no attributed time, makes that total None.
         """
         from olmo_eval.common.types import RequestType
         from olmo_eval.runners.common.usage import request_token_usage
@@ -137,8 +147,9 @@ class ResultItem:
     request_trace: dict[str, Any] | None = None
     # When the worker sent the request to the provider (POSIX seconds)
     sent_at: float | None = None
-    # This request's share of its batch's inference wall time, from batch metrics.
-    # None when metrics are disabled or the batch could not be attributed.
+    # This request's share of its worker's busy time (see ShareClock): its batch's or
+    # rollout's share, split across a batch's requests by token share. None only for
+    # fatal error signals.
     attributed_seconds: float | None = None
 
 

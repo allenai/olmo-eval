@@ -443,6 +443,21 @@ export interface TaskRuntime {
     /** Wall-clock span within the run, in seconds after processing started. */
     span_start_s: number | null;
     span_end_s: number | null;
+    /**
+     * Summed judge model call time while scoring this task. Concurrent calls each count, so it can
+     * exceed wall time. Null means not recorded; 0 means measured with no judge calls.
+     */
+    scoring_judge_seconds: number | null;
+    /**
+     * Summed sandbox operation time while scoring; can exceed wall time. Null means not recorded;
+     * 0 means measured with none.
+     */
+    scoring_sandbox_seconds: number | null;
+    /**
+     * Time running the task's scoring code, summed across scoring threads and processes. Null
+     * means not recorded.
+     */
+    scoring_compute_seconds: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -462,6 +477,27 @@ export interface BaselineCell {
     delta: DeltaStats;
     /** Null for unbounded metrics or when instances do not pair. */
     contingency: Contingency | null;
+}
+
+/**
+ * A task's scoring failures. An unscored instance has no scored output and is left out
+ * of the metrics; with instances that produced no output it counts against the task's
+ * failure budget. A partially scored instance is scored from the outputs that were.
+ */
+export interface ScoringFailures {
+    instances_unscored: Count;
+    instances_partially_scored: Count;
+    /** Outputs with a scoring error, across all instances. */
+    outputs_unscored: Count;
+    /** Unscored outputs whose failure was flagged as infrastructure (judge, sandbox). */
+    infrastructure: Count;
+    /** Unscored outputs by exception type, from each output's first error. */
+    by_type: { [type: string]: Count };
+    /**
+     * The first scoring error as "Type: message", capped at 500 characters.
+     * @maxLength 500
+     */
+    first_error?: string | null;
 }
 
 export interface TaskResultRow {
@@ -484,6 +520,8 @@ export interface TaskResultRow {
     instances_failed: Count | null;
     /** Per-generation diagnostics, available even when predictions were not uploaded. */
     generation_counts?: { [count: string]: Count } | null;
+    /** Outputs and instances whose scores could not be computed; null when none failed. */
+    scoring_failures?: ScoringFailures | null;
     instances_stored: Count;
     metrics: FlatMetrics;
     error: string | null;

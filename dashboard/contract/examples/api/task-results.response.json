@@ -170,7 +170,10 @@
         "completion_tokens_total": 48210,
         "seconds_per_1k_instances": 2110.1666666666665,
         "span_start_s": 0.12,
-        "span_end_s": 1265.2544946670532
+        "span_end_s": 1265.2544946670532,
+        "scoring_judge_seconds": 62.0,
+        "scoring_sandbox_seconds": 0.0,
+        "scoring_compute_seconds": 3.4
       },
       "completion_tokens_total": 48210,
       "mean_completion_tokens": 80.35,

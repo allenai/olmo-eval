@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from olmo_eval_api.schemas import ingest as s
 from olmo_eval_api.services.derive import instance_key_hash
+from olmo_eval_api.services.ingest import HASH_OPTIONAL_FIELDS
 from olmo_eval_api.settings import UPLOADER_SERVICE_ACCOUNT
 from tests.factories import (
     instance_rows,
@@ -79,6 +80,69 @@ async def test_generation_counts_survive_task_result_upserts(
             {"id": response.json()["task_result_id"]},
         )
         assert stored.scalar_one() == counts
+
+
+async def test_scoring_failures_are_stored_with_the_task_result(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    await seed_contract_example_run(client)
+    payload = load_example("ingest/task-result.request.json")
+    payload["scoring_failures"] = {
+        "instances_unscored": 1,
+        "instances_partially_scored": 2,
+        "outputs_unscored": 3,
+        "infrastructure": 2,
+        "by_type": {"JudgeParseError": 2, "KeyError": 1},
+        "first_error": "JudgeParseError: no parseable verdict after 3 judge attempts",
+    }
+    response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
+    assert response.status_code == 200, response.text
+    stored = await session.execute(
+        text("SELECT scoring_failures FROM task_results WHERE id = :id"),
+        {"id": response.json()["task_result_id"]},
+    )
+    assert stored.scalar_one() == payload["scoring_failures"]
+
+
+async def _stored_scoring_seconds(session: Any, task_result_id: int) -> tuple[Any, ...]:
+    """The judge, sandbox and compute seconds stored for a task result."""
+    stored = await session.execute(
+        text(
+            "SELECT scoring_judge_seconds, scoring_sandbox_seconds, scoring_compute_seconds"
+            " FROM task_results WHERE id = :id"
+        ),
+        {"id": task_result_id},
+    )
+    return tuple(stored.one())
+
+
+async def test_scoring_seconds_are_stored_and_updated_on_reupload(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    await seed_contract_example_run(client)
+    payload = load_example("ingest/task-result.request.json")
+    for judge in (62.0, 70.5):
+        payload.update(
+            scoring_judge_seconds=judge, scoring_sandbox_seconds=0.0, scoring_compute_seconds=3.4
+        )
+        response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
+        assert response.status_code == 200, response.text
+        stored = await _stored_scoring_seconds(session, response.json()["task_result_id"])
+        assert stored == (judge, 0.0, 3.4)
+
+
+async def test_negative_scoring_seconds_are_stored_as_null(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    await seed_contract_example_run(client)
+    payload = load_example("ingest/task-result.request.json")
+    payload.update(
+        scoring_judge_seconds=-1.0, scoring_sandbox_seconds=0.0, scoring_compute_seconds=2.0
+    )
+    response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
+    assert response.status_code == 200, response.text
+    stored = await _stored_scoring_seconds(session, response.json()["task_result_id"])
+    assert stored == (None, 0.0, 2.0)
 
 
 async def test_request_id_passthrough(client: httpx.AsyncClient) -> None:
@@ -213,6 +277,7 @@ async def test_contract_example_round_trip(client: httpx.AsyncClient, session: A
     assert row["reported_completion_tokens_total"] == 398112
     assert row["first_request_at"] is not None and row["last_completed_at"] is not None
     assert row["attributed_inference_seconds"] is None
+    assert row["scoring_judge_seconds"] is None and row["scoring_compute_seconds"] is None
     assert row["finalized_at"] is not None
     assert run["startup_seconds"] == 78.4
     assert run["processing_seconds"] == 1266.1
@@ -232,6 +297,9 @@ async def test_old_client_payloads_ingest(client: httpx.AsyncClient, session: An
         "prompt_tokens_total",
         "completion_tokens_total",
         "attributed_inference_seconds",
+        "scoring_judge_seconds",
+        "scoring_sandbox_seconds",
+        "scoring_compute_seconds",
     ):
         del task[key]
     tr = (await client.post(f"/v1/runs/{RUN_ID}/task-results", json=task)).json()
@@ -346,7 +414,7 @@ async def test_identical_task_result_reupload_keeps_instances(
     if legacy_hash:
         request = s.TaskResultIn.model_validate(payload)
         legacy_body = {
-            "request": request.model_dump(mode="json", exclude={"generation_counts"}),
+            "request": request.model_dump(mode="json", exclude=set(HASH_OPTIONAL_FIELDS)),
             "files": {
                 path: None for path in (request.predictions_path, request.requests_path) if path
             },

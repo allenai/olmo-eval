@@ -45,6 +45,43 @@ uv run pytest tests/ --ignore=tests/integration -v
   `olmo-eval suite inspect <suite>`, `olmo-eval task inspect <spec> --request`,
   `olmo-eval run -m mock -t <spec> -o limit=5`.
 
+## Before running an eval
+
+Results should reach the olmo-eval database whenever they measure an established eval.
+An eval is established when the run uses task specs and scoring code from `main`
+unchanged, and in progress when it depends on a task, spec, or scoring change not yet on
+`main`.
+Uploads use the user's Google Application Default Credentials, for local runs and for
+`olmo-eval beaker launch` alike. Without them, a local run keeps results only on disk and a
+Beaker launch stops with an error.
+
+Before `olmo-eval run` or `olmo-eval beaker launch` with a real model, check credentials:
+
+```bash
+gcloud auth application-default print-access-token > /dev/null
+```
+
+If the check fails, ask the user a multiple-choice question before running, such as "Do
+you want to log in first so that your eval results can be uploaded to the olmo-eval
+database?", with these options:
+
+- **Log in first (recommended).** Give the user the command and wait for them to confirm,
+  then rerun the check. The login opens a browser, so the user runs it, not the agent (in
+  Claude Code, by typing `! <command>`). Tell them to sign in with their @allenai.org
+  account.
+
+  ```bash
+  gcloud auth application-default login
+  ```
+
+  If `gcloud` is missing, point them to `brew install --cask google-cloud-sdk` on macOS or
+  <https://cloud.google.com/sdk/docs/install>.
+- **Run without uploading.** Pass `--no-upload`.
+
+Skip the question and pass `--no-upload` for an in-progress eval, including validation runs
+for an open PR. Those results can be uploaded after merge with
+`olmo-eval results upload <output-dir>`. Mock and dry runs need no credentials.
+
 ## Invariants
 
 - **Spec meaning is fixed.** Don't change an existing spec's prompt, data, extraction,
@@ -54,11 +91,24 @@ uv run pytest tests/ --ignore=tests/integration -v
 - **Task hash.** Every setting that changes requests or scores must reach
   `TaskConfig.to_dict()`. A new optional field must be serialized only when set, so
   existing hashes don't move. Test both directions.
+- **Pinned hashes.** `tests/evals/tasks/test_task_hashes.py` pins the stored task hash
+  of every task, single variant, and suite spec in `task_hashes.json`, and fails when
+  one is added, removed, or changed. A new task or variant only adds specs: regenerate
+  the file with `uv run pytest tests/evals/tasks/test_task_hashes.py
+  --update-task-hashes`, and nothing more is needed. A changed hash means a change moved
+  a spec's identity: prefer a new variant, as "Spec meaning is fixed" says, and move a
+  hash in place only when unavoidable. Then regenerate the file, check that only the
+  intended specs changed, and add an entry to
+  [docs/result-compatibility.md](docs/result-compatibility.md) naming them. A removed
+  spec is a retirement and needs an entry too. The test cannot see a change to what a
+  spec measures that leaves its hash alone; that still needs an entry.
 - **Pins.** Pin a new dataset's `revision=` and judge models to dated snapshots when the
   task is introduced.
 - **Failures aren't scores.** No broad `except` around provider, judge, or scoring calls
-  that substitutes a score; no sentinel scores; missing logprobs are not zero; a task
-  with no scored responses fails. Diagnostics must reach saved predictions.
+  that substitutes a score; no sentinel scores; missing logprobs are not zero. A scorer
+  that cannot decide raises; the runner leaves that output unscored and counts it against
+  the failure budget, and a task with no scored responses fails. Diagnostics must reach
+  saved predictions.
 - **Per-instance metrics.** Override `Metric.compute_instance()` when the metric differs
   from the scorer value, and return `None` for out-of-scope instances.
 - **Parity.** Match the cited reference exactly; keep reference bugs under the parity name

@@ -7,24 +7,16 @@ import importlib
 import multiprocessing as mp
 import os
 import pickle
+import time
 from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any
 
 from olmo_eval.common.scorers.base import ProcessScorer
+from olmo_eval.common.scorers.execution import format_scoring_error
+from olmo_eval.common.scoring_time import add_scoring_seconds
 from olmo_eval.common.types import Instance, LMOutput
-
-
-def _format_process_error(exc: Exception) -> dict[str, str]:
-    error = {
-        "phase": "process",
-        "type": type(exc).__qualname__,
-    }
-    message = str(exc).strip()
-    if message:
-        error["message"] = message
-    return error
 
 
 def _resolve_attr(module_name: str, qualname: str) -> Any:
@@ -90,6 +82,7 @@ class ProcessOutputScore:
 
     score: float
     error: dict[str, str] | None = None
+    seconds: float = 0.0  # time the worker spent scoring this output
 
 
 class ProcessScoringConfigError(RuntimeError):
@@ -163,6 +156,7 @@ def _get_cached_process_scorer(spec: SerializedProcessScorer) -> ProcessScorer:
     scorer = scorer_cls(**spec.params)
     if not isinstance(scorer, ProcessScorer):
         raise TypeError(f"{spec.module}.{spec.qualname} did not reconstruct as a ProcessScorer")
+    scorer.warmup()  # keeps the worker's start-up out of the first output's time
     _SCORER_CACHE[cache_key] = scorer
     return scorer
 
@@ -175,11 +169,14 @@ def _score_outputs_in_process(
     scorer = _get_cached_process_scorer(spec)
     scored: list[ProcessOutputScore] = []
     for output in outputs:
+        started = time.perf_counter()
         try:
-            value = scorer.process_score(instance, output)
-            scored.append(ProcessOutputScore(score=float(value)))
+            value = float(scorer.process_score(instance, output))
+            error = None
         except Exception as exc:
-            scored.append(ProcessOutputScore(score=0.0, error=_format_process_error(exc)))
+            value, error = 0.0, format_scoring_error(exc, phase="process")
+        seconds = time.perf_counter() - started
+        scored.append(ProcessOutputScore(score=value, error=error, seconds=seconds))
     return scored
 
 
@@ -224,13 +221,15 @@ class ProcessPoolManager:
         spec = serialize_process_scorer(scorer)
         loop = asyncio.get_running_loop()
         pool = self.get_pool(spec.pool_name)
-        return await loop.run_in_executor(
+        results = await loop.run_in_executor(
             pool,
             _score_outputs_in_process,
             spec,
             instance,
             list(outputs),
         )
+        add_scoring_seconds("compute", sum(result.seconds for result in results))
+        return results
 
     def shutdown(self, *, wait: bool = True, cancel_futures: bool = True) -> None:
         for executor in self._executors.values():

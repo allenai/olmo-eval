@@ -14,9 +14,10 @@ from olmo_eval.cli.beaker.job_assembler import (
     assemble_external_eval_job,
     upload_job_settings,
 )
+from olmo_eval.common.constants.infrastructure import BEAKER_DEFAULT_IMAGE, BEAKER_SGLANG_IMAGE
 
 
-def _assemble(**config_overrides):
+def _assemble(*, effective_image="beaker://user/image", **config_overrides):
     launch_config = LaunchConfig(
         name="test",
         model_specs=["test-model"],
@@ -37,7 +38,7 @@ def _assemble(**config_overrides):
     )
     assembler = JobConfigAssembler(
         config=launch_config,
-        effective_image="beaker://user/image",
+        effective_image=effective_image,
         effective_groups=["group-a"],
         beaker_username="test-user",
         common_secrets=[],
@@ -75,6 +76,19 @@ def test_no_upload_is_forwarded_and_api_url_is_optional() -> None:
     assert "--no-upload" in job.command
     assert "--upload" not in job.command
     assert "OLMO_EVAL_API_URL" not in job.env_vars
+
+
+@pytest.mark.parametrize(
+    "kind,image", [("vllm", BEAKER_DEFAULT_IMAGE), ("sglang", BEAKER_SGLANG_IMAGE)]
+)
+def test_default_image_is_recorded_in_upload_provenance(kind, image) -> None:
+    _, job = _assemble(
+        effective_image=None,
+        harness="default",
+        harness_overrides=[f"provider.kind={kind}"],
+    )
+    assert job.beaker_image == image
+    assert job.env_vars["OLMO_EVAL_BEAKER_IMAGE"] == image
 
 
 def test_launch_ids_differ_between_launches() -> None:
