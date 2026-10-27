@@ -22,6 +22,9 @@ BEAKER_DEFAULT_PRIORITY = "normal"
 BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 
+BEAKER_SGLANG_IMAGE = "01M5VBMKPG8BX4BVJBGVBMF64V"
+"""Ai2-owned olmo-eval-cu1302-trc2130-amd64-devel; recipe: docs/sglang.md."""
+
 BEAKER_SANDBOX_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64-sandbox"
 """Docker image for Beaker evaluation jobs with sandbox support (includes Podman)."""
 
@@ -198,6 +201,7 @@ OE_EVAL_LAUNCH_COMMAND = "oe_eval/launch.py"
 # =============================================================================
 
 BACKEND_OPTIONAL_GROUPS: dict[str, str | None] = {
+    "sglang": "sglang",
     "vllm": "vllm",
     "vllm_server": "vllm",
     "hf": "hf",

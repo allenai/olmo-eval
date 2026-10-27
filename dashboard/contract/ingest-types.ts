@@ -43,6 +43,27 @@ export type DateTime = string;
 export type JsonObject = { [key: string]: unknown };
 
 /**
+ * A task's scoring failures. An unscored instance has no scored output and is left out
+ * of the metrics; with instances that produced no output it counts against the task's
+ * failure budget. A partially scored instance is scored from the outputs that were.
+ */
+export interface ScoringFailures {
+    instances_unscored: NonNegativeInt32;
+    instances_partially_scored: NonNegativeInt32;
+    /** Outputs with a scoring error, across all instances. */
+    outputs_unscored: NonNegativeInt32;
+    /** Unscored outputs whose failure was flagged as infrastructure (judge, sandbox). */
+    infrastructure: NonNegativeInt32;
+    /** Unscored outputs by exception type, from each output's first error. */
+    by_type: { [type: string]: NonNegativeInt32 };
+    /**
+     * The first scoring error as "Type: message", capped at 500 characters.
+     * @maxLength 500
+     */
+    first_error?: string | null;
+}
+
+/**
  * Run ID. olmo-eval uses its experiment_id (12 lowercase hex characters).
  * @pattern ^[a-z0-9]{6,32}$
  */
@@ -147,7 +168,7 @@ export interface EnvironmentInfo {
     hostname: string | null;
     platform: string | null;
     python_version: string | null;
-    /** Installed distribution versions: "olmo-eval", "vllm", "torch", "transformers", "datasets", "litellm" when present. */
+    /** Installed distribution versions: "olmo-eval", "vllm", "torch", "transformers", "datasets", "litellm" when present. When the vLLM server runs from its own venv, that venv's versions appear as "vllm-venv/vllm", "vllm-venv/torch" and "vllm-venv/transformers". */
     packages: { [distribution: string]: string };
     cuda_version: string | null;
     /** e.g. "NVIDIA H100 80GB HBM3". */
@@ -346,6 +367,8 @@ export interface TaskResultIn {
     instances_failed: NonNegativeInt32 | null;
     /** Per-generation diagnostic counts; absent for older clients and loglikelihood tasks. */
     generation_counts?: { [count: string]: NonNegativeInteger } | null;
+    /** Outputs and instances whose scores could not be computed; absent when none failed. */
+    scoring_failures?: ScoringFailures | null;
     error: string | null;
     error_summary: JsonObject | null;
     /**
@@ -363,10 +386,32 @@ export interface TaskResultIn {
     /** Completion tokens over every request of the task, including failed instances. */
     completion_tokens_total?: NonNegativeInteger | null;
     /**
-     * Inference seconds attributed to this task from per-batch inference metrics (each batch's
-     * wall time split by the task's share of the batch's tokens). Null unless recorded.
+     * Inference worker seconds attributed to this task. Each worker's busy time is split evenly
+     * across the batches and agent rollouts in flight, and a batch's share across its requests by
+     * token share. This is the worker's occupancy, not GPU time: agent rollouts include their tool
+     * and sandbox time, and are credited while they wait on them. Summed over workers, so a
+     * run with N inference workers attributes up to N times its processing time. Null unless
+     * recorded.
      */
     attributed_inference_seconds?: number | null;
+    /**
+     * Summed durations of the judge model calls made while scoring this task. Each call is timed
+     * on its own, so concurrent calls all count and the total can exceed wall time. Null means not
+     * recorded; 0 means measured with no judge calls.
+     */
+    scoring_judge_seconds?: number | null;
+    /**
+     * Summed durations of the sandbox operations made while scoring this task. Concurrent
+     * operations all count, so the total can exceed wall time. Null means not recorded; 0 means
+     * measured with no sandbox operations.
+     */
+    scoring_sandbox_seconds?: number | null;
+    /**
+     * Time spent running the task's scoring code (answer extraction, scorers and metrics) on the
+     * event loop, in a scoring thread or in a process pool. Pool work runs in parallel, so the
+     * total can exceed wall time. Null means not recorded.
+     */
+    scoring_compute_seconds?: number | null;
     predictions_path: RelativePath | null;
     requests_path: RelativePath | null;
     /** Registered suites that contain this task spec (static membership). */

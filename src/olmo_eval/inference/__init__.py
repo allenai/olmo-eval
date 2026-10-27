@@ -1,5 +1,7 @@
 """Language model inference providers."""
 
+from importlib import import_module
+
 from olmo_eval.common.types import ProviderKind
 
 from .base import InferenceProvider
@@ -16,6 +18,7 @@ __all__ = [
     "MockProvider",
     "HuggingFaceProvider",
     "VLLMProvider",
+    "SGLangProvider",
     "VLLMServerProvider",
     "OlmoCoreProvider",
     "OlmoCoreVLMProvider",
@@ -95,6 +98,8 @@ def create_provider(
     force_download = bool(kwargs.get("force_download", False))
 
     match kind_str:
+        case "sglang":
+            return import_module(".providers.sglang", __name__).SGLangProvider(model_name, **kwargs)
         case "mock":
             from .providers.mock import MockProvider
 
@@ -161,6 +166,8 @@ def create_provider(
 
 # Lazy imports for optional dependencies
 def __getattr__(name: str):
+    if name == "SGLangProvider":
+        return import_module(".providers.sglang", __name__).SGLangProvider
     if name == "MockProvider":
         from .providers.mock import MockProvider
 

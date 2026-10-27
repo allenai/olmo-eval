@@ -10,7 +10,7 @@ import { DeltaValue, ScoreValue, SigLegend } from "@/components/cells";
 import { Badge, Button, Checkbox, CopyText, cx, EmptyState, ErrorPanel, KV, LinkOut, Panel, Skeleton, Tip } from "@/components/primitives";
 import { type Cell, downloadText, toCSV } from "@/lib/csv";
 import { jsonDiff } from "@/lib/diff";
-import { formatCI, formatCount, formatDuration, formatRate, formatRuntime, formatScore, formatStderr, shortHash } from "@/lib/format";
+import { formatCI, formatCount, formatDuration, formatRate, formatRuntime, formatScore, formatStack, formatStderr, shortHash } from "@/lib/format";
 import { useHotkeys } from "@/lib/keyboard";
 import { goodness } from "@/lib/scales";
 import { absoluteLocal } from "@/lib/time";
@@ -378,6 +378,26 @@ function HealthPanel({ ctx }: { ctx: RunCtx }) {
           </>
         ),
         detail: t.error_summary ? Object.entries(t.error_summary).map(([k, v]) => `${k} ×${v}`).join(", ") : undefined,
+        // These instances produced no output, so they have no instance rows to list.
+        href: buildHref(`/runs/${ctx.run.run_id}`, { tab: "tasks", task: t.task_name }),
+      });
+    }
+    const sf = t.scoring_failures;
+    if (sf && (sf.instances_unscored || sf.instances_partially_scored)) {
+      const processed = Math.max(1, t.instances_processed ?? t.n);
+      const parts: string[] = [];
+      if (sf.instances_unscored) parts.push(`${formatCount(sf.instances_unscored)}/${formatCount(t.instances_processed ?? t.n)} instances could not be scored (${formatRate(sf.instances_unscored / processed, 1)})`);
+      if (sf.instances_partially_scored) parts.push(`${formatCount(sf.instances_partially_scored)} scored from part of their outputs`);
+      const types = Object.entries(sf.by_type).map(([k, v]) => `${k} ×${v}`).join(", ");
+      items.push({
+        icon: <AlertTriangle />,
+        tone: s.warn,
+        text: (
+          <>
+            <strong>{t.task_name}</strong>: {parts.join("; ")}
+          </>
+        ),
+        detail: [types, sf.first_error].filter(Boolean).join(" · ") || undefined,
         href: buildHref(`/runs/${ctx.run.run_id}`, { tab: "instances", task: t.task_name, has: "scoring_error" }),
       });
     }
@@ -491,7 +511,7 @@ export function Provenance({ run }: { run: RunDetail }) {
             ["Startup", run.startup_seconds != null ? formatRuntime(run.startup_seconds) : <span className="muted">not recorded</span>],
             ["Processing", run.processing_seconds != null ? formatRuntime(run.processing_seconds) : <span className="muted">{run.startup_seconds != null && !run.finished_at ? "in progress" : "not recorded"}</span>],
             ["olmo-eval", run.olmo_eval_version ? <span className="mono">{run.olmo_eval_version} @ {shortHash(run.git.commit)}</span> : null],
-            ["Stack", <span className="mono" style={{ fontSize: 11.5 }}>{["vllm", "torch", "transformers"].filter((p) => env.packages[p]).map((p) => `${p} ${env.packages[p]}`).join(" · ") || "—"}</span>],
+            ["Stack", <span className="mono" style={{ fontSize: 11.5 }}>{formatStack(env.packages) || "—"}</span>],
             ["Results", <CopyText text={run.gcs_prefix} display={<span className="mono" style={{ fontSize: 11.5 }}>{run.gcs_prefix}</span>} />],
           ]}
         />

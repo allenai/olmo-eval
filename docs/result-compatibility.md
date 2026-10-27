@@ -16,6 +16,44 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-10-22: Scoring failures are left out and budgeted, not scored as zero (#492)
+
+- **Affected**: every task run by `AsyncEvalRunner` whose scoring failed for some output:
+  a scorer that raised, a judge with no verdict after its retries, or a lost or missing
+  sandbox. Runs where every output was scored are unchanged.
+- **Change**: a failed output used to be recorded as 0 and kept in the metrics. It now
+  has no score. An instance with no scored output is left out of the metrics, and an
+  instance with some scored outputs is scored from those, including pass@k and pass^k.
+  Unscored instances and instances with no output share the failure budget
+  (`max_hard_failure_rate`, 5% by default); a task over it, or with nothing scored,
+  fails and publishes no metrics. The rule that one infrastructure scoring error (a
+  judge that gave no verdict, a lost or missing sandbox) withheld the whole task is
+  gone, so such a task now publishes when its failures fit the budget. Judge tasks no
+  longer raise when every sample of an instance fails.
+- **Identity**: task hashes are unchanged.
+- **Comparability**: an earlier result is affected only if its predictions carry
+  `scoring_errors`. Leaving out a zero raises a mean of non-negative scores: a
+  higher-is-better metric that averaged those zeros in comes out better, and a
+  lower-is-better one, such as an error rate, comes out worse. Metrics that already
+  excluded failed outputs, such as the judged-task, omniscience and Arena-Hard metrics,
+  are unchanged, except that a run with a few judge failures is no longer withheld.
+  Counts that tasks keep of their own errors, such as omniscience's
+  `judge_parsing_errors`, now count only failures that did not raise.
+
+## 2026-10-16: `ctc_contradiction` scores its high-low gold pairs (#490)
+
+- **Affected**: `ctc_contradiction` at rungs `r64k`, `r128k`, `r256k`, `r512k` and `r1m`,
+  and the `ctc` suites that include them. Rungs `r2k` to `r32k` are unchanged.
+- **Change**: gold pairs are sorted low-high when the data loads. On the affected rungs,
+  87–91% of examples hold at least one high-low pair, and the vendored scorer raised on
+  them. The runner recorded those examples as 0 on every metric, so a model's score was
+  bounded by the few examples without such a pair. Those examples are now scored.
+- **Identity**: task hashes are unchanged. An earlier result can be told apart by its
+  predictions: the unscored examples carry a `ValueError` under `scoring_errors`, which the
+  dashboard stores as `has_scoring_error` on each instance.
+- **Comparability**: results for the affected rungs from before the change are not
+  measurements and should be discarded. Results for `r2k` to `r32k` remain comparable.
+
 ## 2026-10-02: Chat-style `ANSWER:` lines in multiple-choice extraction (#433)
 
 - **Affected**: generation variants that extract an answer letter with the shared MCQ

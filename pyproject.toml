@@ -95,8 +95,19 @@ vllm = [
     "torch-c-dlpack-ext ; platform_system != 'Darwin'",  # Required for TVM tensor allocation in vLLM
     # transformers 5.13 nests rope_parameters per layer type; vLLM 0.19.1 reads it flat,
     # so Olmo-3 (mixed sliding/full attention) fails to load with a rope_theta KeyError.
-    # The 5.8.0 floor matches the hf extra (DeepSeek-R1-Distill-Qwen tokenizer).
-    "transformers>=5.8.0,<5.13 ; platform_system != 'Darwin'",
+    # Keep the previously locked vLLM dependency versions below. Without these
+    # bounds, a fresh uv lock can reuse SGLang's newer transitive dependencies
+    # even in the mutually exclusive vLLM resolution. The lock alone also cannot
+    # constrain Beaker's uv pip install, which installs the published extra.
+    # Both that extra and local uv sync --group vllm need these constraints.
+    # Update both lists together when qualifying a vLLM upgrade.
+    "transformers==5.8.1 ; sys_platform != 'darwin'",
+    "apache-tvm-ffi==0.1.9 ; sys_platform != 'darwin'",
+    "cuda-pathfinder==1.5.3 ; sys_platform != 'darwin'",
+    "grpcio==1.80.0 ; sys_platform != 'darwin'",
+    "mistral-common==1.11.0 ; sys_platform != 'darwin'",
+    "protobuf==5.29.6 ; sys_platform != 'darwin'",
+    "xgrammar==0.1.34 ; sys_platform != 'darwin'",
 ]
 litellm = [
     "litellm~=1.80.11",
@@ -132,6 +143,18 @@ clients = [
     # unsatisfiable rather than protective. Track the same floor and the 3.x major boundary.
     "openai>=2.45,<3",
 ]
+# Inline SGLang plus the Olmo architecture plugin. Keep the engine/plugin pins
+# together: olmo-sglang uses SGLang internals. CUDA 13 / Torch 2.13 runtime.
+# TODO: Replace these Git pins with qualified published SGLang/olmo-sglang
+# releases. SGLang already uses the official upstream repo; the model plugin
+# remains separate while the architecture evolves. Revisit upstreaming model
+# support once it stabilizes, independently of publishing the plugin package.
+sglang = [
+    "flash-linear-attention==0.5.2 ; sys_platform == 'linux'",
+    "olmo-sglang @ git+https://github.com/allenai/olmo-sglang.git@94ba0d5036c8ea7794636009d4ef233b0f3db32f ; sys_platform == 'linux'",
+    "sglang @ git+https://github.com/sgl-project/sglang.git@3145136dcd1238754e0ea2b2ffd546532119c71c#subdirectory=python ; sys_platform == 'linux'",
+    "tqdm==4.67.3 ; sys_platform == 'linux'",
+]
 
 [project.scripts]
 olmo-eval = "olmo_eval.cli:main"
@@ -146,6 +169,12 @@ package = true
 default-groups = ["dev", "vllm"]
 # These extras/groups have incompatible transitive dependencies and cannot be installed together
 conflicts = [
+    [{ extra = "sglang" }, { extra = "litellm" }],
+    [{ extra = "sglang" }, { extra = "vllm" }],
+    [{ extra = "sglang" }, { group = "vllm" }],
+    [{ extra = "sglang" }, { extra = "openhands" }],
+    [{ extra = "sglang" }, { extra = "agents" }],
+    [{ extra = "sglang" }, { extra = "clients" }],
     [
         { extra = "agents" },
         { extra = "openhands" },
@@ -171,6 +200,15 @@ conflicts = [
         { extra = "openhands" },
     ],
 ]
+
+# This provider uses the Python Engine, not SGLang's optional Rust HTTP/gRPC
+# servers or Rust multimodal transport. Do not require a Rust toolchain merely
+# to install the inline provider. Configure both uv project and pip commands.
+[tool.uv.extra-build-variables]
+sglang = { SGLANG_BUILD_RUST_EXTS = "none" }
+
+[tool.uv.pip.extra-build-variables]
+sglang = { SGLANG_BUILD_RUST_EXTS = "none" }
 
 [tool.setuptools.package-data]
 "olmo_eval.evals.tasks" = ["*.jsonl", "*.json"]
@@ -199,6 +237,14 @@ vllm = [
     "vllm[runai]==0.19.1 ; platform_system != 'Darwin'",
     "opencv-python-headless==4.13.0.92 ; platform_system != 'Darwin'",
     "torch-c-dlpack-ext ; platform_system != 'Darwin'",
+    # Mirror the vllm extra's compatibility pins; see the rationale above.
+    "apache-tvm-ffi==0.1.9 ; sys_platform != 'darwin'",
+    "cuda-pathfinder==1.5.3 ; sys_platform != 'darwin'",
+    "grpcio==1.80.0 ; sys_platform != 'darwin'",
+    "mistral-common==1.11.0 ; sys_platform != 'darwin'",
+    "protobuf==5.29.6 ; sys_platform != 'darwin'",
+    "transformers==5.8.1 ; sys_platform != 'darwin'",
+    "xgrammar==0.1.34 ; sys_platform != 'darwin'",
 ]
 
 [tool.ruff]
@@ -320,6 +366,9 @@ allowed-unresolved-imports = [
     "swerex.**",
     "olmocr.**",
     "pymupdf.**",
+    # Imported by the AA-Briefcase-Lite submission parser inside its sandbox image.
+    "pptx.**",
+    "openpyxl.**",
 ]
 
 [tool.gantry]

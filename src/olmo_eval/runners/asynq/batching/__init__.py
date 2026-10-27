@@ -24,7 +24,7 @@ from .config import (
 from .streaming import StreamingStrategy
 
 
-def get_strategy(config: BatchConfig) -> BatchingStrategy:
+def get_strategy(config: BatchConfig, max_batch_sequences: int | None = None) -> BatchingStrategy:
     """Factory to get strategy implementation.
 
     Args:
@@ -47,7 +47,7 @@ def get_strategy(config: BatchConfig) -> BatchingStrategy:
             f"Unknown batch strategy: {config.strategy}. Available: {list(strategies.keys())}"
         )
 
-    return strategy_cls(config)
+    return strategy_cls(config, max_batch_sequences=max_batch_sequences)
 
 
 __all__ = [
