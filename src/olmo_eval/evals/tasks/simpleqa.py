@@ -20,9 +20,11 @@ from typing import Any
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers import SimpleQAJudgeScorer
+from olmo_eval.common.scorers.llm_judge import SIMPLEQA_JUDGE
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common.judge import grade_with_config_judge
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,14 @@ class SimpleQA(Task):
     data_source = DataSource(path="allenai/simpleqa_full", split="test")
     formatter = ChatFormatter()
     sampling_params = SamplingParams(temperature=0.0)
+
+    def __init__(self, config: TaskConfig) -> None:
+        """Build the task, grading with the judge its config names."""
+        super().__init__(
+            grade_with_config_judge(
+                config, SimpleQAJudgeScorer, SIMPLEQA_JUDGE, "SimpleQAJudgeScorer"
+            )
+        )
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -120,4 +130,6 @@ register_variant(
     "judge",
     metrics=(AccuracyMetric(scorer=SimpleQAJudgeScorer),),
     required_secrets=("OPENAI_API_KEY",),
+    judge_model=SIMPLEQA_JUDGE.model,
+    judge_max_tokens=SIMPLEQA_JUDGE.max_tokens,
 )

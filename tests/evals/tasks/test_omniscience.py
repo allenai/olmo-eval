@@ -1,6 +1,5 @@
 """Tests for the AA-Omniscience task."""
 
-import inspect
 import logging
 from dataclasses import replace
 
@@ -153,7 +152,7 @@ class TestRegistration:
                 metrics=tuple(replace(metric, scorer=judge) for metric in task.config.metrics),
             )
 
-        default_model = inspect.signature(build_openai_judge_fn).parameters["model"].default
+        default_model = omniscience.OMNISCIENCE_JUDGE.model
         default_hash = compute_task_hash(task.config.to_dict())
 
         assert compute_task_hash(with_judge(default_model).to_dict()) == default_hash
@@ -175,7 +174,7 @@ class TestRegistration:
         assert {id(metric.scorer()) for metric in task.config.metrics} == {id(judge)}
         assert task.config.get_primary_metric().scorer() is judge
         assert judge.judge_fn.__dict__["judge_config"] == {
-            **build_openai_judge_fn().__dict__["judge_config"],
+            **omniscience.OMNISCIENCE_JUDGE.build_fn("OmniscienceScorer").judge_config,
             setting: value,
         }
 

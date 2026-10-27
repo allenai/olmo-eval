@@ -41,6 +41,7 @@ from olmo_eval.common.types import (
 from olmo_eval.data import DataSource
 from olmo_eval.evals.extract import extract_think_answer
 from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common.judge import grade_with_config_judge
 
 logger = logging.getLogger(__name__)
 
@@ -446,13 +447,6 @@ def extract_final_answer(text: str) -> str:
     return "" if "<think>" in answer else answer
 
 
-def _graded_by(metric: Metric, judge: OmniscienceScorer) -> Metric:
-    """Return the metric with ``judge`` as its scorer if it grades with an Omniscience judge."""
-    if isinstance(metric.scorer(), OmniscienceScorer):
-        return replace(metric, scorer=judge)
-    return metric
-
-
 @register("omniscience")
 class Omniscience(Task):
     """Knowledge and hallucination benchmark"""
@@ -468,26 +462,11 @@ class Omniscience(Task):
 
         Settings left unset keep the default judge's values.
         """
-        if any(
-            value is not None
-            for value in (
-                config.judge_model,
-                config.judge_reasoning_effort,
-                config.judge_max_tokens,
+        super().__init__(
+            grade_with_config_judge(
+                config, OmniscienceScorer, OMNISCIENCE_JUDGE, "OmniscienceScorer"
             )
-        ):
-            judge = OmniscienceScorer(
-                judge_fn=OMNISCIENCE_JUDGE.with_config(config).build_fn("OmniscienceScorer")
-            )
-            primary = config.primary_metric
-            if isinstance(primary, Metric):
-                primary = _graded_by(primary, judge)
-            config = replace(
-                config,
-                metrics=tuple(_graded_by(metric, judge) for metric in config.metrics),
-                primary_metric=primary,
-            )
-        super().__init__(config)
+        )
 
     @property
     def instances(self) -> Iterator[Instance]:

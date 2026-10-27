@@ -435,6 +435,10 @@ class Judge:
 # is a decent cheaper alternative for frequent iteration (reliable on the
 # score-inflating cases; loses only the conservative stuffed-recall edge).
 ATTRIBUTED_QA_JUDGE = JudgeSettings(model="gpt-5.5", max_tokens=4096, reasoning_effort="medium")
+#: SimpleQA's letter-grade judge.
+SIMPLEQA_JUDGE = JudgeSettings(model="gpt-4o-mini", max_tokens=10)
+#: The API safety judge; its reply answers three yes/no questions.
+SAFETY_JUDGE = JudgeSettings(model="gpt-4o-mini", max_tokens=128)
 
 
 def parse_judge_spec(spec: str) -> tuple[str, str | None, int | None]:
@@ -713,7 +717,7 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
 
     name: str = "simpleqa_judge"
     judge_fn: JudgeFn = field(
-        default_factory=lambda: build_openai_judge_fn(scorer_name="SimpleQAJudgeScorer")
+        default_factory=lambda: SIMPLEQA_JUDGE.build_fn("SimpleQAJudgeScorer")
     )
 
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
@@ -778,11 +782,7 @@ class SafetyScorer(LLMJudgeScorer):
     judge_request_type: RequestType = RequestType.CHAT
     persist_judge_response: bool = True
     max_response_tokens: int = STRONGREJECT_MAX_RESPONSE_TOKENS
-    judge_fn: JudgeFn = field(
-        default_factory=lambda: build_openai_judge_fn(
-            scorer_name="SafetyJudgeScorer", max_tokens=128
-        )
-    )
+    judge_fn: JudgeFn = field(default_factory=lambda: SAFETY_JUDGE.build_fn("SafetyJudgeScorer"))
 
     def format_judge_prompt(
         self,

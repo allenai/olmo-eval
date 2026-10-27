@@ -17,10 +17,12 @@ from olmo_eval.common.metrics import (
     SubsetAccuracyMetric,
 )
 from olmo_eval.common.scorers import SafetyScorer
+from olmo_eval.common.scorers.llm_judge import SAFETY_JUDGE
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_think_answer, extract_think_answer_only
-from olmo_eval.evals.tasks.common import Task, register_variant
+from olmo_eval.evals.tasks.common import Task, TaskConfig, register_variant
+from olmo_eval.evals.tasks.common.judge import grade_with_config_judge
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,12 @@ class SafetyBase(Task):
     sampling_params: SamplingParams = judge_sampling
     formatter = ChatFormatter()
     answer_extractor = extract_think_answer
+
+    def __init__(self, config: TaskConfig) -> None:
+        """Build the task, grading with the API judge its config names."""
+        super().__init__(
+            grade_with_config_judge(config, SafetyScorer, SAFETY_JUDGE, "SafetyJudgeScorer")
+        )
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -149,6 +157,8 @@ def register_safety_variants(
         primary_metric=primary_metric(SafetyScorer),
         sampling_params=judge_sampling,
         required_secrets=("OPENAI_API_KEY",),
+        judge_model=SAFETY_JUDGE.model,
+        judge_max_tokens=SAFETY_JUDGE.max_tokens,
     )
 
     register_variant(

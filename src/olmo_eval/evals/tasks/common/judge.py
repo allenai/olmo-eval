@@ -28,7 +28,7 @@ import asyncio
 import logging
 from abc import abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, ClassVar, Literal, TypeVar
 
 from olmo_eval.common.execution import ScoringContext
@@ -41,6 +41,7 @@ from olmo_eval.common.scorers.llm_judge import (
     Judge,
     JudgeParseError,
     JudgeSettings,
+    LLMJudgeScorer,
 )
 from olmo_eval.common.types import Instance, LMOutput, Response
 
@@ -198,6 +199,39 @@ class JudgedMacroScoreMetric(Metric):
 
     def display_format(self) -> str:
         return self.display
+
+
+def grade_with_config_judge(
+    config: TaskConfig,
+    scorer_type: type[LLMJudgeScorer],
+    default: JudgeSettings,
+    scorer_name: str,
+) -> TaskConfig:
+    """Return ``config`` with its API judge scorers built from its judge settings.
+
+    For judge scorers whose judge is set at construction: each metric graded by an
+    API-judged ``scorer_type`` gets a scorer whose judge is ``default`` with the
+    config's judge fields applied, so the judge reaches both the task hash and the
+    calls. Metrics graded otherwise, including by a judge served from the inference
+    pool, are kept. A config that sets no judge field is returned unchanged.
+    """
+    judge_fields = (config.judge_model, config.judge_reasoning_effort, config.judge_max_tokens)
+    if all(value is None for value in judge_fields):
+        return config
+    judge = scorer_type(judge_fn=default.with_config(config).build_fn(scorer_name))
+
+    def regraded(metric: Metric) -> Metric:
+        scorer = metric.scorer()
+        if isinstance(scorer, scorer_type) and scorer.provider_name is None:
+            return replace(metric, scorer=judge)
+        return metric
+
+    primary = config.primary_metric
+    if isinstance(primary, Metric):
+        primary = regraded(primary)
+    return replace(
+        config, metrics=tuple(regraded(metric) for metric in config.metrics), primary_metric=primary
+    )
 
 
 class JudgedTask(Task):
