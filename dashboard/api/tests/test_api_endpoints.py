@@ -1347,3 +1347,93 @@ async def test_generated_gap_task_panel_survives_a_missing_companion(client):
     panels = {panel["key"]: panel for panel in body["panels"]}
     assert panels["suite:unanchored"]["points"] == []
     assert [point["score"] for point in panels["task:in"]["points"]] == [0.4]
+
+
+@pytest.mark.parametrize("merge", ["latest", "all"])
+@pytest.mark.parametrize(
+    ("aggregation", "metric"),
+    [
+        ("gap", "primary"),
+        ("gap", "strict:default"),
+        ("average", "strict:default"),
+        ("weighted_average", "strict:default"),
+        ("average_of_averages", "strict:default"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("display_format", "higher_is_better"), [("percent", False), ("raw", True)]
+)
+async def test_progression_uses_selected_primary_metadata_from_later_checkpoint(
+    client: httpx.AsyncClient,
+    session: Any,
+    merge: str,
+    aggregation: str,
+    metric: str,
+    display_format: str,
+    higher_is_better: bool,
+) -> None:
+    now = datetime.now(UTC)
+    for run_id, step, primary, scores in [
+        ("secondarymeta01", 1000, "flex:default", (0.9, 0.9)),
+        ("primarymeta01", 2000, "strict:default", (0.6, 0.8)),
+    ]:
+        await seed_run(
+            client,
+            run_id=run_id,
+            model_name=f"test-org/selected-meta-step{step}",
+            step=step,
+            primary_metric=primary,
+            tasks={"in": [scores[0]] * 2, "out": [scores[1]] * 6},
+            suites=[suite("selected_meta", ["in", "out"], aggregation=aggregation)],
+            created_at=now - timedelta(hours=3 - step // 1000),
+            session=session,
+        )
+    # The earlier checkpoint can supply strict scores, but not their metadata.
+    # Mixed primaries keep it from anchoring GAP requests to flex.
+    await session.execute(
+        text(
+            "UPDATE task_results SET "
+            "metrics = metrics || jsonb_build_object('strict:default', "
+            "CASE WHEN task_name = 'in' THEN 0.2 ELSE 0.4 END), "
+            "primary_metric = CASE WHEN task_name = 'out' THEN 'strict:default' "
+            "ELSE primary_metric END, "
+            "score = CASE WHEN task_name = 'out' THEN 0.4 ELSE score END, "
+            "metric_meta = '{}'::jsonb, display_format = :format, higher_is_better = :direction "
+            "WHERE run_id = 'secondarymeta01'"
+        ),
+        {
+            "format": "raw" if display_format == "percent" else "percent",
+            "direction": not higher_is_better,
+        },
+    )
+    await session.execute(
+        text(
+            "UPDATE task_results SET metric_meta = '{}'::jsonb, "
+            "display_format = :format, higher_is_better = :direction "
+            "WHERE run_id = 'primarymeta01'"
+        ),
+        {"format": display_format, "direction": higher_is_better},
+    )
+    await session.commit()
+
+    body = await get(
+        client,
+        "/api/models/progression",
+        "ProgressionResponse",
+        series="test-org/selected-meta",
+        scope="suite:selected_meta",
+        metric=metric,
+        merge=merge,
+    )
+    panel = next(panel for panel in body["panels"] if panel["key"] == "suite:selected_meta")
+    assert [point["step"] for point in panel["points"]] == [1000, 2000]
+    expected_scores = (
+        [0.4, 0.8]
+        if aggregation == "gap"
+        else [0.35, 0.75]
+        if aggregation == "weighted_average"
+        else [0.3, 0.7]
+    )
+    assert [point["score"] for point in panel["points"]] == pytest.approx(expected_scores)
+    assert panel["meta"]["display_format"] == display_format
+    assert panel["meta"]["higher_is_better"] is higher_is_better
