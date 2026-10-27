@@ -5,13 +5,35 @@ from __future__ import annotations
 import multiprocessing as mp
 import queue
 import time
+from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.asynq.types import WORKER_FATAL
 
+if TYPE_CHECKING:
+    from olmo_eval.harness.config import ProviderConfig
+
 logger = get_logger(__name__)
 
 DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
+
+
+def provider_init_timeout(provider: ProviderConfig) -> float:
+    """Return how long to wait for inference workers to initialize a provider.
+
+    A provider ``startup_timeout`` longer than the default wait extends it, with a 60s
+    buffer for worker setup before the server starts.
+
+    Args:
+        provider: Provider configuration the inference workers load.
+
+    Returns:
+        Timeout in seconds for all workers to report their init times.
+    """
+    startup_timeout = provider.kwargs.get("startup_timeout")
+    if startup_timeout is None:
+        return DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS
+    return max(DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS, float(startup_timeout) + 60.0)
 
 
 def terminate_workers(
@@ -195,6 +217,7 @@ def wait_for_init_times(
 
 __all__ = [
     "DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS",
+    "provider_init_timeout",
     "terminate_workers",
     "check_workers_alive",
     "wait_for_workers_ready",

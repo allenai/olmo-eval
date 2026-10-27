@@ -20,6 +20,7 @@ from olmo_eval.common.logging import configure_worker_logging, get_logger
 from olmo_eval.evals.tasks.common import get_task
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
+    provider_init_timeout,
     terminate_workers,
     wait_for_init_times,
     wait_for_workers_ready,
@@ -858,7 +859,11 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Wait for workers to report their init times (also checks for crashes)
             provider_init_seconds = wait_for_init_times(
-                init_queue, num_inference_workers, workers=workers, result_queue=result_queue
+                init_queue,
+                num_inference_workers,
+                workers=workers,
+                result_queue=result_queue,
+                timeout=provider_init_timeout(self.provider_config),
             )
             if len(provider_init_seconds) != num_inference_workers:
                 raise RuntimeError(
