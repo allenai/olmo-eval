@@ -276,6 +276,7 @@ class TaskResult(SQLModel, table=True):
     instances_processed: int | None = _int()
     instances_failed: int | None = _int()
     generation_counts: dict[str, int] | None = _jsonb(nullable=True)
+    scoring_failures: dict[str, Any] | None = _jsonb(nullable=True)
     instance_count_expected: int = _int(nullable=False)
     instances_stored: int = _int(nullable=False, default=0)
     error: str | None = _text()
@@ -286,6 +287,10 @@ class TaskResult(SQLModel, table=True):
     first_request_at: datetime | None = _ts(nullable=True)
     last_completed_at: datetime | None = _ts(nullable=True)
     attributed_inference_seconds: float | None = _float()
+    # Summed time of each scoring call and step; can exceed wall time. Null for older clients.
+    scoring_judge_seconds: float | None = _float()
+    scoring_sandbox_seconds: float | None = _float()
+    scoring_compute_seconds: float | None = _float()
     # Task-level token totals as the client reported them (every request, including failed
     # instances); null for older clients.
     reported_prompt_tokens_total: int | None = _int(BigInteger)

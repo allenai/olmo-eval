@@ -5,9 +5,10 @@ from __future__ import annotations
 import multiprocessing as mp
 import queue
 import time
+from typing import Any
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.runners.asynq.types import WORKER_FATAL
+from olmo_eval.runners.asynq.types import WORKER_FATAL, WorkerReady
 
 logger = get_logger(__name__)
 
@@ -144,16 +145,18 @@ def wait_for_init_times(
     result_queue: mp.Queue | None = None,
     timeout: float = DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS,
     check_interval: float = 1.0,
+    worker_configs: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, float]:
     """Wait for all workers to report their initialization times.
 
     Args:
-        init_queue: Queue that workers put (worker_id, init_time) tuples on.
+        init_queue: Queue that workers put WorkerReady messages on.
         num_workers: Expected number of workers.
         workers: Optional list of worker processes to check for crashes.
         result_queue: Optional queue to check for fatal error markers.
         timeout: Maximum time to wait for all init times.
         check_interval: How often to check for new entries.
+        worker_configs: Optional destination for resolved worker configurations.
 
     Returns:
         Dictionary mapping worker_id to init time in seconds.
@@ -171,8 +174,15 @@ def wait_for_init_times(
         # Drain all available init times from the queue
         while True:
             try:
-                worker_id, init_time = init_queue.get_nowait()
-                collected[worker_id] = init_time
+                message = init_queue.get_nowait()
+                if isinstance(message, WorkerReady):
+                    collected[message.worker_id] = message.init_time
+                    if worker_configs is not None:
+                        worker_configs[message.worker_id] = message.harness_config
+                else:
+                    # Compatibility for callers that only report startup timing.
+                    worker_id, init_time = message
+                    collected[worker_id] = init_time
             except queue.Empty:
                 break
 
