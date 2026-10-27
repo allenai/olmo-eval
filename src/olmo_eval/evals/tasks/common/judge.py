@@ -33,7 +33,6 @@ from typing import Any, ClassVar, Literal, TypeVar
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.multi_turn import turn_count, turn_replies
-from olmo_eval.common.scorers import ScoringIncompleteError
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.execution import format_scoring_error
 from olmo_eval.common.scorers.llm_judge import (
@@ -54,8 +53,6 @@ V = TypeVar("V")
 #: for scores in their own units.
 DisplayFormat = Literal["percentage", "raw"]
 
-#: Judge concurrency when the scoring context does not set one.
-DEFAULT_JUDGE_CONCURRENCY = 16
 
 _THINK_OPEN = "<think>"
 _THINK_CLOSE = "</think>"
@@ -229,7 +226,9 @@ class JudgedTask(Task):
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._judge_limiter: asyncio.Semaphore | None = None
+        self._judge_instance: Judge | None = None
+        # The run's limiter replaces this one when scoring gets a context.
+        self._judge_limiter = ScoringContext().judge_limiter
 
     @abstractmethod
     async def _score_output(self, response: Response, output: LMOutput, judge: Judge) -> float:
@@ -251,7 +250,7 @@ class JudgedTask(Task):
 
     def _get_judge(self) -> Judge:
         """Return this task's judge, built once so its request-shape cache persists."""
-        judge = getattr(self, "_judge_instance", None)
+        judge = self._judge_instance
         if judge is None:
             if self.config.judge_model is None or self.config.judge_max_tokens is None:
                 raise ValueError(f"{type(self).__name__} requires a complete judge configuration")
@@ -267,20 +266,6 @@ class JudgedTask(Task):
             )
             self._judge_instance = judge
         return judge
-
-    def _get_judge_semaphore(self, context: ScoringContext | None) -> asyncio.Semaphore:
-        """Return the run's judge limiter, or this task's own when scored without a context."""
-        if context is not None:
-            return context.judge_limiter
-        semaphore = getattr(self, "_own_judge_limiter", None)
-        if semaphore is None:
-            semaphore = asyncio.Semaphore(DEFAULT_JUDGE_CONCURRENCY)
-            self._own_judge_limiter = semaphore
-        return semaphore
-
-    def _limiter(self) -> asyncio.Semaphore:
-        """Return the limiter judge calls hold: the run's while scoring, else this task's own."""
-        return self._judge_limiter or self._get_judge_semaphore(None)
 
     async def _judge_output(
         self,
@@ -301,7 +286,7 @@ class JudgedTask(Task):
         """
         try:
             verdict, raw = await judge.ask(
-                prompt, parse, limiter=self._limiter(), system_prompt=system_prompt
+                prompt, parse, limiter=self._judge_limiter, system_prompt=system_prompt
             )
         except JudgeParseError as exc:
             judge_result[raw_key] = exc.raw
@@ -386,7 +371,8 @@ class JudgedTask(Task):
         """Judge every output concurrently, then aggregate each instance over its samples."""
         self._extract_answers(responses)
         judge = self._get_judge()
-        self._judge_limiter = self._get_judge_semaphore(context)
+        if context is not None:
+            self._judge_limiter = context.judge_limiter
         self._warn_about_missing_responses(responses)
 
         jobs = [
@@ -397,16 +383,7 @@ class JudgedTask(Task):
 
         async def run(response_index: int, output_index: int) -> float:
             response = responses[response_index]
-            try:
-                return await self._score_output(response, response.outputs[output_index], judge)
-            except ScoringIncompleteError:
-                raise
-            except Exception as exc:
-                # A judge call that failed after its retries left the output unscored,
-                # which the runner must report as incomplete rather than as wrong.
-                raise ScoringIncompleteError(
-                    f"{self.config.name} judge call failed: {type(exc).__name__}: {exc}"
-                ) from exc
+            return await self._score_output(response, response.outputs[output_index], judge)
 
         results = await asyncio.gather(*(run(*job) for job in jobs), return_exceptions=True)
 

@@ -436,7 +436,7 @@ class _FrontierScience(JudgedTask, ABC):
     ) -> tuple[float | None, str]:
         """Return the judge's verdict and reply, or None and the last reply if none parses."""
         try:
-            return await judge.ask(prompt, parse, limiter=self._limiter())
+            return await judge.ask(prompt, parse, limiter=self._judge_limiter)
         except JudgeParseError as exc:
             return None, exc.raw
 

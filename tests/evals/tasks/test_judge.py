@@ -250,16 +250,6 @@ class TestJudgeConfiguration:
         with pytest.raises(ValueError, match="complete judge configuration"):
             task._get_judge()
 
-    def test_judge_limiter_is_shared_through_the_scoring_context(self):
-        context = ScoringContext(scoring_concurrency=2)
-        first = _PassFailTask(_config())
-        second = _PassFailTask(_config(name="other"))
-
-        semaphore = first._get_judge_semaphore(context)
-
-        assert second._get_judge_semaphore(context) is semaphore
-        assert first._get_judge_semaphore(None) is not semaphore
-
 
 class TestScoreResponses:
     @pytest.mark.anyio
