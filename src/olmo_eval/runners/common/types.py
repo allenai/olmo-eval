@@ -25,13 +25,31 @@ DEFAULT_MAX_HARD_FAILURE_RATE = 0.05
 #   last_completed_at: when the task's last instance finished (inference and scoring)
 #   prompt_tokens_total / completion_tokens_total: summed over every request of the
 #       task as the provider reported them (rules in runners/common/usage.py)
-#   attributed_inference_seconds: per-batch inference wall time split by token share
+#   attributed_inference_seconds: the task's share of inference worker time. Each
+#       worker's busy time is split evenly across the batches and agent rollouts in
+#       flight, and a batch's share across its requests by token share. Summed over
+#       workers, so a run with N workers attributes up to N x processing_seconds.
+#       This is worker occupancy, not GPU time: agent rollouts include their tool and
+#       sandbox time, and are credited while they wait on them.
+#   scoring_judge_seconds / scoring_sandbox_seconds: summed durations of the judge
+#       model calls and sandbox operations made while scoring the task. Each call is
+#       timed on its own, so concurrent calls each count in full and the sum can
+#       exceed wall time. A call's time includes the client's own retries, but not
+#       waiting for a scorer's judge or sandbox slot.
+#   scoring_compute_seconds: time spent running the task's scoring code (answer
+#       extraction, scorers, metric computation) on the event loop, in a scoring
+#       thread, or in a scoring process pool. Pool work runs in parallel, so this too
+#       can exceed wall time.
+#   See olmo_eval.common.scoring_time for how each is measured.
 TASK_COST_KEYS = (
     "first_request_at",
     "last_completed_at",
     "prompt_tokens_total",
     "completion_tokens_total",
     "attributed_inference_seconds",
+    "scoring_judge_seconds",
+    "scoring_sandbox_seconds",
+    "scoring_compute_seconds",
 )
 
 # Run-level timing keys written to metrics.json by the async runner.
@@ -80,6 +98,9 @@ class TaskResult:
     prompt_tokens_total: int | None = None
     completion_tokens_total: int | None = None
     attributed_inference_seconds: float | None = None
+    scoring_judge_seconds: float | None = None
+    scoring_sandbox_seconds: float | None = None
+    scoring_compute_seconds: float | None = None
 
     @property
     def failure_rate(self) -> float:

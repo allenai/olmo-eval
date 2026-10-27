@@ -15,11 +15,31 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from functools import lru_cache
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 from typing import Any
 
-TRACKED_PACKAGES = ("olmo-eval", "vllm", "torch", "transformers", "datasets", "litellm", "sglang")
+TRACKED_PACKAGES = (
+    "olmo-eval",
+    "vllm",
+    "torch",
+    "transformers",
+    "datasets",
+    "litellm",
+    "sglang",
+    "olmo-sglang",
+    "flash-linear-attention",
+)
+
+
+def package_revision(name: str) -> str | None:
+    """Read the installed VCS commit without importing GPU packages or exposing URLs."""
+    try:
+        direct_url = json.loads(distribution(name).read_text("direct_url.json") or "{}")
+        commit = direct_url.get("vcs_info", {}).get("commit_id")
+        return commit if isinstance(commit, str) else None
+    except (PackageNotFoundError, OSError, ValueError, AttributeError, TypeError):
+        return None
 
 
 def get_author() -> str:
@@ -110,6 +130,10 @@ def package_versions(env: Mapping[str, str] | None = None) -> dict[str, str]:
     for name in TRACKED_PACKAGES:
         try:
             versions[name] = version(name)
+            if name in {"sglang", "olmo-sglang", "flash-linear-attention"}:
+                commit = package_revision(name)
+                if commit:
+                    versions[name] += f"@{commit}"
         except PackageNotFoundError:
             continue
         except Exception:

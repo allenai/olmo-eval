@@ -386,10 +386,32 @@ export interface TaskResultIn {
     /** Completion tokens over every request of the task, including failed instances. */
     completion_tokens_total?: NonNegativeInteger | null;
     /**
-     * Inference seconds attributed to this task from per-batch inference metrics (each batch's
-     * wall time split by the task's share of the batch's tokens). Null unless recorded.
+     * Inference worker seconds attributed to this task. Each worker's busy time is split evenly
+     * across the batches and agent rollouts in flight, and a batch's share across its requests by
+     * token share. This is the worker's occupancy, not GPU time: agent rollouts include their tool
+     * and sandbox time, and are credited while they wait on them. Summed over workers, so a
+     * run with N inference workers attributes up to N times its processing time. Null unless
+     * recorded.
      */
     attributed_inference_seconds?: number | null;
+    /**
+     * Summed durations of the judge model calls made while scoring this task. Each call is timed
+     * on its own, so concurrent calls all count and the total can exceed wall time. Null means not
+     * recorded; 0 means measured with no judge calls.
+     */
+    scoring_judge_seconds?: number | null;
+    /**
+     * Summed durations of the sandbox operations made while scoring this task. Concurrent
+     * operations all count, so the total can exceed wall time. Null means not recorded; 0 means
+     * measured with no sandbox operations.
+     */
+    scoring_sandbox_seconds?: number | null;
+    /**
+     * Time spent running the task's scoring code (answer extraction, scorers and metrics) on the
+     * event loop, in a scoring thread or in a process pool. Pool work runs in parallel, so the
+     * total can exceed wall time. Null means not recorded.
+     */
+    scoring_compute_seconds?: number | null;
     predictions_path: RelativePath | null;
     requests_path: RelativePath | null;
     /** Registered suites that contain this task spec (static membership). */

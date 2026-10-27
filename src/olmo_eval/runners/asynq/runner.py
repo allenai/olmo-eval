@@ -31,6 +31,7 @@ from olmo_eval.runners.asynq.results import (
     process_results,
     utc_iso,
 )
+from olmo_eval.runners.asynq.runtime import apply_worker_configs
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
@@ -857,14 +858,22 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
 
             # Wait for workers to report their init times (also checks for crashes)
+            worker_configs: dict[str, dict[str, Any]] = {}
             provider_init_seconds = wait_for_init_times(
-                init_queue, num_inference_workers, workers=workers, result_queue=result_queue
+                init_queue,
+                num_inference_workers,
+                workers=workers,
+                result_queue=result_queue,
+                worker_configs=worker_configs,
             )
             if len(provider_init_seconds) != num_inference_workers:
                 raise RuntimeError(
                     f"Expected {num_inference_workers} inference worker(s) to initialize "
                     f"before starting work, got {len(provider_init_seconds)}."
                 )
+
+            self.harness_config = apply_worker_configs(self.harness_config, worker_configs)
+            self._update_metrics_config(experiment_id)
 
             runner_logger.info(
                 f"All {num_inference_workers} inference worker(s) ready; starting queued work"
@@ -1326,6 +1335,10 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 tags=self.upload_config.tags if self.upload_config else (),
             )
             model = model_info_from_provider(self.provider_config, self.attention_backend)
+            if str(self.provider_config.kind) == "sglang":
+                # Runtime identity is unknown until workers initialize. Do not
+                # register a provisional auto-profile hash as an actual model.
+                model["model_hash"] = None
             write_manifest(self.output_dir, build_manifest(run, model))
         except Exception as e:
             logger.warning(f"Could not write the run manifest: {e}")

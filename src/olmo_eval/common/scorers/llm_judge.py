@@ -20,6 +20,7 @@ from olmo_eval.common.openai_credentials import (
     require_openai_credentials,
 )
 from olmo_eval.common.scorers.execution import ContextScorer, ScoringIncompleteError
+from olmo_eval.common.scoring_time import measure_scoring
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.retry import retry_with_backoff
 
@@ -328,7 +329,8 @@ def build_openai_judge_fn(
             if response_format is not None:
                 kwargs["response_format"] = response_format
             try:
-                response = await client.chat.completions.create(**kwargs)
+                with measure_scoring("judge"):
+                    response = await client.chat.completions.create(**kwargs)
                 return response.choices[0].message.content or ""
             except Exception as e:
                 message = str(e).lower()
@@ -617,7 +619,8 @@ class LLMJudgeScorer(ContextScorer):
         from olmo_eval.inference.errors import first_output
 
         try:
-            results = await provider.agenerate([request], sampling_params)
+            with measure_scoring("judge"):
+                results = await provider.agenerate([request], sampling_params)
             outputs = results[0] if results else []
             if not outputs:
                 return ""
@@ -652,7 +655,10 @@ class LLMJudgeScorer(ContextScorer):
         from olmo_eval.inference.errors import first_output
 
         try:
-            results = await provider.alogprobs([request], SamplingParams(temperature=0, top_p=1))
+            with measure_scoring("judge"):
+                results = await provider.alogprobs(
+                    [request], SamplingParams(temperature=0, top_p=1)
+                )
             outputs = results[0] if results else []
             first_output(outputs)
         except Exception as exc:

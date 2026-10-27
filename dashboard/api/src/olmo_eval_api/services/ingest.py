@@ -67,6 +67,14 @@ MAX_ARTIFACTS_PER_RUN = 10_000
 # URL accepts only the declared size.
 MAX_ARTIFACT_BYTES_PER_RUN = 50 * 1024**3
 MAX_INSTANCES_PER_RUN = 10_000_000
+# Optional task-result fields added after release; left out of the content hash when unset.
+HASH_OPTIONAL_FIELDS = (
+    "generation_counts",
+    "scoring_failures",
+    "scoring_judge_seconds",
+    "scoring_sandbox_seconds",
+    "scoring_compute_seconds",
+)
 _INSTANCE_CHUNK = 500
 _BATCH_CHUNK = 1000
 SIGN_CONCURRENCY = 16
@@ -558,6 +566,9 @@ async def upsert_task_result(
         "first_request_at": req.first_request_at,
         "last_completed_at": req.last_completed_at,
         "attributed_inference_seconds": derive.finite_or_none(req.attributed_inference_seconds),
+        "scoring_judge_seconds": derive.nonneg_finite_or_none(req.scoring_judge_seconds),
+        "scoring_sandbox_seconds": derive.nonneg_finite_or_none(req.scoring_sandbox_seconds),
+        "scoring_compute_seconds": derive.nonneg_finite_or_none(req.scoring_compute_seconds),
         "reported_prompt_tokens_total": req.prompt_tokens_total,
         "reported_completion_tokens_total": req.completion_tokens_total,
         # Replaced when the run completes (finalize_task_result).
@@ -655,9 +666,7 @@ async def _content_hash(session: AsyncSession, run_id: str, req: s.TaskResultIn)
         )
         checksums = {path: md5 for path, md5 in rows}
     request = req.model_dump(mode="json")
-    # Optional fields added after release are left out when unset, so an older
-    # client's re-upload keeps its hash.
-    for optional in ("generation_counts", "scoring_failures"):
+    for optional in HASH_OPTIONAL_FIELDS:
         if request.get(optional) is None:
             request.pop(optional, None)
     body = {"request": request, "files": {p: checksums.get(p) for p in paths}}

@@ -443,6 +443,21 @@ export interface TaskRuntime {
     /** Wall-clock span within the run, in seconds after processing started. */
     span_start_s: number | null;
     span_end_s: number | null;
+    /**
+     * Summed judge model call time while scoring this task. Concurrent calls each count, so it can
+     * exceed wall time. Null means not recorded; 0 means measured with no judge calls.
+     */
+    scoring_judge_seconds: number | null;
+    /**
+     * Summed sandbox operation time while scoring; can exceed wall time. Null means not recorded;
+     * 0 means measured with none.
+     */
+    scoring_sandbox_seconds: number | null;
+    /**
+     * Time running the task's scoring code, summed across scoring threads and processes. Null
+     * means not recorded.
+     */
+    scoring_compute_seconds: number | null;
 }
 
 // ---------------------------------------------------------------------------
