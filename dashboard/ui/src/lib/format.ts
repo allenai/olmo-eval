@@ -176,3 +176,12 @@ export function metricLabel(key: string | null | undefined): string {
 export function pluralize(n: number, one: string, many = `${one}s`): string {
   return `${formatCount(n)} ${n === 1 ? one : many}`;
 }
+
+/** The serving stack, preferring the separate vLLM venv's versions when recorded. */
+export function formatStack(packages: Record<string, string>): string {
+  return ["vllm", "torch", "transformers"]
+    .map((name) => [name, packages[`vllm-venv/${name}`] ?? packages[name]] as const)
+    .filter(([, version]) => version)
+    .map(([name, version]) => `${name} ${version}`)
+    .join(" · ");
+}

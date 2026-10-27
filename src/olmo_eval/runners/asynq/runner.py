@@ -27,10 +27,11 @@ from olmo_eval.runners.asynq.monitoring import (
 from olmo_eval.runners.asynq.preparation import prepare_task_items
 from olmo_eval.runners.asynq.results import (
     aggregate_results,
-    check_hard_failure_gate,
+    check_failure_budget,
     process_results,
     utc_iso,
 )
+from olmo_eval.runners.asynq.runtime import apply_worker_configs
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
@@ -857,14 +858,22 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
 
             # Wait for workers to report their init times (also checks for crashes)
+            worker_configs: dict[str, dict[str, Any]] = {}
             provider_init_seconds = wait_for_init_times(
-                init_queue, num_inference_workers, workers=workers, result_queue=result_queue
+                init_queue,
+                num_inference_workers,
+                workers=workers,
+                result_queue=result_queue,
+                worker_configs=worker_configs,
             )
             if len(provider_init_seconds) != num_inference_workers:
                 raise RuntimeError(
                     f"Expected {num_inference_workers} inference worker(s) to initialize "
                     f"before starting work, got {len(provider_init_seconds)}."
                 )
+
+            self.harness_config = apply_worker_configs(self.harness_config, worker_configs)
+            self._update_metrics_config(experiment_id)
 
             runner_logger.info(
                 f"All {num_inference_workers} inference worker(s) ready; starting queued work"
@@ -956,7 +965,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             try:
                 overrides, sampling_overrides = self._build_task_overrides(spec)
                 # Before prepare_task_items, which loads the data.
-                self._check_scaffold(spec, get_task(spec))
+                configured = get_task(spec, overrides or None)
+                self._check_scaffold(spec, configured)
+                self._check_sandbox(spec, configured)
                 task, task_items = prepare_task_items(
                     spec,
                     self.model_name,
@@ -1060,6 +1071,20 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 f"{f'scaffold={scaffold}' if scaffold else 'no scaffold'}."
             )
 
+    def _check_sandbox(self, spec: str, task: Task) -> None:
+        """Fail before generation if the task runs code and this run's harness has no sandbox.
+
+        Without a sandbox the runner starts no executor, and every execution scorer raises
+        ``SandboxRequiredError`` once generation is done.
+        """
+        if self.harness_config.sandboxes or not _count_execution_scorers(task):
+            return
+        raise ValueError(
+            f"{spec} scores by running code, so it has to run under a harness with sandboxes, "
+            f"for example `--harness codex_universal`; harness {self.harness_config.name!r} "
+            "has none."
+        )
+
     def _build_task_overrides(self, spec: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """Build task and sampling overrides for a given task spec.
 
@@ -1147,7 +1172,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
     @property
     def max_hard_failure_rate(self) -> float:
-        """Fraction of a task's instances allowed to hard-fail before it is failed."""
+        """The failure budget: fraction of a task's instances that may go unscored."""
         configured = self.harness_config.max_hard_failure_rate
         return DEFAULT_MAX_HARD_FAILURE_RATE if configured is None else configured
 
@@ -1213,7 +1238,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
-        check_hard_failure_gate(results)
+        check_failure_budget(results)
         return final_results
 
     def _finalize_and_save(
@@ -1282,6 +1307,10 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 tags=self.upload_config.tags if self.upload_config else (),
             )
             model = model_info_from_provider(self.provider_config, self.attention_backend)
+            if str(self.provider_config.kind) == "sglang":
+                # Runtime identity is unknown until workers initialize. Do not
+                # register a provisional auto-profile hash as an actual model.
+                model["model_hash"] = None
             write_manifest(self.output_dir, build_manifest(run, model))
         except Exception as e:
             logger.warning(f"Could not write the run manifest: {e}")

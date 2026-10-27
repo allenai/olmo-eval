@@ -199,6 +199,15 @@ class MetricMetaIn(_In):
     unit: str | None = None
 
 
+class ScoringFailuresIn(_In):
+    instances_unscored: NonNeg32
+    instances_partially_scored: NonNeg32
+    outputs_unscored: NonNeg32
+    infrastructure: NonNeg32
+    by_type: dict[str, NonNeg32]
+    first_error: str | None = Field(default=None, max_length=500)
+
+
 class TaskResultIn(_In):
     task_name: str = Field(min_length=1)
     task_hash: str = Field(min_length=1, max_length=64)
@@ -214,6 +223,7 @@ class TaskResultIn(_In):
     instances_processed: NonNeg32 | None
     instances_failed: NonNeg32 | None
     generation_counts: dict[str, NonNeg] | None = None
+    scoring_failures: ScoringFailuresIn | None = None
     error: str | None
     error_summary: dict[str, Any] | None
     duration_seconds: float | None
@@ -222,6 +232,9 @@ class TaskResultIn(_In):
     prompt_tokens_total: NonNeg | None = None
     completion_tokens_total: NonNeg | None = None
     attributed_inference_seconds: float | None = None
+    scoring_judge_seconds: float | None = None
+    scoring_sandbox_seconds: float | None = None
+    scoring_compute_seconds: float | None = None
     predictions_path: RelativePath | None
     requests_path: RelativePath | None
     suites: list[str]

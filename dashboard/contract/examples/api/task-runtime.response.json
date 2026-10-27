@@ -115,7 +115,10 @@
         "completion_tokens_total": 48210,
         "seconds_per_1k_instances": 2110.167,
         "span_start_s": 0.12,
-        "span_end_s": 1265.254
+        "span_end_s": 1265.254,
+        "scoring_judge_seconds": null,
+        "scoring_sandbox_seconds": null,
+        "scoring_compute_seconds": null
       }
     },
     {
@@ -146,7 +149,10 @@
         "completion_tokens_total": 30115,
         "seconds_per_1k_instances": 687.5,
         "span_start_s": 0.4,
-        "span_end_s": 1720.8
+        "span_end_s": 1720.8,
+        "scoring_judge_seconds": null,
+        "scoring_sandbox_seconds": null,
+        "scoring_compute_seconds": null
       }
     }
   ],

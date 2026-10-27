@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import multiprocessing as mp
 import os
 import time
-from typing import Any
+from dataclasses import replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.inference.gpu_planner import resolve_visible_devices
+from olmo_eval.runners.asynq.runtime import resolved_worker_config
 from olmo_eval.runners.asynq.types import (
     WORKER_FATAL,
     ResultItem,
+    WorkerReady,
 )
+from olmo_eval.upload.provenance import package_versions
+
+if TYPE_CHECKING:
+    from olmo_eval.inference.providers.sglang import SGLangProvider
 
 logger = get_logger(__name__)
 
@@ -96,22 +105,26 @@ def inference_worker(
             safe_model = model_name.replace("/", "_").replace("\\", "_")
             log_dir = os.path.join(output_dir, "logs", f"vllm_server_{safe_model}")
 
-        # Only inject vllm-specific kwargs for vllm providers
-        vllm_only_overrides: dict[str, Any] = {}
+        # Map worker allocation to each engine without forwarding unrelated options.
+        engine_overrides: dict[str, Any] = {}
         if provider_kind in ("vllm", "vllm_server"):
-            vllm_only_overrides = dict(
+            engine_overrides = dict(
                 tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
                 load_format=load_format,
                 model_loader_extra_config=extra_loader_config,
                 enable_auto_tool_choice=enable_auto_tool_choice or None,
                 log_dir=log_dir,
             )
+        elif provider_kind == "sglang":
+            engine_overrides = dict(
+                tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+            )
 
         harness_config = harness_config.with_provider_overrides(
             max_model_len=max_model_len,
             max_concurrency=max_concurrency,
             tokenizer=tokenizer,
-            **vllm_only_overrides,
+            **engine_overrides,
         )
 
         # Update metrics config with runtime values (output_dir, provider_kind, model_name)
@@ -135,9 +148,6 @@ def inference_worker(
 
             validate_scaffold(harness_config.scaffold)
 
-        # Initialize metrics reporters early so setup errors surface before inference
-        harness.initialize_reporters()
-
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")
 
@@ -157,7 +167,49 @@ def inference_worker(
 
             batch_config = harness_config.batching or BatchConfig()
             batch_config.validate_for_provider(provider_kind)
-            strategy = get_strategy(batch_config)
+            max_batch_sequences = batch_config.max_batch_sequences
+            if batch_config.chunk_size == "auto":
+                if provider_kind == "sglang" and max_batch_sequences is None:
+                    max_batch_sequences = cast(
+                        "SGLangProvider", harness.provider
+                    ).recommended_batch_sequences
+                batch_config = replace(
+                    batch_config,
+                    chunk_size=max_batch_sequences or batch_config.resolved_chunk_size,
+                    max_batch_sequences=max_batch_sequences,
+                )
+            strategy = get_strategy(batch_config, max_batch_sequences=max_batch_sequences)
+            profile = (
+                cast("SGLangProvider", harness.provider).profile_report
+                if provider_kind == "sglang"
+                else None
+            )
+            packages = (
+                {
+                    key: value
+                    for key, value in package_versions().items()
+                    if key in {"sglang", "olmo-sglang", "flash-linear-attention"}
+                }
+                if provider_kind == "sglang"
+                else None
+            )
+            harness_config = resolved_worker_config(
+                harness_config, batch_config, profile=profile, packages=packages
+            )
+            harness.config = harness_config
+            # Reporters must see the resolved model hash, not the requested auto profile.
+            harness.initialize_reporters()
+            if provider_kind == "sglang" and output_dir:
+                profile_dir = Path(output_dir) / "runtime"
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                report = dict(
+                    cast("SGLangProvider", harness.provider).profile_report,
+                    batch_size=batch_config.chunk_size,
+                    max_batch_sequences=max_batch_sequences,
+                )
+                (profile_dir / f"sglang-profile-{worker_id}.json").write_text(
+                    json.dumps(report, indent=2) + "\n"
+                )
 
             concurrency_str = max_concurrency or "unlimited"
             if batch_config.strategy == "streaming":
@@ -172,7 +224,7 @@ def inference_worker(
                 )
 
             if init_queue is not None:
-                init_queue.put((worker_id, init_time))
+                init_queue.put(WorkerReady(worker_id, init_time, harness_config.to_dict()))
 
             if start_event is not None:
                 start_event.wait()

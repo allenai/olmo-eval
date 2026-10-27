@@ -43,12 +43,17 @@ class TaskMetricsEntry(Serializable):
     error_summary: str | None = None
     # How the saved generations ended; see TaskResult.generation_counts.
     generation_counts: dict[str, int] | None = None
+    # Outputs and instances whose scores could not be computed; see TaskResult.
+    scoring_failures: dict[str, Any] | None = None
     # Per-task cost; see TASK_COST_KEYS in runners/common/types.py
     first_request_at: str | None = None
     last_completed_at: str | None = None
     prompt_tokens_total: int | None = None
     completion_tokens_total: int | None = None
     attributed_inference_seconds: float | None = None
+    scoring_judge_seconds: float | None = None
+    scoring_sandbox_seconds: float | None = None
+    scoring_compute_seconds: float | None = None
 
 
 @dataclass
