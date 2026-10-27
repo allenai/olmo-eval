@@ -383,6 +383,7 @@ def _first_instance_error(failed_instances: dict[int, str]) -> str | None:
 
 
 __all__ = [
+    "configure_task",
     "prepare_task_items",
     "build_requests_from_items",
     "finalize_task",

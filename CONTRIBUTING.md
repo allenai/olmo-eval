@@ -94,6 +94,9 @@ results and hashed to identify it.
 - A new optional field must leave existing hashes unchanged when unused, so serialize it
   only when set. Test both that changing the field changes the hash and that an unrelated
   existing task keeps its hash.
+- `tests/evals/tasks/test_task_hashes.py` pins every spec's stored hash. When it fails,
+  regenerate `task_hashes.json` with `--update-task-hashes` and follow the "Pinned
+  hashes" rule in AGENTS.md for when a moved or removed hash needs a compatibility entry.
 - Pin a new dataset's `revision=` when the task is introduced, and pin judge models to
   dated snapshots. Adding a pin later changes the task's identity after results exist.
 - Variant names describe the measurement or regime (`mc`, `rc`, `bpb`, `gen`, `cot`,
