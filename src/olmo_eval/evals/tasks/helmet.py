@@ -15,16 +15,15 @@ Upstream reference: princeton-nlp/HELMET at commit aeadacc6.
 
 import os
 import re
-from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from olmo_eval.common.metrics import AccuracyMetric, NDCGMetric, RecallMetric, RougeLF1Metric
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
 from olmo_eval.data import (
     helmet_alce_loader,
     helmet_icl_loader,
@@ -72,7 +71,6 @@ from olmo_eval.data.ruler_loader import (
     load_ruler_dataset,
 )
 from olmo_eval.data.ruler_tasks import RULER_TASKS
-from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 from olmo_eval.evals.tasks.common.registry import register
 from olmo_eval.evals.tasks.helmet_judge import (
     LONGQA_METRICS,
@@ -81,28 +79,22 @@ from olmo_eval.evals.tasks.helmet_judge import (
     HelmetSummBookJudgedTask,
     HelmetSummJudgedTask,
 )
+from olmo_eval.evals.tasks.ruler import RulerTask, make_ruler_task_class
 
 
-class HelmetTask(Task):
+class HelmetTask(RulerTask):
     """Shared plumbing for HELMET-plus tasks.
 
-    Subclasses implement `_load_dataset` to fetch their data; everything from
-    prompt assembly onward is common, since all HELMET tasks share the same
-    `user_template` / `system_template` prompt shape.
+    Builds on `RulerTask`, which supplies the per-variant config lookup, the
+    instance cache, the completion request with its answer prefix, and raw-text
+    answers. HELMET differs in where data comes from -- subclasses implement
+    `_load_dataset` -- in always rendering prompts from its templates, in the
+    scoring inputs it keeps in metadata, and in sending its chat-format categories
+    as chat requests.
     """
 
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
-        task_name = config.name.removeprefix("helmet_")
-        self.task_name = task_name
-        self.helmet_config = HELMET_TASKS[task_name]
-
-        task_type, context_size_str = task_name.rsplit("__", 1)
-        self.task_type = task_type
-        self.context_size = int(context_size_str)
-
-        self._dataset = None
-        self._templates = None
+    _tasks_registry: dict[str, dict[str, Any]] = HELMET_TASKS
+    _name_prefix: str = "helmet_"
 
     def _load_dataset(self) -> dict[str, Any]:
         """Return the loader payload: `data` plus the HELMET prompt templates."""
@@ -116,25 +108,9 @@ class HelmetTask(Task):
 
         self._dataset = loaded["data"]
         self._templates = {
-            "prompt": loaded["prompt_template"],
             "user": loaded["user_template"],
             "system": loaded["system_template"],
         }
-
-    @property
-    def instances(self) -> Iterator[Instance]:
-        self._load_data()
-
-        if self._instances_cache is not None:
-            yield from self._instances_cache
-            return
-
-        self._instances_cache = []
-        for idx, doc in enumerate(self._dataset):  # type: ignore
-            instance = self.process_doc(cast(dict[str, Any], doc), index=idx)
-            if instance is not None:
-                self._instances_cache.append(instance)
-                yield instance
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         if self._templates is None:
@@ -149,18 +125,18 @@ class HelmetTask(Task):
         # fields and formatting leaves it unchanged
         prepend_text = (
             ""
-            if self.helmet_config.get("use_chat_template")
+            if self.ruler_config.get("use_chat_template")
             else self._templates["system"].format(**doc)
         )
 
         answer = doc.get("answer")
 
-        metadata: dict = {
+        metadata: dict[str, Any] = {
             "id": index,
             "task_type": self.task_type,
             "context_size": self.context_size,
             "prepend_text": prepend_text,
-            "tag": self.helmet_config["tag"],
+            "tag": self.ruler_config["tag"],
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
@@ -192,32 +168,17 @@ class HelmetTask(Task):
     def request_type(self) -> RequestType:
         # HELMET wraps its chat-format categories (LongQA, summarization, cite) in
         # the model's chat template as a single user turn; the rest are completions
-        if self.helmet_config.get("use_chat_template"):
+        if self.ruler_config.get("use_chat_template"):
             return RequestType.CHAT
         return RequestType.COMPLETION
 
     def format_request(self, instance: Instance) -> LMRequest:
-        if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
-
-        if self.request_type == RequestType.CHAT:
+        if self.config.formatter is None and self.request_type == RequestType.CHAT:
             return LMRequest(
                 request_type=RequestType.CHAT,
                 messages=({"role": "user", "content": instance.question},),
             )
-
-        prompt = instance.question
-        prepend_text = (instance.metadata or {}).get("prepend_text", "")
-        if prepend_text:
-            prompt = prompt + "\n" + prepend_text
-
-        return LMRequest(
-            request_type=self.request_type,
-            prompt=prompt,
-        )
-
-    def extract_answer(self, output: LMOutput) -> Any:
-        return output.text
+        return super().format_request(instance)
 
 
 class HelmetJsonKvTask(HelmetTask):
@@ -231,8 +192,8 @@ class HelmetJsonKvTask(HelmetTask):
         huggingface_hub rather than the standard dataset pipeline.
         """
         return load_json_kv_dataset(
-            length_name=self.helmet_config["length_name"],
-            shots=self.helmet_config["shots"],
+            length_name=self.ruler_config["length_name"],
+            shots=self.ruler_config["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -263,8 +224,8 @@ class HelmetIclTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_icl_dataset(
-            icl_dataset=self.helmet_config["icl_dataset"],
-            shots=self.helmet_config["shots"],
+            icl_dataset=self.ruler_config["icl_dataset"],
+            shots=self.ruler_config["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -278,9 +239,9 @@ class HelmetInfbenchTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_infbench_dataset(
-            subset=self.helmet_config["infbench_subset"],
-            max_context_tokens=self.helmet_config["max_context_tokens"],
-            shots=self.helmet_config["shots"],
+            subset=self.ruler_config["infbench_subset"],
+            max_context_tokens=self.ruler_config["max_context_tokens"],
+            shots=self.ruler_config["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -375,8 +336,8 @@ class HelmetNarrativeQaTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_narrativeqa_dataset(
-            max_context_tokens=self.helmet_config["max_context_tokens"],
-            shots=self.helmet_config["shots"],
+            max_context_tokens=self.ruler_config["max_context_tokens"],
+            shots=self.ruler_config["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -394,13 +355,13 @@ class HelmetKiltTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_kilt_dataset(
-            task=self.helmet_config["kilt_task"],
-            length_name=self.helmet_config["length_name"],
-            shots=self.helmet_config["shots"],
-            max_samples=self.helmet_config["max_questions"],
+            task=self.ruler_config["kilt_task"],
+            length_name=self.ruler_config["length_name"],
+            shots=self.ruler_config["shots"],
+            max_samples=self.ruler_config["max_questions"],
             seed=self.config.seed,
-            popularity_threshold=self.helmet_config.get("popularity_threshold"),
-            max_prompt_tokens=self.helmet_config["max_prompt_tokens"],
+            popularity_threshold=self.ruler_config.get("popularity_threshold"),
+            max_prompt_tokens=self.ruler_config["max_prompt_tokens"],
         )
 
     def extract_answer(self, output: LMOutput) -> Any:
@@ -415,8 +376,8 @@ class HelmetMsMarcoTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_msmarco_dataset(
-            length_name=self.helmet_config["length_name"],
-            shots=self.helmet_config["shots"],
+            length_name=self.ruler_config["length_name"],
+            shots=self.ruler_config["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -431,8 +392,8 @@ class HelmetMultiLexSumTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_multi_lexsum_dataset(
-            max_context_tokens=self.helmet_config["max_context_tokens"],
-            shots=self.helmet_config["shots"],
+            max_context_tokens=self.ruler_config["max_context_tokens"],
+            shots=self.ruler_config["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -448,9 +409,9 @@ class HelmetAlceTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_alce_dataset(
-            task=self.helmet_config["alce_task"],
-            length_name=self.helmet_config["length_name"],
-            shots=self.helmet_config["shots"],
+            task=self.ruler_config["alce_task"],
+            length_name=self.ruler_config["length_name"],
+            shots=self.ruler_config["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -466,7 +427,7 @@ class HelmetRulerTask(HelmetTask):
     """
 
     def _load_dataset(self) -> dict[str, Any]:
-        ruler_name = f"{self.helmet_config['ruler_task']}__{self.context_size}"
+        ruler_name = f"{self.ruler_config['ruler_task']}__{self.context_size}"
         return load_ruler_dataset(
             task_name=ruler_name,
             data_path=os.path.join(download_ruler_data(), RULER_TASKS[ruler_name]["data"]),
@@ -584,40 +545,34 @@ def _task_settings(task_cfg: dict) -> dict[str, Any]:
     return {"helmet": task_cfg, "sources": sources, "templates": templates}
 
 
-def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
+# Upstream's vLLM and API backends stop on "\n" and "\n\n"; its HF backend stops on
+# the token ids of the newline spellings in RULER_STOP_SEQUENCES. As stop strings,
+# the newline alone covers them all.
+HELMET_STOP_SEQUENCES = ("\n",)
+
+
+def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
     """Create a task subclass for a HELMET-plus task variant.
 
-    Subclasses carry only class-level attributes (metrics, sampling_params, limit);
-    all runtime state is derived from config.name inside HelmetTask.__init__.
+    The kind's task class, behind its judge for the judged tasks, with HELMET's
+    metrics, stop sequences and task settings.
     """
-    bases: tuple[type, ...] = (_TASK_CLASSES[task_cfg["kind"]],)
+    metrics, primary_name = _TASK_METRICS[task_cfg["metrics_key"]]
     judged_cls = _JUDGED_TASK_CLASSES.get(task_cfg["metrics_key"])
-    if judged_cls is not None:
-        bases = (judged_cls, *bases)
-    metrics, primary_metric = _TASK_METRICS[task_cfg["metrics_key"]]
-    # Hand over the Metric itself, not its name: TaskConfig only resolves a
-    # Metric instance, and an unresolved primary drops the task out of its
-    # suite's average-of-averages.
-    primary_metric = next(m for m in metrics if m.name == primary_metric)
-
-    stop_sequences = ("\n",) if task_cfg.get("stop_new_line") else None
-
-    return type(
-        f"Helmet_{task_name}",
-        bases,
-        {
-            "__module__": __name__,
-            "metrics": metrics,
-            "primary_metric": primary_metric,
-            "sampling_params": SamplingParams(
-                temperature=0.0,
-                top_p=1.0,
-                max_tokens=task_cfg["max_gen_toks"],
-                stop_sequences=stop_sequences,
-            ),
-            "limit": task_cfg["limit"],
-            "task_settings": _task_settings(task_cfg),
-        },
+    return make_ruler_task_class(
+        task_name,
+        task_cfg,
+        base_cls=_TASK_CLASSES[task_cfg["kind"]],
+        class_prefix="Helmet",
+        limit=task_cfg["limit"],
+        metrics=metrics,
+        # Hand over the Metric itself, not its name: TaskConfig only resolves a
+        # Metric instance, and an unresolved primary drops the task out of its
+        # suite's average-of-averages.
+        primary_metric=next(m for m in metrics if m.name == primary_name),
+        stop_sequences=HELMET_STOP_SEQUENCES,
+        extra_bases=() if judged_cls is None else (judged_cls,),
+        attrs={"task_settings": _task_settings(task_cfg)},
     )
 
 

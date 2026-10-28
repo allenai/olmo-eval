@@ -242,7 +242,6 @@ def load_infbench_dataset(
 
     return {
         "data": rows,
-        "prompt_template": spec["user_template"] + "\n\n" + spec["system_template"],
         "user_template": spec["user_template"],
         "system_template": spec["system_template"],
     }

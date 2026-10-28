@@ -221,7 +221,6 @@ def load_kilt_dataset(
 
     return {
         "data": rows,
-        "prompt_template": prompt_template,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }

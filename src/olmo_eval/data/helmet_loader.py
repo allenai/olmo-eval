@@ -199,7 +199,6 @@ def load_json_kv_dataset(
 
     return {
         "data": data,
-        "prompt_template": _USER_TEMPLATE + "\n" + _SYSTEM_TEMPLATE,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }

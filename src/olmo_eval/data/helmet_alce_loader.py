@@ -120,7 +120,6 @@ def load_alce_dataset(
 
     return {
         "data": records,
-        "prompt_template": _USER_TEMPLATE + "\n\n" + _SYSTEM_TEMPLATE,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }

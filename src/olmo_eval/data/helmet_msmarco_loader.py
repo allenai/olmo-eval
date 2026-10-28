@@ -183,7 +183,6 @@ def load_msmarco_dataset(
 
     return {
         "data": [build(r) for r in data],
-        "prompt_template": _USER_TEMPLATE + "\n" + _SYSTEM_TEMPLATE,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }

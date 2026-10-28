@@ -193,7 +193,6 @@ def load_multi_lexsum_dataset(
 
     return {
         "data": data,
-        "prompt_template": _USER_TEMPLATE + "\n\n" + _SYSTEM_TEMPLATE,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }
