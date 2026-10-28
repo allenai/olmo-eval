@@ -1,0 +1,232 @@
+"""Owned attached-process output and deployment cleanup regressions."""
+
+import asyncio
+import gc
+import logging
+import subprocess
+import sys
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+pytest.importorskip("swerex")
+
+from olmo_eval.harness.sandbox.docker_deployment import OwnedDockerDeployment
+from olmo_eval.harness.sandbox.executor import _run_with_progress
+
+
+@pytest.mark.anyio
+async def test_attached_output_is_drained_before_readiness_and_bounded(monkeypatch):
+    from swerex.deployment.docker import DockerDeployment
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import os; os.write(1,b'START'+b'x'*8388608+b'END'); "
+            "os.write(2,b'ERROR'+b'y'*8388608+b'LAST')",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    deployment = OwnedDockerDeployment(image="unused", port=58123)
+    deployment._container_process = process
+
+    async def ready(self, timeout):
+        await asyncio.to_thread(process.wait, timeout=5)
+
+    monkeypatch.setattr(DockerDeployment, "_wait_until_alive", ready)
+    try:
+        await deployment._wait_until_alive(timeout=5)
+        for capture in deployment._captures:
+            await asyncio.to_thread(capture._thread.join, 1)
+        for stream, prefix, suffix in (
+            (process.stdout, b"START", b"END"),
+            (process.stderr, b"ERROR", b"LAST"),
+        ):
+            output = stream.read()
+            assert output.startswith(prefix) and output.endswith(suffix)
+            assert b"[Output truncated]" in output
+            assert len(output) <= 512 * 1024 + 100
+    finally:
+        await deployment.stop()
+    assert all(not capture._thread.is_alive() for capture in (process.stdout, process.stderr))
+
+
+@pytest.mark.anyio
+async def test_startup_failure_keeps_diagnostics_and_stops_process(monkeypatch, caplog):
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import os,time; os.write(2,b'startup-fixture-error'); time.sleep(60)",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    deployment = OwnedDockerDeployment(
+        image="unused", port=58123, logger=logging.getLogger("startup-fixture")
+    )
+    deployment._container_process = process
+
+    async def failed(*args, **kwargs):
+        for _ in range(100):
+            if b"startup-fixture-error" in process.stderr.read():
+                raise TimeoutError("readiness fixture")
+            await asyncio.sleep(0.01)
+        pytest.fail("Attached stderr was not drained")
+
+    monkeypatch.setattr("swerex.deployment.docker._wait_until_alive", failed)
+    with pytest.raises(TimeoutError, match="readiness fixture"):
+        await deployment._wait_until_alive(timeout=1)
+    assert process.poll() is not None
+    assert "startup-fixture-error" in caplog.text
+    await deployment.stop()
+
+
+class Remover:
+    def __init__(self, mode):
+        self.mode = mode
+        self.returncode = None
+        self.killed = False
+
+    async def wait(self):
+        if self.mode == "timeout" and not self.killed:
+            await asyncio.sleep(60)
+        self.returncode = 1 if self.mode == "fail" else (-9 if self.killed else 0)
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("close_mode", ["ok", "raise", "timeout"])
+@pytest.mark.parametrize("remove_mode", ["ok", "fail", "timeout"])
+async def test_cleanup_is_bounded_idempotent_and_finalized(monkeypatch, close_mode, remove_mode):
+    calls = []
+
+    async def close():
+        calls.append("close")
+        if close_mode == "raise":
+            raise ConnectionRefusedError("closed server")
+        if close_mode == "timeout":
+            await asyncio.sleep(60)
+
+    deployment = OwnedDockerDeployment(image="unused", port=58123)
+    deployment._runtime = SimpleNamespace(close=close)
+    deployment._container_name = "owned-fixture"
+    process = SimpleNamespace(poll=lambda: None, kill=Mock(), wait=Mock(return_value=0))
+    deployment._container_process = process
+    remover = Remover(remove_mode)
+
+    async def create(*args, **kwargs):
+        assert args == ("docker", "rm", "-f", "owned-fixture")
+        return remover
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", create)
+    monkeypatch.setattr("olmo_eval.harness.sandbox.docker_deployment._CLOSE_TIMEOUT", 0.01)
+    monkeypatch.setattr("olmo_eval.harness.sandbox.docker_deployment._REMOVE_TIMEOUT", 0.01)
+    for _ in range(2):
+        if remove_mode == "ok":
+            await asyncio.wait_for(deployment.stop(), timeout=1)
+        else:
+            with pytest.raises(RuntimeError, match="confirm removal"):
+                await asyncio.wait_for(deployment.stop(), timeout=1)
+    assert calls == ["close"]
+    process.kill.assert_called_once()
+    assert deployment._runtime is None and deployment._container_process is None
+    if remove_mode == "timeout":
+        assert remover.killed
+    del deployment
+    gc.collect()
+    await asyncio.sleep(0)
+    assert calls == ["close"]
+
+
+@pytest.mark.anyio
+async def test_cancellation_waits_for_owned_cleanup_and_gc_creates_no_task(monkeypatch):
+    entered, finish = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def close():
+        calls.append("close")
+        entered.set()
+        await finish.wait()
+
+    deployment = OwnedDockerDeployment(image="unused", port=58123)
+    deployment._runtime = SimpleNamespace(close=close)
+    task = asyncio.create_task(deployment.stop())
+    await entered.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await deployment.stop()
+    before = asyncio.all_tasks()
+    del deployment
+    gc.collect()
+    await asyncio.sleep(0)
+    assert asyncio.all_tasks() == before
+    assert calls == ["close"]
+
+
+@pytest.mark.anyio
+async def test_progress_cancellation_awaits_the_startup_task():
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def start():
+        entered.set()
+        try:
+            await asyncio.sleep(60)
+        finally:
+            cancelled.set()
+
+    task = asyncio.create_task(_run_with_progress(start(), "fixture", interval=0.01))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cancelled.is_set()
+
+
+@pytest.mark.anyio
+async def test_deployment_can_restart_after_completed_cleanup(monkeypatch):
+    from swerex.deployment.docker import DockerDeployment
+
+    calls = []
+
+    async def close():
+        calls.append("close")
+
+    async def start(self):
+        self._runtime = SimpleNamespace(close=close)
+
+    monkeypatch.setattr(DockerDeployment, "start", start)
+    deployment = OwnedDockerDeployment(image="unused", port=58123)
+    for _ in range(2):
+        await deployment.start()
+        await deployment.stop()
+    assert calls == ["close", "close"]
+
+
+@pytest.mark.anyio
+async def test_cleanup_preserves_container_and_image_options(monkeypatch):
+    deployment = OwnedDockerDeployment(
+        image="unused", port=58123, remove_container=False, remove_images=True
+    )
+    deployment._container_name = "owned-fixture"
+    commands = []
+
+    async def create(*args, **kwargs):
+        commands.append(args)
+        return Remover("ok")
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", create)
+    await deployment.stop()
+    assert commands == [("docker", "kill", "owned-fixture"), ("docker", "rmi", "unused")]

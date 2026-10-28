@@ -403,3 +403,24 @@ async def test_large_payload_does_not_use_runtime_argv(sandbox, kind):
     else:
         result = await sandbox.execute_command(f"printf '%s' '{payload}' | wc -c", timeout=10)
     assert result.success and int(result.output.strip()) == len(payload)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("stream", [1, 2])
+async def test_runtime_log_flood_does_not_block_file_staging(sandbox, stream):
+    code = (
+        "import os\n"
+        f"fd = os.open('/proc/1/fd/{stream}', os.O_WRONLY)\n"
+        "try:\n"
+        "    for _ in range(128): os.write(fd, b'x' * 65536)\n"
+        "finally: os.close(fd)\n"
+    )
+    flooded = await asyncio.wait_for(sandbox.execute_code(code, timeout=3), timeout=15)
+    assert flooded.success, flooded.error
+    staged = await asyncio.wait_for(
+        sandbox.execute_with_files(
+            "cat /tmp/after-log-flood", {"/tmp/after-log-flood": "responsive"}, timeout=3
+        ),
+        timeout=10,
+    )
+    assert staged.success and staged.output == "responsive"
