@@ -15,7 +15,7 @@ from swerex.deployment.docker import DockerDeployment
 
 _CAPTURE_BYTES = 256 * 1024
 _CLOSE_TIMEOUT = 2.0
-_REMOVE_TIMEOUT = 3.0
+_REMOVE_TIMEOUT = 10.0
 _PROCESS_TIMEOUT = 2.0
 
 
