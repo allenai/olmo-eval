@@ -3,6 +3,7 @@
 import asyncio
 import gc
 import logging
+import os
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ import pytest
 
 pytest.importorskip("swerex")
 
-from olmo_eval.harness.sandbox.docker_deployment import OwnedDockerDeployment
+from olmo_eval.harness.sandbox.docker_deployment import OwnedDockerDeployment, _CapturedPipe
 from olmo_eval.harness.sandbox.executor import _run_with_progress
 
 
@@ -52,6 +53,63 @@ async def test_attached_output_is_drained_before_readiness_and_bounded(monkeypat
     finally:
         await deployment.stop()
     assert all(not capture._thread.is_alive() for capture in (process.stdout, process.stderr))
+
+
+def test_attached_pipe_drains_a_high_file_descriptor():
+    fcntl = pytest.importorskip("fcntl")
+    resource = pytest.importorskip("resource")
+    minimum_fd = 1200
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft <= minimum_fd:
+        if hard != resource.RLIM_INFINITY and hard <= minimum_fd:
+            pytest.skip("File descriptor limit cannot support a high descriptor")
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (minimum_fd + 1, hard))
+        except (OSError, ValueError) as exc:
+            pytest.skip(f"Cannot raise the file descriptor limit: {exc}")
+    read_fd = write_fd = high_fd = None
+    try:
+        read_fd, write_fd = os.pipe()
+        high_fd = fcntl.fcntl(read_fd, fcntl.F_DUPFD, minimum_fd)
+        assert high_fd >= minimum_fd
+        payload = b"high-descriptor startup diagnostics"
+        os.write(write_fd, payload)
+        os.close(write_fd)
+        write_fd = None
+        stream = os.fdopen(high_fd, "rb", buffering=0)
+        high_fd = None
+        capture = _CapturedPipe(stream)
+        try:
+            capture._thread.join(timeout=2)
+            assert not capture._thread.is_alive()
+            assert capture.error is None
+            assert capture.read() == payload
+        finally:
+            capture.close()
+        assert stream.closed
+    finally:
+        for descriptor in (read_fd, write_fd, high_fd):
+            if descriptor is not None:
+                os.close(descriptor)
+        if soft <= minimum_fd:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+
+
+def test_attached_pipe_records_unexpected_reader_errors(monkeypatch, tmp_path):
+    error = ValueError("selector setup failed")
+
+    def failed_selector():
+        raise error
+
+    monkeypatch.setattr(
+        "olmo_eval.harness.sandbox.docker_deployment.selectors.DefaultSelector", failed_selector
+    )
+    stream = (tmp_path / "capture").open("w+b")
+    capture = _CapturedPipe(stream)
+    capture._thread.join(timeout=2)
+    assert not capture._thread.is_alive()
+    assert capture.error is error
+    assert stream.closed
 
 
 @pytest.mark.anyio
