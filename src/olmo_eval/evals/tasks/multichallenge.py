@@ -31,8 +31,8 @@ snapshot, which is the default here. Scale's current leaderboard judges with
 Gemini 2.5 Pro, so its numbers are not directly comparable. The paper asks for a
 structured reply; here the verdict is read from plain text, so any chat model can
 judge. Change the judge with ``-o judge_model=<model>`` (and
-``-o judge_reasoning_effort=<effort>`` for reasoning judges), or for every judge task
-in a run with ``OLMO_EVAL_JUDGE=<model>[:<effort>]``; a task override wins. The
+``-o judge_reasoning_effort=<effort>`` for reasoning judges), or for every judged task
+in a run with ``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]``; a task override wins. The
 judge settings are part of the task hash.
 
 Examples::
@@ -75,7 +75,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.scorers.llm_judge import JudgeFn
+from olmo_eval.common.scorers.llm_judge import Judge
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -244,7 +244,7 @@ class MultiChallenge(JudgedTask):
             messages=tuple(instance.metadata["messages"]),
         )
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn: JudgeFn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge: Judge) -> float:
         """Judge one output; an unfinished response fails without the judge."""
         answer = self._judged_answer(output)
         truncated = is_truncated(output)
@@ -261,9 +261,7 @@ class MultiChallenge(JudgedTask):
             prompt = MULTICHALLENGE_JUDGE_PROMPT.format(
                 response=answer, criteria=response.instance.question
             )
-            verdict = await self._judge_output(
-                output, judge_fn, prompt, parse_verdict, judge_result
-            )
+            verdict = await self._judge_output(output, judge, prompt, parse_verdict, judge_result)
             judge_result["verdict"] = verdict
             passed = verdict == pass_criteria
 

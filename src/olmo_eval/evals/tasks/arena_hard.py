@@ -30,8 +30,8 @@ The default judge is ``gpt-4.1-2025-04-14``, the snapshot behind upstream's GPT-
 leaderboard, called at temperature 0 with upstream's prompts. Upstream's official
 judge is Gemini 2.5, whose scores run higher; compare a score only with others from
 the same judge. Change the judge with ``-o judge_model=<model>`` (and
-``-o judge_reasoning_effort=<effort>``), or for every judge task in a run with
-``OLMO_EVAL_JUDGE=<model>[:<effort>]``; a task override wins. The judge settings
+``-o judge_reasoning_effort=<effort>``), or for every judged task in a run with
+``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]``; a task override wins. The judge settings
 are part of the task configuration and hash.
 
 Scoring
@@ -83,7 +83,7 @@ from typing import Any, ClassVar
 import tiktoken
 
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.scorers.llm_judge import JudgeFn
+from olmo_eval.common.scorers.llm_judge import Judge
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -502,7 +502,7 @@ class _ArenaHardV2(JudgedTask):
             messages=({"role": "user", "content": instance.question},),
         )
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn: JudgeFn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge: Judge) -> float:
         """Judge one output in both positions, record its battles, and return its win rate."""
         answer = self._judged_answer(output)
         instance = response.instance
@@ -525,7 +525,7 @@ class _ArenaHardV2(JudgedTask):
             )
             verdict = await self._judge_output(
                 output,
-                judge_fn,
+                judge,
                 prompt,
                 parse_verdict,
                 judge_result,

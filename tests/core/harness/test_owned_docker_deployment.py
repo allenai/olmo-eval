@@ -17,6 +17,11 @@ from olmo_eval.harness.sandbox.docker_deployment import OwnedDockerDeployment, _
 from olmo_eval.harness.sandbox.executor import _run_with_progress
 
 
+@pytest.fixture(autouse=True)
+def no_machine_runtime_aliases(monkeypatch):
+    monkeypatch.setattr("olmo_eval.harness.sandbox.docker_deployment.shutil.which", lambda _: None)
+
+
 @pytest.mark.anyio
 async def test_attached_output_is_drained_before_readiness_and_bounded(monkeypatch):
     from swerex.deployment.docker import DockerDeployment
@@ -223,6 +228,56 @@ async def test_cleanup_waits_for_slow_successful_container_removal(monkeypatch):
     await deployment.stop()
     assert remover.returncode == 0
     assert not remover.killed
+    assert deployment._container_name is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("runtime", "aliased"),
+    [("docker", False), ("podman", False), ("docker", True)],
+    ids=["docker", "podman", "docker-podman-symlink"],
+)
+async def test_force_removal_does_not_wait_for_container_stop_grace(
+    monkeypatch, tmp_path, runtime, aliased
+):
+    docker = tmp_path / "docker"
+    podman = tmp_path / "podman"
+    podman.touch()
+    if aliased:
+        docker.symlink_to(podman)
+    else:
+        docker.touch()
+    monkeypatch.setattr(
+        "olmo_eval.harness.sandbox.docker_deployment.shutil.which",
+        lambda name: str(tmp_path / name),
+    )
+    uses_podman = runtime == "podman" or aliased
+
+    class ForceRemover(Remover):
+        def __init__(self, arguments):
+            super().__init__("ok")
+            self.arguments = arguments
+
+        async def wait(self):
+            # Podman force-removal honors the container's stop grace by default.
+            immediate = self.arguments[3:5] == ("--time", "0")
+            if uses_podman and not immediate and not self.killed:
+                await asyncio.sleep(60)
+            return await super().wait()
+
+    commands = []
+
+    async def create(*args, **kwargs):
+        commands.append(args)
+        return ForceRemover(args)
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", create)
+    monkeypatch.setattr("olmo_eval.harness.sandbox.docker_deployment._REMOVE_TIMEOUT", 0.01)
+    deployment = OwnedDockerDeployment(image="unused", port=58123, container_runtime=runtime)
+    deployment._container_name = "owned-fixture"
+    await deployment.stop()
+    options = ("--time", "0") if uses_podman else ()
+    assert commands == [(runtime, "rm", "-f", *options, "owned-fixture")]
     assert deployment._container_name is None
 
 
