@@ -178,11 +178,21 @@ class HelmetTask(Task):
 
     @property
     def request_type(self) -> RequestType:
+        # HELMET wraps its chat-format categories (LongQA, summarization, cite) in
+        # the model's chat template as a single user turn; the rest are completions
+        if self.helmet_config.get("use_chat_template"):
+            return RequestType.CHAT
         return RequestType.COMPLETION
 
     def format_request(self, instance: Instance) -> LMRequest:
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, self.get_fewshot())
+
+        if self.request_type == RequestType.CHAT:
+            return LMRequest(
+                request_type=RequestType.CHAT,
+                messages=({"role": "user", "content": instance.question},),
+            )
 
         prompt = instance.question
         prepend_text = (instance.metadata or {}).get("prepend_text", "")
@@ -595,6 +605,9 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
             ),
             "limit": task_cfg["limit"],
             "task_settings": _task_settings(task_cfg),
+            # the judged tasks call the OpenAI judge at scoring time, so a Beaker
+            # launch must mount the key up front rather than fail after generation
+            "required_secrets": ("OPENAI_API_KEY",) if task_cfg.get("judged") else (),
         },
     )
 

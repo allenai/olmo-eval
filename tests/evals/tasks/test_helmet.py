@@ -711,3 +711,45 @@ def test_helmet_ruler_tasks_render_helmets_prompt(tmp_path, monkeypatch):
     assert budgets == {"niah_mk_2": 50, "niah_mk_3": 100, "niah_mv": 50}
     sources = task.config.to_dict()["task_settings"]["sources"]
     assert sources["ruler_data"].startswith("allenai/ruler_data@")
+
+
+@pytest.mark.parametrize(
+    ("task_name", "chat"),
+    [
+        ("helmet_infbench_qa_eng__8192", True),
+        ("helmet_narrativeqa__8192", True),
+        ("helmet_alce_asqa__8192", True),
+        ("helmet_multi_lexsum__8192", True),
+        ("helmet_kilt_nq__8192", False),
+        ("helmet_json_kv__8192", False),
+    ],
+)
+def test_chat_template_tasks_send_a_single_user_turn(task_name, chat):
+    """HELMET's chat-format categories go out as one user message for the server
+    to wrap in the chat template, with no answer prefix; the rest stay completions
+    with the prefix on its own line."""
+    from olmo_eval.common.types import RequestType
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    task = get_task(task_name)
+    prepend_text = "" if chat else "Answer:"
+    instance = Instance(question="CONTEXT\nQuestion: q", metadata={"prepend_text": prepend_text})
+    request = task.format_request(instance)
+
+    if chat:
+        assert request.request_type == RequestType.CHAT
+        assert request.messages == ({"role": "user", "content": "CONTEXT\nQuestion: q"},)
+        assert request.prompt == ""
+    else:
+        assert request.request_type == RequestType.COMPLETION
+        assert request.messages == ()
+        assert request.prompt == "CONTEXT\nQuestion: q\nAnswer:"
+
+
+def test_judged_tasks_require_the_openai_key():
+    """Only the LLM-judged tasks ask the launcher for OPENAI_API_KEY."""
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    for name, config in HELMET_TASKS.items():
+        expected = ("OPENAI_API_KEY",) if config.get("judged") else ()
+        assert type(get_task(f"helmet_{name}")).required_secrets == expected, name
