@@ -5,7 +5,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import TRUNCATABLE_SPAN_KEY, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.providers.vllm import VLLMProvider
 
 
@@ -55,6 +55,14 @@ class FakeTokenizer:
             }
         )
         return [ord(char) for char in text]
+
+    def __call__(
+        self, text: str, add_special_tokens: bool = False, return_offsets_mapping: bool = False
+    ) -> dict[str, list]:
+        encoded: dict[str, list] = {"input_ids": [ord(char) for char in text]}
+        if return_offsets_mapping:
+            encoded["offset_mapping"] = [(i, i + 1) for i in range(len(text))]
+        return encoded
 
 
 class FakeLLM:
@@ -159,3 +167,37 @@ def test_generate_preserves_termination_without_logprobs(fake_provider) -> None:
     output = provider.generate([request], SamplingParams(max_tokens=1))[0][0]
     assert output.metadata["finish_reason"] == "length"
     assert output.metadata["completion_tokens"] == 1
+
+
+def test_generate_cuts_the_end_of_the_truncatable_span_to_fit(fake_provider) -> None:
+    """Like HELMET's tokenize(): drop the span's last tokens until prompt + generation
+    fit the context, keeping the text around the span."""
+    provider, llm, _ = fake_provider
+    provider._max_length = 20
+    prompt = "Head:" + "abcdefghij" + "|Tail"  # 20 one-character tokens
+    request = LMRequest(
+        request_type=RequestType.COMPLETION,
+        prompt=prompt,
+        metadata={TRUNCATABLE_SPAN_KEY: (5, 15)},
+    )
+
+    output = provider.generate([request], SamplingParams(max_tokens=4))[0][0]
+
+    assert llm.generate_calls[0]["prompts"] == ["Head:abcdef|Tail"]
+    assert output.metadata["prompt_truncated_tokens"] == 4
+
+
+def test_generate_leaves_a_fitting_or_spanless_prompt_alone(fake_provider) -> None:
+    provider, llm, _ = fake_provider
+    provider._max_length = 20
+    fits = LMRequest(
+        request_type=RequestType.COMPLETION,
+        prompt="Head:abc|Tail",
+        metadata={TRUNCATABLE_SPAN_KEY: (5, 8)},
+    )
+    spanless = LMRequest(request_type=RequestType.COMPLETION, prompt="x" * 30)
+
+    outputs = provider.generate([fits, spanless], SamplingParams(max_tokens=4))
+
+    assert llm.generate_calls[0]["prompts"] == ["Head:abc|Tail", "x" * 30]
+    assert all("prompt_truncated_tokens" not in o[0].metadata for o in outputs)

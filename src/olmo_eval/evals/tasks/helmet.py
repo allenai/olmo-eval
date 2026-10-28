@@ -16,7 +16,8 @@ Upstream reference: princeton-nlp/HELMET at commit aeadacc6.
 import json
 import os
 import re
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.metrics import AccuracyMetric, NDCGMetric, RecallMetric, RougeLF1Metric
@@ -24,7 +25,14 @@ from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
+from olmo_eval.common.types import (
+    TRUNCATABLE_SPAN_KEY,
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+)
 from olmo_eval.data import (
     helmet_alce_loader,
     helmet_icl_loader,
@@ -73,7 +81,7 @@ from olmo_eval.data.ruler_loader import (
 )
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import TaskConfig
-from olmo_eval.evals.tasks.common.registry import register
+from olmo_eval.evals.tasks.common.registry import register, register_variant
 from olmo_eval.evals.tasks.helmet_judge import (
     LONGQA_METRICS,
     SUMM_METRICS,
@@ -82,6 +90,21 @@ from olmo_eval.evals.tasks.helmet_judge import (
     HelmetSummJudgedTask,
 )
 from olmo_eval.evals.tasks.ruler import RulerTask, make_ruler_task_class
+
+_CONTEXT_MARK = "\x00helmet-context\x00"
+
+
+def _context_span(template: str, doc: dict[str, Any]) -> tuple[int, int] | None:
+    """The ``(start, end)`` characters of ``doc["context"]`` in the rendered template.
+
+    The context is located by rendering the template once with a marker in its
+    place, so the span is exact even when other fields repeat its text.
+    """
+    context = doc.get("context")
+    if not isinstance(context, str) or "{context}" not in template:
+        return None
+    start = template.format(**{**doc, "context": _CONTEXT_MARK}).index(_CONTEXT_MARK)
+    return start, start + len(context)
 
 
 class HelmetTask(RulerTask):
@@ -97,7 +120,13 @@ class HelmetTask(RulerTask):
 
     _tasks_registry: dict[str, dict[str, Any]] = HELMET_TASKS
     _name_prefix: str = "helmet_"
-    answer_prefix_separator = ANSWER_PREFIX_SEPARATOR
+    #: Joins the question and the answer prefix when a chat-format task runs in base
+    #: mode: upstream's `prompt_template` for that loader (data.py).
+    base_answer_prefix_separator: str = "\n"
+
+    @property
+    def answer_prefix_separator(self) -> str:  # type: ignore[override]
+        return self.base_answer_prefix_separator if self.base_mode else ANSWER_PREFIX_SEPARATOR
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
@@ -158,6 +187,7 @@ class HelmetTask(RulerTask):
             raise RuntimeError("Templates not loaded. Call _load_data() first.")
 
         question = self._templates["user"].format(**doc)
+        context_span = _context_span(self._templates["user"], doc)
 
         # With a chat template the answer prefix is left off: HELMET wraps the
         # user turn alone in the chat template and adds no partial assistant turn.
@@ -179,6 +209,8 @@ class HelmetTask(RulerTask):
             "prepend_text": prepend_text,
             "tag": self.ruler_config["tag"],
         }
+        if context_span is not None:
+            metadata["context_span"] = context_span
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
         for scoring_field in ("qa_pairs", "qampari_answers"):
@@ -219,7 +251,39 @@ class HelmetTask(RulerTask):
                 request_type=RequestType.CHAT,
                 messages=({"role": "user", "content": instance.question},),
             )
-        return super().format_request(instance)
+        request = super().format_request(instance)
+        span = (instance.metadata or {}).get("context_span")
+        if self.config.formatter is not None or span is None:
+            return request
+        # Upstream's tokenize() (model_utils.py) cuts the end of the context, measured
+        # with the evaluated model's tokenizer, until the prompt leaves room for the
+        # generation; the provider does that cut, since only it has that tokenizer.
+        # The completion prompt starts with the rendered question, so the span holds.
+        return replace(request, metadata={**(request.metadata or {}), TRUNCATABLE_SPAN_KEY: span})
+
+    @property
+    def base_mode(self) -> bool:
+        """Whether a chat-format task runs as a completion, as HELMET runs base models.
+
+        Upstream's `use_chat_template` is a run flag, set for instruct models and
+        cleared for base models; the `:base` variant clears it in the task settings.
+        """
+        return bool(self.ruler_config.get("use_chat_template")) and not self.settings.get(
+            "use_chat_template"
+        )
+
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        # In completion mode upstream's eval.py prepends the answer prefix to each
+        # output before parsing ("since we are autocompleting 'Answer:' in the
+        # input, then we should prepend the system prompt to the output as well").
+        if self.base_mode:
+            for response in responses:
+                prefix = (response.instance.metadata or {}).get("prepend_text", "")
+                for output in response.outputs:
+                    if prefix and "helmet_answer_prefix" not in output.metadata:
+                        output.metadata["helmet_answer_prefix"] = prefix
+                        output.text = prefix + output.text
+        super()._extract_answers(responses)
 
 
 class HelmetJsonKvTask(HelmetTask):
@@ -277,6 +341,8 @@ class HelmetIclTask(HelmetTask):
 
 class HelmetInfbenchTask(HelmetTask):
     """HELMET LongQA task: answer a question about a book-length story."""
+
+    base_answer_prefix_separator = "\n\n"
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_infbench_dataset(
@@ -431,6 +497,8 @@ class HelmetMsMarcoTask(HelmetTask):
 class HelmetMultiLexSumTask(HelmetTask):
     """HELMET summarization task: summarize the filings of a civil rights lawsuit."""
 
+    base_answer_prefix_separator = "\n\n"
+
     def _load_dataset(self) -> dict[str, Any]:
         return load_multi_lexsum_dataset(
             max_context_tokens=self.settings["max_context_tokens"],
@@ -447,6 +515,8 @@ class HelmetAlceTask(HelmetTask):
     citations actually support the claims is AutoAIS's job, which needs an NLI
     model this task does not yet wire up.
     """
+
+    base_answer_prefix_separator = "\n\n"
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_alce_dataset(
@@ -656,3 +726,20 @@ for _task_name, _task_config in HELMET_TASKS.items():
     # Inject into module globals so pickle can find the class by name
     globals()[_cls.__name__] = _cls
     register(f"helmet_{_task_name}")(_cls)
+
+#: Runs a chat-format task (LongQA, summarization, cite) as upstream runs base
+#: models: `use_chat_template` off, so the prompt is a completion ending in the
+#: answer prefix, and the prefix is prepended to the output before parsing.
+BASE_VARIANT = "base"
+
+for _task_name, _task_config in HELMET_TASKS.items():
+    if _task_config.get("use_chat_template"):
+        _settings = _task_settings(_task_config)
+        register_variant(
+            f"helmet_{_task_name}",
+            BASE_VARIANT,
+            task_settings={
+                **_settings,
+                "helmet": {**_settings["helmet"], "use_chat_template": False},
+            },
+        )

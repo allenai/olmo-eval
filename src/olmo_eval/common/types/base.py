@@ -227,6 +227,13 @@ FOLLOW_UP_TURNS_KEY = "follow_up_turns"
 #: ``completion_tokens`` the provider reported for that turn.
 TURNS_KEY = "turns"
 
+#: ``LMRequest.metadata`` key holding the ``(start, end)`` character span of a
+#: completion prompt that a provider may shorten to fit the model's context. A
+#: provider that supports it drops tokens from the end of the span until the prompt
+#: and the generation budget fit, and records the number dropped as
+#: ``prompt_truncated_tokens`` in each output's metadata.
+TRUNCATABLE_SPAN_KEY = "truncatable_span"
+
 
 @dataclass(frozen=True, slots=True)
 class LMRequest:

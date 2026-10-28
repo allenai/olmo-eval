@@ -885,6 +885,68 @@ def test_chat_template_tasks_send_a_single_user_turn(task_name, chat):
         assert request.prompt == "CONTEXT\nQuestion: q\nAnswer:"
 
 
+@pytest.mark.parametrize(
+    ("task_name", "prefix", "separator"),
+    [
+        ("helmet_narrativeqa__8192", "Answer:", "\n"),
+        ("helmet_infbench_qa_eng__8192", "Answer:", "\n\n"),
+        ("helmet_infbench_sum_eng__8192", "Summary:", "\n\n"),
+        ("helmet_multi_lexsum__8192", "Summary:", "\n\n"),
+        ("helmet_alce_asqa__8192", "Answer:", "\n\n"),
+    ],
+)
+def test_base_variant_sends_upstreams_completion_prompt(task_name, prefix, separator):
+    """`:base` runs a chat-format task as HELMET runs base models (use_chat_template
+    False): the prompt_template completion, ending in the answer prefix after that
+    loader's separator, with the context marked for the provider to trim."""
+    from olmo_eval.common.types import TRUNCATABLE_SPAN_KEY, RequestType
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    task = get_task(f"{task_name}:base")
+    assert task.base_mode and not get_task(task_name).base_mode
+    instance = Instance(
+        question="Intro\n\nCONTEXT\n\nQuestion: q",
+        metadata={"prepend_text": prefix, "context_span": (7, 14)},
+    )
+    request = task.format_request(instance)
+
+    assert request.request_type == RequestType.COMPLETION
+    assert request.prompt == f"Intro\n\nCONTEXT\n\nQuestion: q{separator}{prefix}"
+    assert request.prompt[slice(*request.metadata[TRUNCATABLE_SPAN_KEY])] == "CONTEXT"
+
+
+def test_base_variant_prepends_the_answer_prefix_before_parsing():
+    """Upstream's eval.py prepends the system template to a completion's output
+    before parsing; the chat path leaves the output as generated."""
+    from olmo_eval.common.types import LMRequest, RequestType
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    def extracted(spec: str) -> tuple[str, str]:
+        task = get_task(spec)
+        output = LMOutput(text=" Paris\nQuestion: next?")
+        instance = _instance(gold=["Paris"], prepend_text="Answer:" if task.base_mode else "")
+        task._extract_answers([Response(instance, LMRequest(RequestType.COMPLETION), [output])])
+        return output.text, output.extracted_answer
+
+    assert extracted("helmet_infbench_qa_eng__8192:base") == (
+        "Answer: Paris\nQuestion: next?",
+        "Paris",
+    )
+    assert extracted("helmet_infbench_qa_eng__8192")[0] == " Paris\nQuestion: next?"
+
+
+def test_base_suites_swap_in_only_the_chat_format_tasks():
+    from olmo_eval.evals.suites.registry import get_suite
+
+    for size in STANDARD_CONTEXT_SIZES:
+        plain, base = get_suite(f"helmet_all__{size}"), get_suite(f"helmet_all__{size}:base")
+        for category, mirrored in zip(plain.tasks, base.tasks, strict=True):
+            assert mirrored.name == f"{category.name}:base"
+            for task, swapped in zip(category.tasks, mirrored.tasks, strict=True):
+                chat = HELMET_TASKS[task.removeprefix("helmet_")].get("use_chat_template")
+                assert swapped == (f"{task}:base" if chat else task)
+
+
 def test_judged_tasks_are_judged_tasks_and_require_the_openai_key():
     """Exactly the tasks flagged as judged grade through JudgedTask and need the key."""
     for name, config in HELMET_TASKS.items():
