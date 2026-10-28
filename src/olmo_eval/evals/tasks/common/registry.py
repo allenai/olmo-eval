@@ -172,7 +172,7 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
                 "truncate_prompt_tokens",
             }:
                 value = int(value_str)
-            elif key in {"temperature", "top_p"}:
+            elif key in {"temperature", "top_p", "judge_temperature"}:
                 value = float(value_str)
             elif key == "dependencies":
                 # Dependencies should be parsed as JSON list

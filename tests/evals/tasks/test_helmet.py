@@ -568,6 +568,7 @@ class TestLongQAJudge:
 
         assert built["model"] == "gpt-4.1-2025-04-14"
         assert built["max_tokens"] == 2048
+        assert built["temperature"] == 0.1
         assert task.config.to_dict()["judge_model"] == "gpt-4.1-2025-04-14"
 
 

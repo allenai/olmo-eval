@@ -11,10 +11,10 @@ task, and ``-o judge_model=...`` or ``OLMO_EVAL_JUDGE`` changes the judge that r
 A judge reply that never parses, after retries, leaves the output unscored rather
 than scoring it 0.0. Upstream likewise leaves such instances out of the average.
 
-Known differences from upstream, which calls ``gpt-4o-2024-05-13`` through its
-``OpenAIModel`` at temperature 0.1, top-p 0.9 and seed 42: the shared judge client
-samples at temperature 0 with no seed, and asks again when a reply does not parse
-where upstream gives up on the first unparseable reply.
+Upstream calls ``gpt-4o-2024-05-13`` through its ``OpenAIModel`` at temperature
+0.1, top-p 0.9 and seed 42. The judge here matches the model and temperature;
+the shared judge client sends no top-p or seed, and asks again when a reply does
+not parse where upstream gives up on the first unparseable reply.
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ from olmo_eval.evals.tasks.constants.helmet_summ_prompts import (
 )
 
 HELMET_JUDGE_MODEL = "gpt-4o-2024-05-13"
+HELMET_JUDGE_TEMPERATURE = 0.1
 # Upstream's budgets: the OpenAIModel default for LongQA, and the explicit
 # generation_max_length eval_gpt4_summ.py sets for summarization.
 HELMET_LONGQA_JUDGE_MAX_TOKENS = 2048
@@ -202,6 +203,7 @@ class HelmetLongQAJudgedTask(JudgedTask):
 
     judge_model = HELMET_JUDGE_MODEL
     judge_max_tokens = HELMET_LONGQA_JUDGE_MAX_TOKENS
+    judge_temperature = HELMET_JUDGE_TEMPERATURE
     judge_scorer_name = HelmetLongQAJudgeScorer.name
     judge_score_key = "gpt4_score"
 
@@ -252,6 +254,7 @@ class HelmetSummJudgedTask(JudgedTask):
 
     judge_model = HELMET_JUDGE_MODEL
     judge_max_tokens = HELMET_SUMM_JUDGE_MAX_TOKENS
+    judge_temperature = HELMET_JUDGE_TEMPERATURE
     judge_scorer_name = HelmetSummJudgeScorer.name
     judge_score_key = "gpt4_f1"
     judge_extra_score_keys = ("gpt4_recall", "gpt4_precision", "gpt4_fluency")

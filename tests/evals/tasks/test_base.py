@@ -20,6 +20,7 @@ from olmo_eval.common.metrics import AccuracyMetric, PassAtKMetric
 from olmo_eval.common.scorers import ExactMatchScorer, ProcessScorer
 from olmo_eval.common.scorers.execution import ContextScorer, ExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
+from olmo_eval.common.types.base import compute_task_hash
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, Task, TaskConfig
 
 
@@ -124,6 +125,16 @@ class TestTaskConfig:
         assert judged["judge_model"] == "judge-snapshot"
         assert judged["judge_reasoning_effort"] == "high"
         assert judged["judge_max_tokens"] == 8192
+
+    def test_serializes_judge_temperature_only_when_set(self):
+        default = TaskConfig(name="judged", judge_model="judge-snapshot", judge_max_tokens=64)
+        warm = TaskConfig(
+            name="judged", judge_model="judge-snapshot", judge_max_tokens=64, judge_temperature=0.1
+        )
+
+        assert "judge_temperature" not in default.to_dict()
+        assert warm.to_dict()["judge_temperature"] == 0.1
+        assert compute_task_hash(warm.to_dict()) != compute_task_hash(default.to_dict())
 
 
 class TestTask:

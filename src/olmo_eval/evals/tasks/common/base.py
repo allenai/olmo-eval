@@ -173,6 +173,8 @@ class TaskConfig:
     judge_model: str | None = None
     judge_reasoning_effort: str | None = None
     judge_max_tokens: int | None = None
+    #: Sampling temperature for the judge; unset means the shared judge's 0.
+    judge_temperature: float | None = None
 
     #: How a task that builds its prompt from a bare label should render it. The
     #: vision tasks read these; they follow the checkpoint, since instruction-tuned
@@ -338,6 +340,10 @@ class TaskConfig:
                     "judge_max_tokens": self.judge_max_tokens,
                 }
             )
+        # Emitted on its own, only when set, so hashes of judges at the default
+        # temperature are unchanged from before the field existed.
+        if self.judge_temperature is not None:
+            serialized["judge_temperature"] = self.judge_temperature
         return serialized
 
     def get_primary_metric(self) -> Metric | None:
