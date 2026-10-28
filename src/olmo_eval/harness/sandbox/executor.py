@@ -152,14 +152,18 @@ async def _run_with_progress(
     task = asyncio.create_task(coro)
     start = time.time()
 
-    while not task.done():
-        try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=interval)
-        except TimeoutError:
-            elapsed = time.time() - start
-            logger.debug(f"{message} ({elapsed:.0f}s elapsed)")
-
-    return task.result()
+    try:
+        while not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=interval)
+            except TimeoutError:
+                elapsed = time.time() - start
+                logger.debug(f"{message} ({elapsed:.0f}s elapsed)")
+        return task.result()
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 def _get_modal_app_name() -> str:
@@ -340,9 +344,7 @@ class SandboxExecutor:
         match self.config.mode:
             case SandboxMode.DOCKER:
                 try:
-                    from swerex.deployment.docker import (
-                        DockerDeployment,
-                    )
+                    from .docker_deployment import OwnedDockerDeployment
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex not installed. Install with: pip install swe-rex"
@@ -408,7 +410,7 @@ class SandboxExecutor:
                 elif self.config.inject_swerex:
                     deployment_kwargs["pull"] = "never"
 
-                return DockerDeployment(**deployment_kwargs)
+                return OwnedDockerDeployment(**deployment_kwargs)
 
             case SandboxMode.LOCAL:
                 try:
@@ -523,34 +525,10 @@ class SandboxExecutor:
                     with contextlib.suppress(Exception):
                         await sandbox.terminate.aio()
 
-            container_name = getattr(self._deployment, "container_name", None)
             try:
                 await asyncio.wait_for(self._deployment.stop(), timeout=10.0)
             except Exception as e:
                 self._log(logging.DEBUG, f"Failed to stop deployment: {e}")
-                if self.config.mode == SandboxMode.DOCKER and isinstance(container_name, str):
-                    try:
-                        process = await asyncio.create_subprocess_exec(
-                            self.config.container_runtime,
-                            "rm",
-                            "-f",
-                            container_name,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
-                        )
-                        try:
-                            _, stderr = await asyncio.wait_for(process.communicate(), timeout=10.0)
-                            if process.returncode:
-                                raise RuntimeError(stderr.decode(errors="replace"))
-                        finally:
-                            if process.returncode is None:
-                                with contextlib.suppress(ProcessLookupError):
-                                    process.kill()
-                                await asyncio.wait_for(process.wait(), timeout=5.0)
-                    except Exception as cleanup_error:
-                        self._log(
-                            logging.WARNING, f"Could not remove {container_name}: {cleanup_error!r}"
-                        )
             self._deployment = None
             self._runtime = None
 
