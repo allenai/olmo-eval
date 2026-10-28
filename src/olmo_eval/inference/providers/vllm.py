@@ -8,7 +8,14 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider, is_debug_requests
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    TRUNCATABLE_SPAN_KEY,
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
@@ -258,6 +265,42 @@ class VLLMProvider(InferenceProvider):
 
         return request.prompt
 
+    def _fit_to_context(
+        self, request: LMRequest, prompt: str, max_tokens: int | None
+    ) -> tuple[str, int]:
+        """Shorten a completion prompt's truncatable span until it fits the context.
+
+        Drops tokens from the end of the span named by ``TRUNCATABLE_SPAN_KEY``, so the
+        prompt plus ``max_tokens`` fits ``max_length``; the text around the span is
+        kept. A prompt without a span, or one that already fits, is returned as is.
+        Returns the prompt sent and the number of span tokens dropped.
+        """
+        span = (request.metadata or {}).get(TRUNCATABLE_SPAN_KEY)
+        if span is None or request.request_type != RequestType.COMPLETION:
+            return prompt, 0
+        tokenizer = self.llm.get_tokenizer()
+        add_special_tokens = self._add_bos_token is not False
+        budget = self.max_length - (max_tokens or 0)
+        start, end = span
+        span_text = prompt[start:end]
+        dropped = 0
+        # Retokenizing after a cut can merge tokens at the new boundary, so recheck
+        # and cut again in the rare case the first cut leaves the prompt a token over.
+        for _ in range(3):
+            fitted = prompt[:start] + span_text + prompt[end:]
+            overflow = len(tokenizer.encode(fitted, add_special_tokens=add_special_tokens)) - budget
+            if overflow <= 0:
+                return fitted, dropped
+            offsets = tokenizer(span_text, add_special_tokens=False, return_offsets_mapping=True)[
+                "offset_mapping"
+            ]
+            keep = max(0, len(offsets) - overflow)
+            span_text = span_text[: offsets[keep][0]] if keep < len(offsets) else span_text
+            dropped += min(overflow, len(offsets))
+            if keep == 0:
+                break
+        return prompt[:start] + span_text + prompt[end:], dropped
+
     def generate(
         self,
         requests: list[LMRequest],
@@ -271,7 +314,11 @@ class VLLMProvider(InferenceProvider):
             )
         vllm_params = self._build_sampling_params(params)
 
-        prompt_strs = [self._format_prompt(req) for req in requests]
+        fitted = [
+            self._fit_to_context(req, self._format_prompt(req), params.max_tokens)
+            for req in requests
+        ]
+        prompt_strs = [prompt for prompt, _ in fitted]
 
         if is_debug_requests():
             for i, prompt in enumerate(prompt_strs):
@@ -293,7 +340,7 @@ class VLLMProvider(InferenceProvider):
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
 
         results: list[list[LMOutput]] = []
-        for output in outputs:
+        for output, (_, truncated) in zip(outputs, fitted, strict=True):
             request_outputs: list[LMOutput] = []
             for completion in output.outputs:
                 logprobs = _convert_logprobs(completion.logprobs)
@@ -311,6 +358,8 @@ class VLLMProvider(InferenceProvider):
 
                 metadata["finish_reason"] = completion.finish_reason
                 metadata["completion_tokens"] = len(completion.token_ids)
+                if truncated:
+                    metadata["prompt_truncated_tokens"] = truncated
 
                 request_outputs.append(
                     LMOutput(

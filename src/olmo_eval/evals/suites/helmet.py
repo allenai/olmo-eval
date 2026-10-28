@@ -26,7 +26,14 @@ Three deliberate differences from `suites/ruler.py`:
 """
 
 from olmo_eval.data.helmet_tasks import CONTEXT_SIZES, HELMET_TASKS
-from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, register
+from olmo_eval.evals.suites.registry import (
+    AggregationStrategy,
+    Suite,
+    get_suite,
+    list_suites,
+    register,
+)
+from olmo_eval.evals.tasks.helmet import BASE_VARIANT
 
 # Task categories (tags), in the order HELMET reports them
 CATEGORIES = ["recall", "rag", "rerank", "longqa", "summ", "icl", "cite"]
@@ -116,3 +123,26 @@ for size in CONTEXT_SIZES:
                 ),
             )
         )
+
+
+def _base(suite: Suite) -> Suite:
+    """The suite with each chat-format task swapped for its `:base` variant."""
+    return Suite(
+        name=f"{suite.name}:{BASE_VARIANT}",
+        tasks=tuple(
+            _base(task)
+            if isinstance(task, Suite)
+            else f"{task}:{BASE_VARIANT}"
+            if HELMET_TASKS[task.removeprefix("helmet_")].get("use_chat_template")
+            else task
+            for task in suite.tasks
+        ),
+        aggregation=suite.aggregation,
+        description=f"{suite.description}; chat-format tasks run as for base models",
+    )
+
+
+# `:base` mirrors of every suite above, for base models: HELMET's README runs them
+# with `--use_chat_template False`.
+for _name in [name for name in list_suites() if name.startswith("helmet_")]:
+    register(_base(get_suite(_name)))
