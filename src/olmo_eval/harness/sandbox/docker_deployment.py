@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import os
 import selectors
+import shutil
 import subprocess
 import threading
 from collections import deque
@@ -17,6 +18,18 @@ _CAPTURE_BYTES = 256 * 1024
 _CLOSE_TIMEOUT = 2.0
 _REMOVE_TIMEOUT = 10.0
 _PROCESS_TIMEOUT = 2.0
+
+
+def _is_podman_runtime(runtime: str) -> bool:
+    """Recognize Podman and Docker compatibility symlinks to its executable."""
+    if runtime == "podman":
+        return True
+    executable = shutil.which(runtime)
+    podman = shutil.which("podman")
+    if executable is not None and podman is not None:
+        with contextlib.suppress(OSError):
+            return os.path.samefile(executable, podman)
+    return False
 
 
 class _CapturedPipe:
@@ -160,7 +173,13 @@ class OwnedDockerDeployment(DockerDeployment):
             if name is not None:
                 try:
                     if self._config.remove_container:
-                        await self._runtime_command("rm", "-f", name)
+                        # Podman force-removal otherwise waits the container's stop grace.
+                        options = (
+                            ("--time", "0")
+                            if _is_podman_runtime(self._config.container_runtime)
+                            else ()
+                        )
+                        await self._runtime_command("rm", "-f", *options, name)
                     else:
                         await self._runtime_command("kill", name)
                 except Exception as exc:

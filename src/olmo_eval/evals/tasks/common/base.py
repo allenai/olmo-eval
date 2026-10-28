@@ -382,6 +382,9 @@ class Task(ABC):
     #: Scaffold the task's requests need, such as ``"multi_turn_chat"``. The runner
     #: refuses to start the task under a harness with a different scaffold.
     required_scaffold: str | None = None
+    #: Whether a model judge scores the task, so ``get_task`` applies
+    #: ``$OLMO_EVAL_JUDGE`` to its judge fields.
+    judged: bool = False
 
     def __init__(self, config: TaskConfig) -> None:
         self.config = config

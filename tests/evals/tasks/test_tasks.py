@@ -3,6 +3,7 @@
 import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
+from olmo_eval.common.types.base import compute_task_hash
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, get_task, list_tasks
 from olmo_eval.evals.tasks.gsm8k import (
     GSM8K_PLATINUM_REPO,
@@ -356,3 +357,23 @@ class TestMultilingualMBPPTask:
         answer = task.extract_answer(output)
         assert "def add" in answer
         assert "return a + b" in answer
+
+
+def test_simpleqa_judge_declares_the_judge_api_key():
+    assert get_task("simpleqa:judge").config.required_secrets == ("OPENAI_API_KEY",)
+
+
+@pytest.mark.parametrize(
+    ("spec", "scorer_name"),
+    [("simpleqa:judge", "simpleqa_judge"), ("harmbench:openai_judge", "safety_judge")],
+)
+def test_the_configured_judge_grades_and_reaches_the_hash(spec, scorer_name):
+    default = get_task(spec)
+    overridden = get_task(spec, {"judge_model": "judge-b"})
+
+    assert default.config.judge_model == "gpt-4o-mini"
+    judge = overridden._get_scorers()[scorer_name]
+    assert judge.judge_fn.judge_config["model"] == "judge-b"
+    assert compute_task_hash(overridden.config.to_dict()) != compute_task_hash(
+        default.config.to_dict()
+    )

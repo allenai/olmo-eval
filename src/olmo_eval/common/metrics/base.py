@@ -850,22 +850,13 @@ class SubsetAccuracyMetric(Metric):
         return False
 
     def compute(self, responses: Sequence[Response]) -> float:
-        """Compute aggregate metric from scored responses."""
-        if not responses:
-            return 0.0
-        scorer_name = self.scorer().name
-
-        if self.name == "any__any":
-            total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
-            return total / len(responses)
-
-        subset, cat = self.name.split("__")
-        subset_responses = []
-        for r in responses:
-            if r.instance.metadata[subset] == cat:
-                subset_responses.append(r.scores.get(scorer_name, 0.0))
-
-        return sum(subset_responses) / len(subset_responses) if subset_responses else -1
+        """Mean score over the subset's scored responses, or 0.0 if it has none."""
+        values = [
+            value
+            for response in responses
+            if (value := self.compute_instance(response)) is not None
+        ]
+        return sum(values) / len(values) if values else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -874,8 +865,9 @@ class MacroSubsetAccuracyMetric(Metric):
     Unweighted mean of per-subset accuracies.
 
     Every subset contributes equally regardless of how many instances it holds,
-    so a small subset is not diluted by a larger one. Subsets with no matching
-    instances are skipped rather than counted as zero.
+    so a small subset is not diluted by a larger one. Responses with no score are
+    left out of their subset, and subsets with no scored instances are skipped
+    rather than counted as zero.
     """
 
     name: str = "macro_accuracy"
@@ -892,9 +884,10 @@ class MacroSubsetAccuracyMetric(Metric):
         for subset_name in self.subsets:
             subset, cat = subset_name.split("__")
             scores = [
-                r.scores.get(scorer_name, 0.0)
+                float(score)
                 for r in responses
                 if r.instance.metadata.get(subset) == cat
+                and isinstance(score := r.scores.get(scorer_name), (int, float))
             ]
             if scores:
                 subset_means.append(sum(scores) / len(scores))
@@ -912,7 +905,7 @@ class MacroSubsetAccuracyMetric(Metric):
 @dataclass(frozen=True, slots=True)
 class SafetyErrorMetric(Metric):
     """
-    Counts the responses an LLM judge could not grade, as flagged by
+    Counts the responses whose answer could not be parsed, as flagged by
     ``is_parsing_error`` in the instance metadata
     """
 

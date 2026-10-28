@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceLogprobFormatter
-from olmo_eval.common.metrics import AccuracyMetric, Metric
+from olmo_eval.common.metrics import AccuracyMetric, Metric, SafetyErrorMetric, SubsetAccuracyMetric
 from olmo_eval.common.scorers.base import LogprobScorer, Scorer
 from olmo_eval.common.types import (
     Instance,
@@ -53,7 +53,6 @@ from olmo_eval.evals.tasks.safety_base import (
     SafetyBase,
     judge_sampling,
     make_mcq_prompt,
-    safety_metrics,
 )
 
 logger = logging.getLogger(__name__)
@@ -246,7 +245,13 @@ _WMDP_SCORER = WMDPScorer()
 register_variant(
     "wmdp",
     "mcq",
-    metrics=safety_metrics(_WMDP_SCORER, _WMDP_SUBSET_METRICS),
+    # The MCQ extractor records unparseable answers without raising, so this
+    # variant keeps the parse-error count the judged safety variants dropped.
+    metrics=(
+        AccuracyMetric(scorer=_WMDP_SCORER),
+        SafetyErrorMetric(scorer=_WMDP_SCORER),
+        *(SubsetAccuracyMetric(name=name, scorer=_WMDP_SCORER) for name in _WMDP_SUBSET_METRICS),
+    ),
     primary_metric=AccuracyMetric(scorer=_WMDP_SCORER),
     sampling_params=judge_sampling,
     formatter=MCQAChatFormatter(),
