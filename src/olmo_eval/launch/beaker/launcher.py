@@ -885,6 +885,12 @@ class BeakerLauncher:
         # overridden packages are symlinked into /opt/vllm-venv below.
         if runtime_torch_version:
             steps.append(build_install_command(runtime_torch_spec(), force_reinstall=True))
+            # Companion packages that must change build together with torch (torchvision/torchaudio
+            # carry the CUDA variant too); otherwise the image's builds end up in the constraints
+            # and conflict with the provider's pins.  Space-separated specs, same index as torch.
+            for extra_spec in ((env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_EXTRA_PACKAGES") or "").split():
+                spec = f"{extra_spec} --index-url {runtime_torch_index_url}" if runtime_torch_index_url else extra_spec
+                steps.append(build_install_command(spec, force_reinstall=True))
 
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
