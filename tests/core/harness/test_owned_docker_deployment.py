@@ -204,6 +204,29 @@ async def test_cleanup_is_bounded_idempotent_and_finalized(monkeypatch, close_mo
 
 
 @pytest.mark.anyio
+async def test_cleanup_waits_for_slow_successful_container_removal(monkeypatch):
+    class DelayedRemover(Remover):
+        async def wait(self):
+            if not self.killed:
+                await asyncio.sleep(3.1)
+            return await super().wait()
+
+    remover = DelayedRemover("ok")
+
+    async def create(*args, **kwargs):
+        assert args == ("docker", "rm", "-f", "owned-fixture")
+        return remover
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", create)
+    deployment = OwnedDockerDeployment(image="unused", port=58123)
+    deployment._container_name = "owned-fixture"
+    await deployment.stop()
+    assert remover.returncode == 0
+    assert not remover.killed
+    assert deployment._container_name is None
+
+
+@pytest.mark.anyio
 async def test_cancellation_waits_for_owned_cleanup_and_gc_creates_no_task(monkeypatch):
     entered, finish = asyncio.Event(), asyncio.Event()
     calls = []
