@@ -526,7 +526,19 @@ class SandboxExecutor:
                         await sandbox.terminate.aio()
 
             try:
-                await asyncio.wait_for(self._deployment.stop(), timeout=10.0)
+                owned_deployment = False
+                if self.config.mode == SandboxMode.DOCKER:
+                    try:
+                        from .docker_deployment import OwnedDockerDeployment
+                    except ImportError:
+                        pass
+                    else:
+                        owned_deployment = isinstance(self._deployment, OwnedDockerDeployment)
+                if owned_deployment:
+                    # Owned cleanup already bounds its operations and waits through cancellation.
+                    await self._deployment.stop()
+                else:
+                    await asyncio.wait_for(self._deployment.stop(), timeout=10.0)
             except Exception as e:
                 self._log(logging.DEBUG, f"Failed to stop deployment: {e}")
             self._deployment = None
