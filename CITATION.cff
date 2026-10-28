@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it as below. Results depend on the
+  code revision, so also report the commit you ran.
+type: software
+title: olmo-eval
+abstract: >-
+  A unified workbench for evaluating language models throughout the model
+  development loop.
+authors:
+  - name: Allen Institute for AI
+repository-code: "https://github.com/allenai/olmo-eval"
+license: Apache-2.0
