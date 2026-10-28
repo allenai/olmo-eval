@@ -123,14 +123,18 @@ async def _run_with_progress(
     task = asyncio.create_task(coro)
     start = time.time()
 
-    while not task.done():
-        try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=interval)
-        except TimeoutError:
-            elapsed = time.time() - start
-            logger.debug(f"{message} ({elapsed:.0f}s elapsed)")
-
-    return task.result()
+    try:
+        while not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=interval)
+            except TimeoutError:
+                elapsed = time.time() - start
+                logger.debug(f"{message} ({elapsed:.0f}s elapsed)")
+        return task.result()
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 def _get_modal_app_name() -> str:
@@ -279,9 +283,7 @@ class SandboxExecutor:
         match self.config.mode:
             case SandboxMode.DOCKER:
                 try:
-                    from swerex.deployment.docker import (
-                        DockerDeployment,
-                    )
+                    from .docker_deployment import OwnedDockerDeployment
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex not installed. Install with: pip install swe-rex"
@@ -347,7 +349,7 @@ class SandboxExecutor:
                 elif self.config.inject_swerex:
                     deployment_kwargs["pull"] = "never"
 
-                return DockerDeployment(**deployment_kwargs)
+                return OwnedDockerDeployment(**deployment_kwargs)
 
             case SandboxMode.LOCAL:
                 try:
