@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import select
+import selectors
 import subprocess
 import threading
 from collections import deque
@@ -30,7 +30,7 @@ class _CapturedPipe:
         self._suffix: deque[bytes] = deque()
         self._suffix_size = 0
         self._truncated = False
-        self.error: OSError | None = None
+        self.error: Exception | None = None
         self._thread = threading.Thread(target=self._drain, daemon=True)
         self._thread.start()
 
@@ -38,33 +38,38 @@ class _CapturedPipe:
         try:
             descriptor = self._stream.fileno()
             os.set_blocking(descriptor, False)
-            while not self._stop.is_set():
-                if not select.select([descriptor], [], [], 0.05)[0]:
-                    continue
-                try:
-                    chunk = os.read(descriptor, 64 * 1024)
-                except BlockingIOError:
-                    continue
-                if not chunk:
-                    break
-                with self._lock:
-                    take = min(len(chunk), _CAPTURE_BYTES - len(self._prefix))
-                    self._prefix.extend(chunk[:take])
-                    chunk = chunk[take:]
-                    if chunk:
-                        self._suffix.append(chunk)
-                        self._suffix_size += len(chunk)
-                        while self._suffix_size > _CAPTURE_BYTES:
-                            first = self._suffix.popleft()
-                            discard = min(len(first), self._suffix_size - _CAPTURE_BYTES)
-                            self._suffix_size -= discard
-                            if discard < len(first):
-                                self._suffix.appendleft(first[discard:])
-                            self._truncated = True
-        except OSError as exc:
+            with selectors.DefaultSelector() as selector:
+                selector.register(descriptor, selectors.EVENT_READ)
+                while not self._stop.is_set():
+                    if not selector.select(timeout=0.05):
+                        continue
+                    try:
+                        chunk = os.read(descriptor, 64 * 1024)
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        break
+                    with self._lock:
+                        take = min(len(chunk), _CAPTURE_BYTES - len(self._prefix))
+                        self._prefix.extend(chunk[:take])
+                        chunk = chunk[take:]
+                        if chunk:
+                            self._suffix.append(chunk)
+                            self._suffix_size += len(chunk)
+                            while self._suffix_size > _CAPTURE_BYTES:
+                                first = self._suffix.popleft()
+                                discard = min(len(first), self._suffix_size - _CAPTURE_BYTES)
+                                self._suffix_size -= discard
+                                if discard < len(first):
+                                    self._suffix.appendleft(first[discard:])
+                                self._truncated = True
+        except Exception as exc:
             self.error = exc
         finally:
-            self._stream.close()
+            try:
+                self._stream.close()
+            except Exception as exc:
+                self.error = self.error or exc
 
     def read(self, size: int = -1) -> bytes:
         with self._lock:
