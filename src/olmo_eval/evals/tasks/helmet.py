@@ -9,6 +9,8 @@ Pre-generated and pre-retrieved data lives on the ai2-internal
 from the Hub at load time. `narrativeqa` and both summarization tasks are
 graded by an LLM judge (see `helmet_judge.py`) and therefore need a judge
 configured -- the `helmet_nojudge__*` suites exclude them.
+
+Upstream reference: princeton-nlp/HELMET at commit aeadacc6.
 """
 
 import os
@@ -21,7 +23,6 @@ from olmo_eval.common.metrics import AccuracyMetric, NDCGMetric, RecallMetric, R
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
-from olmo_eval.common.scorers.helmet_judge import HelmetLongQAJudgeScorer, HelmetSummJudgeScorer
 from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import (
@@ -51,7 +52,12 @@ from olmo_eval.data.helmet_loader import (
     load_json_kv_dataset,
 )
 from olmo_eval.data.helmet_msmarco_loader import load_msmarco_dataset, parse_rankings
-from olmo_eval.data.helmet_multilexsum_loader import load_multi_lexsum_dataset
+from olmo_eval.data.helmet_multilexsum_loader import (
+    MIN_SOURCE_TOKENS,
+    MULTI_LEXSUM_REPO,
+    MULTI_LEXSUM_REVISION,
+    load_multi_lexsum_dataset,
+)
 from olmo_eval.data.helmet_narrativeqa_loader import (
     NARRATIVEQA_REPO,
     NARRATIVEQA_REVISION,
@@ -68,6 +74,13 @@ from olmo_eval.data.ruler_loader import (
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 from olmo_eval.evals.tasks.common.registry import register
+from olmo_eval.evals.tasks.helmet_judge import (
+    LONGQA_METRICS,
+    SUMM_METRICS,
+    HelmetLongQAJudgedTask,
+    HelmetSummBookJudgedTask,
+    HelmetSummJudgedTask,
+)
 
 
 class HelmetTask(Task):
@@ -129,9 +142,8 @@ class HelmetTask(Task):
 
         question = self._templates["user"].format(**doc)
 
-        # With a chat template the answer prefix is left off rather than fed in
-        # as a partial assistant turn, matching how HELMET runs its chat-format
-        # tasks (and how ruler.py handles the same distinction).
+        # With a chat template the answer prefix is left off: HELMET wraps the
+        # user turn alone in the chat template and adds no partial assistant turn.
         # RULER's answer prefixes name the needle and query, so the system
         # template is filled from the row too; for every other task it has no
         # fields and formatting leaves it unchanged
@@ -357,7 +369,7 @@ class InfbenchChoiceScorer(Scorer):
 class HelmetNarrativeQaTask(HelmetTask):
     """HELMET LongQA task: answer a question about a novel or movie script.
 
-    Graded by an LLM judge (see `HelmetLongQAJudgeScorer`), so running it needs
+    Graded by an LLM judge (see `HelmetLongQAJudgedTask`), so running it needs
     a judge configured -- `OPENAI_API_KEY` for the default OpenAI judge.
     """
 
@@ -368,10 +380,6 @@ class HelmetNarrativeQaTask(HelmetTask):
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
-
-    def extract_answer(self, output: LMOutput) -> Any:
-        parsed = _parse_labeled_output(output.text, prefix="Answer:")
-        return parsed if parsed else output.text
 
 
 class HelmetKiltTask(HelmetTask):
@@ -509,19 +517,17 @@ _TASK_METRICS: dict[str, tuple] = {
         "qampari_rec_top5",
     ),
     # HELMET's gpt-4-f1: fluency-gated F1 over key points, via three judge calls
-    "summ_book": (
-        (AccuracyMetric(name="gpt4_f1", scorer=HelmetSummJudgeScorer(is_book=True)),),
-        "gpt4_f1",
-    ),
-    "summ_lawsuit": (
-        (AccuracyMetric(name="gpt4_f1", scorer=HelmetSummJudgeScorer(is_book=False)),),
-        "gpt4_f1",
-    ),
-    # HELMET's gpt-4-score, normalized to [0, 1]; see HelmetLongQAJudgeScorer
-    "narrativeqa": (
-        (AccuracyMetric(name="gpt4_score", scorer=HelmetLongQAJudgeScorer()),),
-        "gpt4_score",
-    ),
+    "summ_book": (SUMM_METRICS, "gpt4_f1"),
+    "summ_lawsuit": (SUMM_METRICS, "gpt4_f1"),
+    # HELMET's gpt-4-score, normalized to [0, 1]; see HelmetLongQAJudgedTask
+    "narrativeqa": (LONGQA_METRICS, "gpt4_score"),
+}
+
+# The judge each judged metric family grades with, mixed in ahead of the task kind.
+_JUDGED_TASK_CLASSES: dict[str, type[HelmetLongQAJudgedTask | HelmetSummJudgedTask]] = {
+    "summ_book": HelmetSummBookJudgedTask,
+    "summ_lawsuit": HelmetSummJudgedTask,
+    "narrativeqa": HelmetLongQAJudgedTask,
 }
 
 
@@ -560,6 +566,9 @@ def _task_settings(task_cfg: dict) -> dict[str, Any]:
     if kind == "infbench":
         sources["infinitebench"] = f"{INFINITEBENCH_REPO}@{INFINITEBENCH_REVISION}"
         sources["infinitebench_subset"] = INFBENCH_SUBSETS[task_cfg["infbench_subset"]]
+    if kind == "multi_lexsum":
+        sources["multi_lexsum"] = f"{MULTI_LEXSUM_REPO}@{MULTI_LEXSUM_REVISION}"
+        sources["min_source_tokens"] = MIN_SOURCE_TOKENS
     if kind in _USES_REFERENCE_TOKENIZER:
         sources["reference_tokenizer"] = f"{REFERENCE_TOKENIZER}@{REFERENCE_TOKENIZER_REVISION}"
 
@@ -581,7 +590,10 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
     Subclasses carry only class-level attributes (metrics, sampling_params, limit);
     all runtime state is derived from config.name inside HelmetTask.__init__.
     """
-    base_cls = _TASK_CLASSES[task_cfg["kind"]]
+    bases: tuple[type, ...] = (_TASK_CLASSES[task_cfg["kind"]],)
+    judged_cls = _JUDGED_TASK_CLASSES.get(task_cfg["metrics_key"])
+    if judged_cls is not None:
+        bases = (judged_cls, *bases)
     metrics, primary_metric = _TASK_METRICS[task_cfg["metrics_key"]]
     # Hand over the Metric itself, not its name: TaskConfig only resolves a
     # Metric instance, and an unresolved primary drops the task out of its
@@ -592,7 +604,7 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
 
     return type(
         f"Helmet_{task_name}",
-        (base_cls,),
+        bases,
         {
             "__module__": __name__,
             "metrics": metrics,
@@ -605,9 +617,6 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[HelmetTask]:
             ),
             "limit": task_cfg["limit"],
             "task_settings": _task_settings(task_cfg),
-            # the judged tasks call the OpenAI judge at scoring time, so a Beaker
-            # launch must mount the key up front rather than fail after generation
-            "required_secrets": ("OPENAI_API_KEY",) if task_cfg.get("judged") else (),
         },
     )
 

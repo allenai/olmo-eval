@@ -2,8 +2,8 @@
 
 Extracted verbatim from HELMET's `scripts/eval_gpt4_summ.py` rather than
 retyped, so the rubrics and their few-shot examples match upstream exactly --
-these are ~55KB of carefully worded grading instructions and a paraphrase
-would silently change scores.
+they are long, carefully worded grading instructions, and a paraphrase would
+silently change scores.
 
 Each dimension has two variants: the plain one grades summaries of civil
 lawsuits (multi_lexsum) and the `_BOOK` one grades summaries of novels

@@ -23,14 +23,11 @@ the same trade already taken for the ICL tasks -- see `helmet_tasks.py`.
 
 import functools
 import json
-import logging
 from typing import Any
 
 from datasets import Features, Sequence, Value, load_dataset
 
 from olmo_eval.data.helmet_loader import download_helmet_plus_file
-
-logger = logging.getLogger(__name__)
 
 # HELMET truncates against meta-llama/Llama-2-7b-hf; this is an ungated mirror
 # of the same tokenizer, so the repo doesn't require gated-model access.
@@ -233,17 +230,13 @@ def load_infbench_dataset(
     if keypoints:
         missing = [row["id"] for row in rows if not keypoints.get(row["id"])]
         if missing:
-            # the judge cannot grade these; each scores 0.0 and is flagged in
-            # its judge_result
-            logger.warning(
-                "%d InfiniteBench %s rows have no key points in %s: %s",
-                len(missing),
-                subset,
-                spec["keypoints_file"],
-                missing[:5],
+            # the judge cannot grade a summary without them
+            raise ValueError(
+                f"{len(missing)} InfiniteBench {subset} rows have no key points in "
+                f"{spec['keypoints_file']}: {missing[:5]}"
             )
         for row in rows:
-            row["keypoints"] = keypoints.get(row["id"], [])
+            row["keypoints"] = keypoints[row["id"]]
             # the expert reference the precision rubric grades against
             row["expert_summary"] = row["answer"][0] if row.get("answer") else ""
 
