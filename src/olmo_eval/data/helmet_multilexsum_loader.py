@@ -58,6 +58,23 @@ _USER_TEMPLATE = (
 )
 _SYSTEM_TEMPLATE = "Summary:"
 _DEMO_TEMPLATE = "Summary: {summary}"
+_DEMO_PREFIX = "Example summaries:\n\n"
+# between documents, and between demos
+_SEPARATOR = "\n\n"
+_DEMO_SUFFIX = "\n\nNow, write a summary of the following legal documents.\n"
+
+#: Every piece of text and every selection threshold this loader builds prompts
+#: from. HELMET's task settings list it, so changing one moves the task hash.
+MEASURED_CONSTANTS = {
+    "user_template": _USER_TEMPLATE,
+    "system_template": _SYSTEM_TEMPLATE,
+    "demo_template": _DEMO_TEMPLATE,
+    "demo_prefix": _DEMO_PREFIX,
+    "separator": _SEPARATOR,
+    "demo_suffix": _DEMO_SUFFIX,
+    "truncation_postfix": TRUNCATION_POSTFIX,
+    "min_source_tokens": MIN_SOURCE_TOKENS,
+}
 
 
 def _read_jsonl(path: str) -> list[dict[str, Any]]:
@@ -144,7 +161,7 @@ def load_multi_lexsum_dataset(
     rows = []
     for case_id in validation_ids:
         row = hosted[case_id]
-        context = "\n\n".join(row["sources"])
+        context = _SEPARATOR.join(row["sources"])
         if _spans_min_tokens(context, tokenizer):
             rows.append((row, context))
 
@@ -171,11 +188,10 @@ def load_multi_lexsum_dataset(
         demo_text = ""
         if shots > 0:
             picks = shuffled_indices(len(train_summaries), demo_seed(row["id"], seed))[:shots]
-            rendered = "\n\n".join(_DEMO_TEMPLATE.format(summary=train_summaries[i]) for i in picks)
-            demo_text = (
-                f"Example summaries:\n\n{rendered}\n\n"
-                "Now, write a summary of the following legal documents.\n"
+            rendered = _SEPARATOR.join(
+                _DEMO_TEMPLATE.format(summary=train_summaries[i]) for i in picks
             )
+            demo_text = f"{_DEMO_PREFIX}{rendered}{_DEMO_SUFFIX}"
         data.append(
             {
                 "context": _truncate_context(

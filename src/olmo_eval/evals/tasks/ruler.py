@@ -83,6 +83,8 @@ class RulerTask(Task):
 
     _tasks_registry: dict[str, dict[str, Any]] = RULER_TASKS
     _name_prefix: str = "ruler_"
+    #: Joins the rendered question and the answer prefix in a completion prompt.
+    answer_prefix_separator: str = "\n"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
@@ -234,7 +236,7 @@ class RulerTask(Task):
         prompt = instance.question
         prepend_text = (instance.metadata or {}).get("prepend_text", "")
         if prepend_text:
-            prompt = prompt + "\n" + prepend_text
+            prompt = prompt + self.answer_prefix_separator + prepend_text
 
         return LMRequest(
             request_type=self.request_type,

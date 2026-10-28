@@ -662,35 +662,115 @@ class TestSummJudge:
 # HELMET's own settings and source revisions reach the task hash
 
 
-def test_helmet_settings_reach_the_task_hash(monkeypatch):
+def _settings_hash(spec: str, **overrides) -> str:
     from olmo_eval.common.types.base import compute_task_hash
-    from olmo_eval.data import helmet_icl_loader
+
+    return compute_task_hash(get_task(spec, overrides or None).config.to_dict())
+
+
+def test_task_settings_record_what_the_run_measures():
     from olmo_eval.evals.tasks import helmet
-    from olmo_eval.evals.tasks.common.registry import get_task
 
-    config = get_task("helmet_icl_trec_coarse__4096").config
-    settings = config.to_dict()["task_settings"]
-    assert settings["helmet"]["shots"] == 200
+    settings = get_task("helmet_icl_trec_coarse__4096").config.to_dict()["task_settings"]
+    assert settings["upstream"] == "princeton-nlp/HELMET@aeadacc6"
+    assert settings["helmet"] == {
+        "length_name": "4k",
+        "shots": 200,
+        "icl_dataset": "trec_coarse",
+    }
     assert settings["sources"]["icl"]["revision"] == "65752bf53af25bc935a0dce92fb5b6c930728450"
-    assert settings["templates"]["_SYSTEM_TEMPLATE"] == "label:"
+    assert settings["constants"]["system_template"] == "label:"
+    assert settings["constants"]["answer_prefix_separator"] == "\n"
 
-    base = helmet._task_settings(HELMET_TASKS["icl_trec_coarse__4096"])
-    assert helmet._task_settings({**HELMET_TASKS["icl_trec_coarse__4096"], "shots": 100}) != base
-    monkeypatch.setattr(helmet_icl_loader, "_SYSTEM_TEMPLATE", "Label:")
-    assert helmet._task_settings(HELMET_TASKS["icl_trec_coarse__4096"]) != base
-    monkeypatch.setattr(helmet, "HELMET_PLUS_REVISION", "0" * 40)
-    kilt_cfg = HELMET_TASKS["kilt_nq__4096"]
-    assert helmet._task_settings(kilt_cfg)["sources"]["helmet_plus"].endswith("0" * 40)
-    lexsum_sources = helmet._task_settings(HELMET_TASKS["multi_lexsum__8192"])["sources"]
-    assert lexsum_sources["multi_lexsum"].endswith(helmet.MULTI_LEXSUM_REVISION)
-    assert lexsum_sources["min_source_tokens"] == 65536
+    lexsum = helmet._task_settings(HELMET_TASKS["multi_lexsum__8192"])
+    assert lexsum["sources"]["multi_lexsum"].endswith(helmet.MULTI_LEXSUM_REVISION)
+    assert lexsum["constants"]["min_source_tokens"] == 65536
+    assert lexsum["helmet"]["max_context_tokens"] == 8192 - 300 - 400
 
-    def task_hash(settings):
-        from dataclasses import replace
 
-        return compute_task_hash(replace(config, task_settings=settings).to_dict())
+def test_suite_flags_and_config_fields_stay_out_of_the_hash():
+    from olmo_eval.evals.tasks import helmet
 
-    assert task_hash(base) != task_hash({**base, "helmet": {**base["helmet"], "shots": 100}})
+    for name in ("alce_asqa_nocite__4096", "narrativeqa__8192", "kilt_popqa__8192"):
+        cfg = HELMET_TASKS[name]
+        flagged = {**cfg, "tag": "other", "ablation": not cfg.get("ablation"), "judged": True}
+        flagged.update(limit=5, max_gen_toks=1, stop_new_line=True, metrics_key="x")
+        assert helmet._task_settings(flagged) == helmet._task_settings(cfg), name
+    # `-o limit=5` is the limit field's alone, not repeated in the settings
+    limited = get_task("helmet_alce_asqa_nocite__4096", {"limit": 5}).config.to_dict()
+    assert "limit" not in limited["task_settings"]["helmet"]
+
+
+@pytest.mark.parametrize(
+    ("loader", "spec"),
+    [
+        ("helmet_infbench_loader", "infbench_qa_eng__8192"),
+        ("helmet_narrativeqa_loader", "narrativeqa__8192"),
+        ("helmet_multilexsum_loader", "multi_lexsum__8192"),
+    ],
+)
+def test_prompt_constants_move_the_hash(loader, spec, monkeypatch):
+    import importlib
+
+    from olmo_eval.data.helmet_infbench_loader import TRUNCATION_POSTFIX
+    from olmo_eval.evals.tasks import helmet
+
+    module = importlib.import_module(f"olmo_eval.data.{loader}")
+    # the listed constant is the one truncation appends
+    assert module.MEASURED_CONSTANTS["truncation_postfix"] is TRUNCATION_POSTFIX
+    before = helmet._task_settings(HELMET_TASKS[spec])
+    monkeypatch.setitem(module.MEASURED_CONSTANTS, "truncation_postfix", " [cut]")
+    assert helmet._task_settings(HELMET_TASKS[spec]) != before
+
+
+def test_the_run_reads_its_settings_from_the_config(monkeypatch):
+    from olmo_eval.evals.tasks import helmet
+
+    spec = "helmet_kilt_nq__8192"
+    settings = get_task(spec).config.task_settings
+    changed = {**settings, "helmet": {**settings["helmet"], "shots": 5, "max_questions": 7}}
+    seen = {}
+
+    def fake_load(**kwargs):
+        seen.update(kwargs)
+        return {"data": [], "user_template": "", "system_template": ""}
+
+    monkeypatch.setattr(helmet, "load_kilt_dataset", fake_load)
+    task = get_task(spec, {"task_settings": changed})
+    task._load_data()
+
+    assert (seen["shots"], seen["max_samples"]) == (5, 7)
+    assert _settings_hash(spec, task_settings=changed) != _settings_hash(spec)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        lambda s: {**s, "constants": {**s["constants"], "system_template": "A:"}},
+        lambda s: {**s, "upstream": "princeton-nlp/HELMET@main"},
+        lambda s: {**s, "helmet": {**s["helmet"], "unknown": 1}},
+        lambda s: {**s, "helmet": {k: v for k, v in s["helmet"].items() if k != "shots"}},
+    ],
+)
+def test_overrides_the_run_cannot_honor_are_refused(override):
+    settings = get_task("helmet_kilt_nq__8192").config.task_settings
+    with pytest.raises(ValueError, match="task_settings"):
+        get_task("helmet_kilt_nq__8192", {"task_settings": override(settings)})
+
+
+@pytest.mark.parametrize(
+    "override", [{"num_fewshot": 3}, {"fewshot_seed": 1}, {"split": "validation"}]
+)
+def test_fewshot_and_split_overrides_are_refused(override):
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        get_task("helmet_icl_banking77__4096", override)
+
+
+def test_settings_that_arrive_through_json_are_accepted():
+    settings = get_task("helmet_icl_banking77__4096").config.task_settings
+    round_tripped = json.loads(json.dumps(settings))
+    task = get_task("helmet_icl_banking77__4096", {"task_settings": round_tripped})
+    assert task.settings == settings["helmet"]
 
 
 def test_task_settings_are_omitted_when_unset():

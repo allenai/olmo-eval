@@ -13,6 +13,7 @@ configured -- the `helmet_nojudge__*` suites exclude them.
 Upstream reference: princeton-nlp/HELMET at commit aeadacc6.
 """
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -46,13 +47,13 @@ from olmo_eval.data.helmet_infbench_loader import (
 )
 from olmo_eval.data.helmet_kilt_loader import load_kilt_dataset
 from olmo_eval.data.helmet_loader import (
+    ANSWER_PREFIX_SEPARATOR,
     HELMET_PLUS_REPO_ID,
     HELMET_PLUS_REVISION,
     load_json_kv_dataset,
 )
 from olmo_eval.data.helmet_msmarco_loader import load_msmarco_dataset, parse_rankings
 from olmo_eval.data.helmet_multilexsum_loader import (
-    MIN_SOURCE_TOKENS,
     MULTI_LEXSUM_REPO,
     MULTI_LEXSUM_REVISION,
     load_multi_lexsum_dataset,
@@ -71,6 +72,7 @@ from olmo_eval.data.ruler_loader import (
     load_ruler_dataset,
 )
 from olmo_eval.data.ruler_tasks import RULER_TASKS
+from olmo_eval.evals.tasks.common.base import TaskConfig
 from olmo_eval.evals.tasks.common.registry import register
 from olmo_eval.evals.tasks.helmet_judge import (
     LONGQA_METRICS,
@@ -95,6 +97,45 @@ class HelmetTask(RulerTask):
 
     _tasks_registry: dict[str, dict[str, Any]] = HELMET_TASKS
     _name_prefix: str = "helmet_"
+    answer_prefix_separator = ANSWER_PREFIX_SEPARATOR
+
+    def __init__(self, config: TaskConfig) -> None:
+        super().__init__(config)
+        self.settings = self._measured_settings(config)
+
+    def _measured_settings(self, config: TaskConfig) -> dict[str, Any]:
+        """Return the HELMET settings this run uses: `config.task_settings["helmet"]`.
+
+        The task settings are the task hash's record of the run, so the run reads
+        them rather than HELMET_TASKS. Their other parts (the upstream commit,
+        sources and prompt constants) are fixed by the code, and an override that
+        changes them is refused, as is one of the TaskConfig fields HELMET has no
+        use for, since either would change the hash and not the run.
+        """
+        default = getattr(type(self), "task_settings", None)
+        settings = config.task_settings
+        if settings is None or default is None:
+            raise ValueError(f"{config.name} has no task_settings")
+        fixed = {key: value for key, value in default.items() if key != "helmet"}
+        given = {key: value for key, value in settings.items() if key != "helmet"}
+        if _canonical(given) != _canonical(fixed):
+            raise ValueError(
+                f"{config.name}: only task_settings['helmet'] can be overridden; "
+                f"{sorted(fixed)} are set by the code"
+            )
+        helmet = settings.get("helmet")
+        if not isinstance(helmet, dict) or set(helmet) != set(default["helmet"]):
+            raise ValueError(
+                f"{config.name}: task_settings['helmet'] must set exactly "
+                f"{sorted(default['helmet'])}"
+            )
+        for name in ("num_fewshot", "fewshot_seed", "split"):
+            if getattr(config, name) != TaskConfig.__dataclass_fields__[name].default:
+                raise ValueError(
+                    f"{config.name} takes its demonstrations and data from HELMET's own "
+                    f"files and task_settings, so {name} cannot be overridden"
+                )
+        return helmet
 
     def _load_dataset(self) -> dict[str, Any]:
         """Return the loader payload: `data` plus the HELMET prompt templates."""
@@ -125,7 +166,7 @@ class HelmetTask(RulerTask):
         # fields and formatting leaves it unchanged
         prepend_text = (
             ""
-            if self.ruler_config.get("use_chat_template")
+            if self.settings.get("use_chat_template")
             else self._templates["system"].format(**doc)
         )
 
@@ -168,7 +209,7 @@ class HelmetTask(RulerTask):
     def request_type(self) -> RequestType:
         # HELMET wraps its chat-format categories (LongQA, summarization, cite) in
         # the model's chat template as a single user turn; the rest are completions
-        if self.ruler_config.get("use_chat_template"):
+        if self.settings.get("use_chat_template"):
             return RequestType.CHAT
         return RequestType.COMPLETION
 
@@ -192,8 +233,8 @@ class HelmetJsonKvTask(HelmetTask):
         huggingface_hub rather than the standard dataset pipeline.
         """
         return load_json_kv_dataset(
-            length_name=self.ruler_config["length_name"],
-            shots=self.ruler_config["shots"],
+            length_name=self.settings["length_name"],
+            shots=self.settings["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -224,8 +265,8 @@ class HelmetIclTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_icl_dataset(
-            icl_dataset=self.ruler_config["icl_dataset"],
-            shots=self.ruler_config["shots"],
+            icl_dataset=self.settings["icl_dataset"],
+            shots=self.settings["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -239,9 +280,9 @@ class HelmetInfbenchTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_infbench_dataset(
-            subset=self.ruler_config["infbench_subset"],
-            max_context_tokens=self.ruler_config["max_context_tokens"],
-            shots=self.ruler_config["shots"],
+            subset=self.settings["infbench_subset"],
+            max_context_tokens=self.settings["max_context_tokens"],
+            shots=self.settings["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -336,8 +377,8 @@ class HelmetNarrativeQaTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_narrativeqa_dataset(
-            max_context_tokens=self.ruler_config["max_context_tokens"],
-            shots=self.ruler_config["shots"],
+            max_context_tokens=self.settings["max_context_tokens"],
+            shots=self.settings["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -355,13 +396,13 @@ class HelmetKiltTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_kilt_dataset(
-            task=self.ruler_config["kilt_task"],
-            length_name=self.ruler_config["length_name"],
-            shots=self.ruler_config["shots"],
-            max_samples=self.ruler_config["max_questions"],
+            task=self.settings["kilt_task"],
+            length_name=self.settings["length_name"],
+            shots=self.settings["shots"],
+            max_samples=self.settings["max_questions"],
             seed=self.config.seed,
-            popularity_threshold=self.ruler_config.get("popularity_threshold"),
-            max_prompt_tokens=self.ruler_config["max_prompt_tokens"],
+            popularity_threshold=self.settings.get("popularity_threshold"),
+            max_prompt_tokens=self.settings["max_prompt_tokens"],
         )
 
     def extract_answer(self, output: LMOutput) -> Any:
@@ -376,8 +417,8 @@ class HelmetMsMarcoTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_msmarco_dataset(
-            length_name=self.ruler_config["length_name"],
-            shots=self.ruler_config["shots"],
+            length_name=self.settings["length_name"],
+            shots=self.settings["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -392,8 +433,8 @@ class HelmetMultiLexSumTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_multi_lexsum_dataset(
-            max_context_tokens=self.ruler_config["max_context_tokens"],
-            shots=self.ruler_config["shots"],
+            max_context_tokens=self.settings["max_context_tokens"],
+            shots=self.settings["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -409,9 +450,9 @@ class HelmetAlceTask(HelmetTask):
 
     def _load_dataset(self) -> dict[str, Any]:
         return load_alce_dataset(
-            task=self.ruler_config["alce_task"],
-            length_name=self.ruler_config["length_name"],
-            shots=self.ruler_config["shots"],
+            task=self.settings["alce_task"],
+            length_name=self.settings["length_name"],
+            shots=self.settings["shots"],
             max_samples=self.config.limit,
             seed=self.config.seed,
         )
@@ -427,7 +468,7 @@ class HelmetRulerTask(HelmetTask):
     """
 
     def _load_dataset(self) -> dict[str, Any]:
-        ruler_name = f"{self.ruler_config['ruler_task']}__{self.context_size}"
+        ruler_name = f"{self.settings['ruler_task']}__{self.context_size}"
         return load_ruler_dataset(
             task_name=ruler_name,
             data_path=os.path.join(download_ruler_data(), RULER_TASKS[ruler_name]["data"]),
@@ -492,7 +533,7 @@ _JUDGED_TASK_CLASSES: dict[str, type[HelmetLongQAJudgedTask | HelmetSummJudgedTa
 }
 
 
-# The loader module behind each task kind, whose prompt templates feed the task hash.
+# The loader module behind each task kind, whose MEASURED_CONSTANTS feed the task hash.
 _LOADER_MODULES = {
     "json_kv": helmet_loader,
     "icl": helmet_icl_loader,
@@ -507,12 +548,43 @@ _LOADER_MODULES = {
 # Kinds that truncate or trim with the reference tokenizer.
 _USES_REFERENCE_TOKENIZER = {"infbench", "narrativeqa", "kilt", "multi_lexsum"}
 
+#: The HELMET_TASKS keys that change what a task measures, and the only ones its
+#: run reads from the task settings. The rest pick the task class (`kind`,
+#: `metrics_key`), are suite flags (`tag`, `judged`, `ablation`), or are already
+#: TaskConfig fields (`limit`, and `max_gen_toks` and `stop_new_line` through the
+#: sampling parameters), so hashing them here would move every hash when a suite
+#: changes, or record a value an override ignores.
+MEASURED_KEYS = (
+    "length_name",
+    "shots",
+    "use_chat_template",
+    "max_context_tokens",
+    "max_prompt_tokens",
+    "max_questions",
+    "popularity_threshold",
+    "ruler_task",
+    "kilt_task",
+    "icl_dataset",
+    "infbench_subset",
+    "alce_task",
+)
+
+#: The reference implementation these tasks port.
+HELMET_UPSTREAM = "princeton-nlp/HELMET@aeadacc6"
+
+
+def _canonical(value: Any) -> str:
+    """A comparable form of task settings, which may have come through JSON."""
+    return json.dumps(value, sort_keys=True)
+
 
 def _task_settings(task_cfg: dict) -> dict[str, Any]:
-    """Everything that shapes a task's prompts but has no TaskConfig field of its own.
+    """Everything that shapes a task's data and prompts but has no TaskConfig field.
 
-    Serialized into the task hash, so a change to shots, token budgets, prompt
-    templates or a pinned source revision gives the task a new hash.
+    Serialized into the task hash, and the only place a task's run reads these
+    settings from (see `HelmetTask`), so a change to shots, token budgets, prompt
+    text or a pinned source revision both changes the run and gives the task a
+    new hash.
     """
     kind = task_cfg["kind"]
     sources: dict[str, Any] = {}
@@ -529,20 +601,22 @@ def _task_settings(task_cfg: dict) -> dict[str, Any]:
         sources["infinitebench_subset"] = INFBENCH_SUBSETS[task_cfg["infbench_subset"]]
     if kind == "multi_lexsum":
         sources["multi_lexsum"] = f"{MULTI_LEXSUM_REPO}@{MULTI_LEXSUM_REVISION}"
-        sources["min_source_tokens"] = MIN_SOURCE_TOKENS
     if kind in _USES_REFERENCE_TOKENIZER:
         sources["reference_tokenizer"] = f"{REFERENCE_TOKENIZER}@{REFERENCE_TOKENIZER_REVISION}"
 
     if kind == "ruler":
         user, system, _ = get_ruler_templates(task_cfg["ruler_task"])
-        templates = {"user": user, "system": system}
+        constants: dict[str, Any] = {"user_template": user, "system_template": system}
     else:
-        templates = {
-            name: value
-            for name, value in vars(_LOADER_MODULES[kind]).items()
-            if "TEMPLATE" in name and isinstance(value, str)
-        }
-    return {"helmet": task_cfg, "sources": sources, "templates": templates}
+        constants = dict(_LOADER_MODULES[kind].MEASURED_CONSTANTS)
+    constants["answer_prefix_separator"] = ANSWER_PREFIX_SEPARATOR
+
+    return {
+        "upstream": HELMET_UPSTREAM,
+        "helmet": {key: task_cfg[key] for key in MEASURED_KEYS if key in task_cfg},
+        "sources": sources,
+        "constants": constants,
+    }
 
 
 # Upstream's vLLM and API backends stop on "\n" and "\n\n"; its HF backend stops on

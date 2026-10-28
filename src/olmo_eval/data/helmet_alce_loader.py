@@ -27,6 +27,18 @@ ALCE_MANIFEST = "alce/manifest.json"
 
 _USER_TEMPLATE = "{demo_text}{instruction}\n\nQuestion: {question}\n\n{context}"
 _SYSTEM_TEMPLATE = "Answer:"
+_DOC_SEPARATOR = "\n\n"
+_DEMO_SEPARATOR = "\n\n\n"
+
+#: Every piece of text and every selection threshold this loader builds prompts
+#: from; the instruction and the demo and document prompts come from the pinned
+#: prompt file. HELMET's task settings list it, so changing one moves the task hash.
+MEASURED_CONSTANTS = {
+    "user_template": _USER_TEMPLATE,
+    "system_template": _SYSTEM_TEMPLATE,
+    "doc_separator": _DOC_SEPARATOR,
+    "demo_separator": _DEMO_SEPARATOR,
+}
 
 
 def load_alce_manifest() -> dict[str, dict[str, Any]]:
@@ -79,7 +91,9 @@ def load_alce_dataset(
 
     def render_docs(docs: list[dict[str, Any]], limit: int | None = None) -> str:
         chosen = docs[:limit] if limit is not None else docs
-        return "\n\n".join(doc_prompt.format(**doc, ID=idx + 1) for idx, doc in enumerate(chosen))
+        return _DOC_SEPARATOR.join(
+            doc_prompt.format(**doc, ID=idx + 1) for idx, doc in enumerate(chosen)
+        )
 
     demo_text = ""
     if shots > 0:
@@ -87,13 +101,13 @@ def load_alce_dataset(
         # prompt varies run to run; seeding here makes it reproducible
         chosen = random.Random(seed).sample(prompt_spec["demos"], shots)
         demo_text = (
-            "\n\n\n".join(
+            _DEMO_SEPARATOR.join(
                 demo_prompt.format(
                     **demo, instruction=instruction, context=render_docs(demo["docs"])
                 )
                 for demo in chosen
             )
-            + "\n\n\n"
+            + _DEMO_SEPARATOR
         )
 
     if max_samples is not None and len(data) > max_samples:

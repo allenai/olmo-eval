@@ -38,7 +38,11 @@ import random
 from typing import Any
 
 from olmo_eval.data.helmet_infbench_loader import REFERENCE_TOKENIZER, _load_reference_tokenizer
-from olmo_eval.data.helmet_loader import download_helmet_plus_file, sample_jsonl_by_key
+from olmo_eval.data.helmet_loader import (
+    ANSWER_PREFIX_SEPARATOR,
+    download_helmet_plus_file,
+    sample_jsonl_by_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,18 @@ _USER_TEMPLATE = (
 _SYSTEM_TEMPLATE = "Answer:"
 _PASSAGE_TEMPLATE = "Document (Title: {title}): {text}"
 _DEMO_TEMPLATE = "{documents}\n\nQuestion: {question}\nAnswer: {answer}"
+# between passages, between demos, and after the last demo
+_SEPARATOR = "\n\n"
+
+#: Every piece of text and every selection threshold this loader builds prompts
+#: from. HELMET's task settings list it, so changing one moves the task hash.
+MEASURED_CONSTANTS = {
+    "user_template": _USER_TEMPLATE,
+    "system_template": _SYSTEM_TEMPLATE,
+    "passage_template": _PASSAGE_TEMPLATE,
+    "demo_template": _DEMO_TEMPLATE,
+    "separator": _SEPARATOR,
+}
 
 
 def load_kilt_manifest() -> dict[str, dict[str, Any]]:
@@ -75,7 +91,7 @@ def _question_key(row: dict[str, Any]) -> Any:
 
 
 def _render_passages(contexts: list[dict[str, Any]]) -> str:
-    return "\n\n".join(_PASSAGE_TEMPLATE.format(**ctx) for ctx in contexts)
+    return _SEPARATOR.join(_PASSAGE_TEMPLATE.format(**ctx) for ctx in contexts)
 
 
 def _instance_seed(key_value: Any) -> int:
@@ -192,7 +208,7 @@ def load_kilt_dataset(
             demos = _drop_duplicates(shuffled, key)[:shots]
 
             demo_text = (
-                "\n\n".join(
+                _SEPARATOR.join(
                     _DEMO_TEMPLATE.format(
                         documents=_render_passages(d["ctxs"]),
                         question=d["question"],
@@ -200,7 +216,7 @@ def load_kilt_dataset(
                     )
                     for d in demos
                 )
-                + "\n\n"
+                + _SEPARATOR
             )
 
         return {
@@ -210,7 +226,7 @@ def load_kilt_dataset(
             "answer": sample["answers"],
         }
 
-    prompt_template = _USER_TEMPLATE + "\n" + _SYSTEM_TEMPLATE
+    prompt_template = _USER_TEMPLATE + ANSWER_PREFIX_SEPARATOR + _SYSTEM_TEMPLATE
     rows = [build(r) for r in data]
     if max_prompt_tokens is not None:
         tokenizer = _load_reference_tokenizer(reference_tokenizer)

@@ -42,6 +42,21 @@ INFINITEBENCH_REVISION = "90f0394333616266d9fe85824ceaf505093cbaa5"
 # was truncated rather than simply ending. Verbatim from HELMET.
 TRUNCATION_POSTFIX = " ... [the rest of the text is omitted]"
 
+# Demos are wrapped and joined like this, around each subset's demo_template.
+_DEMO_PREFIX = "For example:\n\n"
+_DEMO_SEPARATOR = "\n\n"
+_DEMO_SUFFIX = "\n\nNow, read the following story:\n\n"
+
+#: Every piece of text this loader builds prompts from, besides each subset's
+#: templates, which are listed with its source. HELMET's task settings list it,
+#: so changing one moves the task hash.
+MEASURED_CONSTANTS = {
+    "demo_prefix": _DEMO_PREFIX,
+    "demo_separator": _DEMO_SEPARATOR,
+    "demo_suffix": _DEMO_SUFFIX,
+    "truncation_postfix": TRUNCATION_POSTFIX,
+}
+
 # HELMET passes explicit features when loading InfiniteBench to work around a
 # dataset hashing bug that otherwise surfaces between online/offline runs.
 _INFBENCH_FEATURES = Features(
@@ -194,8 +209,8 @@ def load_infbench_dataset(
             # depend on how many instances are being evaluated
             demos = demo_pool.filter(lambda x: x["id"] != example["id"])
             demos = demos.shuffle(seed=seed).select(range(shots))
-            demo_text = "\n\n".join(demo_template.format(**d) for d in demos)
-            return {"demo": f"For example:\n\n{demo_text}\n\nNow, read the following story:\n\n"}
+            demo_text = _DEMO_SEPARATOR.join(demo_template.format(**d) for d in demos)
+            return {"demo": f"{_DEMO_PREFIX}{demo_text}{_DEMO_SUFFIX}"}
 
         data = data.map(add_demos)
 
