@@ -35,7 +35,11 @@ def _parse_override_value(value: str) -> Any:
                 return items
             return []
 
-    # Parse bool, int, float, or string
+    # Parse null, bool, int, float, or string. "null" clears a field, so
+    # max_tokens=null generates up to the model's context limit. "none" stays a
+    # string because some fields take it as a value.
+    if value.lower() == "null":
+        return None
     if value.lower() == "true":
         return True
     elif value.lower() == "false":
