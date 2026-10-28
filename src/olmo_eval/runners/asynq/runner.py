@@ -17,6 +17,7 @@ from rich.console import Console
 from olmo_eval.common.configs import expand_tasks
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.common.logging import configure_worker_logging, get_logger
+from olmo_eval.evals.tasks.common import get_task
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
     terminate_workers,
@@ -26,21 +27,22 @@ from olmo_eval.runners.asynq.monitoring import (
 from olmo_eval.runners.asynq.preparation import prepare_task_items
 from olmo_eval.runners.asynq.results import (
     aggregate_results,
-    check_hard_failure_gate,
+    check_failure_budget,
     process_results,
+    utc_iso,
 )
+from olmo_eval.runners.asynq.runtime import apply_worker_configs
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
-from olmo_eval.runners.common.models import S3Config
 from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE, TaskResult
 from olmo_eval.runners.processing.utils import generate_experiment_id
-from olmo_eval.storage import StorageBackend
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ProcessScoringPoolConfig
     from olmo_eval.evals.tasks.common import SandboxEnv, Task
     from olmo_eval.harness.sandbox import SandboxConfig
+    from olmo_eval.upload import UploadConfig
 
 logger = get_logger(__name__)
 runner_logger = configure_worker_logging("runner")
@@ -91,6 +93,23 @@ class ProcessPoolPlan:
     pools: dict[str, ProcessScoringPoolConfig]
     demand: dict[str, ProcessPoolDemand]
     auto_created: frozenset[str]
+
+
+def _processing_seconds(
+    results: Mapping[str, TaskResult], processing_start: float, fallback_end: float
+) -> float:
+    """Seconds from processing start until the last task finished.
+
+    Uses the latest task last_completed_at, or fallback_end when no task has one.
+    """
+    from datetime import datetime
+
+    ends = [
+        datetime.fromisoformat(r.last_completed_at).timestamp()
+        for r in results.values()
+        if r.last_completed_at
+    ]
+    return max([*ends, processing_start] if ends else [fallback_end]) - processing_start
 
 
 def _materialize_sandbox_instances(sandboxes: Sequence[SandboxConfig]) -> list[SandboxConfig]:
@@ -496,13 +515,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
     # Output configuration
     output_dir: str = BEAKER_RESULT_DIR
-    storages: list[StorageBackend] = field(default_factory=list)
 
     # vLLM-specific configuration
     attention_backend: str | None = None
 
-    # S3 upload configuration (optional)
-    s3_config: S3Config | None = None
+    # Dashboard upload configuration; None writes the manifest but uploads nothing
+    upload_config: UploadConfig | None = None
 
     # Experiment metadata
     experiment_name: str | None = None
@@ -525,6 +543,10 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     # Configuration for print_config display
     _mode_name: str = "Async Mode"
     _mode_description: str = "Async (All-at-once)"
+
+    # Run record state for the manifest written at start and finalize
+    _started_at: str | None = field(default=None, init=False, repr=False)
+    _prepared_tasks: dict[str, Task] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def provider_config(self) -> ProviderConfig:
@@ -579,19 +601,26 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
     async def run_async(self) -> dict[str, Any]:
         """Execute evaluations using instance-level queuing."""
-        # Track experiment start time
+        # Track experiment start time. This is also the anchor for startup_seconds: it
+        # comes before task data loading, worker spawn and provider init, and after CLI
+        # startup (imports and config resolution), which it does not cover.
         experiment_start = time.time()
 
         # Generate experiment ID early so metrics can include it
         experiment_id = generate_experiment_id()
+        self._start_run_record(experiment_id)
 
         # Prepare tasks
         expanded_tasks, trackers, items = self._prepare_tasks()
+        self._prepared_tasks = {
+            spec: tracker.task for spec, tracker in trackers.items() if tracker.task is not None
+        }
         total_instances = len(items)
         runner_logger.info(f"Total instances: {total_instances}")
 
         # Update harness metrics config with experiment metadata before starting workers
         self._update_metrics_config(experiment_id)
+        self._enable_tool_parsing_for_tool_requests(items)
 
         # Setup multiprocessing
         ctx = mp.get_context("spawn")
@@ -829,14 +858,22 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
 
             # Wait for workers to report their init times (also checks for crashes)
+            worker_configs: dict[str, dict[str, Any]] = {}
             provider_init_seconds = wait_for_init_times(
-                init_queue, num_inference_workers, workers=workers, result_queue=result_queue
+                init_queue,
+                num_inference_workers,
+                workers=workers,
+                result_queue=result_queue,
+                worker_configs=worker_configs,
             )
             if len(provider_init_seconds) != num_inference_workers:
                 raise RuntimeError(
                     f"Expected {num_inference_workers} inference worker(s) to initialize "
                     f"before starting work, got {len(provider_init_seconds)}."
                 )
+
+            self.harness_config = apply_worker_configs(self.harness_config, worker_configs)
+            self._update_metrics_config(experiment_id)
 
             runner_logger.info(
                 f"All {num_inference_workers} inference worker(s) ready; starting queued work"
@@ -848,6 +885,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             processing_start = time.time()
             for tracker in trackers.values():
                 tracker.start_time = processing_start
+            startup_seconds = processing_start - experiment_start
 
             # Process results
             results = await self._process_results(
@@ -859,6 +897,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 len(expanded_tasks),
                 total_instances,
             )
+            processing_seconds = _processing_seconds(results, processing_start, time.time())
 
             # Wait for all workers
             for worker in workers:
@@ -887,6 +926,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Aggregate and save results
             results_dict = self._aggregate_results(results, expanded_tasks)
+            results_dict["startup_seconds"] = startup_seconds
+            results_dict["processing_started_at"] = utc_iso(processing_start)
+            results_dict["processing_seconds"] = processing_seconds
             return self._finalize_and_gate(
                 results,
                 results_dict,
@@ -922,6 +964,11 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         def prepare_one(spec: str) -> tuple[str, TaskTracker, list[QueueItem]]:
             try:
                 overrides, sampling_overrides = self._build_task_overrides(spec)
+                # Before prepare_task_items, which loads the data.
+                configured = get_task(spec, overrides or None)
+                self._check_scaffold(spec, configured)
+                self._check_sandbox(spec, configured)
+                self._check_judge_provider(spec, configured)
                 task, task_items = prepare_task_items(
                     spec,
                     self.model_name,
@@ -1014,6 +1061,58 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         return expanded_tasks, trackers, items
 
+    def _check_scaffold(self, spec: str, task: Task) -> None:
+        """Fail before generation if the task needs a scaffold this run's harness lacks."""
+        required = task.required_scaffold
+        scaffold = self.harness_config.scaffold
+        if required is not None and scaffold != required:
+            raise ValueError(
+                f"{spec} has to run under a harness with scaffold={required}, for example "
+                f"`--harness {required}`; harness {self.harness_config.name!r} has "
+                f"{f'scaffold={scaffold}' if scaffold else 'no scaffold'}."
+            )
+
+    def _check_sandbox(self, spec: str, task: Task) -> None:
+        """Fail before generation if the task runs code and this run's harness has no sandbox.
+
+        Without a sandbox the runner starts no executor, and every execution scorer raises
+        ``SandboxRequiredError`` once generation is done.
+        """
+        if self.harness_config.sandboxes or not _count_execution_scorers(task):
+            return
+        raise ValueError(
+            f"{spec} scores by running code, so it has to run under a harness with sandboxes, "
+            f"for example `--harness codex_universal`; harness {self.harness_config.name!r} "
+            "has none."
+        )
+
+    def _check_judge_provider(self, spec: str, task: Task) -> None:
+        """Fail before generation if an auxiliary judge provider serves another model.
+
+        A task judged by a provider in this run's harness records the judge model in
+        its config, and so in its task hash; the provider must serve that model.
+        """
+        from olmo_eval.common.scorers import LLMJudgeScorer
+
+        judge_model = task.config.judge_model
+        for scorer in task._get_scorers().values():
+            name = getattr(scorer, "provider_name", None)
+            if not isinstance(scorer, LLMJudgeScorer) or name is None or judge_model is None:
+                continue
+            provider = self.harness_config.auxiliary_providers.get(name)
+            if provider is None:
+                raise ValueError(
+                    f"{spec} is judged by the auxiliary provider {name!r}, which harness "
+                    f"{self.harness_config.name!r} does not define. Add a provider {name!r} "
+                    f"that serves {judge_model!r}; the task module shows a launch command."
+                )
+            if provider.served_model != judge_model:
+                raise ValueError(
+                    f"{spec} is judged by {judge_model!r}, but auxiliary provider {name!r} "
+                    f"serves {provider.served_model!r}. Serve {judge_model!r}, or pass "
+                    f"`-o judge_model={provider.served_model}` to record the judge you use."
+                )
+
     def _build_task_overrides(self, spec: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """Build task and sampling overrides for a given task spec.
 
@@ -1051,6 +1150,28 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         except ImportError:
             return 0
 
+    def _enable_tool_parsing_for_tool_requests(self, items: Sequence[QueueItem]) -> None:
+        """Start a managed vLLM server that returns tool calls when tasks send tools.
+
+        A harness with its own tools already gets this from the worker. A task
+        that puts function schemas on its requests needs it too, or the server
+        answers in plain text. A setting given explicitly is left as it is.
+
+        This must be called before starting workers, which read the setting from
+        the serialized config.
+        """
+        provider = self.harness_config.provider
+        if str(provider.kind) != "vllm_server" or provider.base_url:
+            return
+        if "enable_auto_tool_choice" in (provider.kwargs or {}):
+            return
+        if not any(item.request.tools for item in items):
+            return
+        self.harness_config = self.harness_config.with_provider_overrides(
+            enable_auto_tool_choice=True
+        )
+        runner_logger.info("Tasks send function schemas; enabling tool-call parsing on vLLM")
+
     def _update_metrics_config(self, experiment_id: str) -> None:
         """Update harness metrics config with experiment metadata.
 
@@ -1079,7 +1200,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
     @property
     def max_hard_failure_rate(self) -> float:
-        """Fraction of a task's instances allowed to hard-fail before it is failed."""
+        """The failure budget: fraction of a task's instances that may go unscored."""
         configured = self.harness_config.max_hard_failure_rate
         return DEFAULT_MAX_HARD_FAILURE_RATE if configured is None else configured
 
@@ -1145,7 +1266,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
-        check_hard_failure_gate(results)
+        check_failure_budget(results)
         return final_results
 
     def _finalize_and_save(
@@ -1155,7 +1276,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         experiment_duration_seconds: float | None = None,
         provider_init_seconds: dict[str, float] | None = None,
     ) -> dict[str, Any]:
-        """Log summary, write metrics, upload to S3, and save results."""
+        """Log summary, write metrics.json and the manifest, then upload the results."""
         from olmo_eval.common.types import compute_model_hash
 
         self._log_summary(results_dict)
@@ -1173,24 +1294,117 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             provider_init_seconds=provider_init_seconds,
         )
 
-        s3_location: str | None = None
-        if self.s3_config and model_hash:
-            s3_location = self._upload_to_s3(
-                model_name=self.model_name,
-                model_hash=model_hash,
-                experiment_id=experiment_id,
-            )
-
         results_dict["_experiment_id"] = experiment_id
-        results_dict["_s3_location"] = s3_location
 
-        self._save_results(
-            results=results_dict,
+        self._write_final_manifest(
+            results_dict,
             experiment_id=experiment_id,
             model_hash=model_hash,
-            s3_location=s3_location,
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
+        if self.upload_config is not None and self.upload_config.enabled:
+            from olmo_eval.upload import upload_results_dir
+
+            upload_results_dir(self.output_dir, self.upload_config)
 
         return results_dict
+
+    def _start_run_record(self, experiment_id: str) -> None:
+        """Write manifest.json with status "running" and register the run (best effort)."""
+        from olmo_eval.upload import register_run_start
+        from olmo_eval.upload.manifest import (
+            build_manifest,
+            build_run_info,
+            model_info_from_provider,
+            utc_now,
+            write_manifest,
+        )
+
+        self._started_at = utc_now()
+        try:
+            run = build_run_info(
+                run_id=experiment_id,
+                status="running",
+                started_at=self._started_at,
+                experiment_name=self.experiment_name,
+                experiment_group=self.experiment_group,
+                task_specs=self.task_specs,
+                output_dir=self.output_dir,
+                harness_config=self.harness_config.to_dict(),
+                tags=self.upload_config.tags if self.upload_config else (),
+            )
+            model = model_info_from_provider(self.provider_config, self.attention_backend)
+            if str(self.provider_config.kind) == "sglang":
+                # Runtime identity is unknown until workers initialize. Do not
+                # register a provisional auto-profile hash as an actual model.
+                model["model_hash"] = None
+            write_manifest(self.output_dir, build_manifest(run, model))
+        except Exception as e:
+            logger.warning(f"Could not write the run manifest: {e}")
+            return
+        if self.upload_config is not None and self.upload_config.enabled:
+            register_run_start(self.output_dir, self.upload_config)
+
+    def _write_final_manifest(
+        self,
+        results_dict: dict[str, Any],
+        experiment_id: str,
+        model_hash: str | None,
+        experiment_duration_seconds: float | None,
+        provider_init_seconds: dict[str, float] | None,
+    ) -> None:
+        """Rewrite manifest.json with the final status, task metadata and suites."""
+        from olmo_eval.upload.manifest import (
+            build_manifest,
+            build_model_info,
+            build_run_info,
+            build_task_entry,
+            run_status,
+            utc_now,
+            write_manifest,
+        )
+        from olmo_eval.upload.metadata import (
+            metric_meta_for_spec,
+            metric_meta_for_task,
+            suite_results,
+        )
+
+        try:
+            tasks: dict[str, dict[str, Any]] = {}
+            for spec, data in results_dict.get("tasks", {}).items():
+                names = list((data.get("metrics") or {}).keys())
+                task = self._prepared_tasks.get(spec)
+                meta = (
+                    metric_meta_for_task(task, names)
+                    if task is not None
+                    else metric_meta_for_spec(spec, names)
+                )
+                tasks[spec] = build_task_entry(spec, meta, data.get("error"))
+            run = build_run_info(
+                run_id=experiment_id,
+                status=run_status({spec: t["error"] for spec, t in tasks.items()}),
+                started_at=self._started_at,
+                finished_at=utc_now(),
+                duration_seconds=experiment_duration_seconds,
+                experiment_name=self.experiment_name,
+                experiment_group=self.experiment_group,
+                task_specs=self.task_specs,
+                output_dir=self.output_dir,
+                harness_config=results_dict.get("harness_config"),
+                provider_init_seconds=provider_init_seconds,
+                errors=results_dict.get("errors", []),
+                tags=self.upload_config.tags if self.upload_config else (),
+            )
+            model = build_model_info(
+                name=results_dict.get("model") or self.model_name,
+                path=results_dict.get("model_path") or self.model_name,
+                model_hash=model_hash,
+                revision=self.provider_config.revision,
+                provider_kind=results_dict.get("provider") or str(self.provider_config.kind),
+                provider_config=results_dict.get("model_config", {}),
+            )
+            suites = suite_results(results_dict.get("suites") or {}, results_dict.get("tasks"))
+            write_manifest(self.output_dir, build_manifest(run, model, tasks, suites))
+        except Exception as e:
+            logger.warning(f"Could not write the run manifest: {e}")

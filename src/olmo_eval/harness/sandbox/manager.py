@@ -15,6 +15,7 @@ from typing import TypeVar
 
 from olmo_eval.common.execution.environment import ExecutionResult
 from olmo_eval.common.logging import configure_worker_logging
+from olmo_eval.common.scoring_time import measure_scoring
 
 from .config import Capability, SandboxConfig, SandboxMode
 from .errors import SandboxInfrastructureError
@@ -50,6 +51,12 @@ class ExecutorBinding:
         if self._released:
             raise RuntimeError("Binding has been released")
         return await self.executor.execute_in_session(command, timeout)
+
+    async def interrupt_session(self) -> None:
+        """Interrupt the command running in the bound executor's bash session."""
+        if self._released:
+            raise RuntimeError("Binding has been released")
+        await self.executor.interrupt_session()
 
     async def release(self) -> None:
         if not self._released:
@@ -314,6 +321,14 @@ class SandboxManager:
         self._round_robin_indices.clear()
         self._active_operations.clear()
         self._logger.info("All sandboxes stopped")
+
+        if self._modal_app_name is not None:
+            from .modal_deployment import stop_modal_app
+
+            try:
+                await stop_modal_app(self._modal_app_name)
+            except Exception as e:
+                self._logger.warning(f"Failed to stop Modal app {self._modal_app_name}: {e}")
 
         with contextlib.suppress(Exception):
             atexit.unregister(self._atexit_cleanup)
@@ -600,7 +615,8 @@ class SandboxManager:
                     excluded=excluded,
                 ) as executor:
                     try:
-                        return await operation(executor)
+                        with measure_scoring("sandbox"):
+                            return await operation(executor)
                     except Exception as exc:
                         if not failover_on_quarantine or executor.is_running:
                             raise
@@ -611,8 +627,14 @@ class SandboxManager:
                             f"an infrastructure failure from {executor.name}: {exc}"
                         )
             except _NoSandboxAvailableError:
-                if last_infrastructure_error is None:
+                # A scoring call that finds its pool empty lost its sandbox to
+                # infrastructure, whether or not this call saw the failure itself.
+                if not failover_on_quarantine:
                     raise
+                if last_infrastructure_error is None:
+                    raise SandboxInfrastructureError(
+                        f"No running sandbox has capabilities {sorted(required_capabilities)}"
+                    ) from None
                 raise SandboxInfrastructureError(
                     f"No healthy sandbox remained for {sorted(required_capabilities)} "
                     f"after infrastructure failures: {last_infrastructure_error}"

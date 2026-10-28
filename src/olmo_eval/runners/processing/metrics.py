@@ -7,12 +7,15 @@ import os
 from typing import Any
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.common.scoring_failures import format_scoring_failures
 from olmo_eval.runners.common.models import (
     MetricsOutput,
     ModelMetadata,
     ScoreSummary,
     TaskMetricsEntry,
 )
+from olmo_eval.runners.common.types import RUN_TIMING_KEYS, TASK_COST_KEYS
+from olmo_eval.runners.processing.generation_counts import format_generation_counts
 from olmo_eval.runners.processing.utils import get_primary_metric
 
 logger = get_logger("runners.metrics")
@@ -82,6 +85,9 @@ def build_single_model_metrics(
             instances_processed=task_data.get("instances_processed"),
             instances_failed=task_data.get("instances_failed"),
             error_summary=task_data.get("error_summary"),
+            generation_counts=task_data.get("generation_counts"),
+            scoring_failures=task_data.get("scoring_failures"),
+            **{key: task_data.get(key) for key in TASK_COST_KEYS},
         )
         tasks_list.append(entry)
 
@@ -103,7 +109,11 @@ def build_single_model_metrics(
             primary = get_primary_metric(metrics, preferred)
             if primary:
                 metric_scorer, score = primary
-                summary[suite_name] = ScoreSummary(metric=metric_scorer, score=score)
+                summary[suite_name] = ScoreSummary(
+                    metric=metric_scorer,
+                    score=score,
+                    generation_counts=suite_data.get("generation_counts"),
+                )
 
     return MetricsOutput(
         timestamp=results.get("timestamp", ""),
@@ -116,6 +126,7 @@ def build_single_model_metrics(
         experiment_group=experiment_group,
         experiment_duration_seconds=experiment_duration_seconds,
         provider_init_seconds=provider_init_seconds,
+        **{key: results.get(key) for key in RUN_TIMING_KEYS},
     )
 
 
@@ -175,6 +186,9 @@ def build_multi_model_metrics(
                 instances_processed=task_data.get("instances_processed"),
                 instances_failed=task_data.get("instances_failed"),
                 error_summary=task_data.get("error_summary"),
+                generation_counts=task_data.get("generation_counts"),
+                scoring_failures=task_data.get("scoring_failures"),
+                **{key: task_data.get(key) for key in TASK_COST_KEYS},
             )
             tasks_list.append(entry)
 
@@ -199,7 +213,9 @@ def build_multi_model_metrics(
                 if primary:
                     metric_scorer, score = primary
                     summary[model_name][suite_name] = ScoreSummary(
-                        metric=metric_scorer, score=score
+                        metric=metric_scorer,
+                        score=score,
+                        generation_counts=suite_data.get("generation_counts"),
                     )
 
     return MetricsOutput(
@@ -216,6 +232,7 @@ def build_multi_model_metrics(
         experiment_group=experiment_group,
         experiment_duration_seconds=experiment_duration_seconds,
         provider_init_seconds=provider_init_seconds,
+        **{key: results.get(key) for key in RUN_TIMING_KEYS},
     )
 
 
@@ -290,6 +307,7 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
     table.add_column("Task", style="cyan")
     table.add_column("Status")
     table.add_column("Instances")
+    table.add_column("Generations")
     table.add_column("Metric")
     table.add_column("Result")
 
@@ -301,8 +319,12 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
         saved = task_data.get("instances_saved", task_data.get("num_instances", 0))
         failed = task_data.get("instances_failed") or 0
         instances = f"{saved}/{processed}"
-        if failed:
-            instances += f" ({failed} failed)"
+        notes = [f"{failed} failed"] if failed else []
+        scoring = format_scoring_failures(task_data.get("scoring_failures"))
+        if scoring:
+            notes.append(scoring)
+        if notes:
+            instances += f" ({', '.join(notes)})"
         return instances
 
     def add_task_row(name: str, task_data: dict[str, Any]) -> None:
@@ -313,26 +335,40 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
 
         metric_name = primary[0] if primary else (preferred or "-")
         instances = format_instances(task_data)
+        generations = format_generation_counts(task_data.get("generation_counts"))
 
         if error:
-            table.add_row(name, "[red]Failed[/red]", instances, metric_name, str(error))
+            table.add_row(
+                name, "[red]Failed[/red]", instances, generations, metric_name, str(error)
+            )
         elif primary:
             table.add_row(
-                name, "[green]Success[/green]", instances, metric_name, f"{primary[1]:.4f}"
+                name,
+                "[green]Success[/green]",
+                instances,
+                generations,
+                metric_name,
+                f"{primary[1]:.4f}",
             )
         else:
-            table.add_row(name, "[green]Success[/green]", instances, metric_name, "-")
+            table.add_row(name, "[green]Success[/green]", instances, generations, metric_name, "-")
 
     def _get_collapsed_tasks(suites: dict[str, Any]) -> set[str]:
         """Identify tasks collapsed into a sub-suite average.
 
-        When a parent suite uses AVERAGE_OF_AVERAGES and a child suite uses
-        AVERAGE, the child's individual tasks are represented by the sub-suite
-        row and should not appear separately.
+        When a parent suite uses AVERAGE_OF_AVERAGES and a child suite averages
+        its own tasks, the child's individual tasks are represented by the
+        sub-suite row and should not appear separately.
         """
+        from olmo_eval.evals.suites.registry import AggregationStrategy
+
+        averaging = {
+            AggregationStrategy.AVERAGE.value,
+            AggregationStrategy.WEIGHTED_AVERAGE.value,
+        }
         collapsed: set[str] = set()
         for suite_data in suites.values():
-            if suite_data.get("parent_suite") and suite_data.get("aggregation") == "average":
+            if suite_data.get("parent_suite") and suite_data.get("aggregation") in averaging:
                 collapsed.update(suite_data.get("tasks", []))
         return collapsed
 
@@ -353,3 +389,49 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
             add_task_row(suite_name, suite_data)
 
     console.print(table)
+
+    warnings = scoring_failure_warnings(results, multi_model=multi_model)
+    if warnings:
+        console.print("Warnings", style="yellow")
+        for warning in warnings:
+            # The warning quotes an error message, so it is printed as plain text.
+            console.print(f"- {warning}", style="yellow", highlight=False, markup=False)
+
+
+def scoring_failure_warnings(results: dict[str, Any], multi_model: bool = False) -> list[str]:
+    """One line per published task whose metrics left out or partly scored instances.
+
+    A task over its failure budget already reports an error, so it gets no warning.
+    """
+    if multi_model:
+        tasks = [
+            (f"{model_name}:{task_name}", task_data)
+            for model_name, model_data in results.get("models", {}).items()
+            for task_name, task_data in model_data.get("tasks", {}).items()
+        ]
+    else:
+        tasks = list(results.get("tasks", {}).items())
+
+    warnings = []
+    for name, task_data in tasks:
+        failures = task_data.get("scoring_failures")
+        if not failures or task_data.get("error"):
+            continue
+        parts = []
+        if failures.get("instances_unscored"):
+            parts.append(
+                f"{failures['instances_unscored']} instance(s) could not be scored and are "
+                "left out of its metrics"
+            )
+        if failures.get("instances_partially_scored"):
+            parts.append(
+                f"{failures['instances_partially_scored']} instance(s) were scored from only "
+                "some of their outputs"
+            )
+        if not parts:
+            continue
+        line = f"{name}: {'; '.join(parts)}."
+        if failures.get("first_error"):
+            line += f" First scoring error: {failures['first_error']}"
+        warnings.append(line)
+    return warnings

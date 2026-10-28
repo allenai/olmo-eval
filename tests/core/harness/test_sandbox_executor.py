@@ -149,3 +149,140 @@ class TestStreamingControlCommand(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _CommandTimeoutError(Exception):
+    """Named like swe-rex's timeout so the executor recognizes it."""
+
+
+class TestSessionTimeout(unittest.IsolatedAsyncioTestCase):
+    def _executor(self) -> SandboxExecutor:
+        executor = SandboxExecutor(
+            SandboxConfig(image="test", mode=SandboxMode.DOCKER, container_runtime="docker")
+        )
+        executor._deployment = mock.Mock()
+        executor._runtime = mock.Mock()
+        executor._session_created = True
+        return executor
+
+    async def test_a_timed_out_command_is_interrupted_and_reported(self) -> None:
+        executor = self._executor()
+        interrupted = mock.Mock(output="^C", exit_code=0)
+        executor._runtime.run_in_session = mock.AsyncMock(
+            side_effect=[_CommandTimeoutError("timed out after 5s"), interrupted]
+        )
+
+        result = await executor.execute_in_session("sleep 100", timeout=5.0)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "timeout")
+        self.assertEqual(result.exit_code, -1)
+        self.assertIn("timed out after 5.0s", result.output)
+        actions = [c.args[0] for c in executor._runtime.run_in_session.await_args_list]
+        self.assertEqual(actions[0].command, "sleep 100")
+        self.assertEqual(type(actions[1]).__name__, "BashInterruptAction")
+
+    async def test_a_syntax_error_comes_back_as_a_result(self) -> None:
+        executor = self._executor()
+
+        class BashIncorrectSyntaxError(RuntimeError):
+            pass
+
+        executor._runtime.run_in_session = mock.AsyncMock(
+            side_effect=BashIncorrectSyntaxError("bash: line 1: syntax error near `('")
+        )
+
+        result = await executor.execute_in_session("echo (")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.exit_code, 2)
+        self.assertEqual(result.error, "syntax")
+        self.assertIn("syntax error", result.output)
+        self.assertEqual(executor._runtime.run_in_session.await_count, 1)
+
+    async def test_other_failures_still_raise(self) -> None:
+        executor = self._executor()
+        executor._runtime.run_in_session = mock.AsyncMock(side_effect=RuntimeError("gone"))
+
+        with self.assertRaises(RuntimeError):
+            await executor.execute_in_session("ls")
+
+    async def test_interrupt_without_a_session_is_a_no_op(self) -> None:
+        executor = self._executor()
+        executor._session_created = False
+        executor._runtime.run_in_session = mock.AsyncMock()
+
+        await executor.interrupt_session()
+
+        executor._runtime.run_in_session.assert_not_awaited()
+
+
+class TestRunDetached(unittest.IsolatedAsyncioTestCase):
+    """``run_detached`` starts a script in its own session and polls it to the end."""
+
+    def _executor(self, polls: list[str], start_output: str = "4242\n") -> SandboxExecutor:
+        from olmo_eval.common.execution import ExecutionResult
+        from olmo_eval.harness.sandbox.executor import _ControlCommandResult
+
+        executor = SandboxExecutor(
+            SandboxConfig(image="test", mode=SandboxMode.DOCKER, container_runtime="podman")
+        )
+        executor._runtime = mock.Mock()
+        executor.write_files = mock.AsyncMock()  # type: ignore[method-assign]
+        executor.execute_command = mock.AsyncMock(  # type: ignore[method-assign]
+            return_value=ExecutionResult(success=True, output=start_output, exit_code=0)
+        )
+        results = [_ControlCommandResult(stdout=p, stderr="noise", exit_code=0) for p in polls]
+        last = results[-1]
+        executor._execute_stream_control = mock.AsyncMock(  # type: ignore[method-assign]
+            side_effect=lambda *a, **k: results.pop(0) if results else last
+        )
+        return executor
+
+    async def test_a_finished_script_reports_its_exit_code(self) -> None:
+        executor = self._executor(["running\n", "3\n"])
+        with mock.patch("asyncio.sleep", new=mock.AsyncMock()):
+            run = await executor.run_detached("make all", timeout=60.0)
+
+        self.assertEqual(run.exit_code, 3)
+        self.assertFalse(run.timed_out)
+        written = executor.write_files.await_args.args[0]  # type: ignore[attr-defined]
+        self.assertEqual(written, {f"{run.run_dir}/script.sh": "make all"})
+        start = executor.execute_command.await_args.args[0]  # type: ignore[attr-defined]
+        self.assertIn(f"mkdir {run.run_dir}/started", start)
+        self.assertIn("setsid nohup bash -c", start)
+        self.assertEqual(run.stdout_path, f"{run.run_dir}/stdout")
+
+    async def test_a_runner_that_disappears_ends_the_wait(self) -> None:
+        executor = self._executor(["running\n", "gone\n"])
+        with mock.patch("asyncio.sleep", new=mock.AsyncMock()):
+            run = await executor.run_detached("sleep 100", timeout=60.0)
+
+        self.assertIsNone(run.exit_code)
+        self.assertFalse(run.timed_out)
+
+    async def test_a_script_past_its_timeout_is_killed_with_its_group(self) -> None:
+        executor = self._executor(["running\n"])
+        with mock.patch("asyncio.sleep", new=mock.AsyncMock()):
+            run = await executor.run_detached("sleep 100", timeout=0.05)
+
+        self.assertTrue(run.timed_out)
+        self.assertIsNone(run.exit_code)
+        kill = executor._execute_stream_control.await_args.args[0]  # type: ignore[attr-defined]
+        self.assertIn("kill -KILL -- -4242", kill)
+
+    async def test_a_script_that_cannot_start_raises(self) -> None:
+        executor = self._executor(["0\n"], start_output="bash: permission denied")
+        with self.assertRaisesRegex(RuntimeError, "Could not start"):
+            await executor.run_detached("true", timeout=60.0)
+
+    async def test_an_unresponsive_sandbox_raises(self) -> None:
+        executor = self._executor(["0\n"])
+        executor._execute_stream_control = mock.AsyncMock(  # type: ignore[method-assign]
+            side_effect=TimeoutError("poll timed out")
+        )
+        with (
+            mock.patch("asyncio.sleep", new=mock.AsyncMock()),
+            self.assertRaisesRegex(RuntimeError, "stopped answering"),
+        ):
+            await executor.run_detached("true", timeout=60.0)

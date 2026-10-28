@@ -20,17 +20,16 @@ leaderboard exactly, set ``OLMO_EVAL_JUDGE=gpt-4.1-mini``.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 from abc import ABC
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import cached_property, partial
 from typing import Any, cast
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.scorers.llm_judge import JudgeFn, build_openai_judge_fn
+from olmo_eval.common.scorers.llm_judge import JUDGE_ATTEMPTS, Judge, JudgeParseError, JudgeSettings
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -46,9 +45,9 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 logger = logging.getLogger(__name__)
 
 RESEARCHQA_REPO = "realliyifei/ResearchQA"
-RESEARCHQA_DEFAULT_JUDGE_SPEC = "gpt-5.4-mini"
+# A reasoning judge can spend this budget and truncate the label list; that batch scores 0.
+RESEARCHQA_JUDGE = JudgeSettings(model="gpt-5.4-mini", max_tokens=4096)
 RESEARCHQA_RUBRIC_BATCH_SIZE = 8
-RESEARCHQA_JUDGE_ATTEMPTS = 3
 
 RESEARCHQA_TYPE_METRICS = {
     "coverage_citation": "Citation",
@@ -129,20 +128,6 @@ def parse_coverage_labels(raw: str, expected_count: int) -> list[str] | None:
     return labels
 
 
-def build_researchqa_judge_fn() -> JudgeFn:
-    """Build the task-local judge from ``$OLMO_EVAL_JUDGE`` or its own default."""
-    spec = os.getenv("OLMO_EVAL_JUDGE", RESEARCHQA_DEFAULT_JUDGE_SPEC)
-    model, separator, effort = spec.partition(":")
-    return build_openai_judge_fn(
-        model=model,
-        temperature=0.0,
-        # A reasoning judge can spend this budget and truncate the label list; that batch scores 0.
-        max_tokens=4096,
-        scorer_name="ResearchQA",
-        reasoning_effort=(effort if separator else None),
-    )
-
-
 def _type_item_count(response: Response, rubric_type: str) -> int:
     rubric = response.instance.metadata.get("rubric", [])
     if not isinstance(rubric, list):
@@ -172,10 +157,10 @@ class ResearchQAMetricBase(Metric, ABC):
 
     scorer: type[Scorer] = ResearchQAScorer
 
-    def pairwise_display_format(self) -> str:
+    def display_format(self) -> str:
         return "percentage"
 
-    def pairwise_unit(self) -> str:
+    def metric_unit(self) -> str:
         return "proportion"
 
 
@@ -209,7 +194,7 @@ class CoverageTypeMetric(ResearchQAMetricBase):
             item_count += response_item_count
         return weighted_score / item_count if item_count else 0.0
 
-    def supports_pairwise_scorer_fallback(self) -> bool:
+    def supports_scorer_fallback(self) -> bool:
         return False
 
 
@@ -277,6 +262,7 @@ class ResearchQA(Task):
     primary_metric = RUBRIC_COVERAGE_METRIC
     sampling_params = SamplingParams(temperature=0.0, max_tokens=4096)
     required_secrets = ("OPENAI_API_KEY",)
+    judged = True
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -342,6 +328,12 @@ class ResearchQA(Task):
             text = text[think_end + len("</think>") :]
         return text.strip()
 
+    @cached_property
+    def _judge(self) -> Judge:
+        """The judge the config names, or the ResearchQA default."""
+        settings = RESEARCHQA_JUDGE.with_config(self.config)
+        return Judge(call=settings.build_fn("ResearchQA"), label="ResearchQA judge")
+
     async def score_responses(
         self,
         responses: Sequence[Response],
@@ -349,14 +341,16 @@ class ResearchQA(Task):
     ) -> Sequence[Response]:
         """Judge rubric coverage, retaining zero-scored parse failures."""
         self._extract_answers(responses)
-        judge_fn = build_researchqa_judge_fn()
+        judge = self._judge
+        if context is not None:
+            judge = replace(judge, limiter=context.judge_limiter)
 
         failed_batches = 0
         failed_items = 0
         affected_instances = 0
         for response in responses:
             scores, labels, item_scores, response_failed_batches = await self._score_single(
-                response, judge_fn
+                response, judge
             )
             response.scores.update(scores)
             failed_batches += response_failed_batches
@@ -379,16 +373,19 @@ class ResearchQA(Task):
                 failed_batches,
                 failed_items,
                 affected_instances,
-                RESEARCHQA_JUDGE_ATTEMPTS,
+                JUDGE_ATTEMPTS,
             )
         return responses
 
     async def _score_single(
         self,
         response: Response,
-        judge_fn: JudgeFn,
+        judge: Judge,
     ) -> tuple[dict[str, float], list[str | None], list[float], int]:
-        """Score one answer and return metrics plus per-rubric judge details."""
+        """Score one answer and return metrics plus per-rubric judge details.
+
+        Every judge reply is kept in the output's ``judge_result``.
+        """
         rubric = response.instance.metadata.get("rubric", [])
         if not isinstance(rubric, list) or not rubric:
             return self._scores_from_items([], []), [], [], 0
@@ -405,19 +402,22 @@ class ResearchQA(Task):
         all_labels: list[str | None] = []
         all_scores: list[float] = []
         failed_batches = 0
+        replies: list[str] = []
+        judge = judge.recording_into(replies)
+        output.metadata["judge_result"] = {"raw_judge_responses": replies}
         for start in range(0, len(rubric), RESEARCHQA_RUBRIC_BATCH_SIZE):
             batch = rubric[start : start + RESEARCHQA_RUBRIC_BATCH_SIZE]
             rubric_items = [item["rubric_item"] for item in batch]
             prompt = build_coverage_judge_prompt(answer, rubric_items)
 
-            labels = None
-            for attempt in range(RESEARCHQA_JUDGE_ATTEMPTS):
-                raw = await judge_fn(prompt)
-                labels = parse_coverage_labels(raw, len(batch))
-                if labels is not None:
-                    break
-                if attempt < RESEARCHQA_JUDGE_ATTEMPTS - 1:
-                    await asyncio.sleep(2**attempt)
+            try:
+                labels, _ = await judge.ask(
+                    prompt, partial(parse_coverage_labels, expected_count=len(batch))
+                )
+            except JudgeParseError:
+                # As in the official grader, an unparseable batch scores 0.0 and its
+                # instance stays in the denominator.
+                labels = None
 
             if labels is None:
                 failed_batches += 1

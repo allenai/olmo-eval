@@ -8,7 +8,8 @@ from typing import Any
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
-from olmo_eval.common.types import Response, SamplingParams
+from olmo_eval.common.scorers.base import SCORER_RESULTS_KEY
+from olmo_eval.common.types import TURNS_KEY, Response, SamplingParams
 
 
 def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> list[dict]:
@@ -71,6 +72,10 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 if num_bytes > 0:
                     out_data["bits_per_byte"] = -sum_logits / (num_bytes * math.log(2))
 
+            for key in ("finish_reason", "completion_tokens", "prompt_tokens"):
+                if key in meta:
+                    out_data[key] = meta[key]
+
             out_data["num_chars"] = num_chars
             if "original_text" in meta:
                 out_data["num_chars_all"] = num_chars_all
@@ -98,6 +103,12 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
             # Whether the answer was stated in the requested format (scorer-set).
             if "answer_format_correct" in meta:
                 out_data["answer_format_correct"] = meta["answer_format_correct"]
+            # Per-instance results scorers keep, keyed by scorer name.
+            if SCORER_RESULTS_KEY in meta:
+                out_data[SCORER_RESULTS_KEY] = meta[SCORER_RESULTS_KEY]
+            # Each turn of a scripted conversation; ``text`` is only the last reply.
+            if TURNS_KEY in meta:
+                out_data[TURNS_KEY] = meta[TURNS_KEY]
 
             model_output.append(out_data)
 
@@ -135,6 +146,10 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
         # Add trajectory if present (multi-turn/agent tasks)
         if resp.trajectory is not None:
             prediction["trajectory"] = resp.trajectory.to_dict()
+
+        # Why scoring failed for a response with no outputs to record it on.
+        if resp.scoring_error is not None:
+            prediction["scoring_error"] = resp.scoring_error
 
         if metrics:
             augment_prediction_instance_metrics(prediction, metrics, response=resp)

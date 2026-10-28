@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import random
+import shlex
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -46,6 +47,46 @@ class _ControlCommandResult:
     stdout: str
     stderr: str
     exit_code: int
+
+
+#: Where detached commands keep their script, output and exit status.
+DETACHED_RUN_ROOT = "/tmp/.detached"
+#: Seconds between checks on a detached command; the last one repeats.
+DETACHED_POLL_INTERVALS = (0.1, 0.2, 0.5, 1.0)
+_DETACHED_CONTROL_TIMEOUT = 30.0
+_DETACHED_MAX_POLL_FAILURES = 3
+
+
+@dataclass(frozen=True)
+class DetachedRun:
+    """How a detached command ended, and where its output is.
+
+    ``exit_code`` is None when the command ran out of time (``timed_out``) or its
+    runner was killed before it could record a status. The caller reads the
+    output files and removes ``run_dir``.
+    """
+
+    run_dir: str
+    exit_code: int | None
+    timed_out: bool = False
+
+    @property
+    def stdout_path(self) -> str:
+        return f"{self.run_dir}/stdout"
+
+    @property
+    def stderr_path(self) -> str:
+        return f"{self.run_dir}/stderr"
+
+
+def _is_bash_syntax_error(exc: BaseException) -> bool:
+    """Return whether an exception reports a command that failed swe-rex's syntax check."""
+    return type(exc).__name__ == "BashIncorrectSyntaxError"
+
+
+def _is_command_timeout(exc: BaseException) -> bool:
+    """Return whether an exception reports a command exceeding its timeout."""
+    return "CommandTimeoutError" in type(exc).__name__ or "timed out" in str(exc).lower()
 
 
 def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
@@ -125,6 +166,9 @@ class SandboxExecutor:
         self.config = config
         self.name = name
         self._modal_app_name = modal_app_name
+        # Modal app this executor created itself and must stop on shutdown.
+        # Apps named by a SandboxManager are stopped by the manager instead.
+        self._owned_modal_app: str | None = None
         self._deployment: Any = None
         self._runtime: Any = None
         self._session_created: bool = False
@@ -174,8 +218,10 @@ class SandboxExecutor:
 
                 import modal
 
-                app_name = self._modal_app_name or _get_modal_app_name()
-                if not self._modal_app_name:
+                app_name = self._modal_app_name
+                if not app_name:
+                    app_name = _get_modal_app_name()
+                    self._owned_modal_app = app_name
                     # Only log if we generated it (manager logs its own)
                     self._log(logging.INFO, f"Using Modal app: {app_name}")
                 original_lookup = modal.App.lookup
@@ -247,7 +293,10 @@ class SandboxExecutor:
                     from .image import get_swerex_image
 
                     image = get_swerex_image(
-                        image, self.config.container_runtime, self.config.dockerfile_extra
+                        image,
+                        self.config.container_runtime,
+                        self.config.dockerfile_extra,
+                        pristine=self.config.pristine_image,
                     )
 
                 # Build docker args, adding log args if log_dir is configured
@@ -338,6 +387,7 @@ class SandboxExecutor:
                         self.config.container_runtime,
                         self.config.dockerfile_extra,
                         require_registry=True,  # Must push to registry for Modal
+                        pristine=self.config.pristine_image,
                     )
                     self._log(logging.DEBUG, f"Using pre-built swerex image: {image}")
                 else:
@@ -416,6 +466,15 @@ class SandboxExecutor:
             self._deployment = None
             self._runtime = None
 
+        if self._owned_modal_app is not None:
+            from .modal_deployment import stop_modal_app
+
+            try:
+                await stop_modal_app(self._owned_modal_app)
+            except Exception as e:
+                self._log(logging.WARNING, f"Failed to stop Modal app {self._owned_modal_app}: {e}")
+            self._owned_modal_app = None
+
         self._log(logging.DEBUG, "Sandbox stopped")
 
     async def execute(self, command: str, timeout: float | None = None) -> str:
@@ -483,7 +542,7 @@ class SandboxExecutor:
             )
         except Exception as e:
             # Check for timeout errors (swerex.exceptions.CommandTimeoutError)
-            if "CommandTimeoutError" in type(e).__name__ or "timed out" in str(e).lower():
+            if _is_command_timeout(e):
                 return ExecutionResult(
                     success=False,
                     output=f"Command timed out after {effective_timeout}s",
@@ -785,7 +844,7 @@ class SandboxExecutor:
                 exit_code=process.returncode or 0,
             )
 
-        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
+        from swerex.runtime.abstract import Command
 
         response = await asyncio.wait_for(
             self._runtime.execute(Command(command=["bash", "-c", command], timeout=timeout)),
@@ -796,6 +855,85 @@ class SandboxExecutor:
             stderr=response.stderr or "",
             exit_code=response.exit_code,
         )
+
+    async def run_detached(self, script: str, timeout: float) -> DetachedRun:
+        """Run a bash script detached from the request that starts it, and wait for it.
+
+        A request to the sandbox server is cut off after a few minutes, so a script
+        that may run longer is started in its own session and polled until it exits.
+        Polls go through the container runtime where it is available, as streamed
+        commands' polls do. The script's stdout and stderr go to separate files.
+        A script still running at ``timeout`` is killed with its process group, and
+        a runner that disappears without recording a status ends the wait at once.
+
+        Args:
+            script: The bash script to run.
+            timeout: Seconds to wait for it.
+
+        Returns:
+            How the script ended, with the directory holding its output.
+
+        Raises:
+            RuntimeError: If the sandbox is not started, the script cannot be
+                started, or the sandbox stops answering polls.
+        """
+        if self._runtime is None:
+            raise RuntimeError("Sandbox not started. Call start() first or use async context.")
+        run_dir = f"{DETACHED_RUN_ROOT}/{uuid.uuid4().hex}"
+        # The script travels in the request body, so its size is not bounded by the
+        # operating system's argument limit.
+        await self.write_files({f"{run_dir}/script.sh": script})
+        inner = (
+            f"bash {run_dir}/script.sh > {run_dir}/stdout 2> {run_dir}/stderr < /dev/null; "
+            f"echo $? > {run_dir}/exit"
+        )
+        # The marker keeps a start that a transport retry repeats from running twice.
+        start = await self.execute_command(
+            f"if mkdir {run_dir}/started 2>/dev/null; then "
+            f"setsid nohup bash -c {shlex.quote(inner)} > /dev/null 2>&1 < /dev/null & "
+            f"echo $! > {run_dir}/pid; fi; cat {run_dir}/pid",
+            timeout=_DETACHED_CONTROL_TIMEOUT,
+        )
+        pid = start.output.strip().splitlines()[-1] if start.output.strip() else ""
+        if not start.success or not pid.isdigit():
+            raise RuntimeError(f"Could not start a detached command: {start.output[-2000:]}")
+
+        # A finished script prints its exit code; a live one "running"; a runner
+        # that died without recording one, "gone". The exit file is read again
+        # after the liveness check, in case the script finished in between.
+        status_cmd = (
+            f"cat {run_dir}/exit 2>/dev/null || "
+            f"{{ kill -0 -- -{pid} 2>/dev/null && echo running; }} || "
+            f"cat {run_dir}/exit 2>/dev/null || echo gone"
+        )
+        deadline = time.monotonic() + timeout
+        delays = iter(DETACHED_POLL_INTERVALS)
+        failures = 0
+        while time.monotonic() < deadline:
+            delay = next(delays, DETACHED_POLL_INTERVALS[-1])
+            await asyncio.sleep(max(0.0, min(delay, deadline - time.monotonic())))
+            try:
+                check = await self._execute_stream_control(
+                    status_cmd, timeout=_DETACHED_CONTROL_TIMEOUT
+                )
+            except Exception as e:
+                failures += 1
+                self._log(logging.WARNING, f"Detached command poll failed ({failures}): {e}")
+                if failures >= _DETACHED_MAX_POLL_FAILURES:
+                    raise RuntimeError("The sandbox stopped answering polls") from e
+                continue
+            failures = 0
+            status = check.stdout.strip()
+            if status.lstrip("-").isdigit():
+                return DetachedRun(run_dir, int(status))
+            if status == "gone":
+                return DetachedRun(run_dir, None)
+
+        await self._execute_stream_control(
+            f"kill -TERM -- -{pid} 2>/dev/null; sleep 0.5; kill -KILL -- -{pid} 2>/dev/null; true",
+            timeout=_DETACHED_CONTROL_TIMEOUT,
+        )
+        return DetachedRun(run_dir, None, timed_out=True)
 
     async def write_files(self, files: Mapping[str, str], timeout: float | None = None) -> None:
         """Write files into the sandbox filesystem.
@@ -959,14 +1097,35 @@ class SandboxExecutor:
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
         prefix = log_prefix or self.name or "sandbox"
 
-        observation = await self._runtime.run_in_session(
-            BashAction(
-                command=command,
-                session="default",
-                timeout=effective_timeout,
-                check="silent",
+        try:
+            observation = await self._runtime.run_in_session(
+                BashAction(
+                    command=command,
+                    session="default",
+                    timeout=effective_timeout,
+                    check="silent",
+                )
             )
-        )
+        except Exception as e:
+            if _is_bash_syntax_error(e):
+                # swe-rex checks a command's syntax before running it. A model
+                # that writes a malformed command should read bash's complaint,
+                # as it would from a shell, rather than end the run.
+                return ExecutionResult(
+                    success=False, output=str(e).strip(), exit_code=2, error="syntax"
+                )
+            if not _is_command_timeout(e):
+                raise
+            # The command is still running in the shell; stop it so the session
+            # can take the next command instead of staying wedged behind this one.
+            self._log(logging.WARNING, f"Session command timed out after {effective_timeout}s")
+            await self.interrupt_session()
+            return ExecutionResult(
+                success=False,
+                output=f"Command timed out after {effective_timeout}s",
+                exit_code=-1,
+                error="timeout",
+            )
 
         output = observation.output or ""
 
@@ -981,6 +1140,24 @@ class SandboxExecutor:
             exit_code=observation.exit_code or 0,
             error=observation.failure_reason or None,
         )
+
+    async def interrupt_session(self) -> None:
+        """Interrupt whatever is running in the persistent bash session.
+
+        Sends an interrupt to the session's foreground job, falling back to
+        killing it, so the session returns to its prompt. A failure to
+        interrupt is logged rather than raised; the next command surfaces a
+        session that is truly stuck.
+        """
+        if self._runtime is None or not self._session_created:
+            return
+
+        from swerex.runtime.abstract import BashInterruptAction
+
+        try:
+            await self._runtime.run_in_session(BashInterruptAction(session="default"))
+        except Exception as e:
+            self._log(logging.WARNING, f"Failed to interrupt session: {e}")
 
     @property
     def is_running(self) -> bool:

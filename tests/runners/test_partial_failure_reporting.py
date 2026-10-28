@@ -19,32 +19,41 @@ import asyncio
 import logging
 import queue
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from olmo_eval.cli.run.config import _apply_dotlist_overrides
 from olmo_eval.cli.utils import process_ordered_args, reconstruct_ordered_args
 from olmo_eval.common.metrics import AccuracyMetric
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
+from olmo_eval.common.types import (
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+    SamplingParams,
+)
 from olmo_eval.evals.suites import get_suite
 from olmo_eval.evals.tasks.common import TaskConfig
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.inference.errors import classify_terminal_provider_error
+from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
 from olmo_eval.runners.asynq.preparation import compute_task_metrics, finalize_task
-from olmo_eval.runners.asynq.processing import process_chat_request
+from olmo_eval.runners.asynq.processing import process_batch, process_chat_request
 from olmo_eval.runners.asynq.results import (
     _report_task_completion,
     aggregate_results,
-    check_hard_failure_gate,
+    check_failure_budget,
     is_hard_failure,
 )
 from olmo_eval.runners.asynq.runner import AsyncEvalRunner
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem, TaskTracker
-from olmo_eval.runners.common.constants import HardFailureRateExceeded
+from olmo_eval.runners.common.constants import FailureBudgetExceeded
 from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE, TaskResult
 from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
 from olmo_eval.runners.processing.metrics import build_single_model_metrics, log_summary
-from olmo_eval.storage.base import convert_runner_results
+from olmo_eval.upload.uploader import _task_payload
 
 SPEC = "deepscholar_bench:probe"
 PRIMARY_METRIC = "accuracy:exact_match"
@@ -125,6 +134,9 @@ class _StubTask:
         data_source="test/data",
         metrics=(AccuracyMetric(),),
     )
+
+    def _get_scorers(self) -> dict[str, object]:
+        return {"code_exec": object()}
 
     def compute_metrics(self, responses: list[Response]) -> dict[str, dict[str, float]]:
         return CLEAN_METRICS
@@ -249,9 +261,9 @@ def test_partial_hard_failure_marks_task_failed() -> None:
     )
     result = _task_result_from(items)
 
-    assert result.hard_failure_rate_exceeded is True
+    assert result.failure_budget_exceeded is True
     assert result.error is not None
-    assert "Hard failure rate" in result.error
+    assert "failed, above the failure budget" in result.error
     # The summary compute_task_metrics used to drop is now attached.
     assert result.error_summary is not None
     assert "47 instances failed" in result.error_summary
@@ -260,7 +272,7 @@ def test_partial_hard_failure_marks_task_failed() -> None:
     assert result.num_instances == SAVED_INSTANCES
     assert result.instances_processed == TOTAL_INSTANCES
     assert result.instances_failed == HARD_FAILURES
-    assert result.hard_failure_rate == pytest.approx(HARD_FAILURES / TOTAL_INSTANCES)
+    assert result.failure_rate == pytest.approx(HARD_FAILURES / TOTAL_INSTANCES)
 
 
 def test_partial_hard_failure_fails_the_run() -> None:
@@ -269,8 +281,8 @@ def test_partial_hard_failure_fails_the_run() -> None:
     )
     result = _task_result_from(items)
 
-    with pytest.raises(HardFailureRateExceeded) as excinfo:
-        check_hard_failure_gate({SPEC: result})
+    with pytest.raises(FailureBudgetExceeded) as excinfo:
+        check_failure_budget({SPEC: result})
     assert SPEC in str(excinfo.value)
 
 
@@ -318,18 +330,146 @@ def test_total_failure_marks_task_failed_and_fails_the_run() -> None:
     items = _run_inference(TOTAL_INSTANCES, hard_failing=set(range(TOTAL_INSTANCES)))
     result = _task_result_from(items)
 
-    assert result.hard_failure_rate_exceeded is True
+    assert result.failure_budget_exceeded is True
     assert result.error is not None
-    assert "No instances were saved" in result.error
+    assert "No instance was scored" in result.error
     assert result.error_summary is not None
     assert "63 instances failed" in result.error_summary
     assert result.num_instances == 0
     assert result.instances_processed == TOTAL_INSTANCES
     assert result.instances_failed == TOTAL_INSTANCES
-    assert result.hard_failure_rate == pytest.approx(1.0)
+    assert result.failure_rate == pytest.approx(1.0)
 
-    with pytest.raises(HardFailureRateExceeded):
-        check_hard_failure_gate({SPEC: result})
+    with pytest.raises(FailureBudgetExceeded):
+        check_failure_budget({SPEC: result})
+
+
+_MAX_TOKENS_400 = (
+    "max_tokens=131072 cannot be greater than max_model_len=max_total_tokens=40960. "
+    "Please request fewer output tokens."
+)
+
+
+def _vllm_server_rejecting(rejected_prompts: set[str]) -> VLLMServerProvider:
+    """A real external-server provider whose client 400s the given chat prompts."""
+    with patch("olmo_eval.inference.providers.vllm_server.BeakerStatusReporter"):
+        provider = VLLMServerProvider(
+            "Qwen/Qwen3-8B", base_url="http://localhost:8000/v1", max_model_len=40960
+        )
+    provider.max_retries = 0
+
+    async def create(**kwargs):
+        if kwargs["messages"][0]["content"] in rejected_prompts:
+            error_type = type("BadRequestError", (Exception,), {"__module__": "openai"})
+            raise error_type(f"Error code: 400 - {_MAX_TOKENS_400}")
+        message = SimpleNamespace(content="a", tool_calls=None)
+        choice = SimpleNamespace(message=message, logprobs=None, finish_reason="stop")
+        return SimpleNamespace(choices=[choice], usage=None)
+
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(side_effect=create)
+    provider._get_or_create_client = MagicMock(return_value=client)
+    return provider
+
+
+def _run_batched_inference(total: int, hard_failing: set[int]) -> list[ResultItem]:
+    """Drive the real batched worker path through a real vllm_server provider."""
+    provider = _vllm_server_rejecting({f"q{idx}" for idx in hard_failing})
+    harness = SimpleNamespace(provider=provider, _apply_config=lambda request: request)
+    items = [
+        QueueItem(
+            model_name="qwen3-8b-27b",
+            task_id=SPEC,
+            instance_idx=idx,
+            instance=Instance(question=f"q{idx}", gold_answer="a"),
+            request=LMRequest(
+                request_type=RequestType.CHAT,
+                messages=({"role": "user", "content": f"q{idx}"},),
+            ),
+            sampling_params=SamplingParams(max_tokens=131072),
+        )
+        for idx in range(total)
+    ]
+    result_queue: queue.Queue[ResultItem] = queue.Queue()
+    asyncio.run(process_batch(items, harness, result_queue))  # type: ignore[arg-type]
+
+    results: list[ResultItem] = []
+    while not result_queue.empty():
+        results.append(result_queue.get())
+    return results
+
+
+def test_batched_total_failure_fails_the_run() -> None:
+    """Issue #310's run: every vllm_server request 400s, which must not score 0.0."""
+    items = _run_batched_inference(TOTAL_INSTANCES, hard_failing=set(range(TOTAL_INSTANCES)))
+    result = _task_result_from(items)
+
+    assert all(is_hard_failure(item) for item in items)
+    assert all(_MAX_TOKENS_400 in (item.error or "") for item in items)
+    assert result.num_instances == 0
+    assert result.instances_failed == TOTAL_INSTANCES
+    assert result.error is not None
+    assert "No instance was scored" in result.error
+    with pytest.raises(FailureBudgetExceeded):
+        check_failure_budget({SPEC: result})
+
+
+def test_batched_partial_failure_fails_the_run() -> None:
+    items = _run_batched_inference(
+        TOTAL_INSTANCES, hard_failing=set(range(SAVED_INSTANCES, TOTAL_INSTANCES))
+    )
+    result = _task_result_from(items)
+
+    assert result.num_instances == SAVED_INSTANCES
+    assert result.instances_failed == HARD_FAILURES
+    assert result.failure_budget_exceeded is True
+    with pytest.raises(FailureBudgetExceeded):
+        check_failure_budget({SPEC: result})
+
+
+def test_batched_clean_run_stays_green() -> None:
+    items = _run_batched_inference(TOTAL_INSTANCES, hard_failing=set())
+    result = _task_result_from(items)
+
+    assert not any(is_hard_failure(item) for item in items)
+    assert result.num_instances == TOTAL_INSTANCES
+    assert result.error is None
+    check_failure_budget({SPEC: result})
+
+
+def _run_empty_loglikelihood(continuations: tuple[str, ...]) -> ResultItem:
+    """One loglikelihood request through a provider that returns no outputs for it."""
+
+    async def alogprobs(requests, sampling_params):
+        return [[] for _ in requests]
+
+    harness = SimpleNamespace(
+        provider=SimpleNamespace(describe_request=lambda *a, **k: None, alogprobs=alogprobs),
+        _apply_config=lambda request: request,
+        flush_metrics=lambda batch_hash: None,
+    )
+    item = QueueItem(
+        model_name="qwen3-8b-27b",
+        task_id=SPEC,
+        instance_idx=0,
+        instance=Instance(question="q0", gold_answer="a"),
+        request=LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD, prompt="q0", continuations=continuations
+        ),
+    )
+    result_queue: queue.Queue[ResultItem] = queue.Queue()
+    asyncio.run(process_batch([item], harness, result_queue))  # type: ignore[arg-type]
+    return result_queue.get_nowait()
+
+
+def test_batched_loglikelihood_without_continuations_is_not_a_failure() -> None:
+    """A request with nothing to score legitimately yields no outputs."""
+    assert _run_empty_loglikelihood(continuations=()).error is None
+
+
+def test_batched_loglikelihood_with_continuations_and_no_outputs_is_a_failure() -> None:
+    """A provider returning no outputs for requested continuations has failed."""
+    assert is_hard_failure(_run_empty_loglikelihood(continuations=(" a", " b")))
 
 
 # ---------------------------------------------------------------------------
@@ -341,15 +481,15 @@ def test_clean_run_stays_green() -> None:
     items = _run_inference(TOTAL_INSTANCES, hard_failing=set())
     result = _task_result_from(items)
 
-    assert result.hard_failure_rate_exceeded is False
+    assert result.failure_budget_exceeded is False
     assert result.error is None
     assert result.error_summary is None
     assert result.num_instances == TOTAL_INSTANCES
     assert result.instances_processed == TOTAL_INSTANCES
     assert result.instances_failed == 0
-    assert result.hard_failure_rate == pytest.approx(0.0)
+    assert result.failure_rate == pytest.approx(0.0)
 
-    check_hard_failure_gate({SPEC: result})  # must not raise
+    check_failure_budget({SPEC: result})  # must not raise
 
     results = _aggregate(result)
     assert results["errors"] == []
@@ -365,9 +505,9 @@ def test_soft_failures_alone_keep_the_task_green() -> None:
 
     assert result.instances_failed == 0
     assert result.num_instances == TOTAL_INSTANCES
-    assert result.hard_failure_rate_exceeded is False
+    assert result.failure_budget_exceeded is False
     assert result.error is None
-    check_hard_failure_gate({SPEC: result})
+    check_failure_budget({SPEC: result})
 
 
 # ---------------------------------------------------------------------------
@@ -382,43 +522,43 @@ def test_default_threshold_is_five_percent() -> None:
 def test_rate_exactly_at_threshold_passes() -> None:
     result = _synthetic_result(total=20, failures=1)  # exactly 0.05
 
-    assert result.hard_failure_rate == pytest.approx(0.05)
-    assert result.hard_failure_rate_exceeded is False
+    assert result.failure_rate == pytest.approx(0.05)
+    assert result.failure_budget_exceeded is False
     assert result.error is None
     # The summary is still attached even though the task passes.
     assert result.error_summary == "Instance 19 failed: boom"
-    check_hard_failure_gate({SPEC: result})
+    check_failure_budget({SPEC: result})
 
 
 def test_rate_just_under_threshold_passes() -> None:
     result = _synthetic_result(total=63, failures=3)  # 0.0476
 
-    assert result.hard_failure_rate == pytest.approx(3 / 63)
-    assert result.hard_failure_rate_exceeded is False
+    assert result.failure_rate == pytest.approx(3 / 63)
+    assert result.failure_budget_exceeded is False
     assert result.error is None
     assert result.error_summary is not None
-    check_hard_failure_gate({SPEC: result})
+    check_failure_budget({SPEC: result})
 
 
 def test_rate_just_over_threshold_fails() -> None:
     result = _synthetic_result(total=63, failures=4)  # 0.0635
 
-    assert result.hard_failure_rate_exceeded is True
+    assert result.failure_budget_exceeded is True
     assert result.error is not None
-    with pytest.raises(HardFailureRateExceeded):
-        check_hard_failure_gate({SPEC: result})
+    with pytest.raises(FailureBudgetExceeded):
+        check_failure_budget({SPEC: result})
 
 
 def test_threshold_can_be_raised_to_tolerate_failures() -> None:
     result = _synthetic_result(total=63, failures=47, max_hard_failure_rate=0.9)
 
-    assert result.hard_failure_rate_exceeded is False
+    assert result.failure_budget_exceeded is False
     assert result.error is None
     # Tolerated, but never silent: the summary and the accounting survive.
     assert result.error_summary is not None
     assert result.instances_failed == 47
     assert result.instances_processed == 63
-    check_hard_failure_gate({SPEC: result})
+    check_failure_budget({SPEC: result})
 
 
 def test_all_failed_task_fails_even_at_the_maximum_threshold() -> None:
@@ -426,12 +566,12 @@ def test_all_failed_task_fails_even_at_the_maximum_threshold() -> None:
     result = _synthetic_result(total=63, failures=63, max_hard_failure_rate=1.0)
 
     assert result.num_instances == 0
-    assert result.hard_failure_rate_exceeded is True
+    assert result.failure_budget_exceeded is True
     assert result.error is not None
-    assert "No instances were saved" in result.error
-    assert "any hard failure rate budget" in result.error
-    with pytest.raises(HardFailureRateExceeded):
-        check_hard_failure_gate({SPEC: result})
+    assert "No instance was scored" in result.error
+    assert "fails at any failure budget" in result.error
+    with pytest.raises(FailureBudgetExceeded):
+        check_failure_budget({SPEC: result})
 
 
 def test_partial_failure_stays_quiet_at_the_maximum_threshold() -> None:
@@ -439,19 +579,19 @@ def test_partial_failure_stays_quiet_at_the_maximum_threshold() -> None:
     result = _synthetic_result(total=63, failures=62, max_hard_failure_rate=1.0)
 
     assert result.num_instances == 1
-    assert result.hard_failure_rate_exceeded is False
+    assert result.failure_budget_exceeded is False
     assert result.error is None
     assert result.error_summary is not None
-    check_hard_failure_gate({SPEC: result})
+    check_failure_budget({SPEC: result})
 
 
 def test_threshold_can_be_lowered_to_zero_tolerance() -> None:
     result = _synthetic_result(total=63, failures=1, max_hard_failure_rate=0.0)
 
-    assert result.hard_failure_rate_exceeded is True
+    assert result.failure_budget_exceeded is True
     assert result.error is not None
-    with pytest.raises(HardFailureRateExceeded):
-        check_hard_failure_gate({SPEC: result})
+    with pytest.raises(FailureBudgetExceeded):
+        check_failure_budget({SPEC: result})
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +678,7 @@ def test_gate_runs_after_results_are_saved() -> None:
     runner = _runner_with_recorded_finalize(calls)
     gated = _synthetic_result(total=63, failures=47)
 
-    with pytest.raises(HardFailureRateExceeded):
+    with pytest.raises(FailureBudgetExceeded):
         runner._finalize_and_gate({SPEC: gated}, {"tasks": {}}, experiment_id="exp")
 
     assert calls == ["finalize_and_save"], "results must be written before the gate fires"
@@ -580,7 +720,7 @@ def test_task_level_error_carries_its_summary() -> None:
     assert result.num_instances == 0
     assert result.instances_processed == 0
     assert result.instances_failed == 0
-    assert result.hard_failure_rate_exceeded is False
+    assert result.failure_budget_exceeded is False
 
 
 # ---------------------------------------------------------------------------
@@ -661,38 +801,42 @@ def test_metrics_json_accounting_on_a_clean_run() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Downstream: storage rows and suite averages
+# Downstream: uploaded task rows and suite averages
 # ---------------------------------------------------------------------------
 
 
-def test_stored_task_row_explains_a_gated_task() -> None:
-    """The stored row must say what happened, not just carry empty metrics."""
+def _uploaded_task_row(results: dict, tmp_path) -> dict:
+    metrics_output = build_single_model_metrics(results).to_dict()
+    run_errors = {e["task"]: e["error"] for e in metrics_output["errors"]}
+    row = metrics_output["tasks"][0]
+    return _task_payload(tmp_path, row, None, run_errors, metrics_output["summary"]).payload
+
+
+def test_uploaded_task_row_explains_a_gated_task(tmp_path) -> None:
+    """The uploaded row must say what happened, not just carry empty metrics."""
     results = _aggregate(_synthetic_result(total=63, failures=47))
     results["tasks"][SPEC]["task_hash"] = "deadbeef"
 
-    stored = convert_runner_results(results, experiment_id="exp-1")
-    row = stored.tasks[0]
+    row = _uploaded_task_row(results, tmp_path)
 
-    assert row.num_instances == 16
-    assert row.instances_processed == 63
-    assert row.instances_failed == 47
-    assert row.error_summary is not None
-    # Both halves survive: the classification first, then the instance detail.
-    assert row.error_summary.startswith("Hard failure rate")
-    assert " | " in row.error_summary
-    assert "47 instances failed" in row.error_summary
+    assert row["num_instances"] == 16
+    assert row["instances_processed"] == 63
+    assert row["instances_failed"] == 47
+    assert row["error"].startswith("47 of 63 instances (74.6%) failed, above the failure budget")
+    assert "47 instances failed" in row["error_summary"]["summary"]
 
 
-def test_stored_task_row_on_a_clean_run() -> None:
+def test_uploaded_task_row_on_a_clean_run(tmp_path) -> None:
     results = _aggregate(_synthetic_result(total=63, failures=0))
     results["tasks"][SPEC]["task_hash"] = "deadbeef"
 
-    row = convert_runner_results(results, experiment_id="exp-1").tasks[0]
+    row = _uploaded_task_row(results, tmp_path)
 
-    assert row.num_instances == 63
-    assert row.instances_processed == 63
-    assert row.instances_failed == 0
-    assert row.error_summary is None
+    assert row["num_instances"] == 63
+    assert row["instances_processed"] == 63
+    assert row["instances_failed"] == 0
+    assert row["error"] is None
+    assert row["error_summary"] is None
 
 
 def test_suite_average_names_the_task_it_excluded(caplog) -> None:
@@ -707,7 +851,7 @@ def test_suite_average_names_the_task_it_excluded(caplog) -> None:
     }
     failed_task = expanded[0]
     task_results[failed_task] = {
-        "error": "Hard failure rate 74.6% exceeds the maximum of 5.0%",
+        "error": "47 of 63 instances (74.6%) failed, above the failure budget of 5.0%",
         "instances_saved": 16,
         "instances_processed": 63,
         "instances_failed": 47,
@@ -718,7 +862,7 @@ def test_suite_average_names_the_task_it_excluded(caplog) -> None:
     logged = " ".join(record.getMessage() for record in caplog.records)
     assert suite_name in logged
     assert failed_task in logged
-    assert "Hard failure rate" in logged
+    assert "failed, above the failure budget" in logged
     # And the average genuinely excludes it.
     assert aggregations[suite_name]["num_tasks"] == len(expanded) - 1
     assert failed_task not in aggregations[suite_name]["tasks"]

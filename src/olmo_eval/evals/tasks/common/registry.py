@@ -15,6 +15,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, TypeVar
 
+from olmo_eval.common.scorers.llm_judge import judge_env_overrides
+
 from .base import SandboxEnv, Task, TaskConfig
 
 T = TypeVar("T", bound=type[Task])
@@ -314,6 +316,11 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
         if task_name not in _variants or variant not in _variants[task_name]:
             raise _resolve_error(variant)
         config = replace(config, **_variants[task_name][variant])
+
+    # A judged task takes its judge from $OLMO_EVAL_JUDGE unless the overrides name a
+    # judge model, which then wins with its task's default effort and budget.
+    if _tasks[task_name].judged and "judge_model" not in (config_overrides or {}):
+        config = replace(config, **judge_env_overrides())
 
     # Apply additional config overrides (highest priority)
     if config_overrides:
