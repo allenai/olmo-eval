@@ -403,4 +403,3 @@ async def test_large_payload_does_not_use_runtime_argv(sandbox, kind):
     else:
         result = await sandbox.execute_command(f"printf '%s' '{payload}' | wc -c", timeout=10)
     assert result.success and int(result.output.strip()) == len(payload)
-
