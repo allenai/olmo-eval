@@ -1256,6 +1256,12 @@ The `-o` flag uses OmegaConf dotlist syntax, supporting:
 | Nested | `a.b.c=val` | `-o scorer.normalize=true` |
 | List | `key=[a,b]` | `-o 'dependencies=[pkg1, pkg2]'` |
 
+To score unfinished thinking traces as no answer, use `-o strip_unclosed_thinking=true`.
+If the model's chat template already ends in `<think>`, also set
+`-o thinking_prefilled=true` so continuations without a closing `</think>` are recognized.
+Use `-o strip_thinking=true` to remove completed traces before scoring. These options
+are off by default; tasks may enable `strip_thinking` in their presets.
+
 **Note:** Quote complex values to prevent shell interpretation:
 ```bash
 # Good - single quotes protect the value
