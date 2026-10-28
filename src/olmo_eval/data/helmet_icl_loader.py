@@ -97,6 +97,16 @@ _USER_TEMPLATE = (
     'Only output "label: {{label}}" and nothing else. \n\n{context}\n\n{question}'
 )
 _SYSTEM_TEMPLATE = "label:"
+_DEMO_SEPARATOR = "\n\n"
+
+#: Every piece of text and every selection threshold this loader builds prompts
+#: from. HELMET's task settings list it, so changing one moves the task hash.
+MEASURED_CONSTANTS = {
+    "item_template": _ITEM_TEMPLATE,
+    "user_template": _USER_TEMPLATE,
+    "system_template": _SYSTEM_TEMPLATE,
+    "demo_separator": _DEMO_SEPARATOR,
+}
 
 
 def _balance_labels(
@@ -250,7 +260,7 @@ def load_icl_dataset(
         label_mapping = list(range(num_labels))
         random.Random(local_seed).shuffle(label_mapping)
 
-        context = "\n\n".join(
+        context = _DEMO_SEPARATOR.join(
             _ITEM_TEMPLATE.format(
                 text=demo[text_field], label=str(label_mapping[int(demo[label_field])])
             )
@@ -266,7 +276,6 @@ def load_icl_dataset(
 
     return {
         "data": data,
-        "prompt_template": _USER_TEMPLATE + "\n" + _SYSTEM_TEMPLATE,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }

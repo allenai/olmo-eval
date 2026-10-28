@@ -23,14 +23,11 @@ the same trade already taken for the ICL tasks -- see `helmet_tasks.py`.
 
 import functools
 import json
-import logging
 from typing import Any
 
 from datasets import Features, Sequence, Value, load_dataset
 
 from olmo_eval.data.helmet_loader import download_helmet_plus_file
-
-logger = logging.getLogger(__name__)
 
 # HELMET truncates against meta-llama/Llama-2-7b-hf; this is an ungated mirror
 # of the same tokenizer, so the repo doesn't require gated-model access.
@@ -44,6 +41,21 @@ INFINITEBENCH_REVISION = "90f0394333616266d9fe85824ceaf505093cbaa5"
 # Appended to a context after cutting it, so the model can tell the document
 # was truncated rather than simply ending. Verbatim from HELMET.
 TRUNCATION_POSTFIX = " ... [the rest of the text is omitted]"
+
+# Demos are wrapped and joined like this, around each subset's demo_template.
+_DEMO_PREFIX = "For example:\n\n"
+_DEMO_SEPARATOR = "\n\n"
+_DEMO_SUFFIX = "\n\nNow, read the following story:\n\n"
+
+#: Every piece of text this loader builds prompts from, besides each subset's
+#: templates, which are listed with its source. HELMET's task settings list it,
+#: so changing one moves the task hash.
+MEASURED_CONSTANTS = {
+    "demo_prefix": _DEMO_PREFIX,
+    "demo_separator": _DEMO_SEPARATOR,
+    "demo_suffix": _DEMO_SUFFIX,
+    "truncation_postfix": TRUNCATION_POSTFIX,
+}
 
 # HELMET passes explicit features when loading InfiniteBench to work around a
 # dataset hashing bug that otherwise surfaces between online/offline runs.
@@ -197,8 +209,8 @@ def load_infbench_dataset(
             # depend on how many instances are being evaluated
             demos = demo_pool.filter(lambda x: x["id"] != example["id"])
             demos = demos.shuffle(seed=seed).select(range(shots))
-            demo_text = "\n\n".join(demo_template.format(**d) for d in demos)
-            return {"demo": f"For example:\n\n{demo_text}\n\nNow, read the following story:\n\n"}
+            demo_text = _DEMO_SEPARATOR.join(demo_template.format(**d) for d in demos)
+            return {"demo": f"{_DEMO_PREFIX}{demo_text}{_DEMO_SUFFIX}"}
 
         data = data.map(add_demos)
 
@@ -233,23 +245,18 @@ def load_infbench_dataset(
     if keypoints:
         missing = [row["id"] for row in rows if not keypoints.get(row["id"])]
         if missing:
-            # the judge cannot grade these; each scores 0.0 and is flagged in
-            # its judge_result
-            logger.warning(
-                "%d InfiniteBench %s rows have no key points in %s: %s",
-                len(missing),
-                subset,
-                spec["keypoints_file"],
-                missing[:5],
+            # the judge cannot grade a summary without them
+            raise ValueError(
+                f"{len(missing)} InfiniteBench {subset} rows have no key points in "
+                f"{spec['keypoints_file']}: {missing[:5]}"
             )
         for row in rows:
-            row["keypoints"] = keypoints.get(row["id"], [])
+            row["keypoints"] = keypoints[row["id"]]
             # the expert reference the precision rubric grades against
             row["expert_summary"] = row["answer"][0] if row.get("answer") else ""
 
     return {
         "data": rows,
-        "prompt_template": spec["user_template"] + "\n\n" + spec["system_template"],
         "user_template": spec["user_template"],
         "system_template": spec["system_template"],
     }

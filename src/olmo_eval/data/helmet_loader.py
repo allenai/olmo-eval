@@ -163,6 +163,20 @@ _USER_TEMPLATE = (
 )
 _SYSTEM_TEMPLATE = "Corresponding value:"
 _DEMO_TEMPLATE = "Key: {key}\nCorresponding value: {value}"
+_DEMO_SEPARATOR = "\n\n"
+
+#: What a completion prompt puts between the rendered user template and the
+#: answer prefix (the system template), as HELMET's prompt_template does.
+ANSWER_PREFIX_SEPARATOR = "\n"
+
+#: Every piece of text and every selection threshold this loader builds prompts
+#: from. HELMET's task settings list it, so changing one moves the task hash.
+MEASURED_CONSTANTS = {
+    "user_template": _USER_TEMPLATE,
+    "system_template": _SYSTEM_TEMPLATE,
+    "demo_template": _DEMO_TEMPLATE,
+    "demo_separator": _DEMO_SEPARATOR,
+}
 
 
 def load_json_kv_dataset(
@@ -190,16 +204,15 @@ def load_json_kv_dataset(
 
     def process_example(example: dict[str, Any]) -> dict[str, Any]:
         demos = example.get("demos", [])[:shots]
-        demo_text = "\n\n".join(
+        demo_text = _DEMO_SEPARATOR.join(
             _DEMO_TEMPLATE.format(key=key, value=value) for key, value in demos
-        ) + ("\n\n" if demos else "")
+        ) + (_DEMO_SEPARATOR if demos else "")
         return {**example, "demos": demo_text}
 
     data = [process_example(record) for record in sample_jsonl_rows(data_path, max_samples, seed)]
 
     return {
         "data": data,
-        "prompt_template": _USER_TEMPLATE + "\n" + _SYSTEM_TEMPLATE,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }

@@ -33,6 +33,23 @@ _USER_TEMPLATE = (
     "Ranking: ID3 > ID1 > ID2\n\n{demos}{context}\n\nQuery: {question}"
 )
 _SYSTEM_TEMPLATE = "Ranking:"
+# the MS MARCO candidates carry no titles, but the template switches on it
+# upstream, so keep both forms
+_TITLED_PASSAGE_TEMPLATE = "[ID: {id}] Document (Title: {title}): {text}"
+_PASSAGE_TEMPLATE = "[ID: {id}] Document: {text}"
+_DEMO_TEMPLATE = "{passages}\n\nQuery: {query}\nRanking: {ranking}\n\n"
+_PASSAGE_SEPARATOR = "\n\n"
+
+#: Every piece of text and every selection threshold this loader builds prompts
+#: from. HELMET's task settings list it, so changing one moves the task hash.
+MEASURED_CONSTANTS = {
+    "user_template": _USER_TEMPLATE,
+    "system_template": _SYSTEM_TEMPLATE,
+    "titled_passage_template": _TITLED_PASSAGE_TEMPLATE,
+    "passage_template": _PASSAGE_TEMPLATE,
+    "demo_template": _DEMO_TEMPLATE,
+    "passage_separator": _PASSAGE_SEPARATOR,
+}
 
 
 def parse_rankings(output: str) -> list[str]:
@@ -88,13 +105,7 @@ def _query_key(row: dict[str, Any]) -> Any:
 
 
 def _passage_template(contexts: list[dict[str, Any]]) -> str:
-    # the MS MARCO candidates carry no titles, but the template switches on it
-    # upstream, so keep both forms
-    return (
-        "[ID: {id}] Document (Title: {title}): {text}"
-        if contexts and "title" in contexts[0]
-        else "[ID: {id}] Document: {text}"
-    )
+    return _TITLED_PASSAGE_TEMPLATE if contexts and "title" in contexts[0] else _PASSAGE_TEMPLATE
 
 
 def _gold_ranking(contexts: list[dict[str, Any]]) -> str:
@@ -141,7 +152,7 @@ def load_msmarco_dataset(
 
     def build(sample: dict[str, Any]) -> dict[str, Any]:
         template = _passage_template(sample["ctxs"])
-        passages = "\n\n".join(template.format(**c) for c in sample["ctxs"])
+        passages = _PASSAGE_SEPARATOR.join(template.format(**c) for c in sample["ctxs"])
 
         demo_text = ""
         if shots > 0:
@@ -166,10 +177,12 @@ def load_msmarco_dataset(
 
             for demo in chosen:
                 demo_template = _passage_template(demo["ctxs"])
-                demo_text += (
-                    "\n\n".join(demo_template.format(**c) for c in demo["ctxs"])
-                    + f"\n\nQuery: {demo['query']}\nRanking: {_gold_ranking(demo['ctxs'])}"
-                    + "\n\n"
+                demo_text += _DEMO_TEMPLATE.format(
+                    passages=_PASSAGE_SEPARATOR.join(
+                        demo_template.format(**c) for c in demo["ctxs"]
+                    ),
+                    query=demo["query"],
+                    ranking=_gold_ranking(demo["ctxs"]),
                 )
 
         return {
@@ -183,7 +196,6 @@ def load_msmarco_dataset(
 
     return {
         "data": [build(r) for r in data],
-        "prompt_template": _USER_TEMPLATE + "\n" + _SYSTEM_TEMPLATE,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }

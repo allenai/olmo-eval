@@ -34,7 +34,6 @@ from .label_set import LabelSetMatchScorer
 from .llm_judge import (
     JudgeFn,
     LLMJudgeScorer,
-    RubricJudgeScorer,
     SafetyScorer,
     SimpleQAGrade,
     SimpleQAJudgeScorer,
@@ -87,7 +86,6 @@ __all__ = [
     "ProcessScorer",
     "RougeLF1Scorer",
     "RougeLRecallScorer",
-    "RubricJudgeScorer",
     "SafetyScorer",
     "SandboxRequiredError",
     "ScoringIncompleteError",

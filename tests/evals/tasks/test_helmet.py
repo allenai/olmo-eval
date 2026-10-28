@@ -1,8 +1,9 @@
 """Offline tests for the HELMET tasks, scorers, and suite structure.
 
 Everything here runs without network or GPU: scorers and parsers are pure
-functions, task/suite structure is import-time registration, and the one
-loader test writes its own fixture file. Reference expectations were derived
+functions, task/suite structure is import-time registration, the judged tasks
+run against a scripted judge, and the loader tests write their own fixture
+files. Reference expectations were derived
 from HELMET's own implementations (utils.py, eval_alce.py,
 scripts/eval_gpt4_*.py) -- where a case is labeled "HELMET gives X", it was
 checked against upstream code.
@@ -20,30 +21,28 @@ from olmo_eval.common.scorers import (
     ndcg_at_k,
 )
 from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
-from olmo_eval.common.scorers.helmet_judge import (
-    HelmetLongQAJudgeScorer,
-    HelmetSummJudgeScorer,
-    parse_judge_json,
-)
-from olmo_eval.common.scorers.helmet_summ_prompts import (
-    FLUENCY_PROMPT,
-    FLUENCY_PROMPT_BOOK,
-    PRECISION_PROMPT,
-    PRECISION_PROMPT_BOOK,
-    RECALL_PROMPT,
-    RECALL_PROMPT_BOOK,
-)
-from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.common.scorers.llm_judge import JUDGE_ATTEMPTS
+from olmo_eval.common.types import Instance, LMOutput, Response
 from olmo_eval.data.helmet_icl_loader import _balance_labels
 from olmo_eval.data.helmet_kilt_loader import _load_jsonl, _question_key
 from olmo_eval.data.helmet_loader import sample_jsonl_by_key
 from olmo_eval.data.helmet_msmarco_loader import parse_rankings
 from olmo_eval.data.helmet_tasks import HELMET_TASKS, STANDARD_CONTEXT_SIZES
+from olmo_eval.evals.tasks.common import get_task
+from olmo_eval.evals.tasks.common.judge import JudgedTask
 from olmo_eval.evals.tasks.helmet import (
     HelmetExactMatchScorer,
     InfbenchChoiceScorer,
     _parse_labeled_output,
 )
+from olmo_eval.evals.tasks.helmet_judge import (
+    parse_judge_json,
+    parse_longqa_answer,
+    parse_longqa_verdict,
+    summ_f1,
+)
+from olmo_eval.runners.io.builders import build_predictions
+from tests.evals.tasks.judge_stubs import scripted_judge, use_judge
 
 
 def _instance(gold=None, **metadata) -> Instance:
@@ -225,62 +224,47 @@ def test_alce_qampari_rec_top5_caps_at_five():
 # LLM-judge parsing and combination
 
 
-def test_longqa_judge_parses_and_normalizes():
-    scorer = HelmetLongQAJudgeScorer()
-    # fluency x correctness / 3
-    assert scorer.parse_judge_response('Reasoning. {"fluency": 1, "correctness": 3}') == 1.0
-    assert scorer.parse_judge_response('x {"fluency": 1, "correctness": 2}') == pytest.approx(2 / 3)
-    # the fluency gate zeroes a correct but disfluent answer
-    assert scorer.parse_judge_response('x {"fluency": 0, "correctness": 3}') == 0.0
+def test_longqa_verdict_parsing_matches_helmet():
+    assert parse_longqa_verdict('Reasoning. {"fluency": 1, "correctness": 3}') == (1.0, 3.0)
     # the LAST json object is the verdict
-    assert scorer.parse_judge_response('{"a": 1} then {"fluency": 1, "correctness": 3}') == 1.0
-    # malformed output scores zero rather than raising
-    assert scorer.parse_judge_response("no json at all") == 0.0
-    assert scorer.parse_judge_response('{"fluency": 1}') == 0.0
+    assert parse_longqa_verdict('{"a": 1} then {"fluency": 0, "correctness": 2}') == (0.0, 2.0)
+    # a reply without both scores gives no verdict, so the judge is asked again
+    assert parse_longqa_verdict("no json at all") is None
+    assert parse_longqa_verdict('{"fluency": 1}') is None
     assert parse_judge_json("{fluency: 1}") is None
 
 
-def test_summ_judge_combination_matches_helmet_formula():
-    combine = HelmetSummJudgeScorer.combine
-    # fluency * 2*rec*prec/(rec+prec), rec = 4/7, prec = 3/4
+def test_summ_parsing_falls_back_to_a_fenced_json_block():
+    # the non-greedy brace match stops inside a nested object and fails to load;
+    # eval_gpt4_summ.py then tries the last ```json block, eval_gpt4_longqa.py doesn't
+    reply = 'Counting.\n```json\n{"precision": 2, "detail": {"x": 1}}\n```'
+    assert parse_judge_json(reply) is None
+    assert parse_judge_json(reply, fenced_fallback=True) == {"precision": 2, "detail": {"x": 1}}
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Answer: the North Pole", "the North Pole"),
+        # newlines become spaces, so everything after the prefix is kept
+        ("Answer: the North\nPole", "the North Pole"),
+        ("They head north.\nAnswer: Answer: the Pole", "the Pole"),
+        ("no prefix here\nsecond line", "no prefix here second line"),
+    ],
+)
+def test_longqa_judged_answer_matches_helmets_parse_output(raw, expected):
+    assert parse_longqa_answer(raw) == expected
+
+
+def test_summ_f1_matches_helmet_formula():
     rec, prec = 4 / 7, 3 / 4
-    expected = 2 * rec * prec / (rec + prec)
-    assert combine(
-        {"fluency": 1}, {"recall": 4}, {"precision": 3, "sentence_count": 4}, 7
-    ) == pytest.approx(expected)
-    # disfluency gates everything
-    assert combine({"fluency": 0}, {"recall": 7}, {"precision": 4, "sentence_count": 4}, 7) == 0.0
-    # zero denominators and missing/malformed verdicts degrade to 0, not raise
-    assert combine({"fluency": 1}, {"recall": 0}, {"precision": 3, "sentence_count": 5}, 10) == 0.0
-    assert combine(None, {"recall": 1}, {"precision": 1, "sentence_count": 1}, 5) == 0.0
-    assert combine({"x": 1}, {"recall": 1}, {"precision": 1, "sentence_count": 1}, 5) == 0.0
-
-
-def test_summ_prompts_format_cleanly():
-    """The rubrics contain literal JSON braces; a bad escape would raise here."""
-    for prompt in (FLUENCY_PROMPT, FLUENCY_PROMPT_BOOK):
-        assert "{text}" in prompt and prompt.format(text="s")
-    for prompt in (RECALL_PROMPT, RECALL_PROMPT_BOOK):
-        assert prompt.format(keypoints="1. k", summary="s")
-    for prompt in (PRECISION_PROMPT, PRECISION_PROMPT_BOOK):
-        assert prompt.format(expert_summary="e", summary="s")
-
-
-def _prompts_third(inst, out):
-    return HelmetSummJudgeScorer(is_book=True)._prompts(inst, out)[2]
-
-
-def test_summ_judge_selects_rubric_variant_by_task():
-    inst = _instance(keypoints=["k1", "k2"], expert_summary="expert", judge_question="")
-    out = _output("A summary.")
-    fluency_book, recall_book, _ = HelmetSummJudgeScorer(is_book=True)._prompts(inst, out)
-    fluency_law, recall_law, _ = HelmetSummJudgeScorer(is_book=False)._prompts(inst, out)
-    # the recall rubric names its domain; fluency variants differ only in examples
-    assert "novel" in recall_book.lower() and "lawsuit" not in recall_book.lower()
-    assert "lawsuit" in recall_law.lower() and "novel" not in recall_law.lower()
-    assert fluency_book != fluency_law
-    # the judge inputs are embedded where the rubric expects them
-    assert "1. k1" in recall_book and "expert" in _prompts_third(inst, out)
+    scores = summ_f1(fluency=1, found=4, supported=3, sentence_count=4, num_key_points=7)
+    assert scores["gpt4_f1"] == pytest.approx(2 * rec * prec / (rec + prec))
+    assert (scores["gpt4_recall"], scores["gpt4_precision"]) == (pytest.approx(rec), prec)
+    # disfluency gates everything; zero denominators give zero, as upstream
+    assert summ_f1(0, 7, 4, 4, 7)["gpt4_f1"] == 0.0
+    assert summ_f1(1, 0, 3, 5, 10)["gpt4_f1"] == 0.0
+    assert summ_f1(1, 1, 1, 0, 5)["gpt4_precision"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -498,140 +482,295 @@ def test_every_helmet_task_config_is_json_serializable():
     for task_name in HELMET_TASKS:
         task = get_task(f"helmet_{task_name}", {"limit": 1, "seed": 42})
         config = task.config.to_dict()
-        serialized = json.dumps(config, sort_keys=True)
-        assert serialized == json.dumps(config, sort_keys=True)
-
-
-def test_judge_scorer_to_dict_is_stable_and_serializable():
-    from olmo_eval.common.scorers.helmet_judge import (
-        HelmetLongQAJudgeScorer,
-        HelmetSummJudgeScorer,
-    )
-
-    for scorer in (HelmetLongQAJudgeScorer(), HelmetSummJudgeScorer(is_book=True)):
-        data = scorer.to_dict()
-        # a live closure must never appear in the serialized form; the judge
-        # is described by its settings instead
-        assert data["judge_fn"]["model"] == scorer.judge_model
-        assert data["judge_fn"]["temperature"] == scorer.judge_temperature
-        assert data["judge_fn"]["max_tokens"] == scorer.judge_max_tokens
-        assert json.dumps(data, sort_keys=True)
-    # two independent constructions carry distinct closures but must
-    # serialize identically, or task hashes would differ run to run
-    assert HelmetLongQAJudgeScorer().to_dict() == HelmetLongQAJudgeScorer().to_dict()
+        assert json.dumps(config, sort_keys=True)
 
 
 # ---------------------------------------------------------------------------
-# judge settings reach the task hash, and judge failures are recorded
+# judged tasks: graded through JudgedTask, with failures left unscored
+
+LONGQA_SPEC = "helmet_narrativeqa__8192"
+LONGQA_VERDICT = 'Step by step, it matches.\n{"fluency": 1, "correctness": 2}'
 
 
-def _stub_judge(*replies: str):
-    pending = list(replies)
-
-    async def judge(prompt: str, **kwargs) -> str:
-        return pending.pop(0)
-
-    return judge
-
-
-@pytest.mark.parametrize(
-    "change",
-    [{"judge_model": "gpt-4o-mini"}, {"judge_temperature": 1.0}, {"judge_max_tokens": 64}],
-)
-def test_judge_settings_change_the_serialized_scorer(change):
-    for scorer_cls in (HelmetLongQAJudgeScorer, HelmetSummJudgeScorer):
-        assert scorer_cls().to_dict() != scorer_cls(**change).to_dict()
+def _judged_response(spec: str, text: str, **metadata) -> tuple[JudgedTask, Response]:
+    task = get_task(spec)
+    assert isinstance(task, JudgedTask)
+    instance = Instance(question="BOOK\n\nQuestion: Where?", metadata={"id": 7, **metadata})
+    request = task.format_request(instance)
+    return task, Response(instance=instance, request=request, outputs=[LMOutput(text=text)])
 
 
-def test_provider_path_uses_the_judge_settings(monkeypatch):
-    import asyncio
-
-    seen = {}
-
-    async def fake_provider(self, prompt, context, **kwargs):
-        seen.update(kwargs)
-        return '{"fluency": 1, "correctness": 3}'
-
-    monkeypatch.setattr(HelmetLongQAJudgeScorer, "_score_with_provider", fake_provider)
-    monkeypatch.setattr(HelmetLongQAJudgeScorer, "_validate_provider", lambda self, ctx: None)
-    scorer = HelmetLongQAJudgeScorer(provider_name="judge", judge_temperature=0.3)
-    score = asyncio.run(scorer.ascore_with_context(_instance(gold="x"), _output("x"), None))
-    assert score == 1.0
-    assert seen == {"temperature": 0.3, "max_tokens": scorer.judge_max_tokens}
-
-
-def test_longqa_judge_records_parse_errors_in_predictions():
-    import asyncio
-
-    from olmo_eval.common.types import LMRequest, RequestType, Response
-    from olmo_eval.runners.io.builders import build_predictions
-
-    instance = _instance(gold="x")
-    good, bad = _output("x"), _output("x")
-    scorer = HelmetLongQAJudgeScorer(
-        judge_fn=_stub_judge('{"fluency": 1, "correctness": 3}', "no json here")
+def _longqa_response(text: str = "Answer: the North Pole"):
+    return _judged_response(
+        LONGQA_SPEC, text, judge_question="Where?", all_gold_answers=["the North Pole"]
     )
-    assert asyncio.run(scorer.ascore_with_context(instance, good, None)) == 1.0
-    assert asyncio.run(scorer.ascore_with_context(instance, bad, None)) == 0.0
-    assert good.metadata["judge_result"]["parse_error"] is False
-    assert bad.metadata["judge_result"] == {
-        "raw_judge_response": "no json here",
-        "parse_error": True,
-    }
-
-    request = LMRequest(request_type=RequestType.COMPLETION, prompt="q")
-    (prediction,) = build_predictions([Response(instance=instance, request=request, outputs=[bad])])
-    assert prediction["model_output"][0]["judge_result"]["parse_error"] is True
 
 
-def test_summ_judge_records_parse_errors_and_missing_keypoints():
-    import asyncio
+@pytest.mark.usefixtures("judge_test_env")
+class TestLongQAJudge:
+    @pytest.mark.anyio
+    async def test_scores_fluency_times_correctness_over_three(self, monkeypatch):
+        task, response = _longqa_response()
+        judge, prompts = scripted_judge(LONGQA_VERDICT)
+        use_judge(monkeypatch, judge)
 
-    scorer = HelmetSummJudgeScorer(
-        judge_fn=_stub_judge('{"fluency": 1}', '{"recall": 2}', "unparseable")
+        await task.score_responses([response])
+
+        assert response.scores["gpt4_score"] == pytest.approx(2 / 3)
+        # the judge sees the bare question, the gold list and the parsed answer
+        assert prompts[0].endswith(
+            "Question: Where?\nCorrect answers: ['the North Pole']\nAnswer: the North Pole\n"
+        )
+        result = response.outputs[0].metadata["judge_result"]
+        assert result["raw_judge_response"] == LONGQA_VERDICT
+        assert (result["fluency"], result["correctness"], result["parse_error"]) == (1, 2, False)
+
+    @pytest.mark.anyio
+    async def test_an_unparseable_reply_is_retried_not_scored(self, monkeypatch):
+        task, response = _longqa_response()
+        judge, prompts = scripted_judge("I cannot decide.", LONGQA_VERDICT)
+        use_judge(monkeypatch, judge)
+
+        await task.score_responses([response])
+
+        assert len(prompts) == 2
+        assert response.scores["gpt4_score"] == pytest.approx(2 / 3)
+
+    @pytest.mark.anyio
+    async def test_a_reply_that_never_parses_leaves_the_output_unscored(self, monkeypatch):
+        task, response = _longqa_response()
+        judge, prompts = scripted_judge(*["no verdict"] * JUDGE_ATTEMPTS)
+        use_judge(monkeypatch, judge)
+
+        await task.score_responses([response])
+
+        assert len(prompts) == JUDGE_ATTEMPTS
+        assert "gpt4_score" not in response.scores
+        output = response.outputs[0]
+        assert "gpt4_score" in output.metadata["scoring_errors"]
+        assert output.metadata["judge_result"]["parse_error"] is True
+        (prediction,) = build_predictions([response])
+        judge_result = prediction["model_output"][0]["judge_result"]
+        assert judge_result["raw_judge_response"] == "no verdict"
+
+    @pytest.mark.anyio
+    async def test_judge_overrides_change_the_judge_that_runs(self, monkeypatch):
+        built = {}
+        judge, _ = scripted_judge(LONGQA_VERDICT)
+        monkeypatch.setattr(
+            "olmo_eval.common.scorers.llm_judge.build_openai_judge_fn",
+            lambda **kwargs: built.update(kwargs) or judge,
+        )
+        task = get_task(LONGQA_SPEC, {"judge_model": "gpt-4.1-2025-04-14"})
+        _, response = _longqa_response()
+
+        await task.score_responses([response])
+
+        assert built["model"] == "gpt-4.1-2025-04-14"
+        assert built["max_tokens"] == 2048
+        assert built["temperature"] == 0.1
+        assert task.config.to_dict()["judge_model"] == "gpt-4.1-2025-04-14"
+
+
+SUMM_REPLIES = {
+    "fluency": '{"fluency": 1}',
+    "recall": 'Two are covered. {"recall": 2}',
+    "precision": '{"precision": 3, "sentence_count": 4}',
+}
+
+
+def _rubric_judge(replies: dict[str, list[str]]):
+    """A judge that answers each rubric from its own queue, whatever the call order."""
+    prompts: dict[str, list[str]] = {rubric: [] for rubric in replies}
+
+    async def judge(prompt: str, *, system_prompt: str | None = None) -> str:
+        if "evaluate the fluency" in prompt:
+            rubric = "fluency"
+        elif "EXPERT SUMMARY TEXT" in prompt:
+            rubric = "precision"
+        else:
+            rubric = "recall"
+        prompts[rubric].append(prompt)
+        return replies[rubric].pop(0)
+
+    return judge, prompts
+
+
+def _summ_response(spec: str, **metadata):
+    fields = {"keypoints": ["k1", "k2", "k3"], "expert_summary": "EXPERT SUMMARY TEXT"}
+    return _judged_response(spec, "  A short summary.  ", **{**fields, **metadata})
+
+
+@pytest.mark.usefixtures("judge_test_env")
+class TestSummJudge:
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("spec", "domain", "other"),
+        [
+            ("helmet_multi_lexsum__8192", "lawsuit", "novel"),
+            ("helmet_infbench_sum_eng__8192", "novel", "lawsuit"),
+        ],
     )
-    output = _output("A summary.")
-    instance = _instance(gold="ref", keypoints=["a", "b"], expert_summary="ref")
-    assert asyncio.run(scorer.ascore_with_context(instance, output, None)) == 0.0
-    result = output.metadata["judge_result"]
-    assert result["parse_error"] is True
-    assert result["raw_judge_responses"]["precision"] == "unparseable"
+    async def test_three_rubrics_combine_into_helmets_f1(self, spec, domain, other, monkeypatch):
+        task, response = _summ_response(spec)
+        judge, prompts = _rubric_judge({k: [v] for k, v in SUMM_REPLIES.items()})
+        use_judge(monkeypatch, judge)
 
-    output = _output("A summary.")
-    assert asyncio.run(scorer.ascore_with_context(_instance(gold="ref"), output, None)) == 0.0
-    assert output.metadata["judge_result"] == {"missing_keypoints": True, "parse_error": False}
+        await task.score_responses([response])
+
+        rec, prec = 2 / 3, 3 / 4
+        assert response.scores["gpt4_f1"] == pytest.approx(2 * rec * prec / (rec + prec))
+        assert response.scores["gpt4_recall"] == pytest.approx(rec)
+        assert response.scores["gpt4_precision"] == prec
+        assert response.scores["gpt4_fluency"] == 1.0
+        recall_prompt = prompts["recall"][0]
+        assert "1. k1\n2. k2\n3. k3" in recall_prompt
+        assert domain in recall_prompt.lower() and other not in recall_prompt.lower()
+        # the summary is judged stripped, as upstream's d["output"].strip()
+        assert "A short summary." in prompts["fluency"][0]
+        assert "  A short summary.  " not in prompts["fluency"][0]
+
+    @pytest.mark.anyio
+    async def test_one_rubric_that_never_parses_leaves_the_output_unscored(self, monkeypatch):
+        task, response = _summ_response("helmet_multi_lexsum__8192")
+        replies = {k: [v] for k, v in SUMM_REPLIES.items()}
+        replies["precision"] = ["no count"] * JUDGE_ATTEMPTS
+        judge, _ = _rubric_judge(replies)
+        use_judge(monkeypatch, judge)
+
+        await task.score_responses([response])
+
+        assert "gpt4_f1" not in response.scores
+        result = response.outputs[0].metadata["judge_result"]
+        assert result["parse_error"] is True
+        assert result["precision_judge_response"] == "no count"
+
+    @pytest.mark.anyio
+    async def test_an_instance_without_key_points_is_an_error_not_a_zero(self, monkeypatch):
+        task, response = _summ_response("helmet_multi_lexsum__8192", keypoints=[])
+        judge, prompts = _rubric_judge({k: [] for k in SUMM_REPLIES})
+        use_judge(monkeypatch, judge)
+
+        await task.score_responses([response])
+
+        assert not any(prompts.values())
+        assert "gpt4_f1" not in response.scores
+        assert "gpt4_f1" in response.outputs[0].metadata["scoring_errors"]
 
 
 # ---------------------------------------------------------------------------
 # HELMET's own settings and source revisions reach the task hash
 
 
-def test_helmet_settings_reach_the_task_hash(monkeypatch):
+def _settings_hash(spec: str, **overrides) -> str:
     from olmo_eval.common.types.base import compute_task_hash
-    from olmo_eval.data import helmet_icl_loader
+
+    return compute_task_hash(get_task(spec, overrides or None).config.to_dict())
+
+
+def test_task_settings_record_what_the_run_measures():
     from olmo_eval.evals.tasks import helmet
-    from olmo_eval.evals.tasks.common.registry import get_task
 
-    config = get_task("helmet_icl_trec_coarse__4096").config
-    settings = config.to_dict()["task_settings"]
-    assert settings["helmet"]["shots"] == 200
+    settings = get_task("helmet_icl_trec_coarse__4096").config.to_dict()["task_settings"]
+    assert settings["upstream"] == "princeton-nlp/HELMET@aeadacc6"
+    assert settings["helmet"] == {
+        "length_name": "4k",
+        "shots": 200,
+        "icl_dataset": "trec_coarse",
+    }
     assert settings["sources"]["icl"]["revision"] == "65752bf53af25bc935a0dce92fb5b6c930728450"
-    assert settings["templates"]["_SYSTEM_TEMPLATE"] == "label:"
+    assert settings["constants"]["system_template"] == "label:"
+    assert settings["constants"]["answer_prefix_separator"] == "\n"
 
-    base = helmet._task_settings(HELMET_TASKS["icl_trec_coarse__4096"])
-    assert helmet._task_settings({**HELMET_TASKS["icl_trec_coarse__4096"], "shots": 100}) != base
-    monkeypatch.setattr(helmet_icl_loader, "_SYSTEM_TEMPLATE", "Label:")
-    assert helmet._task_settings(HELMET_TASKS["icl_trec_coarse__4096"]) != base
-    monkeypatch.setattr(helmet, "HELMET_PLUS_REVISION", "0" * 40)
-    kilt_cfg = HELMET_TASKS["kilt_nq__4096"]
-    assert helmet._task_settings(kilt_cfg)["sources"]["helmet_plus"].endswith("0" * 40)
+    lexsum = helmet._task_settings(HELMET_TASKS["multi_lexsum__8192"])
+    assert lexsum["sources"]["multi_lexsum"].endswith(helmet.MULTI_LEXSUM_REVISION)
+    assert lexsum["constants"]["min_source_tokens"] == 65536
+    assert lexsum["helmet"]["max_context_tokens"] == 8192 - 300 - 400
 
-    def task_hash(settings):
-        from dataclasses import replace
 
-        return compute_task_hash(replace(config, task_settings=settings).to_dict())
+def test_suite_flags_and_config_fields_stay_out_of_the_hash():
+    from olmo_eval.evals.tasks import helmet
 
-    assert task_hash(base) != task_hash({**base, "helmet": {**base["helmet"], "shots": 100}})
+    for name in ("alce_asqa_nocite__4096", "narrativeqa__8192", "kilt_popqa__8192"):
+        cfg = HELMET_TASKS[name]
+        flagged = {**cfg, "tag": "other", "ablation": not cfg.get("ablation"), "judged": True}
+        flagged.update(limit=5, max_gen_toks=1, stop_new_line=True, metrics_key="x")
+        assert helmet._task_settings(flagged) == helmet._task_settings(cfg), name
+    # `-o limit=5` is the limit field's alone, not repeated in the settings
+    limited = get_task("helmet_alce_asqa_nocite__4096", {"limit": 5}).config.to_dict()
+    assert "limit" not in limited["task_settings"]["helmet"]
+
+
+@pytest.mark.parametrize(
+    ("loader", "spec"),
+    [
+        ("helmet_infbench_loader", "infbench_qa_eng__8192"),
+        ("helmet_narrativeqa_loader", "narrativeqa__8192"),
+        ("helmet_multilexsum_loader", "multi_lexsum__8192"),
+    ],
+)
+def test_prompt_constants_move_the_hash(loader, spec, monkeypatch):
+    import importlib
+
+    from olmo_eval.data.helmet_infbench_loader import TRUNCATION_POSTFIX
+    from olmo_eval.evals.tasks import helmet
+
+    module = importlib.import_module(f"olmo_eval.data.{loader}")
+    # the listed constant is the one truncation appends
+    assert module.MEASURED_CONSTANTS["truncation_postfix"] is TRUNCATION_POSTFIX
+    before = helmet._task_settings(HELMET_TASKS[spec])
+    monkeypatch.setitem(module.MEASURED_CONSTANTS, "truncation_postfix", " [cut]")
+    assert helmet._task_settings(HELMET_TASKS[spec]) != before
+
+
+def test_the_run_reads_its_settings_from_the_config(monkeypatch):
+    from olmo_eval.evals.tasks import helmet
+
+    spec = "helmet_kilt_nq__8192"
+    settings = get_task(spec).config.task_settings
+    changed = {**settings, "helmet": {**settings["helmet"], "shots": 5, "max_questions": 7}}
+    seen = {}
+
+    def fake_load(**kwargs):
+        seen.update(kwargs)
+        return {"data": [], "user_template": "", "system_template": ""}
+
+    monkeypatch.setattr(helmet, "load_kilt_dataset", fake_load)
+    task = get_task(spec, {"task_settings": changed})
+    task._load_data()
+
+    assert (seen["shots"], seen["max_samples"]) == (5, 7)
+    assert _settings_hash(spec, task_settings=changed) != _settings_hash(spec)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        lambda s: {**s, "constants": {**s["constants"], "system_template": "A:"}},
+        lambda s: {**s, "upstream": "princeton-nlp/HELMET@main"},
+        lambda s: {**s, "helmet": {**s["helmet"], "unknown": 1}},
+        lambda s: {**s, "helmet": {k: v for k, v in s["helmet"].items() if k != "shots"}},
+    ],
+)
+def test_overrides_the_run_cannot_honor_are_refused(override):
+    settings = get_task("helmet_kilt_nq__8192").config.task_settings
+    with pytest.raises(ValueError, match="task_settings"):
+        get_task("helmet_kilt_nq__8192", {"task_settings": override(settings)})
+
+
+@pytest.mark.parametrize(
+    "override", [{"num_fewshot": 3}, {"fewshot_seed": 1}, {"split": "validation"}]
+)
+def test_fewshot_and_split_overrides_are_refused(override):
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        get_task("helmet_icl_banking77__4096", override)
+
+
+def test_settings_that_arrive_through_json_are_accepted():
+    settings = get_task("helmet_icl_banking77__4096").config.task_settings
+    round_tripped = json.loads(json.dumps(settings))
+    task = get_task("helmet_icl_banking77__4096", {"task_settings": round_tripped})
+    assert task.settings == settings["helmet"]
 
 
 def test_task_settings_are_omitted_when_unset():
@@ -711,3 +850,165 @@ def test_helmet_ruler_tasks_render_helmets_prompt(tmp_path, monkeypatch):
     assert budgets == {"niah_mk_2": 50, "niah_mk_3": 100, "niah_mv": 50}
     sources = task.config.to_dict()["task_settings"]["sources"]
     assert sources["ruler_data"].startswith("allenai/ruler_data@")
+
+
+@pytest.mark.parametrize(
+    ("task_name", "chat"),
+    [
+        ("helmet_infbench_qa_eng__8192", True),
+        ("helmet_narrativeqa__8192", True),
+        ("helmet_alce_asqa__8192", True),
+        ("helmet_multi_lexsum__8192", True),
+        ("helmet_kilt_nq__8192", False),
+        ("helmet_json_kv__8192", False),
+    ],
+)
+def test_chat_template_tasks_send_a_single_user_turn(task_name, chat):
+    """HELMET's chat-format categories go out as one user message for the server
+    to wrap in the chat template, with no answer prefix; the rest stay completions
+    with the prefix on its own line."""
+    from olmo_eval.common.types import RequestType
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    task = get_task(task_name)
+    prepend_text = "" if chat else "Answer:"
+    instance = Instance(question="CONTEXT\nQuestion: q", metadata={"prepend_text": prepend_text})
+    request = task.format_request(instance)
+
+    if chat:
+        assert request.request_type == RequestType.CHAT
+        assert request.messages == ({"role": "user", "content": "CONTEXT\nQuestion: q"},)
+        assert request.prompt == ""
+    else:
+        assert request.request_type == RequestType.COMPLETION
+        assert request.messages == ()
+        assert request.prompt == "CONTEXT\nQuestion: q\nAnswer:"
+
+
+def test_judged_tasks_are_judged_tasks_and_require_the_openai_key():
+    """Exactly the tasks flagged as judged grade through JudgedTask and need the key."""
+    for name, config in HELMET_TASKS.items():
+        task = get_task(f"helmet_{name}")
+        judged = bool(config.get("judged"))
+        assert isinstance(task, JudgedTask) == judged, name
+        assert task.config.required_secrets == (("OPENAI_API_KEY",) if judged else ()), name
+
+
+# ---------------------------------------------------------------------------
+# Multi-LexSum selection follows upstream's load_multi_lexsum
+
+
+class _WordTokenizer:
+    """One token per whitespace-separated word, with character offsets."""
+
+    def __call__(self, text: str, return_offsets_mapping: bool = False) -> dict:
+        import re
+
+        spans = [m.span() for m in re.finditer(r"\S+", text)]
+        encoded: dict = {"input_ids": list(range(len(spans)))}
+        if return_offsets_mapping:
+            encoded["offset_mapping"] = spans
+        return encoded
+
+
+def _multi_lexsum_fixture(tmp_path, monkeypatch, *, min_tokens: int = 6):
+    """Hosted validation file, release files and tokenizer, with a small length floor.
+
+    Validation cases with 4-12 words of sources; the floor keeps those with at least
+    `min_tokens` words. The hosted file lists cases in reverse release order.
+    """
+    from olmo_eval.data import helmet_multilexsum_loader as loader
+
+    dev = [
+        {"case_id": f"V{i}", "summary/short": None if i == 3 else f"short {i}"} for i in range(10)
+    ]
+    hosted = [
+        {
+            "id": f"V{i}",
+            "sources": ["word " * (4 + i), "tail"],
+            "summary/short": f"short {i}",
+            "summary/long": f"long {i}",
+            "summary/short_keypoints": [f"point {i}"],
+        }
+        for i in reversed(range(10))
+    ]
+    train = [
+        {"case_id": f"T{i}", "summary/short": None if i % 4 == 0 else f"train summary {i}"}
+        for i in range(12)
+    ]
+    path = tmp_path / "multi_lexsum_val.jsonl"
+    path.write_text("".join(json.dumps(row) + "\n" for row in hosted), encoding="utf-8")
+    monkeypatch.setattr(loader, "download_helmet_plus_file", lambda name: str(path))
+    monkeypatch.setattr(
+        loader, "_release_cases", lambda name: {"dev.json": dev, "train.json": train}[name]
+    )
+    monkeypatch.setattr(loader, "_load_reference_tokenizer", lambda name: _WordTokenizer())
+    monkeypatch.setattr(loader, "MIN_SOURCE_TOKENS", min_tokens)
+    return loader, hosted, train
+
+
+def test_multi_lexsum_selects_long_cases_in_release_order(tmp_path, monkeypatch):
+    from datasets import Dataset
+
+    loader, _, _ = _multi_lexsum_fixture(tmp_path, monkeypatch)
+
+    data = loader.load_multi_lexsum_dataset(max_context_tokens=100, shots=0)["data"]
+
+    # V0's 5 words fall below the floor, V3 has no short summary, and the rest
+    # follow dev.json's order, not the hosted file's
+    eligible = [f"short {i}" for i in (1, 2, 4, 5, 6, 7, 8, 9)]
+    assert [row["answer"] for row in data] == [[s] for s in eligible]
+    assert data[0]["keypoints"] == ["point 1"]
+    assert data[0]["expert_summary"] == "long 1"
+
+    sampled = loader.load_multi_lexsum_dataset(max_context_tokens=100, shots=0, max_samples=3)
+    expected = Dataset.from_list([{"s": s} for s in eligible]).shuffle(seed=42).select(range(3))
+    assert [row["answer"][0] for row in sampled["data"]] == expected["s"]
+
+
+def test_multi_lexsum_draws_train_demos_per_instance(tmp_path, monkeypatch):
+    from datasets import Dataset
+
+    loader, _, train = _multi_lexsum_fixture(tmp_path, monkeypatch)
+    pool = Dataset.from_list([c for c in train if c["summary/short"] is not None])
+
+    data = loader.load_multi_lexsum_dataset(max_context_tokens=100, shots=2, seed=7)["data"]
+
+    for case_id, row in zip(("V1", "V2"), data, strict=False):
+        picks = pool.shuffle(seed=loader.demo_seed(case_id, 7)).select(range(2))
+        rendered = "\n\n".join(f"Summary: {s}" for s in picks["summary/short"])
+        assert row["demo"] == (
+            f"Example summaries:\n\n{rendered}\n\n"
+            "Now, write a summary of the following legal documents.\n"
+        )
+    assert len({row["demo"] for row in data}) > 1
+
+
+def test_multi_lexsum_truncates_the_documents(tmp_path, monkeypatch):
+    from olmo_eval.data.helmet_infbench_loader import TRUNCATION_POSTFIX
+
+    loader, _, _ = _multi_lexsum_fixture(tmp_path, monkeypatch)
+    budget = 10
+    separator = len(_WordTokenizer()(TRUNCATION_POSTFIX)["input_ids"])
+
+    data = loader.load_multi_lexsum_dataset(max_context_tokens=budget, shots=0)["data"]
+
+    # V1's 6 words fit; V9's 14 are cut after word budget - separator, plus the notice
+    assert data[0]["context"] == "word " * 5 + "\n\ntail"
+    kept = data[-1]["context"].removesuffix(TRUNCATION_POSTFIX)
+    assert data[-1]["context"].endswith(TRUNCATION_POSTFIX)
+    assert kept.split() == ["word"] * (budget - separator + 1)
+
+
+def test_multi_lexsum_refuses_incomplete_data(tmp_path, monkeypatch):
+    loader, hosted, _ = _multi_lexsum_fixture(tmp_path, monkeypatch)
+    path = tmp_path / "multi_lexsum_val.jsonl"
+
+    without_points = [{**row, "summary/short_keypoints": []} for row in hosted]
+    path.write_text("".join(json.dumps(r) + "\n" for r in without_points), encoding="utf-8")
+    with pytest.raises(ValueError, match="no key points"):
+        loader.load_multi_lexsum_dataset(max_context_tokens=100, shots=0)
+
+    path.write_text("".join(json.dumps(r) + "\n" for r in hosted[1:]), encoding="utf-8")
+    with pytest.raises(ValueError, match="missing from"):
+        loader.load_multi_lexsum_dataset(max_context_tokens=100, shots=0)

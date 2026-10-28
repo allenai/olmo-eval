@@ -38,6 +38,22 @@ _USER_TEMPLATE = (
 )
 _SYSTEM_TEMPLATE = "Answer:"
 _DEMO_TEMPLATE = "Question: {question}\nAnswer: {answer}"
+_DEMO_PREFIX = "For example:\n\n"
+_DEMO_SEPARATOR = "\n\n"
+_DEMO_SUFFIX = "\n\nNow, use the following story to answer the question:\n\n"
+
+#: Every piece of text and every selection threshold this loader builds prompts
+#: from. HELMET's task settings list it, so changing one moves the task hash.
+MEASURED_CONSTANTS = {
+    "user_template": _USER_TEMPLATE,
+    "system_template": _SYSTEM_TEMPLATE,
+    "demo_template": _DEMO_TEMPLATE,
+    "demo_prefix": _DEMO_PREFIX,
+    "demo_separator": _DEMO_SEPARATOR,
+    "demo_suffix": _DEMO_SUFFIX,
+    "truncation_postfix": TRUNCATION_POSTFIX,
+    "min_document_tokens": MIN_DOCUMENT_TOKENS,
+}
 
 
 def _iter_long_documents(rows, tokenizer, needed: int | None):
@@ -108,14 +124,11 @@ def load_narrativeqa_dataset(
         # HELMET shuffles the demo pool without a seed, so its demos vary run
         # to run; seeding here makes the prompt reproducible.
         demos = all_data["train"].shuffle(seed=seed).select(range(shots))
-        rendered = "\n\n".join(
+        rendered = _DEMO_SEPARATOR.join(
             _DEMO_TEMPLATE.format(question=d["question"]["text"], answer=d["answers"][0]["text"])
             for d in demos
         )
-        demo_text = (
-            f"For example:\n\n{rendered}\n\n"
-            "Now, use the following story to answer the question:\n\n"
-        )
+        demo_text = f"{_DEMO_PREFIX}{rendered}{_DEMO_SUFFIX}"
 
     rows = all_data["test"].shuffle(seed=seed)
     separator_length = len(tokenizer(TRUNCATION_POSTFIX)["input_ids"])
@@ -140,7 +153,6 @@ def load_narrativeqa_dataset(
 
     return {
         "data": data,
-        "prompt_template": _USER_TEMPLATE + "\n" + _SYSTEM_TEMPLATE,
         "user_template": _USER_TEMPLATE,
         "system_template": _SYSTEM_TEMPLATE,
     }

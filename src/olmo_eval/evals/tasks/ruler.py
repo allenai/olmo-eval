@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import RecallMetric
+from olmo_eval.common.metrics import Metric, RecallMetric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
@@ -83,6 +83,8 @@ class RulerTask(Task):
 
     _tasks_registry: dict[str, dict[str, Any]] = RULER_TASKS
     _name_prefix: str = "ruler_"
+    #: Joins the rendered question and the answer prefix in a completion prompt.
+    answer_prefix_separator: str = "\n"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
@@ -234,7 +236,7 @@ class RulerTask(Task):
         prompt = instance.question
         prepend_text = (instance.metadata or {}).get("prepend_text", "")
         if prepend_text:
-            prompt = prompt + "\n" + prepend_text
+            prompt = prompt + self.answer_prefix_separator + prepend_text
 
         return LMRequest(
             request_type=self.request_type,
@@ -256,13 +258,23 @@ class RulerTask(Task):
         return output.text
 
 
+#: RULER's newline stops: the newline character and the byte-level spellings some
+#: tokenizers decode it to.
+RULER_STOP_SEQUENCES = ("\n", "Ċ", "ĊĊ", "<0x0A>")
+
+
 def make_ruler_task_class(
     task_name: str,
     task_cfg: dict,
     *,
     base_cls: type[RulerTask] = RulerTask,
     class_prefix: str = "Ruler",
-    limit: int = 100,
+    limit: int | None = 100,
+    metrics: tuple[Metric, ...] | None = None,
+    primary_metric: Metric | str = "recall",
+    stop_sequences: tuple[str, ...] = RULER_STOP_SEQUENCES,
+    extra_bases: tuple[type, ...] = (),
+    attrs: dict[str, Any] | None = None,
 ) -> type[RulerTask]:
     """Create a task subclass for a RULER task variant.
 
@@ -276,29 +288,35 @@ def make_ruler_task_class(
         base_cls: RulerTask subclass to build on (allows other data sources/prefixes).
         class_prefix: Prefix for the generated class name.
         limit: Number of samples to draw per task/context-size condition.
+        metrics: The task's metrics; RULER's recall metric by default.
+        primary_metric: The primary metric, or its name.
+        stop_sequences: Stops used when the task config sets ``stop_new_line``.
+        extra_bases: Classes mixed in ahead of ``base_cls``.
+        attrs: Further class attributes.
     """
-    # QA tasks use RulerQAScorer which applies HELMET-style normalization
-    # (removes articles/punctuation, normalizes whitespace) matching the old framework.
-    # All other tasks use the standard SubstringRecallScorer via RecallMetric.
-    stop_sequences: tuple[str, ...] | None = (
-        ("\n", "Ċ", "ĊĊ", "<0x0A>") if task_cfg.get("stop_new_line", False) else None
-    )
+    if metrics is None:
+        # QA tasks use RulerQAScorer which applies HELMET-style normalization
+        # (removes articles/punctuation, normalizes whitespace) matching the old
+        # framework. All other tasks use the standard SubstringRecallScorer via
+        # RecallMetric.
+        metrics = (
+            (RecallMetric(scorer=RulerQAScorer),) if task_cfg["tag"] == "qa" else (RecallMetric(),)
+        )
     return type(
         f"{class_prefix}_{task_name}",
-        (base_cls,),
+        (*extra_bases, base_cls),
         {
             "__module__": base_cls.__module__,
-            "metrics": (RecallMetric(scorer=RulerQAScorer),)
-            if task_cfg["tag"] == "qa"
-            else (RecallMetric(),),
-            "primary_metric": "recall",
+            "metrics": metrics,
+            "primary_metric": primary_metric,
             "sampling_params": SamplingParams(
                 temperature=0.0,
                 top_p=1.0,
                 max_tokens=task_cfg.get("max_gen_toks", 50),
-                stop_sequences=stop_sequences,
+                stop_sequences=stop_sequences if task_cfg.get("stop_new_line", False) else None,
             ),
             "limit": limit,
+            **(attrs or {}),
         },
     )
 
