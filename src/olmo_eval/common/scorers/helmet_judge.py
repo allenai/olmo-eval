@@ -24,8 +24,10 @@ from olmo_eval.common.scorers.helmet_summ_prompts import (
 from olmo_eval.common.scorers.llm_judge import LLMJudgeScorer, build_openai_judge_fn
 from olmo_eval.common.types import Instance, LMOutput
 
-# HELMET grades with gpt-4o at temperature 0.1 (scripts/eval_gpt4_longqa.py).
-HELMET_JUDGE_MODEL = "gpt-4o-2024-05-13"
+# HELMET grades with gpt-4o at temperature 0.1 (scripts/eval_gpt4_longqa.py). Upstream
+# pins gpt-4o-2024-05-13, which OpenAI has since deprecated (the API rejects it), so this
+# uses the next gpt-4o snapshot, the one plain `gpt-4o` serves.
+HELMET_JUDGE_MODEL = "gpt-4o-2024-08-06"
 HELMET_JUDGE_TEMPERATURE = 0.1
 # The rubric asks the judge to reason step by step before emitting JSON, so it
 # needs far more room than the 10-token default used for letter-grade judges.
