@@ -31,11 +31,10 @@ def configure_task(
     """Build a task with its config overrides and final sampling params applied.
 
     The config is the one a run stores, so its hash is the run's task hash.
+    Overrides go through ``get_task`` so the task is constructed with them, and
+    an explicit ``judge_model`` override takes precedence over ``$OLMO_EVAL_JUDGE``.
     """
-    task = get_task(spec)
-
-    if overrides:
-        task.config = replace(task.config, **overrides)
+    task = get_task(spec, overrides or None)
 
     # Build sampling params from overrides
     existing_params = task.config.sampling_params or SamplingParams()

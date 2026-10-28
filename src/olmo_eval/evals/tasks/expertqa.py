@@ -32,7 +32,8 @@ import json
 import logging
 import re
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import cached_property
 from typing import Any
 
 from olmo_eval.common.scorers.citation import (
@@ -42,7 +43,7 @@ from olmo_eval.common.scorers.citation import (
     parse_cite_tag_response,
     score_citations_for_sections,
 )
-from olmo_eval.common.scorers.llm_judge import JudgeFn, build_default_judge_fn
+from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, Judge
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -162,11 +163,6 @@ EXPERTQA_METRICS = (
     AnswerPrecisionMetric(),
     SnippetGroundingMetric(),
 )
-
-
-def _build_judge_fn() -> JudgeFn:
-    """Build the ExpertQA judge function; kept as a small test hook."""
-    return build_default_judge_fn(scorer_name="ExpertQA")
 
 
 def _trajectory_source_text(response: Response) -> str:
@@ -307,6 +303,7 @@ class ExpertQA(Task):
     # The LLM-judge scorer needs an OpenAI key at scoring time; the launcher
     # mounts {user}_OPENAI_API_KEY, or {user}_OPENROUTER_API_KEY in its place.
     required_secrets = ("OPENAI_API_KEY",)
+    judged = True
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -346,6 +343,12 @@ class ExpertQA(Task):
         output.metadata["parsed_response"] = parsed
         return parsed
 
+    @cached_property
+    def _judge(self) -> Judge:
+        """The judge the config names, or the attributed-QA default."""
+        settings = ATTRIBUTED_QA_JUDGE.with_config(self.config)
+        return Judge(call=settings.build_fn("ExpertQA"), label="ExpertQA judge")
+
     async def score_responses(
         self,
         responses: Sequence[Response],
@@ -354,7 +357,9 @@ class ExpertQA(Task):
         """Score responses for citation precision/recall and answer precision."""
         self._extract_answers(responses)
 
-        judge_fn = _build_judge_fn()
+        judge = self._judge
+        if context is not None:
+            judge = replace(judge, limiter=context.judge_limiter)
         missing_trajectory = 0
 
         for response in responses:
@@ -363,11 +368,7 @@ class ExpertQA(Task):
             per_label: dict[str, dict[int, float]] = {label: {} for label in EXPERTQA_OUTPUT_LABELS}
 
             for out_idx, output in enumerate(response.outputs):
-                scores = await self._score_output(
-                    response=response,
-                    output=output,
-                    judge_fn=judge_fn,
-                )
+                scores = await self._score_output(response=response, output=output, judge=judge)
                 for label in EXPERTQA_OUTPUT_LABELS:
                     score = scores.get(label, 0.0)
                     output.metadata[f"score:{label}"] = score
@@ -395,8 +396,9 @@ class ExpertQA(Task):
         self,
         response: Response,
         output: LMOutput,
-        judge_fn: JudgeFn,
+        judge: Judge,
     ) -> dict[str, float]:
+        """Score one output; a judge reply that never parses leaves it unscored."""
         zeros = {k: 0.0 for k in EXPERTQA_OUTPUT_LABELS}
         parsed = output.metadata.get("parsed_response")
         if not parsed or not parsed.get("sections"):
@@ -407,10 +409,15 @@ class ExpertQA(Task):
         output.metadata["grounding_stats"] = grounding_stats
 
         answer_text = format_report(grounded)
-        precision_score = await self._score_precision(
-            judge_fn, response.instance.question, answer_text
-        )
-        citation_scores = await score_citations_for_sections(judge_fn, grounded)
+        replies: list[str] = []
+        judge = judge.recording_into(replies)
+        try:
+            precision_score = await self._score_precision(
+                judge, response.instance.question, answer_text
+            )
+            citation_scores = await score_citations_for_sections(judge, grounded)
+        finally:
+            output.metadata["judge_result"] = {"raw_judge_responses": replies}
 
         return {
             "citation_precision": citation_scores.get("citation_precision", 0.0),
@@ -425,11 +432,10 @@ class ExpertQA(Task):
         """Ground parsed JSON citation snippets against trajectory tool text."""
         return ground_citations_in_sources(parsed, _trajectory_source_text(response))
 
-    async def _score_precision(self, judge_fn: JudgeFn, question: str, answer: str) -> float:
+    async def _score_precision(self, judge: Judge, question: str, answer: str) -> float:
         """Answer precision via the irrelevant-paragraph judge (astabench precision_eval)."""
         prompt = PRECISION_EVAL_PROMPT.format(query=question, answer=answer)
-        raw = await judge_fn(prompt)
-        parsed = extract_json_from_response(raw)
+        parsed, _ = await judge.ask(prompt, extract_json_from_response)
         if not parsed:
             return 1.0  # No irrelevant paragraphs identified = perfect precision
 
