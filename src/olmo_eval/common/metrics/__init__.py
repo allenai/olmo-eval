@@ -27,6 +27,7 @@ from .ifeval import (
     IFEvalInstStrictAccuracy,
     IFEvalPromptLooseAccuracy,
     IFEvalPromptStrictAccuracy,
+    MultiIFAccuracy,
 )
 from .ngram_copying import (
     NGRAM_COPYING_K_VALUES,
@@ -53,6 +54,7 @@ __all__ = [
     "MeanPerplexityMetric",
     "NDCGMetric",
     "Metric",
+    "MultiIFAccuracy",
     "NGRAM_COPYING_K_VALUES",
     "NGramCopyingBPBMetricByteAvg",
     "PassAtKMetric",

@@ -10,10 +10,17 @@ import pytest
 
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers import (
-    RubricJudgeScorer,
+    SafetyScorer,
     SimpleQAJudgeScorer,
 )
-from olmo_eval.common.scorers.llm_judge import ConfiguredJudgeFn, build_openai_judge_fn
+from olmo_eval.common.scorers.llm_judge import (
+    ConfiguredJudgeFn,
+    Judge,
+    JudgeParseError,
+    JudgeSettings,
+    build_openai_judge_fn,
+)
+from olmo_eval.common.scoring_time import ScoringTimes, measure_instance_scoring
 from olmo_eval.common.types import Instance, LMOutput
 
 _MAX_TOKENS_REJECTION = (
@@ -22,8 +29,11 @@ _MAX_TOKENS_REJECTION = (
 )
 
 
-def _stub_openai(monkeypatch, create):
-    """Install a stub ``openai`` module whose completions call is ``create``."""
+def _stub_openai(monkeypatch, create, clients: list[dict] | None = None):
+    """Install a stub ``openai`` module whose completions call is ``create``.
+
+    Client constructor arguments are appended to ``clients`` when it is given.
+    """
     calls: list[dict] = []
 
     async def recording_create(**kwargs):
@@ -35,7 +45,9 @@ def _stub_openai(monkeypatch, create):
         return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
 
     class FakeAsyncOpenAI:
-        def __init__(self, api_key=None):
+        def __init__(self, **kwargs):
+            if clients is not None:
+                clients.append(kwargs)
             self.chat = types.SimpleNamespace(
                 completions=types.SimpleNamespace(create=recording_create)
             )
@@ -104,6 +116,58 @@ class TestBuildOpenAIJudgeFn:
         with pytest.raises(RuntimeError, match="rate limit exceeded"):
             await judge("grade this")
 
+    @pytest.mark.anyio
+    async def test_scoring_records_every_judge_request(self, monkeypatch, scoring_clock):
+        reply = []
+
+        async def create(**kwargs):
+            await asyncio.sleep(0)
+            scoring_clock.t += 1.5
+            if "max_tokens" in kwargs:
+                raise RuntimeError(_MAX_TOKENS_REJECTION)
+            return reply[0]
+
+        _, make_message = _stub_openai(monkeypatch, create)
+        reply.append(make_message("VERDICT: CORRECT"))
+        judge = build_openai_judge_fn(model="gpt-5", max_tokens=64)
+        totals = ScoringTimes()
+
+        assert await measure_instance_scoring(judge("grade this"), totals) == "VERDICT: CORRECT"
+        # The rejected request took time too.
+        assert totals.judge == pytest.approx(3.0)
+
+    @pytest.mark.anyio
+    async def test_falls_back_to_openrouter(self, monkeypatch):
+        reply = []
+
+        async def create(**kwargs):
+            return reply[0]
+
+        clients: list[dict] = []
+        calls, make_message = _stub_openai(monkeypatch, create, clients)
+        monkeypatch.delenv("OPENAI_API_KEY")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        reply.append(make_message("VERDICT: CORRECT"))
+
+        judge = build_openai_judge_fn(model="gpt-4o-mini", max_tokens=64)
+
+        assert await judge("grade this") == "VERDICT: CORRECT"
+        assert clients == [{"api_key": "or-key", "base_url": "https://openrouter.ai/api/v1"}]
+        assert calls[0]["model"] == "openai/gpt-4o-mini"
+
+    @pytest.mark.anyio
+    async def test_missing_keys_name_both_options(self, monkeypatch):
+        async def create(**kwargs):
+            raise AssertionError("no request should be sent")
+
+        _stub_openai(monkeypatch, create)
+        monkeypatch.delenv("OPENAI_API_KEY")
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        judge = build_openai_judge_fn(model="gpt-4o-mini", scorer_name="MyScorer")
+
+        with pytest.raises(ValueError, match="OPENAI_API_KEY or OPENROUTER_API_KEY .*MyScorer"):
+            await judge("grade this")
+
     def test_records_the_settings_that_affect_judge_output(self):
         judge = build_openai_judge_fn(
             model="gpt-5", max_tokens=64, temperature=0.5, reasoning_effort="low"
@@ -115,6 +179,33 @@ class TestBuildOpenAIJudgeFn:
             "temperature": 0.5,
             "reasoning_effort": "low",
         }
+
+    @pytest.mark.anyio
+    async def test_sends_content_parts_and_a_response_format(self, monkeypatch):
+        reply = []
+
+        async def create(**kwargs):
+            return reply[0]
+
+        calls, make_message = _stub_openai(monkeypatch, create)
+        reply.append(make_message('{"passed": true}'))
+        response_format = {"type": "json_object"}
+        judge = build_openai_judge_fn(model="gpt-5", response_format=response_format)
+        content = [
+            {"type": "text", "text": "grade this"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+        ]
+
+        assert await judge(content, system_prompt="be strict") == '{"passed": true}'
+        assert calls[0]["messages"] == [
+            {"role": "system", "content": "be strict"},
+            {"role": "user", "content": content},
+        ]
+        assert calls[0]["response_format"] == response_format
+        assert judge.judge_config["response_format"] == response_format
+
+    def test_records_a_response_format_only_when_set(self):
+        assert "response_format" not in build_openai_judge_fn().judge_config
 
     def test_records_the_default_model(self):
         default_model = inspect.signature(build_openai_judge_fn).parameters["model"].default
@@ -256,7 +347,54 @@ class TestSimpleQAJudgeScorer:
         assert scorer.get_grade("B") == "INCORRECT"
         assert scorer.get_grade("C") == "NOT_ATTEMPTED"
         assert scorer.get_grade("CORRECT") == "CORRECT"
-        assert scorer.get_grade("garbage") == "INCORRECT"
+        assert scorer.get_grade("garbage") is None
+
+    @pytest.mark.anyio
+    async def test_asks_again_when_a_reply_names_no_grade(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        replies = ["I am not sure.", "B"]
+
+        async def mock_judge(prompt: str) -> str:
+            return replies.pop(0)
+
+        scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
+        instance = Instance(question="Q", gold_answer="A")
+
+        score = await scorer.ascore_with_context(instance, LMOutput(text="?"), ScoringContext())
+
+        assert score == 0.0
+        assert replies == []
+
+    @pytest.mark.anyio
+    async def test_a_reply_that_never_names_a_grade_leaves_the_output_unscored(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+
+        async def mock_judge(prompt: str) -> str:
+            return "I am not sure."
+
+        scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
+        instance = Instance(question="Q", gold_answer="A")
+
+        output = LMOutput(text="?")
+
+        with pytest.raises(JudgeParseError) as raised:
+            await scorer.ascore_with_context(instance, output, ScoringContext())
+
+        assert raised.value.raw == "I am not sure."
+        assert output.metadata["judge_result"] == {
+            "raw_judge_response": "I am not sure.",
+            "parse_error": True,
+        }
 
     def test_format_prompt(self):
         """Test prompt formatting."""
@@ -276,119 +414,6 @@ class TestSimpleQAJudgeScorer:
         """Test scorer name."""
         scorer = SimpleQAJudgeScorer()
         assert scorer.name == "simpleqa_judge"
-
-
-class TestRubricJudgeScorer:
-    """Tests for RubricJudgeScorer."""
-
-    @pytest.mark.anyio
-    async def test_extract_score(self):
-        """Test extracting score from response."""
-
-        async def mock_judge(prompt: str) -> str:
-            return "The response is good. Score: 8"
-
-        scorer = RubricJudgeScorer(judge_fn=mock_judge, max_score=10.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.8
-
-    @pytest.mark.anyio
-    async def test_extract_decimal_score(self):
-        """Test extracting decimal score."""
-
-        async def mock_judge(prompt: str) -> str:
-            return "Score: 7.5"
-
-        scorer = RubricJudgeScorer(judge_fn=mock_judge, max_score=10.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.75
-
-    @pytest.mark.anyio
-    async def test_custom_score_pattern(self):
-        """Test custom score pattern."""
-
-        async def mock_judge(prompt: str) -> str:
-            return "Rating: 4/5"
-
-        scorer = RubricJudgeScorer(
-            judge_fn=mock_judge,
-            score_pattern=r"Rating:\s*(\d+)/5",
-            max_score=5.0,
-        )
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.8
-
-    @pytest.mark.anyio
-    async def test_no_score_found(self):
-        """Test when no score is found."""
-
-        async def mock_judge(prompt: str) -> str:
-            return "Good response with no score"
-
-        scorer = RubricJudgeScorer(judge_fn=mock_judge, default_score=5.0, max_score=10.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.5
-
-    def test_get_raw_score(self):
-        """Test getting raw score."""
-        scorer = RubricJudgeScorer(max_score=10.0)
-        raw = scorer.get_raw_score("The Score: 7 is given")
-        assert raw == 7.0
-
-    @pytest.mark.anyio
-    async def test_custom_rubric(self):
-        """Test with custom rubric."""
-        custom_rubric = "Rate 0-5 based on accuracy"
-
-        async def mock_judge(prompt: str) -> str:
-            assert custom_rubric in prompt
-            return "Score: 4"
-
-        scorer = RubricJudgeScorer(judge_fn=mock_judge, rubric=custom_rubric, max_score=5.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = await scorer.ascore_with_context(instance, output, ScoringContext())
-        assert score == 0.8
-
-    def test_format_prompt(self):
-        """Test prompt formatting."""
-        scorer = RubricJudgeScorer(rubric="Custom rubric here")
-        instance = Instance(question="Test question", gold_answer="Expected answer")
-        output = LMOutput(text="Model response")
-
-        prompt = scorer.format_judge_prompt(instance, output)
-        assert "Test question" in prompt
-        assert "Expected answer" in prompt
-        assert "Model response" in prompt
-        assert "Custom rubric here" in prompt
-
-    def test_default_rubric_used(self):
-        """Test default rubric when none provided."""
-        scorer = RubricJudgeScorer(max_score=10.0)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        prompt = scorer.format_judge_prompt(instance, output)
-        assert "10" in prompt
-        assert "0" in prompt
-
-    def test_scorer_name(self):
-        """Test scorer name."""
-        scorer = RubricJudgeScorer()
-        assert scorer.name == "rubric_judge"
 
 
 class TestLLMJudgeScorerIntegration:
@@ -424,22 +449,282 @@ class TestLLMJudgeScorerIntegration:
         assert score2 == 0.0
         assert len(responses) == 2
 
+
+class TestJudgeSettings:
+    def test_a_config_replaces_the_judge_fields_it_sets(self):
+        default = JudgeSettings(model="judge-a", max_tokens=10, reasoning_effort="low")
+        config = types.SimpleNamespace(
+            judge_model="judge-b", judge_reasoning_effort=None, judge_max_tokens=None
+        )
+
+        assert default.with_config(config) == JudgeSettings(model="judge-b", max_tokens=10)
+
+    def test_a_config_naming_another_model_drops_the_default_effort(self):
+        default = JudgeSettings(model="judge-a", max_tokens=10, reasoning_effort="medium")
+        other = types.SimpleNamespace(
+            judge_model="judge-b", judge_reasoning_effort=None, judge_max_tokens=None
+        )
+        same = types.SimpleNamespace(
+            judge_model="judge-a", judge_reasoning_effort=None, judge_max_tokens=64
+        )
+
+        assert default.with_config(other).reasoning_effort is None
+        assert default.with_config(same) == JudgeSettings(
+            model="judge-a", max_tokens=64, reasoning_effort="medium"
+        )
+
+    def test_builds_a_judge_that_records_its_settings(self):
+        settings = JudgeSettings(model="judge-a", max_tokens=64, reasoning_effort="high")
+
+        assert settings.build_fn("Scorer").judge_config == {
+            "model": "judge-a",
+            "max_tokens": 64,
+            "temperature": 0.0,
+            "reasoning_effort": "high",
+        }
+
+
+class TestJudge:
     @pytest.mark.anyio
-    async def test_rubric_different_scales(self):
-        """Test rubric scorer with different score scales."""
-        scales = [(5.0, 4), (10.0, 8), (100.0, 80)]
-        ctx = ScoringContext()
+    async def test_returns_the_verdict_and_the_reply_it_came_from(self):
+        async def call(prompt, *, system_prompt=None):
+            return f"{system_prompt}: {prompt}"
 
-        for max_score, raw_score in scales:
+        judge = Judge(call=call)
 
-            async def make_judge(rs):
-                return f"Score: {rs}"
+        verdict, raw = await judge.ask(
+            "grade", str.upper, limiter=asyncio.Semaphore(1), system_prompt="strict"
+        )
 
-            scorer = RubricJudgeScorer(
-                judge_fn=lambda p, rs=raw_score: make_judge(rs), max_score=max_score
+        assert (verdict, raw) == ("STRICT: GRADE", "strict: grade")
+
+    @pytest.mark.anyio
+    async def test_asks_again_until_a_reply_parses(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        replies = ["?", "VERDICT: 1"]
+        sent = []
+
+        async def call(prompt, *, system_prompt=None):
+            sent.append((prompt, system_prompt))
+            return replies.pop(0)
+
+        def parse(raw):
+            return raw.split(": ")[1] if raw.startswith("VERDICT") else None
+
+        verdict, raw = await Judge(call=call).ask("grade", parse, system_prompt="strict")
+
+        assert (verdict, raw) == ("1", "VERDICT: 1")
+        assert sent == [("grade", "strict"), ("grade", "strict")]
+
+    @pytest.mark.anyio
+    async def test_raises_with_the_last_reply_when_nothing_parses(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        replies = iter(["first", "last"])
+
+        async def call(prompt, *, system_prompt=None):
+            return next(replies)
+
+        judge = Judge(call=call, attempts=2)
+
+        with pytest.raises(JudgeParseError, match="after 2 judge attempts") as raised:
+            await judge.ask("grade", lambda _: None, limiter=asyncio.Semaphore(1))
+
+        assert raised.value.raw == "last"
+
+
+class TestJudgeLimiter:
+    @pytest.mark.anyio
+    async def test_judge_scorer_calls_share_the_run_limiter(self):
+        in_flight = 0
+        peak = 0
+
+        async def judge(prompt: str) -> str:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            try:
+                await asyncio.sleep(0.01)
+                return "A"
+            finally:
+                in_flight -= 1
+
+        scorer = SimpleQAJudgeScorer(judge_fn=judge)
+        context = ScoringContext(scoring_concurrency=2)
+        instance = Instance(question="Q?", gold_answer="A")
+
+        await asyncio.gather(
+            *(scorer.ascore_with_context(instance, LMOutput(text="A"), context) for _ in range(6))
+        )
+
+        assert peak == 2
+
+
+class TestCallJudge:
+    @pytest.mark.anyio
+    async def test_retries_a_transient_failure(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        replies: list[str | Exception] = [RuntimeError("rate limit exceeded"), "A"]
+
+        async def judge(prompt):
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        assert await llm_judge.call_judge(judge, "grade", label="test judge") == "A"
+        assert replies == []
+
+    @pytest.mark.anyio
+    async def test_a_failed_call_is_recorded_as_an_infrastructure_failure(self):
+        from olmo_eval.common.scorers import llm_judge
+        from olmo_eval.common.scorers.execution import format_scoring_error
+
+        async def judge(prompt):
+            raise RuntimeError("judge unavailable")
+
+        with pytest.raises(llm_judge.ScoringIncompleteError) as raised:
+            await llm_judge.call_judge(judge, "grade", label="test judge")
+
+        error = format_scoring_error(raised.value, phase="judge")
+        assert error["infrastructure"] == "true"
+        assert error["message"] == "test judge call failed: RuntimeError: judge unavailable"
+
+
+class TestSafetyScorerVerdicts:
+    """A safety judge reply with no verdict leaves the output unscored instead of scoring 0."""
+
+    @staticmethod
+    def _instance(gold: str = "response_refusal=yes") -> Instance:
+        return Instance(question="Q", gold_answer=gold, metadata={"is_empty_response": False})
+
+    def test_a_wildguard_verdict_is_compared_with_the_gold_category(self):
+        scorer = SafetyScorer(judge_format="wildguard")
+        reply = "Harmful request: yes\nResponse refusal: yes\nHarmful response: no"
+
+        assert scorer.parse_judge_response(reply, instance=self._instance()) == 1.0
+
+    @pytest.mark.parametrize(
+        ("judge_format", "reply"),
+        [
+            ("wildguard", "I cannot classify this."),
+            ("wildguard", "Harmful request: yes\nResponse refusal: maybe\nHarmful response: no"),
+            ("standard", "yes"),
+            ("standard", "1. yes\n2. perhaps\n3. no"),
+        ],
+    )
+    def test_a_reply_without_an_allowed_answer_raises(self, judge_format, reply):
+        scorer = SafetyScorer(judge_format=judge_format)
+        instance = self._instance()
+
+        with pytest.raises(JudgeParseError) as raised:
+            scorer.parse_judge_response(reply, instance=instance)
+
+        assert raised.value.raw == reply
+        assert instance.metadata["is_parsing_error"] is True
+        assert instance.metadata["judge_result"]["raw_judge_response"] == reply
+
+    def test_strongreject_without_grade_logprobs_raises(self):
+        scorer = SafetyScorer(judge_format="strongreject")
+
+        with pytest.raises(JudgeParseError, match="no grade logprobs"):
+            scorer.parse_judge_response("", instance=self._instance(), grade_logprobs={})
+
+    @pytest.mark.anyio
+    async def test_the_api_judge_is_asked_again_for_a_verdict(self, monkeypatch):
+        from olmo_eval.common.scorers import llm_judge
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        replies = ["unclear", "1. yes\n2. yes\n3. no"]
+
+        async def judge(prompt: str) -> str:
+            return replies.pop(0)
+
+        scorer = SafetyScorer(judge_fn=judge)
+        instance = Instance(question="Q", gold_answer="response_refusal=yes")
+
+        score = await scorer.ascore_with_context(instance, LMOutput(text="No."), ScoringContext())
+
+        assert score == 1.0
+        assert replies == []
+
+    @pytest.mark.anyio
+    async def test_each_sample_keeps_its_own_result(self):
+        replies = {"first": "1. yes\n2. yes\n3. no", "": "1. yes\n2. no\n3. no"}
+
+        async def judge(prompt: str) -> str:
+            await asyncio.sleep(0)
+            return next(
+                reply for answer, reply in replies.items() if f"Assistant: {answer}\n" in prompt
             )
-            instance = Instance(question="Q", gold_answer="A")
-            output = LMOutput(text="R")
 
-            score = await scorer.ascore_with_context(instance, output, ctx)
-            assert score == 0.8
+        scorer = SafetyScorer(judge_fn=judge)
+        instance = Instance(question="Q", gold_answer="response_refusal=yes")
+        answered, empty = LMOutput(text="first"), LMOutput(text="")
+        answered.extracted_answer, empty.extracted_answer = "first", ""
+
+        scores = await asyncio.gather(
+            scorer.ascore_with_context(instance, answered, ScoringContext()),
+            scorer.ascore_with_context(instance, empty, ScoringContext()),
+        )
+
+        assert scores == [1.0, 0.0]
+        assert answered.metadata["judge_result"]["response_refusal"] == "yes"
+        assert empty.metadata["judge_result"]["response_refusal"] == "no"
+        assert answered.metadata["judge_result"]["is_empty_response"] is False
+        assert empty.metadata["judge_result"]["is_empty_response"] is True
+        assert empty.metadata["judge_result"]["is_parsing_error"] is False
+        assert "judge_result" not in instance.metadata
+
+    @pytest.mark.parametrize(
+        ("judge_format", "kwargs"),
+        [("wildguard", {}), ("strongreject", {"grade_logprobs": {}})],
+    )
+    def test_an_empty_response_scores_zero_without_a_verdict(self, judge_format, kwargs):
+        scorer = SafetyScorer(judge_format=judge_format)
+        instance = Instance(
+            question="Q", gold_answer="response_refusal=yes", metadata={"is_empty_response": True}
+        )
+
+        score = scorer.parse_judge_response("//", instance=instance, **kwargs)
+
+        assert score == 0.0
+        assert instance.metadata["is_parsing_error"] is True
+
+    @pytest.mark.anyio
+    async def test_a_failed_provider_call_is_not_a_parse_error(self):
+        from olmo_eval.common.scorers.execution import ScoringIncompleteError
+
+        async def agenerate(requests, params):
+            raise RuntimeError("provider down")
+
+        provider = types.SimpleNamespace(agenerate=agenerate)
+        context = ScoringContext(
+            inference_pool=types.SimpleNamespace(get=lambda name: provider, names=["wg"])
+        )
+        scorer = SafetyScorer(provider_name="wg", judge_format="standard")
+        output = LMOutput(text="No.")
+
+        with pytest.raises(ScoringIncompleteError, match="provider down"):
+            await scorer.ascore_with_context(
+                Instance(question="Q", gold_answer="response_refusal=yes"), output, context
+            )
+
+        assert output.metadata["is_parsing_error"] is False

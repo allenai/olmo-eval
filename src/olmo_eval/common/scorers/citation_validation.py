@@ -11,9 +11,9 @@ them. It has two layers:
    the expected scores. This proves the plumbing, GIVEN a correct judge. See
    tests/core/test_citation_validation.py.
 
-2. Judge layer (needs OPENAI_API_KEY, run manually): run the same cases through
-   real judges to test whether they ARE correct judges on these adversarial
-   cases. Run `python -m olmo_eval.common.scorers.citation_validation` to sweep a
+2. Judge layer (needs OPENAI_API_KEY or OPENROUTER_API_KEY, run manually): run
+   the same cases through real judges to test whether they ARE correct judges on
+   these adversarial cases. Run `python -m olmo_eval.common.scorers.citation_validation` to sweep a
    ladder of judges; pass rung specs as args (`model` or `model:effort`, e.g.
    `gpt-5.5:low`) and `--repeat N` to average over runs (the gpt-5 series runs at
    temperature 1, so single runs are noisy).
@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from olmo_eval.common.scorers.citation import score_citations_for_sections
-from olmo_eval.common.scorers.llm_judge import JudgeFn, build_openai_judge_fn
+from olmo_eval.common.scorers.llm_judge import Judge, JudgeFn, build_openai_judge_fn
 
 # An expectation on a resulting metric: (metric_name, op, threshold), op in {">=", "<="}.
 Expectation = tuple[str, str, float]
@@ -273,7 +273,7 @@ class CaseResult:
 
 async def run_case(case: AdversarialCase, judge_fn: JudgeFn) -> CaseResult:
     """Score one case with the given judge and check its expectations."""
-    scores = await score_citations_for_sections(judge_fn, case.parsed_response)
+    scores = await score_citations_for_sections(Judge(call=judge_fn), case.parsed_response)
     return CaseResult(
         name=case.name,
         description=case.description,
@@ -460,7 +460,7 @@ async def citation_scorer_agreement(
     correct = 0
     for ex in examples:
         parsed = _section(ex.section_text, ex.citations)
-        scores = await score_citations_for_sections(judge_fn, parsed)
+        scores = await score_citations_for_sections(Judge(call=judge_fn), parsed)
         scorer_supported = scores.get("citation_recall", 0.0) >= _SUPPORTED_RECALL_THRESHOLD
         correct += int(scorer_supported == ex.human_supported)
     return {"accuracy": correct / len(examples), "n": float(len(examples))}

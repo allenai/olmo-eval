@@ -44,10 +44,49 @@ export const BASIS_LABEL: Record<RuntimeBasis, string> = {
 
 export const BASIS_HELP: Record<RuntimeBasis, string> = {
   measured: "The run contained only this task, so the run's processing time is the task's time.",
-  attributed: "Split from per-batch inference metrics by this task's share of each batch.",
+  attributed: "This task's share of the inference workers' time, divided by the number of workers.",
   estimated: "The run's processing time times this task's share of the run's tokens. Rough when tasks differ a lot in prompt versus output length.",
   not_recorded: "This run predates runtime recording or lacks token counts.",
 };
+
+export const SCORING_KIND_LABEL = {
+  judge: "Judge",
+  sandbox: "Sandbox",
+  compute: "Scoring code",
+} as const;
+
+export type ScoringKind = keyof typeof SCORING_KIND_LABEL;
+
+const SCORING_KIND_SHORT: Record<ScoringKind, string> = {
+  judge: "judge",
+  sandbox: "sandbox",
+  compute: "code",
+};
+
+export const SCORING_KINDS = Object.keys(SCORING_KIND_LABEL) as ScoringKind[];
+
+export const SCORING_KIND_HELP: Record<ScoringKind, string> = {
+  judge:
+    "Time in judge model calls while scoring this task. Each call counts in full, so the total can exceed wall time. 0 s means no judge calls; — means not recorded.",
+  sandbox:
+    "Time in sandbox operations while scoring this task. Sandbox use during agent rollouts counts toward Runtime instead. Each operation counts in full, so the total can exceed wall time. 0 s means none; — means not recorded.",
+  compute:
+    "Time running answer extraction, scorers and metrics, summed across threads and processes, so it can exceed wall time. — means not recorded.",
+};
+
+export function scoringValue(rt: TaskRuntime, kind: ScoringKind): number | null {
+  return rt[`scoring_${kind}_seconds`];
+}
+
+/** "Scoring: judge 1m 02s, sandbox 0 s, code 3.4 s." or "" when nothing was recorded. */
+export function formatScoringSummary(rt: TaskRuntime | null | undefined): string {
+  if (!rt) return "";
+  const parts = SCORING_KINDS.flatMap((kind) => {
+    const v = scoringValue(rt, kind);
+    return v == null ? [] : [`${SCORING_KIND_SHORT[kind]} ${formatRuntime(v)}`];
+  });
+  return parts.length ? `Scoring: ${parts.join(", ")}.` : "";
+}
 
 /** Short prefix for values that are estimates. */
 export function basisMark(basis: RuntimeBasis | null | undefined): string {

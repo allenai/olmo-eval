@@ -4923,7 +4923,7 @@
       "type": "object"
     },
     "RuntimeBasis": {
-      "description": "How inference_seconds was obtained:\n- measured: the run contained only this task, so its processing time is the task's time.\n- attributed: from per-batch inference metrics split by the task's share of each batch.\n- estimated: the run's processing time times the task's share of the run's tokens.\n- not_recorded: the run predates runtime recording or lacks token counts.",
+      "description": "How inference_seconds was obtained:\n- measured: the run contained only this task, so its processing time is the task's time.\n- attributed: the client's attributed worker time divided by the run's inference workers.\n- estimated: the run's processing time times the task's share of the run's tokens.\n- not_recorded: the run predates runtime recording or lacks token counts.",
       "enum": [
         "measured",
         "attributed",
@@ -5133,6 +5133,49 @@
         "n",
         "task_result_id",
         "delta"
+      ],
+      "type": "object"
+    },
+    "ScoringFailures": {
+      "additionalProperties": false,
+      "description": "A task's scoring failures. An unscored instance has no scored output and is left out of the metrics; with instances that produced no output it counts against the task's failure budget. A partially scored instance is scored from the outputs that were.",
+      "properties": {
+        "by_type": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Count"
+          },
+          "description": "Unscored outputs by exception type, from each output's first error.",
+          "type": "object"
+        },
+        "first_error": {
+          "description": "The first scoring error as \"Type: message\", capped at 500 characters.",
+          "maxLength": 500,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "infrastructure": {
+          "$ref": "#/definitions/Count",
+          "description": "Unscored outputs whose failure was flagged as infrastructure (judge, sandbox)."
+        },
+        "instances_partially_scored": {
+          "$ref": "#/definitions/Count"
+        },
+        "instances_unscored": {
+          "$ref": "#/definitions/Count"
+        },
+        "outputs_unscored": {
+          "$ref": "#/definitions/Count",
+          "description": "Outputs with a scoring error, across all instances."
+        }
+      },
+      "required": [
+        "instances_unscored",
+        "instances_partially_scored",
+        "outputs_unscored",
+        "infrastructure",
+        "by_type"
       ],
       "type": "object"
     },
@@ -6018,6 +6061,17 @@
           "description": "The corpus score equals the mean of per-instance values (times instance_scale).",
           "type": "boolean"
         },
+        "scoring_failures": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ScoringFailures"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Outputs and instances whose scores could not be computed; null when none failed."
+        },
         "split": {
           "type": [
             "string",
@@ -6177,6 +6231,27 @@
             }
           ]
         },
+        "scoring_compute_seconds": {
+          "description": "Time running the task's scoring code, summed across scoring threads and processes. Null means not recorded.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "scoring_judge_seconds": {
+          "description": "Summed judge model call time while scoring this task. Concurrent calls each count, so it can exceed wall time. Null means not recorded; 0 means measured with no judge calls.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "scoring_sandbox_seconds": {
+          "description": "Summed sandbox operation time while scoring; can exceed wall time. Null means not recorded; 0 means measured with none.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "seconds_per_1k_instances": {
           "description": "inference_seconds per 1,000 instances.",
           "type": [
@@ -6229,7 +6304,10 @@
         "completion_tokens_total",
         "seconds_per_1k_instances",
         "span_start_s",
-        "span_end_s"
+        "span_end_s",
+        "scoring_judge_seconds",
+        "scoring_sandbox_seconds",
+        "scoring_compute_seconds"
       ],
       "type": "object"
     },

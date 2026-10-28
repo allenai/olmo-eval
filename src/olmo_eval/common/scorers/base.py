@@ -79,6 +79,9 @@ class ProcessScorer(Scorer):
         """Score a single output in a subprocess."""
         ...
 
+    def warmup(self) -> None:
+        """Load what ``process_score`` needs, once per worker before any output is timed."""
+
 
 @dataclass(frozen=True, slots=True)
 class ExactMatchScorer(Scorer):
@@ -361,6 +364,11 @@ class MinervaMathScorer(ProcessScorer):
     """
 
     name: str = "minerva_math_flex"
+
+    def warmup(self) -> None:
+        from olmo_eval.evals.extract.math import is_equiv
+
+        is_equiv("1/2", "0.5")  # imports and first-call setup in sympy
 
     def process_score(self, instance: Instance, output: LMOutput) -> float:
         from olmo_eval.evals.extract.math import is_equiv

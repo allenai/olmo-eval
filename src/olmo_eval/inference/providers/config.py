@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from olmo_eval.common.openai_credentials import describe_secret, secret_available
 from olmo_eval.common.repr import hide_unset
 from olmo_eval.common.types import ProviderKind
 
@@ -23,7 +23,7 @@ class ProviderConfig:
     a provider via the create_provider factory function.
 
     Attributes:
-        kind: Provider type (vllm, vllm_server, hf, olmo_core, litellm, mock).
+        kind: Provider type (sglang, vllm, vllm_server, hf, olmo_core, litellm, mock).
         model: Model name or path (HuggingFace ID, API model name, or local path).
         alias: Short display name for the model (used in DB and S3 paths).
         base_url: Base URL for API-based providers (vllm_server, litellm).
@@ -40,6 +40,8 @@ class ProviderConfig:
         package: Package specifier that overrides the default provider extra (e.g., vllm fork).
         dependencies: Additional package specifiers for runtime installation.
         kwargs: Additional arguments passed to the provider constructor.
+        resolved_runtime: Observed runtime identity, refreshed by workers after initialization.
+            Stored and hashed, but never forwarded to an engine constructor.
     """
 
     kind: str = ProviderKind.VLLM_SERVER
@@ -59,17 +61,27 @@ class ProviderConfig:
     package: str | None = None
     dependencies: tuple[str, ...] = ()
     kwargs: Mapping[str, Any] = field(default_factory=dict)
+    resolved_runtime: Mapping[str, Any] = field(default_factory=dict)
 
     # Providers that require GPU resources for local inference
     _GPU_PROVIDERS: ClassVar[frozenset[str]] = frozenset(
-        {"vllm", "vllm_server", "hf", "olmo_core", "olmo_core_vlm"}
+        {"sglang", "vllm", "vllm_server", "hf", "olmo_core", "olmo_core_vlm"}
     )
+
+    @property
+    def served_model(self) -> str:
+        """The model requests reach: the LoRA adapter's path when one is loaded, else ``model``."""
+        modules = self.kwargs.get("lora_modules") if self.kwargs.get("enable_lora") else None
+        if modules:
+            name, separator, path = str(modules[0]).partition("=")
+            return path if separator else name
+        return self.model
 
     @property
     def requires_gpu(self) -> bool:
         """Whether this provider requires GPU resources.
 
-        Returns True for local inference providers (vllm, vllm_server, hf, olmo_core).
+        Returns True for local inference providers (sglang, vllm, vllm_server, hf, olmo_core).
         Returns False for API-based providers (litellm, mock).
         """
         return str(self.kind) in self._GPU_PROVIDERS
@@ -78,7 +90,7 @@ class ProviderConfig:
     def requires_local_gpu(self) -> bool:
         """Whether this provider needs local GPU resources.
 
-        Returns True for local inference (vllm, vllm_server, hf, olmo_core)
+        Returns True for local inference (sglang, vllm, vllm_server, hf, olmo_core)
         without external base_url.
         Returns False for API-backed providers or configs pointing to external servers.
         """
@@ -89,6 +101,15 @@ class ProviderConfig:
 
     # Config fields accepted by each provider kind (fields with non-default values are passed)
     _PROVIDER_FIELDS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "sglang": (
+            "tokenizer",
+            "revision",
+            "force_download",
+            "trust_remote_code",
+            "dtype",
+            "max_model_len",
+            "max_concurrency",
+        ),
         "vllm": (
             "tokenizer",
             "revision",
@@ -134,7 +155,9 @@ class ProviderConfig:
 
         missing = self.validate_secrets()
         if missing:
-            raise ValueError(f"Missing required secrets: {', '.join(missing)}")
+            raise ValueError(
+                f"Missing required secrets: {', '.join(describe_secret(m) for m in missing)}"
+            )
 
         kind_str = str(self.kind)
         provider_kwargs: dict[str, Any] = dict(self.kwargs)
@@ -167,11 +190,7 @@ class ProviderConfig:
         Returns:
             List of missing secret names (empty if all present).
         """
-        missing = []
-        for secret in self.required_secrets:
-            if not os.getenv(secret):
-                missing.append(secret)
-        return missing
+        return [secret for secret in self.required_secrets if not secret_available(secret)]
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization.
@@ -211,6 +230,8 @@ class ProviderConfig:
             d["dependencies"] = list(self.dependencies)
         if self.kwargs:
             d["kwargs"] = dict(self.kwargs)
+        if self.resolved_runtime:
+            d["resolved_runtime"] = dict(self.resolved_runtime)
         return d
 
     @classmethod
@@ -257,6 +278,7 @@ class ProviderConfig:
             package=data.get("package"),
             dependencies=tuple(deps),
             kwargs=merged_kwargs,
+            resolved_runtime=data.get("resolved_runtime", {}),
         )
 
     def with_overrides(self, **overrides: Any) -> ProviderConfig:

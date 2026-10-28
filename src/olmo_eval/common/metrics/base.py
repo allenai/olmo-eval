@@ -389,6 +389,25 @@ class MeanPerplexityMetric(Metric):
         return False
 
 
+def _sample_scores(response: Response, scorer_name: str) -> list[float]:
+    """Each scored sample's value for ``scorer_name``.
+
+    Samples whose scoring failed have no value and are left out. A single-sample
+    response without per-output values falls back to its response-level score.
+    """
+    score_key = f"score:{scorer_name}"
+    scores = [
+        float(value)
+        for output in response.outputs
+        if isinstance(value := (output.metadata or {}).get(score_key), (int, float))
+    ]
+    if not scores and len(response.outputs) <= 1:
+        value = response.scores.get(scorer_name)
+        if isinstance(value, (int, float)):
+            scores.append(float(value))
+    return scores
+
+
 @dataclass(frozen=True, slots=True)
 class PassAtKMetric(Metric):
     """Compute pass@k metric across multiple samples per task.
@@ -410,7 +429,6 @@ class PassAtKMetric(Metric):
             return 0.0
 
         scorer_name = self.scorer().name
-        score_key = f"score:{scorer_name}"
 
         # Group per-output scores by task ID
         task_results: dict[str, list[float]] = {}
@@ -418,18 +436,13 @@ class PassAtKMetric(Metric):
             task_id = r.instance.metadata.get("id", "unknown")
             if task_id not in task_results:
                 task_results[task_id] = []
-            # Use per-output scores stored during scoring (one score per sample)
-            for output in r.outputs:
-                if output.metadata and score_key in output.metadata:
-                    task_results[task_id].append(output.metadata[score_key])
-                else:
-                    # Fallback: single-sample response, use response-level score
-                    task_results[task_id].append(r.scores.get(scorer_name, 0.0))
-                    break
+            task_results[task_id].extend(_sample_scores(r, scorer_name))
 
-        # Compute pass@k for each task
+        # Compute pass@k for each task. A task with no scored sample is left out.
         pass_at_k_values = []
         for scores in task_results.values():
+            if not scores:
+                continue
             n = len(scores)
             c = sum(1 for s in scores if s > 0.5)  # Count passing
             pass_at_k_values.append(compute_pass_at_k(n, c, min(self.k, n)))
@@ -437,19 +450,7 @@ class PassAtKMetric(Metric):
         return sum(pass_at_k_values) / len(pass_at_k_values) if pass_at_k_values else 0.0
 
     def compute_instance(self, response: Response) -> float | None:
-        scorer_name = self.scorer().name
-        score_key = f"score:{scorer_name}"
-        sample_scores: list[float] = []
-        for output in response.outputs:
-            score = (output.metadata or {}).get(score_key)
-            if isinstance(score, (int, float)):
-                sample_scores.append(float(score))
-
-        if not sample_scores:
-            scorer_score = response.scores.get(scorer_name)
-            if isinstance(scorer_score, (int, float)) and len(response.outputs) <= 1:
-                sample_scores.append(float(scorer_score))
-
+        sample_scores = _sample_scores(response, self.scorer().name)
         if not sample_scores:
             return None
 
@@ -482,7 +483,6 @@ class PassPowKMetric(Metric):
             return 0.0
 
         scorer_name = self.scorer().name
-        score_key = f"score:{scorer_name}"
 
         # Group per-output scores by task ID
         task_results: dict[str, list[float]] = {}
@@ -490,18 +490,13 @@ class PassPowKMetric(Metric):
             task_id = r.instance.metadata.get("id", "unknown")
             if task_id not in task_results:
                 task_results[task_id] = []
-            # Use per-output scores stored during scoring (one score per sample)
-            for output in r.outputs:
-                if output.metadata and score_key in output.metadata:
-                    task_results[task_id].append(output.metadata[score_key])
-                else:
-                    # Fallback: single-sample response, use response-level score
-                    task_results[task_id].append(r.scores.get(scorer_name, 0.0))
-                    break
+            task_results[task_id].extend(_sample_scores(r, scorer_name))
 
-        # Compute pass^k for each task
+        # Compute pass^k for each task. A task with no scored sample is left out.
         pass_pow_k_values = []
         for scores in task_results.values():
+            if not scores:
+                continue
             n = len(scores)
             c = sum(1 for s in scores if s > 0.5)  # Count passing
             pass_pow_k_values.append(compute_pass_pow_k(n, c, self.k))
@@ -509,19 +504,7 @@ class PassPowKMetric(Metric):
         return sum(pass_pow_k_values) / len(pass_pow_k_values) if pass_pow_k_values else 0.0
 
     def compute_instance(self, response: Response) -> float | None:
-        scorer_name = self.scorer().name
-        score_key = f"score:{scorer_name}"
-        sample_scores: list[float] = []
-        for output in response.outputs:
-            score = (output.metadata or {}).get(score_key)
-            if isinstance(score, (int, float)):
-                sample_scores.append(float(score))
-
-        if not sample_scores:
-            scorer_score = response.scores.get(scorer_name)
-            if isinstance(scorer_score, (int, float)) and len(response.outputs) <= 1:
-                sample_scores.append(float(scorer_score))
-
+        sample_scores = _sample_scores(response, self.scorer().name)
         if not sample_scores:
             return None
 
@@ -867,22 +850,13 @@ class SubsetAccuracyMetric(Metric):
         return False
 
     def compute(self, responses: Sequence[Response]) -> float:
-        """Compute aggregate metric from scored responses."""
-        if not responses:
-            return 0.0
-        scorer_name = self.scorer().name
-
-        if self.name == "any__any":
-            total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
-            return total / len(responses)
-
-        subset, cat = self.name.split("__")
-        subset_responses = []
-        for r in responses:
-            if r.instance.metadata[subset] == cat:
-                subset_responses.append(r.scores.get(scorer_name, 0.0))
-
-        return sum(subset_responses) / len(subset_responses) if subset_responses else -1
+        """Mean score over the subset's scored responses, or 0.0 if it has none."""
+        values = [
+            value
+            for response in responses
+            if (value := self.compute_instance(response)) is not None
+        ]
+        return sum(values) / len(values) if values else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -891,8 +865,9 @@ class MacroSubsetAccuracyMetric(Metric):
     Unweighted mean of per-subset accuracies.
 
     Every subset contributes equally regardless of how many instances it holds,
-    so a small subset is not diluted by a larger one. Subsets with no matching
-    instances are skipped rather than counted as zero.
+    so a small subset is not diluted by a larger one. Responses with no score are
+    left out of their subset, and subsets with no scored instances are skipped
+    rather than counted as zero.
     """
 
     name: str = "macro_accuracy"
@@ -909,9 +884,10 @@ class MacroSubsetAccuracyMetric(Metric):
         for subset_name in self.subsets:
             subset, cat = subset_name.split("__")
             scores = [
-                r.scores.get(scorer_name, 0.0)
+                float(score)
                 for r in responses
                 if r.instance.metadata.get(subset) == cat
+                and isinstance(score := r.scores.get(scorer_name), (int, float))
             ]
             if scores:
                 subset_means.append(sum(scores) / len(scores))
@@ -929,7 +905,7 @@ class MacroSubsetAccuracyMetric(Metric):
 @dataclass(frozen=True, slots=True)
 class SafetyErrorMetric(Metric):
     """
-    Counts the responses an LLM judge could not grade, as flagged by
+    Counts the responses whose answer could not be parsed, as flagged by
     ``is_parsing_error`` in the instance metadata
     """
 

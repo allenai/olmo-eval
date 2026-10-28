@@ -9,7 +9,7 @@ This project provides a unified workbench for evaluating language models through
 Features:
 
 - Registry of benchmark tasks and composable suites, with named variants for few-shot settings, formatting, and scoring (e.g. humaneval:3shot:bpb).
-- Support for inference via vLLM, LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
+- Support for inference via vLLM, [SGLang](docs/sglang.md), LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
 - Harness abstraction that separates execution policy from task definition, so any task can be run baseline or tool-augmented without modification.
 - Multi-turn agentic evaluation with tool calling, scaffolds, and sandboxed environments via Docker, Podman, or Modal.
 - LLM-as-judge scoring with auxiliary providers, including locally served judge models.
@@ -309,7 +309,7 @@ config = HarnessConfig(
 | `scaffold_kwargs` | `dict[str, Any]` | `{}` | Scaffold-specific options (e.g., `enable_compaction`) |
 | `metrics` | `MetricsConfig \| None` | `None` | Inference metrics collection config |
 | `batching` | `BatchConfig \| None` | `None` | Batching strategy configuration |
-| `max_hard_failure_rate` | `float \| None` | `None` | Fraction of a task's instances allowed to hard-fail before the task is marked failed and the run exits non-zero (default `0.05`). `1.0` never fails a run on partial instance failures; a task that saves zero instances still fails |
+| `max_hard_failure_rate` | `float \| None` | `None` | The failure budget: fraction of a task's instances allowed to produce no output or have no scored output before the task is marked failed, its metrics are withheld and the run exits non-zero (default `0.05`). `1.0` never fails a run on partial failures; a task with nothing scored still fails |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
 
 #### Scaffolds
@@ -347,7 +347,7 @@ outputs = harness.generate(requests)  # No scaffold needed
 
 #### Inference Metrics
 
-Harness configurations can include `MetricsConfig` to collect inference performance metrics during evaluation:
+Harness configurations can include `MetricsConfig` to collect inference performance metrics during evaluation. A run without `--harness` or `--harness-config` collects them with the default `MetricsConfig()`, writing `metrics/<provider>_<model>-inference.jsonl` in the output directory, as the built-in presets do:
 
 ```python
 from olmo_eval.harness import HarnessConfig, ProviderConfig
@@ -803,8 +803,9 @@ Images live under `$MOLMO_DATA_DIR/torch_datasets/`. Manifests that recorded
 absolute paths on another machine are re-anchored under the current root
 automatically.
 
-Four tasks call the OpenAI API and need `OPENAI_API_KEY`, so the
-`molmo2_imageqa` suite needs it as a whole:
+Four tasks call the OpenAI API and need `OPENAI_API_KEY` or `OPENROUTER_API_KEY`
+(see [OpenAI models through OpenRouter](#openai-models-through-openrouter)), so the
+`molmo2_imageqa` suite needs one of them as a whole:
 
 - `math_vista` defaults to the official `gpt-4-0613` answer extraction. Use the
   `math_vista:offline` variant for an API-free heuristic instead.
@@ -813,8 +814,9 @@ Four tasks call the OpenAI API and need `OPENAI_API_KEY`, so the
   cached, so the key is only needed on a cache miss.
 
 The launcher resolves the key as the user-scoped beaker secret
-`{beaker-username}_OPENAI_API_KEY`; if it is missing, the launch fails up front
-and prints the `beaker secret write` command to run.
+`{beaker-username}_OPENAI_API_KEY`, or `{beaker-username}_OPENROUTER_API_KEY` when
+that is missing. If neither exists, the launch fails up front and prints the
+`beaker secret write` command to run.
 
 ### Running
 
@@ -1554,6 +1556,7 @@ budget: ai2/oe-other
 | `--provider-kwarg` | `-K` | none | Provider kwargs for external evals (`key=value`) |
 | `--force-download-model` | | `false` | Refresh Hugging Face model/tokenizer cache before loading |
 | `--uv-cache-dir` | | default | UV cache directory for package downloads |
+| `--weka-bucket` | | none | Extra Weka bucket to mount at `/weka/<bucket>`, on top of `oe-training-default`, `oe-eval-default` and `oe-adapt-default` (can specify multiple) |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--yes` | `-y` | `false` | Skip confirmation prompt |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
@@ -1615,6 +1618,47 @@ belong after `--harness`.
 
 Quote values that contain brackets, braces, or spaces so the shell passes them through
 unchanged.
+
+### OpenAI models through OpenRouter
+
+Anything that needs `OPENAI_API_KEY` also accepts an
+[OpenRouter](https://openrouter.ai) key in `OPENROUTER_API_KEY` (or
+`OPEN_ROUTER_KEY`). This covers LLM
+judges, the OpenAI models in the model registry (`gpt-4o`, `gpt-4o-mini`, ...),
+and the OpenAI models that external evals such as tau2 and DeepScholar call.
+When both keys are set, the OpenAI key is used.
+
+With only an OpenRouter key, requests go to OpenRouter's OpenAI-compatible
+endpoint, and OpenAI model names are sent as OpenRouter slugs (`gpt-4o` becomes
+`openai/gpt-4o`). Judge response caches are still keyed by the OpenAI model name,
+so existing caches keep working.
+
+Locally, export the key:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+On Beaker, store it as a user-scoped secret. A task that requires
+`OPENAI_API_KEY` uses `{beaker-username}_OPENROUTER_API_KEY` when
+`{beaker-username}_OPENAI_API_KEY` does not exist:
+
+```bash
+beaker secret write --workspace <workspace> {beaker-username}_OPENROUTER_API_KEY sk-or-...
+```
+
+External evals run third-party code in a sandbox. There, the OpenRouter key is
+exported as both `OPENROUTER_API_KEY` and `OPENAI_API_KEY`, and `OPENAI_BASE_URL`
+points the OpenAI SDK at OpenRouter. olmo-eval rewrites the model names it passes
+to tau2, DeepScholar and AstaBench, but it cannot rewrite names hardcoded inside a benchmark,
+such as AstaBench's scorer models. OpenRouter resolves most bare OpenAI names
+(`gpt-4o-mini`, `o3-mini-2025-01-31`), but rejects dated snapshots it does not list,
+such as `gpt-4-0613`.
+
+The `openai_agents` harness compacts long agent histories through OpenAI's
+`responses.compact` endpoint. OpenRouter does not serve that endpoint, so with
+only an OpenRouter key the harness skips compaction, logs a warning and keeps
+the full history.
 
 ### Secret Environment Overrides
 
@@ -1840,7 +1884,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/build_image.sh --help
 ```
 
-**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1
+**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1, 13.0.2
 **PyTorch version**: Configurable via `--torch-version`
 **Configuration**: See `scripts/build_config.sh`
 
@@ -1861,13 +1905,19 @@ The script auto-detects the image name from the tag (e.g., `olmo-eval-cu1281-trc
 The image contains:
 - Python 3.12 (via uv)
 - PyTorch with CUDA support
+- Base Python dependencies from `uv.lock`
 - System dependencies (git, uv, ca-certificates)
 
 The image does NOT contain:
 - olmo-eval source code (provided by gantry at runtime)
-- olmo-eval dependencies like click, datasets, rich, etc. (installed at job startup)
 - Storage backends like boto3, psycopg (installed at job startup if needed)
 - Inference providers like vllm, transformers, litellm (installed at job startup)
+
+For the SGLang provider, `provider.kind=sglang` selects a compatible shared
+CUDA 13 / PyTorch 2.13 base and installs the pinned `sglang` extra (including the
+Olmo model plugin) at startup. Explicit image overrides take precedence. See the
+[SGLang setup guide](docs/sglang.md) for local installation, checkpoint registration
+and a small validation command.
 
 ### Installing Inference Providers at Runtime
 

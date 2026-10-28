@@ -7,7 +7,9 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.constants.infrastructure import (
+    BEAKER_DEFAULT_IMAGE,
     BEAKER_RESULT_DIR,
+    BEAKER_SGLANG_IMAGE,
     cluster_has_weka,
 )
 from olmo_eval.launch.beaker.constants import BEAKER_INFRA_ENV_VARS
@@ -285,6 +287,7 @@ def assemble_external_eval_job(
     base_url: str | None = None,
     user_env_vars: dict[str, str] | None = None,
     force_download_model: bool = False,
+    weka_buckets: list[str] | None = None,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -309,13 +312,14 @@ def assemble_external_eval_job(
         inject_aws_credentials: Whether to inject AWS credentials.
         inject_gcs_credentials: Whether to inject GCS credentials.
         eval_args: Arguments to pass to external evaluations.
+        weka_buckets: Weka buckets to mount in addition to the defaults.
 
     Returns:
         Configured BeakerJobConfig.
     """
     from uuid import uuid4
 
-    from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig
+    from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig, weka_buckets_with
 
     upload_args, upload_env = upload_job_settings(
         upload=upload,
@@ -439,6 +443,10 @@ def assemble_external_eval_job(
         for extra in collect_install_extras(scaffold_name=scaffold_name):
             if extra not in extras:
                 extras.append(extra)
+    for eval_name in external_evals:
+        for extra in get_external_eval(eval_name).extras:
+            if extra not in extras:
+                extras.append(extra)
 
     provider_packages = get_provider_dependencies(model) or None
 
@@ -467,6 +475,7 @@ def assemble_external_eval_job(
         extras=extras,
         provider_packages=provider_packages,
         vllm_isolated_venv=vllm_isolated_venv,
+        weka_buckets=weka_buckets_with(weka_buckets or ()),
     )
 
 
@@ -476,7 +485,7 @@ class JobConfigAssembler:
     def __init__(
         self,
         config: LaunchConfig,
-        effective_image: str,
+        effective_image: str | None,
         effective_groups: list[str],
         beaker_username: str,
         common_secrets: list[tuple[str, str]],
@@ -499,7 +508,7 @@ class JobConfigAssembler:
 
     def assemble(self, exp: ExperimentPlan) -> BeakerJobConfig:
         """Assemble a BeakerJobConfig for an experiment."""
-        from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig
+        from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig, weka_buckets_with
 
         command = self._build_command(exp)
 
@@ -529,6 +538,11 @@ class JobConfigAssembler:
 
         # Install for the provider the job will actually run with
         provider_kind = resolve_provider_kind(exp.model_spec, preset, self.config.harness_overrides)
+        # None means the caller left image selection to the resolved provider.
+        # Resolve per experiment so mixed-provider launches can use different bases.
+        effective_image = self.effective_image or (
+            BEAKER_SGLANG_IMAGE if provider_kind == "sglang" else BEAKER_DEFAULT_IMAGE
+        )
         vllm_isolated_venv = provider_kind == "vllm_server"
         model_provider_extras = get_provider_extras(exp.model_spec, default_kind=provider_kind)
 
@@ -536,6 +550,7 @@ class JobConfigAssembler:
         # Keep companion extras like clients for vllm_server.
         provider_extra_override = (
             {
+                "sglang": "sglang",
                 "olmo_core": "olmo_core",
                 "olmo_core_vlm": "olmo_core_vlm",
                 "vllm": "vllm",
@@ -584,7 +599,7 @@ class JobConfigAssembler:
         }
         # Add infrastructure config for olmo-eval
         job_env_vars.update(BEAKER_INFRA_ENV_VARS)
-        job_env_vars.update(self._upload_settings(exp)[1])
+        job_env_vars.update(self._upload_settings(exp, image=effective_image)[1])
 
         if cluster_has_weka(self.config.cluster):
             job_env_vars.update(
@@ -629,6 +644,18 @@ class JobConfigAssembler:
                     setup_modal_gcp_secret = True
                     log.info(f"Modal GCP secret setup enabled: {secret_name}")
 
+        if (
+            (provider_kind == "sglang" or effective_image == BEAKER_SGLANG_IMAGE)
+            and "LD_LIBRARY_PATH" not in self.config.env_vars
+            and not any(secret.name == "LD_LIBRARY_PATH" for secret in env_secrets)
+        ):
+            # Select compatibility libraries on the actual host, before Python
+            # imports CUDA. Explicit library paths remain authoritative.
+            command = [
+                "bash",
+                "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/cuda13_driver",
+                *command,
+            ]
         # User-supplied env vars win over everything above
         job_env_vars.update(self.config.env_vars)
 
@@ -663,7 +690,7 @@ class JobConfigAssembler:
             budget=self.config.budget,
             extras=install_extras,
             groups=self.effective_groups,
-            beaker_image=self.effective_image,
+            beaker_image=effective_image,
             inject_aws_credentials=self.inject_aws_credentials,
             inject_gcs_credentials=self.inject_gcs_credentials,
             inject_upload_credentials=self.config.upload,
@@ -675,9 +702,12 @@ class JobConfigAssembler:
             setup_registry_mirror=setup_registry_mirror,
             vllm_isolated_venv=vllm_isolated_venv,
             setup_modal_gcp_secret=setup_modal_gcp_secret,
+            weka_buckets=weka_buckets_with(self.config.weka_buckets),
         )
 
-    def _upload_settings(self, exp: ExperimentPlan) -> tuple[list[str], dict[str, str]]:
+    def _upload_settings(
+        self, exp: ExperimentPlan, *, image: str | None = None
+    ) -> tuple[list[str], dict[str, str]]:
         return upload_job_settings(
             upload=self.config.upload,
             launch_id=self.config.launch_id,
@@ -685,7 +715,7 @@ class JobConfigAssembler:
             tags=self.config.tags,
             clusters=_resolved_clusters(self.config.cluster),
             priority=exp.priority,
-            image=self.effective_image,
+            image=image or self.effective_image,
             budget=self.config.budget,
         )
 

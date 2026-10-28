@@ -34,6 +34,19 @@ from olmo_eval.cli.utils import (
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV_CACHE_DIR
 
 
+def _validate_weka_buckets(
+    _ctx: click.Context, _param: click.Parameter, buckets: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Reject anything that is not a bare bucket name, such as a /weka/... path."""
+    for bucket in buckets:
+        if not bucket or "/" in bucket or ":" in bucket:
+            raise click.BadParameter(
+                f"{bucket!r} is not a bucket name; pass the bucket name, "
+                "e.g. --weka-bucket olmo-3p5-post-checkpoints"
+            )
+    return buckets
+
+
 @click.command()
 @click.option(
     "--config",
@@ -231,6 +244,13 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="UV cache directory for package downloads (on Weka shared storage)",
 )
 @click.option(
+    "--weka-bucket",
+    "weka_buckets",
+    multiple=True,
+    callback=_validate_weka_buckets,
+    help="Extra Weka bucket to mount at /weka/<bucket>, on top of the defaults (repeatable)",
+)
+@click.option(
     "--hf-token/--no-hf-token",
     "hf_token",
     default=None,
@@ -305,6 +325,7 @@ def launch(
     eval_args: tuple[str, ...],
     provider_kwargs: tuple[str, ...],
     uv_cache_dir: str,
+    weka_buckets: tuple[str, ...],
     hf_token: bool | None,
     secret_env: tuple[str, ...],
     env_vars: tuple[str, ...],
@@ -332,7 +353,6 @@ def launch(
     from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
     from olmo_eval.cli.beaker.task_validator import TaskValidator
     from olmo_eval.common.constants.infrastructure import (
-        BEAKER_DEFAULT_IMAGE,
         BEAKER_SANDBOX_IMAGE,
     )
 
@@ -429,6 +449,7 @@ def launch(
         "harness": harness,
         "harness_overrides": harness_overrides,
         "uv_cache_dir": uv_cache_dir,
+        "weka_buckets": list(weka_buckets),
         "secret_env_overrides": secret_env_overrides,
         "env_vars": parsed_env_vars,
     }
@@ -481,6 +502,7 @@ def launch(
             eval_args=parsed_eval_args if parsed_eval_args else None,
             provider_kwargs=parsed_provider_kwargs if parsed_provider_kwargs else None,
             uv_cache_dir=uv_cache_dir,
+            weka_buckets=list(weka_buckets),
             preemptible=preemptible,
             min_runtime=min_runtime,
             retries=retries,
@@ -546,6 +568,7 @@ def launch(
             )
         harness_needs_sandbox = bool(harness_preset.sandboxes)
 
+    effective_image: str | None
     if image:
         effective_image = image
     elif eval_config and eval_config.beaker_image:
@@ -553,7 +576,7 @@ def launch(
     elif harness_needs_sandbox:
         effective_image = BEAKER_SANDBOX_IMAGE
     else:
-        effective_image = BEAKER_DEFAULT_IMAGE
+        effective_image = None  # JobConfigAssembler selects per resolved provider.
 
     # Handle group creation
     _handle_group_creation(launcher, effective_groups, dry_run, yes)
@@ -1071,6 +1094,7 @@ def _launch_external_evals(
     eval_args: dict[str, str] | None = None,
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
+    weka_buckets: list[str] | None = None,
     preemptible: bool | None = None,
     min_runtime: str | None = None,
     retries: int | None = None,
@@ -1262,6 +1286,7 @@ def _launch_external_evals(
             base_url=provider_config.base_url,
             user_env_vars=user_env_vars,
             force_download_model=force_download_model,
+            weka_buckets=weka_buckets,
         )
         job_configs.append(job_config)
 

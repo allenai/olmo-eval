@@ -343,6 +343,9 @@ def _task_payload(
         "prompt_tokens_total": _nonneg_int(row.get("prompt_tokens_total")),
         "completion_tokens_total": _nonneg_int(row.get("completion_tokens_total")),
         "attributed_inference_seconds": _nonneg_float(row.get("attributed_inference_seconds")),
+        "scoring_judge_seconds": _nonneg_float(row.get("scoring_judge_seconds")),
+        "scoring_sandbox_seconds": _nonneg_float(row.get("scoring_sandbox_seconds")),
+        "scoring_compute_seconds": _nonneg_float(row.get("scoring_compute_seconds")),
         "predictions_path": predictions.relative_to(output_dir).as_posix() if predictions else None,
         "requests_path": requests.relative_to(output_dir).as_posix() if requests else None,
         "suites": suites,
@@ -350,6 +353,8 @@ def _task_payload(
     }
     if row.get("generation_counts") is not None:
         payload["generation_counts"] = row["generation_counts"]
+    if row.get("scoring_failures") is not None:
+        payload["scoring_failures"] = row["scoring_failures"]
     return TaskUpload(spec, payload, predictions, requests)
 
 
