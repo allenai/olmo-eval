@@ -271,16 +271,18 @@ class VLLMProvider(InferenceProvider):
         """Shorten a completion prompt's truncatable span until it fits the context.
 
         Drops tokens from the end of the span named by ``TRUNCATABLE_SPAN_KEY``, so the
-        prompt plus ``max_tokens`` fits ``max_length``; the text around the span is
-        kept. A prompt without a span, or one that already fits, is returned as is.
-        Returns the prompt sent and the number of span tokens dropped.
+        prompt plus ``max_tokens`` fits the request's ``max_length`` (capped at the
+        model's); the text around the span is kept. A prompt without a span, or one
+        that already fits, is returned as is. Returns the prompt sent and the number
+        of span tokens dropped.
         """
         span = (request.metadata or {}).get(TRUNCATABLE_SPAN_KEY)
         if span is None or request.request_type != RequestType.COMPLETION:
             return prompt, 0
         tokenizer = self.llm.get_tokenizer()
         add_special_tokens = self._add_bos_token is not False
-        budget = self.max_length - (max_tokens or 0)
+        limit = min(self.max_length, request.max_length or self.max_length)
+        budget = limit - (max_tokens or 0)
         start, end = span
         span_text = prompt[start:end]
         dropped = 0
