@@ -59,20 +59,17 @@ Every number in that log line is also its own registered metric in
 `metrics.json` — the log only narrates them.
 
 **Data-integrity corrections.** The data_source datasets
-(``PardisSzah/fairstress-core``, ``PardisSzah/fairstress``) are built from
-the originally released data by
-``scripts/internal/build_fairstress_corrected.py`` (same repo, see that
-script and its co-located ``fairstress_corrections.json`` for the exact,
-re-runnable methodology). The pre-correction originals are kept private at
-``PardisSzah/original_fairstress-core``/``PardisSzah/original_fairstress``
+(``PardisSzah/fairstress-core``, ``PardisSzah/fairstress``) already have
+both corrections below baked in; the pre-correction originals are kept
+private at ``PardisSzah/original_fairstress-core``/``PardisSzah/original_fairstress``
 for provenance. Two corrections, validated by the paper's authors:
 
 1. **Question-polarity negation.** 5 of 300 scenario templates ask a
    *negative*-outcome question (terminate, revoke, demote, hold liable).
    The dataset's ``expected_correct`` field for these 5 was generated
    without checking question direction and is backwards for GT items in
-   these scenarios; the build script negates it for exactly those 5 (by
-   ``scenario_id``) — this affects AccGap/FragGap only (TieLean/TieShift
+   these scenarios; it is negated for exactly those 5 (by ``scenario_id``)
+   in the published data — this affects AccGap/FragGap only (TieLean/TieShift
    are computed from AMB items, which carry no ``expected_correct`` label
    and are unaffected). A 6th scenario (severance vs. contested
    termination) is genuinely ambiguous in which direction its question
@@ -397,10 +394,10 @@ class FairStressAccGapMetric(Metric):
             return None
         return float(bool(meta.get("is_correct")))
 
-    def supports_pairwise_scorer_fallback(self) -> bool:
+    def supports_scorer_fallback(self) -> bool:
         return False
 
-    def pairwise_higher_is_better(self) -> bool:
+    def higher_is_better(self) -> bool:
         return False  # 0 is fair; neither direction of the gap is "better"
 
 
@@ -447,10 +444,10 @@ class FairStressTieLeanMetric(Metric):
         # per-instance correctness, there's nothing meaningful to report here.
         return None
 
-    def supports_pairwise_scorer_fallback(self) -> bool:
+    def supports_scorer_fallback(self) -> bool:
         return False
 
-    def pairwise_higher_is_better(self) -> bool:
+    def higher_is_better(self) -> bool:
         return False
 
 
@@ -515,10 +512,10 @@ class FairStressFragGapMetric(Metric):
         # Cross-instance conditioning has no single-instance equivalent.
         return None
 
-    def supports_pairwise_scorer_fallback(self) -> bool:
+    def supports_scorer_fallback(self) -> bool:
         return False
 
-    def pairwise_higher_is_better(self) -> bool:
+    def higher_is_better(self) -> bool:
         return False
 
 
@@ -583,10 +580,10 @@ class FairStressTieShiftMetric(Metric):
         # Cross-instance conditioning has no single-instance equivalent.
         return None
 
-    def supports_pairwise_scorer_fallback(self) -> bool:
+    def supports_scorer_fallback(self) -> bool:
         return False
 
-    def pairwise_higher_is_better(self) -> bool:
+    def higher_is_better(self) -> bool:
         return False
 
 
@@ -633,10 +630,10 @@ class FairStressRefusalMetric(Metric):
             return None
         return float(not meta.get("answered"))
 
-    def supports_pairwise_scorer_fallback(self) -> bool:
+    def supports_scorer_fallback(self) -> bool:
         return False
 
-    def pairwise_higher_is_better(self) -> bool:
+    def higher_is_better(self) -> bool:
         return False  # higher refusal is not "better"
 
 

@@ -208,10 +208,9 @@ class TestFairStressProcessDoc:
 
 
 class TestDataIsAlreadyCorrected:
-    """The data_source datasets (PardisSzah/*-corrected) already have the
-    question-polarity negation and D2/F6-F9 exclusion baked in (see
-    scripts/internal/build_fairstress_corrected.py) -- process_doc() no
-    longer applies or re-derives either correction, it trusts the data."""
+    """The data_source datasets already have the question-polarity negation
+    and D2/F6-F9 exclusion baked in -- process_doc() no longer applies or
+    re-derives either correction, it trusts the data."""
 
     def test_expected_correct_passes_through_unchanged(self):
         task = get_task("fairstress")
@@ -668,11 +667,20 @@ class TestContrastTypeFiltering:
             assert m.degree is not None
 
 
-class TestPairwiseDirection:
-    """0 (or, for Refusal, a low rate) is "fair" for every FairStress
-    metric -- none of them have a monotonic "higher is better" direction,
-    so the base Metric class's `pairwise_higher_is_better() -> True`
-    default would be actively misleading for all five if left unoverridden."""
+class TestMetricDirectionAndFallback:
+    """0 (or, for Refusal, a low rate) is "fair" for every FairStress metric --
+    none of them have a monotonic "higher is better" direction, so the base
+    Metric class's `higher_is_better() -> True` default would be actively
+    misleading for all five if left unoverridden.
+
+    These must override the base class's actual method names
+    (`higher_is_better`/`supports_scorer_fallback`) -- a prior version of this
+    file defined `pairwise_higher_is_better`/`supports_pairwise_scorer_fallback`,
+    which don't exist on `Metric` and silently override nothing. That let
+    `augment_prediction_instance_metrics` fall back to the raw scorer's 0/1
+    correctness in place of `compute_instance()`'s `None` whenever a metric has
+    no single-instance value (e.g. a TieLean/FragGap/TieShift item) -- see
+    `TestScorerFallbackDisabled` below for the regression."""
 
     @pytest.mark.parametrize(
         "metric_cls",
@@ -683,13 +691,53 @@ class TestPairwiseDirection:
             FairStressTieShiftMetric,
         ],
     )
-    def test_signed_metrics_have_no_pairwise_direction(self, metric_cls):
-        assert metric_cls(name="any__any").pairwise_higher_is_better() is False
+    def test_signed_metrics_have_no_direction(self, metric_cls):
+        assert metric_cls(name="any__any").higher_is_better() is False
 
-    def test_refusal_has_no_pairwise_direction(self):
+    def test_refusal_has_no_direction(self):
         from olmo_eval.evals.tasks.fairstress import FairStressRefusalMetric
 
-        assert FairStressRefusalMetric(name="any__any").pairwise_higher_is_better() is False
+        assert FairStressRefusalMetric(name="any__any").higher_is_better() is False
+
+    @pytest.mark.parametrize(
+        "metric_cls",
+        [
+            FairStressAccGapMetric,
+            FairStressTieLeanMetric,
+            FairStressFragGapMetric,
+            FairStressTieShiftMetric,
+        ],
+    )
+    def test_signed_metrics_disable_scorer_fallback(self, metric_cls):
+        assert metric_cls(name="any__any").supports_scorer_fallback() is False
+
+    def test_refusal_disables_scorer_fallback(self):
+        from olmo_eval.evals.tasks.fairstress import FairStressRefusalMetric
+
+        assert FairStressRefusalMetric(name="any__any").supports_scorer_fallback() is False
+
+
+class TestScorerFallbackDisabled:
+    """Regression test for the bug Chris's agent found in review: when a
+    metric's own `compute_instance()` returns `None` (TieLean/FragGap/TieShift
+    always do -- there is no single-instance value for a cross-instance
+    conditional rate), `augment_prediction_instance_metrics` must leave that
+    metric's instance value unset rather than silently substituting the raw
+    scorer's 0/1 correctness."""
+
+    def test_tielean_none_does_not_leak_raw_scorer_value(self):
+        from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
+
+        metric = FairStressTieLeanMetric(name="any__any__tielean", degree=None)
+        response = _response(
+            {"condition": "AMB", "has_injection": False, "chose_minority": True},
+            extracted_answer="A",
+        )
+        assert metric.compute_instance(response) is None  # no single-instance value exists
+
+        prediction: dict = {}
+        augment_prediction_instance_metrics(prediction, [metric], response=response)
+        assert "any__any__tielean" not in prediction.get("instance_metrics", {})
 
 
 class TestComputeInstanceSubsetFiltering:
