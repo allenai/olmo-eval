@@ -98,12 +98,20 @@ returns.
 
 Example commands to run:
 
+**Recommended default: fairstress_headline.** It's what the paper's own
+headline numbers need (Type-1 contrasts, D3 only) and nothing more, filtered
+before inference rather than at the metrics stage like "full" is, so it's
+roughly a fifth of the full corpus's size at the same per-item robustness-
+metric reliability (see FairStressHeadline's own docstring). Use "fairstress"
+(FairStress-Core) or "fairstress:full" (the complete paper-faithful corpus)
+instead if you specifically need those.
+
 For a posttrained model:
 olmo-eval beaker launch  \
     --harness default   \
     -o 'metrics.collect_gpu=true'   \
     -m allenai/Olmo-3-7B-Instruct   \
-    -t "fairstress:answer@high" \
+    -t "fairstress_headline@high" \
     -w "ai2/WORKSPACE"   \
     -B "ai2/BUDGET"   \
     --cluster h100
@@ -112,10 +120,14 @@ For a chain-of-thought / reasoning-mode run:
 olmo-eval beaker launch  \
     --harness default   \
     -m allenai/Olmo-3-7B-Instruct   \
-    -t "fairstress:reasoning@high" \
+    -t "fairstress_headline:reasoning@high" \
     -w "ai2/WORKSPACE"   \
     -B "ai2/BUDGET"   \
     --cluster h100
+
+To instead run FairStress-Core (fast, stratified subset) or the complete
+corpus, replace the task spec above with "fairstress:answer"/
+"fairstress:reasoning" (Core) or "fairstress:full" (complete corpus).
 """
 
 import logging
