@@ -11,6 +11,8 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.inference.errors import (
     classify_terminal_provider_error,
     is_context_overflow,
+    is_context_overflow_message,
+    is_context_overflow_output,
     request_error,
 )
 from olmo_eval.inference.metrics.core.stats import compute_batch_hash
@@ -18,6 +20,7 @@ from olmo_eval.runners.asynq.share_clock import ShareClock
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
 
 if TYPE_CHECKING:
+    from olmo_eval.common.types import LMOutput
     from olmo_eval.harness import Harness
 
 logger = get_logger(__name__)
@@ -120,6 +123,19 @@ def _format_error_detail(exc: Exception) -> str:
     return " | ".join(parts)
 
 
+def _request_caused(error: str | None, outputs: list[LMOutput]) -> bool:
+    """Whether a failure is known to come from the request, so that retrying cannot help.
+
+    Providers that dispatch through ``dispatch_requests`` turn every exception,
+    including connection and server errors, into a marked output, so a marked output
+    is request-caused only when the provider flagged a context overflow or the error
+    text reports one. Everything else is treated as possibly transient.
+    """
+    if error is None:
+        return False
+    return is_context_overflow_output(outputs) or is_context_overflow_message(error)
+
+
 async def process_chat_request(
     item: QueueItem,
     harness: Harness,
@@ -195,6 +211,9 @@ async def process_chat_request(
                 attempt=item.attempt,
                 sent_at=sent_at,
                 attributed_seconds=seconds,
+                request_caused=_request_caused(
+                    provider_error or harness_result.error, [final_output]
+                ),
             )
         )
 
@@ -222,7 +241,7 @@ async def process_chat_request(
                 attempt=item.attempt,
                 sent_at=sent_at,
                 attributed_seconds=seconds,
-                retryable=not is_context_overflow(e),
+                request_caused=is_context_overflow(e),
             )
         )
 
@@ -280,6 +299,8 @@ async def process_batch(
                     error=_format_error_detail(error),
                     attempt=item.attempt,
                     sent_at=time.time(),
+                    # Nothing was sent; preparing the request failed.
+                    request_caused=True,
                 )
             )
         else:
@@ -327,6 +348,7 @@ async def process_batch(
                     error=error,
                     attempt=item.attempt,
                     sent_at=sent_at,
+                    request_caused=_request_caused(error, outputs),
                 )
             )
 
@@ -363,7 +385,7 @@ async def process_batch(
                     attempt=item.attempt,
                     sent_at=sent_at,
                     attributed_seconds=share,
-                    retryable=not is_context_overflow(e),
+                    request_caused=is_context_overflow(e),
                 )
             )
     except BaseException:

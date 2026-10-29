@@ -124,14 +124,15 @@ def output_options(func: F) -> F:  # noqa: UP047
         "--resume",
         is_flag=True,
         help=(
-            "Continue the run whose progress is recorded in the output directory, "
-            "skipping the instances it finished"
+            "Record progress in the output directory and continue from the progress "
+            "already there, skipping the instances an earlier attempt finished. Without "
+            "it, no progress is recorded and any found is ignored"
         ),
     )
     @click.option(
         "--fresh",
         is_flag=True,
-        help="Discard progress recorded in the output directory and start a new run",
+        help="Discard progress recorded in the output directory before the run",
     )
     @click.option(
         "--dry-run",

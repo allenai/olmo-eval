@@ -4,8 +4,9 @@ The mock provider gives every request the same answer, so a run that restored
 outputs onto the wrong instance would look correct. Here each output is a function
 of a hash of the prompt and the sample index: about half repeat the answer the
 fake dataset hides in the prompt (``<<say:...>>``), the rest are wrong, and some
-requests fail. Calls also take a random few milliseconds, so results arrive out of
-order.
+requests fail, either from their own context overflow (final) or as a marked
+connection error (which a resumed run tries again). Calls also take a random few
+milliseconds, so results arrive out of order.
 
 Workers are separate processes, so the provider reaches them through
 :func:`inference_worker`, which the tests put in place of the real worker target.
@@ -21,12 +22,13 @@ import re
 from typing import Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
-from olmo_eval.inference.errors import REQUEST_ERROR_KEY
+from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
 from olmo_eval.inference.providers.mock import MockProvider
 
 _SAY = re.compile(r"<<say:(.*?)>>", re.DOTALL)
 
-FAILED_REQUEST = "prompt too long for the fake model"
+FAILED_REQUEST = "context overflow: maximum context length of the fake model exceeded"
+TRANSIENT_REQUEST = "ConnectionError: the fake server reset the connection"
 
 
 def digest(*parts: Any) -> int:
@@ -52,8 +54,13 @@ class HashProvider(MockProvider):
         results = []
         for request in requests:
             prompt = _prompt(request)
-            if digest(prompt, "fail") % 9 == 0:
-                results.append([LMOutput(text="", metadata={REQUEST_ERROR_KEY: FAILED_REQUEST})])
+            failure = digest(prompt, "fail") % 9
+            if failure == 0:
+                metadata = {REQUEST_ERROR_KEY: FAILED_REQUEST, CONTEXT_OVERFLOW_KEY: True}
+                results.append([LMOutput(text="", metadata=metadata)])
+                continue
+            if failure == 1:
+                results.append([LMOutput(text="", metadata={REQUEST_ERROR_KEY: TRANSIENT_REQUEST})])
                 continue
             said = _SAY.findall(prompt)
             outputs = []

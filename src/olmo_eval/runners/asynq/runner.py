@@ -7,7 +7,7 @@ import contextlib
 import multiprocessing as mp
 import random
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -26,7 +26,7 @@ from olmo_eval.runners.asynq.monitoring import (
 )
 from olmo_eval.runners.asynq.preparation import prepare_task_items
 from olmo_eval.runners.asynq.progress import (
-    ProgressMismatchError,
+    Restored,
     discard_progress,
     has_progress,
     open_run_progress,
@@ -540,8 +540,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     # Shuffle seed for deterministic instance ordering
     shuffle_seed: int = 42
 
-    # Continue from the progress recorded in output_dir, or discard it. Without either,
-    # a run refuses an output_dir that holds progress.
+    # resume records progress under output_dir and continues from it when it is there.
+    # Without it a run writes no progress and ignores any it finds; fresh discards it.
     resume: bool = False
     fresh: bool = False
 
@@ -623,9 +623,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         if self.fresh:
             discard_progress(self.output_dir)
         elif not self.resume and has_progress(self.output_dir):
-            raise ProgressMismatchError(
-                f"{self.output_dir} holds progress from an earlier run. Pass --resume to "
-                "continue it, or --fresh to discard it and start over."
+            runner_logger.warning(
+                f"{self.output_dir} holds progress from an earlier run, which this run "
+                "ignores. Pass --resume to continue it, or --fresh to discard it."
             )
 
         # Generate experiment ID early so metrics can include it. A resumed run keeps
@@ -644,13 +644,17 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         self._update_metrics_config(experiment_id)
         self._enable_tool_parsing_for_tool_requests(items)
 
-        # Skip the instances an earlier attempt on this output directory already scored.
-        progress = open_run_progress(self.output_dir, self.model_name, self.harness_config)
-        try:
-            restored = progress.restore(trackers, items, self.harness_config)
-        except BaseException:
-            progress.close()
-            raise
+        # With --resume, record progress and skip the instances an earlier attempt on
+        # this output directory already finished. Without it, nothing is recorded.
+        progress: RunProgress | None = None
+        restored = Restored(remaining=items)
+        if self.resume:
+            progress = open_run_progress(self.output_dir, self.model_name, self.harness_config)
+            try:
+                restored = progress.restore(trackers, items, self.harness_config)
+            except BaseException:
+                progress.close()
+                raise
         items = restored.remaining
         total_instances = len(items)
 
@@ -905,7 +909,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 )
 
             self.harness_config = apply_worker_configs(self.harness_config, worker_configs)
-            progress.check_runtime(self.harness_config.provider.resolved_runtime)
+            if progress is not None:
+                progress.check_runtime(self.harness_config.provider.resolved_runtime)
             self._update_metrics_config(experiment_id)
 
             runner_logger.info(
@@ -971,13 +976,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 experiment_id=experiment_id,
                 experiment_duration_seconds=experiment_duration_seconds,
                 provider_init_seconds=provider_init_seconds,
+                progress=progress,
             )
-            # The run is complete, and its outputs replace the records.
-            progress.close()
-            discard_progress(self.output_dir)
             return final_results
         finally:
-            progress.close()
+            if progress is not None:
+                progress.close()
             terminate_workers(workers)
             if sandbox_manager is not None:
                 runner_logger.info("Stopping sandbox manager...")
@@ -1300,18 +1304,27 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         experiment_id: str,
         experiment_duration_seconds: float | None = None,
         provider_init_seconds: dict[str, float] | None = None,
+        progress: RunProgress | None = None,
     ) -> dict[str, Any]:
         """Write the results, then fail the run if a task blew its budget.
 
         The order is the point: a run that trips the gate must still leave its
         metrics.json and predictions on disk to be diagnosed from, so the gate is
-        checked only after _finalize_and_save has returned.
+        checked only after _finalize_and_save has returned. A run that trips it also
+        keeps its progress records, so a retry continues from them; a run that passes
+        deletes them once its outputs are written, before anything is uploaded.
         """
+        keep_progress = progress is None or any(
+            result.failure_budget_exceeded for result in results.values()
+        )
         final_results = self._finalize_and_save(
             results_dict,
             experiment_id=experiment_id,
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
+            before_upload=None
+            if keep_progress or progress is None
+            else lambda: self._discard_progress(progress),
         )
         check_failure_budget(results)
         return final_results
@@ -1322,8 +1335,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         experiment_id: str,
         experiment_duration_seconds: float | None = None,
         provider_init_seconds: dict[str, float] | None = None,
+        before_upload: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
-        """Log summary, write metrics.json and the manifest, then upload the results."""
+        """Log summary, write metrics.json and the manifest, then upload the results.
+
+        ``before_upload`` runs once the outputs are written and before they are uploaded.
+        """
         from olmo_eval.common.types import compute_model_hash
 
         self._log_summary(results_dict)
@@ -1350,12 +1367,19 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
+        if before_upload is not None:
+            before_upload()
         if self.upload_config is not None and self.upload_config.enabled:
             from olmo_eval.upload import upload_results_dir
 
             upload_results_dir(self.output_dir, self.upload_config)
 
         return results_dict
+
+    def _discard_progress(self, progress: RunProgress) -> None:
+        """Delete the records of a completed run; its outputs replace them."""
+        progress.close()
+        discard_progress(self.output_dir)
 
     def _previous_run_id(self) -> str | None:
         """The run ID to continue, when resuming a run the output directory holds.
@@ -1370,7 +1394,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         job_id = os.environ.get("BEAKER_JOB_ID")
         self._resume = {"resumed_count": 0, "beaker_job_ids": [job_id] if job_id else []}
-        if not self.resume:
+        # Progress that was discarded (a completed run, or --fresh) has nothing to continue.
+        if not self.resume or not has_progress(self.output_dir):
             return None
         manifest = read_manifest(self.output_dir)
         if manifest is None:

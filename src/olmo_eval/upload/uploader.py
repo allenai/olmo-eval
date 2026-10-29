@@ -208,6 +208,11 @@ def _parse_time(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+# Top-level directories of the output directory that hold a run's working state, not
+# its results: the records a resumable run keeps (``runners.asynq.progress.PROGRESS_DIR``).
+_UNUPLOADED_DIRS = frozenset({"progress"})
+
+
 def collect_artifacts(
     output_dir: Path,
     task_files: Mapping[str, str],
@@ -220,7 +225,7 @@ def collect_artifacts(
     An output directory can be reused across runs (the default is /tmp/results/). When
     ``since`` is given, files last modified before it are left out, except metrics.json,
     manifest.json and the files the run's tasks reference. Paths in ``skip`` are never
-    included.
+    included, and neither is the ``progress/`` directory of resume records.
     """
     artifacts: list[dict[str, Any]] = []
     files: dict[str, Path] = {}
@@ -229,6 +234,8 @@ def collect_artifacts(
     stale = 0
     for root, dirs, names in os.walk(output_dir):
         dirs.sort()
+        if Path(root) == Path(output_dir):
+            dirs[:] = [d for d in dirs if d not in _UNUPLOADED_DIRS]
         for name in sorted(names):
             path = Path(root) / name
             if (

@@ -9,13 +9,16 @@ write the same predictions, requests and metrics as an uninterrupted one.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import math
 import queue
+import re
 import shutil
+import time
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +43,13 @@ from olmo_eval.runners.asynq.progress import (
     ProgressMismatchError,
     RunProgress,
     decode_value,
+    discard_progress,
     encode_value,
+    has_progress,
     open_run_progress,
     parse_exit_thresholds,
     store_class,
+    stream_base,
 )
 from olmo_eval.runners.asynq.results import process_results
 from olmo_eval.runners.asynq.runner import AsyncEvalRunner
@@ -157,18 +163,24 @@ def offline_tasks() -> Iterator[None]:
         yield
 
 
-def _harness(**kwargs: Any) -> HarnessConfig:
+def _harness(system_prompt: str | None = None, **kwargs: Any) -> HarnessConfig:
     # HashProvider fails some requests on purpose; keep every task's metrics.
     return HarnessConfig(
         name="default",
         provider=ProviderConfig(kind="mock", model="mock", **kwargs),
         max_hard_failure_rate=1.0,
+        system_prompt=system_prompt,
     )
 
 
-def _runner(out: Path, limits: dict[str, int] = TASK_LIMITS, **kwargs: Any) -> AsyncEvalRunner:
+def _runner(
+    out: Path,
+    limits: dict[str, int] = TASK_LIMITS,
+    system_prompt: str | None = None,
+    **kwargs: Any,
+) -> AsyncEvalRunner:
     return AsyncEvalRunner(
-        harness_config=_harness(),
+        harness_config=_harness(system_prompt),
         task_specs=list(limits),
         task_overrides={spec: {"limit": limit} for spec, limit in limits.items()},
         output_dir=str(out),
@@ -189,9 +201,13 @@ def run_eval(
     layout: str,
     limits: dict[str, int] = TASK_LIMITS,
     env: dict[str, str] | None = None,
+    resume: bool = True,
     **kwargs: Any,
 ) -> RunStats:
-    """Run the evaluation into ``out`` under the CLI's SIGTERM handling."""
+    """Run the evaluation into ``out`` under the CLI's SIGTERM handling.
+
+    Progress is only recorded with ``resume``, which is on unless a test turns it off.
+    """
     seen: dict[str, Any] = {"queued": None, "restored": 0, "finalized": set()}
 
     async def spy(**call: Any) -> Any:
@@ -211,7 +227,7 @@ def run_eval(
         mp.setattr(runner_module, "process_results", spy)
         try:
             with _sigterm_raises():
-                _runner(out, limits, **kwargs).run()
+                _runner(out, limits, resume=resume, **kwargs).run()
         finally:
             seen["judge_calls"] = len(resume_fakes.JUDGE_CALLS) - judge_calls
     return RunStats(seen["queued"], seen["restored"], seen["finalized"], seen["judge_calls"])
@@ -237,9 +253,21 @@ _TIMING_KEYS = {
 
 def _without_timing(value: Any) -> Any:
     if isinstance(value, dict):
-        return {k: _without_timing(v) for k, v in value.items() if k not in _TIMING_KEYS}
+        return {
+            k: _without_arrival_order(k, _without_timing(v))
+            for k, v in value.items()
+            if k not in _TIMING_KEYS
+        }
     if isinstance(value, list):
         return [_without_timing(v) for v in value]
+    return value
+
+
+def _without_arrival_order(key: str, value: Any) -> Any:
+    # "(first: ...)" names whichever failure arrived first, and a restored failure
+    # always arrives before a rerun one; no run fixes that order.
+    if key == "error_summary" and isinstance(value, str):
+        return re.sub(r"\(first: .*\)", "(first: <any>)", value)
     return value
 
 
@@ -261,24 +289,26 @@ def _artifacts(out: Path) -> dict[str, bytes]:
 def assert_same_results(resumed: Path, reference: Path) -> None:
     resumed_files, reference_files = _artifacts(resumed), _artifacts(reference)
     assert sorted(resumed_files) == sorted(reference_files)
-    assert len(reference_files) == 2 * len(TASK_LIMITS)
+    assert reference_files and len(reference_files) % 2 == 0
     for name, content in reference_files.items():
         assert resumed_files[name] == content, f"{name} differs"
     assert _metrics(resumed) == _metrics(reference)
 
 
-def _stores(out: Path, layout: str) -> list[Any]:
-    cls = store_class(layout)
-    paths = sorted((out / PROGRESS_DIR).glob(f"*/*{cls.suffix}"))
-    return [cls(path.with_name(path.name[: -len(cls.suffix)])) for path in paths]
+def _stream(out: Path, layout: str) -> Any:
+    return store_class(layout)(stream_base(out, "mock"))
 
 
-def _instance_entries(store: Any) -> list[dict[str, Any]]:
-    return [entry for entry in store.read() if "idx" in entry]
+def _entries(out: Path, layout: str) -> list[dict[str, Any]]:
+    return list(_stream(out, layout).read())
+
+
+def _instance_entries(out: Path, layout: str) -> list[dict[str, Any]]:
+    return [entry for entry in _entries(out, layout) if "idx" in entry]
 
 
 def _recorded(out: Path, layout: str) -> int:
-    return sum(len(_instance_entries(store)) for store in _stores(out, layout))
+    return len(_instance_entries(out, layout))
 
 
 def keep_first_entries(out: Path, layout: str, keep: int) -> int:
@@ -288,17 +318,17 @@ def keep_first_entries(out: Path, layout: str, keep: int) -> int:
     """
     for final in (out / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"):
         final.unlink()
+    store = _stream(out, layout)
+    entries = list(store.read())
+    store.reset()
     kept_total = 0
-    for store in _stores(out, layout):
-        header, *entries = store.read()
-        store.reset(header)
-        for entry in entries:
-            if "idx" in entry:
-                if kept_total >= keep:
-                    continue
-                kept_total += 1
-            store.append(entry)
-        store.close()
+    for entry in entries:
+        if "idx" in entry:
+            if kept_total >= keep:
+                continue
+            kept_total += 1
+        store.append(entry)
+    store.close()
     return kept_total
 
 
@@ -330,20 +360,33 @@ def _copy(full: Path, tmp_path: Path, *, keep_outputs: bool = False) -> Path:
 class TestRoundTrip:
     def test_records_hold_outcomes_not_prompts(self, full_run) -> None:
         full, layout = full_run
-        stores = _stores(full, layout)
-        assert len(stores) == len(TASK_LIMITS)
+        entries = _entries(full, layout)
+        headers = [entry for entry in entries if "header" in entry]
+        assert len(headers) == len(TASK_LIMITS)
         assert len(list((full / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))) == len(TASK_LIMITS)
-        entries = [_instance_entries(store) for store in stores]
-        failed = [e for rest in entries for e in rest if "failed" in e]
-        assert failed and all(e["failed"] == resume_fakes.FAILED_REQUEST for e in failed)
-        for store, rest in zip(stores, entries, strict=True):
-            header = next(iter(store.read()))
+        for entry in headers:
+            header = entry["header"]
             assert header["task_hash"] and header["model_hash"] and header["harness_hash"]
-            assert "execution" in header
-            assert len({entry["idx"] for entry in rest}) == len(rest)
-            assert "<<say:" not in json.dumps(rest)
+            assert "engine_version" in header and "execution" in header
+        instances = [entry for entry in entries if "idx" in entry]
+        # Only failures the request caused are recorded; the fake's connection errors
+        # are retried, so they never appear.
+        failed = [e for e in instances if "failed" in e]
+        assert failed and all(e["failed"] == resume_fakes.FAILED_REQUEST for e in failed)
+        assert resume_fakes.TRANSIENT_REQUEST not in json.dumps(entries)
+        assert len({(e["t"], e["idx"]) for e in instances}) == len(instances)
+        assert "<<say:" not in json.dumps(instances)
         # Instances whose judge was unavailable are not final, so they are not recorded.
-        assert _recorded(full, layout) < TOTAL
+        assert len(instances) < TOTAL
+
+    def test_one_stream_holds_every_task(self, full_run) -> None:
+        full, layout = full_run
+        stream = _stream(full, layout)
+        assert stream.path.exists()
+        assert len(list((full / PROGRESS_DIR).glob(f"*/*{stream.suffix}"))) == 1
+        if layout == "segments":
+            # A run is written in a few segments however many tasks it has.
+            assert len(list(stream.path.glob("*.jsonl"))) <= 2
 
     def test_finalized_tasks_are_not_run_again(self, full_run, tmp_path) -> None:
         full, layout = full_run
@@ -383,7 +426,7 @@ class TestRoundTrip:
         assert stats.queued == TOTAL - kept
         assert_same_results(out, full)
 
-    def test_sigterm_then_resume(self, full_run, tmp_path) -> None:
+    def test_sigterm_then_resume(self, full_run, tmp_path, monkeypatch) -> None:
         full, layout = full_run
         out = tmp_path / "run"
 
@@ -395,9 +438,17 @@ class TestRoundTrip:
         assert first is not None and first["run"]["status"] == "running"
         secret = run_secret(out)
 
-        # Without --resume the directory is refused rather than mixed into.
-        with pytest.raises(ProgressMismatchError, match="Pass --resume"):
-            run_eval(out, layout)
+        # Without --resume the progress is ignored, with a warning, and not touched.
+        elsewhere = tmp_path / "ordinary"
+        shutil.copytree(out, elsewhere)
+        before = sorted(p.name for p in (elsewhere / PROGRESS_DIR).rglob("*"))
+        warnings: list[str] = []
+        monkeypatch.setattr(runner_module.runner_logger, "warning", warnings.append)
+        ordinary = run_eval(elsewhere, layout, resume=False)
+        assert ordinary.queued == TOTAL and ordinary.restored == 0
+        assert any("ignores" in message for message in warnings)
+        assert sorted(p.name for p in (elsewhere / PROGRESS_DIR).rglob("*")) == before
+        assert_same_results(elsewhere, full)
 
         # The threshold was crossed before this attempt started, so it finishes.
         stats = run_eval(out, layout, env={DEBUG_EXIT_AT_ENV: "0.37"}, resume=True)
@@ -416,17 +467,57 @@ class TestRoundTrip:
         full, layout = full_run
         out = _copy(full, tmp_path)
 
-        stats = run_eval(out, layout, fresh=True)
+        stats = run_eval(out, layout, fresh=True, resume=False)
 
         assert stats.queued == TOTAL and stats.restored == 0
         assert_same_results(out, full)
+        assert not has_progress(out)
+
+    def test_a_run_without_resume_writes_no_progress(self, full_run, tmp_path) -> None:
+        full, layout = full_run
+        out = tmp_path / "ordinary"
+
+        stats = run_eval(out, layout, resume=False)
+
+        assert stats.queued == TOTAL
+        assert not (out / PROGRESS_DIR).exists()
+        assert_same_results(out, full)
+
+    def test_resume_without_progress_matches_an_ordinary_run(self, full_run, tmp_path) -> None:
+        full, layout = full_run
+        out = tmp_path / "first"
+
+        run_eval(out, layout, resume=True)
+
+        assert_same_results(out, full)
+        assert not (out / PROGRESS_DIR).exists()
+
+    def test_a_system_prompt_reaches_restored_requests(self, tmp_path) -> None:
+        # Restored responses carry the request the harness sent, so the saved requests
+        # must hold the system prompt exactly as an uninterrupted run saves them.
+        limits = {"gsm8k": 6, "arc_challenge:mc": 6}
+        reference = tmp_path / "reference"
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(runner_module, "discard_progress", lambda output_dir: None)
+            run_eval(reference, "segments", limits, system_prompt="Be brief.")
+        assert "Be brief." in b"".join(_artifacts(reference).values()).decode()
+        out = tmp_path / "cut"
+        shutil.copytree(reference, out)
+        _clear_outputs(out)
+        kept = keep_first_entries(out, "segments", 8)
+
+        stats = run_eval(out, "segments", limits, system_prompt="Be brief.")
+
+        assert stats.restored == kept and kept > 0
+        assert_same_results(out, reference)
 
 
 class TestStores:
     @pytest.mark.parametrize("layout", LAYOUTS)
     def test_a_torn_last_line_is_dropped(self, tmp_path, layout) -> None:
-        store = store_class(layout)(tmp_path / "task_abcdef")
-        store.reset({"header": True})
+        store = store_class(layout)(tmp_path / "run")
+        store.reset()
+        store.append({"header": True})
         store.append({"idx": 0})
         store.close()
         torn = b'{"idx": 1, "outputs": [{"te'
@@ -436,15 +527,40 @@ class TestStores:
         else:
             (store.path / "000099.jsonl").write_bytes(b'{"idx": 1}\n' + torn)
 
-        reopened = store_class(layout)(tmp_path / "task_abcdef")
+        reopened = store_class(layout)(tmp_path / "run")
         expected = [{"header": True}, {"idx": 0}] + ([] if layout == "append" else [{"idx": 1}])
         assert list(reopened.read()) == expected
         reopened.append({"idx": 2})
         reopened.close()
-        assert list(store_class(layout)(tmp_path / "task_abcdef").read()) == [
+        assert list(store_class(layout)(tmp_path / "run").read()) == [
             *expected,
             {"idx": 2},
         ]
+
+    def test_segments_are_flushed_by_size_and_age(self, tmp_path, monkeypatch) -> None:
+        from olmo_eval.runners.asynq import progress as progress_module
+
+        monkeypatch.setattr(progress_module, "SEGMENT_MAX_BYTES", 100)
+        store = store_class("segments")(tmp_path / "run")
+        for i in range(30):
+            store.append({"idx": i, "pad": "x" * 20})
+        # Size flushes write a few segments; the buffered rest waits for close.
+        written = len(list(store.path.glob("*.jsonl")))
+        assert 1 <= written < 30
+        store.close()
+        assert [e["idx"] for e in store_class("segments")(tmp_path / "run").read()] == list(
+            range(30)
+        )
+
+        monkeypatch.setattr(progress_module, "SEGMENT_MAX_BYTES", 10**9)
+        monkeypatch.setattr(progress_module, "SEGMENT_MAX_SECONDS", 0.05)
+        aged = store_class("segments")(tmp_path / "aged")
+        aged.append({"idx": 0})
+        deadline = time.monotonic() + 5
+        while not list(aged.path.glob("*.jsonl")) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert list(aged.path.glob("*.jsonl"))
+        aged.close()
 
     def test_segments_are_the_default_layout(self, monkeypatch) -> None:
         monkeypatch.delenv(PROGRESS_LAYOUT_ENV, raising=False)
@@ -514,6 +630,66 @@ class TestHeaders:
         with pytest.raises(ProgressMismatchError, match="harness_hash differs"):
             self._restore(tmp_path, changed)
 
+    def test_a_different_engine_version_is_refused(self, tmp_path, monkeypatch) -> None:
+        from olmo_eval.runners.asynq import progress as progress_module
+
+        monkeypatch.setattr(progress_module, "_package_version", lambda name: "0.10.0")
+        runner = _runner(tmp_path, {"gsm8k": 3})
+        runner.harness_config = HarnessConfig(
+            name="default", provider=ProviderConfig(kind="vllm", model="m")
+        )
+        self._restore(tmp_path, runner)
+        monkeypatch.setattr(progress_module, "_package_version", lambda name: "0.11.0")
+
+        with pytest.raises(
+            ProgressMismatchError, match=r"engine_version differs.*vllm==0.10.0.*vllm==0.11.0"
+        ):
+            self._restore(tmp_path, runner)
+
+    def test_a_different_commit_is_refused(self, tmp_path, monkeypatch) -> None:
+        runner = _runner(tmp_path, {"gsm8k": 3})
+        monkeypatch.setattr("olmo_eval.upload.provenance.git_info", lambda: {"commit": "a" * 40})
+        self._restore(tmp_path, runner)
+        stored = next(e for e in _entries(tmp_path, "segments") if "header" in e)
+        assert stored["header"]["git_commit"] == "a" * 40
+        monkeypatch.setattr("olmo_eval.upload.provenance.git_info", lambda: {"commit": "b" * 40})
+
+        with pytest.raises(ProgressMismatchError, match="git_commit differs"):
+            self._restore(tmp_path, runner)
+
+    def test_runtime_identity_ignores_what_depends_on_the_node(self, tmp_path) -> None:
+        runtime = {
+            "profile": "qwen",
+            "packages": {"sglang": "0.5"},
+            "logprobs": "original",
+            "arithmetic_environment": {"A": "1"},
+            "engine_options": {"attention_backend": "fa3", "max_running_requests": 64},
+            "effective_max_running_requests": 64,
+        }
+        progress = _progress(tmp_path)
+        trackers, items = _local_setup(undecidable=set())
+        progress.restore(trackers, items, _harness())
+        progress.check_runtime(runtime)
+        progress.close()
+
+        other_node = {
+            **runtime,
+            "engine_options": {"attention_backend": "fa3", "max_running_requests": 48},
+            "effective_max_running_requests": 48,
+        }
+        again = _progress(tmp_path)
+        trackers, items = _local_setup(undecidable=set())
+        again.restore(trackers, items, _harness())
+        again.check_runtime(other_node)
+
+        new_engine = {**runtime, "packages": {"sglang": "0.6"}}
+        with pytest.raises(ProgressMismatchError, match=r"packages.sglang: '0.5' -> '0.6'"):
+            again.check_runtime(new_engine)
+        backend = {**runtime, "engine_options": {"attention_backend": "triton"}}
+        with pytest.raises(ProgressMismatchError, match="attention_backend"):
+            again.check_runtime(backend)
+        again.close()
+
     def test_a_different_setup_only_warns(self, tmp_path, caplog) -> None:
         self._restore(tmp_path, _runner(tmp_path, {"gsm8k": 3}))
         changed = _runner(tmp_path, {"gsm8k": 3})
@@ -539,6 +715,26 @@ class TestHeaders:
         assert restored.responses == {}
         assert len(restored.remaining) == len(items)
         assert "4 recorded instance(s) no longer match" in caplog.text
+
+    @pytest.mark.parametrize("changed", ["gold_answer", "metadata"])
+    def test_a_changed_gold_or_metadata_is_run_again(self, tmp_path, changed) -> None:
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        _process(trackers, restored.remaining, progress, restored.responses)
+        progress.close()
+        _drop_final(tmp_path)
+
+        trackers, items = _local_setup(undecidable=set())
+        edited = items[2]
+        if changed == "gold_answer":
+            edited.instance = replace(edited.instance, gold_answer="another answer")
+        else:
+            edited.instance.metadata["source"] = "a corrected document"
+        restored = _progress(tmp_path).restore(trackers, items, _harness())
+
+        assert sorted(restored.responses["local"]) == [0, 1, 3]
+        assert [item.instance_idx for item in restored.remaining] == [2]
 
 
 # --- Accounting, driven through process_results without worker processes ---
@@ -611,12 +807,16 @@ def _process(
     restored: dict[str, Any],
     failures: dict[int, bool] | None = None,
 ) -> dict[str, Any]:
-    """Feed one result per item to process_results; ``failures`` maps idx -> retryable."""
+    """Feed one result per item to process_results.
+
+    ``failures`` maps the idx of an item whose call failed to whether the request
+    caused the failure.
+    """
     failures = failures or {}
-    results: queue.Queue[ResultItem] = queue.Queue()
+    results = []
     for item in items:
         failed = item.instance_idx in failures
-        results.put(
+        results.append(
             ResultItem(
                 model_name="mock",
                 task_id=item.task_id,
@@ -625,9 +825,21 @@ def _process(
                 request=item.request,
                 outputs=[] if failed else [LMOutput(text="a", metadata={"prompt_tokens": 3})],
                 error="provider failed" if failed else None,
-                retryable=failures.get(item.instance_idx, False),
+                request_caused=failures.get(item.instance_idx, False),
             )
         )
+    return _process_results(trackers, results, progress, restored)
+
+
+def _process_results(
+    trackers: dict[str, TaskTracker],
+    result_items: list[ResultItem],
+    progress: RunProgress,
+    restored: dict[str, Any],
+) -> dict[str, Any]:
+    results: queue.Queue[ResultItem] = queue.Queue()
+    for result in result_items:
+        results.put(result)
     return asyncio.run(
         process_results(
             trackers=trackers,
@@ -636,7 +848,7 @@ def _process(
             scoring_context=None,  # type: ignore[arg-type]
             scoring_concurrency=2,
             total_tasks=len(trackers),
-            total_instances=len(items),
+            total_instances=len(result_items),
             model_name="mock",
             save_predictions=False,
             write_predictions_fn=None,
@@ -660,13 +872,13 @@ def _drop_final(out: Path) -> None:
 
 class TestAccounting:
     def test_only_outcomes_an_uninterrupted_run_keeps_are_recorded(self, tmp_path) -> None:
-        # 0: a request failure (final); 1: a failed call (retried); 2: undecidable
+        # 0: a request-caused failure (final); 1: a failed call (retried); 2: undecidable
         # (final, unscored); 3: grader unreachable (retried).
         trackers, items = _local_setup(undecidable={2}, unreachable=frozenset({3}))
         progress = _progress(tmp_path)
         restored = progress.restore(trackers, items, _harness())
         first = _process(
-            trackers, restored.remaining, progress, restored.responses, {0: False, 1: True}
+            trackers, restored.remaining, progress, restored.responses, {0: True, 1: False}
         )
         progress.close()
         _drop_final(tmp_path)
@@ -678,11 +890,148 @@ class TestAccounting:
         assert sorted(restored.responses["local"]) == [2]
         assert trackers["local"].failed_instances == {0: "provider failed"}
         assert [item.instance_idx for item in restored.remaining] == [1, 3]
-        second = _process(trackers, restored.remaining, progress, restored.responses, {1: True})
+        second = _process(trackers, restored.remaining, progress, restored.responses, {1: False})
         progress.close()
         assert second["local"].metrics == first["local"].metrics
         assert second["local"].instances_failed == first["local"].instances_failed == 2
         assert second["local"].scoring_failures == first["local"].scoring_failures
+
+    def test_provider_errors_reach_the_records_as_the_runner_sees_them(self, tmp_path) -> None:
+        """Failures take the path they take at run time, through process_batch.
+
+        API providers turn every exception into a marked output, so a connection
+        error and a context overflow both arrive as outputs. Only the overflow is the
+        request's fault; the connection error must run again.
+        """
+        from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
+        from olmo_eval.inference.utils import dispatch_requests
+        from olmo_eval.runners.asynq.processing import process_batch
+
+        class Provider:
+            def describe_request(self, request: LMRequest, params: Any) -> None:
+                return None
+
+            async def agenerate(self, requests: list[LMRequest], params: Any) -> Any:
+                async def call(request: LMRequest) -> list[LMOutput]:
+                    if request.prompt == "overflow-text":
+                        raise ValueError("maximum context length is 8 tokens, got 90")
+                    if request.prompt == "reset":
+                        raise ConnectionError("connection reset by peer")
+                    if request.prompt == "overflow-flag":
+                        return [
+                            LMOutput(
+                                text="",
+                                metadata={
+                                    REQUEST_ERROR_KEY: "too long",
+                                    CONTEXT_OVERFLOW_KEY: True,
+                                },
+                            )
+                        ]
+                    return [LMOutput(text="a", metadata={"prompt_tokens": 3})]
+
+                return await dispatch_requests(requests, call)
+
+        class Harness:
+            provider = Provider()
+
+            def _apply_config(self, request: LMRequest) -> LMRequest:
+                return request
+
+            def flush_metrics(self, batch_hash: str) -> None:
+                return None
+
+        prompts = ["overflow-text", "reset", "overflow-flag", "fine"]
+
+        def setup() -> tuple[dict[str, TaskTracker], list[QueueItem]]:
+            trackers, items = _local_setup(undecidable=set())
+            for item, prompt in zip(items, prompts, strict=True):
+                item.request = replace(item.request, prompt=prompt)
+            return trackers, items
+
+        trackers, items = setup()
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        sent: queue.Queue[ResultItem] = queue.Queue()
+        asyncio.run(process_batch(restored.remaining, Harness(), sent))  # type: ignore[arg-type]
+        result_items = [sent.get_nowait() for _ in range(sent.qsize())]
+        by_idx = {result.instance_idx: result for result in result_items}
+        assert [by_idx[i].request_caused for i in range(4)] == [True, False, True, False]
+        assert by_idx[1].error is not None and "ConnectionError" in by_idx[1].error
+        _process_results(trackers, result_items, progress, restored.responses)
+        progress.close()
+        _drop_final(tmp_path)
+
+        trackers, items = setup()
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+
+        assert sorted(trackers["local"].failed_instances) == [0, 2]
+        assert sorted(restored.responses["local"]) == [3]
+        assert [item.instance_idx for item in restored.remaining] == [1]
+
+    def test_a_scorers_metadata_writes_survive_a_restore(self, tmp_path) -> None:
+        """Instance metadata a scorer sets is what the task's metric reads."""
+        from olmo_eval.common.metrics.base import Metric
+
+        @dataclass(frozen=True)
+        class Stamping(Scorer):
+            name: str = "stamping"
+
+            def score(self, instance: Instance, output: LMOutput) -> float:
+                instance.metadata["stamp"] = len(output.text) + int(instance.metadata["id"])
+                instance.metadata.pop("draft", None)
+                return 1.0
+
+        @dataclass(frozen=True, slots=True)
+        class StampSum(Metric):
+            name: str = "stamp_sum"
+            scorer: type[Scorer] | Scorer = Stamping
+
+            def compute(self, responses: Any) -> float:
+                return float(
+                    sum(r.instance.metadata["stamp"] for r in responses)
+                    + sum("draft" in r.instance.metadata for r in responses) * 1000
+                )
+
+        def setup() -> tuple[dict[str, TaskTracker], list[QueueItem]]:
+            trackers, items = _local_setup(undecidable=set())
+            trackers["local"].task = _LocalTask(
+                TaskConfig(name="local", data_source="test/local", metrics=(StampSum(),))
+            )
+            for item in items:
+                item.instance.metadata["draft"] = True
+            return trackers, items
+
+        def feed(trackers: Any, items: Any, progress: Any, restored: Any) -> dict[str, Any]:
+            # As over the queue, a result carries its own copy of the instance.
+            results = [
+                ResultItem(
+                    model_name="mock",
+                    task_id="local",
+                    instance_idx=item.instance_idx,
+                    instance=replace(item.instance, metadata=dict(item.instance.metadata)),
+                    request=item.request,
+                    outputs=[LMOutput(text="abc", metadata={"prompt_tokens": 3})],
+                )
+                for item in items
+            ]
+            return _process_results(trackers, results, progress, restored)
+
+        trackers, items = setup()
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        first = feed(trackers, restored.remaining, progress, restored.responses)
+        progress.close()
+        _drop_final(tmp_path)
+        expected = first["local"].metrics
+        assert expected["stamp_sum"][next(iter(expected["stamp_sum"]))] == 18.0
+
+        trackers, items = setup()
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        assert restored.remaining == []
+        second = feed(trackers, [], progress, restored.responses)
+        assert second["local"].metrics == expected
 
     def test_a_task_recorded_in_full_completes_with_nothing_queued(self, tmp_path) -> None:
         trackers, items = _local_setup(undecidable=set())
@@ -736,6 +1085,43 @@ class TestAccounting:
         assert not list((tmp_path / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))
 
 
+class TestFailedTasks:
+    def test_a_failed_task_is_recomputed_not_finalized(self, tmp_path) -> None:
+        # Every instance fails from its request, so nothing is scored and the task fails.
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        failures = {i: True for i in range(4)}
+        first = _process(trackers, restored.remaining, progress, restored.responses, failures)
+        progress.close()
+        assert first["local"].error
+        assert not list((tmp_path / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))
+
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        # The failures the request caused are restored; the task is not.
+        assert restored.finalized == {}
+        assert sorted(trackers["local"].failed_instances) == [0, 1, 2, 3]
+
+    def test_a_task_with_an_error_is_not_finalized(self, tmp_path) -> None:
+        from olmo_eval.runners.common.types import TaskResult
+
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        progress.restore(trackers, items, _harness())
+        config = trackers["local"].task.config.to_dict()  # type: ignore[union-attr]
+        progress.finalize("local", TaskResult("local", config, 0, {}, error="boom"))
+        progress.finalize(
+            "local",
+            TaskResult("local", config, 0, {}, failure_budget_exceeded=True),
+        )
+        assert not list((tmp_path / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))
+        progress.finalize("local", TaskResult("local", config, 0, {}))
+        assert len(list((tmp_path / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))) == 1
+        progress.close()
+
+
 class TestRunIdentity:
     def _write_manifest(self, out: Path, status: str, specs: list[str]) -> str:
         runner = _runner(out, {spec: 3 for spec in specs})
@@ -747,9 +1133,16 @@ class TestRunIdentity:
         path.write_text(json.dumps(manifest))
         return "abc123def456"
 
+    @staticmethod
+    def _leave_progress(out: Path) -> None:
+        record = stream_base(out, "mock").with_suffix(".jsonl")
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text("{}\n")
+
     def test_a_resumed_run_keeps_its_id(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setenv("BEAKER_JOB_ID", "job-1")
         run_id = self._write_manifest(tmp_path, "failed", ["gsm8k"])
+        self._leave_progress(tmp_path)
         monkeypatch.setenv("BEAKER_JOB_ID", "job-2")
         runner = _runner(tmp_path, {"gsm8k": 3}, resume=True)
 
@@ -774,6 +1167,81 @@ class TestRunIdentity:
     ) -> None:
         self._write_manifest(tmp_path, status, specs)
         assert _runner(tmp_path, {"gsm8k": 3}, resume=resume)._previous_run_id() is None
+
+    def test_discarded_progress_gives_a_new_id(self, tmp_path) -> None:
+        self._write_manifest(tmp_path, "failed", ["gsm8k"])
+        runner = _runner(tmp_path, {"gsm8k": 3}, resume=True)
+        assert runner._previous_run_id() is None
+        self._leave_progress(tmp_path)
+        assert runner._previous_run_id() == "abc123def456"
+        discard_progress(tmp_path)
+        assert _runner(tmp_path, {"gsm8k": 3}, resume=True)._previous_run_id() is None
+
+
+class TestProgressIsNotUploaded:
+    def test_collect_artifacts_skips_progress(self, tmp_path) -> None:
+        from olmo_eval.upload.uploader import collect_artifacts
+
+        (tmp_path / "metrics.json").write_text("{}")
+        (tmp_path / "predictions" / "m").mkdir(parents=True)
+        (tmp_path / "predictions" / "m" / "t.jsonl").write_text("{}\n")
+        for name in ("run.segments/000000.jsonl", "m/t_abcdef.final.json"):
+            path = tmp_path / PROGRESS_DIR / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}")
+
+        artifacts, files = collect_artifacts(tmp_path, {}, [])
+
+        assert sorted(files) == ["metrics.json", "predictions/m/t.jsonl"]
+        assert not any(a["path"].startswith(PROGRESS_DIR) for a in artifacts)
+
+    def _finalize(self, tmp_path, results, progress) -> bool:
+        """Run the finalize step; whether the records were gone when the upload ran."""
+        from unittest.mock import patch
+
+        from olmo_eval.runners.asynq.results import FailureBudgetExceeded
+        from olmo_eval.upload import UploadConfig
+
+        runner = _runner(tmp_path, {"gsm8k": 3}, resume=True)
+        runner.upload_config = UploadConfig(enabled=True, api_url="https://ingest.test")
+        runner._start_run_record = lambda experiment_id: None  # type: ignore[method-assign]
+        seen: list[bool] = []
+
+        def upload(output_dir, config) -> None:
+            assert (Path(output_dir) / "metrics.json").exists()
+            seen.append(has_progress(output_dir))
+
+        results_dict = {"model": "mock", "model_config": {}, "tasks": {}, "errors": []}
+        with (
+            patch("olmo_eval.upload.upload_results_dir", side_effect=upload),
+            contextlib.suppress(FailureBudgetExceeded),
+        ):
+            runner._finalize_and_gate(
+                results, results_dict, experiment_id="abc123def456", progress=progress
+            )
+        assert len(seen) == 1
+        return seen[0]
+
+    def test_progress_is_deleted_before_a_completed_run_uploads(self, tmp_path) -> None:
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        results = _process(trackers, restored.remaining, progress, restored.responses)
+        assert has_progress(tmp_path)
+
+        assert self._finalize(tmp_path, results, progress) is False
+        assert not has_progress(tmp_path)
+
+    def test_a_run_that_trips_the_gate_keeps_progress_for_its_retry(self, tmp_path) -> None:
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        results = _process(trackers, restored.remaining, progress, restored.responses)
+        results["local"].failure_budget_exceeded = True
+
+        assert self._finalize(tmp_path, results, progress) is True
+        assert has_progress(tmp_path)
+        progress.close()
 
 
 def test_the_resume_flags_reach_the_runner(tmp_path) -> None:
