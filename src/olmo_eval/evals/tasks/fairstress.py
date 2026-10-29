@@ -58,10 +58,10 @@ CLI's compact results table) is the D3 TieShift for the same reason.
 Every number in that log line is also its own registered metric in
 `metrics.json` — the log only narrates them.
 
-**Data-integrity corrections.** The data_source datasets
-(``PardisSzah/fairstress-core``, ``PardisSzah/fairstress``) already have
-both corrections below baked in; the pre-correction originals are kept
-private at ``PardisSzah/original_fairstress-core``/``PardisSzah/original_fairstress``
+**Data-integrity corrections.** The data_source dataset (``allenai/fairstress``,
+``full``/``core`` files) already has both corrections below baked in; the
+pre-correction originals are kept private at
+``PardisSzah/original_fairstress-core``/``PardisSzah/original_fairstress``
 for provenance. Two corrections, validated by the paper's authors:
 
 1. **Question-polarity negation.** 5 of 300 scenario templates ask a
@@ -817,9 +817,9 @@ class FairStress(Task):
     """FairStress: bias in the answer vs. bias in the defense of the answer."""
 
     # FairStress-Core (48,005 items) is the default data source, not the full
-    # corpus (PardisSzah/fairstress, wired in via the "full" variant below):
-    # olmo-eval's async runner materializes every instance (runs
-    # process_doc() on the whole corpus) *before* applying `limit`
+    # corpus (allenai/fairstress's "full" files, wired in via the "full"
+    # variant below): olmo-eval's async runner materializes every instance
+    # (runs process_doc() on the whole corpus) *before* applying `limit`
     # (runners/asynq/preparation.py) — confirmed directly: fairstress:answer
     # at limit=20 against the full corpus took 10+ minutes and 18GB+ RAM just
     # to build the instance list. Core is a stratified sample (not the
@@ -828,21 +828,24 @@ class FairStress(Task):
     #
     # Both datasets have the validated corrections (see module docstring)
     # baked in; the pre-correction originals live, private, under
-    # "original_"-prefixed names. Hosted temporarily under a personal
-    # account pending official release, but are PUBLIC — no token or
-    # `required_secrets` entry is needed to read them.
-    # Revision pinned to the corrected-data upload commit: an unpinned
-    # "main" ref is resolved against a client's local HF cache under an
-    # offline/no-egress run (e.g. some Beaker jobs), so a cache populated
-    # before this repo name held the corrected data silently keeps serving
-    # whatever it last saw instead of erroring — pinning turns that into a
-    # loud cache-miss instead of a silent wrong answer, and makes every run
-    # reproducible regardless of cache state. Re-pin here if the dataset is
-    # ever intentionally updated.
+    # "original_"-prefixed names on PardisSzah/*. Hosted on Ai2's official
+    # allenai/fairstress dataset repo, which is PUBLIC — no token or
+    # `required_secrets` entry is needed to read it. `data_files` is given
+    # explicitly (rather than relying on the repo's own split names) so this
+    # keeps working regardless of how that repo's README config evolves.
+    # Revision pinned to a specific upload commit: an unpinned "main" ref is
+    # resolved against a client's local HF cache under an offline/no-egress
+    # run (e.g. some Beaker jobs), so a cache populated before this repo name
+    # held the corrected data silently keeps serving whatever it last saw
+    # instead of erroring — pinning turns that into a loud cache-miss instead
+    # of a silent wrong answer, and makes every run reproducible regardless
+    # of cache state. Re-pin here if the dataset is ever intentionally
+    # updated.
     data_source = DataSource(
-        path="PardisSzah/fairstress-core",
+        path="allenai/fairstress",
         split="train",
-        revision="d9f3a48965f3ae8a1f0b71281391818fb77a1145",
+        data_files="data/core-*.parquet",
+        revision="a5cdf125f8a59d605efd0ea9deefe75083588208",
     )
     split = Split.TRAIN
     formatter = MCQAChatFormatter()
@@ -1079,9 +1082,10 @@ register_variant(
     # Pinned for the same cache-consistency reason as the Core data_source
     # above — see that comment.
     data_source=DataSource(
-        path="PardisSzah/fairstress",
+        path="allenai/fairstress",
         split="train",
-        revision="c33b0deffd118ee5704c2705ccb6f040eff21829",
+        data_files="data/full-*.parquet",
+        revision="a5cdf125f8a59d605efd0ea9deefe75083588208",
     ),
     metrics=_fairstress_metrics(),
     primary_metric=FairStressTieShiftMetric(name="degree__3__tieshift", degree=3),

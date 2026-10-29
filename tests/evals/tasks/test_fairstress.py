@@ -42,7 +42,7 @@ class TestFairStressRegistration:
         # Variants compose via get_task's colon-chaining (see registry.py) --
         # no separate "full_reasoning" registration needed.
         task = get_task("fairstress:full:reasoning")
-        assert task.config.data_source.path == "PardisSzah/fairstress"
+        assert task.config.data_source.path == "allenai/fairstress"
         assert task.config.strip_thinking is True
 
     @pytest.mark.parametrize("variant", ["reasoning"])
@@ -71,17 +71,21 @@ class TestFairStressRegistration:
         # 10+ minute / 18GB+ run against the full corpus at limit=20).
         task = get_task("fairstress")
         assert isinstance(task.config.data_source, DataSource)
-        assert task.config.data_source.path == "PardisSzah/fairstress-core"
+        assert task.config.data_source.path == "allenai/fairstress"
+        # path alone no longer disambiguates core vs. full -- both variants
+        # share one repo now, split only by which files are named explicitly.
+        assert task.config.data_source.data_files == "data/core-*.parquet"
         assert task.config.get_data_source().split == "train"
 
     def test_full_variant_points_at_the_complete_corpus(self):
         task = get_task("fairstress:full")
         assert isinstance(task.config.data_source, DataSource)
-        assert task.config.data_source.path == "PardisSzah/fairstress"
+        assert task.config.data_source.path == "allenai/fairstress"
+        assert task.config.data_source.data_files == "data/full-*.parquet"
 
     @pytest.mark.parametrize(
         ("variant", "path"),
-        [("answer", "PardisSzah/fairstress-core"), ("full", "PardisSzah/fairstress")],
+        [("answer", "allenai/fairstress"), ("full", "allenai/fairstress")],
     )
     def test_data_source_revision_is_pinned(self, variant, path):
         # Regression test: an unpinned "main" ref is resolved against a
