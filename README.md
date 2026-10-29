@@ -1543,7 +1543,7 @@ budget: ai2/oe-other
 | `--gpus` | `-G` | auto | Number of GPUs (defaults to 1 for GPU providers, 0 otherwise) |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
 | `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
-| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`) |
+| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`); `--no-preemptible` means `--min-runtime 8h` |
 | `--min-runtime` | | none | Minimum runtime before Beaker may preempt the job (e.g., `2h`) |
 | `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | `-r` | none | Number of retries on failure |
@@ -1586,8 +1586,11 @@ uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
   both config file fields.
 - External evals (`-E`) take `--min-runtime` from the CLI only; they do not read the
   config file.
-- `--no-preemptible` still works. Beaker treats it as an 8h min runtime with auto-resume
-  turned off.
+- `--no-preemptible` (and `preemptible: false`) is the same as `--min-runtime 8h`. The
+  launcher sends the min runtime and leaves `preemptible` unset, so Beaker keeps
+  auto-resume on. Sending `preemptible=False` to Beaker would also turn auto-resume off,
+  and on clusters that make jobs interruptible after the min runtime, a preemption after
+  8h would end the experiment with no replacement job.
 
 ### Per-Task Overrides
 
@@ -1816,7 +1819,7 @@ retries: 2
 | `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
 | `min_runtime` | string | no | Minimum runtime before preemption (e.g., `2h`); see [Preemption](#preemption) |
-| `preemptible` | bool | no | Deprecated by Beaker; cannot be combined with `min_runtime` |
+| `preemptible` | bool | no | Deprecated by Beaker; `false` means `min_runtime: 8h`; cannot be combined with `min_runtime` |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
 | `beaker_image` | string | no | Container image to use (config-only) |

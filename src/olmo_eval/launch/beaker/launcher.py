@@ -361,6 +361,8 @@ class BeakerJobConfig:
         priority: Job priority level.
         preemptible: Whether the job can be preempted. Ignored and set to None when
             min_runtime is set; combining False with min_runtime raises ValueError.
+            False becomes min_runtime="8h" with preemptible None, which keeps Beaker's
+            auto-resume on.
         min_runtime: Minimum time the job runs before Beaker may preempt it (e.g., "2h").
             Replaces preemptible, which Beaker has deprecated.
         timeout: Job timeout (e.g., "24h", "30m").
@@ -461,6 +463,11 @@ class BeakerJobConfig:
                     "preemptible=False cannot be combined with min_runtime; set min_runtime alone"
                 )
             self.min_runtime = validate_min_runtime(self.min_runtime)
+            self.preemptible = None
+        elif self.preemptible is False:
+            # Beaker maps preemptible=False to an 8h min runtime with auto-resume off, so a
+            # preemption after 8h ends the experiment. Ask for the min runtime directly.
+            self.min_runtime = "8h"
             self.preemptible = None
         elif self.preemptible is None:
             self.preemptible = True
