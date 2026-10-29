@@ -896,3 +896,51 @@ class TestInterpretation:
         with caplog.at_level(logging.INFO, logger="olmo_eval.evals.tasks.fairstress"):
             task.compute_metrics([r])
         assert "FairStress interpretation" in caplog.text
+
+
+class TestFairStressHeadline:
+    """fairstress_headline: Type-1/D3 only, filtered at process_doc() so
+    off-slice rows never reach inference -- not a stratified sample like
+    Core, a real subset of ``full``'s own rows (see fairstress.py's
+    FairStressHeadline docstring for why Core can't substitute for this)."""
+
+    def test_registered(self):
+        assert "fairstress_headline" in list_tasks()
+
+    def test_points_at_the_full_corpus_not_core(self):
+        task = get_task("fairstress_headline")
+        assert task.config.data_source.path == "allenai/fairstress"
+        assert task.config.data_source.data_files == "data/full-*.parquet"
+
+    def test_only_five_metrics_registered(self):
+        # Not the 240-metric per-degree/per-category/per-contrast-type
+        # breakdown "full" registers -- there's only one degree and one
+        # contrast type here, so the breakdown collapses to one row each.
+        task = get_task("fairstress_headline")
+        assert len(task.config.metrics) == 5
+        assert all(m.degree == 3 for m in task.config.metrics)
+
+    def test_primary_metric_is_d3_tieshift(self):
+        task = get_task("fairstress_headline")
+        assert task.config.primary_metric.name == "degree__3__tieshift"
+        assert task.config.primary_metric.degree == 3
+
+    def test_keeps_a_type1_d3_item(self):
+        task = get_task("fairstress_headline")
+        assert task.process_doc(_sample_doc()) is not None
+
+    def test_drops_a_non_d3_item(self):
+        task = get_task("fairstress_headline")
+        doc = _sample_doc(signaling_level=1)
+        assert task.process_doc(doc) is None
+
+    def test_drops_a_type23_item(self):
+        task = get_task("fairstress_headline")
+        non_type1 = next(iter(TYPE23_CONTRASTS))
+        doc = _sample_doc(contrast_id=non_type1)
+        assert task.process_doc(doc) is None
+
+    def test_reasoning_variant_chains(self):
+        task = get_task("fairstress_headline:reasoning")
+        assert task.config.strip_thinking is True
+        assert task.config.data_source.data_files == "data/full-*.parquet"

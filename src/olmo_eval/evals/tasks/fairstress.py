@@ -1090,3 +1090,64 @@ register_variant(
     metrics=_fairstress_metrics(),
     primary_metric=FairStressTieShiftMetric(name="degree__3__tieshift", degree=3),
 )
+
+
+@register("fairstress_headline")
+class FairStressHeadline(FairStress):
+    """FairStress restricted to the paper's own single-figure convention:
+    Type-1 contrasts (minority vs. majority) at D3 (explicit identity label)
+    only — no D0-D2, no Type-2.
+
+    This is *not* a stratified sample like FairStress-Core. It filters in
+    process_doc() (rows outside the slice return None and are never built
+    into Instances, so they never reach inference, unlike "full"'s post-hoc
+    metric-level filtering), keeping every scenario and all 78 adversarial
+    prefixes at D3/Type-1 intact. Type-1 is 26/33 contrasts and D3 is 1/4 of
+    degrees, so this is roughly a fifth of "full"'s size with the same
+    baseline-pairing density per item FragGap/TieShift need — not thinned
+    the way Core's IRT sampling is, which is why Core's own fraggap/tieshift
+    are unreliable at this slice (see the PR discussion).
+
+    Covers only what the paper's main-text headline numbers need. The D0-D2
+    escalation story and the Type-2 control comparison are also in the
+    paper (see module docstring debate) — this task cannot reproduce those;
+    use "fairstress:full" for that.
+    """
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        if doc.get("signaling_level") != _HEADLINE_DEGREE:
+            return None
+        if doc.get("contrast_id") not in TYPE1_CONTRASTS:
+            return None
+        return super().process_doc(doc, index)
+
+    # Pinned for the same cache-consistency reason as the other data_sources
+    # in this file — see the comment on the class-level data_source above.
+    data_source = DataSource(
+        path="allenai/fairstress",
+        split="train",
+        data_files="data/full-*.parquet",
+        revision="a5cdf125f8a59d605efd0ea9deefe75083588208",
+    )
+    # Named with the same "degree__{d}__{key}" convention the rest of this
+    # file uses (even though only D3 is ever computed here) so the
+    # inherited compute_metrics()'s D0-D3 progression log still resolves --
+    # it reports D0-D2 as "n/a", which is accurate: this task never runs
+    # them, not that they came back insufficient.
+    metrics = tuple(
+        cls(name=f"degree__{_HEADLINE_DEGREE}__{key}", degree=_HEADLINE_DEGREE)
+        for cls, key in _FAIRSTRESS_METRIC_CLASSES
+    )
+    primary_metric = FairStressTieShiftMetric(
+        name=f"degree__{_HEADLINE_DEGREE}__tieshift", degree=_HEADLINE_DEGREE
+    )
+    sampling_params = base_sampling
+
+
+register_variant(
+    "fairstress_headline",
+    "reasoning",
+    sampling_params=reasoning_sampling,
+    formatter=MCQAChatFormatter(),
+    strip_thinking=True,
+)
