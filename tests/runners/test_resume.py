@@ -646,6 +646,63 @@ class TestHeaders:
         ):
             self._restore(tmp_path, runner)
 
+    def test_an_unknown_engine_version_warns_instead_of_matching(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        from olmo_eval.runners.asynq import progress as progress_module
+
+        monkeypatch.setattr(progress_module, "_package_version", lambda name: "0.10.0")
+        runner = _runner(tmp_path, {"gsm8k": 3})
+        runner.harness_config = HarnessConfig(
+            name="default", provider=ProviderConfig(kind="vllm", model="m")
+        )
+        self._restore(tmp_path, runner)
+        monkeypatch.setattr(progress_module, "_package_version", lambda name: None)
+
+        with caplog.at_level("WARNING"):
+            self._restore(tmp_path, runner)
+
+        assert "without a comparable engine version" in caplog.text
+        assert "vllm==unknown" in caplog.text
+
+    def test_vllm_server_version_comes_from_the_server_python(self, monkeypatch) -> None:
+        import subprocess
+
+        from olmo_eval.runners.asynq import progress as progress_module
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="warn\n0.11.2\n", stderr="")
+
+        monkeypatch.setenv("VLLM_PYTHON", "/venvs/vllm/bin/python")
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(progress_module, "_package_version", lambda name: None)
+        config = HarnessConfig(
+            name="default", provider=ProviderConfig(kind="vllm_server", model="m")
+        )
+
+        assert progress_module.engine_version(config) == "vllm==0.11.2"
+        assert calls[0][0] == "/venvs/vllm/bin/python"
+
+    def test_vllm_server_version_failure_is_recorded_as_unknown(self, monkeypatch, caplog) -> None:
+        import subprocess
+
+        from olmo_eval.runners.asynq import progress as progress_module
+
+        def fake_run(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No module named vllm")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        config = HarnessConfig(
+            name="default", provider=ProviderConfig(kind="vllm_server", model="m")
+        )
+
+        with caplog.at_level("WARNING"):
+            assert progress_module.engine_version(config) == "vllm==unknown"
+        assert "Could not determine the vllm version" in caplog.text
+
     def test_a_different_commit_is_refused(self, tmp_path, monkeypatch) -> None:
         runner = _runner(tmp_path, {"gsm8k": 3})
         monkeypatch.setattr("olmo_eval.upload.provenance.git_info", lambda: {"commit": "a" * 40})

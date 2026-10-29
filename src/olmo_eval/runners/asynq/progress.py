@@ -455,12 +455,58 @@ _ENGINE_PACKAGES = {
 }
 
 
+# Recorded in place of a version that could not be determined.
+UNKNOWN_VERSION = "unknown"
+_SERVER_PROBE_TIMEOUT_SECONDS = 60
+
+
+def _server_package_version(package: str) -> str | None:
+    """Version of ``package`` in the Python the vLLM server is launched with.
+
+    The server can run in an environment other than the runner's (``VLLM_PYTHON``), so the
+    runner's own metadata does not describe it.
+    """
+    import subprocess
+
+    from olmo_eval.inference.providers.vllm_server_utils import _get_vllm_python
+
+    python = _get_vllm_python()
+    code = f"from importlib.metadata import version; print(version({package!r}))"
+    try:
+        result = subprocess.run(
+            [python, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=_SERVER_PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning(f"Could not run {python} to read the {package} version: {e}")
+        return None
+    lines = result.stdout.strip().splitlines()
+    if result.returncode != 0 or not lines:
+        logger.warning(
+            f"Could not read the {package} version from {python}: {result.stderr[-200:]}"
+        )
+        return None
+    return lines[-1].strip()
+
+
 def engine_version(harness_config: HarnessConfig) -> str | None:
-    """``package==version`` of the inference engine the provider runs, if it has one."""
-    package = _ENGINE_PACKAGES.get(str(harness_config.provider.kind))
+    """``package==version`` of the inference engine the provider runs, if it has one.
+
+    A version that cannot be determined is recorded as ``package==unknown`` with a warning.
+    """
+    kind = str(harness_config.provider.kind)
+    package = _ENGINE_PACKAGES.get(kind)
     if package is None:
         return None
-    return f"{package}=={_package_version(package)}"
+    probe = _server_package_version if kind == "vllm_server" else _package_version
+    found = probe(package)
+    if found is None:
+        logger.warning(f"Could not determine the {package} version the {kind} provider runs")
+        found = UNKNOWN_VERSION
+    return f"{package}=={found}"
 
 
 # Resolved SGLang runtime keys that decide what the engine computes. The engine derives
@@ -542,6 +588,17 @@ def check_header(path: Path, recorded: Mapping[str, Any], expected: Mapping[str,
     for key in MEASUREMENT_FIELDS:
         old, new = recorded.get(key), expected.get(key)
         if key == "git_commit" and (old is None or new is None):
+            continue
+        if key == "engine_version" and UNKNOWN_VERSION in (
+            str(old).rpartition("==")[2],
+            str(new).rpartition("==")[2],
+        ):
+            # An unknown version cannot be compared, and refusing would block every resume
+            # whenever the probe fails, so it warns instead of passing as equal.
+            logger.warning(
+                f"Resuming {path} without a comparable engine version "
+                f"(recorded {old!r}, this run {new!r}); the engine may have changed"
+            )
             continue
         if old == new:
             continue
