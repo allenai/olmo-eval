@@ -343,7 +343,7 @@ def full_run(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFa
     """An uninterrupted run in each layout, with its records kept, and its layout."""
     out = tmp_path_factory.mktemp(f"full-{request.param}")
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(runner_module, "discard_progress", lambda output_dir: None)
+        mp.setattr(RunProgress, "discard", lambda self: None)
         stats = run_eval(out, request.param)
     assert stats.queued == TOTAL and stats.restored == 0
     return out, request.param
@@ -498,7 +498,7 @@ class TestRoundTrip:
         limits = {"gsm8k": 6, "arc_challenge:mc": 6}
         reference = tmp_path / "reference"
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(runner_module, "discard_progress", lambda output_dir: None)
+            mp.setattr(RunProgress, "discard", lambda self: None)
             run_eval(reference, "segments", limits, system_prompt="Be brief.")
         assert "Be brief." in b"".join(_artifacts(reference).values()).decode()
         out = tmp_path / "cut"
@@ -689,6 +689,37 @@ class TestHeaders:
         with pytest.raises(ProgressMismatchError, match="attention_backend"):
             again.check_runtime(backend)
         again.close()
+
+    def test_request_length_caps_are_part_of_the_runtime_identity(self, tmp_path) -> None:
+        runtime = {
+            "profile": "qwen",
+            "engine_options": {"max_total_tokens": 1000, "mem_fraction_static": 0.9},
+            "max_total_num_tokens": 1000,
+            "max_req_input_len": 999,
+        }
+        progress = _progress(tmp_path)
+        trackers, items = _local_setup(undecidable=set())
+        progress.restore(trackers, items, _harness())
+        progress.check_runtime(runtime)
+        progress.close()
+
+        again = _progress(tmp_path)
+        trackers, items = _local_setup(undecidable=set())
+        again.restore(trackers, items, _harness())
+        # The requested pool and memory fraction differ, but the caps they led to match.
+        again.check_runtime(
+            {**runtime, "engine_options": {"max_total_tokens": 2000, "mem_fraction_static": 0.8}}
+        )
+        smaller_pool = {**runtime, "max_total_num_tokens": 500, "max_req_input_len": 499}
+        with pytest.raises(ProgressMismatchError, match="max_total_num_tokens: 1000 -> 500"):
+            again.check_runtime(smaller_pool)
+        again.close()
+
+    def test_unreported_caps_fall_back_to_the_requested_pool(self) -> None:
+        from olmo_eval.runners.asynq.progress import runtime_identity
+
+        runtime = {"engine_options": {"max_total_tokens": 1000, "max_running_requests": 8}}
+        assert runtime_identity(runtime) == {"engine_options": {"max_total_tokens": 1000}}
 
     def test_a_different_setup_only_warns(self, tmp_path, caplog) -> None:
         self._restore(tmp_path, _runner(tmp_path, {"gsm8k": 3}))
@@ -1195,14 +1226,14 @@ class TestProgressIsNotUploaded:
         assert sorted(files) == ["metrics.json", "predictions/m/t.jsonl"]
         assert not any(a["path"].startswith(PROGRESS_DIR) for a in artifacts)
 
-    def _finalize(self, tmp_path, results, progress) -> bool:
-        """Run the finalize step; whether the records were gone when the upload ran."""
+    def _finalize(self, tmp_path, results, progress, resume=True) -> bool:
+        """Run the finalize step; whether the records were still there when the upload ran."""
         from unittest.mock import patch
 
         from olmo_eval.runners.asynq.results import FailureBudgetExceeded
         from olmo_eval.upload import UploadConfig
 
-        runner = _runner(tmp_path, {"gsm8k": 3}, resume=True)
+        runner = _runner(tmp_path, {"gsm8k": 3}, resume=resume)
         runner.upload_config = UploadConfig(enabled=True, api_url="https://ingest.test")
         runner._start_run_record = lambda experiment_id: None  # type: ignore[method-assign]
         seen: list[bool] = []
@@ -1222,26 +1253,82 @@ class TestProgressIsNotUploaded:
         assert len(seen) == 1
         return seen[0]
 
-    def test_progress_is_deleted_before_a_completed_run_uploads(self, tmp_path) -> None:
+    def _finished(self, tmp_path):
         trackers, items = _local_setup(undecidable=set())
         progress = _progress(tmp_path)
         restored = progress.restore(trackers, items, _harness())
         results = _process(trackers, restored.remaining, progress, restored.responses)
         assert has_progress(tmp_path)
+        return progress, results
 
-        assert self._finalize(tmp_path, results, progress) is False
+    def test_progress_is_deleted_after_a_completed_run_uploads(self, tmp_path) -> None:
+        progress, results = self._finished(tmp_path)
+
+        assert self._finalize(tmp_path, results, progress) is True
         assert not has_progress(tmp_path)
 
+    def test_a_failed_upload_keeps_progress_for_the_requeue(self, tmp_path) -> None:
+        from unittest.mock import patch
+
+        from olmo_eval.upload import UploadConfig
+
+        progress, results = self._finished(tmp_path)
+        runner = _runner(tmp_path, {"gsm8k": 3}, resume=True)
+        runner.upload_config = UploadConfig(enabled=True, api_url="https://ingest.test")
+        runner._start_run_record = lambda experiment_id: None  # type: ignore[method-assign]
+        results_dict = {"model": "mock", "model_config": {}, "tasks": {}, "errors": []}
+
+        with (
+            patch("olmo_eval.upload.upload_results_dir", side_effect=RuntimeError("preempted")),
+            pytest.raises(RuntimeError, match="preempted"),
+        ):
+            runner._finalize_and_gate(
+                results, results_dict, experiment_id="abc123def456", progress=progress
+            )
+        assert has_progress(tmp_path)
+
     def test_a_run_that_trips_the_gate_keeps_progress_for_its_retry(self, tmp_path) -> None:
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
-        results = _process(trackers, restored.remaining, progress, restored.responses)
+        progress, results = self._finished(tmp_path)
         results["local"].failure_budget_exceeded = True
 
         assert self._finalize(tmp_path, results, progress) is True
         assert has_progress(tmp_path)
         progress.close()
+
+    def test_a_completed_run_deletes_only_its_own_records(self, tmp_path) -> None:
+        other = tmp_path / PROGRESS_DIR / "other-model"
+        other.mkdir(parents=True)
+        (other / "run.jsonl").write_text("{}\n")
+        (other / f"gsm8k_abcdef{FINAL_SUFFIX}").write_text("{}")
+        progress, results = self._finished(tmp_path)
+        mine = stream_base(tmp_path, "mock").parent
+        assert mine.is_dir()
+
+        self._finalize(tmp_path, results, progress)
+
+        assert not mine.exists()
+        assert sorted(p.name for p in other.iterdir()) == [
+            f"gsm8k_abcdef{FINAL_SUFFIX}",
+            "run.jsonl",
+        ]
+
+    def test_discard_removes_emptied_directories(self, tmp_path) -> None:
+        progress, _ = self._finished(tmp_path)
+        progress.discard()
+        assert not (tmp_path / PROGRESS_DIR).exists()
+
+    def test_a_run_without_resume_leaves_stale_progress_and_warns(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        progress, results = self._finished(tmp_path)
+        progress.close()
+        warnings: list[str] = []
+        monkeypatch.setattr(runner_module.runner_logger, "warning", warnings.append)
+
+        self._finalize(tmp_path, results, None, resume=False)
+
+        assert has_progress(tmp_path)
+        assert any("stale" in w for w in warnings)
 
 
 def test_the_resume_flags_reach_the_runner(tmp_path) -> None:

@@ -205,6 +205,15 @@ class SGLangProvider(InferenceProvider):
                         self.profile_report["effective_max_running_requests"] = capacity
             except Exception:
                 logger.debug("Resolved SGLang capacity unavailable", exc_info=True)
+        # The engine clips max_new_tokens, and aborts prompts, by the request-length caps it
+        # derives from the KV pool, so they decide what a request generates. Engine keeps
+        # them from startup, so reading them makes no server call.
+        scheduler_info = getattr(self.engine, "scheduler_info", None)
+        if isinstance(scheduler_info, dict):
+            for key in ("max_total_num_tokens", "max_req_input_len"):
+                value = scheduler_info.get(key)
+                if type(value) is int and value > 0:
+                    self.profile_report[key] = value
         self._closed = False
         self._capacity_checked = False
         self._previous_batch: tuple[int, int, int, int] | None = None

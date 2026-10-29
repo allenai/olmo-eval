@@ -7,7 +7,7 @@ import contextlib
 import multiprocessing as mp
 import random
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -1312,7 +1312,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         metrics.json and predictions on disk to be diagnosed from, so the gate is
         checked only after _finalize_and_save has returned. A run that trips it also
         keeps its progress records, so a retry continues from them; a run that passes
-        deletes them once its outputs are written, before anything is uploaded.
+        deletes its own once its outputs are written and uploaded, so a preemption during
+        the upload still resumes instead of rerunning the eval.
         """
         keep_progress = progress is None or any(
             result.failure_budget_exceeded for result in results.values()
@@ -1322,10 +1323,15 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_id=experiment_id,
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
-            before_upload=None
-            if keep_progress or progress is None
-            else lambda: self._discard_progress(progress),
         )
+        if progress is not None and not keep_progress:
+            progress.discard()
+        elif progress is None and has_progress(self.output_dir):
+            runner_logger.warning(
+                f"{self.output_dir} still holds progress from an earlier run. It is stale: "
+                "this run did not use it. Delete the progress/ directory, or pass --fresh, "
+                "before using --resume here."
+            )
         check_failure_budget(results)
         return final_results
 
@@ -1335,12 +1341,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         experiment_id: str,
         experiment_duration_seconds: float | None = None,
         provider_init_seconds: dict[str, float] | None = None,
-        before_upload: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
-        """Log summary, write metrics.json and the manifest, then upload the results.
-
-        ``before_upload`` runs once the outputs are written and before they are uploaded.
-        """
+        """Log summary, write metrics.json and the manifest, then upload the results."""
         from olmo_eval.common.types import compute_model_hash
 
         self._log_summary(results_dict)
@@ -1367,19 +1369,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
-        if before_upload is not None:
-            before_upload()
         if self.upload_config is not None and self.upload_config.enabled:
             from olmo_eval.upload import upload_results_dir
 
             upload_results_dir(self.output_dir, self.upload_config)
 
         return results_dict
-
-    def _discard_progress(self, progress: RunProgress) -> None:
-        """Delete the records of a completed run; its outputs replace them."""
-        progress.close()
-        discard_progress(self.output_dir)
 
     def _previous_run_id(self) -> str | None:
         """The run ID to continue, when resuming a run the output directory holds.

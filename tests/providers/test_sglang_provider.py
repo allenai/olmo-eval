@@ -1093,3 +1093,12 @@ def test_output_does_not_duplicate_raw_logprob_arrays(setup_engine):
     assert "output_token_logprobs" not in output.metadata
     assert "output_top_logprobs" not in output.metadata
     assert output.metadata["sum_logits"] == -1.0
+
+
+def test_request_length_caps_reach_the_profile_report(setup_engine):
+    engine, _, _ = setup_engine
+    engine.scheduler_info = {"max_total_num_tokens": 4096, "max_req_input_len": 4000}
+    provider = SGLangProvider("model")
+    assert provider.profile_report["max_total_num_tokens"] == 4096
+    assert provider.profile_report["max_req_input_len"] == 4000
+    engine.get_server_info.assert_not_called()

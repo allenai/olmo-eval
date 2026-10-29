@@ -463,25 +463,39 @@ def engine_version(harness_config: HarnessConfig) -> str | None:
     return f"{package}=={_package_version(package)}"
 
 
-# Resolved SGLang runtime keys that decide what the engine computes. The rest of the
-# runtime (capacity and memory settings the engine derives from the node it landed on)
-# differs between nodes without changing the outputs, so a requeue on another node
-# must not be refused for it.
-_RUNTIME_IDENTITY_KEYS = ("profile", "packages", "logprobs", "arithmetic_environment")
-_NODE_DEPENDENT_ENGINE_OPTIONS = frozenset(
-    {"max_running_requests", "max_total_tokens", "max_mamba_cache_size", "mem_fraction_static"}
+# Resolved SGLang runtime keys that decide what the engine computes. The engine derives
+# max_req_input_len and max_total_num_tokens from the KV pool of the node it landed on,
+# clips max_new_tokens by them and aborts prompts at or above max_req_input_len, so a
+# requeue onto a node with another pool could mix truncation regimes: they are compared.
+# The rest of the runtime (scheduling and memory settings) changes only speed, so a requeue
+# on another node must not be refused for it.
+_RUNTIME_IDENTITY_KEYS = (
+    "profile",
+    "packages",
+    "logprobs",
+    "arithmetic_environment",
+    "max_total_num_tokens",
+    "max_req_input_len",
+)
+_SCHEDULING_ENGINE_OPTIONS = frozenset(
+    {"max_running_requests", "max_mamba_cache_size", "mem_fraction_static", "max_total_tokens"}
 )
 
 
 def runtime_identity(runtime: Mapping[str, Any]) -> dict[str, Any]:
-    """The part of a resolved runtime that identifies what the engine computes."""
+    """The part of a resolved runtime that identifies what the engine computes.
+
+    ``mem_fraction_static`` and ``max_total_tokens`` matter only through the effective caps
+    the engine reports, so they are left out when it reported them. A runtime that did not
+    report them keeps ``max_total_tokens`` (the requested pool size) in the identity.
+    """
     identity = {key: runtime[key] for key in _RUNTIME_IDENTITY_KEYS if key in runtime}
+    reported = "max_total_num_tokens" in runtime and "max_req_input_len" in runtime
+    skipped = _SCHEDULING_ENGINE_OPTIONS - ({"max_total_tokens"} if not reported else set())
     options = runtime.get("engine_options")
     if isinstance(options, Mapping):
         identity["engine_options"] = {
-            key: value
-            for key, value in options.items()
-            if key not in _NODE_DEPENDENT_ENGINE_OPTIONS
+            key: value for key, value in options.items() if key not in skipped
         }
     return identity
 
@@ -818,6 +832,7 @@ class RunProgress:
     _total: int = field(default=0, init=False)
     _done: int = field(default=0, init=False)
     _armed: list[float] = field(default_factory=list, init=False)
+    _bases: list[Path] = field(default_factory=list, init=False)
 
     def header(self, spec: str, task_config: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -877,6 +892,7 @@ class RunProgress:
             header = self.header(spec, tracker.task.config.to_dict())
             expected[spec] = header
             base = progress_base(self.output_dir, self.model_name, spec, header["task_hash"])
+            self._bases.append(base)
             final = self._load_final(spec, header, base)
             if final is not None:
                 restored.finalized[spec] = final
@@ -982,8 +998,9 @@ class RunProgress:
     def check_runtime(self, runtime: Mapping[str, Any]) -> None:
         """Compare the workers' resolved runtime identity with the one recorded, or record it.
 
-        Only :func:`runtime_identity` is compared. A requeue lands on another node,
-        where capacity settings the engine derives from the node differ.
+        Only :func:`runtime_identity` is compared. A requeue lands on another node, where
+        scheduling settings differ; the request-length caps the engine derived do not
+        change without changing the outputs, so they are compared.
         """
         if not runtime or self._store is None:
             return
@@ -1038,7 +1055,12 @@ class RunProgress:
             self._append(spec, idx, lambda item, rh: encode_response(item, response, result, rh))
 
     def record_failure(self, spec: str, idx: int, result: ResultItem) -> None:
-        """Record a generation failure that the request caused."""
+        """Record a generation failure that the request caused.
+
+        A scaffold failure that still returns a fallback output is not a generation failure.
+        It is scored as a soft failure and recorded as final through :meth:`record`, as an
+        uninterrupted run keeps it.
+        """
         if result.request_caused:
             self._append(spec, idx, lambda item, rh: encode_failure(item, result, rh))
 
@@ -1071,6 +1093,29 @@ class RunProgress:
             )
         except Exception as e:  # noqa: BLE001 - losing the record must not stop the run
             logger.error(f"Could not record the finalized result of {spec}: {e}")
+
+    def discard(self) -> None:
+        """Delete this run's records: its model's stream and its tasks' finalized results.
+
+        Other models' streams and tasks in the same output directory are left alone, and
+        directories this empties are removed.
+        """
+        self.close()
+        stream = stream_base(self.output_dir, self.model_name)
+        for layout in _LAYOUTS.values():
+            path = stream.with_name(stream.name + layout.suffix)
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+        for base in self._bases:
+            base.with_name(base.name + FINAL_SUFFIX).unlink(missing_ok=True)
+        root = Path(self.output_dir) / PROGRESS_DIR
+        for directory in (_model_dir(self.output_dir, self.model_name), root):
+            try:
+                directory.rmdir()
+            except OSError:
+                break
 
     def close(self) -> None:
         """Write out and fsync every record."""
