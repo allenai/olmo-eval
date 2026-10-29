@@ -471,7 +471,13 @@ def _server_package_version(package: str) -> str | None:
     from olmo_eval.inference.providers.vllm_server_utils import _get_vllm_python
 
     python = _get_vllm_python()
-    code = f"from importlib.metadata import version; print(version({package!r}))"
+    # Some images install vLLM without distribution metadata, so fall back to the module.
+    code = (
+        "import importlib, importlib.metadata as m\n"
+        f"try:\n    print(m.version({package!r}))\n"
+        "except m.PackageNotFoundError:\n"
+        f"    print(importlib.import_module({package!r}).__version__)"
+    )
     try:
         result = subprocess.run(
             [python, "-c", code],
