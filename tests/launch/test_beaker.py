@@ -862,9 +862,7 @@ class TestBuildCommandWithTaskPackages:
         assert (
             "cd /gantry-runtime && uv export --extra vllm "
             "--no-default-groups --no-hashes --no-emit-project "
-            "--no-header --no-annotate --frozen 2>/dev/null "
-            "| grep -vE '^(torch|nvidia-)' | grep -vE ' @ ' "
-            "> /tmp/vllm-lock-constraints.txt"
+            "--no-header --no-annotate --frozen > /tmp/vllm-lock-export.txt"
         ) in install_cmd
         assert "-c /tmp/vllm-lock-constraints.txt -e '.[vllm]'" in install_cmd
         assert (

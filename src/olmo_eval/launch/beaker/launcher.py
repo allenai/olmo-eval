@@ -999,6 +999,27 @@ class BeakerLauncher:
             f"| grep -vE '^nvidia-cutlass-dsl' > {constraints}"
         )
 
+        # Both bundled vLLM paths consume the same lock selection. Export in a
+        # separate step so an export failure cannot be hidden by a shell pipeline.
+        vllm_lock_constraints = "/tmp/vllm-lock-constraints.txt"
+        if has_vllm:
+            steps.append(
+                "cd /gantry-runtime && uv export --extra vllm "
+                "--no-default-groups --no-hashes --no-emit-project "
+                "--no-header --no-annotate --frozen > /tmp/vllm-lock-export.txt"
+            )
+            # Torch/CUDA remain governed by the image/provider. Direct sources
+            # retain their declared URLs rather than becoming index constraints.
+            steps.append(
+                "grep -vE '^(torch|nvidia-)' /tmp/vllm-lock-export.txt "
+                f"| grep -vE ' @ ' > {vllm_lock_constraints}"
+            )
+
+        main_constraints = constraints
+        if has_vllm and not use_isolated_vllm_venv:
+            main_constraints = "/tmp/inline-vllm-constraints.txt"
+            steps.append(f"cat {constraints} {vllm_lock_constraints} > {main_constraints}")
+
         # Install vLLM in isolated venv when requested (for server mode)
         if use_isolated_vllm_venv:
             vllm_venv = "/opt/vllm-venv"
@@ -1013,17 +1034,6 @@ class BeakerLauncher:
             # Custom provider packages (e.g., a vLLM fork) are installed below
             # into the same isolated environment.
             if has_vllm:
-                # Build a lockfile constraint set scoped to vLLM. Keep torch/CUDA
-                # out so vLLM can pick its required build, and drop direct refs
-                # that uv exports as commit-pinned URLs.
-                vllm_lock_constraints = "/tmp/vllm-lock-constraints.txt"
-                steps.append(
-                    f"cd /gantry-runtime && uv export --extra vllm "
-                    f"--no-default-groups --no-hashes --no-emit-project "
-                    f"--no-header --no-annotate --frozen 2>/dev/null "
-                    f"| grep -vE '^(torch|nvidia-)' | grep -vE ' @ ' "
-                    f"> {vllm_lock_constraints}"
-                )
                 steps.append(
                     f"cd /gantry-runtime && uv pip install "
                     f"--python {vllm_venv}/bin/python "
@@ -1046,7 +1056,7 @@ class BeakerLauncher:
             main_extras.append("beaker")
         if main_extras:
             extras_str = ",".join(main_extras)
-            install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
+            install_cmd = f"uv pip install -e '.[{extras_str}]' -c {main_constraints}"
             steps.append(f"cd /gantry-runtime && {install_cmd}")
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")
@@ -1066,7 +1076,7 @@ class BeakerLauncher:
         # Install task-specific dependencies
         if task_packages:
             for pkg in task_packages:
-                steps.append(build_install_command(pkg, constraints))
+                steps.append(build_install_command(pkg, main_constraints))
 
         # Set up Modal secret for GCP Artifact Registry (Modal sandboxes)
         if setup_modal_gcp_secret:

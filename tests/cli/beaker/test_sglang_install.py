@@ -84,4 +84,5 @@ def test_job_installs_selected_provider(provider_kind, custom_package, image, li
         assert "vllm" not in command
     else:
         assert "sglang" not in command
-    assert "-c /tmp/cuda-constraints.txt" in command
+    constraint_file = "inline-vllm" if provider_kind == "vllm" else "cuda"
+    assert f"-c /tmp/{constraint_file}-constraints.txt" in command

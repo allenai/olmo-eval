@@ -1515,6 +1515,15 @@ uv run olmo-eval beaker group list -w <workspace>
 Docker images do NOT include inference providers (vllm, transformers, litellm) by default.
 Each model must resolve to a provider configuration, either from a built-in model preset or from harness overrides.
 
+Bundled Beaker `vllm` and `vllm_server` installations use dependency constraints
+exported from the repository's `uv.lock`. Inline vLLM shares the main environment,
+so its package and task-dependency installs also retain the image's Torch/CUDA
+constraints. An incompatible task dependency fails installation instead of
+silently replacing a locked vLLM dependency. The server keeps its isolated venv.
+Explicit `provider.package` overrides retain their own dependency resolution;
+qualifying a custom runtime remains the caller's responsibility. Standalone pip
+installs do not consume the lock.
+
 **Via config file (recommended):**
 
 ```yaml
