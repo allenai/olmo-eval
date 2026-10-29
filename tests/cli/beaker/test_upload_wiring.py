@@ -180,3 +180,11 @@ def test_launch_cli_resolves_upload_from_env(monkeypatch) -> None:
     assert captured["upload"] is False
     assert captured["api_url"] == "https://dev-ingest.example"
     assert captured["tags"] == ["x"]
+
+
+def test_job_command_resumes_from_its_results() -> None:
+    """Every job of a task runs the same command, so a requeued or retried job continues."""
+    _, job = _assemble(upload=False)
+
+    assert "--resume" in job.command
+    assert "--fresh" not in job.command

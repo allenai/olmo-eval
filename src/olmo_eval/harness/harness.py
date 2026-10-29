@@ -344,10 +344,8 @@ class Harness:
     def _apply_config(self, request: LMRequest) -> LMRequest:
         """Inject tool schemas and system prompt from config.
 
-        This transforms a request by adding:
-        - Tool schemas (if config has tools)
-        - System prompt (if configured and not already present)
-        - Formatted prompt with chat template (if a chat request)
+        See :func:`apply_harness_config`. A request with tools also fails here when
+        the provider would drop them.
 
         Args:
             request: Original request.
@@ -355,51 +353,48 @@ class Harness:
         Returns:
             New request with config applied.
         """
-
-        messages = self._inject_system_prompt(request.messages)
-        tools = self.config.tool_schemas if self.config.has_tools else request.tools
         # A scaffold sends its tools itself; only a request the provider sends
         # directly depends on the provider honouring its tool schemas.
         if request.tools and not self.config.scaffold:
             require_tool_support(self.provider)
-
-        return LMRequest(
-            request_type=request.request_type,
-            messages=messages,
-            prompt=request.prompt,
-            continuations=request.continuations,
-            continuation_prompts=request.continuation_prompts,
-            tools=tools,
-            system_prompt=self.config.system_prompt or request.system_prompt,
-            max_length=request.max_length,
-            images=request.images,
-            metadata=request.metadata,
-        )
+        return apply_harness_config(self.config, request)
 
     def _inject_system_prompt(
         self, messages: tuple[dict[str, Any], ...]
     ) -> tuple[dict[str, Any], ...]:
-        """Add system prompt to messages if configured and not present.
+        """Add system prompt to messages if configured and not present."""
+        return _inject_system_prompt(self.config.system_prompt, messages)
 
-        Args:
-            messages: Original message tuple.
 
-        Returns:
-            Messages with system prompt prepended if needed.
-        """
-        if not self.config.system_prompt:
-            return messages
+def _inject_system_prompt(
+    system_prompt: str | None, messages: tuple[dict[str, Any], ...]
+) -> tuple[dict[str, Any], ...]:
+    """Prepend a system message unless there is no prompt or the messages start with one."""
+    if not system_prompt or (messages and messages[0].get("role") == "system"):
+        return messages
+    system_msg: dict[str, Any] = {"role": "system", "content": system_prompt}
+    return (system_msg,) + messages
 
-        # Check if messages already start with a system message
-        if messages and messages[0].get("role") == "system":
-            return messages
 
-        # Prepend system message
-        system_msg: dict[str, Any] = {
-            "role": "system",
-            "content": self.config.system_prompt,
-        }
-        return (system_msg,) + messages
+def apply_harness_config(config: HarnessConfig, request: LMRequest) -> LMRequest:
+    """The request a harness with ``config`` sends for ``request``.
+
+    Adds the harness's tool schemas (if it has tools) and its system prompt (if it
+    has one and the messages do not start with a system message). It depends only
+    on the config, so a resumed run rebuilds the same request without a provider.
+    """
+    return LMRequest(
+        request_type=request.request_type,
+        messages=_inject_system_prompt(config.system_prompt, request.messages),
+        prompt=request.prompt,
+        continuations=request.continuations,
+        continuation_prompts=request.continuation_prompts,
+        tools=config.tool_schemas if config.has_tools else request.tools,
+        system_prompt=config.system_prompt or request.system_prompt,
+        max_length=request.max_length,
+        images=request.images,
+        metadata=request.metadata,
+    )
 
 
 def create_harness(

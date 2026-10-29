@@ -8,7 +8,11 @@ import time
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.inference.errors import classify_terminal_provider_error, request_error
+from olmo_eval.inference.errors import (
+    classify_terminal_provider_error,
+    is_context_overflow,
+    request_error,
+)
 from olmo_eval.inference.metrics.core.stats import compute_batch_hash
 from olmo_eval.runners.asynq.share_clock import ShareClock
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
@@ -218,6 +222,7 @@ async def process_chat_request(
                 attempt=item.attempt,
                 sent_at=sent_at,
                 attributed_seconds=seconds,
+                retryable=not is_context_overflow(e),
             )
         )
 
@@ -358,6 +363,7 @@ async def process_batch(
                     attempt=item.attempt,
                     sent_at=sent_at,
                     attributed_seconds=share,
+                    retryable=not is_context_overflow(e),
                 )
             )
     except BaseException:

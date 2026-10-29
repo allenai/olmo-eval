@@ -151,6 +151,9 @@ class ResultItem:
     # rollout's share, split across a batch's requests by token share. None only for
     # fatal error signals.
     attributed_seconds: float | None = None
+    # The error came from the call failing (a connection or server error), not from
+    # this request, so a resumed run tries the instance again.
+    retryable: bool = False
 
 
 __all__ = [
