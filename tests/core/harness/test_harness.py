@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
-from olmo_eval.common.types import LMRequest, ProviderKind, RequestType
+from olmo_eval.common.types import ContextFit, LMRequest, ProviderKind, RequestType
 from olmo_eval.harness import clear_registry, register_tool
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.harness.harness import Harness, apply_harness_config, create_harness
@@ -41,6 +43,41 @@ def _injected(config, messages):
     """The messages a harness with ``config`` sends for a chat request."""
     request = LMRequest(request_type=RequestType.CHAT, messages=messages)
     return apply_harness_config(config, request).messages
+
+
+class TestApplyHarnessConfig:
+    # Fields the harness may change; every other request field must pass through as is.
+    CHANGED = {"messages", "tools", "system_prompt"}
+
+    def test_every_other_request_field_passes_through(self):
+        # A new LMRequest field must be handled in apply_harness_config, or a resumed
+        # run, which rebuilds requests through it, would silently drop that field.
+        assert {f.name for f in dataclasses.fields(LMRequest)} == self.CHANGED | {
+            "request_type",
+            "prompt",
+            "continuations",
+            "continuation_prompts",
+            "max_length",
+            "images",
+            "metadata",
+            "context_fit",
+        }
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": "q"},),
+            prompt="p",
+            continuations=("a", "b"),
+            continuation_prompts=("pa", "pb"),
+            max_length=123,
+            images=("image",),
+            metadata={"k": "v"},
+            context_fit=ContextFit(text="document", max_prompt_tokens=4096),
+        )
+        config = HarnessConfig(name="h", provider=ProviderConfig(kind=ProviderKind.MOCK))
+        applied = apply_harness_config(config, request)
+        for field in dataclasses.fields(LMRequest):
+            if field.name not in self.CHANGED:
+                assert getattr(applied, field.name) == getattr(request, field.name), field.name
 
 
 class TestHarness:

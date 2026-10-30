@@ -1160,15 +1160,16 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     def _check_judge_provider(self, spec: str, task: Task) -> None:
         """Fail before generation if an auxiliary judge provider serves another model.
 
-        A task judged by a provider in this run's harness records the judge model in
-        its config, and so in its task hash; the provider must serve that model.
+        A task scored by a model in this run's harness, such as an LLM judge or
+        ALCE's NLI model, records that model in ``judge_model``, and so in its task
+        hash; the provider must serve that model.
         """
-        from olmo_eval.common.scorers import LLMJudgeScorer
+        from olmo_eval.common.scorers.execution import ContextScorer
 
         judge_model = task.config.judge_model
         for scorer in task._get_scorers().values():
             name = getattr(scorer, "provider_name", None)
-            if not isinstance(scorer, LLMJudgeScorer) or name is None or judge_model is None:
+            if not isinstance(scorer, ContextScorer) or name is None or judge_model is None:
                 continue
             provider = self.harness_config.auxiliary_providers.get(name)
             if provider is None:

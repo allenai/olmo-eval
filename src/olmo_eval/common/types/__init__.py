@@ -9,8 +9,10 @@ from .agent import (
     TrajectoryMetrics,
 )
 from .base import (
+    CONTEXT_CUT_TOKENS_KEY,
     FOLLOW_UP_TURNS_KEY,
     TURNS_KEY,
+    ContextFit,
     Instance,
     LMOutput,
     LMRequest,
@@ -60,6 +62,7 @@ from .trajectory import (
 )
 
 __all__ = [
+    "CONTEXT_CUT_TOKENS_KEY",
     "FOLLOW_UP_TURNS_KEY",
     "TURNS_KEY",
     "AgentMetrics",
@@ -67,6 +70,7 @@ __all__ = [
     "AgentTurn",
     "APICallToolType",
     "CodeExecutionToolType",
+    "ContextFit",
     "compute_model_hash",
     "compute_task_hash",
     "DatabaseToolType",

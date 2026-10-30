@@ -155,8 +155,10 @@ results and hashed to identify it.
   OpenAI-compatible judge, an `LLMJudgeScorer` subclass for a single-verdict scorer, and
   `JudgeSettings` with `Judge` or `call_judge` for other multi-call scoring.
 - Keep judge settings in `TaskConfig` (`judge_model`, `judge_reasoning_effort`,
-  `judge_max_tokens`): set them as class defaults, or leave them unset to mean a
-  `JudgeSettings` default named in the task module. Set `judged = True` so `get_task`
+  `judge_max_tokens`, `judge_temperature`): set them as class defaults, or leave them
+  unset to mean a `JudgeSettings` default named in the task module. A default effort or
+  temperature belongs to the default model and is dropped when another judge is named.
+  Set `judged = True` so `get_task`
   applies `OLMO_EVAL_JUDGE`, and don't read the variable while scoring; leave it unset
   only when the task's judge settings cannot take an arbitrary judge, as for
   Omniscience's 10-token letter grade. A judge served by

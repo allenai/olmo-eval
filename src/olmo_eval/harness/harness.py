@@ -388,6 +388,7 @@ def apply_harness_config(config: HarnessConfig, request: LMRequest) -> LMRequest
         max_length=request.max_length,
         images=request.images,
         metadata=request.metadata,
+        context_fit=request.context_fit,
     )
 
 
