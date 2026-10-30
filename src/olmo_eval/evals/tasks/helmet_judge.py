@@ -12,9 +12,12 @@ A judge reply that never parses, after retries, leaves the output unscored rathe
 than scoring it 0.0. Upstream likewise leaves such instances out of the average.
 
 Upstream calls ``gpt-4o-2024-05-13`` through its ``OpenAIModel`` at temperature
-0.1, top-p 0.9 and seed 42. The judge here matches the model and temperature;
-the shared judge client sends no top-p or seed, and asks again when a reply does
-not parse where upstream gives up on the first unparseable reply.
+0.1, top-p 0.9 and seed 42. OpenAI has retired that snapshot (the API rejects it as
+deprecated), so the judge here is ``gpt-5.4-2026-03-05``, at upstream's temperature,
+which it accepts. In a sweep re-grading the same outputs with several judges, it
+ranked models as gpt-4o-2024-08-06 did and left no output unscored. The shared judge
+client sends no top-p or seed, and asks again when a reply does not parse where
+upstream gives up on the first unparseable reply.
 """
 
 from __future__ import annotations
@@ -42,7 +45,8 @@ from olmo_eval.evals.tasks.constants.helmet_summ_prompts import (
     RECALL_PROMPT_BOOK,
 )
 
-HELMET_JUDGE_MODEL = "gpt-4o-2024-05-13"
+# Upstream pins gpt-4o-2024-05-13, which the API now rejects as deprecated.
+HELMET_JUDGE_MODEL = "gpt-5.4-2026-03-05"
 HELMET_JUDGE_TEMPERATURE = 0.1
 # Upstream's budgets: the OpenAIModel default for LongQA, and the explicit
 # generation_max_length eval_gpt4_summ.py sets for summarization.
