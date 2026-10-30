@@ -495,6 +495,19 @@ class TestJudgeSettings:
         assert default.with_config(warm).temperature == 0.7
         assert default.with_config(unset).temperature == 0.2
 
+    def test_a_config_naming_another_model_drops_the_default_temperature(self):
+        default = JudgeSettings(model="judge-a", max_tokens=10, temperature=0.2)
+        other = types.SimpleNamespace(
+            judge_model="judge-b",
+            judge_reasoning_effort=None,
+            judge_max_tokens=None,
+            judge_temperature=None,
+        )
+        warm_other = types.SimpleNamespace(**{**vars(other), "judge_temperature": 0.7})
+
+        assert default.with_config(other).temperature == 0.0
+        assert default.with_config(warm_other).temperature == 0.7
+
     def test_builds_a_judge_that_records_its_settings(self):
         settings = JudgeSettings(model="judge-a", max_tokens=64, reasoning_effort="high")
 

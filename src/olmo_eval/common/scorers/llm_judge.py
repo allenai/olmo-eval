@@ -340,20 +340,21 @@ class JudgeSettings:
         ``config`` is a ``TaskConfig``; its ``judge_model``, ``judge_reasoning_effort``,
         ``judge_max_tokens`` and ``judge_temperature`` replace the matching setting when
         they are not None.
-        The default effort belongs to the default model, so a config that names
-        another model and no effort gets none.
+        The default effort and temperature belong to the default model, so a config
+        that names another model and neither gets the effort none and the temperature 0.
         """
         model = config.judge_model or self.model
         reasoning_effort = config.judge_reasoning_effort
         if reasoning_effort is None and model == self.model:
             reasoning_effort = self.reasoning_effort
+        temperature = config.judge_temperature
+        if temperature is None:
+            temperature = self.temperature if model == self.model else 0.0
         return JudgeSettings(
             model=model,
             max_tokens=config.judge_max_tokens or self.max_tokens,
             reasoning_effort=reasoning_effort,
-            temperature=(
-                self.temperature if config.judge_temperature is None else config.judge_temperature
-            ),
+            temperature=temperature,
         )
 
     def build_fn(self, scorer_name: str) -> ConfiguredJudgeFn:

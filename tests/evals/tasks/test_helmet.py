@@ -553,6 +553,14 @@ class TestLongQAJudge:
         judge_result = prediction["model_output"][0]["judge_result"]
         assert judge_result["raw_judge_response"] == "no verdict"
 
+    def test_judged_by_gpt_5_4_at_its_default_temperature(self, monkeypatch):
+        monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
+
+        config = get_task(LONGQA_SPEC).config
+
+        assert config.judge_model == "gpt-5.4-2026-03-05"
+        assert config.judge_temperature is None
+
     @pytest.mark.anyio
     async def test_judge_overrides_change_the_judge_that_runs(self, monkeypatch):
         built = {}
@@ -568,7 +576,6 @@ class TestLongQAJudge:
 
         assert built["model"] == "gpt-4.1-2025-04-14"
         assert built["max_tokens"] == 2048
-        assert built["temperature"] == 0.1
         assert task.config.to_dict()["judge_model"] == "gpt-4.1-2025-04-14"
 
 

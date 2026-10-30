@@ -319,12 +319,18 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
 
     # A judged task takes its judge from $OLMO_EVAL_JUDGE unless the overrides name a
     # judge model, which then wins with its task's default effort and budget.
+    default_judge = config.judge_model
     if _tasks[task_name].judged and "judge_model" not in (config_overrides or {}):
         config = replace(config, **judge_env_overrides())
 
     # Apply additional config overrides (highest priority)
     if config_overrides:
         config = replace(config, **config_overrides)
+
+    # A task's judge temperature is tuned for its default judge, and reasoning judges
+    # reject one, so another judge gets none unless the overrides set it too.
+    if config.judge_model != default_judge and "judge_temperature" not in (config_overrides or {}):
+        config = replace(config, judge_temperature=None)
 
     return _tasks[task_name](config)
 

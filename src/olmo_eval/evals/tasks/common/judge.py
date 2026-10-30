@@ -8,7 +8,9 @@ separate results. ``-o judge_model=<model>`` (and ``-o judge_reasoning_effort=<e
 ``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]`` changes the judge of every task
 with ``judged = True`` in a run whose ``-o`` overrides name no judge model. A task's
 default reasoning effort goes with its default model, so the environment override
-replaces it; the task keeps its token budget unless the override names one.
+replaces it. Its default temperature does too, and is dropped whenever the judge model
+changes unless ``-o judge_temperature`` sets one. The task keeps its token budget
+unless the override names one.
 ``get_task`` applies the environment override, after variants and before ``-o``
 overrides.
 
