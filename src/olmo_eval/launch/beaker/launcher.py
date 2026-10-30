@@ -973,6 +973,10 @@ class BeakerLauncher:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_artifact_registry"
             steps.append(f"source {script}")
 
+        # Optional shell snippet run after every package install (e.g. to re-pin a dependency that a later
+        # per-package install changed).  Not exported: it is a command, not a variable.
+        env_exports = dict(env_exports or {})
+        post_install_cmd = env_exports.pop("OLMO_EVAL_RUNTIME_POST_INSTALL_CMD", None)
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
             for key, value in env_exports.items():
@@ -1098,6 +1102,9 @@ class BeakerLauncher:
             for pkg in task_packages:
                 steps.append(build_install_command(pkg, constraints))
 
+        if post_install_cmd:
+            steps.append(post_install_cmd)
+
         # Set up Modal secret for GCP Artifact Registry (Modal sandboxes)
         if setup_modal_gcp_secret:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_modal_gcp_secret"
@@ -1126,6 +1133,7 @@ class BeakerLauncher:
             "OLMO_EVAL_RUNTIME_TORCH_VERSION",
             "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
             "OLMO_EVAL_RUNTIME_TORCH_EXTRA_PACKAGES",
+            "OLMO_EVAL_RUNTIME_POST_INSTALL_CMD",
         )
         for key in install_env_keys:
             if key in config.env_vars:
