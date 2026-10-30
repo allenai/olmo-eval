@@ -359,12 +359,6 @@ class Harness:
             require_tool_support(self.provider)
         return apply_harness_config(self.config, request)
 
-    def _inject_system_prompt(
-        self, messages: tuple[dict[str, Any], ...]
-    ) -> tuple[dict[str, Any], ...]:
-        """Add system prompt to messages if configured and not present."""
-        return _inject_system_prompt(self.config.system_prompt, messages)
-
 
 def _inject_system_prompt(
     system_prompt: str | None, messages: tuple[dict[str, Any], ...]

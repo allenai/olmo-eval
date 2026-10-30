@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import multiprocessing as mp
+import os
 import random
 import time
 from collections.abc import Mapping, Sequence
@@ -560,7 +561,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     _started_at: str | None = field(default=None, init=False, repr=False)
     _prepared_tasks: dict[str, Task] = field(default_factory=dict, init=False, repr=False)
     # Restarts of this run in the same output directory, kept in the manifest
-    _resume: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
+    _resume_record: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def provider_config(self) -> ProviderConfig:
@@ -630,7 +631,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         # Generate experiment ID early so metrics can include it. A resumed run keeps
         # the ID of the run it continues.
-        experiment_id = self._previous_run_id() or generate_experiment_id()
+        previous_run_id, self._resume_record = self._previous_run()
+        experiment_id = previous_run_id or generate_experiment_id()
         self._start_run_record(experiment_id)
 
         # Prepare tasks
@@ -710,7 +712,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 item_queue=item_queue,
                 result_queue=result_queue,
                 output_dir=self.output_dir,
-                record_progress=progress is not None,
+                per_request=progress is not None,
             )
 
             # Add poison pills (one per worker)
@@ -971,7 +973,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             results_dict["startup_seconds"] = startup_seconds
             results_dict["processing_started_at"] = utc_iso(processing_start)
             results_dict["processing_seconds"] = processing_seconds
-            final_results = self._finalize_and_gate(
+            return self._finalize_and_gate(
                 results,
                 results_dict,
                 experiment_id=experiment_id,
@@ -979,7 +981,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 provider_init_seconds=provider_init_seconds,
                 progress=progress,
             )
-            return final_results
         finally:
             if progress is not None:
                 progress.close()
@@ -1377,25 +1378,24 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         return results_dict
 
-    def _previous_run_id(self) -> str | None:
-        """The run ID to continue, when resuming a run the output directory holds.
+    def _previous_run(self) -> tuple[str | None, dict[str, Any]]:
+        """The run ID to continue and this run's restart record for the manifest.
 
-        That is a manifest that is still running or failed, for the same task specs and
-        model. Its upload secret, if it has one, is reused with the directory. Records
-        the restart in ``_resume``.
+        The ID is that of a manifest in the output directory that is still running or failed,
+        for the same task specs and model, when resuming; its upload secret, if it has one,
+        is reused with the directory. Otherwise it is None.
         """
-        import os
-
         from olmo_eval.upload.manifest import RUN_ID_RE, read_manifest
 
         job_id = os.environ.get("BEAKER_JOB_ID")
-        self._resume = {"resumed_count": 0, "beaker_job_ids": [job_id] if job_id else []}
+        job_ids = [job_id] if job_id else []
+        fresh = {"resumed_count": 0, "beaker_job_ids": job_ids}
         # Progress that was discarded (a completed run, or --fresh) has nothing to continue.
         if not self.resume or not has_progress(self.output_dir):
-            return None
+            return None, fresh
         manifest = read_manifest(self.output_dir)
         if manifest is None:
-            return None
+            return None, fresh
         run = manifest.get("run") or {}
         run_id = run.get("run_id")
         if (
@@ -1405,15 +1405,14 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             or not isinstance(run_id, str)
             or not RUN_ID_RE.match(run_id)
         ):
-            return None
+            return None, fresh
         previous = manifest.get("resume") or {}
-        job_ids = [*previous.get("beaker_job_ids", []), *self._resume["beaker_job_ids"]]
-        self._resume = {
+        record = {
             "resumed_count": int(previous.get("resumed_count") or 0) + 1,
-            "beaker_job_ids": job_ids,
+            "beaker_job_ids": [*previous.get("beaker_job_ids", []), *job_ids],
         }
-        runner_logger.info(f"Continuing run {run_id} (restart {self._resume['resumed_count']})")
-        return run_id
+        runner_logger.info(f"Continuing run {run_id} (restart {record['resumed_count']})")
+        return run_id, record
 
     def _start_run_record(self, experiment_id: str) -> None:
         """Write manifest.json with status "running" and register the run (best effort)."""
@@ -1444,7 +1443,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 # Runtime identity is unknown until workers initialize. Do not
                 # register a provisional auto-profile hash as an actual model.
                 model["model_hash"] = None
-            write_manifest(self.output_dir, build_manifest(run, model, resume=self._resume))
+            write_manifest(self.output_dir, build_manifest(run, model, resume=self._resume_record))
         except Exception as e:
             logger.warning(f"Could not write the run manifest: {e}")
             return
@@ -1511,7 +1510,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             )
             suites = suite_results(results_dict.get("suites") or {}, results_dict.get("tasks"))
             write_manifest(
-                self.output_dir, build_manifest(run, model, tasks, suites, resume=self._resume)
+                self.output_dir,
+                build_manifest(run, model, tasks, suites, resume=self._resume_record),
             )
         except Exception as e:
             logger.warning(f"Could not write the run manifest: {e}")

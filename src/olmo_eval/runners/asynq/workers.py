@@ -38,7 +38,7 @@ def inference_worker(
     output_dir: str | None = None,
     num_workers: int = 1,
     start_event: Any | None = None,
-    record_progress: bool = False,
+    per_request: bool = False,
 ) -> None:
     """Worker process that initializes a harness and processes items.
 
@@ -57,8 +57,8 @@ def inference_worker(
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
         num_workers: Number of parallel workers sharing the work.
         start_event: Optional event used to hold all ready workers at a start gate.
-        record_progress: The run records progress, so results should return as each
-            request finishes where the provider allows it.
+        per_request: Return each request's result as it finishes where the provider
+            allows it, instead of when its batch ends.
     """
     import sys
 
@@ -181,12 +181,10 @@ def inference_worker(
                     chunk_size=max_batch_sequences or batch_config.resolved_chunk_size,
                     max_batch_sequences=max_batch_sequences,
                 )
-            # A run that records progress records each instance when its result
-            # returns, so results should not wait for the rest of their batch.
             strategy = get_strategy(
                 batch_config,
                 max_batch_sequences=max_batch_sequences,
-                per_request=record_progress and batch_config.dispatches_per_request(provider_kind),
+                per_request=per_request and batch_config.dispatches_per_request(provider_kind),
             )
             profile = (
                 cast("SGLangProvider", harness.provider).profile_report

@@ -2,7 +2,7 @@
 
 A run started with ``--resume`` records progress under ``<output_dir>/progress/<model>/``
 and continues from it when it is there. The records are one run-level stream of
-tagged entries (``run.segments`` or ``run.jsonl``) plus one ``<spec>_<hash6>.final.json``
+tagged entries (``run.segments``) plus one ``<spec>_<hash6>.final.json``
 per finalized task. For each task the stream has a header naming what the task
 measures (task, model, harness, engine and code) and where it ran, then one entry per
 finished instance, written by the runner's main process once the instance's outcome
@@ -30,11 +30,9 @@ unavailable), and anything that arrives after shutdown was requested. A task tha
 failed (an error or an exceeded failure budget) is not finalized, so a retry computes
 it again from its recorded instances.
 
-Two storage layouts sit behind :class:`ProgressStore`, chosen with
-``OLMO_EVAL_PROGRESS_LAYOUT``: ``segments`` (default) writes the buffered entries to a
-new numbered file every few minutes (or at 8 MB) with an atomic rename, so a results
-uploader that re-sends changed files sends each segment once and a long run makes
-hundreds of files, not millions; ``append`` appends one JSON line per entry to one file.
+:class:`ProgressStore` writes the buffered entries to a new numbered file every few
+minutes (or at 8 MB) with an atomic rename, so a results uploader that re-sends changed
+files sends each segment once and a long run makes hundreds of files, not millions.
 """
 
 from __future__ import annotations
@@ -47,8 +45,6 @@ import pickle
 import shutil
 import signal
 import threading
-import time
-from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
@@ -58,7 +54,8 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.scoring_failures import output_scoring_errors
 from olmo_eval.common.shutdown import shutdown_requested
 from olmo_eval.common.types import LMOutput, Response
-from olmo_eval.runners.common.types import PREDICTIONS_SUFFIX, REQUESTS_SUFFIX, TaskResult
+from olmo_eval.runners.common.types import TaskResult
+from olmo_eval.runners.io.writers import output_path
 from olmo_eval.runners.processing.utils import compute_task_hash, sanitize_spec_for_filename
 
 if TYPE_CHECKING:
@@ -70,15 +67,12 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 PROGRESS_DIR = "progress"
-PROGRESS_LAYOUT_ENV = "OLMO_EVAL_PROGRESS_LAYOUT"
 DEBUG_EXIT_AT_ENV = "OLMO_EVAL_DEBUG_EXIT_AT"
-RECORD_VERSION = 3
+RECORD_VERSION = 4
 FINAL_SUFFIX = ".final.json"
 
-# Append layout: seconds between fsyncs. Segments layout: the run's one segment stream
-# is written when its buffered entries reach this size or this age, and on close.
-# Beaker uploads /results every few minutes, so writing more often buys little.
-FSYNC_INTERVAL_SECONDS = 5.0
+# The segment stream is written when its buffered entries reach this size or age, and on
+# close. Beaker uploads /results every few minutes, so writing more often buys little.
 SEGMENT_MAX_BYTES = 8 * 1024 * 1024
 SEGMENT_MAX_SECONDS = 120.0
 
@@ -204,23 +198,20 @@ def decode_value(value: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Storage layouts
+# Storage
 # ---------------------------------------------------------------------------
 
 
-def _read_lines(path: Path, on_end: Callable[[int, int], None] | None = None) -> Iterator[Any]:
+def _read_lines(path: Path) -> Iterator[Any]:
     """Yield the entries of a JSONL file line by line.
 
     A last line without a newline was cut off mid-write; it is dropped and logged.
-    ``on_end`` gets the byte length of the complete lines and of the file.
     """
-    good = 0
     with open(path, "rb") as f:
         for number, line in enumerate(f, start=1):
             if not line.endswith(b"\n"):
                 logger.warning(f"Dropping a partly written last line from {path}")
                 break
-            good += len(line)
             if not line.strip():
                 continue
             try:
@@ -230,106 +221,22 @@ def _read_lines(path: Path, on_end: Callable[[int, int], None] | None = None) ->
                     f"Progress record {path} line {number} is not valid JSON ({e}). "
                     "Pass --fresh to discard recorded progress."
                 ) from e
-        size = f.seek(0, os.SEEK_END)
-    if on_end is not None:
-        on_end(good, size)
 
 
 def _dump(entry: Mapping[str, Any]) -> str:
     return json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
 
 
-class ProgressStore(ABC):
-    """Storage for a run's progress stream: tagged entries, read back in order."""
+class ProgressStore:
+    """A run's progress stream: tagged entries in a directory of numbered JSONL segments.
 
-    suffix: str
-
-    def __init__(self, base: Path) -> None:
-        self.path = base.with_name(base.name + self.suffix)
-
-    @abstractmethod
-    def read(self) -> Iterator[dict[str, Any]]:
-        """Yield every complete entry in order; nothing when there is no record.
-
-        Reads one line at a time. Drops (and logs) an entry that was cut off while
-        being written. Appends after a full read continue the record.
-        """
-
-    @abstractmethod
-    def reset(self) -> None:
-        """Discard every existing entry."""
-
-    @abstractmethod
-    def append(self, entry: Mapping[str, Any]) -> None:
-        """Add one entry after those already read or written."""
-
-    @abstractmethod
-    def close(self) -> None:
-        """Write out and fsync everything appended so far."""
-
-
-class AppendProgressStore(ProgressStore):
-    """One JSONL file, flushed after every line and fsynced every few seconds."""
-
-    suffix = ".jsonl"
-
-    def __init__(self, base: Path) -> None:
-        super().__init__(base)
-        self._file: Any = None
-        self._last_sync = 0.0
-        self._lock = threading.Lock()
-
-    def read(self) -> Iterator[dict[str, Any]]:
-        if not self.path.is_file():
-            return
-
-        def truncate_torn_tail(good: int, size: int) -> None:
-            if good < size:
-                with open(self.path, "r+b") as f:
-                    f.truncate(good)
-
-        yield from _read_lines(self.path, truncate_torn_tail)
-
-    def reset(self) -> None:
-        self.close()
-        self.path.unlink(missing_ok=True)
-
-    def append(self, entry: Mapping[str, Any]) -> None:
-        with self._lock:
-            if self._file is None:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                self._file = open(self.path, "a", encoding="utf-8")  # noqa: SIM115
-            self._file.write(_dump(entry))
-            self._file.flush()
-            if time.monotonic() - self._last_sync >= FSYNC_INTERVAL_SECONDS:
-                self._sync()
-
-    def _sync(self) -> None:
-        os.fsync(self._file.fileno())
-        self._last_sync = time.monotonic()
-
-    def close(self) -> None:
-        with self._lock:
-            if self._file is None:
-                return
-            self._file.flush()
-            self._sync()
-            self._file.close()
-            self._file = None
-
-
-class SegmentProgressStore(ProgressStore):
-    """A directory of numbered JSONL segments, each written whole and renamed into place.
-
-    Entries are buffered and written as a new segment once they reach
-    ``SEGMENT_MAX_BYTES``, every ``SEGMENT_MAX_SECONDS`` by a background thread, and
-    on close.
+    Each segment is written whole and renamed into place. Entries are buffered and written
+    as a new segment once they reach ``SEGMENT_MAX_BYTES``, every ``SEGMENT_MAX_SECONDS``
+    by a background thread, and on close.
     """
 
-    suffix = ".segments"
-
-    def __init__(self, base: Path) -> None:
-        super().__init__(base)
+    def __init__(self, path: Path) -> None:
+        self.path = path
         self._buffer: list[str] = []
         self._buffered_bytes = 0
         self._next_segment = 0
@@ -338,6 +245,11 @@ class SegmentProgressStore(ProgressStore):
         self._thread: threading.Thread | None = None
 
     def read(self) -> Iterator[dict[str, Any]]:
+        """Yield every complete entry in order; nothing when there is no record.
+
+        Drops (and logs) an entry that was cut off while being written. Appends after a
+        full read continue the record.
+        """
         if not self.path.is_dir():
             return
         for leftover in self.path.glob("*.tmp"):
@@ -348,6 +260,7 @@ class SegmentProgressStore(ProgressStore):
             yield from _read_lines(segment)
 
     def reset(self) -> None:
+        """Discard every existing entry."""
         with self._lock:
             self._buffer, self._buffered_bytes = [], 0
             if self.path.exists():
@@ -355,6 +268,7 @@ class SegmentProgressStore(ProgressStore):
             self._next_segment = 0
 
     def append(self, entry: Mapping[str, Any]) -> None:
+        """Add one entry after those already read or written."""
         line = _dump(entry)
         with self._lock:
             self._buffer.append(line)
@@ -395,6 +309,7 @@ class SegmentProgressStore(ProgressStore):
         self._buffer, self._buffered_bytes = [], 0
 
     def close(self) -> None:
+        """Write out and fsync everything appended so far."""
         with self._lock:
             stop, thread = self._stop, self._thread
             self._stop = self._thread = None
@@ -403,23 +318,6 @@ class SegmentProgressStore(ProgressStore):
             thread.join()
         with self._lock:
             self._write_segment()
-
-
-_LAYOUTS: dict[str, type[ProgressStore]] = {
-    "segments": SegmentProgressStore,
-    "append": AppendProgressStore,
-}
-
-
-def store_class(layout: str | None = None) -> type[ProgressStore]:
-    """The store for ``layout``, by default the one ``OLMO_EVAL_PROGRESS_LAYOUT`` names."""
-    name = (layout or os.environ.get(PROGRESS_LAYOUT_ENV) or "segments").strip().lower()
-    if name not in _LAYOUTS:
-        raise ValueError(
-            f"{PROGRESS_LAYOUT_ENV}={name!r} is not a progress layout; "
-            f"use one of {', '.join(sorted(_LAYOUTS))}"
-        )
-    return _LAYOUTS[name]
 
 
 def _model_dir(output_dir: str | Path, model_name: str) -> Path:
@@ -431,14 +329,14 @@ def task_key(spec: str, task_hash: str) -> str:
     return f"{sanitize_spec_for_filename(spec)}_{task_hash[-6:]}"
 
 
-def progress_base(output_dir: str | Path, model_name: str, spec: str, task_hash: str) -> Path:
-    """Path of a task's finalized result without its suffix."""
-    return _model_dir(output_dir, model_name) / task_key(spec, task_hash)
+def final_path(output_dir: str | Path, model_name: str, spec: str, task_hash: str) -> Path:
+    """Path of a task's finalized result."""
+    return _model_dir(output_dir, model_name) / f"{task_key(spec, task_hash)}{FINAL_SUFFIX}"
 
 
-def stream_base(output_dir: str | Path, model_name: str) -> Path:
-    """Path of the run's progress stream without the layout's suffix."""
-    return _model_dir(output_dir, model_name) / "run"
+def stream_dir(output_dir: str | Path, model_name: str) -> Path:
+    """Path of the directory holding the run's progress stream."""
+    return _model_dir(output_dir, model_name) / "run.segments"
 
 
 def has_progress(output_dir: str | Path) -> bool:
@@ -452,16 +350,6 @@ def discard_progress(output_dir: str | Path) -> None:
     path = Path(output_dir) / PROGRESS_DIR
     if path.exists():
         shutil.rmtree(path)
-
-
-def _output_paths(output_dir: str, model_name: str, spec: str, task_hash: str) -> dict[str, Path]:
-    """The predictions and requests files the runner writes for a task."""
-    name = f"{sanitize_spec_for_filename(spec)}_{task_hash[-6:]}"
-    model = sanitize_spec_for_filename(model_name)
-    return {
-        "predictions": Path(output_dir) / "predictions" / model / f"{name}{PREDICTIONS_SUFFIX}",
-        "requests": Path(output_dir) / "requests" / model / f"{name}{REQUESTS_SUFFIX}",
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -561,12 +449,9 @@ def engine_version(harness_config: HarnessConfig) -> str | None:
     return f"{package}=={found}"
 
 
-# Resolved SGLang runtime keys that decide what the engine computes. The engine derives
-# max_req_input_len and max_total_num_tokens from the KV pool of the node it landed on,
-# clips max_new_tokens by them and aborts prompts at or above max_req_input_len, so a
-# requeue onto a node with another pool could mix truncation regimes: they are compared.
-# The rest of the runtime (scheduling and memory settings) changes only speed, so a requeue
-# on another node must not be refused for it.
+# Resolved SGLang runtime keys that decide what the engine computes. The request-length caps
+# come from the node's KV pool and truncate prompts and outputs, so they are compared;
+# scheduling and memory settings change only speed.
 _RUNTIME_IDENTITY_KEYS = (
     "profile",
     "packages",
@@ -764,14 +649,12 @@ def _metadata_changes(original: Mapping[str, Any], current: Mapping[str, Any]) -
     return changes
 
 
-def keeps_logprobs(task: Task | None) -> bool:
+def keeps_logprobs(task: Task) -> bool:
     """Whether a task's records keep the per-token logprobs of its generations.
 
     A metric whose scorer reads logprobs (``Scorer.reads_logprobs``) computes from them
     after a restore, so they are kept. Log-likelihood outputs always keep theirs.
     """
-    if task is None:
-        return True
     config = task.config
     metrics = [*config.metrics, config.get_primary_metric()]
     for metric in metrics:
@@ -796,7 +679,7 @@ def _drops_logprobs(output: LMOutput) -> bool:
     )
 
 
-def _encode_output(output: LMOutput, keep_logprobs: bool = True) -> dict[str, Any]:
+def _encode_output(output: LMOutput, keep_logprobs: bool) -> dict[str, Any]:
     encoded: dict[str, Any] = {"text": output.text}
     if output.logprobs is not None:
         if keep_logprobs or not _drops_logprobs(output):
@@ -838,20 +721,19 @@ def encode_response(
     item: QueueItem,
     response: Response,
     result: ResultItem,
-    rh: str | None = None,
-    keep_logprobs: bool = True,
+    request_hash: str,
+    keep_logprobs: bool,
 ) -> dict[str, Any]:
     """A scored instance's entry: what scoring produced, without the prompt.
 
-    ``rh`` is the instance's hash from before it was scored. Without ``keep_logprobs``
+    ``request_hash`` is the instance's hash from before it was scored. Without ``keep_logprobs``
     a generation's per-token logprobs are left out where the predictions writer does not
     need them; a log-likelihood request's are always kept.
     """
     from olmo_eval.common.types import RequestType
 
-    rh = rh or request_hash(item)
     keep = keep_logprobs or item.request.request_type == RequestType.LOGLIKELIHOOD
-    entry: dict[str, Any] = {"idx": item.instance_idx, "rh": rh}
+    entry: dict[str, Any] = {"idx": item.instance_idx, "request_hash": request_hash}
     entry["outputs"] = [_encode_output(output, keep) for output in response.outputs]
     if response.scores:
         entry["scores"] = encode_value(response.scores)
@@ -869,9 +751,13 @@ def encode_response(
     return entry
 
 
-def encode_failure(item: QueueItem, result: ResultItem, rh: str | None = None) -> dict[str, Any]:
+def encode_failure(item: QueueItem, result: ResultItem, request_hash: str) -> dict[str, Any]:
     """A generation failure's entry."""
-    entry = {"idx": item.instance_idx, "rh": rh or request_hash(item), "failed": result.error or ""}
+    entry = {
+        "idx": item.instance_idx,
+        "request_hash": request_hash,
+        "failed": result.error or "",
+    }
     entry.update(_usage(result))
     return entry
 
@@ -996,7 +882,7 @@ class RunProgress:
     _total: int = field(default=0, init=False)
     _done: int = field(default=0, init=False)
     _armed: list[float] = field(default_factory=list, init=False)
-    _bases: list[Path] = field(default_factory=list, init=False)
+    _final_paths: list[Path] = field(default_factory=list, init=False)
 
     def header(self, spec: str, task_config: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -1012,9 +898,8 @@ class RunProgress:
             "task_config": task_config,
         }
 
-    def _load_final(self, spec: str, header: Mapping[str, Any], base: Path) -> TaskResult | None:
+    def _load_final(self, spec: str, header: Mapping[str, Any], path: Path) -> TaskResult | None:
         """The task's finalized result, if it was finalized and its output files are on disk."""
-        path = base.with_name(base.name + FINAL_SUFFIX)
         if not path.is_file():
             return None
         try:
@@ -1046,7 +931,7 @@ class RunProgress:
         for item in items:
             by_task.setdefault(item.task_id, {})[item.instance_idx] = item
 
-        self._store = store = store_class()(stream_base(self.output_dir, self.model_name))
+        self._store = store = ProgressStore(stream_dir(self.output_dir, self.model_name))
         restored = Restored()
         expected: dict[str, dict[str, Any]] = {}
         active: dict[str, tuple[str, _TaskProgress]] = {}
@@ -1055,9 +940,9 @@ class RunProgress:
                 continue
             header = self.header(spec, tracker.task.config.to_dict())
             expected[spec] = header
-            base = progress_base(self.output_dir, self.model_name, spec, header["task_hash"])
-            self._bases.append(base)
-            final = self._load_final(spec, header, base)
+            path = final_path(self.output_dir, self.model_name, spec, header["task_hash"])
+            self._final_paths.append(path)
+            final = self._load_final(spec, header, path)
             if final is not None:
                 restored.finalized[spec] = final
                 continue
@@ -1098,7 +983,7 @@ class RunProgress:
                 task.trace = entry["default_trace"]
                 continue
             item = task.items.get(entry["idx"])
-            if item is None or entry.get("rh") != task.hashes[entry["idx"]]:
+            if item is None or entry.get("request_hash") != task.hashes[entry["idx"]]:
                 mismatched += 1
                 continue
             outcome = (
@@ -1219,11 +1104,14 @@ class RunProgress:
         if not is_final(response):
             return
         task = self._tasks.get(spec)
-        keep = task is None or task.keep_logprobs
+        if task is None:
+            return
         self._append(
             spec,
             idx,
-            lambda item, rh: encode_response(item, response, result, rh, keep_logprobs=keep),
+            lambda item, request_hash: encode_response(
+                item, response, result, request_hash, task.keep_logprobs
+            ),
         )
 
     def record_failure(self, spec: str, idx: int, result: ResultItem) -> None:
@@ -1234,7 +1122,9 @@ class RunProgress:
         uninterrupted run keeps it.
         """
         if result.request_caused:
-            self._append(spec, idx, lambda item, rh: encode_failure(item, result, rh))
+            self._append(
+                spec, idx, lambda item, request_hash: encode_failure(item, result, request_hash)
+            )
 
     def finalize(self, spec: str, result: TaskResult, *, wrote: Sequence[str] = ()) -> None:
         """Keep a finalized task's result, so a resumed run does not compute it again.
@@ -1247,16 +1137,18 @@ class RunProgress:
         if task is None or shutdown_requested() or result.error or result.failure_budget_exceeded:
             return
         task_hash = task.header["task_hash"]
-        paths = _output_paths(self.output_dir, self.model_name, spec, task_hash)
+        paths = {
+            kind: output_path(self.output_dir, kind, spec, self.model_name, task_hash)
+            for kind in wrote
+        }
         stored = {
             f.name: getattr(result, f.name)
             for f in fields(result)
             if f.name not in _UNSTORED_RESULT_FIELDS
         }
-        base = progress_base(self.output_dir, self.model_name, spec, task_hash)
         try:
             _write_json_atomic(
-                base.with_name(base.name + FINAL_SUFFIX),
+                final_path(self.output_dir, self.model_name, spec, task_hash),
                 {
                     "header": task.header,
                     "outputs": [str(paths[kind].relative_to(self.output_dir)) for kind in wrote],
@@ -1273,15 +1165,9 @@ class RunProgress:
         directories this empties are removed.
         """
         self.close()
-        stream = stream_base(self.output_dir, self.model_name)
-        for layout in _LAYOUTS.values():
-            path = stream.with_name(stream.name + layout.suffix)
-            if path.is_dir():
-                shutil.rmtree(path, ignore_errors=True)
-            else:
-                path.unlink(missing_ok=True)
-        for base in self._bases:
-            base.with_name(base.name + FINAL_SUFFIX).unlink(missing_ok=True)
+        shutil.rmtree(stream_dir(self.output_dir, self.model_name), ignore_errors=True)
+        for path in self._final_paths:
+            path.unlink(missing_ok=True)
         root = Path(self.output_dir) / PROGRESS_DIR
         for directory in (_model_dir(self.output_dir, self.model_name), root):
             try:
@@ -1325,7 +1211,6 @@ __all__ = [
     "DEBUG_EXIT_AT_ENV",
     "DroppedLogprobs",
     "DroppedLogprobsError",
-    "PROGRESS_LAYOUT_ENV",
     "ProgressMismatchError",
     "ProgressStore",
     "Restored",

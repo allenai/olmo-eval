@@ -7,7 +7,7 @@ import pytest
 from olmo_eval.common.types import LMRequest, ProviderKind, RequestType
 from olmo_eval.harness import clear_registry, register_tool
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
-from olmo_eval.harness.harness import Harness, create_harness
+from olmo_eval.harness.harness import Harness, apply_harness_config, create_harness
 from olmo_eval.harness.tools import tool
 
 
@@ -35,6 +35,12 @@ def sample_tool():
 
     register_tool(test_search)
     return test_search
+
+
+def _injected(config, messages):
+    """The messages a harness with ``config`` sends for a chat request."""
+    request = LMRequest(request_type=RequestType.CHAT, messages=messages)
+    return apply_harness_config(config, request).messages
 
 
 class TestHarness:
@@ -153,10 +159,8 @@ class TestHarness:
             provider=mock_provider_config,
             system_prompt="System message",
         )
-        harness = Harness(config)
-
         messages = ({"role": "user", "content": "Hello"},)
-        injected = harness._inject_system_prompt(messages)
+        injected = _injected(config, messages)
 
         assert len(injected) == 2
         assert injected[0]["role"] == "system"
@@ -170,13 +174,11 @@ class TestHarness:
             provider=mock_provider_config,
             system_prompt="New system",
         )
-        harness = Harness(config)
-
         messages = (
             {"role": "system", "content": "Existing system"},
             {"role": "user", "content": "Hello"},
         )
-        injected = harness._inject_system_prompt(messages)
+        injected = _injected(config, messages)
 
         assert len(injected) == 2  # No new system message added
         assert injected[0]["content"] == "Existing system"
@@ -184,10 +186,8 @@ class TestHarness:
     def test_harness_no_inject_if_no_prompt(self, mock_provider_config):
         """Test that nothing is injected if no system prompt configured."""
         config = HarnessConfig(name="no_prompt", provider=mock_provider_config)
-        harness = Harness(config)
-
         messages = ({"role": "user", "content": "Hello"},)
-        injected = harness._inject_system_prompt(messages)
+        injected = _injected(config, messages)
 
         assert injected == messages
 

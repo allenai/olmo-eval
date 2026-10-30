@@ -151,10 +151,8 @@ class ResultItem:
     # rollout's share, split across a batch's requests by token share. None only for
     # fatal error signals.
     attributed_seconds: float | None = None
-    # The request itself caused the error (a prompt past the context window, a request
-    # that cannot be prepared), so trying it again cannot help and a resumed run keeps
-    # the failure. Every other error, including every provider error that reaches the
-    # runner as a marked output, may be transient and is tried again.
+    # The request itself caused the error (such as a context overflow), so a resumed run
+    # keeps the failure. Other errors may be transient and are tried again.
     request_caused: bool = False
 
 

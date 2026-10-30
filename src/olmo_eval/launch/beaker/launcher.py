@@ -62,6 +62,7 @@ __all__ = [
     "print_experiment_config",
     "resolve_clusters",
     "validate_min_runtime",
+    "PROTECTED_MIN_RUNTIME",
     "weka_buckets_with",
 ]
 
@@ -467,7 +468,7 @@ class BeakerJobConfig:
         elif self.preemptible is False:
             # Beaker maps preemptible=False to an 8h min runtime with auto-resume off, so a
             # preemption after 8h ends the experiment. Ask for the min runtime directly.
-            self.min_runtime = "8h"
+            self.min_runtime = PROTECTED_MIN_RUNTIME
             self.preemptible = None
         elif self.preemptible is None:
             self.preemptible = True
@@ -777,6 +778,9 @@ def _parse_timeout(timeout: str) -> int:
 
     return total_ns if total_ns else 86400_000_000_000  # Default 24h
 
+
+PROTECTED_MIN_RUNTIME = "8h"
+"""Min runtime that ``preemptible=False`` resolves to (the longest Beaker allows)."""
 
 _MIN_RUNTIME_PATTERN = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
 

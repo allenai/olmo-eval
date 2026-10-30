@@ -74,10 +74,6 @@ class LaunchConfig:
     env_vars: dict[str, str] = field(default_factory=dict)
 
 
-PROTECTED_MIN_RUNTIME = "8h"
-"""Min runtime that ``--no-preemptible`` resolves to (the longest Beaker allows)."""
-
-
 def resolve_preemption(
     preemptible: bool | None, min_runtime: str | None
 ) -> tuple[bool | None, str | None]:
@@ -92,7 +88,7 @@ def resolve_preemption(
     Raises:
         ValueError: If both are set, or the min runtime is not a valid duration.
     """
-    from olmo_eval.launch.beaker import validate_min_runtime
+    from olmo_eval.launch.beaker import PROTECTED_MIN_RUNTIME, validate_min_runtime
 
     if min_runtime is None:
         if preemptible is False:

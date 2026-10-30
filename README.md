@@ -1107,8 +1107,8 @@ into its replacement, so a requeued job continues where the last one stopped (se
   the harness settings that affect outputs, the inference engine version (such as
   `vllm==0.11.2`), the git commit and, for SGLang, the resolved runtime. A difference
   stops the run with an error naming the setting; pass `--fresh` or use another output
-  directory. Where the run executes (GPU count, cluster, tensor parallelism, concurrency,
-  batching) may differ and only logs a warning. An instance whose prepared request, gold
+  directory. Where the run executes (GPU count, cluster, tensor parallelism, concurrency)
+  may differ and only logs a warning. An instance whose prepared request, gold
   answer or metadata changed is run again.
 - **Failures.** An instance is recorded only when an uninterrupted run would keep its
   outcome: a scored response, or a failure the request itself caused, such as a context
@@ -1117,7 +1117,7 @@ into its replacement, so a requeued job continues where the last one stopped (se
   fails or exceeds its failure budget is computed again from its recorded instances.
 - **Results return per request.** While recording, providers that send requests one at
   a time (`vllm_server`, `litellm`) return each result when it finishes, not when its
-  batch does. In-process engines (`vllm`, `sglang`, `hf`) return a batch at once; to
+  batch does. In-process engines (`vllm`, `sglang`, `hf`, `olmo_core`, `olmo_core_vlm`) return a batch at once; to
   record them more often, lower the batch size with
   `--harness default -o batching.chunk_size=16`.
 - **Testing.** `OLMO_EVAL_DEBUG_EXIT_AT=0.5` makes a `--resume` run send itself SIGTERM

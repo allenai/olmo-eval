@@ -253,6 +253,7 @@ async def process_batch(
     result_queue: mp.Queue,
     worker_logger: logging.Logger | None = None,
     clock: ShareClock | None = None,
+    flush_metrics: bool = True,
 ) -> None:
     """Process a batch of COMPLETION or LOGLIKELIHOOD requests.
 
@@ -267,6 +268,8 @@ async def process_batch(
         worker_logger: Logger with worker identification.
         clock: The worker's clock; each result carries its share of the batch's
             share of worker time. Without one the batch is timed on its own.
+        flush_metrics: Flush the inference metrics as one batch when it succeeds. A caller
+            that splits a batch flushes once for the whole batch instead.
     """
     from olmo_eval.common.types import RequestType
 
@@ -394,7 +397,8 @@ async def process_batch(
         raise
     else:
         batch_seconds = clock.stop(token)
-        _flush_batch_metrics(harness, items, log)
+        if flush_metrics:
+            _flush_batch_metrics(harness, items, log)
         for result, share in zip(
             results, attribute_batch_seconds(batch_seconds, results), strict=True
         ):
@@ -412,12 +416,16 @@ async def process_batch_per_request(
 ) -> None:
     """Process a batch as single-request provider calls, queueing each result when it ends.
 
-    For providers that dispatch a batch's requests one at a time anyway (``vllm_server``,
-    ``litellm``), so each request reaches the server exactly as in one batched call, and
-    the batch's requests run at once up to the same limit the provider would apply,
-    its ``max_concurrency``. A result is queued as soon as its request finishes, so a
-    batch with one slow request no longer holds back the results of the others. Each
-    request is a unit on the worker's clock, as in the streaming strategy.
+    For providers where :meth:`BatchConfig.dispatches_per_request` is true, so each request
+    reaches the server exactly as in one batched call, and the batch's requests run at once
+    up to the same limit the provider would apply, its ``max_concurrency``. A result is
+    queued as soon as its request finishes, so one slow request does not hold back the
+    others. The inference metrics are flushed once for the whole batch.
+
+    Each request is a unit on the worker's clock, as in the streaming strategy, so its
+    worker time is an even split of the wall time it overlapped with other requests.
+    Batched mode splits a batch's time by token share, which needs the batch's end; both
+    credit the same total worker time.
     """
     if not items:
         return
@@ -428,12 +436,15 @@ async def process_batch_per_request(
 
     async def one(item: QueueItem) -> None:
         async with semaphore:
-            await process_batch([item], harness, result_queue, worker_logger, clock)
+            await process_batch(
+                [item], harness, result_queue, worker_logger, clock, flush_metrics=False
+            )
 
     tasks = [asyncio.create_task(one(item)) for item in items]
     try:
         # The first error (a terminal provider error) propagates as itself.
         await asyncio.gather(*tasks)
+        _flush_batch_metrics(harness, items, worker_logger or logger)
     finally:
         for task in tasks:
             task.cancel()
