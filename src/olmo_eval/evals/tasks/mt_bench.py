@@ -63,7 +63,7 @@ from dataclasses import dataclass, replace
 from typing import Any, ClassVar
 
 from olmo_eval.common.multi_turn import missing_replies_error, scripted_chat_request, turn_replies
-from olmo_eval.common.scorers.llm_judge import JudgeFn
+from olmo_eval.common.scorers.llm_judge import Judge
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -375,14 +375,14 @@ class MTBench(JudgedTask):
             raise missing_replies_error("MT-Bench")
         return await super().score_responses(responses, context)
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn: JudgeFn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge: Judge) -> float:
         """Rate both turns; a turn without a visible answer gets the lowest rating."""
         answers = list(output.extracted_answer or [])
         answers += [""] * (len(MT_BENCH_TURNS) - len(answers))
         judge_result: dict[str, Any] = {"scorer": MT_BENCH_SCORER_NAME}
         ratings = await self._judge_together(
             *(
-                self._rate_turn(response.instance, output, answers, turn, judge_fn, judge_result)
+                self._rate_turn(response.instance, output, answers, turn, judge, judge_result)
                 for turn in MT_BENCH_TURNS
             )
         )
@@ -399,7 +399,7 @@ class MTBench(JudgedTask):
         output: LMOutput,
         answers: Sequence[str],
         turn: int,
-        judge_fn: JudgeFn,
+        judge: Judge,
         judge_result: dict[str, Any],
     ) -> float:
         """Rate one turn, recording its rating and the judge's reply in ``judge_result``."""
@@ -407,7 +407,7 @@ class MTBench(JudgedTask):
             system_prompt, prompt = judge_prompt(instance, answers, turn)
             rating = await self._judge_output(
                 output,
-                judge_fn,
+                judge,
                 prompt,
                 parse_rating,
                 judge_result,
