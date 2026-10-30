@@ -117,8 +117,9 @@ AUTOAIS_REVISION = "aa6cfe1dd4257853bfdd772992045f41bfc14988"
 AUTOAIS_PROVIDER = "autoais"
 #: Upstream's ``--at_most_citations`` default: later citations of a sentence are ignored.
 AT_MOST_CITATIONS = 3
-#: ``LMOutput.metadata`` key holding an output's citation scores and NLI calls.
-AUTOAIS_KEY = "autoais"
+#: ``LMOutput.metadata`` key holding an output's citation scores and NLI calls; the
+#: judges' key, so the record reaches saved predictions.
+AUTOAIS_KEY = "judge_result"
 
 # the T5 model answers "1" for entailment; upstream allows it a few tokens
 _NLI_PARAMS = SamplingParams(temperature=0.0, max_tokens=10)
@@ -176,7 +177,7 @@ class AutoAisScorer(ContextScorer):
       missed when left out.
 
     The score is ``citation_rec``. Both values, and every NLI call, are recorded
-    in ``metadata["autoais"]`` for `CitationMetric` to read. An output with no
+    in ``metadata["judge_result"]`` for `CitationMetric` to read. An output with no
     claims has no citation scores, and upstream leaves it out of both averages.
     """
 
