@@ -281,3 +281,22 @@ def test_interpreter_package_versions_queries_a_real_interpreter() -> None:
     versions = interpreter_package_versions(sys.executable, ("olmo-eval", "no-such-dist-xyz"))
     assert "olmo-eval" in versions
     assert "no-such-dist-xyz" not in versions
+
+
+def test_uncommitted_diff_hash_is_a_short_hash_of_the_diff_or_none(monkeypatch) -> None:
+    import hashlib
+
+    diffs = {"text": "diff --git a/x b/x\n+changed\n"}
+    monkeypatch.setattr(provenance, "_run", lambda args, cwd=None, timeout=5.0: diffs["text"])
+    provenance.uncommitted_diff_hash.cache_clear()
+    try:
+        assert (
+            provenance.uncommitted_diff_hash()
+            == hashlib.sha256(diffs["text"].encode()).hexdigest()[:12]
+        )
+
+        monkeypatch.setattr(provenance, "_run", lambda args, cwd=None, timeout=5.0: None)
+        provenance.uncommitted_diff_hash.cache_clear()
+        assert provenance.uncommitted_diff_hash() is None
+    finally:
+        provenance.uncommitted_diff_hash.cache_clear()
