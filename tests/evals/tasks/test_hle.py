@@ -6,6 +6,7 @@ import math
 
 import pytest
 
+from olmo_eval.common.scorers import llm_judge
 from olmo_eval.common.types import LMOutput, RequestType, Response
 from olmo_eval.evals.tasks import hle
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, get_task, task_exists
@@ -127,12 +128,12 @@ class TestJudgeConfiguration:
             captured.update(kwargs)
             return object()
 
-        monkeypatch.setattr(judge_module, "build_openai_judge_fn", fake_builder)
+        monkeypatch.setattr(llm_judge, "build_openai_judge_fn", fake_builder)
         task = get_task(
             "hle:text",
             config_overrides={"judge_model": "judge-a", "judge_reasoning_effort": "high"},
         )
-        task._get_judge_fn()
+        task._get_judge()
 
         assert captured["model"] == "judge-a"
         assert captured["reasoning_effort"] == "high"
