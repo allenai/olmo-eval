@@ -136,7 +136,8 @@ Suites support different strategies for combining task results:
 | `WEIGHTED_AVERAGE` | Average of all task scores, each weighted by the task's instance count |
 | `AVERAGE_OF_AVERAGES` | Average over child suite averages (equal weight per child) |
 | `DISPLAY_ONLY` | Display child results without computing suite average |
-| `NONE` | No aggregation - just collect individual task results |
+| `GAP` | Two tasks, reference then companion: both primary scores and the companion minus the reference |
+| `NONE` | No suite score: tasks report individually, and each nested suite reports its own aggregate |
 
 **Average of Averages Example:**
 
@@ -187,6 +188,23 @@ register(Suite(
 `WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored.
 
 A weighted suite reports its weighted mean or no score at all. If a contributing task has no instance count, the suite aggregate is omitted and the runner logs which tasks were missing, rather than publishing an unweighted mean under the same suite name. Instance counts are required when a result is stored, so this only affects results written before that check existed.
+
+**Gap Example:**
+
+```python
+register(Suite(
+    name="omega:dev",
+    tasks=("omega_500:hillclimb", "omega_500_out"),  # in-distribution, then held-out
+    aggregation=AggregationStrategy.GAP,
+))
+
+# With scores of 0.60 (in) and 0.45 (out):
+# primary_score: reference 0.60, companion 0.45 (the suite's primary), gap -0.15
+```
+
+A gap suite retains its definition in `suite_metrics`, but is omitted from `summary` unless both tasks scored on the same primary metric. It can be nested only in a `NONE` suite, which reports it under its own name: a gap is not a score to average.
+
+The held-out companion score is the value to rank and optimize. The gap is a diagnostic guard, shown in percentage points in the log summary; reducing the reference score never improves the suite's primary score. In `metrics.json`, `suite_metrics["omega:dev"]["primary_score"]` retains `reference`, `companion`, and `gap`; `summary` selects the companion.
 
 ### Formatters
 
@@ -972,6 +990,22 @@ use `load_instance_image` from `evals/vision/data/images.py` for either form) an
 of PIL images / zero-arg callables / file paths — and sends them all on one
 request. Registration and variants work exactly as described in
 [Adding New Tasks](#adding-new-tasks).
+
+## Hill-Climb Dev Suite
+
+`hillclimb:dev` runs LiveCodeBench lite, the OMEGA in/out pair, IFEval, IFBench
+and GPQA main together. It has no cross-domain aggregate; each task reports
+its score and `omega:dev` reports its held-out score and gap.
+
+```bash
+uv run olmo-eval run -m <checkpoint> -t hillclimb:dev \
+    --harness codex_python \
+    -o provider.kind=vllm -o provider.max_model_len=36864 \
+    -o sandboxes.0.inject_swerex=true
+```
+
+LiveCodeBench requires the sandboxed harness; see [missing-sandbox tracking (#423)](https://github.com/allenai/olmo-eval/issues/423). Set the same model context limit
+for every checkpoint you compare; OMEGA has a 32,768-token generation cap.
 
 ## Querying Results
 
