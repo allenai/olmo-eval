@@ -366,3 +366,65 @@ async def test_cleanup_preserves_container_and_image_options(monkeypatch):
     monkeypatch.setattr("asyncio.create_subprocess_exec", create)
     await deployment.stop()
     assert commands == [("docker", "kill", "owned-fixture"), ("docker", "rmi", "unused")]
+
+
+@pytest.mark.anyio
+async def test_executor_waits_for_owned_cleanup_without_a_competing_deadline(monkeypatch, caplog):
+    from olmo_eval.harness.sandbox import SandboxConfig, SandboxExecutor, SandboxMode
+
+    completed = False
+
+    async def close():
+        nonlocal completed
+        await asyncio.sleep(0.03)
+        completed = True
+
+    real_wait_for = asyncio.wait_for
+
+    async def shortened_generic_deadline(awaitable, timeout):
+        return await real_wait_for(awaitable, 0.005 if timeout == 10.0 else timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", shortened_generic_deadline)
+    caplog.set_level(logging.DEBUG, logger="olmo_eval.harness.sandbox.executor")
+    deployment = OwnedDockerDeployment(image="unused", port=58123)
+    runtime = SimpleNamespace(close=close)
+    deployment._runtime = runtime
+    executor = SandboxExecutor(SandboxConfig(image="unused", mode=SandboxMode.DOCKER))
+    executor._deployment = deployment
+    executor._runtime = runtime
+    await executor.stop()
+    assert completed
+    assert "Failed to stop deployment" not in caplog.text
+    assert executor._deployment is None and executor._runtime is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("mode", ["docker", "local", "modal"])
+async def test_executor_preserves_generic_deployment_deadlines(monkeypatch, caplog, mode):
+    from olmo_eval.harness.sandbox import SandboxConfig, SandboxExecutor, SandboxMode
+
+    cancelled = False
+    completed = False
+
+    async def stop():
+        nonlocal cancelled, completed
+        try:
+            await asyncio.sleep(0.03)
+            completed = True
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+
+    real_wait_for = asyncio.wait_for
+
+    async def shortened_generic_deadline(awaitable, timeout):
+        return await real_wait_for(awaitable, 0.005 if timeout == 10.0 else timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", shortened_generic_deadline)
+    caplog.set_level(logging.DEBUG, logger="olmo_eval.harness.sandbox.executor")
+    executor = SandboxExecutor(SandboxConfig(image="unused", mode=SandboxMode(mode)))
+    executor._deployment = SimpleNamespace(stop=stop)
+    executor._runtime = SimpleNamespace()
+    await executor.stop()
+    assert cancelled and not completed
+    assert "Failed to stop deployment" in caplog.text
