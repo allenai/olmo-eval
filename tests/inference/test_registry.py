@@ -539,3 +539,15 @@ class TestValidateGPUPlan:
 
         with pytest.raises(ValueError, match="out of range"):
             validate_gpu_plan(plan, total_gpus=4)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "served"),
+    [
+        ({}, "google/gemma-2b"),
+        ({"lora_modules": ["sr=org/adapter"]}, "google/gemma-2b"),
+        ({"enable_lora": True, "lora_modules": ["sr=org/adapter"]}, "org/adapter"),
+    ],
+)
+def test_served_model_is_the_loaded_adapter_or_the_model(kwargs, served):
+    assert ProviderConfig(model="google/gemma-2b", kwargs=kwargs).served_model == served

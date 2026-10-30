@@ -16,6 +16,93 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
+
+- **Affected**:
+  - Safety: the `openai_judge`, `wg_judge`, `wg_judge_thinking` and `base` variants of
+    `do_anything_now`, `harmbench`, `trustllm_jailbreaktrigger`, `wildguardtest`,
+    `wildjailbreak` and `xstest`. For `strongreject`, the `openai_judge`, `sr_judge`,
+    `sr_judge_thinking` and `base` variants. Also the safety suites that include them.
+  - `simpleqa:judge`.
+  - `omniscience:judge`.
+  - `expertqa`, `expertqa:cite`, `astabench_scholarqa` and `astabench_scholarqa:test`.
+  - `researchqa` and `researchqa:mini`, for saved predictions only.
+  - `wmdp:mcq`, for empty subsets only.
+  - Any run that sets `OLMO_EVAL_JUDGE`, or that passes `-o judge_*` to a judged task.
+- **Change**:
+  - **A judge reply with no verdict.**
+    - Before: SimpleQA scored it as incorrect. The safety judges scored it 0. They also
+      scored 0 for an answer outside the allowed ones, and for a StrongREJECT judge
+      that returned no grade logprobs. ExpertQA and AstaBench SQA scored an unparseable
+      precision reply as 1.0 and an unparseable ingredient reply as 0. They treated a
+      citation section whose reply had no claims as empty. Omniscience graded it
+      `PARSING_ERROR`. Its metrics left that grade out, but it did not count against
+      the failure budget.
+    - Now: an API judge is asked again. If no reply parses, the output is left
+      unscored. It counts against the failure budget.
+    - Exception: an empty safety response still scores 0. That score does not depend
+      on the judge.
+    - FrontierScience and ResearchQA keep scoring an unparseable reply 0, as their
+      reference graders do.
+  - **Removed metrics.** The 28 safety specs drop `parsing_error`. `omniscience:judge`
+    drops `judge_parsing_errors`. Both would now always read 0. The run's scoring
+    failures count these replies instead.
+  - **Subset metrics.** They leave out unscored responses. An empty subset reports 0
+    instead of -1.
+  - **Safety judge checkpoints.** The `wg_judge`, `sr_judge`, `*_thinking` and `base`
+    variants set `judge_model` to the model their judge provider must serve. That is
+    `allenai/wildguard` for WildGuard, and the `qylu4156/strongreject-15k-v1` adapter
+    for StrongREJECT. The runner stops before generating if the provider serves another
+    model.
+  - **API judges in config.** The safety `openai_judge` variants and `simpleqa:judge`
+    set `judge_model` to `gpt-4o-mini` and set `judge_max_tokens`. `-o judge_*` now
+    changes the judge that grades them.
+  - **`OLMO_EVAL_JUDGE`.**
+    - Now: it is applied when the task is built. It applies to HLE, MultiChallenge,
+      MT-Bench, Arena-Hard, FrontierScience, ExpertQA, AstaBench SQA and ResearchQA. It
+      does not apply when `-o` names a judge model. It accepts
+      `model[:effort[:max_tokens]]`.
+    - Before: an explicit `-o judge_model` equal to a task's default lost to it.
+      FrontierScience let it override `-o`. ExpertQA, AstaBench SQA and ResearchQA read
+      it while scoring.
+  - **`-o judge_*` on `omniscience:judge`.** Before, the default judge graded the run,
+    while the config recorded the override. Now the overridden judge grades it.
+  - **Retries.** Judge scorers and the attributed-QA tasks retry a judge call that fails
+    for a transient reason. Before, they made one attempt. The attributed-QA tasks now
+    share the run's judge concurrency limit.
+  - **Saved predictions.**
+    - Safety: each sample keeps its judge result in `model_output[i].judge_result`.
+      `is_empty_response`, `is_truncated_response` and `is_parsing_error` are inside it.
+      Before, one result per instance was saved at the top level of the prediction, and
+      the flags were saved in the request's `doc`.
+    - Omniscience: the grade and raw reply are in `model_output[i].judge_result`.
+      Before, they were on the instance.
+    - SimpleQA: the judge's raw reply is saved.
+    - ExpertQA, AstaBench SQA and ResearchQA: every judge reply is saved in
+      `judge_result.raw_judge_responses`.
+  - **FrontierScience** also records a `truncation_rate` score. Its metrics are
+    unchanged.
+- **Identity**:
+  - The task hash changes for 30 specs: the 28 safety specs listed above,
+    `simpleqa:judge` and `omniscience:judge`.
+  - No other spec changes its hash when it runs with its default judge.
+  - A run with another judge on `expertqa`, `astabench_scholarqa` or `researchqa` now
+    gets its own hash. Before, it shared the default judge's hash. Tell those earlier
+    runs apart by date or commit.
+- **Comparability**:
+  - A result is affected only if one of its judge replies did not parse. In the
+    validation runs for #512, this happened for one output.
+  - `simpleqa:judge`: such replies counted as incorrect. Leaving them out raises
+    accuracy.
+  - Safety: such replies counted as unsafe. Leaving them out raises the score. An
+    earlier `parsing_error` value says how many there were.
+  - ExpertQA and AstaBench SQA: such an output got precision 1.0. It is now unscored.
+  - `omniscience:judge`: the metrics are unchanged, since they already left these
+    grades out. A run with many such replies can now exceed the failure budget.
+  - An earlier subset value of -1 meant the subset had no instances.
+  - An earlier `omniscience:judge` run with `-o judge_*` was graded by the default
+    judge.
+
 ## 2026-10-22: Scoring failures are left out and budgeted, not scored as zero (#492)
 
 - **Affected**: every task run by `AsyncEvalRunner` whose scoring failed for some output:

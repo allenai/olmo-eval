@@ -125,6 +125,59 @@ class TestRequiredScaffold:
         assert len(items) == 2
 
 
+class TestJudgeProvider:
+    """A task judged by an auxiliary provider fails before its data loads on a wrong judge."""
+
+    SPEC = "harmbench:wg_judge"
+
+    @pytest.fixture
+    def loaded(self, monkeypatch) -> list[str]:
+        """Stand in for prepare_task_items, recording each spec whose data it would load."""
+        loaded: list[str] = []
+
+        def prepare(spec, model_name, overrides, sampling_overrides=None):
+            loaded.append(spec)
+            return get_task(spec, overrides), []
+
+        monkeypatch.setattr("olmo_eval.runners.asynq.runner.prepare_task_items", prepare)
+        return loaded
+
+    def _runner(self, **providers: ProviderConfig) -> AsyncEvalRunner:
+        harness = replace(make_harness_config(), auxiliary_providers=providers)
+        return AsyncEvalRunner(harness_config=harness, task_specs=[self.SPEC])
+
+    def test_the_provider_serving_the_recorded_judge_is_accepted(self, loaded):
+        runner = self._runner(wg_judge=ProviderConfig(model="allenai/wildguard"))
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+        assert loaded == [self.SPEC]
+
+    def test_a_provider_serving_another_model_is_refused(self, loaded):
+        runner = self._runner(wg_judge=ProviderConfig(model="org/other-guard"))
+
+        with pytest.raises(RuntimeError, match="serves 'org/other-guard'") as exc:
+            runner._prepare_tasks()
+
+        assert "-o judge_model=org/other-guard" in str(exc.value)
+        assert loaded == []
+
+    def test_a_missing_provider_is_refused(self, loaded):
+        with pytest.raises(RuntimeError, match="does not define"):
+            self._runner()._prepare_tasks()
+
+        assert loaded == []
+
+    def test_a_judge_model_override_names_the_judge_to_expect(self, loaded):
+        runner = self._runner(wg_judge=ProviderConfig(model="org/other-guard"))
+        runner.task_overrides = {self.SPEC: {"judge_model": "org/other-guard"}}
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+
+
 class TestRequiredSandbox:
     """A task that scores by running code fails before its data loads without a sandbox."""
 
