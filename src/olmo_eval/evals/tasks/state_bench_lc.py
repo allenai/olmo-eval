@@ -12,7 +12,8 @@ from olmo_eval.common.types import Instance, LMRequest, RequestType
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register
 
-STATE_BENCH_REPO = "jacksonp-ai2/state-bench-lc"
+STATE_BENCH_REPO = "allenai/state-bench"
+STATE_BENCH_REVISION = "683d249128a0d387eda27c8cfc8c1f9df0389495"
 
 STATE_BENCH_CONFIGS = (
     "cube-painting--aperiodic",
@@ -46,12 +47,60 @@ STATE_BENCH_TOKEN_STRATA = (
     "tokens_256k",
     "tokens_512k",
     "tokens_1m",
-    "tokens_2m_plus",
 )
 
-STATE_BENCH_STRATA_BY_CONFIG = {
-    config_name: STATE_BENCH_TOKEN_STRATA for config_name in STATE_BENCH_CONFIGS
+STATE_BENCH_CONFIGS_SET = frozenset(STATE_BENCH_CONFIGS)
+
+# Token strata are half-open [min, max) token ranges, and the dataset omits a stratum from a
+# config when that config has no rows inside it. A task pointing at an omitted split fails at
+# dataset load, so strata are enumerated per config rather than as a full cross product.
+#
+# Generation caps the number of extra assignments, and that cap is sized against the most
+# token-dense formatter, so sparser formatters top out at shorter contexts. Only the configs
+# below reach the `tokens_1m` floor; strata absent from this mapping exist for every config.
+STATE_BENCH_CONFIGS_BY_STRATUM: dict[str, frozenset[str]] = {
+    "tokens_1m": frozenset(
+        {
+            "cube-painting--periodic",
+            "integer-code--aperiodic",
+            "integer-code--periodic",
+            "integer-code--r-trivial",
+            "ruler--aperiodic",
+            "ruler--periodic",
+            "ruler--r-trivial",
+            "spreadsheet-cells--periodic",
+            "status-lights--periodic",
+        }
+    ),
 }
+
+
+def state_bench_configs_for_stratum(token_stratum: str) -> tuple[str, ...]:
+    """Return the dataset configs that have a staged split for a token stratum."""
+    available = STATE_BENCH_CONFIGS_BY_STRATUM.get(token_stratum, STATE_BENCH_CONFIGS_SET)
+    return tuple(config_name for config_name in STATE_BENCH_CONFIGS if config_name in available)
+
+
+def state_bench_strata_for_config(config_name: str) -> tuple[str, ...]:
+    """Return the token strata that a dataset config has staged splits for."""
+    return tuple(
+        token_stratum
+        for token_stratum in STATE_BENCH_TOKEN_STRATA
+        if config_name in STATE_BENCH_CONFIGS_BY_STRATUM.get(token_stratum, STATE_BENCH_CONFIGS_SET)
+    )
+
+
+STATE_BENCH_STRATA_BY_CONFIG = {
+    config_name: state_bench_strata_for_config(config_name) for config_name in STATE_BENCH_CONFIGS
+}
+
+# (config, stratum) pairs deliberately not registered, for coverage reporting.
+STATE_BENCH_OMITTED_SPLITS = tuple(
+    (config_name, token_stratum)
+    for token_stratum in STATE_BENCH_TOKEN_STRATA
+    for config_name in STATE_BENCH_CONFIGS
+    if token_stratum not in STATE_BENCH_STRATA_BY_CONFIG[config_name]
+)
 
 
 def state_bench_task_name(config_name: str, token_stratum: str) -> str:
@@ -79,7 +128,13 @@ STATE_BENCH_10PCT_TASKS = tuple(
 
 
 class StateBench(Task):
-    """Rank candidate final states after a long sequence of assignments."""
+    """Rank candidate final states after a long sequence of assignments.
+
+    The initial state appears at the start of the prompt, so a prompt longer than the
+    model's context is unanswerable once the provider left-truncates it. Run only the
+    token strata that fit the model's context; logprob providers record the number of
+    dropped prompt tokens as ``prompt_truncated_tokens`` in each output's metadata.
+    """
 
     metrics = (LogprobPerTokenMCAccuracyMetric(),)
     dataset_split: str
@@ -162,6 +217,7 @@ for _config_name in STATE_BENCH_CONFIGS:
                     STATE_BENCH_REPO,
                     subset=_config_name,
                     split=_dataset_split,
+                    revision=STATE_BENCH_REVISION,
                 ),
                 "dataset_split": _dataset_split,
                 "__module__": __name__,
@@ -180,6 +236,7 @@ for _config_name in STATE_BENCH_CONFIGS:
                     STATE_BENCH_REPO,
                     subset=_config_name,
                     split=_dataset_split,
+                    revision=STATE_BENCH_REVISION,
                 ),
                 "dataset_split": _dataset_split,
                 "__module__": __name__,
