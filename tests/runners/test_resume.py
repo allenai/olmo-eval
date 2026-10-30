@@ -9,18 +9,22 @@ write the same predictions, requests and metrics as an uninterrupted one.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import math
+import os
 import queue
 import re
 import shutil
-import time
+import signal
+import threading
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import resume_fakes
@@ -30,10 +34,23 @@ from olmo_eval.cli.run import _sigterm_raises
 from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.llm_judge import Judge
-from olmo_eval.common.shutdown import Terminated, clear_shutdown, request_shutdown
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
+from olmo_eval.common.shutdown import (
+    Terminated,
+    clear_shutdown,
+    request_shutdown,
+    shutdown_requested,
+)
+from olmo_eval.common.types import (
+    Instance,
+    LMOutput,
+    LMRequest,
+    ProviderKind,
+    RequestType,
+    Response,
+)
 from olmo_eval.evals.tasks.common import Task, TaskConfig
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
+from olmo_eval.runners.asynq import progress as progress_module
 from olmo_eval.runners.asynq import runner as runner_module
 from olmo_eval.runners.asynq.progress import (
     DEBUG_EXIT_AT_ENV,
@@ -43,6 +60,7 @@ from olmo_eval.runners.asynq.progress import (
     DroppedLogprobsError,
     ProgressMismatchError,
     ProgressStore,
+    Restored,
     RunProgress,
     decode_value,
     discard_progress,
@@ -163,11 +181,21 @@ def offline_tasks() -> Iterator[None]:
         yield
 
 
-def _harness(system_prompt: str | None = None, **kwargs: Any) -> HarnessConfig:
+@pytest.fixture
+def runner_log(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """``caplog`` that also sees the runner's own logger, which does not propagate."""
+    runner_module.runner_logger.addHandler(caplog.handler)
+    try:
+        yield caplog
+    finally:
+        runner_module.runner_logger.removeHandler(caplog.handler)
+
+
+def _harness(system_prompt: str | None = None, model: str = "mock", **kwargs: Any) -> HarnessConfig:
     # HashProvider fails some requests on purpose; keep every task's metrics.
     return HarnessConfig(
         name="default",
-        provider=ProviderConfig(kind="mock", model="mock", **kwargs),
+        provider=ProviderConfig(kind="mock", model=model, **kwargs),
         max_hard_failure_rate=1.0,
         system_prompt=system_prompt,
     )
@@ -177,12 +205,19 @@ def _runner(
     out: Path,
     limits: dict[str, int] = TASK_LIMITS,
     system_prompt: str | None = None,
+    model: str = "mock",
+    provider: dict[str, Any] | None = None,
+    overrides: dict[str, dict[str, Any]] | None = None,
     **kwargs: Any,
 ) -> AsyncEvalRunner:
+    """A runner for ``limits``; ``provider`` and ``overrides`` add provider and task settings."""
+    overrides = overrides or {}
     return AsyncEvalRunner(
-        harness_config=_harness(system_prompt),
+        harness_config=_harness(system_prompt, model, **(provider or {})),
         task_specs=list(limits),
-        task_overrides={spec: {"limit": limit} for spec, limit in limits.items()},
+        task_overrides={
+            spec: {"limit": limit, **overrides.get(spec, {})} for spec, limit in limits.items()
+        },
         output_dir=str(out),
         **kwargs,
     )
@@ -206,6 +241,9 @@ def run_eval(
     """Run the evaluation into ``out`` under the CLI's SIGTERM handling.
 
     Progress is only recorded with ``resume``, which is on unless a test turns it off.
+    ``OLMO_EVAL_DEBUG_EXIT_AT`` ends the run through the CLI's SIGTERM path, without
+    sending a signal to the test process: a real one would end a test session that runs
+    tests on threads, where no handler is installed.
     """
     seen: dict[str, Any] = {"queued": None, "restored": 0, "finalized": set()}
 
@@ -217,8 +255,20 @@ def run_eval(
         seen["finalized"] = set(call["finalized"])
         return await process_results(**call)
 
+    real_kill = os.kill
+
+    def sigterm(pid: int, sig: int) -> None:
+        if pid != os.getpid():
+            real_kill(pid, sig)  # the runner stopping its workers
+            return
+        assert sig == signal.SIGTERM
+        # What the CLI's handler does when the signal arrives.
+        request_shutdown()
+        raise Terminated()
+
     judge_calls = len(resume_fakes.JUDGE_CALLS)
     with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(progress_module.os, "kill", sigterm)
         mp.delenv(DEBUG_EXIT_AT_ENV, raising=False)
         for key, value in (env or {}).items():
             mp.setenv(key, value)
@@ -347,6 +397,19 @@ def full_run(tmp_path_factory: pytest.TempPathFactory):
     return out
 
 
+INTERRUPTED_LIMITS = {"gsm8k": 8}
+
+
+@pytest.fixture(scope="module")
+def interrupted_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A run of one task that SIGTERM ended part way, as Beaker job ``job-1``."""
+    out = tmp_path_factory.mktemp("interrupted")
+    with pytest.raises(Terminated):
+        run_eval(out, INTERRUPTED_LIMITS, env={DEBUG_EXIT_AT_ENV: "0.3", "BEAKER_JOB_ID": "job-1"})
+    assert has_progress(out) and _recorded(out) >= 2
+    return out
+
+
 def _copy(full: Path, tmp_path: Path, *, keep_outputs: bool = False) -> Path:
     out = tmp_path / "run"
     shutil.copytree(full, out)
@@ -382,8 +445,9 @@ class TestRoundTrip:
         stream = _stream(full)
         assert stream.path.exists()
         assert len(list((full / PROGRESS_DIR).glob("*/*.segments"))) == 1
-        # A run is written in a few segments however many tasks it has.
-        assert len(list(stream.path.glob("*.jsonl"))) <= 2
+        # A run is written in a few segments however many tasks it has: the flush at
+        # close, plus none by size or age within these seconds.
+        assert len(list(stream.path.glob("*.jsonl"))) == 1
 
     def test_finalized_tasks_are_not_run_again(self, full_run, tmp_path) -> None:
         full = full_run
@@ -423,7 +487,7 @@ class TestRoundTrip:
         assert stats.queued == TOTAL - kept
         assert_same_results(out, full)
 
-    def test_sigterm_then_resume(self, full_run, tmp_path, monkeypatch) -> None:
+    def test_sigterm_then_resume(self, full_run, tmp_path, runner_log) -> None:
         full = full_run
         out = tmp_path / "run"
 
@@ -431,6 +495,8 @@ class TestRoundTrip:
             run_eval(out, env={DEBUG_EXIT_AT_ENV: "0.37"})
         recorded = _recorded(out)
         assert recorded >= 0.37 * TOTAL
+        specs = {e["t"]: e["header"]["spec"] for e in _entries(out) if "header" in e}
+        recorded_by_spec = Counter(specs[e["t"]] for e in _instance_entries(out))
         first = read_manifest(out)
         assert first is not None and first["run"]["status"] == "running"
         secret = run_secret(out)
@@ -439,18 +505,21 @@ class TestRoundTrip:
         elsewhere = tmp_path / "ordinary"
         shutil.copytree(out, elsewhere)
         before = sorted(p.name for p in (elsewhere / PROGRESS_DIR).rglob("*"))
-        warnings: list[str] = []
-        monkeypatch.setattr(runner_module.runner_logger, "warning", warnings.append)
-        ordinary = run_eval(elsewhere, resume=False)
+        with runner_log.at_level(logging.WARNING):
+            ordinary = run_eval(elsewhere, resume=False)
         assert ordinary.queued == TOTAL and ordinary.restored == 0
-        assert any("ignores" in message for message in warnings)
+        assert "holds progress from an earlier run, which this run ignores" in runner_log.text
         assert sorted(p.name for p in (elsewhere / PROGRESS_DIR).rglob("*")) == before
         assert_same_results(elsewhere, full)
 
         # The threshold was crossed before this attempt started, so it finishes.
         stats = run_eval(out, env={DEBUG_EXIT_AT_ENV: "0.37"}, resume=True)
 
-        assert stats.queued is not None and stats.queued <= TOTAL - recorded
+        # Finalized tasks are taken whole; the other tasks restore what was recorded.
+        unfinalized = sum(n for spec, n in recorded_by_spec.items() if spec not in stats.finalized)
+        finalized = sum(TASK_LIMITS[spec] for spec in stats.finalized)
+        assert stats.finalized and stats.restored == unfinalized
+        assert stats.queued == TOTAL - finalized - stats.restored
         assert_same_results(out, full)
         manifest = read_manifest(out)
         assert manifest is not None
@@ -459,6 +528,65 @@ class TestRoundTrip:
         assert manifest["resume"]["resumed_count"] == 1
         assert (out / RUN_SECRET_NAME).read_text().strip() == secret
         assert not (out / PROGRESS_DIR).exists()
+
+    def test_an_unreadable_finalized_result_is_ignored(self, full_run, tmp_path, caplog) -> None:
+        full = full_run
+        out = _copy(full, tmp_path, keep_outputs=True)
+        (out / "metrics.json").unlink()
+        broken = sorted((out / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))[0]
+        spec = json.loads(broken.read_text())["header"]["spec"]
+        broken.write_text('{"header": ')
+
+        with caplog.at_level(logging.WARNING):
+            stats = run_eval(out)
+
+        assert f"Ignoring unreadable finalized result {broken}" in caplog.text
+        assert stats.finalized == set(TASK_LIMITS) - {spec}
+        assert_same_results(out, full)
+
+    def test_a_finalized_task_whose_predictions_are_missing_is_recomputed(
+        self, full_run, tmp_path, caplog
+    ) -> None:
+        full = full_run
+        out = _copy(full, tmp_path, keep_outputs=True)
+        (out / "metrics.json").unlink()
+        final = sorted((out / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))[0]
+        data = json.loads(final.read_text())
+        (out / data["outputs"][0]).unlink()
+
+        with caplog.at_level(logging.INFO):
+            stats = run_eval(out)
+
+        assert "is missing; recomputing it" in caplog.text
+        assert stats.finalized == set(TASK_LIMITS) - {data["header"]["spec"]}
+        assert_same_results(out, full)
+
+    def test_a_failing_record_stops_recording_that_task_and_the_run_completes(
+        self, full_run, tmp_path, monkeypatch, caplog
+    ) -> None:
+        full = full_run
+        out = tmp_path / "run"
+        attempts: list[str] = []
+        real_append = ProgressStore.append
+
+        def append(self: ProgressStore, entry: Any) -> None:
+            if "header" in entry or "runtime" in entry:
+                real_append(self, entry)
+                return
+            attempts.append(entry["t"])
+            raise OSError("disk full")
+
+        monkeypatch.setattr(ProgressStore, "append", append)
+
+        with caplog.at_level(logging.WARNING):
+            stats = run_eval(out)
+
+        # Each task tried once; after the failure it records nothing more.
+        assert attempts and len(attempts) == len(set(attempts))
+        assert caplog.text.count("recording stops for this task") == len(attempts)
+        assert "disk full" in caplog.text
+        assert stats.queued == TOTAL
+        assert_same_results(out, full)
 
     def test_fresh_discards_recorded_progress(self, full_run, tmp_path) -> None:
         full = full_run
@@ -526,28 +654,59 @@ class TestStores:
         reopened.close()
         assert list(ProgressStore(tmp_path / "run").read()) == [*expected, {"idx": 2}]
 
-    def test_segments_are_flushed_by_size_and_age(self, tmp_path, monkeypatch) -> None:
-        from olmo_eval.runners.asynq import progress as progress_module
+    def test_segments_are_flushed_by_size(self, tmp_path, monkeypatch) -> None:
+        # Every line is 50 bytes, so a 100-byte limit writes one segment per two entries.
+        def entry(i: int) -> dict[str, Any]:
+            return {"idx": f"{i:02d}", "pad": ""}
 
+        line = len(json.dumps(entry(0), separators=(",", ":"))) + 1
+        pad = "x" * (50 - line)
         monkeypatch.setattr(progress_module, "SEGMENT_MAX_BYTES", 100)
         store = ProgressStore(tmp_path / "run")
-        for i in range(30):
-            store.append({"idx": i, "pad": "x" * 20})
-        # Size flushes write a few segments; the buffered rest waits for close.
-        written = len(list(store.path.glob("*.jsonl")))
-        assert 1 <= written < 30
+        for i in range(31):
+            store.append({**entry(i), "pad": pad})
+
+        assert len(list(store.path.glob("*.jsonl"))) == 15  # the 31st entry is buffered
         store.close()
-        assert [e["idx"] for e in ProgressStore(tmp_path / "run").read()] == list(range(30))
+        assert len(list(store.path.glob("*.jsonl"))) == 16
+        assert [e["idx"] for e in ProgressStore(tmp_path / "run").read()] == [
+            f"{i:02d}" for i in range(31)
+        ]
+
+    def test_buffered_entries_are_flushed_when_they_age(self, tmp_path, monkeypatch) -> None:
+        """The flush thread writes the buffer each time its wait times out."""
+        flushed = threading.Event()
+
+        class AgingEvent:
+            """The first wait times out at once, as if the age limit had passed."""
+
+            def __init__(self) -> None:
+                self._set = threading.Event()
+                self._waits = 0
+
+            def wait(self, timeout: float) -> bool:
+                self._waits += 1
+                if self._waits == 1:
+                    return False
+                flushed.set()  # the flush after the first timeout is done
+                return self._set.wait(30)
+
+            def set(self) -> None:
+                self._set.set()
 
         monkeypatch.setattr(progress_module, "SEGMENT_MAX_BYTES", 10**9)
-        monkeypatch.setattr(progress_module, "SEGMENT_MAX_SECONDS", 0.05)
-        aged = ProgressStore(tmp_path / "aged")
-        aged.append({"idx": 0})
-        deadline = time.monotonic() + 5
-        while not list(aged.path.glob("*.jsonl")) and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert list(aged.path.glob("*.jsonl"))
-        aged.close()
+        monkeypatch.setattr(
+            progress_module,
+            "threading",
+            SimpleNamespace(Lock=threading.Lock, Thread=threading.Thread, Event=AgingEvent),
+        )
+        store = ProgressStore(tmp_path / "aged")
+        store.append({"idx": 0})
+        assert flushed.wait(30)
+
+        assert [e["idx"] for e in ProgressStore(tmp_path / "aged").read()] == [0]
+        store.close()
+        assert len(list(store.path.glob("*.jsonl"))) == 1  # close had nothing left to write
 
     def test_values_round_trip_through_json(self) -> None:
         value = {
@@ -570,85 +729,110 @@ class TestStores:
             parse_exit_thresholds("30")
 
 
-class TestHeaders:
-    def _restore(self, out: Path, runner: AsyncEvalRunner) -> Any:
-        _, trackers, items = runner._prepare_tasks()
-        progress = open_run_progress(str(out), runner.model_name, runner.harness_config)
-        try:
-            return progress.restore(trackers, items, runner.harness_config)
-        finally:
-            progress.close()
+def _vllm() -> HarnessConfig:
+    return HarnessConfig(name="default", provider=ProviderConfig(kind="vllm", model="m"))
 
-    def test_a_different_max_tokens_names_the_setting(self, tmp_path) -> None:
-        self._restore(tmp_path, _runner(tmp_path, {"gsm8k": 3}))
-        changed = _runner(tmp_path, {"gsm8k": 3})
-        changed.task_overrides["gsm8k"]["max_tokens"] = 128
+
+def _resume_copy(interrupted_run: Path, tmp_path: Path) -> Path:
+    out = tmp_path / "run"
+    shutil.copytree(interrupted_run, out)
+    return out
+
+
+class TestHeaders:
+    """What a run must match to continue the records of another."""
+
+    def _restore(self, out: Path, harness: HarnessConfig | None = None) -> Any:
+        # Below run_eval: a vllm provider cannot run offline, and the git commit and
+        # execution fields are set where the progress is opened.
+        progress, _, restored = _open(out, harness)
+        progress.close()
+        return restored
+
+    def test_a_different_max_tokens_names_the_setting(self, interrupted_run, tmp_path) -> None:
+        out = _resume_copy(interrupted_run, tmp_path)
 
         with pytest.raises(
             ProgressMismatchError,
             match=r"task_hash differs.*sampling_params.max_tokens: 512 -> 128",
         ):
-            self._restore(tmp_path, changed)
+            run_eval(out, INTERRUPTED_LIMITS, overrides={"gsm8k": {"max_tokens": 128}})
 
-    def test_a_different_model_revision_is_refused(self, tmp_path) -> None:
-        self._restore(tmp_path, _runner(tmp_path, {"gsm8k": 3}))
-        changed = _runner(tmp_path, {"gsm8k": 3})
-        changed.harness_config = _harness(revision="v2")
+    def test_a_different_model_revision_names_the_revision(self, interrupted_run, tmp_path) -> None:
+        # The model hash covers the revision too, but only the revision is readable.
+        out = _resume_copy(interrupted_run, tmp_path)
+
+        with pytest.raises(
+            ProgressMismatchError, match=r"model_revision differs \(recorded None, this run 'v2'"
+        ):
+            run_eval(out, INTERRUPTED_LIMITS, provider={"revision": "v2"})
+
+    def test_a_different_model_is_refused(self, tmp_path) -> None:
+        self._restore(tmp_path)
 
         with pytest.raises(ProgressMismatchError, match="model_hash differs"):
-            self._restore(tmp_path, changed)
+            self._restore(tmp_path, _harness(model="another-model"))
 
-    def test_a_different_system_prompt_is_refused(self, tmp_path) -> None:
-        self._restore(tmp_path, _runner(tmp_path, {"gsm8k": 3}))
-        changed = _runner(tmp_path, {"gsm8k": 3})
-        changed.harness_config = HarnessConfig(
-            name="default",
-            provider=ProviderConfig(kind="mock", model="mock"),
-            system_prompt="Be brief.",
-        )
+    def test_a_different_system_prompt_is_refused(self, interrupted_run, tmp_path) -> None:
+        out = _resume_copy(interrupted_run, tmp_path)
 
         with pytest.raises(ProgressMismatchError, match="harness_hash differs"):
-            self._restore(tmp_path, changed)
+            run_eval(out, INTERRUPTED_LIMITS, system_prompt="Be brief.")
+
+    def test_a_second_conflicting_header_is_refused(self, tmp_path) -> None:
+        """Every header of a task is checked, not only the first."""
+        self._restore(tmp_path)
+        store = _stream(tmp_path)
+        header = next(e for e in store.read() if "header" in e)
+        store.append({"t": "local_other", "header": {**header["header"], "task_hash": "f" * 64}})
+        store.close()
+
+        with pytest.raises(ProgressMismatchError, match="task_hash differs"):
+            self._restore(tmp_path)
 
     def test_a_different_engine_version_is_refused(self, tmp_path, monkeypatch) -> None:
-        from olmo_eval.runners.asynq import progress as progress_module
-
         monkeypatch.setattr(progress_module, "_package_version", lambda name: "0.10.0")
-        runner = _runner(tmp_path, {"gsm8k": 3})
-        runner.harness_config = HarnessConfig(
-            name="default", provider=ProviderConfig(kind="vllm", model="m")
-        )
-        self._restore(tmp_path, runner)
+        self._restore(tmp_path, _vllm())
         monkeypatch.setattr(progress_module, "_package_version", lambda name: "0.11.0")
 
         with pytest.raises(
             ProgressMismatchError, match=r"engine_version differs.*vllm==0.10.0.*vllm==0.11.0"
         ):
-            self._restore(tmp_path, runner)
+            self._restore(tmp_path, _vllm())
 
     def test_an_unknown_engine_version_warns_instead_of_matching(
         self, tmp_path, monkeypatch, caplog
     ) -> None:
-        from olmo_eval.runners.asynq import progress as progress_module
-
         monkeypatch.setattr(progress_module, "_package_version", lambda name: "0.10.0")
-        runner = _runner(tmp_path, {"gsm8k": 3})
-        runner.harness_config = HarnessConfig(
-            name="default", provider=ProviderConfig(kind="vllm", model="m")
-        )
-        self._restore(tmp_path, runner)
+        self._restore(tmp_path, _vllm())
         monkeypatch.setattr(progress_module, "_package_version", lambda name: None)
 
         with caplog.at_level("WARNING"):
-            self._restore(tmp_path, runner)
+            self._restore(tmp_path, _vllm())
 
         assert "without a comparable engine version" in caplog.text
         assert "vllm==unknown" in caplog.text
 
+    @pytest.mark.parametrize(
+        ("kind", "expected"),
+        [
+            ("vllm", "vllm==1.2.3"),
+            ("sglang", "sglang==1.2.3"),
+            ("hf", "transformers==1.2.3"),
+            ("litellm", None),
+            ("mock", None),
+        ],
+    )
+    def test_the_engine_version_is_that_of_the_engine_package(
+        self, monkeypatch, kind, expected
+    ) -> None:
+        monkeypatch.setattr(progress_module, "_package_version", lambda name: "1.2.3")
+        config = HarnessConfig(name="default", provider=ProviderConfig(kind=kind, model="m"))
+
+        assert progress_module.engine_version(config) == expected
+
     def test_vllm_server_version_comes_from_the_server_python(self, monkeypatch) -> None:
         import subprocess
-
-        from olmo_eval.runners.asynq import progress as progress_module
 
         calls = []
 
@@ -669,8 +853,6 @@ class TestHeaders:
     def test_vllm_server_version_failure_is_recorded_as_unknown(self, monkeypatch, caplog) -> None:
         import subprocess
 
-        from olmo_eval.runners.asynq import progress as progress_module
-
         def fake_run(cmd, **kwargs):
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No module named vllm")
 
@@ -683,126 +865,181 @@ class TestHeaders:
             assert progress_module.engine_version(config) == "vllm==unknown"
         assert "Could not determine the vllm version" in caplog.text
 
-    def test_a_different_commit_is_refused(self, tmp_path, monkeypatch) -> None:
-        runner = _runner(tmp_path, {"gsm8k": 3})
-        monkeypatch.setattr("olmo_eval.upload.provenance.git_info", lambda: {"commit": "a" * 40})
-        self._restore(tmp_path, runner)
+    @pytest.mark.parametrize(
+        ("recorded", "current", "refused"),
+        [
+            ("a" * 40, "b" * 40, True),
+            ("a" * 40, "a" * 40, False),
+            (None, "a" * 40, False),
+            ("a" * 40, None, False),
+        ],
+    )
+    def test_a_different_commit_is_refused_unless_one_is_unknown(
+        self, tmp_path, monkeypatch, recorded, current, refused
+    ) -> None:
+        def at(commit: str | None) -> None:
+            monkeypatch.setattr("olmo_eval.upload.provenance.git_info", lambda: {"commit": commit})
+
+        at(recorded)
+        self._restore(tmp_path)
         stored = next(e for e in _entries(tmp_path) if "header" in e)
-        assert stored["header"]["git_commit"] == "a" * 40
-        monkeypatch.setattr("olmo_eval.upload.provenance.git_info", lambda: {"commit": "b" * 40})
+        assert stored["header"]["git_commit"] == recorded
+        at(current)
 
-        with pytest.raises(ProgressMismatchError, match="git_commit differs"):
-            self._restore(tmp_path, runner)
-
-    def test_runtime_identity_ignores_what_depends_on_the_node(self, tmp_path) -> None:
-        runtime = {
-            "profile": "qwen",
-            "packages": {"sglang": "0.5"},
-            "logprobs": "original",
-            "arithmetic_environment": {"A": "1"},
-            "engine_options": {"attention_backend": "fa3", "max_running_requests": 64},
-            "effective_max_running_requests": 64,
-        }
-        progress = _progress(tmp_path)
-        trackers, items = _local_setup(undecidable=set())
-        progress.restore(trackers, items, _harness())
-        progress.check_runtime(runtime)
-        progress.close()
-
-        other_node = {
-            **runtime,
-            "engine_options": {"attention_backend": "fa3", "max_running_requests": 48},
-            "effective_max_running_requests": 48,
-        }
-        again = _progress(tmp_path)
-        trackers, items = _local_setup(undecidable=set())
-        again.restore(trackers, items, _harness())
-        again.check_runtime(other_node)
-
-        new_engine = {**runtime, "packages": {"sglang": "0.6"}}
-        with pytest.raises(ProgressMismatchError, match=r"packages.sglang: '0.5' -> '0.6'"):
-            again.check_runtime(new_engine)
-        backend = {**runtime, "engine_options": {"attention_backend": "triton"}}
-        with pytest.raises(ProgressMismatchError, match="attention_backend"):
-            again.check_runtime(backend)
-        again.close()
-
-    def test_request_length_caps_are_part_of_the_runtime_identity(self, tmp_path) -> None:
-        runtime = {
-            "profile": "qwen",
-            "engine_options": {"max_total_tokens": 1000, "mem_fraction_static": 0.9},
-            "max_total_num_tokens": 1000,
-            "max_req_input_len": 999,
-        }
-        progress = _progress(tmp_path)
-        trackers, items = _local_setup(undecidable=set())
-        progress.restore(trackers, items, _harness())
-        progress.check_runtime(runtime)
-        progress.close()
-
-        again = _progress(tmp_path)
-        trackers, items = _local_setup(undecidable=set())
-        again.restore(trackers, items, _harness())
-        # The requested pool and memory fraction differ, but the caps they led to match.
-        again.check_runtime(
-            {**runtime, "engine_options": {"max_total_tokens": 2000, "mem_fraction_static": 0.8}}
-        )
-        smaller_pool = {**runtime, "max_total_num_tokens": 500, "max_req_input_len": 499}
-        with pytest.raises(ProgressMismatchError, match="max_total_num_tokens: 1000 -> 500"):
-            again.check_runtime(smaller_pool)
-        again.close()
-
-    def test_unreported_caps_fall_back_to_the_requested_pool(self) -> None:
-        from olmo_eval.runners.asynq.progress import runtime_identity
-
-        runtime = {"engine_options": {"max_total_tokens": 1000, "max_running_requests": 8}}
-        assert runtime_identity(runtime) == {"engine_options": {"max_total_tokens": 1000}}
+        if refused:
+            with pytest.raises(ProgressMismatchError, match="git_commit differs"):
+                self._restore(tmp_path)
+        else:
+            self._restore(tmp_path)
 
     def test_a_different_setup_only_warns(self, tmp_path, caplog) -> None:
-        self._restore(tmp_path, _runner(tmp_path, {"gsm8k": 3}))
-        changed = _runner(tmp_path, {"gsm8k": 3})
-        changed.harness_config = _harness(num_instances=4)
+        self._restore(tmp_path)
 
         with caplog.at_level(logging.WARNING):
-            self._restore(tmp_path, changed)
+            self._restore(tmp_path, _harness(num_instances=4))
         assert "num_instances: 1 -> 4" in caplog.text
 
     def test_a_changed_request_is_run_again(self, tmp_path, caplog) -> None:
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
-        _process(trackers, restored.remaining, progress, restored.responses)
-        progress.close()
-        _drop_final(tmp_path)
+        _first_attempt(tmp_path)
 
-        trackers, items = _local_setup(undecidable=set(), prompt="changed q{i}")
-        progress = _progress(tmp_path)
         with caplog.at_level(logging.WARNING):
-            restored = progress.restore(trackers, items, _harness())
+            progress, _, restored = _open(tmp_path, prompt="changed q{i}")
         progress.close()
         assert restored.responses == {}
-        assert len(restored.remaining) == len(items)
+        assert len(restored.remaining) == 4
         assert "4 recorded instance(s) no longer match" in caplog.text
 
     @pytest.mark.parametrize("changed", ["gold_answer", "metadata"])
     def test_a_changed_gold_or_metadata_is_run_again(self, tmp_path, changed) -> None:
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
-        _process(trackers, restored.remaining, progress, restored.responses)
-        progress.close()
-        _drop_final(tmp_path)
+        _first_attempt(tmp_path)
 
-        trackers, items = _local_setup(undecidable=set())
-        edited = items[2]
-        if changed == "gold_answer":
-            edited.instance = replace(edited.instance, gold_answer="another answer")
-        else:
-            edited.instance.metadata["source"] = "a corrected document"
-        restored = _progress(tmp_path).restore(trackers, items, _harness())
+        def edit(items: list[QueueItem]) -> None:
+            edited = items[2]
+            if changed == "gold_answer":
+                edited.instance = replace(edited.instance, gold_answer="another answer")
+            else:
+                edited.instance.metadata["source"] = "a corrected document"
+
+        progress, _, restored = _open(tmp_path, edit=edit)
+        progress.close()
 
         assert sorted(restored.responses["local"]) == [0, 1, 3]
         assert [item.instance_idx for item in restored.remaining] == [2]
+
+    def test_the_batching_strategy_is_not_part_of_what_must_match(self, tmp_path) -> None:
+        from olmo_eval.runners.asynq.batching import BatchConfig
+
+        _first_attempt(tmp_path)
+
+        streaming = replace(_harness(), batching=BatchConfig.streaming())
+        progress, _, restored = _open(tmp_path, streaming)
+        progress.close()
+
+        assert sorted(restored.responses["local"]) == [0, 1, 2, 3]
+
+    def test_the_harness_hash_ignores_how_work_is_scheduled(self) -> None:
+        from olmo_eval.harness.sandbox import SandboxConfig, SandboxMode
+
+        def config(sandbox: dict[str, Any] | None = None, **kwargs: Any) -> HarnessConfig:
+            return HarnessConfig(
+                name="default",
+                provider=ProviderConfig(kind="mock", model="m"),
+                sandboxes=(SandboxConfig(image="img", mode=SandboxMode.LOCAL, **(sandbox or {})),),
+                **kwargs,
+            )
+
+        base = progress_module.harness_hash(config())
+        scheduling = config(
+            max_concurrency=7,
+            scoring_concurrency=3,
+            sandbox_pool_instances=4,
+            sandbox_pool_min_instances=2,
+            sandbox={"instances": 6, "min_instances": 3},
+        )
+        assert progress_module.harness_hash(scheduling) == base
+        assert progress_module.harness_hash(config(system_prompt="Be brief.")) != base
+        assert progress_module.harness_hash(config(tools=("browse_webpage",))) != base
+        assert progress_module.harness_hash(config(sandbox={"image_pull": "always"})) != base
+
+
+class TestRuntimeIdentity:
+    """The workers' resolved SGLang runtime must be the same when a run continues."""
+
+    runtime = {
+        "profile": "qwen",
+        "packages": {"sglang": "0.5"},
+        "logprobs": "original",
+        "arithmetic_environment": {"A": "1"},
+        "engine_options": {"attention_backend": "fa3", "max_running_requests": 64},
+        "effective_max_running_requests": 64,
+        "max_total_num_tokens": 1000,
+        "max_req_input_len": 999,
+    }
+
+    def _recorded(self, out: Path) -> RunProgress:
+        """A run that recorded ``runtime``, restarted on the same directory."""
+        progress, _, _ = _open(out)
+        progress.check_runtime(self.runtime)
+        progress.close()
+        again, _, _ = _open(out)
+        return again
+
+    def test_what_depends_on_the_node_is_ignored(self, tmp_path) -> None:
+        again = self._recorded(tmp_path)
+        other_node = {
+            **self.runtime,
+            "engine_options": {"attention_backend": "fa3", "max_running_requests": 48},
+            "effective_max_running_requests": 48,
+        }
+        again.check_runtime(other_node)
+
+        new_engine = {**self.runtime, "packages": {"sglang": "0.6"}}
+        with pytest.raises(ProgressMismatchError, match=r"packages.sglang: '0.5' -> '0.6'"):
+            again.check_runtime(new_engine)
+        backend = {**self.runtime, "engine_options": {"attention_backend": "triton"}}
+        with pytest.raises(ProgressMismatchError, match="attention_backend"):
+            again.check_runtime(backend)
+        again.close()
+
+    @pytest.mark.parametrize("cap", ["max_total_num_tokens", "max_req_input_len"])
+    def test_each_request_length_cap_is_part_of_the_identity(self, tmp_path, cap) -> None:
+        again = self._recorded(tmp_path)
+        # The requested pool and memory fraction differ, but the caps they led to match.
+        options = {
+            **self.runtime["engine_options"],
+            "max_total_tokens": 2000,
+            "mem_fraction_static": 0.8,
+        }
+        again.check_runtime({**self.runtime, "engine_options": options})
+
+        with pytest.raises(ProgressMismatchError, match=rf"{cap}: \d+ -> \d+"):
+            again.check_runtime({**self.runtime, cap: self.runtime[cap] - 500})
+        again.close()
+
+    def test_unreported_caps_fall_back_to_the_requested_pool(self) -> None:
+        runtime = {"engine_options": {"max_total_tokens": 1000, "max_running_requests": 8}}
+        assert progress_module.runtime_identity(runtime) == {
+            "engine_options": {"max_total_tokens": 1000}
+        }
+
+    def test_the_caps_reach_the_resolved_runtime(self) -> None:
+        from olmo_eval.runners.asynq.batching import BatchConfig
+        from olmo_eval.runners.asynq.runtime import resolved_worker_config
+
+        config = HarnessConfig(name="default", provider=ProviderConfig(kind="sglang", model="m"))
+        profile = {"selected": "generic", "effective_options": {}}
+
+        capped = resolved_worker_config(
+            config,
+            BatchConfig(),
+            profile={**profile, "max_total_num_tokens": 1000, "max_req_input_len": 999},
+        )
+        uncapped = resolved_worker_config(config, BatchConfig(), profile=profile)
+
+        assert capped.provider.resolved_runtime["max_total_num_tokens"] == 1000
+        assert capped.provider.resolved_runtime["max_req_input_len"] == 999
+        assert "max_total_num_tokens" not in uncapped.provider.resolved_runtime
+        assert "max_req_input_len" not in uncapped.provider.resolved_runtime
 
 
 # --- Accounting, driven through process_results without worker processes ---
@@ -837,7 +1074,10 @@ class _LocalTask(Task):
 
 
 def _local_setup(
-    undecidable: set[int], unreachable: frozenset[int] = frozenset(), prompt: str = "q{i}"
+    undecidable: set[int] | frozenset[int] = frozenset(),
+    unreachable: frozenset[int] = frozenset(),
+    prompt: str = "q{i}",
+    request_type: RequestType = RequestType.COMPLETION,
 ) -> tuple[dict[str, TaskTracker], list[QueueItem]]:
     task = _LocalTask(
         TaskConfig(
@@ -860,7 +1100,7 @@ def _local_setup(
                     "unreachable": i in unreachable,
                 },
             ),
-            request=LMRequest(request_type=RequestType.COMPLETION, prompt=prompt.format(i=i)),
+            request=LMRequest(request_type=request_type, prompt=prompt.format(i=i)),
         )
         for i in range(4)
     ]
@@ -938,22 +1178,46 @@ def _drop_final(out: Path) -> None:
         final.unlink()
 
 
+def _open(
+    out: Path,
+    harness: HarnessConfig | None = None,
+    edit: Any = None,
+    **setup: Any,
+) -> tuple[RunProgress, dict[str, TaskTracker], Restored]:
+    """Open the run's progress and restore it for the local task (see ``_local_setup``).
+
+    ``edit`` may change the prepared items first, as a dataset change would.
+    """
+    harness = harness or _harness()
+    trackers, items = _local_setup(**setup)
+    if edit is not None:
+        edit(items)
+    progress = open_run_progress(str(out), "mock", harness)
+    return progress, trackers, progress.restore(trackers, items, harness)
+
+
+def _first_attempt(
+    out: Path, failures: dict[int, bool] | None = None, **setup: Any
+) -> dict[str, Any]:
+    """Run the local task once, recording progress, then leave only the records as a kill would.
+
+    Returns the task results of this attempt.
+    """
+    progress, trackers, restored = _open(out, **setup)
+    results = _process(trackers, restored.remaining, progress, restored.responses, failures)
+    progress.close()
+    _drop_final(out)
+    return results
+
+
 class TestAccounting:
     def test_only_outcomes_an_uninterrupted_run_keeps_are_recorded(self, tmp_path) -> None:
         # 0: a request-caused failure (final); 1: a failed call (retried); 2: undecidable
         # (final, unscored); 3: grader unreachable (retried).
-        trackers, items = _local_setup(undecidable={2}, unreachable=frozenset({3}))
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
-        first = _process(
-            trackers, restored.remaining, progress, restored.responses, {0: True, 1: False}
-        )
-        progress.close()
-        _drop_final(tmp_path)
+        marked = {"undecidable": {2}, "unreachable": frozenset({3})}
+        first = _first_attempt(tmp_path, {0: True, 1: False}, **marked)
 
-        trackers, items = _local_setup(undecidable={2}, unreachable=frozenset({3}))
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
+        progress, trackers, restored = _open(tmp_path, **marked)
 
         assert sorted(restored.responses["local"]) == [2]
         assert trackers["local"].failed_instances == {0: "provider failed"}
@@ -1032,6 +1296,7 @@ class TestAccounting:
         trackers, items = setup()
         progress = _progress(tmp_path)
         restored = progress.restore(trackers, items, _harness())
+        progress.close()
 
         assert sorted(trackers["local"].failed_instances) == [0, 2]
         assert sorted(restored.responses["local"]) == [3]
@@ -1102,16 +1367,9 @@ class TestAccounting:
         assert second["local"].metrics == expected
 
     def test_a_task_recorded_in_full_completes_with_nothing_queued(self, tmp_path) -> None:
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
-        first = _process(trackers, restored.remaining, progress, restored.responses)
-        progress.close()
-        _drop_final(tmp_path)
+        first = _first_attempt(tmp_path)
 
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
+        progress, trackers, restored = _open(tmp_path)
         assert restored.remaining == []
         second = _process(trackers, [], progress, restored.responses)
         progress.close()
@@ -1121,24 +1379,74 @@ class TestAccounting:
         assert trackers["local"].prompt_tokens_total == 12
 
     def test_a_restored_instance_that_arrives_again_is_rejected(self, tmp_path) -> None:
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
-        _process(trackers, restored.remaining, progress, restored.responses)
-        progress.close()
-        _drop_final(tmp_path)
+        _first_attempt(tmp_path)
 
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
+        progress, trackers, restored = _open(tmp_path)
+        again = _local_setup()[1][:1]
         with pytest.raises(RuntimeError, match="accounting mismatch"):
-            _process(trackers, items[:1], progress, restored.responses)
+            _process(trackers, again, progress, restored.responses)
         progress.close()
+
+
+def test_request_times_and_worker_seconds_are_restored(tmp_path) -> None:
+    progress, trackers, restored = _open(tmp_path)
+    results = [
+        ResultItem(
+            model_name="mock",
+            task_id="local",
+            instance_idx=item.instance_idx,
+            instance=item.instance,
+            request=item.request,
+            outputs=[LMOutput(text="a", metadata={"prompt_tokens": 3})],
+            sent_at=1000.0 + 10 * (3 - item.instance_idx),
+            attributed_seconds=2.0,
+        )
+        for item in restored.remaining
+    ]
+    _process_results(trackers, results, progress, restored.responses)
+    progress.close()
+    _drop_final(tmp_path)
+    assert trackers["local"].first_request_at == 1000.0
+
+    progress, trackers, restored = _open(tmp_path)
+    progress.close()
+
+    assert restored.remaining == []
+    # The earliest request of the first attempt, as if it had not been interrupted.
+    assert trackers["local"].first_request_at == 1000.0
+    assert trackers["local"].attributed_inference_seconds == 8.0
+
+
+def _scored(item: QueueItem, failed: bool = False) -> tuple[Response, ResultItem]:
+    """The scored response of one local-task item, and the result it came from."""
+    result = ResultItem(
+        model_name="mock",
+        task_id=item.task_id,
+        instance_idx=item.instance_idx,
+        instance=item.instance,
+        request=item.request,
+        outputs=[] if failed else [LMOutput(text="a")],
+        error="too long" if failed else None,
+        request_caused=failed,
+    )
+    response = Response(
+        instance=item.instance,
+        request=item.request,
+        outputs=result.outputs,
+        scores={"picky": 1.0},
+    )
+    return response, result
+
+
+class TestShutdown:
+    @pytest.fixture(autouse=True)
+    def _clear_shutdown(self) -> Iterator[None]:
+        clear_shutdown()
+        yield
+        clear_shutdown()
 
     def test_nothing_is_recorded_after_shutdown_was_requested(self, tmp_path) -> None:
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
+        progress, trackers, restored = _open(tmp_path)
         request_shutdown()
         try:
             with pytest.raises(Terminated):
@@ -1147,10 +1455,62 @@ class TestAccounting:
             clear_shutdown()
             progress.close()
 
-        trackers, items = _local_setup(undecidable=set())
-        restored = _progress(tmp_path).restore(trackers, items, _harness())
+        progress, trackers, restored = _open(tmp_path)
+        progress.close()
         assert restored.responses == {} and trackers["local"].failed_instances == {}
         assert not list((tmp_path / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))
+
+    def test_a_result_that_arrives_after_shutdown_is_not_recorded(self, tmp_path) -> None:
+        progress, _, restored = _open(tmp_path)
+        before, scored_after, failed_after = restored.remaining[:3]
+
+        progress.record("local", before.instance_idx, *_scored(before))
+        request_shutdown()
+        progress.record("local", scored_after.instance_idx, *_scored(scored_after))
+        progress.record_failure("local", failed_after.instance_idx, _scored(failed_after, True)[1])
+        progress.close()
+
+        assert [e["idx"] for e in _instance_entries(tmp_path)] == [before.instance_idx]
+
+    def test_a_task_finished_after_shutdown_is_not_finalized(self, tmp_path) -> None:
+        from olmo_eval.runners.common.types import TaskResult
+
+        progress, trackers, _ = _open(tmp_path)
+        config = trackers["local"].task.config.to_dict()  # type: ignore[union-attr]
+        request_shutdown()
+        progress.finalize("local", TaskResult("local", config, 4, {}))
+        progress.close()
+
+        assert not list((tmp_path / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))
+
+    def test_the_sigterm_handler_requests_shutdown_and_raises(self) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            pytest.skip("signal handlers are only installed from the main thread")
+        previous = signal.getsignal(signal.SIGTERM)
+
+        with _sigterm_raises():
+            handler = signal.getsignal(signal.SIGTERM)
+            assert callable(handler) and handler is not previous
+            with pytest.raises(Terminated):
+                handler(signal.SIGTERM, None)
+            assert shutdown_requested()
+
+        # A later run in this process starts with no request pending.
+        assert not shutdown_requested()
+        assert signal.getsignal(signal.SIGTERM) is previous
+
+    def test_leaving_the_sigterm_context_clears_a_request_made_inside_it(self) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            pytest.skip("signal handlers are only installed from the main thread")
+
+        with _sigterm_raises():
+            request_shutdown()
+        assert not shutdown_requested()
+
+        with pytest.raises(RuntimeError, match="boom"), _sigterm_raises():
+            request_shutdown()
+            raise RuntimeError("boom")
+        assert not shutdown_requested()
 
 
 class TestFailedTasks:
@@ -1190,61 +1550,65 @@ class TestFailedTasks:
         progress.close()
 
 
+def _run_id(out: Path) -> str:
+    manifest = read_manifest(out)
+    assert manifest is not None
+    return manifest["run"]["run_id"]
+
+
 class TestRunIdentity:
-    def _write_manifest(self, out: Path, status: str, specs: list[str]) -> str:
-        runner = _runner(out, {spec: 3 for spec in specs})
-        _, runner._resume_record = runner._previous_run()
-        runner._start_run_record("abc123def456")
-        path = out / "manifest.json"
-        manifest = json.loads(path.read_text())
-        manifest["run"]["status"] = status
-        path.write_text(json.dumps(manifest))
-        return "abc123def456"
+    def test_a_resumed_run_keeps_its_id_and_counts_its_restarts(
+        self, interrupted_run, tmp_path
+    ) -> None:
+        out = _resume_copy(interrupted_run, tmp_path)
 
-    @staticmethod
-    def _leave_progress(out: Path) -> None:
-        record = stream_dir(out, "mock") / "000000.jsonl"
-        record.parent.mkdir(parents=True, exist_ok=True)
-        record.write_text("{}\n")
+        run_eval(out, INTERRUPTED_LIMITS, env={"BEAKER_JOB_ID": "job-2"})
 
-    def test_a_resumed_run_keeps_its_id(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setenv("BEAKER_JOB_ID", "job-1")
-        run_id = self._write_manifest(tmp_path, "failed", ["gsm8k"])
-        self._leave_progress(tmp_path)
-        monkeypatch.setenv("BEAKER_JOB_ID", "job-2")
-        runner = _runner(tmp_path, {"gsm8k": 3}, resume=True)
-
-        previous_run_id, runner._resume_record = runner._previous_run()
-        assert previous_run_id == run_id
-        runner._start_run_record(run_id)
-
-        manifest = read_manifest(tmp_path)
+        manifest = read_manifest(out)
         assert manifest is not None
+        assert manifest["run"]["run_id"] == _run_id(interrupted_run)
+        assert manifest["run"]["status"] == "complete"
         assert manifest["resume"] == {"resumed_count": 1, "beaker_job_ids": ["job-1", "job-2"]}
-        assert manifest["run"]["status"] == "running"
 
     @pytest.mark.parametrize(
-        ("status", "specs", "resume"),
-        [
-            ("complete", ["gsm8k"], True),
-            ("running", ["ifeval"], True),
-            ("running", ["gsm8k"], False),
-        ],
+        "case", ["another model", "other task specs", "without resume", "fresh", "discarded"]
     )
-    def test_a_finished_other_or_unresumed_run_gets_a_new_id(
-        self, tmp_path, status, specs, resume
+    def test_a_run_that_cannot_continue_the_records_gets_a_new_id(
+        self, interrupted_run, tmp_path, case
     ) -> None:
-        self._write_manifest(tmp_path, status, specs)
-        assert _runner(tmp_path, {"gsm8k": 3}, resume=resume)._previous_run()[0] is None
+        out = _resume_copy(interrupted_run, tmp_path)
+        limits = {"gsm8k": 2}
+        kwargs: dict[str, Any] = {}
+        if case == "another model":
+            kwargs["model"] = "another-model"
+        elif case == "other task specs":
+            limits = {"ifeval": 4}
+        elif case == "without resume":
+            kwargs["resume"] = False
+        elif case == "fresh":
+            kwargs.update(fresh=True, resume=False)
+        else:
+            discard_progress(out)
 
-    def test_discarded_progress_gives_a_new_id(self, tmp_path) -> None:
-        self._write_manifest(tmp_path, "failed", ["gsm8k"])
-        runner = _runner(tmp_path, {"gsm8k": 3}, resume=True)
+        run_eval(out, limits, **kwargs)
+
+        manifest = read_manifest(out)
+        assert manifest is not None
+        assert manifest["run"]["run_id"] != _run_id(interrupted_run)
+        assert manifest["resume"]["resumed_count"] == 0
+
+    def test_a_completed_run_is_not_continued(self, interrupted_run, tmp_path) -> None:
+        # Below run_eval: a completed run deletes its progress, so no run can reach a
+        # completed manifest that still has records beside it.
+        out = _resume_copy(interrupted_run, tmp_path)
+        path = out / "manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["run"]["status"] = "complete"
+        path.write_text(json.dumps(manifest))
+
+        runner = _runner(out, INTERRUPTED_LIMITS, resume=True)
+
         assert runner._previous_run()[0] is None
-        self._leave_progress(tmp_path)
-        assert runner._previous_run()[0] == "abc123def456"
-        discard_progress(tmp_path)
-        assert _runner(tmp_path, {"gsm8k": 3}, resume=True)._previous_run()[0] is None
 
 
 class TestProgressIsNotUploaded:
@@ -1269,109 +1633,103 @@ class TestProgressIsNotUploaded:
         assert sorted(files) == ["metrics.json", "predictions/m/t.jsonl"]
         assert not any(a["path"].startswith(PROGRESS_DIR) for a in artifacts)
 
-    def _finalize(self, tmp_path, results, progress, resume=True) -> bool:
-        """Run the finalize step; whether the records were still there when the upload ran."""
+
+class TestProgressLifetime:
+    """When a run deletes the records it wrote."""
+
+    def _upload_run(
+        self, out: Path, upload_error: Exception | None = None, **kwargs: Any
+    ) -> list[bool]:
+        """Run with uploads on; whether the records were still there when the upload ran."""
         from unittest.mock import patch
 
-        from olmo_eval.runners.asynq.results import FailureBudgetExceeded
         from olmo_eval.upload import UploadConfig
 
-        runner = _runner(tmp_path, {"gsm8k": 3}, resume=resume)
-        runner.upload_config = UploadConfig(enabled=True, api_url="https://ingest.test")
-        runner._start_run_record = lambda experiment_id: None  # type: ignore[method-assign]
         seen: list[bool] = []
 
-        def upload(output_dir, config) -> None:
+        def upload(output_dir: str, config: Any) -> None:
             assert (Path(output_dir) / "metrics.json").exists()
             seen.append(has_progress(output_dir))
+            if upload_error is not None:
+                raise upload_error
 
-        results_dict = {"model": "mock", "model_config": {}, "tasks": {}, "errors": []}
         with (
             patch("olmo_eval.upload.upload_results_dir", side_effect=upload),
-            contextlib.suppress(FailureBudgetExceeded),
+            patch("olmo_eval.upload.register_run_start"),
         ):
-            runner._finalize_and_gate(
-                results, results_dict, experiment_id="abc123def456", progress=progress
+            run_eval(
+                out,
+                INTERRUPTED_LIMITS,
+                upload_config=UploadConfig(enabled=True, api_url="https://ingest.test"),
+                **kwargs,
             )
-        assert len(seen) == 1
-        return seen[0]
-
-    def _finished(self, tmp_path):
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
-        results = _process(trackers, restored.remaining, progress, restored.responses)
-        assert has_progress(tmp_path)
-        return progress, results
+        return seen
 
     def test_progress_is_deleted_after_a_completed_run_uploads(self, tmp_path) -> None:
-        progress, results = self._finished(tmp_path)
-
-        assert self._finalize(tmp_path, results, progress) is True
+        # The records outlive the upload, so a preemption during it still resumes.
+        assert self._upload_run(tmp_path) == [True]
         assert not has_progress(tmp_path)
 
     def test_a_failed_upload_keeps_progress_for_the_requeue(self, tmp_path) -> None:
-        from unittest.mock import patch
+        with pytest.raises(RuntimeError, match="preempted"):
+            self._upload_run(tmp_path, RuntimeError("preempted"))
 
-        from olmo_eval.upload import UploadConfig
-
-        progress, results = self._finished(tmp_path)
-        runner = _runner(tmp_path, {"gsm8k": 3}, resume=True)
-        runner.upload_config = UploadConfig(enabled=True, api_url="https://ingest.test")
-        runner._start_run_record = lambda experiment_id: None  # type: ignore[method-assign]
-        results_dict = {"model": "mock", "model_config": {}, "tasks": {}, "errors": []}
-
-        with (
-            patch("olmo_eval.upload.upload_results_dir", side_effect=RuntimeError("preempted")),
-            pytest.raises(RuntimeError, match="preempted"),
-        ):
-            runner._finalize_and_gate(
-                results, results_dict, experiment_id="abc123def456", progress=progress
-            )
         assert has_progress(tmp_path)
 
-    def test_a_run_that_trips_the_gate_keeps_progress_for_its_retry(self, tmp_path) -> None:
-        progress, results = self._finished(tmp_path)
-        results["local"].failure_budget_exceeded = True
-
-        assert self._finalize(tmp_path, results, progress) is True
-        assert has_progress(tmp_path)
-        progress.close()
-
-    def test_a_completed_run_deletes_only_its_own_records(self, tmp_path) -> None:
-        other = tmp_path / PROGRESS_DIR / "other-model"
+    def test_a_completed_run_deletes_only_its_own_records(self, interrupted_run, tmp_path) -> None:
+        out = _resume_copy(interrupted_run, tmp_path)
+        other = out / PROGRESS_DIR / "other-model"
         other.mkdir(parents=True)
         (other / "run.segments").write_text("{}\n")
         (other / f"gsm8k_abcdef{FINAL_SUFFIX}").write_text("{}")
-        progress, results = self._finished(tmp_path)
-        mine = stream_dir(tmp_path, "mock").parent
-        assert mine.is_dir()
 
-        self._finalize(tmp_path, results, progress)
+        run_eval(out, INTERRUPTED_LIMITS)
 
-        assert not mine.exists()
+        assert not stream_dir(out, "mock").parent.exists()
         assert sorted(p.name for p in other.iterdir()) == [
             f"gsm8k_abcdef{FINAL_SUFFIX}",
             "run.segments",
         ]
 
-    def test_discard_removes_emptied_directories(self, tmp_path) -> None:
-        progress, _ = self._finished(tmp_path)
-        progress.discard()
-        assert not (tmp_path / PROGRESS_DIR).exists()
-
     def test_a_run_without_resume_leaves_stale_progress_and_warns(
-        self, tmp_path, monkeypatch
+        self, interrupted_run, tmp_path, runner_log
     ) -> None:
-        progress, results = self._finished(tmp_path)
-        progress.close()
-        warnings: list[str] = []
-        monkeypatch.setattr(runner_module.runner_logger, "warning", warnings.append)
+        out = _resume_copy(interrupted_run, tmp_path)
+        before = sorted(str(p.relative_to(out)) for p in (out / PROGRESS_DIR).rglob("*"))
 
-        self._finalize(tmp_path, results, None, resume=False)
+        with runner_log.at_level(logging.WARNING):
+            run_eval(out, INTERRUPTED_LIMITS, resume=False)
+
+        assert "It is stale: this run did not use it" in runner_log.text
+        assert sorted(str(p.relative_to(out)) for p in (out / PROGRESS_DIR).rglob("*")) == before
+
+    def test_a_run_that_trips_the_gate_keeps_progress_for_its_retry(self, tmp_path) -> None:
+        # Below run_eval: no fake provider failure rate trips the budget at a chosen task.
+        from olmo_eval.runners.asynq.results import FailureBudgetExceeded
+
+        progress, trackers, restored = _open(tmp_path)
+        results = _process(trackers, restored.remaining, progress, restored.responses)
+        results["local"].failure_budget_exceeded = True
+        runner = _runner(tmp_path, {"gsm8k": 3}, resume=True)
+        runner._start_run_record = lambda experiment_id: None  # type: ignore[method-assign]
+        results_dict = {"model": "mock", "model_config": {}, "tasks": {}, "errors": []}
+
+        with pytest.raises(FailureBudgetExceeded):
+            runner._finalize_and_gate(
+                results, results_dict, experiment_id="abc123def456", progress=progress
+            )
+        progress.close()
 
         assert has_progress(tmp_path)
-        assert any("stale" in w for w in warnings)
+
+    def test_discard_removes_emptied_directories(self, tmp_path) -> None:
+        progress, trackers, restored = _open(tmp_path)
+        _process(trackers, restored.remaining, progress, restored.responses)
+        assert has_progress(tmp_path)
+
+        progress.discard()
+
+        assert not (tmp_path / PROGRESS_DIR).exists()
 
 
 def test_the_resume_flags_reach_the_runner(tmp_path) -> None:
@@ -1436,7 +1794,10 @@ def _long_generation(item: QueueItem, samples: int, tokens: int) -> ResultItem:
 
 
 def _record_and_restore(
-    tmp_path: Path, results: Any, *metrics: Any
+    tmp_path: Path,
+    results: Any,
+    *metrics: Any,
+    request_type: RequestType = RequestType.COMPLETION,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     """Record a run of the local task, then restore it in full and finish it again.
 
@@ -1445,7 +1806,7 @@ def _record_and_restore(
     """
 
     def setup() -> tuple[dict[str, TaskTracker], list[QueueItem]]:
-        trackers, items = _local_setup(undecidable=set())
+        trackers, items = _local_setup(request_type=request_type)
         if metrics:
             trackers["local"].task = _LocalTask(
                 TaskConfig(name="local", data_source="test/local", metrics=metrics)
@@ -1529,6 +1890,58 @@ class TestCompactRecords:
         assert second["local"].metrics == first["local"].metrics
         assert json.dumps(second["local"].predictions) == json.dumps(first["local"].predictions)
 
+    def test_loglikelihood_outputs_keep_their_logprobs_for_any_metric(self, tmp_path) -> None:
+        """No scorer is marked as reading logprobs, so only the request type keeps them."""
+        from olmo_eval.common.metrics.base import Metric
+
+        @dataclass(frozen=True, slots=True)
+        class FirstChoiceAccuracy(Metric):
+            """Multiple-choice accuracy from the logprobs of each choice, gold index 0."""
+
+            name: str = "first_choice_accuracy"
+            scorer: type[Scorer] | Scorer = _PickyScorer
+
+            def compute(self, responses: Any) -> float:
+                correct = 0
+                for response in responses:
+                    totals = [sum(t["logprob"] for t in o.logprobs) for o in response.outputs]
+                    correct += totals.index(max(totals)) == 0
+                return correct / len(responses)
+
+        def choices(item: QueueItem) -> ResultItem:
+            outputs = []
+            for choice, logprob in enumerate((-0.5, -2.0 - item.instance_idx, -3.0)):
+                outputs.append(
+                    LMOutput(
+                        text=f"choice {choice}",
+                        logprobs=[{"token": f"c{choice}", "logprob": logprob}],
+                        # As every provider that returns logprobs sets them, so the
+                        # records could do without the logprobs if they were generated.
+                        metadata={"sum_logits": logprob, "num_tokens": 1, "num_tokens_all": 1},
+                    )
+                )
+            return ResultItem(
+                model_name="mock",
+                task_id="local",
+                instance_idx=item.instance_idx,
+                instance=item.instance,
+                request=item.request,
+                outputs=outputs,
+            )
+
+        first, second, recorded = _record_and_restore(
+            tmp_path, choices, FirstChoiceAccuracy(), request_type=RequestType.LOGLIKELIHOOD
+        )
+
+        assert len(recorded) == 4
+        for entry in recorded:
+            assert len(entry["outputs"]) == 3
+            assert all(
+                output["logprobs"] and "logprob_count" not in output for output in entry["outputs"]
+            )
+        assert first["local"].metrics["first_choice_accuracy"]
+        assert second["local"].metrics == first["local"].metrics
+
     def test_reading_left_out_logprobs_fails_instead_of_scoring(self, tmp_path) -> None:
         """A consumer the records do not know about cannot compute from missing tokens."""
         _record_and_restore(tmp_path, lambda item: _long_generation(item, 1, 7))
@@ -1568,13 +1981,21 @@ class TestCompactRecords:
 
 
 class _SlowProvider:
-    """Answers each request with its prompt; the request "slow" waits to be released."""
+    """Answers each request with its prompt; the request "slow" waits to be released.
 
-    max_concurrency = 8
+    ``fast_answered`` is set once every request other than "slow" and "dead" has been
+    answered; ``in_flight`` and ``peak`` count the calls running at once.
+    """
 
-    def __init__(self) -> None:
+    max_concurrency: int | None = 8
+
+    def __init__(self, fast: int = 0) -> None:
         self.release = asyncio.Event()
+        self.fast_answered = asyncio.Event()
         self.calls: list[list[str]] = []
+        self._fast_left = fast
+        self.in_flight = 0
+        self.peak = 0
 
     def describe_request(self, request: LMRequest, params: Any) -> None:
         return None
@@ -1585,11 +2006,21 @@ class _SlowProvider:
         self.calls.append([str(request.prompt) for request in requests])
 
         async def one(request: LMRequest) -> list[LMOutput]:
-            if request.prompt == "slow":
-                await self.release.wait()
-            if request.prompt == "dead":
-                raise TerminalProviderError("engine died")
-            return [LMOutput(text=str(request.prompt))]
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+            try:
+                if request.prompt == "slow":
+                    await self.release.wait()
+                if request.prompt == "dead":
+                    raise TerminalProviderError("engine died")
+                await asyncio.sleep(0)  # let other requests start
+                if request.prompt != "slow":
+                    self._fast_left -= 1
+                    if self._fast_left == 0:
+                        self.fast_answered.set()
+                return [LMOutput(text=str(request.prompt))]
+            finally:
+                self.in_flight -= 1
 
         return list(await asyncio.gather(*(one(request) for request in requests)))
 
@@ -1623,13 +2054,20 @@ def _queued(prompts: list[str]) -> queue.Queue[QueueItem | None]:
     return items
 
 
+_WAIT_SECONDS = 60  # far longer than any run takes; it only bounds a hang
+
+
 async def _run_batched(
-    prompts: list[str], per_request: bool, wait_for: int
+    prompts: list[str], per_request: bool
 ) -> tuple[list[str], _SlowProvider, list[ResultItem]]:
-    """Run one batch through the batched strategy; return what arrived before "slow" ended."""
+    """Run one batch through the batched strategy; return what arrived before "slow" ended.
+
+    Waits for the provider to answer every other request, not for a time to pass.
+    """
     from olmo_eval.runners.asynq.batching import BatchConfig, get_strategy
 
-    provider = _SlowProvider()
+    fast = sum(prompt not in ("slow", "dead") for prompt in prompts)
+    provider = _SlowProvider(fast)
     harness = _FakeHarness(provider)
     provider.harness = harness  # type: ignore[attr-defined]
     results: queue.Queue[ResultItem] = queue.Queue()
@@ -1646,21 +2084,30 @@ async def _run_batched(
             len(prompts),
         )
     )
-    deadline = time.monotonic() + 1.0
-    while results.qsize() < wait_for and time.monotonic() < deadline and not run.done():
-        await asyncio.sleep(0.01)
-    early = [str(results.get_nowait().request.prompt) for _ in range(results.qsize())]
-    provider.release.set()
+    answered = asyncio.create_task(provider.fast_answered.wait())
     try:
+        await asyncio.wait(
+            {run, answered}, timeout=_WAIT_SECONDS, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not run.done():
+            # Per-request results are queued as each call returns; a whole batch's, never
+            # before the batch ends, so give those every chance to appear.
+            for _ in range(200 if per_request else 50):
+                if per_request and results.qsize() >= fast:
+                    break
+                await asyncio.sleep(0.001)
+        early = [str(results.get_nowait().request.prompt) for _ in range(results.qsize())]
+        provider.release.set()
         await run
     finally:
+        answered.cancel()
         rest = [results.get_nowait() for _ in range(results.qsize())]
     return early, provider, rest
 
 
 class TestPerRequestResults:
     def test_a_slow_request_does_not_hold_back_its_batch(self) -> None:
-        early, provider, rest = asyncio.run(_run_batched(["slow", "a", "b", "c"], True, 3))
+        early, provider, rest = asyncio.run(_run_batched(["slow", "a", "b", "c"], True))
 
         # Each finished request reached the result queue while "slow" was still running.
         assert sorted(early) == ["a", "b", "c"]
@@ -1669,7 +2116,7 @@ class TestPerRequestResults:
         assert all(result.error is None for result in rest)
 
     def test_without_progress_a_batch_returns_whole(self) -> None:
-        early, provider, rest = asyncio.run(_run_batched(["slow", "a", "b", "c"], False, 3))
+        early, provider, rest = asyncio.run(_run_batched(["slow", "a", "b", "c"], False))
 
         assert early == []
         assert provider.calls == [["slow", "a", "b", "c"]]
@@ -1677,14 +2124,14 @@ class TestPerRequestResults:
 
     @pytest.mark.parametrize("per_request", [True, False])
     def test_a_batch_flushes_one_metrics_record(self, per_request) -> None:
-        _, provider, _ = asyncio.run(_run_batched(["slow", "a", "b", "c"], per_request, 3))
+        _, provider, _ = asyncio.run(_run_batched(["slow", "a", "b", "c"], per_request))
 
         assert len(provider.harness.flushed) == 1  # type: ignore[attr-defined]
 
     def test_per_request_and_batched_flush_the_same_batch_identity(self) -> None:
         flushed = []
         for per_request in (True, False):
-            _, provider, _ = asyncio.run(_run_batched(["slow", "a", "b", "c"], per_request, 3))
+            _, provider, _ = asyncio.run(_run_batched(["slow", "a", "b", "c"], per_request))
             flushed.append(provider.harness.flushed)  # type: ignore[attr-defined]
 
         assert flushed[0] == flushed[1]
@@ -1718,48 +2165,102 @@ class TestPerRequestResults:
         assert len(shares) == 3
         assert sum(shares) == pytest.approx(7.0)
 
+    @pytest.mark.parametrize(
+        ("provider_limit", "argument_limit", "expected_peak"),
+        [(2, None, 2), (2, 5, 2), (None, 3, 3), (None, None, 6)],
+    )
+    def test_requests_in_flight_stay_within_the_providers_concurrency(
+        self, provider_limit, argument_limit, expected_peak
+    ) -> None:
+        """The provider's own limit applies, as it would to one batched call."""
+        from olmo_eval.runners.asynq.processing import process_batch_per_request
+
+        class Provider(_SlowProvider):
+            max_concurrency = provider_limit
+
+            async def agenerate(self, requests, params):
+                self.in_flight += 1
+                self.peak = max(self.peak, self.in_flight)
+                for _ in range(5):  # stay in flight while the others get their turn
+                    await asyncio.sleep(0)
+                self.in_flight -= 1
+                return [[LMOutput(text=str(request.prompt))] for request in requests]
+
+        provider = Provider()
+        results: queue.Queue[ResultItem] = queue.Queue()
+        items = list(_queued([f"r{i}" for i in range(6)]).queue)[:-1]
+
+        asyncio.run(
+            process_batch_per_request(
+                items,
+                _FakeHarness(provider),  # type: ignore[arg-type]
+                results,  # type: ignore[arg-type]
+                max_concurrency=argument_limit,
+            )
+        )
+
+        assert provider.peak == expected_peak
+        assert results.qsize() == 6
+
     def test_a_terminal_error_still_stops_the_worker(self) -> None:
         from olmo_eval.inference.errors import TerminalProviderError
 
         with pytest.raises(TerminalProviderError, match="engine died"):
-            asyncio.run(_run_batched(["slow", "dead", "a"], True, 3))
+            asyncio.run(_run_batched(["slow", "dead", "a"], True))
 
-    def test_only_providers_that_dispatch_one_by_one_split_batches(self) -> None:
+    def test_the_engines_are_the_providers_that_keep_whole_batches(self) -> None:
+        from olmo_eval.common.types import ProviderKind
         from olmo_eval.runners.asynq.batching import BatchConfig
 
-        split = {kind for kind in ("vllm_server", "litellm", "mock")}
-        engines = {"vllm", "sglang", "hf", "olmo_core", "olmo_core_vlm"}
-        assert all(BatchConfig.dispatches_per_request(kind) for kind in split)
-        assert not any(BatchConfig.dispatches_per_request(kind) for kind in engines)
+        kinds = {str(kind) for kind in ProviderKind}
+        assert kinds >= BatchConfig._SEQUENTIAL_ONLY
+        for kind in sorted(kinds):
+            assert BatchConfig.dispatches_per_request(kind) is (
+                kind not in BatchConfig._SEQUENTIAL_ONLY
+            )
+        assert {"vllm_server", "litellm", "mock"} <= {
+            kind for kind in kinds if BatchConfig.dispatches_per_request(kind)
+        }
 
     @pytest.mark.parametrize("per_request", [True, False])
-    def test_the_worker_asks_for_per_request_results_only_with_progress(
-        self, monkeypatch, per_request
+    @pytest.mark.parametrize("kind", sorted(str(kind) for kind in ProviderKind))
+    def test_the_worker_splits_batches_only_for_providers_that_dispatch_one_by_one(
+        self, monkeypatch, kind, per_request
     ) -> None:
         from olmo_eval.runners.asynq import batching
+        from olmo_eval.runners.asynq.batching import BatchConfig
 
         chosen: list[bool] = []
-        real = batching.get_strategy
 
-        def spy(*args: Any, **kwargs: Any) -> Any:
+        def get_strategy(*args: Any, **kwargs: Any) -> Any:
             chosen.append(kwargs["per_request"])
-            return real(*args, **kwargs)
+            return SimpleNamespace(run=AsyncMock())
 
-        monkeypatch.setattr(batching, "get_strategy", spy)
-        items: queue.Queue[QueueItem | None] = queue.Queue()
-        items.put(None)
-        # The real worker, in this process; the module fixture replaced the spawned one.
+        class Provider:
+            # What the worker reads from an SGLang provider.
+            profile_report = {"selected": "generic", "effective_options": {}}
+            recommended_batch_sequences = None
+
+        def make_harness(config: HarnessConfig) -> Any:
+            return SimpleNamespace(
+                provider=Provider(), initialize_reporters=Mock(), cleanup=AsyncMock()
+            )
+
+        monkeypatch.setattr(batching, "get_strategy", get_strategy)
+        monkeypatch.setattr("olmo_eval.harness.Harness", make_harness)
+        config = HarnessConfig(name="default", provider=ProviderConfig(kind=kind, model="m"))
+
         real_inference_worker(
             "worker-0",
             [],
-            items,  # type: ignore[arg-type]
-            queue.Queue(),  # type: ignore[arg-type]
-            _harness().to_dict(),
+            Mock(),
+            Mock(),
+            config.to_dict(),
             0,
             per_request=per_request,
         )
 
-        assert chosen == [per_request]
+        assert chosen == [per_request and kind not in BatchConfig._SEQUENTIAL_ONLY]
 
     @pytest.mark.parametrize("resume", [True, False])
     def test_the_runner_tells_workers_whether_it_records_progress(
@@ -1767,7 +2268,8 @@ class TestPerRequestResults:
     ) -> None:
         from olmo_eval.inference.provider_manager import ProviderManager
 
-        sent: list[Any] = []
+        told: list[bool] = []
+        sent: list[dict[str, Any]] = []
 
         class Context:
             def Process(self, target: Any, args: tuple[Any, ...]) -> Any:
@@ -1777,43 +2279,22 @@ class TestPerRequestResults:
                 sent.append(dict(zip(parameters, args, strict=False)))
                 raise RuntimeError("stop before starting workers")
 
-        manager = ProviderManager(
-            harness_config=_harness(),
-            num_inference_workers=1,
-            gpu_ids=[],
-            item_queue=queue.Queue(),  # type: ignore[arg-type]
-            result_queue=queue.Queue(),  # type: ignore[arg-type]
-            per_request=resume,
-        )
-        with pytest.raises(RuntimeError, match="stop before"):
-            manager.start(Context(), 0, queue.Queue())  # type: ignore[arg-type]
-        assert sent[0]["per_request"] is resume
-
-        made: list[bool] = []
         real_init = ProviderManager.__init__
 
         def init(self: Any, *args: Any, **kwargs: Any) -> None:
-            made.append(kwargs.get("per_request", False))
+            told.append(kwargs.get("per_request", False))
             real_init(self, *args, **kwargs)
 
+        def start(self: Any, ctx: Any, *args: Any) -> Any:
+            return real_start(self, Context(), *args)
+
+        real_start = ProviderManager.start
         monkeypatch.setattr(ProviderManager, "__init__", init)
-        run_eval(tmp_path, {"gsm8k": 2}, resume=resume)
-        assert made == [resume]
+        monkeypatch.setattr(ProviderManager, "start", start)
 
-    def test_the_batching_strategy_is_not_part_of_what_must_match(self, tmp_path) -> None:
-        from olmo_eval.runners.asynq.batching import BatchConfig
+        with pytest.raises(RuntimeError, match="stop before starting workers"):
+            run_eval(tmp_path, {"gsm8k": 2}, resume=resume)
 
-        trackers, items = _local_setup(undecidable=set())
-        progress = _progress(tmp_path)
-        restored = progress.restore(trackers, items, _harness())
-        _process(trackers, restored.remaining, progress, restored.responses)
-        progress.close()
-        _drop_final(tmp_path)
-
-        streaming = replace(_harness(), batching=BatchConfig.streaming())
-        trackers, items = _local_setup(undecidable=set())
-        progress = open_run_progress(str(tmp_path), "mock", streaming)
-        restored = progress.restore(trackers, items, streaming)
-        progress.close()
-
-        assert sorted(restored.responses["local"]) == [0, 1, 2, 3]
+        # The runner gives the manager the flag, and the manager passes it to each worker.
+        assert told == [resume]
+        assert sent[0]["per_request"] is resume

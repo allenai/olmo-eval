@@ -5,9 +5,10 @@ outputs onto the wrong instance would look correct. Here each output is a functi
 of a hash of the prompt and the sample index: about half repeat the answer the
 fake dataset hides in the prompt (``<<say:...>>``), the rest are wrong, and some
 requests fail, either from their own context overflow (final) or as a marked
-connection error (which a resumed run tries again). Calls also take a random few
-milliseconds, so results arrive out of order. Generations carry per-token logprobs
-and their summaries, as vllm_server returns them when asked for logprobs.
+connection error (which a resumed run tries again). Calls also take a few
+milliseconds, fixed by the request so that a rerun sleeps the same, and results arrive
+out of order. Generations carry per-token logprobs and their summaries, as vllm_server
+returns them when asked for logprobs.
 
 Workers are separate processes, so the provider reaches them through
 :func:`inference_worker`, which the tests put in place of the real worker target.
@@ -18,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import random
 import re
 from typing import Any
 
@@ -41,8 +41,9 @@ def _prompt(request: LMRequest) -> str:
     return request.prompt or json.dumps(request.messages, sort_keys=True, default=str)
 
 
-async def _latency() -> None:
-    await asyncio.sleep(random.uniform(0.0, 0.01))
+async def _latency(key: str) -> None:
+    """Sleep a few milliseconds fixed by ``key``, so different requests finish out of order."""
+    await asyncio.sleep((digest(key, "latency") % 10) / 1000.0)
 
 
 def _token_logprobs(text: str, prompt: str, sample: int) -> list[LogProbEntry]:
@@ -98,7 +99,7 @@ class HashProvider(MockProvider):
     async def agenerate(
         self, requests: list[LMRequest], sampling_params: SamplingParams | None = None
     ) -> list[list[LMOutput]]:
-        await _latency()
+        await _latency(_prompt(requests[0]) if requests else "")
         return self.generate(requests, sampling_params)
 
     def logprobs(
@@ -122,7 +123,7 @@ class HashProvider(MockProvider):
     async def alogprobs(
         self, requests: list[LMRequest], sampling_params: SamplingParams | None = None
     ) -> list[list[LMOutput]]:
-        await _latency()
+        await _latency(_prompt(requests[0]) if requests else "")
         return self.logprobs(requests, sampling_params)
 
 
@@ -132,7 +133,7 @@ JUDGE_CALLS: list[str] = []
 async def judge(prompt: Any, *, system_prompt: str | None = None) -> str:
     """Grade by a hash of the prompt; some calls fail, and some replies give no verdict."""
     JUDGE_CALLS.append(str(prompt))
-    await _latency()
+    await _latency(str(prompt))
     h = digest(str(prompt), "judge")
     if h % 5 == 0:
         raise ConnectionError("fake judge unavailable")

@@ -1102,3 +1102,31 @@ def test_request_length_caps_reach_the_profile_report(setup_engine):
     assert provider.profile_report["max_total_num_tokens"] == 4096
     assert provider.profile_report["max_req_input_len"] == 4000
     engine.get_server_info.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "scheduler_info",
+    [
+        {"max_total_num_tokens": 0, "max_req_input_len": 0},
+        {"max_total_num_tokens": -5, "max_req_input_len": -5},
+        {"max_total_num_tokens": 4096.0, "max_req_input_len": "4000"},
+        {"max_total_num_tokens": True, "max_req_input_len": None},
+        {},
+    ],
+)
+def test_unusable_request_length_caps_are_left_out_of_the_profile_report(
+    setup_engine, scheduler_info
+):
+    engine, _, _ = setup_engine
+    engine.scheduler_info = scheduler_info
+    provider = SGLangProvider("model")
+    assert "max_total_num_tokens" not in provider.profile_report
+    assert "max_req_input_len" not in provider.profile_report
+
+
+def test_each_request_length_cap_is_kept_on_its_own(setup_engine):
+    engine, _, _ = setup_engine
+    engine.scheduler_info = {"max_total_num_tokens": 4096, "max_req_input_len": 0}
+    provider = SGLangProvider("model")
+    assert provider.profile_report["max_total_num_tokens"] == 4096
+    assert "max_req_input_len" not in provider.profile_report

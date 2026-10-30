@@ -82,8 +82,10 @@ MEASUREMENT_FIELDS = (
     "version",
     "spec",
     "task_hash",
-    "model_hash",
+    # Before model_hash, which covers the revision too, so a changed revision is reported
+    # by name instead of as an opaque hash.
     "model_revision",
+    "model_hash",
     "harness_hash",
     "engine_version",
     "git_commit",
