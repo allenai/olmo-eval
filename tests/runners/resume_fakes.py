@@ -6,7 +6,8 @@ of a hash of the prompt and the sample index: about half repeat the answer the
 fake dataset hides in the prompt (``<<say:...>>``), the rest are wrong, and some
 requests fail, either from their own context overflow (final) or as a marked
 connection error (which a resumed run tries again). Calls also take a random few
-milliseconds, so results arrive out of order.
+milliseconds, so results arrive out of order. Generations carry per-token logprobs
+and their summaries, as vllm_server returns them when asked for logprobs.
 
 Workers are separate processes, so the provider reaches them through
 :func:`inference_worker`, which the tests put in place of the real worker target.
@@ -21,7 +22,7 @@ import random
 import re
 from typing import Any
 
-from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
 from olmo_eval.inference.providers.mock import MockProvider
 
@@ -42,6 +43,14 @@ def _prompt(request: LMRequest) -> str:
 
 async def _latency() -> None:
     await asyncio.sleep(random.uniform(0.0, 0.01))
+
+
+def _token_logprobs(text: str, prompt: str, sample: int) -> list[LogProbEntry]:
+    """Per-token logprobs of a generation, one entry per word, as vllm_server returns them."""
+    return [
+        {"token": token, "logprob": -(digest(prompt, sample, i) % 5000) / 1000.0}
+        for i, token in enumerate(re.findall(r"\s*\S+", text))
+    ]
 
 
 class HashProvider(MockProvider):
@@ -67,13 +76,19 @@ class HashProvider(MockProvider):
             for sample in range(params.num_samples):
                 h = digest(prompt, sample)
                 text = said[-1] if said and h % 2 == 0 else f"I am not sure, maybe {h % 97}."
+                logprobs = _token_logprobs(text, prompt, sample)
                 outputs.append(
                     LMOutput(
                         text=text,
+                        logprobs=logprobs,
                         metadata={
                             "finish_reason": "stop" if h % 5 else "length",
                             "prompt_tokens": len(prompt) // 4,
                             "completion_tokens": 1 + h % 50,
+                            # As vllm_server sets them when it returns logprobs.
+                            "sum_logits": sum(entry["logprob"] for entry in logprobs),
+                            "num_tokens": len(logprobs),
+                            "num_tokens_all": len(logprobs),
                         },
                     )
                 )

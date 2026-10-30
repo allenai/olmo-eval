@@ -40,6 +40,8 @@ from olmo_eval.runners.asynq.progress import (
     FINAL_SUFFIX,
     PROGRESS_DIR,
     PROGRESS_LAYOUT_ENV,
+    RECORD_VERSION,
+    DroppedLogprobsError,
     ProgressMismatchError,
     RunProgress,
     decode_value,
@@ -1409,6 +1411,172 @@ def test_the_resume_flags_reach_the_runner(tmp_path) -> None:
         )
         runner = RunnerFactory(config.build(), UploadConfig(enabled=False)).create()
         assert isinstance(runner, AsyncEvalRunner) and getattr(runner, flag)
+
+
+# --- Compact records ---
+
+
+def _long_generation(item: QueueItem, samples: int, tokens: int) -> ResultItem:
+    """A result with ``samples`` generations of ``tokens`` tokens, each with its logprob.
+
+    Outputs carry per-token logprobs and their summaries, as vllm_server returns them
+    when the generation kwargs ask for logprobs.
+    """
+    outputs = []
+    for sample in range(samples):
+        logprobs = [
+            {"token": f" w{(sample + i) % 997}", "logprob": -((sample * 31 + i) % 4000) / 1000.0}
+            for i in range(tokens)
+        ]
+        outputs.append(
+            LMOutput(
+                text="".join(entry["token"] for entry in logprobs),
+                logprobs=logprobs,  # type: ignore[arg-type]
+                metadata={
+                    "finish_reason": "length",
+                    "prompt_tokens": 3,
+                    "completion_tokens": tokens,
+                    "sum_logits": sum(entry["logprob"] for entry in logprobs),
+                    "num_tokens": tokens,
+                    "num_tokens_all": tokens,
+                },
+            )
+        )
+    return ResultItem(
+        model_name="mock",
+        task_id=item.task_id,
+        instance_idx=item.instance_idx,
+        instance=item.instance,
+        request=item.request,
+        outputs=outputs,
+    )
+
+
+def _record_and_restore(
+    tmp_path: Path, results: Any, *metrics: Any
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Record a run of the local task, then restore it in full and finish it again.
+
+    ``results`` maps each queue item to its result. Returns both runs' task results
+    and the recorded instance entries.
+    """
+
+    def setup() -> tuple[dict[str, TaskTracker], list[QueueItem]]:
+        trackers, items = _local_setup(undecidable=set())
+        if metrics:
+            trackers["local"].task = _LocalTask(
+                TaskConfig(name="local", data_source="test/local", metrics=metrics)
+            )
+        return trackers, items
+
+    trackers, items = setup()
+    progress = _progress(tmp_path)
+    restored = progress.restore(trackers, items, _harness())
+    first = _process_results(
+        trackers, [results(item) for item in restored.remaining], progress, restored.responses
+    )
+    progress.close()
+    _drop_final(tmp_path)
+    recorded = _instance_entries(tmp_path, "segments")
+
+    trackers, items = setup()
+    progress = _progress(tmp_path)
+    restored = progress.restore(trackers, items, _harness())
+    assert restored.remaining == []
+    second = _process_results(trackers, [], progress, restored.responses)
+    progress.close()
+    return first, second, recorded
+
+
+class TestCompactRecords:
+    def test_generations_are_recorded_without_per_token_logprobs(self, full_run) -> None:
+        full, layout = full_run
+        entries = _entries(full, layout)
+        spec_of = {e["t"]: e["header"]["spec"] for e in entries if "header" in e}
+        outputs: dict[str, list[dict[str, Any]]] = {}
+        for entry in entries:
+            for output in entry.get("outputs", ()):
+                outputs.setdefault(spec_of[entry["t"]], []).append(output)
+
+        # Log-likelihood outputs keep theirs: the multiple-choice metrics read them.
+        assert all("logprobs" in output for output in outputs.pop("arc_challenge:mc"))
+        # The fake returns per-token logprobs with every generation, as vllm_server does.
+        generations = [output for task in outputs.values() for output in task]
+        assert generations
+        assert all("logprobs" not in o and o["logprob_count"] > 0 for o in generations)
+        # The summaries the predictions report come from the metadata the records keep.
+        predictions = b"".join(
+            content for name, content in _artifacts(full).items() if "/gsm8k_" in name
+        )
+        assert b'"sum_logits"' in predictions and b'"bits_per_byte"' in predictions
+
+    def test_a_long_generation_is_recorded_without_its_token_logprobs(self, tmp_path) -> None:
+        samples, tokens = 32, 2000
+        first, second, recorded = _record_and_restore(
+            tmp_path, lambda item: _long_generation(item, samples, tokens)
+        )
+
+        assert len(recorded) == 4
+        for entry in recorded:
+            assert [output["logprob_count"] for output in entry["outputs"]] == [tokens] * samples
+            assert not any("logprobs" in output for output in entry["outputs"])
+        # The same entry with every token's logprob, as records held it before.
+        with_tokens = {
+            **recorded[0],
+            "outputs": [
+                {**output, "logprobs": [{"token": " w1", "logprob": -1.234}] * tokens}
+                for output in recorded[0]["outputs"]
+            ],
+        }
+        assert len(json.dumps(recorded[0])) * 4 < len(json.dumps(with_tokens))
+        # A restore writes byte-identical predictions and the same metrics.
+        assert second["local"].metrics == first["local"].metrics
+        assert json.dumps(second["local"].predictions) == json.dumps(first["local"].predictions)
+        assert '"sum_logits"' in json.dumps(first["local"].predictions)
+
+    def test_a_metric_that_reads_logprobs_keeps_them(self, tmp_path) -> None:
+        from olmo_eval.common.metrics import BPBMetricInstanceAvg
+
+        first, second, recorded = _record_and_restore(
+            tmp_path, lambda item: _long_generation(item, 2, 5), BPBMetricInstanceAvg()
+        )
+
+        assert all("logprobs" in output for e in recorded for output in e["outputs"])
+        assert first["local"].metrics["bits_per_byte"]
+        assert second["local"].metrics == first["local"].metrics
+        assert json.dumps(second["local"].predictions) == json.dumps(first["local"].predictions)
+
+    def test_reading_left_out_logprobs_fails_instead_of_scoring(self, tmp_path) -> None:
+        """A consumer the records do not know about cannot compute from missing tokens."""
+        _record_and_restore(tmp_path, lambda item: _long_generation(item, 1, 7))
+        _drop_final(tmp_path)
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        progress.close()
+
+        output = restored.responses["local"][0].outputs[0]
+        assert output.logprobs is not None and len(output.logprobs) == 7 and output.logprobs
+        with pytest.raises(DroppedLogprobsError, match="7 per-token logprobs"):
+            sum(entry["logprob"] for entry in output.logprobs)
+
+    def test_a_record_in_an_older_format_is_refused(self, tmp_path) -> None:
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        progress.restore(trackers, items, _harness())
+        progress.close()
+        store = _stream(tmp_path, "segments")
+        entries = list(store.read())
+        store.reset()
+        for entry in entries:
+            if "header" in entry:
+                entry["header"]["version"] = RECORD_VERSION - 1
+            store.append(entry)
+        store.close()
+
+        trackers, items = _local_setup(undecidable=set())
+        with pytest.raises(ProgressMismatchError, match=r"record format 2.*--fresh"):
+            _progress(tmp_path).restore(trackers, items, _harness())
 
 
 # --- Results return per request while progress is recorded ---

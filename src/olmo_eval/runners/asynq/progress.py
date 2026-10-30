@@ -15,6 +15,9 @@ An entry keeps what scoring produced (outputs, scores, the provider's request tr
 and instance metadata that scoring changed), not the prompt: the instance and request
 are rebuilt by preparing the task again, and a short hash of the prepared instance
 (request, sampling parameters, gold answer and metadata) checks that they are the same.
+A generation's per-token logprobs are left out when nothing after scoring reads them
+(see :func:`keeps_logprobs`); its output metadata keeps the summaries the predictions
+writer reads (``sum_logits``, ``num_tokens``).
 
 An instance's outcome is final, and recorded, when the uninterrupted run would keep
 it too: a scored response (including one some scorer could not score, which the
@@ -49,7 +52,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.scoring_failures import output_scoring_errors
@@ -59,6 +62,8 @@ from olmo_eval.runners.common.types import PREDICTIONS_SUFFIX, REQUESTS_SUFFIX, 
 from olmo_eval.runners.processing.utils import compute_task_hash, sanitize_spec_for_filename
 
 if TYPE_CHECKING:
+    from olmo_eval.common.types import LogProbEntry
+    from olmo_eval.evals.tasks.common import Task
     from olmo_eval.harness.config import HarnessConfig
     from olmo_eval.runners.asynq.types import QueueItem, ResultItem, TaskTracker
 
@@ -67,7 +72,7 @@ logger = get_logger(__name__)
 PROGRESS_DIR = "progress"
 PROGRESS_LAYOUT_ENV = "OLMO_EVAL_PROGRESS_LAYOUT"
 DEBUG_EXIT_AT_ENV = "OLMO_EVAL_DEBUG_EXIT_AT"
-RECORD_VERSION = 2
+RECORD_VERSION = 3
 FINAL_SUFFIX = ".final.json"
 
 # Append layout: seconds between fsyncs. Segments layout: the run's one segment stream
@@ -111,6 +116,47 @@ _OPERATIONAL_HARNESS_KEYS = frozenset(
 
 class ProgressMismatchError(RuntimeError):
     """Progress recorded in the output directory cannot be used by this run."""
+
+
+class DroppedLogprobsError(RuntimeError):
+    """Code read the per-token logprobs of a restored output whose record left them out."""
+
+
+class DroppedLogprobs:
+    """Stands in for the per-token logprobs a record left out of a restored output.
+
+    It has the list's length and truth value, which is what the predictions writer reads
+    besides the summaries in the output's metadata. Reading an entry raises
+    :class:`DroppedLogprobsError` rather than letting a metric compute from data the
+    record does not hold, so a consumer :func:`keeps_logprobs` does not know about
+    fails instead of changing a score.
+    """
+
+    __slots__ = ("_count",)
+
+    def __init__(self, count: int) -> None:
+        self._count = count
+
+    def __len__(self) -> int:
+        return self._count
+
+    def __bool__(self) -> bool:
+        return self._count > 0
+
+    def _missing(self) -> DroppedLogprobsError:
+        return DroppedLogprobsError(
+            f"The {self._count} per-token logprobs of this restored output were not recorded. "
+            "Mark the scorer that reads them with reads_logprobs = True, or pass --fresh."
+        )
+
+    def __iter__(self) -> Iterator[Any]:
+        raise self._missing()
+
+    def __getitem__(self, index: Any) -> Any:
+        raise self._missing()
+
+    def __repr__(self) -> str:
+        return f"DroppedLogprobs({self._count})"
 
 
 # ---------------------------------------------------------------------------
@@ -591,6 +637,12 @@ def check_header(path: Path, recorded: Mapping[str, Any], expected: Mapping[str,
 
     Execution fields that differ are logged.
     """
+    if recorded.get("version") != expected.get("version"):
+        raise ProgressMismatchError(
+            f"Progress record {path} has record format {recorded.get('version')!r}, and this "
+            f"version of olmo-eval reads format {expected.get('version')!r}. Pass --fresh to "
+            "discard recorded progress, or use another output directory."
+        )
     for key in MEASUREMENT_FIELDS:
         old, new = recorded.get(key), expected.get(key)
         if key == "git_commit" and (old is None or new is None):
@@ -712,10 +764,45 @@ def _metadata_changes(original: Mapping[str, Any], current: Mapping[str, Any]) -
     return changes
 
 
-def _encode_output(output: LMOutput) -> dict[str, Any]:
+def keeps_logprobs(task: Task | None) -> bool:
+    """Whether a task's records keep the per-token logprobs of its generations.
+
+    A metric whose scorer reads logprobs (``Scorer.reads_logprobs``) computes from them
+    after a restore, so they are kept. Log-likelihood outputs always keep theirs.
+    """
+    if task is None:
+        return True
+    config = task.config
+    metrics = [*config.metrics, config.get_primary_metric()]
+    for metric in metrics:
+        scorer = getattr(metric, "scorer", None)
+        if scorer is None:
+            continue
+        scorer_type = scorer if isinstance(scorer, type) else type(scorer)
+        if getattr(scorer_type, "reads_logprobs", False):
+            return True
+    return False
+
+
+def _drops_logprobs(output: LMOutput) -> bool:
+    """Whether the predictions writer can do without the output's per-token logprobs.
+
+    It reads ``sum_logits`` and ``num_tokens`` from the metadata when both are there,
+    which every provider that returns logprobs sets, and the list's length otherwise.
+    """
+    metadata = output.metadata or {}
+    return (
+        isinstance(output.logprobs, list) and "sum_logits" in metadata and "num_tokens" in metadata
+    )
+
+
+def _encode_output(output: LMOutput, keep_logprobs: bool = True) -> dict[str, Any]:
     encoded: dict[str, Any] = {"text": output.text}
     if output.logprobs is not None:
-        encoded["logprobs"] = encode_value(output.logprobs)
+        if keep_logprobs or not _drops_logprobs(output):
+            encoded["logprobs"] = encode_value(output.logprobs)
+        else:
+            encoded["logprob_count"] = len(output.logprobs)
     if output.extracted_answer is not None:
         encoded["answer"] = encode_value(output.extracted_answer)
     if output.metadata:
@@ -726,9 +813,12 @@ def _encode_output(output: LMOutput) -> dict[str, Any]:
 
 
 def _decode_output(encoded: Mapping[str, Any]) -> LMOutput:
+    logprobs = decode_value(encoded.get("logprobs"))
+    if "logprob_count" in encoded:
+        logprobs = cast("list[LogProbEntry]", DroppedLogprobs(encoded["logprob_count"]))
     return LMOutput(
         text=encoded["text"],
-        logprobs=decode_value(encoded.get("logprobs")),
+        logprobs=logprobs,
         extracted_answer=decode_value(encoded.get("answer")),
         metadata=decode_value(encoded.get("meta") or {}),
         tool_calls=decode_value(encoded.get("tool_calls")),
@@ -745,15 +835,24 @@ def _usage(result: ResultItem) -> dict[str, Any]:
 
 
 def encode_response(
-    item: QueueItem, response: Response, result: ResultItem, rh: str | None = None
+    item: QueueItem,
+    response: Response,
+    result: ResultItem,
+    rh: str | None = None,
+    keep_logprobs: bool = True,
 ) -> dict[str, Any]:
     """A scored instance's entry: what scoring produced, without the prompt.
 
-    ``rh`` is the instance's hash from before it was scored.
+    ``rh`` is the instance's hash from before it was scored. Without ``keep_logprobs``
+    a generation's per-token logprobs are left out where the predictions writer does not
+    need them; a log-likelihood request's are always kept.
     """
+    from olmo_eval.common.types import RequestType
+
     rh = rh or request_hash(item)
+    keep = keep_logprobs or item.request.request_type == RequestType.LOGLIKELIHOOD
     entry: dict[str, Any] = {"idx": item.instance_idx, "rh": rh}
-    entry["outputs"] = [_encode_output(output) for output in response.outputs]
+    entry["outputs"] = [_encode_output(output, keep) for output in response.outputs]
     if response.scores:
         entry["scores"] = encode_value(response.scores)
     if response.request_trace is not None:
@@ -867,6 +966,8 @@ class _TaskProgress:
     hashes: dict[int, str] = field(default_factory=dict)
     # The request trace entries leave out; most tasks send every request the same way.
     trace: Any = None
+    # Whether entries keep their generations' per-token logprobs (keeps_logprobs).
+    keep_logprobs: bool = True
 
 
 @dataclass
@@ -964,6 +1065,7 @@ class RunProgress:
                 key=task_key(spec, header["task_hash"]),
                 header=header,
                 items=by_task.get(spec, {}),
+                keep_logprobs=keeps_logprobs(tracker.task),
             )
             task.hashes = {idx: request_hash(item) for idx, item in task.items.items()}
             active[task.key] = (spec, task)
@@ -1114,8 +1216,15 @@ class RunProgress:
 
     def record(self, spec: str, idx: int, response: Response, result: ResultItem) -> None:
         """Record a scored instance whose outcome is final."""
-        if is_final(response):
-            self._append(spec, idx, lambda item, rh: encode_response(item, response, result, rh))
+        if not is_final(response):
+            return
+        task = self._tasks.get(spec)
+        keep = task is None or task.keep_logprobs
+        self._append(
+            spec,
+            idx,
+            lambda item, rh: encode_response(item, response, result, rh, keep_logprobs=keep),
+        )
 
     def record_failure(self, spec: str, idx: int, result: ResultItem) -> None:
         """Record a generation failure that the request caused.
@@ -1214,6 +1323,8 @@ def open_run_progress(
 
 __all__ = [
     "DEBUG_EXIT_AT_ENV",
+    "DroppedLogprobs",
+    "DroppedLogprobsError",
     "PROGRESS_LAYOUT_ENV",
     "ProgressMismatchError",
     "ProgressStore",
