@@ -201,20 +201,3 @@ def test_generate_leaves_a_fitting_or_spanless_prompt_alone(fake_provider) -> No
 
     assert llm.generate_calls[0]["prompts"] == ["Head:abc|Tail", "x" * 30]
     assert all("prompt_truncated_tokens" not in o[0].metadata for o in outputs)
-
-
-def test_generate_fits_the_span_to_the_requests_own_length(fake_provider) -> None:
-    """A request's max_length (HELMET's length tier) caps the budget below the model's."""
-    provider, llm, _ = fake_provider
-    provider._max_length = 100
-    request = LMRequest(
-        request_type=RequestType.COMPLETION,
-        prompt="Head:" + "abcdefghij" + "|Tail",
-        max_length=20,
-        metadata={TRUNCATABLE_SPAN_KEY: (5, 15)},
-    )
-
-    output = provider.generate([request], SamplingParams(max_tokens=2))[0][0]
-
-    assert llm.generate_calls[0]["prompts"] == ["Head:abcdefgh|Tail"]
-    assert output.metadata["prompt_truncated_tokens"] == 2

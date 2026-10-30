@@ -913,7 +913,6 @@ def test_base_variant_sends_upstreams_completion_prompt(task_name, prefix, separ
     assert request.request_type == RequestType.COMPLETION
     assert request.prompt == f"Intro\n\nCONTEXT\n\nQuestion: q{separator}{prefix}"
     assert request.prompt[slice(*request.metadata[TRUNCATABLE_SPAN_KEY])] == "CONTEXT"
-    assert request.max_length == 8192
 
 
 def test_base_variant_prepends_the_answer_prefix_before_parsing():

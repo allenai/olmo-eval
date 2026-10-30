@@ -257,14 +257,13 @@ class HelmetTask(RulerTask):
             return request
         # Upstream's tokenize() (model_utils.py) cuts the end of the context, measured
         # with the evaluated model's tokenizer, until the prompt leaves room for the
-        # generation within the length tier (input_max_length); the provider does that
-        # cut, since only it has that tokenizer. The completion prompt starts with the
-        # rendered question, so the span holds.
-        return replace(
-            request,
-            max_length=self.context_size,
-            metadata={**(request.metadata or {}), TRUNCATABLE_SPAN_KEY: span},
-        )
+        # generation; the provider does that cut, since only it has that tokenizer.
+        # Upstream's budget is the length tier (it runs the model with max_length =
+        # input_max_length); here it is the model's context, so a model with room past
+        # the tier sees all of the tier's text and only a model at its limit loses the
+        # end of it. The completion prompt starts with the rendered question, so the
+        # span holds.
+        return replace(request, metadata={**(request.metadata or {}), TRUNCATABLE_SPAN_KEY: span})
 
     @property
     def base_mode(self) -> bool:
