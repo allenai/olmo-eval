@@ -88,7 +88,12 @@ export type NestedMetrics = { [metric: string]: { [scorer: string]: number | nul
 /** Flat metrics keyed by "metric_name:scorer_name". */
 export type FlatMetrics = { [metricKey: string]: number | null };
 
-export type RunStatus = "running" | "complete" | "partial" | "failed";
+/**
+ * "interrupted" is not final: the run stopped (SIGTERM) but can resume under the same run ID,
+ * so a later "running" upsert moves it back to "running". complete, partial and failed are
+ * final.
+ */
+export type RunStatus = "running" | "interrupted" | "complete" | "partial" | "failed";
 export type FinalRunStatus = "complete" | "partial" | "failed";
 export type UploadState = "uploading" | "complete";
 
@@ -242,7 +247,8 @@ export interface ModelInfo {
 
 /**
  * Create or update a run. Sent once when the run starts (status "running") and
- * again at the end with the final status. Re-sending is safe.
+ * again at the end with the final status, or with "interrupted" when a resumable run is
+ * stopped. Re-sending is safe.
  */
 export interface RunUpsertRequest {
     protocol_version: 1;
@@ -255,7 +261,7 @@ export interface RunUpsertResponse {
     run_id: RunId;
     /** True when this request created the run. */
     created: boolean;
-    /** Status after the upsert (a final status is never downgraded to "running"). */
+    /** Status after the upsert (a final status is never downgraded to "running" or "interrupted"). */
     status: RunStatus;
     upload_state: UploadState;
     /** gs:// URI of the run's artifact prefix, ending in "/". */

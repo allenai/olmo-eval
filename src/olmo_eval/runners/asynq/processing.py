@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import multiprocessing as mp
 import time
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.inference.errors import classify_terminal_provider_error, request_error
+from olmo_eval.inference.errors import (
+    classify_terminal_provider_error,
+    is_context_overflow,
+    is_context_overflow_message,
+    is_context_overflow_output,
+    request_error,
+)
 from olmo_eval.inference.metrics.core.stats import compute_batch_hash
 from olmo_eval.runners.asynq.share_clock import ShareClock
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
 
 if TYPE_CHECKING:
+    from olmo_eval.common.types import LMOutput
     from olmo_eval.harness import Harness
 
 logger = get_logger(__name__)
@@ -116,6 +124,19 @@ def _format_error_detail(exc: Exception) -> str:
     return " | ".join(parts)
 
 
+def _request_caused(error: str | None, outputs: list[LMOutput]) -> bool:
+    """Whether a failure is known to come from the request, so that retrying cannot help.
+
+    Providers that dispatch through ``dispatch_requests`` turn every exception,
+    including connection and server errors, into a marked output, so a marked output
+    is request-caused only when the provider flagged a context overflow or the error
+    text reports one. Everything else is treated as possibly transient.
+    """
+    if error is None:
+        return False
+    return is_context_overflow_output(outputs) or is_context_overflow_message(error)
+
+
 async def process_chat_request(
     item: QueueItem,
     harness: Harness,
@@ -191,6 +212,9 @@ async def process_chat_request(
                 attempt=item.attempt,
                 sent_at=sent_at,
                 attributed_seconds=seconds,
+                request_caused=_request_caused(
+                    provider_error or harness_result.error, [final_output]
+                ),
             )
         )
 
@@ -218,6 +242,7 @@ async def process_chat_request(
                 attempt=item.attempt,
                 sent_at=sent_at,
                 attributed_seconds=seconds,
+                request_caused=is_context_overflow(e),
             )
         )
 
@@ -228,6 +253,7 @@ async def process_batch(
     result_queue: mp.Queue,
     worker_logger: logging.Logger | None = None,
     clock: ShareClock | None = None,
+    flush_metrics: bool = True,
 ) -> None:
     """Process a batch of COMPLETION or LOGLIKELIHOOD requests.
 
@@ -242,6 +268,8 @@ async def process_batch(
         worker_logger: Logger with worker identification.
         clock: The worker's clock; each result carries its share of the batch's
             share of worker time. Without one the batch is timed on its own.
+        flush_metrics: Flush the inference metrics as one batch when it succeeds. A caller
+            that splits a batch flushes once for the whole batch instead.
     """
     from olmo_eval.common.types import RequestType
 
@@ -275,6 +303,8 @@ async def process_batch(
                     error=_format_error_detail(error),
                     attempt=item.attempt,
                     sent_at=time.time(),
+                    # Nothing was sent; preparing the request failed.
+                    request_caused=True,
                 )
             )
         else:
@@ -322,6 +352,7 @@ async def process_batch(
                     error=error,
                     attempt=item.attempt,
                     sent_at=sent_at,
+                    request_caused=_request_caused(error, outputs),
                 )
             )
 
@@ -358,6 +389,7 @@ async def process_batch(
                     attempt=item.attempt,
                     sent_at=sent_at,
                     attributed_seconds=share,
+                    request_caused=is_context_overflow(e),
                 )
             )
     except BaseException:
@@ -365,12 +397,58 @@ async def process_batch(
         raise
     else:
         batch_seconds = clock.stop(token)
-        _flush_batch_metrics(harness, items, log)
+        if flush_metrics:
+            _flush_batch_metrics(harness, items, log)
         for result, share in zip(
             results, attribute_batch_seconds(batch_seconds, results), strict=True
         ):
             result.attributed_seconds = share
             result_queue.put(result)
+
+
+async def process_batch_per_request(
+    items: list[QueueItem],
+    harness: Harness,
+    result_queue: mp.Queue,
+    max_concurrency: int | None = None,
+    worker_logger: logging.Logger | None = None,
+    clock: ShareClock | None = None,
+) -> None:
+    """Process a batch as single-request provider calls, queueing each result when it ends.
+
+    For providers where :meth:`BatchConfig.dispatches_per_request` is true, so each request
+    reaches the server exactly as in one batched call, and the batch's requests run at once
+    up to the same limit the provider would apply, its ``max_concurrency``. A result is
+    queued as soon as its request finishes, so one slow request does not hold back the
+    others. The inference metrics are flushed once for the whole batch.
+
+    Each request is a unit on the worker's clock, as in the streaming strategy, so its
+    worker time is an even split of the wall time it overlapped with other requests.
+    Batched mode splits a batch's time by token share, which needs the batch's end; both
+    credit the same total worker time.
+    """
+    if not items:
+        return
+    if clock is None:
+        clock = ShareClock()
+    limit = getattr(harness.provider, "max_concurrency", None) or max_concurrency or len(items)
+    semaphore = asyncio.Semaphore(limit)
+
+    async def one(item: QueueItem) -> None:
+        async with semaphore:
+            await process_batch(
+                [item], harness, result_queue, worker_logger, clock, flush_metrics=False
+            )
+
+    tasks = [asyncio.create_task(one(item)) for item in items]
+    try:
+        # The first error (a terminal provider error) propagates as itself.
+        await asyncio.gather(*tasks)
+        _flush_batch_metrics(harness, items, worker_logger or logger)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def process_items(
@@ -381,6 +459,7 @@ async def process_items(
     worker_logger: logging.Logger | None = None,
     show_progress: bool = True,
     clock: ShareClock | None = None,
+    per_request: bool = False,
 ) -> None:
     """Process queue items, batching where possible.
 
@@ -398,6 +477,9 @@ async def process_items(
         clock: The worker's clock, shared by every batch and rollout the worker
             runs so overlapping work splits worker time. Defaults to a clock for
             these items alone.
+        per_request: Send each request of a batch to the provider on its own and
+            queue its result as soon as it finishes, instead of when the whole batch
+            has. See :func:`process_batch_per_request`.
     """
     from olmo_eval.common.types import RequestType, SamplingParams
 
@@ -425,7 +507,12 @@ async def process_items(
             batches[key].append(item)
 
         for batch in batches.values():
-            await process_batch(batch, harness, result_queue, log, clock)
+            if per_request:
+                await process_batch_per_request(
+                    batch, harness, result_queue, max_concurrency, log, clock
+                )
+            else:
+                await process_batch(batch, harness, result_queue, log, clock)
 
     if chat_items:
         from olmo_eval.inference.dispatch import dispatch_concurrent
@@ -466,5 +553,6 @@ __all__ = [
     "attribute_batch_seconds",
     "process_chat_request",
     "process_batch",
+    "process_batch_per_request",
     "process_items",
 ]

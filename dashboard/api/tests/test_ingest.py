@@ -388,6 +388,70 @@ async def test_status_never_downgraded(client: httpx.AsyncClient) -> None:
     assert body["upload_state"] == "complete"
 
 
+async def _upsert_status(client: httpx.AsyncClient, body: dict, status: str) -> dict:
+    body["run"]["status"] = status
+    response = await client.put(f"/v1/runs/{body['run']['run_id']}", json=body)
+    assert response.status_code == 200, response.text
+    assert_valid("RunUpsertResponse", response.json())
+    return response.json()
+
+
+async def _complete(client: httpx.AsyncClient, run_id: str, status: str) -> None:
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": status,
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [],
+            "expected_task_results": 0,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
+async def test_an_interrupted_run_resumes_and_then_finishes(client: httpx.AsyncClient) -> None:
+    body = run_payload(run_id="intr00000001", model_name="m", status="running")
+    assert (await _upsert_status(client, body, "running"))["status"] == "running"
+
+    stopped = await _upsert_status(client, body, "interrupted")
+    assert stopped["status"] == "interrupted" and stopped["upload_state"] == "uploading"
+
+    # The replacement job registers its start under the same run ID.
+    assert (await _upsert_status(client, body, "running"))["status"] == "running"
+    assert (await _upsert_status(client, body, "interrupted"))["status"] == "interrupted"
+
+    await _complete(client, "intr00000001", "partial")
+    final = await _upsert_status(client, body, "partial")
+    assert final["status"] == "partial" and final["upload_state"] == "complete"
+
+
+@pytest.mark.parametrize("final", ["complete", "partial", "failed"])
+@pytest.mark.parametrize("unfinished", ["running", "interrupted"])
+async def test_a_final_status_is_never_downgraded(
+    client: httpx.AsyncClient, final: str, unfinished: str
+) -> None:
+    run_id = "fini00000001"
+    body = run_payload(run_id=run_id, model_name="m", status="running")
+    await _upsert_status(client, body, "interrupted")
+    await _complete(client, run_id, final)
+
+    after = await _upsert_status(client, body, unfinished)
+
+    assert after["status"] == final and after["upload_state"] == "complete"
+
+
+async def test_an_interrupted_run_can_be_reported_failed(client: httpx.AsyncClient) -> None:
+    run_id = "intr00000002"
+    body = run_payload(run_id=run_id, model_name="m", status="running")
+    await _upsert_status(client, body, "interrupted")
+
+    assert (await _upsert_status(client, body, "failed"))["status"] == "failed"
+    await _complete(client, run_id, "failed")
+    assert (await _upsert_status(client, body, "interrupted"))["status"] == "failed"
+
+
 async def test_reupload_keeps_a_complete_run_visible(client: httpx.AsyncClient) -> None:
     await seed_contract_example_run(client)
     final = load_example("ingest/run-upsert-final.request.json")

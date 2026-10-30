@@ -24,11 +24,19 @@ from .config import (
 from .streaming import StreamingStrategy
 
 
-def get_strategy(config: BatchConfig, max_batch_sequences: int | None = None) -> BatchingStrategy:
+def get_strategy(
+    config: BatchConfig,
+    max_batch_sequences: int | None = None,
+    per_request: bool = False,
+) -> BatchingStrategy:
     """Factory to get strategy implementation.
 
     Args:
         config: Batch configuration specifying strategy and parameters.
+        max_batch_sequences: Budget of expanded samples per batch.
+        per_request: Return each request's result as soon as it finishes; only for
+            providers that dispatch requests one by one
+            (:meth:`BatchConfig.dispatches_per_request`).
 
     Returns:
         Configured batching strategy instance.
@@ -47,7 +55,7 @@ def get_strategy(config: BatchConfig, max_batch_sequences: int | None = None) ->
             f"Unknown batch strategy: {config.strategy}. Available: {list(strategies.keys())}"
         )
 
-    return strategy_cls(config, max_batch_sequences=max_batch_sequences)
+    return strategy_cls(config, max_batch_sequences=max_batch_sequences, per_request=per_request)
 
 
 __all__ = [

@@ -134,7 +134,8 @@ class Run(SQLModel, table=True):
     __tablename__ = "runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('running', 'complete', 'partial', 'failed')", name="ck_runs_status"
+            "status IN ('running', 'interrupted', 'complete', 'partial', 'failed')",
+            name="ck_runs_status",
         ),
         CheckConstraint("upload_state IN ('uploading', 'complete')", name="ck_runs_upload_state"),
         Index("ix_runs_launch_id", "launch_id"),

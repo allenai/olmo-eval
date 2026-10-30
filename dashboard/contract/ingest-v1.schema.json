@@ -1273,8 +1273,10 @@
       "type": "object"
     },
     "RunStatus": {
+      "description": "\"interrupted\" is not final: the run stopped (SIGTERM) but can resume under the same run ID, so a later \"running\" upsert moves it back to \"running\". complete, partial and failed are final.",
       "enum": [
         "running",
+        "interrupted",
         "complete",
         "partial",
         "failed"
@@ -1283,7 +1285,7 @@
     },
     "RunUpsertRequest": {
       "additionalProperties": false,
-      "description": "Create or update a run. Sent once when the run starts (status \"running\") and again at the end with the final status. Re-sending is safe.",
+      "description": "Create or update a run. Sent once when the run starts (status \"running\") and again at the end with the final status, or with \"interrupted\" when a resumable run is stopped. Re-sending is safe.",
       "properties": {
         "client": {
           "$ref": "#/definitions/ClientInfo"
@@ -1326,7 +1328,7 @@
         },
         "status": {
           "$ref": "#/definitions/RunStatus",
-          "description": "Status after the upsert (a final status is never downgraded to \"running\")."
+          "description": "Status after the upsert (a final status is never downgraded to \"running\" or \"interrupted\")."
         },
         "upload_state": {
           "$ref": "#/definitions/UploadState"

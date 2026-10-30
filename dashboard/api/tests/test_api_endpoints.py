@@ -101,6 +101,77 @@ async def seeded(client: httpx.AsyncClient, session: Any) -> dict[str, Any]:
     return ids
 
 
+async def test_interrupted_runs_are_listed_but_not_scored(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    from tests.factories import run_payload
+
+    done = await seed_run(client, run_id="done00000001", tasks={"arc": [1.0, 0.0]})
+    stopped = run_payload(run_id="intr00000001", model_name="test-org/test-model")
+    for status in ("running", "interrupted"):
+        stopped["run"]["status"] = status
+        assert (await client.put("/v1/runs/intr00000001", json=stopped)).status_code == 200
+    # A finished run whose upload has not completed is "uploading", not unfinished.
+    pending = run_payload(run_id="upld00000001", model_name="test-org/test-model")
+    pending["run"]["status"] = "failed"
+    assert (await client.put("/v1/runs/upld00000001", json=pending)).status_code == 200
+
+    body = await get(client, "/api/runs", "RunsListResponse")
+    statuses = {r["run_id"]: (r["status"], r["upload_state"]) for r in body["items"]}
+    assert statuses == {
+        done: ("complete", "complete"),
+        "intr00000001": ("interrupted", "uploading"),
+    }
+
+    body = await get(client, "/api/runs", "RunsListResponse", status="interrupted")
+    assert [r["run_id"] for r in body["items"]] == ["intr00000001"]
+    body = await get(client, "/api/runs", "RunsListResponse", status="uploading")
+    assert [r["run_id"] for r in body["items"]] == ["upld00000001"]
+    body = await get(client, "/api/runs", "RunsListResponse", status="running")
+    assert body["items"] == []
+
+    facets = await get(client, "/api/runs/facets", "RunsFacetsResponse")
+    assert {f["value"]: f["count"] for f in facets["status"]} == {
+        "complete": 1,
+        "interrupted": 1,
+    }
+
+    activity = await get(client, "/api/activity", "ActivityResponse")
+    item = next(i for i in activity["items"] if i["runs"][0]["run_id"] == "intr00000001")
+    assert item["status"] == "interrupted"
+
+
+@pytest.mark.parametrize(
+    ("status", "age", "stale"),
+    [
+        ("interrupted", timedelta(days=2), True),
+        ("interrupted", timedelta(hours=1), False),
+        ("running", timedelta(days=2), True),
+        ("running", timedelta(hours=1), False),
+    ],
+)
+async def test_an_unresumed_interrupted_run_goes_stale_like_a_running_one(
+    client: httpx.AsyncClient, session: Any, status: str, age: timedelta, stale: bool
+) -> None:
+    from tests.factories import run_payload
+
+    body = run_payload(run_id="stal00000001", model_name="test-org/test-model")
+    for step in ("running", status):
+        body["run"]["status"] = step
+        assert (await client.put("/v1/runs/stal00000001", json=body)).status_code == 200
+    await session.execute(
+        text("UPDATE runs SET updated_at = :t WHERE run_id = 'stal00000001'"),
+        {"t": datetime.now(UTC) - age},
+    )
+    await session.commit()
+
+    listed = await get(client, "/api/runs", "RunsListResponse")
+    detail = await get(client, "/api/runs/stal00000001", "RunDetail")
+
+    assert [r["stale"] for r in listed["items"]] == [stale]
+    assert detail["stale"] is stale
+
+
 async def test_runs_list_and_facets(client: httpx.AsyncClient, seeded: dict) -> None:
     body = await get(client, "/api/runs", "RunsListResponse")
     assert body["total"] == 6

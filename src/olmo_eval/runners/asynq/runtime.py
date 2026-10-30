@@ -36,6 +36,9 @@ def resolved_worker_config(
         }
         if "effective_max_running_requests" in profile:
             runtime["effective_max_running_requests"] = profile["effective_max_running_requests"]
+        for key in ("max_total_num_tokens", "max_req_input_len"):
+            if key in profile:
+                runtime[key] = profile[key]
         provider = replace(provider, resolved_runtime=runtime)
     resolved = replace(config, provider=provider, batching=batch)
     if str(provider.kind) == "sglang" and resolved.metrics is not None and resolved.metrics.enabled:

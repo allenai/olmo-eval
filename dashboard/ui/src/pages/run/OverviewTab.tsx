@@ -325,7 +325,11 @@ function SuiteTree({ ctx, onOpenTask }: { ctx: RunCtx; onOpenTask: (row: TaskRes
         </div>
       ) : !tasks.length ? (
         <EmptyState title="No task results yet" compact>
-          {ctx.run.status === "running" ? "This run is still running. Task results appear as they finish." : "This run recorded no task results."}
+          {ctx.run.status === "running"
+            ? "This run is still running. Task results appear as they finish."
+            : ctx.run.status === "interrupted"
+              ? "This run was interrupted before recording task results."
+              : "This run recorded no task results."}
         </EmptyState>
       ) : (
         <div className={s.tree}>

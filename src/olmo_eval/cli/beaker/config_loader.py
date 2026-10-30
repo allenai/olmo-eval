@@ -80,15 +80,20 @@ def resolve_preemption(
     """Resolve the preemption settings from one source into (preemptible, min_runtime).
 
     A min runtime replaces preemptible, so the returned preemptible is None when a min
-    runtime is set. Without either setting, jobs are preemptible.
+    runtime is set. Without either setting, jobs are preemptible. ``preemptible=False``
+    becomes the maximum min runtime (8h) with preemptible unset, because Beaker turns
+    ``preemptible=False`` into the same min runtime but also disables auto-resume, so a
+    preemption after 8h would end the experiment.
 
     Raises:
         ValueError: If both are set, or the min runtime is not a valid duration.
     """
-    from olmo_eval.launch.beaker import validate_min_runtime
+    from olmo_eval.launch.beaker import PROTECTED_MIN_RUNTIME, validate_min_runtime
 
     if min_runtime is None:
-        return (True if preemptible is None else preemptible), None
+        if preemptible is False:
+            return None, PROTECTED_MIN_RUNTIME
+        return True, None
     if preemptible is not None:
         raise ValueError("preemptible and min_runtime cannot both be set; set min_runtime alone")
     return None, validate_min_runtime(min_runtime)

@@ -15,6 +15,7 @@ from olmo_eval_api.schemas.ingest import RUN_ID_PATTERN, TAG_PATTERN
 from olmo_eval_api.services.filters import RunFilters, build_where, run_filters
 from olmo_eval_api.services.queries import (
     RUN_FROM,
+    UNFINISHED,
     clamp_limit,
     decode_cursor,
     encode_cursor,
@@ -412,7 +413,7 @@ FACETS: dict[str, str] = {
     "group": "r.experiment_group",
     "workspace": "r.beaker_workspace",
     "status": (
-        "CASE WHEN r.status <> 'running' AND r.upload_state = 'uploading' "
+        f"CASE WHEN NOT {UNFINISHED} AND r.upload_state = 'uploading' "
         "THEN 'uploading' ELSE r.status END"
     ),
     "model": "r.model_name",

@@ -768,6 +768,22 @@ function makePlans(): RunPlan[] {
     doneFraction: 0.2,
     ability: (task) => p1last.ability(task) + 0.02,
   });
+  // A preempted run waiting for its resumed job.
+  const p1prev = find("olmo3-1b-anneal-step4000");
+  plans.push({
+    ...p1prev,
+    modelName: "olmo3-1b-anneal-step4250",
+    step: 4250,
+    tokensSeen: 4250 * (s1.tokensPerStep ?? 0),
+    path: s1.pathFor(4250),
+    revision: "step4250",
+    launch: `L-${hexId(8, "1b-4250")}`,
+    createdAt: NOW - 2.5 * HOUR,
+    status: "interrupted",
+    uploadState: "uploading",
+    doneFraction: 0.3,
+    ability: (task) => p1prev.ability(task) + 0.01,
+  });
   // Uploading and failed runs.
   const tlast = find("tulu4-8b-dpo-step1750");
   plans.push({
@@ -1041,7 +1057,7 @@ function buildWorld(): World {
     });
     const lastTaskEnd = processingStart + sim.processingS * 1000;
     const status = plan.status;
-    const finished = status === "running" ? null : failedRun ? plan.createdAt + 14 * 60_000 : lastTaskEnd + 2 * 60_000;
+    const finished = status === "running" || status === "interrupted" ? null : failedRun ? plan.createdAt + 14 * 60_000 : lastTaskEnd + 2 * 60_000;
     const duration = finished ? (finished - started) / 1000 : null;
     const recorded = sim.basis !== "not_recorded";
     const experimentId = beakerId("ex", runId);
@@ -1069,7 +1085,7 @@ function buildWorld(): World {
       experiment_group: plan.group,
       status,
       upload_state: plan.uploadState,
-      stale: status === "running" && NOW - plan.createdAt > DAY,
+      stale: (status === "running" || status === "interrupted") && NOW - plan.createdAt > DAY,
       model: {
         model_id: model.model_id,
         name: model.name,
@@ -1102,7 +1118,7 @@ function buildWorld(): World {
       summary,
       startupS: sim.startupS,
       processingStartedAt: recorded && sim.startupS != null && !failedRun ? iso(processingStart) : null,
-      processingS: recorded && status !== "running" && !failedRun ? sim.processingS : null,
+      processingS: recorded && status !== "running" && status !== "interrupted" && !failedRun ? sim.processingS : null,
       model,
       beaker: {
         experiment_id: experimentId,

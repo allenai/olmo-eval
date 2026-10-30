@@ -55,7 +55,8 @@ export type TaskResultId = Integer;
 /** Flat metrics keyed by "metric_name:scorer_name". */
 export type FlatMetrics = { [metricKey: string]: number | null };
 
-export type RunStatus = "running" | "complete" | "partial" | "failed";
+/** "interrupted": stopped and waiting to resume under the same run ID; not final. */
+export type RunStatus = "running" | "interrupted" | "complete" | "partial" | "failed";
 export type UploadState = "uploading" | "complete";
 export type MetricKind = "binary" | "bounded" | "unbounded";
 export type DisplayFormat = "percent" | "raw";
@@ -1369,7 +1370,7 @@ export interface ActivityItem {
     runs: RunSummary[];
     n_tasks: Count;
     n_failed_tasks: Count;
-    /** Worst status among the runs (failed > partial > running > complete). */
+    /** Worst status among the runs (failed > partial > interrupted > running > complete). */
     status: RunStatus;
     /** First task error message when any task failed. */
     failure_reason: string | null;

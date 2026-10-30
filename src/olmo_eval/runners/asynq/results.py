@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import queue
 import time
+from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +15,7 @@ from olmo_eval.common.progress import ProgressLogger
 from olmo_eval.common.scorers.execution import format_scoring_error
 from olmo_eval.common.scoring_failures import RESPONSE_ERROR_KEY, format_scoring_failures
 from olmo_eval.common.scoring_time import install_child_task_timing, measure_instance_scoring
+from olmo_eval.common.shutdown import Terminated, shutdown_requested
 from olmo_eval.common.types import Response
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.runners.asynq.monitoring import check_workers_alive
@@ -38,6 +40,7 @@ if TYPE_CHECKING:
 
     from olmo_eval.common.execution import ScoringContext
     from olmo_eval.evals.tasks.common import Task
+    from olmo_eval.runners.asynq.progress import RunProgress
 
 logger = get_logger(__name__)
 
@@ -85,12 +88,24 @@ async def _score_response(
     return scored[0] if scored else response
 
 
-def _build_pending_instance_keys(trackers: dict[str, TaskTracker]) -> set[InstanceKey]:
-    """Build the exact set of inference results expected from workers."""
+def _build_pending_instance_keys(
+    trackers: dict[str, TaskTracker],
+    restored: dict[str, dict[int, Response]] | None = None,
+    finalized: Collection[str] = (),
+) -> set[InstanceKey]:
+    """Build the exact set of inference results expected from workers.
+
+    Work restored from progress records was not queued, so no result is expected for
+    it: restored responses, failures already on the trackers, and finalized tasks.
+    """
+    restored = restored or {}
     return {
         (tracker.model_name, spec, instance_idx)
         for spec, tracker in trackers.items()
+        if spec not in finalized
         for instance_idx in range(tracker.total_instances)
+        if instance_idx not in restored.get(spec, {})
+        and instance_idx not in tracker.failed_instances
     }
 
 
@@ -159,6 +174,9 @@ async def process_results(
     save_requests: bool,
     write_requests_fn: Any,
     max_hard_failure_rate: float = DEFAULT_MAX_HARD_FAILURE_RATE,
+    restored: dict[str, dict[int, Response]] | None = None,
+    finalized: dict[str, TaskResult] | None = None,
+    progress: RunProgress | None = None,
 ) -> dict[str, TaskResult]:
     """Process results from workers with inline async scoring.
 
@@ -172,12 +190,19 @@ async def process_results(
         scoring_context: Scoring context with execution environment.
         scoring_concurrency: Maximum concurrent scoring operations.
         total_tasks: Total number of tasks.
-        total_instances: Total number of instances across all tasks.
+        total_instances: Number of instances queued to the workers across all tasks.
         model_name: Model name for reporting.
         save_predictions: Whether to save predictions.
         write_predictions_fn: Function to write predictions.
         max_hard_failure_rate: Fraction of a task's instances allowed to have no
             output or no scored output before the task is marked failed.
+        restored: Scored responses restored from progress records, by spec and
+            instance index. They were not queued and count as already scored;
+            restored generation failures are already on the trackers.
+        finalized: Results of tasks an earlier attempt finalized; none of their
+            instances were queued.
+        progress: Progress records to add each final instance outcome and each
+            finalized task to.
 
     Returns:
         Dict mapping task spec to TaskResult.
@@ -186,8 +211,11 @@ async def process_results(
     tasks_complete = 0
 
     # Track scored responses per task: spec -> {idx: scored_response}
-    scored_responses: dict[str, dict[int, Response]] = {spec: {} for spec in trackers}
-    instances_scored: dict[str, int] = {spec: 0 for spec in trackers}
+    restored = restored or {}
+    scored_responses: dict[str, dict[int, Response]] = {
+        spec: dict(restored.get(spec, {})) for spec in trackers
+    }
+    instances_scored: dict[str, int] = {spec: len(scored_responses[spec]) for spec in trackers}
 
     # Progress tracking for scoring
     scoring_progress = ProgressLogger(
@@ -233,22 +261,28 @@ async def process_results(
             results[spec] = task_result
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
+            wrote: list[str] = []
             if save_predictions and task_result.predictions:
                 task_hash = compute_task_hash(task_result.config)
                 write_predictions_fn(
                     model_name, task_result.spec, task_result.predictions, task_hash
                 )
+                wrote.append("predictions")
             if save_requests and task_result.requests:
                 task_hash = compute_task_hash(task_result.config)
                 write_requests_fn(model_name, task_result.spec, task_result.requests, task_hash)
+                wrote.append("requests")
+            if progress is not None:
+                progress.finalize(spec, task_result, wrote=wrote)
 
     async def score_and_store(
         spec: str,
         instance_idx: int,
         response: Response,
         task: Task,
+        result_item: ResultItem,
     ) -> None:
-        """Score a single response and store the result."""
+        """Score a single response, store the result, and record it in the progress record."""
         async with scoring_semaphore:
             try:
                 scored = await measure_instance_scoring(
@@ -267,6 +301,8 @@ async def process_results(
 
         scored_responses[spec][instance_idx] = scored
         instances_scored[spec] += 1
+        if progress is not None:
+            progress.record(spec, instance_idx, scored, result_item)
         scoring_progress.update(1)
         check_task_completion(spec)
 
@@ -287,7 +323,17 @@ async def process_results(
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
 
-    pending_instances = _build_pending_instance_keys(trackers)
+    for spec, task_result in (finalized or {}).items():
+        results[spec] = task_result
+        tasks_complete += 1
+        _report_task_completion(model_name, task_result)
+
+    # A task whose instances were all restored completes before any result arrives.
+    for spec, tracker in trackers.items():
+        if spec not in results and (restored.get(spec) or tracker.failed_instances):
+            check_task_completion(spec)
+
+    pending_instances = _build_pending_instance_keys(trackers, restored, finalized or {})
     if len(pending_instances) != total_instances:
         raise RuntimeError(
             "Inference accounting mismatch before processing: "
@@ -305,6 +351,9 @@ async def process_results(
         # Collect instance results and score each inline
         while pending_instances:
             _reap_done_tasks()
+            # SIGTERM can land in a scoring task, which keeps the exception to itself.
+            if shutdown_requested():
+                raise Terminated()
 
             try:
                 result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
@@ -354,6 +403,10 @@ async def process_results(
                     f"{result_item.task_id}: {instance_error}"
                 )
                 tracker.add_failure(result_item.instance_idx, instance_error)
+                if progress is not None:
+                    progress.record_failure(
+                        result_item.task_id, result_item.instance_idx, result_item
+                    )
                 scoring_progress.update(1)
                 check_task_completion(result_item.task_id)
                 continue
@@ -391,6 +444,7 @@ async def process_results(
                     instance_idx=result_item.instance_idx,
                     response=response,
                     task=tracker.task,
+                    result_item=result_item,
                 )
             )
             in_flight_scoring.add(scoring_task)
@@ -398,6 +452,8 @@ async def process_results(
         # Wait for all in-flight scoring to complete
         if in_flight_scoring:
             await asyncio.gather(*in_flight_scoring, return_exceptions=True)
+        if shutdown_requested():
+            raise Terminated()
 
         # Final check — all tasks should be complete
         if tasks_complete < total_tasks:

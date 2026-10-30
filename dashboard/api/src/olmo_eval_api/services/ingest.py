@@ -62,6 +62,8 @@ from olmo_eval_api.storage.base import Storage
 logger = logging.getLogger(__name__)
 
 FINAL_STATUSES = {"complete", "partial", "failed"}
+# Statuses of a run that has not finished: "interrupted" runs resume under the same ID.
+UNFINISHED_STATUSES = {"running", "interrupted"}
 MAX_TASK_RESULTS_PER_RUN = 2000
 MAX_INSTANCES_PER_TASK_RESULT = 1_000_000
 MAX_ARTIFACTS_PER_RUN = 10_000
@@ -226,7 +228,9 @@ async def upsert_run(
     if not created and run.write_secret_hash is None and run_secret:
         run.write_secret_hash = hash_run_secret(run_secret)
     if not created:
-        downgrade = run.status in FINAL_STATUSES and req.run.status == "running"
+        # A final status is never replaced by an unfinished one. An interrupted run becomes
+        # running again when a resumed job registers, and final when it completes.
+        downgrade = run.status in FINAL_STATUSES and req.run.status in UNFINISHED_STATUSES
         if not downgrade:
             fields["tags"] = merge_tags(run.tags, run.client_tags, fields["client_tags"])
             if not may_change_author(principal, run.uploaded_by):

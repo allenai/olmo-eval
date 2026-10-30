@@ -121,6 +121,20 @@ def output_options(func: F) -> F:  # noqa: UP047
         help="Save per-instance requests to JSONL (default: enabled)",
     )
     @click.option(
+        "--resume",
+        is_flag=True,
+        help=(
+            "Record progress in the output directory and continue from the progress "
+            "already there, skipping the instances an earlier attempt finished. Without "
+            "it, no progress is recorded and any found is ignored"
+        ),
+    )
+    @click.option(
+        "--fresh",
+        is_flag=True,
+        help="Discard progress recorded in the output directory before the run",
+    )
+    @click.option(
         "--dry-run",
         is_flag=True,
         help="Print config and exit without running",

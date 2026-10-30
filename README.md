@@ -1107,6 +1107,78 @@ uv run olmo-eval run -m allenai/OLMo-2-1124-7B -t mmlu --force-download-model
 uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 ```
 
+### Resuming Interrupted Runs
+
+With `--resume`, a run records each instance as it finishes. Restarted on the same
+output directory, it skips the instances an earlier attempt finished and writes the same
+predictions and metrics as an uninterrupted run.
+
+```bash
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --resume   # interrupted
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --resume   # continues
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --fresh    # discards progress
+```
+
+| Flag | Description |
+|------|-------------|
+| `--resume` | Record progress under `<output_dir>/progress/` and continue from any already there |
+| `--fresh` | Delete the recorded progress of this run's tasks and model before the run; cannot be combined with `--resume` |
+
+Without either flag, a run records nothing and ignores progress it finds, with a warning.
+Beaker launches always pass `--resume`, and Beaker copies a preempted job's `/results`
+into its replacement, so a requeued job continues where the last one stopped (see
+[Preemption](#preemption)).
+
+- **What is recorded.** `progress/<model>/run.segments/` holds one stream for the run: a
+  header per task, then one entry per finished instance with its outputs, scores and a
+  hash of its prepared request. Prompts are rebuilt from the task, not stored. A
+  generation's per-token logprobs are left out unless one of the task's metrics scores
+  from them (`Scorer.reads_logprobs`); its `sum_logits` and `num_tokens` are kept. Each
+  finished task also gets a `<task>_<hash>.final.json`. Entries reach the disk every two
+  minutes. The `progress/` directory is never uploaded. A run that completes deletes
+  the records of its own tasks only.
+- **What must match.** The record format, task spec and hash, model hash and revision,
+  the harness settings that affect outputs, the inference engine version (such as
+  `vllm==0.11.2`), the git commit, the uncommitted changes to tracked files (a hash of
+  `git diff HEAD`; untracked files are not covered) and, for SGLang, the resolved runtime.
+  Editing code after an interruption therefore stops a resume; revert the edits, pass
+  `--fresh`, or use another output directory. A run that starts from a dirty tree warns
+  that resuming will need the same changes. Without git (an installed package), the
+  commit and changes are not compared. New untracked files, such as a new scorer module,
+  are not covered either; `git add -N <file>` includes one. A difference
+  stops the run with an error naming the setting; pass `--fresh` or use another output
+  directory. Where the run executes (GPU count, cluster, tensor parallelism, concurrency)
+  may differ and only logs a warning. An instance whose prepared request, gold
+  answer or metadata changed is run again.
+- **Sharing an output directory.** Runs of different tasks may share one. Each run
+  keeps the others' records when it completes and logs which tasks it is keeping. Only one
+  run at a time may record for a model: `progress/<model>/.lock` names the holder (host,
+  PID, start time, Beaker job). A second run fails with an error naming it. A lock whose
+  process is gone from this host is taken over; on Beaker, a job takes over any lock in its
+  own `/results` (the predecessor's, copied there) and any lock left by an earlier attempt of
+  the same job. In a shared directory (`-O /weka/...`), another job's lock is treated as any
+  lock from another host. For a lock from another host outside Beaker,
+  delete the file once that run is gone.
+- **Failures.** An instance is recorded only when an uninterrupted run would keep its
+  outcome: a scored response, or a failure the request itself caused, such as a context
+  overflow. Connection and server errors, judge or sandbox outages, and results that
+  arrive after SIGTERM are not recorded, so the resumed run tries them again. A task that
+  fails or exceeds its failure budget is computed again from its recorded instances.
+- **Results return per request.** While recording, providers that send requests one at
+  a time (`vllm_server`, `litellm`) return each result when it finishes, not when its
+  batch does. In-process engines (`vllm`, `sglang`, `hf`, `olmo_core`, `olmo_core_vlm`) return a batch at once; to
+  record them more often, lower the batch size with
+  `--harness default -o batching.chunk_size=16`.
+- **Dashboard status.** A `--resume` run stopped by SIGTERM, as a preemption or a canceled
+  Beaker job stops it, shows as `interrupted` instead of `failed`. The resumed run keeps
+  the run ID and shows as running again, then finishes with its final status. A run that
+  nobody resumes shows as stale, like a stale running run, after the same delay; `olmo-eval results upload` on its directory uploads
+  it as finished, with the status its saved results support. Other crashes, Ctrl-C, and
+  runs without `--resume` are still reported as `failed`.
+- **Testing.** `OLMO_EVAL_DEBUG_EXIT_AT=0.5` makes a `--resume` run send itself SIGTERM
+  once half of its instances are recorded, which ends it as a preemption does (exit code
+  143).
+
 ## Debugging and Inspection
 
 olmo-eval provides tools for inspecting tasks, requests, and responses at various stages of evaluation.
@@ -1577,7 +1649,7 @@ budget: ai2/oe-other
 | `--gpus` | `-G` | auto | Number of GPUs (defaults to 1 for GPU providers, 0 otherwise) |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
 | `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
-| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`) |
+| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`); `--no-preemptible` means `--min-runtime 8h` |
 | `--min-runtime` | | none | Minimum runtime before Beaker may preempt the job (e.g., `2h`) |
 | `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | `-r` | none | Number of retries on failure |
@@ -1601,8 +1673,10 @@ budget: ai2/oe-other
 
 ### Preemption
 
-By default, Beaker can preempt a job at any time and requeues it afterward. Use
-`--min-runtime` (or `min_runtime:` in a config file) to protect a job from preemption:
+By default, Beaker can preempt a job at any time and requeues it afterward. The requeued
+job continues from the instances the preempted one recorded (see
+[Resuming Interrupted Runs](#resuming-interrupted-runs)). Use `--min-runtime` (or
+`min_runtime:` in a config file) to protect a job from preemption:
 
 ```bash
 uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
@@ -1620,8 +1694,11 @@ uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
   both config file fields.
 - External evals (`-E`) take `--min-runtime` from the CLI only; they do not read the
   config file.
-- `--no-preemptible` still works. Beaker treats it as an 8h min runtime with auto-resume
-  turned off.
+- `--no-preemptible` (and `preemptible: false`) is the same as `--min-runtime 8h`. The
+  launcher sends the min runtime and leaves `preemptible` unset, so Beaker keeps
+  auto-resume on. Sending `preemptible=False` to Beaker would also turn auto-resume off,
+  and on clusters that make jobs interruptible after the min runtime, a preemption after
+  8h would end the experiment with no replacement job.
 
 ### Per-Task Overrides
 
@@ -1850,7 +1927,7 @@ retries: 2
 | `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
 | `min_runtime` | string | no | Minimum runtime before preemption (e.g., `2h`); see [Preemption](#preemption) |
-| `preemptible` | bool | no | Deprecated by Beaker; cannot be combined with `min_runtime` |
+| `preemptible` | bool | no | Deprecated by Beaker; `false` means `min_runtime: 8h`; cannot be combined with `min_runtime` |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
 | `beaker_image` | string | no | Container image to use (config-only) |

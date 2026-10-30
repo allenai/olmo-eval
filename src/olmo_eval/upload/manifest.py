@@ -2,7 +2,8 @@
 
 metrics.json alone cannot fully rebuild a run: suite definitions, metric
 directions and provenance may be unavailable. The runner writes
-this manifest next to it (once at start with status "running", again at the end),
+this manifest next to it (once at start with status "running", again at the end,
+or with status "interrupted" when a resumable run is stopped),
 and the uploader reads only files on disk, so ``olmo-eval results upload`` and the
 in-run upload share one code path.
 """
@@ -38,6 +39,9 @@ METRICS_NAME = "metrics.json"
 RUN_SECRET_NAME = ".upload-secret"
 MANIFEST_VERSION = 1
 RUN_ID_RE = re.compile(r"^[a-z0-9]{6,32}$")
+# Statuses of a run that --resume continues under the same run ID. "interrupted" is a
+# resumable run that was stopped (SIGTERM); "failed" covers runs recorded before it existed.
+RESUMABLE_STATUSES = ("running", "interrupted", "failed")
 
 
 class ManifestError(Exception):
@@ -260,14 +264,19 @@ def build_manifest(
     model: Mapping[str, Any],
     tasks: Mapping[str, Mapping[str, Any]] | None = None,
     suites: Sequence[Mapping[str, Any]] = (),
+    resume: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    """The manifest. ``resume`` (restarts of the run, kept locally) is not uploaded."""
+    manifest: dict[str, Any] = {
         "manifest_version": MANIFEST_VERSION,
         "run": dict(run),
         "model": dict(model),
         "tasks": {k: dict(v) for k, v in (tasks or {}).items()},
         "suites": [dict(s) for s in suites],
     }
+    if resume:
+        manifest["resume"] = dict(resume)
+    return manifest
 
 
 def write_manifest(output_dir: str | Path, manifest: Mapping[str, Any]) -> Path:

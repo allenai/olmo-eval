@@ -32,6 +32,7 @@ class ProviderManager:
         item_queue: mp.Queue,
         result_queue: mp.Queue,
         output_dir: str | None = None,
+        per_request: bool = False,
     ):
         """Initialize the provider manager.
 
@@ -42,6 +43,8 @@ class ProviderManager:
             item_queue: Shared queue for work items (workers pull from this).
             result_queue: Shared queue for results (workers write to this).
             output_dir: Output directory for logs and results.
+            per_request: Workers return each request's result as soon as the provider
+                allows, instead of when its batch ends.
         """
         self._harness_config = harness_config
         self._num_inference_workers = num_inference_workers
@@ -49,6 +52,7 @@ class ProviderManager:
         self._item_queue = item_queue
         self._result_queue = result_queue
         self._output_dir = output_dir
+        self._per_request = per_request
         self._processes: list[mp.process.BaseProcess] = []
         self._logger = configure_worker_logging("provider-mgr")
 
@@ -99,6 +103,7 @@ class ProviderManager:
                     self._output_dir,
                     self._num_inference_workers,
                     start_event,
+                    self._per_request,
                 ),
             )
             proc.start()
