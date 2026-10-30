@@ -283,20 +283,89 @@ def test_interpreter_package_versions_queries_a_real_interpreter() -> None:
     assert "no-such-dist-xyz" not in versions
 
 
-def test_uncommitted_diff_hash_is_a_short_hash_of_the_diff_or_none(monkeypatch) -> None:
-    import hashlib
+def _git(repo: Path, *args: str) -> None:
+    import subprocess
 
-    diffs = {"text": "diff --git a/x b/x\n+changed\n"}
-    monkeypatch.setattr(provenance, "_run", lambda args, cwd=None, timeout=5.0: diffs["text"])
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+@pytest.fixture
+def checkout(tmp_path, monkeypatch) -> Path:
+    """A git checkout whose package directory ``olmo_eval`` appears to live in."""
+    import olmo_eval
+
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "notes.txt").write_bytes(b"one\ntwo\n")
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    monkeypatch.setattr(olmo_eval, "__file__", str(repo / "pkg" / "__init__.py"))
     provenance.uncommitted_diff_hash.cache_clear()
-    try:
-        assert (
-            provenance.uncommitted_diff_hash()
-            == hashlib.sha256(diffs["text"].encode()).hexdigest()[:12]
-        )
+    yield repo
+    provenance.uncommitted_diff_hash.cache_clear()
 
-        monkeypatch.setattr(provenance, "_run", lambda args, cwd=None, timeout=5.0: None)
-        provenance.uncommitted_diff_hash.cache_clear()
-        assert provenance.uncommitted_diff_hash() is None
-    finally:
-        provenance.uncommitted_diff_hash.cache_clear()
+
+def _diff_hash() -> str | None:
+    provenance.uncommitted_diff_hash.cache_clear()
+    return provenance.uncommitted_diff_hash()
+
+
+def test_uncommitted_diff_hash_follows_the_tracked_edits(checkout) -> None:
+    clean = _diff_hash()
+    notes = checkout / "pkg" / "notes.txt"
+    notes.write_bytes(b"one\nthree\n")
+    edited = _diff_hash()
+    notes.write_bytes(b"one\nfour\n")
+
+    assert clean is not None and edited is not None
+    assert len(edited) == 12 and edited != clean
+    assert _diff_hash() not in (clean, edited)
+    notes.write_bytes(b"one\nthree\n")
+    assert _diff_hash() == edited
+
+
+def test_uncommitted_diff_hash_covers_a_file_that_is_not_utf8(checkout) -> None:
+    (checkout / "pkg" / "notes.txt").write_bytes(b"one\ncaf\xe9\n")
+    first = _diff_hash()
+    (checkout / "pkg" / "notes.txt").write_bytes(b"one\nna\xefve\n")
+
+    assert first is not None
+    assert _diff_hash() not in (None, first)
+
+
+def test_uncommitted_diff_hash_ignores_the_users_textconv_and_ext_diff(checkout) -> None:
+    (checkout / "pkg" / "notes.txt").write_bytes(b"one\nthree\n")
+    (checkout / ".gitattributes").write_text("*.txt diff=shout\n")
+    _git(checkout, "add", "-N", ".gitattributes")
+    without_config = _diff_hash()
+
+    _git(checkout, "config", "diff.shout.textconv", "tr a-z A-Z <")
+    _git(checkout, "config", "diff.external", "echo external")
+
+    assert without_config is not None
+    assert _diff_hash() == without_config
+
+
+@pytest.mark.parametrize("failure", ["timeout", "missing"])
+def test_uncommitted_diff_hash_is_none_and_warns_when_git_fails(
+    monkeypatch, caplog, failure
+) -> None:
+    import subprocess
+
+    def run(*args, **kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("git", 30)
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(provenance.subprocess, "run", run)
+    with caplog.at_level("WARNING"):
+        assert _diff_hash() is None
+    provenance.uncommitted_diff_hash.cache_clear()
+
+    assert "code-change detection is off" in caplog.text

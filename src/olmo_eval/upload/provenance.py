@@ -19,6 +19,10 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 from typing import Any
 
+from olmo_eval.common.logging import get_logger
+
+logger = get_logger(__name__)
+
 TRACKED_PACKAGES = (
     "olmo-eval",
     "vllm",
@@ -193,17 +197,34 @@ def uncommitted_diff_hash() -> str | None:
     """Short hash of the tracked files' uncommitted changes in the olmo_eval checkout.
 
     Staged and unstaged edits are both in ``git diff HEAD``. Untracked files are not,
-    which matches the dirty flag of :func:`git_info`. None when git cannot say.
+    which matches the dirty flag of :func:`git_info`. The diff is hashed as bytes, so a
+    file that is not UTF-8 is covered, and without text conversion or external diff
+    drivers, so the hash does not depend on the user's git configuration. None when git
+    cannot say, in which case a resume does not detect code changes.
     """
     import hashlib
 
     import olmo_eval
 
     cwd = Path(olmo_eval.__file__).resolve().parent
-    diff = _run(["git", "diff", "HEAD", "--no-ext-diff", "--no-color"], cwd=cwd, timeout=30.0)
+    try:
+        result = subprocess.run(
+            ["git", "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color"],
+            cwd=cwd,
+            capture_output=True,
+            timeout=30.0,
+            check=False,
+        )
+        diff = result.stdout if result.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        diff = None
     if diff is None:
+        logger.warning(
+            "Could not hash the uncommitted changes with git; code-change detection is off "
+            "for this run, so a resume will not notice edits made in between."
+        )
         return None
-    return hashlib.sha256(diff.encode()).hexdigest()[:12]
+    return hashlib.sha256(diff).hexdigest()[:12]
 
 
 def git_info(env: Mapping[str, str] | None = None) -> dict[str, Any]:
