@@ -58,6 +58,7 @@ from olmo_eval.runners.asynq.progress import (
     PROGRESS_DIR,
     RECORD_VERSION,
     DroppedLogprobsError,
+    ProgressLockedError,
     ProgressMismatchError,
     ProgressStore,
     Restored,
@@ -258,8 +259,8 @@ def run_eval(
     real_kill = os.kill
 
     def sigterm(pid: int, sig: int) -> None:
-        if pid != os.getpid():
-            real_kill(pid, sig)  # the runner stopping its workers
+        if pid != os.getpid() or sig == 0:
+            real_kill(pid, sig)  # the runner stopping its workers, or a liveness check
             return
         assert sig == signal.SIGTERM
         # What the CLI's handler does when the signal arrives.
@@ -1595,7 +1596,7 @@ class TestRunIdentity:
         elif case == "fresh":
             kwargs.update(fresh=True, resume=False)
         else:
-            discard_progress(out)
+            discard_progress(out, "mock", ["gsm8k"])
 
         run_eval(out, limits, **kwargs)
 
@@ -2310,3 +2311,395 @@ class TestPerRequestResults:
         # The runner gives the manager the flag, and the manager passes it to each worker.
         assert told == [resume]
         assert sent[0]["per_request"] is resume
+
+
+# ---------------------------------------------------------------------------
+# Uncommitted code changes
+# ---------------------------------------------------------------------------
+
+_COMMIT = "a" * 40
+
+
+def _code_at(monkeypatch, dirty: bool | None, diff: str | None = None) -> None:
+    """Make the git helpers report a working tree: ``dirty`` None means no git."""
+    info: dict[str, Any] = {"commit": None if dirty is None else _COMMIT, "dirty": dirty}
+    monkeypatch.setattr("olmo_eval.upload.provenance.git_info", lambda: info)
+    monkeypatch.setattr("olmo_eval.upload.provenance.uncommitted_diff_hash", lambda: diff)
+
+
+class TestCodeChanges:
+    def _restore(self, out: Path) -> None:
+        progress, _, _ = _open(out)
+        progress.close()
+
+    @pytest.mark.parametrize(
+        ("recorded", "current", "refused"),
+        [
+            ((True, "d1"), (False, None), True),
+            ((False, None), (True, "d1"), True),
+            ((True, "d1"), (True, "d2"), True),
+            ((True, "d1"), (True, "d1"), False),
+            ((False, None), (False, None), False),
+            ((None, None), (True, "d1"), False),
+            ((True, "d1"), (None, None), False),
+        ],
+    )
+    def test_a_different_uncommitted_diff_is_refused_unless_git_is_unknown(
+        self, tmp_path, monkeypatch, recorded, current, refused
+    ) -> None:
+        _code_at(monkeypatch, *recorded)
+        self._restore(tmp_path)
+        stored = next(e for e in _entries(tmp_path) if "header" in e)
+        assert (
+            stored["header"]["diff_hash"]
+            == {
+                (True, "d1"): "d1",
+                (False, None): "clean",
+                (None, None): None,
+            }[recorded]
+        )
+        _code_at(monkeypatch, *current)
+
+        if refused:
+            with pytest.raises(ProgressMismatchError, match="code changed since the records"):
+                self._restore(tmp_path)
+            assert not (stream_dir(tmp_path, "mock").parent / ".lock").exists()
+        else:
+            self._restore(tmp_path)
+
+    def test_the_refusal_says_what_to_do(self, tmp_path, monkeypatch) -> None:
+        _code_at(monkeypatch, True, "d1")
+        self._restore(tmp_path)
+        _code_at(monkeypatch, False)
+
+        with pytest.raises(ProgressMismatchError) as error:
+            self._restore(tmp_path)
+
+        message = str(error.value)
+        assert "changes d1 then, no uncommitted changes now" in message
+        assert "--fresh" in message and "another output directory (-O)" in message
+
+    def test_starting_from_a_dirty_tree_warns_once(self, tmp_path, monkeypatch, caplog) -> None:
+        _code_at(monkeypatch, True, "d1")
+        with caplog.at_level(logging.WARNING):
+            open_run_progress(str(tmp_path), "mock", _harness())
+        warnings = [r for r in caplog.records if "uncommitted changes" in r.getMessage()]
+        assert len(warnings) == 1
+        assert "same uncommitted changes" in warnings[0].getMessage()
+
+    @pytest.mark.parametrize("dirty", [False, None])
+    def test_a_clean_or_unknown_tree_does_not_warn(
+        self, tmp_path, monkeypatch, caplog, dirty
+    ) -> None:
+        _code_at(monkeypatch, dirty)
+        with caplog.at_level(logging.WARNING):
+            open_run_progress(str(tmp_path), "mock", _harness())
+        assert "uncommitted" not in caplog.text
+
+    def test_a_beaker_checkout_is_clean_without_running_git(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("GIT_REF", _COMMIT)
+        monkeypatch.setattr(
+            "olmo_eval.upload.provenance.uncommitted_diff_hash",
+            lambda: pytest.fail("git was run"),
+        )
+        progress = open_run_progress(str(tmp_path), "mock", _harness())
+        assert progress.diff_hash == "clean" and progress.git_commit == _COMMIT
+
+
+# ---------------------------------------------------------------------------
+# Runs that share an output directory
+# ---------------------------------------------------------------------------
+
+A_LIMITS = {"gsm8k": 8}
+B_LIMITS = {"ifeval": 4}
+
+
+def _lock_path(out: Path) -> Path:
+    return stream_dir(out, "mock").parent / ".lock"
+
+
+def _header_specs(out: Path) -> set[str]:
+    return {e["header"]["spec"] for e in _entries(out) if "header" in e}
+
+
+def _write_lock(out: Path, **holder: Any) -> None:
+    import socket
+
+    lock = _lock_path(out)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(
+        json.dumps({"host": socket.gethostname(), "pid": 1, "started": "then", **holder})
+    )
+
+
+def _dead_pid() -> int:
+    import subprocess
+    import sys
+
+    process = subprocess.Popen([sys.executable, "-c", "pass"])
+    process.wait()
+    return process.pid
+
+
+def _same_artifacts(out: Path, reference: Path) -> None:
+    """``out`` holds the reference run's predictions and requests, whatever else it holds."""
+    ours, theirs = _artifacts(out), _artifacts(reference)
+    assert theirs
+    assert {name: ours.get(name) for name in theirs} == theirs
+    assert _metrics(out) == _metrics(reference)
+
+
+@pytest.fixture(scope="module")
+def a_reference(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("a_reference")
+    run_eval(out, A_LIMITS)
+    return out
+
+
+def _interrupt_a(out: Path) -> int:
+    with pytest.raises(Terminated):
+        run_eval(out, A_LIMITS, env={DEBUG_EXIT_AT_ENV: "0.5"})
+    recorded = _recorded(out)
+    assert recorded >= 2
+    return recorded
+
+
+class TestSharedOutputDirectory:
+    def test_another_run_completing_keeps_this_runs_records(self, tmp_path, a_reference) -> None:
+        recorded = _interrupt_a(tmp_path)
+
+        stats_b = run_eval(tmp_path, B_LIMITS)
+
+        assert stats_b.restored == 0
+        assert _header_specs(tmp_path) == {"gsm8k"}
+        assert _recorded(tmp_path) == recorded
+        stats_a = run_eval(tmp_path, A_LIMITS)
+        assert stats_a.restored == recorded
+        _same_artifacts(tmp_path, a_reference)
+        assert not (tmp_path / PROGRESS_DIR).exists()
+
+    @pytest.mark.parametrize("failure", ["rename", "first removal", "second removal"])
+    def test_a_crash_during_discard_leaves_the_other_runs_records_restorable(
+        self, tmp_path, a_reference, monkeypatch, failure, caplog
+    ) -> None:
+        recorded = _interrupt_a(tmp_path)
+        real_discard, real_unlink = RunProgress.discard, Path.unlink
+
+        def discard(self: RunProgress) -> None:
+            self._flush()  # so that the failure is in rewriting, not in this run's last segment
+            removals = 0
+
+            def unlink(path: Path, missing_ok: bool = False) -> None:
+                nonlocal removals
+                if path.suffix == ".jsonl":
+                    removals += 1
+                    if removals == (1 if failure == "first removal" else 2):
+                        raise OSError("disk went away")
+                real_unlink(path, missing_ok=missing_ok)
+
+            def replace(src: Any, dst: Any) -> None:
+                raise OSError("disk went away")
+
+            with pytest.MonkeyPatch.context() as inner:
+                if failure == "rename":
+                    inner.setattr(progress_module.os, "replace", replace)
+                else:
+                    inner.setattr(Path, "unlink", unlink)
+                real_discard(self)
+
+        monkeypatch.setattr(RunProgress, "discard", discard)
+        with caplog.at_level(logging.WARNING):
+            run_eval(tmp_path, B_LIMITS)
+        monkeypatch.undo()
+        assert "Could not delete the progress records" in caplog.text
+
+        assert not _lock_path(tmp_path).exists()
+        assert _recorded(tmp_path) >= recorded
+        stats = run_eval(tmp_path, A_LIMITS)
+        assert stats.restored == recorded
+        _same_artifacts(tmp_path, a_reference)
+
+    def test_discard_keeps_other_tasks_final_results(self, tmp_path) -> None:
+        run_eval(tmp_path, {"gsm8k": 4}, resume=True)  # completes: nothing is left
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(RunProgress, "discard", lambda self: None)
+            run_eval(tmp_path, B_LIMITS)
+        finals = sorted((tmp_path / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))
+        assert len(finals) == 1
+
+        run_eval(tmp_path, {"gsm8k": 4})
+
+        assert sorted((tmp_path / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}")) == finals
+        assert _header_specs(tmp_path) == {"ifeval"}
+
+    def test_restoring_names_the_tasks_of_other_runs(self, interrupted_run, tmp_path, caplog):
+        out = _resume_copy(interrupted_run, tmp_path)
+
+        with caplog.at_level(logging.INFO):
+            progress, _, _ = _open(out)
+        progress.close()
+
+        assert "keeping progress for gsm8k from another run" in caplog.text
+
+    def test_a_run_of_its_own_tasks_does_not_warn(self, interrupted_run, tmp_path, caplog):
+        out = _resume_copy(interrupted_run, tmp_path)
+
+        with caplog.at_level(logging.INFO):
+            run_eval(out, INTERRUPTED_LIMITS)
+
+        assert "from another run" not in caplog.text
+
+
+class TestFresh:
+    def test_fresh_discards_only_this_runs_tasks_for_its_model(self, tmp_path) -> None:
+        _interrupt_a(tmp_path)
+        with pytest.raises(Terminated):
+            run_eval(tmp_path, {"ifeval": 8}, env={DEBUG_EXIT_AT_ENV: "0.5"})
+        other = tmp_path / PROGRESS_DIR / "other-model"
+        other.mkdir()
+        (other / "run.segments").write_text("{}\n")
+        assert _header_specs(tmp_path) == {"gsm8k", "ifeval"}
+
+        run_eval(tmp_path, A_LIMITS, fresh=True, resume=False)
+
+        assert _header_specs(tmp_path) == {"ifeval"}
+        assert (other / "run.segments").is_file()
+
+    def test_fresh_removes_the_tasks_final_results_and_empty_directories(self, tmp_path) -> None:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(RunProgress, "discard", lambda self: None)
+            run_eval(tmp_path, A_LIMITS)
+        assert list((tmp_path / PROGRESS_DIR).glob(f"*/*{FINAL_SUFFIX}"))
+
+        run_eval(tmp_path, A_LIMITS, fresh=True, resume=False)
+
+        assert not (tmp_path / PROGRESS_DIR).exists()
+
+    def test_fresh_deletes_a_stream_it_cannot_read(self, tmp_path, caplog) -> None:
+        _interrupt_a(tmp_path)
+        segment = next(stream_dir(tmp_path, "mock").glob("*.jsonl"))
+        segment.write_text("not json\n")
+
+        with caplog.at_level(logging.WARNING):
+            run_eval(tmp_path, A_LIMITS, fresh=True, resume=False)
+
+        assert "Deleting the whole stream" in caplog.text
+        assert not has_progress(tmp_path)
+
+    def test_fresh_is_refused_while_another_run_records(self, tmp_path) -> None:
+        progress, _, _ = _open(tmp_path)
+        try:
+            with pytest.raises(ProgressLockedError):
+                run_eval(tmp_path, A_LIMITS, fresh=True, resume=False)
+        finally:
+            progress.close()
+
+
+class TestProgressLock:
+    def test_a_second_recording_run_is_refused_and_names_the_holder(self, tmp_path) -> None:
+        import socket
+
+        first, _, _ = _open(tmp_path)
+        try:
+            with pytest.raises(ProgressLockedError) as error:
+                _open(tmp_path)
+        finally:
+            first.close()
+
+        message = str(error.value)
+        assert socket.gethostname() in message and f"pid {os.getpid()}" in message
+        assert "another output directory (-O)" in message
+        _open(tmp_path)[0].close()  # free again once the first run is done
+
+    def test_models_lock_independently(self, tmp_path) -> None:
+        first, _, _ = _open(tmp_path)
+        try:
+            other = open_run_progress(str(tmp_path), "other-model", _harness(model="other-model"))
+            trackers, items = _local_setup()
+            other.restore(trackers, items, _harness(model="other-model"))
+            other.close()
+        finally:
+            first.close()
+
+    def test_a_lock_of_a_dead_process_is_taken_over(self, tmp_path, caplog) -> None:
+        _write_lock(tmp_path, pid=_dead_pid())
+
+        with caplog.at_level(logging.WARNING):
+            progress, _, _ = _open(tmp_path)
+
+        assert "Taking over" in caplog.text and "no longer running" in caplog.text
+        assert json.loads(_lock_path(tmp_path).read_text())["pid"] == os.getpid()
+        progress.close()
+        assert not _lock_path(tmp_path).exists()
+
+    @pytest.mark.parametrize("holder_job", ["job-1", "job-2", None])
+    def test_a_beaker_job_takes_over_the_lock_it_inherited(
+        self, tmp_path, monkeypatch, caplog, holder_job
+    ) -> None:
+        # /results of the preempted job (or an earlier attempt of this one) was copied here,
+        # from another host whose process cannot be checked.
+        _write_lock(tmp_path, host="another-node", beaker_job_id=holder_job)
+        monkeypatch.setenv("BEAKER_JOB_ID", "job-2")
+
+        with caplog.at_level(logging.WARNING):
+            progress, _, _ = _open(tmp_path)
+
+        assert "Taking over" in caplog.text
+        assert json.loads(_lock_path(tmp_path).read_text())["beaker_job_id"] == "job-2"
+        progress.close()
+
+    def test_a_lock_from_another_host_is_not_guessed_at_off_beaker(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.delenv("BEAKER_JOB_ID", raising=False)
+        _write_lock(tmp_path, host="another-node", pid=_dead_pid())
+
+        with pytest.raises(ProgressLockedError, match="another-node.*delete the lock file"):
+            _open(tmp_path)
+
+    def test_an_unreadable_lock_is_refused(self, tmp_path) -> None:
+        _lock_path(tmp_path).parent.mkdir(parents=True)
+        _lock_path(tmp_path).write_text("")
+
+        with pytest.raises(ProgressLockedError, match="unreadable"):
+            _open(tmp_path)
+
+    def test_a_lock_is_not_progress(self, tmp_path) -> None:
+        progress, _, _ = _open(tmp_path)
+        try:
+            assert not has_progress(tmp_path)
+        finally:
+            progress.close()
+
+    def test_release_leaves_a_lock_another_run_took_over(self, tmp_path) -> None:
+        progress, _, _ = _open(tmp_path)
+        _write_lock(tmp_path, pid=os.getpid() + 1, token="someone-else")
+
+        progress.close()
+
+        assert json.loads(_lock_path(tmp_path).read_text())["token"] == "someone-else"
+
+    def test_the_lock_is_released_after_a_completed_run(self, tmp_path) -> None:
+        run_eval(tmp_path, A_LIMITS)
+
+        assert not (tmp_path / PROGRESS_DIR).exists()
+
+    def test_the_lock_is_released_after_sigterm(self, tmp_path) -> None:
+        _interrupt_a(tmp_path)
+
+        assert has_progress(tmp_path) and not _lock_path(tmp_path).exists()
+
+    def test_the_lock_is_released_when_the_records_are_refused(self, interrupted_run, tmp_path):
+        out = _resume_copy(interrupted_run, tmp_path)
+
+        with pytest.raises(ProgressMismatchError):
+            run_eval(out, INTERRUPTED_LIMITS, overrides={"gsm8k": {"max_tokens": 128}})
+
+        assert not _lock_path(out).exists()
+
+    def test_a_run_without_resume_takes_no_lock(self, tmp_path) -> None:
+        progress, _, _ = _open(tmp_path)
+        try:
+            run_eval(tmp_path, A_LIMITS, resume=False)
+        finally:
+            progress.close()

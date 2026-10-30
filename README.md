@@ -1088,7 +1088,7 @@ uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --fresh    # discards p
 | Flag | Description |
 |------|-------------|
 | `--resume` | Record progress under `<output_dir>/progress/` and continue from any already there |
-| `--fresh` | Delete recorded progress before the run; cannot be combined with `--resume` |
+| `--fresh` | Delete the recorded progress of this run's tasks and model before the run; cannot be combined with `--resume` |
 
 Without either flag, a run records nothing and ignores progress it finds, with a warning.
 Beaker launches always pass `--resume`, and Beaker copies a preempted job's `/results`
@@ -1101,15 +1101,27 @@ into its replacement, so a requeued job continues where the last one stopped (se
   generation's per-token logprobs are left out unless one of the task's metrics scores
   from them (`Scorer.reads_logprobs`); its `sum_logits` and `num_tokens` are kept. Each
   finished task also gets a `<task>_<hash>.final.json`. Entries reach the disk every two
-  minutes. The `progress/` directory is never uploaded, and a run that completes deletes
-  it.
+  minutes. The `progress/` directory is never uploaded. A run that completes deletes
+  the records of its own tasks only.
 - **What must match.** The record format, task spec and hash, model hash and revision,
   the harness settings that affect outputs, the inference engine version (such as
-  `vllm==0.11.2`), the git commit and, for SGLang, the resolved runtime. A difference
+  `vllm==0.11.2`), the git commit, the uncommitted changes to tracked files (a hash of
+  `git diff HEAD`; untracked files are not covered) and, for SGLang, the resolved runtime.
+  Editing code after an interruption therefore stops a resume; revert the edits, pass
+  `--fresh`, or use another output directory. A run that starts from a dirty tree warns
+  that resuming will need the same changes. Without git (an installed package), the
+  commit and changes are not compared. A difference
   stops the run with an error naming the setting; pass `--fresh` or use another output
   directory. Where the run executes (GPU count, cluster, tensor parallelism, concurrency)
   may differ and only logs a warning. An instance whose prepared request, gold
   answer or metadata changed is run again.
+- **Sharing an output directory.** Runs of different tasks may share one. Each run
+  keeps the others' records when it completes and logs which tasks it is keeping. Only one
+  run at a time may record for a model: `progress/<model>/.lock` names the holder (host,
+  PID, start time, Beaker job). A second run fails with an error naming it. A lock whose
+  process is gone from this host is taken over; on Beaker, a job takes over the lock its
+  predecessor left in the copied `/results`. For a lock from another host outside Beaker,
+  delete the file once that run is gone.
 - **Failures.** An instance is recorded only when an uninterrupted run would keep its
   outcome: a scored response, or a failure the request itself caused, such as a context
   overflow. Connection and server errors, judge or sandbox outages, and results that

@@ -8,8 +8,10 @@ measures (task, model, harness, engine and code) and where it ran, then one entr
 finished instance, written by the runner's main process once the instance's outcome
 is final. A resumed run keeps the finalized tasks, rebuilds the recorded instances of
 the others, and queues only the rest, so its predictions and metrics are the same as
-an uninterrupted run's. A run that completes deletes its records, and they are never
-uploaded.
+an uninterrupted run's. A run that completes deletes its own tasks' records, and they
+are never uploaded. Other runs may share the output directory: their tasks' records are
+kept, and a lock file in the model's directory (:class:`ProgressLock`) stops two runs from
+recording into the same stream at once.
 
 An entry keeps what scoring produced (outputs, scores, the provider's request trace
 and instance metadata that scoring changed), not the prompt: the instance and request
@@ -38,14 +40,18 @@ files sends each segment once and a long run makes hundreds of files, not millio
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import os
 import pickle
 import shutil
 import signal
+import socket
 import threading
-from collections.abc import Callable, Iterator, Mapping, Sequence
+import time
+import uuid
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -68,8 +74,9 @@ logger = get_logger(__name__)
 
 PROGRESS_DIR = "progress"
 DEBUG_EXIT_AT_ENV = "OLMO_EVAL_DEBUG_EXIT_AT"
-RECORD_VERSION = 4
+RECORD_VERSION = 5
 FINAL_SUFFIX = ".final.json"
+LOCK_NAME = ".lock"
 
 # The segment stream is written when its buffered entries reach this size or age, and on
 # close. Beaker uploads /results every few minutes, so writing more often buys little.
@@ -89,6 +96,7 @@ MEASUREMENT_FIELDS = (
     "harness_hash",
     "engine_version",
     "git_commit",
+    "diff_hash",
 )
 
 # Harness settings that change how work is scheduled, not what an instance's
@@ -112,6 +120,10 @@ _OPERATIONAL_HARNESS_KEYS = frozenset(
 
 class ProgressMismatchError(RuntimeError):
     """Progress recorded in the output directory cannot be used by this run."""
+
+
+class ProgressLockedError(ProgressMismatchError):
+    """Another run is recording progress for this model in the output directory."""
 
 
 class DroppedLogprobsError(RuntimeError):
@@ -269,6 +281,55 @@ class ProgressStore:
                 shutil.rmtree(self.path)
             self._next_segment = 0
 
+    def drop(self, keys: Collection[str] = (), specs: Collection[str] = ()) -> None:
+        """Remove the entries of the tasks in ``keys`` or whose header names a spec in ``specs``.
+
+        The other tasks' entries are rewritten into one new segment, written to a temporary
+        file and renamed into place after the old segments, which are then removed newest
+        first. A crash leaves the old segments, or a prefix of them followed by the new
+        segment; the new segment holds every entry that is kept, so either way a reader
+        sees the kept tasks' records complete (and the removed tasks' too, as before the
+        call). Nothing is left when no task's entries are.
+        """
+        with self._lock:
+            self._buffer, self._buffered_bytes = [], 0
+        segments = sorted(self.path.glob("[0-9]*.jsonl")) if self.path.is_dir() else []
+        if not segments:
+            return
+        for leftover in self.path.glob("*.tmp"):
+            leftover.unlink()
+        dropped = set(keys)
+        final = self.path / f"{int(segments[-1].stem) + 1:06d}.jsonl"
+        tmp = final.with_suffix(".tmp")
+        kept_tasks, removed_any = False, False
+        with open(tmp, "w", encoding="utf-8") as f:
+            for segment in segments:
+                for entry in _read_lines(segment):
+                    key = entry.get("t")
+                    header = entry.get("header")
+                    if isinstance(header, dict) and header.get("spec") in specs:
+                        dropped.add(key)
+                    if key in dropped:
+                        removed_any = True
+                        continue
+                    kept_tasks = kept_tasks or key is not None
+                    f.write(_dump(entry))
+            f.flush()
+            os.fsync(f.fileno())
+        if not removed_any:
+            tmp.unlink()
+            return
+        if kept_tasks:
+            os.replace(tmp, final)
+        else:
+            tmp.unlink()
+        for segment in reversed(segments):
+            segment.unlink()
+        self._next_segment = int(final.stem) + 1 if kept_tasks else 0
+        if not kept_tasks:
+            with contextlib.suppress(OSError):
+                self.path.rmdir()
+
     def append(self, entry: Mapping[str, Any]) -> None:
         """Add one entry after those already read or written."""
         line = _dump(entry)
@@ -342,16 +403,168 @@ def stream_dir(output_dir: str | Path, model_name: str) -> Path:
 
 
 def has_progress(output_dir: str | Path) -> bool:
-    """Whether the output directory holds any progress record."""
+    """Whether the output directory holds any progress record (a lock file is not one)."""
     path = Path(output_dir) / PROGRESS_DIR
-    return path.is_dir() and any(p.is_file() for p in path.rglob("*"))
+    return path.is_dir() and any(p.is_file() and p.name != LOCK_NAME for p in path.rglob("*"))
 
 
-def discard_progress(output_dir: str | Path) -> None:
-    """Delete every progress record in the output directory."""
-    path = Path(output_dir) / PROGRESS_DIR
-    if path.exists():
-        shutil.rmtree(path)
+def _remove_empty_dirs(*directories: Path) -> None:
+    for directory in directories:
+        try:
+            directory.rmdir()
+        except OSError:
+            break
+
+
+def discard_progress(output_dir: str | Path, model_name: str, specs: Collection[str]) -> None:
+    """Delete the records of ``specs`` for one model, under any task hash.
+
+    Other tasks' records and other models' progress in the output directory are kept.
+    A stream that cannot be read is deleted whole, since its tasks cannot be told apart.
+    """
+    model_dir = _model_dir(output_dir, model_name)
+    with ProgressLock(model_dir):
+        store = ProgressStore(stream_dir(output_dir, model_name))
+        try:
+            store.drop(specs=specs)
+        except ProgressMismatchError as e:
+            logger.warning(f"{e} Deleting the whole stream {store.path}.")
+            shutil.rmtree(store.path, ignore_errors=True)
+        for path in model_dir.glob(f"*{FINAL_SUFFIX}"):
+            if _final_spec(path, specs) is not None:
+                path.unlink()
+    _remove_empty_dirs(model_dir, Path(output_dir) / PROGRESS_DIR)
+
+
+def _final_spec(path: Path, specs: Collection[str] | None = None) -> str | None:
+    """The spec a ``.final.json`` belongs to (in ``specs``, when given); None if not."""
+    try:
+        spec = json.loads(path.read_text())["header"]["spec"]
+    except (OSError, ValueError, KeyError, TypeError):
+        # Unreadable: go by the name, ``<spec>_<hash6>``.
+        stem = path.name[: -len(FINAL_SUFFIX)]
+        candidates = specs if specs is not None else [stem[:-7]]
+        return next(
+            (c for c in candidates if stem == f"{sanitize_spec_for_filename(c)}_{stem[-6:]}"),
+            None,
+        )
+    return spec if specs is None or spec in specs else None
+
+
+# ---------------------------------------------------------------------------
+# Lock
+# ---------------------------------------------------------------------------
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+class ProgressLock:
+    """Marks a model's progress directory as in use by one recording run.
+
+    The lock file holds the holder's host, PID, start time and Beaker job ID. A lock that
+    cannot belong to a live run is taken over with a warning: on Beaker, any lock is the
+    last job's (``/results`` is copied into the replacement job and one job of a task runs
+    at a time); elsewhere, one whose process is gone from this host. A lock from another
+    host cannot be checked, so it stops the run until its holder is gone and the file is
+    deleted.
+    """
+
+    def __init__(self, model_dir: Path) -> None:
+        self.path = model_dir / LOCK_NAME
+        self._token: str | None = None
+
+    def __enter__(self) -> ProgressLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.release()
+
+    def _read(self) -> dict[str, Any] | None:
+        try:
+            data = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    @staticmethod
+    def _stale(holder: Mapping[str, Any]) -> str | None:
+        """Why the holder's lock can be taken over, or None when it may still be running."""
+        job_id = os.environ.get("BEAKER_JOB_ID")
+        if job_id:
+            if holder.get("beaker_job_id") == job_id:
+                return f"it was left by an earlier attempt of this Beaker job ({job_id})"
+            left_by = holder.get("beaker_job_id") or "an earlier run"
+            return f"it was left by {left_by}, not this job ({job_id})"
+        pid = holder.get("pid")
+        if holder.get("host") == socket.gethostname() and isinstance(pid, int):
+            return None if _pid_alive(pid) else f"process {pid} is no longer running"
+        return None
+
+    def _describe(self, holder: Mapping[str, Any] | None) -> str:
+        if holder is None:
+            return "an unreadable lock file"
+        job = f", Beaker job {holder['beaker_job_id']}" if holder.get("beaker_job_id") else ""
+        return (
+            f"host {holder.get('host')}, pid {holder.get('pid')}, started "
+            f"{holder.get('started')}{job}"
+        )
+
+    def acquire(self) -> None:
+        """Take the lock, or raise :class:`ProgressLockedError` naming who holds it."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        token = uuid.uuid4().hex
+        mine = {
+            "host": socket.gethostname(),
+            "pid": os.getpid(),
+            "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "beaker_job_id": os.environ.get("BEAKER_JOB_ID") or None,
+            "token": token,
+        }
+        for _ in range(2):
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                holder = self._read()
+                reason = self._stale(holder) if holder is not None else None
+                if reason is None:
+                    raise ProgressLockedError(
+                        f"Another run is recording progress here: {self.path} is held by "
+                        f"{self._describe(holder)}. Two runs recording into the same output "
+                        "directory and model would overwrite each other's progress. Wait for "
+                        "it to finish, use another output directory (-O), or, if that run is "
+                        "gone, delete the lock file."
+                    ) from None
+                logger.warning(f"Taking over {self.path} ({self._describe(holder)}): {reason}")
+                self.path.unlink(missing_ok=True)
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(mine, f)
+                f.flush()
+                os.fsync(f.fileno())
+            self._token = token
+            return
+        raise ProgressLockedError(
+            f"Another run took {self.path} while this one was reclaiming it "
+            f"({self._describe(self._read())})."
+        )
+
+    def release(self) -> None:
+        """Remove the lock file if this run still holds it."""
+        token, self._token = self._token, None
+        if token is None:
+            return
+        holder = self._read()
+        if holder is not None and holder.get("token") == token:
+            self.path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +606,8 @@ _ENGINE_PACKAGES = {
 
 # Recorded in place of a version that could not be determined.
 UNKNOWN_VERSION = "unknown"
+# The diff_hash of a working tree with no uncommitted changes to tracked files.
+CLEAN_TREE = "clean"
 _SERVER_PROBE_TIMEOUT_SECONDS = 60
 
 
@@ -519,6 +734,10 @@ def _differences(recorded: Any, current: Any) -> list[str]:
     ]
 
 
+def _code_state(diff_hash: Any) -> str:
+    return "no uncommitted changes" if diff_hash == CLEAN_TREE else f"changes {diff_hash}"
+
+
 def check_header(path: Path, recorded: Mapping[str, Any], expected: Mapping[str, Any]) -> None:
     """Raise ProgressMismatchError naming the first measurement field that differs.
 
@@ -532,7 +751,7 @@ def check_header(path: Path, recorded: Mapping[str, Any], expected: Mapping[str,
         )
     for key in MEASUREMENT_FIELDS:
         old, new = recorded.get(key), expected.get(key)
-        if key == "git_commit" and (old is None or new is None):
+        if key in ("git_commit", "diff_hash") and (old is None or new is None):
             continue
         if key == "engine_version" and UNKNOWN_VERSION in (
             str(old).rpartition("==")[2],
@@ -547,6 +766,14 @@ def check_header(path: Path, recorded: Mapping[str, Any], expected: Mapping[str,
             continue
         if old == new:
             continue
+        if key == "diff_hash":
+            raise ProgressMismatchError(
+                f"Progress record {path} was written with different uncommitted code changes "
+                f"({_code_state(old)} then, {_code_state(new)} now): the code changed since "
+                "the records were written, so restored instances would keep scores from the "
+                "old code. Restore the same edits to resume, pass --fresh to rerun this "
+                "run's tasks, or use another output directory (-O)."
+            )
         changed = (
             _differences(recorded.get("task_config"), expected.get("task_config"))
             if key == "task_hash"
@@ -876,6 +1103,9 @@ class RunProgress:
     harness_hash: str | None
     git_commit: str | None
     engine_version: str | None = None
+    # Hash of the uncommitted changes to tracked files (CLEAN_TREE when there are none);
+    # None when git cannot say, which never refuses a resume.
+    diff_hash: str | None = None
     execution: dict[str, Any] = field(default_factory=dict)
     exit_thresholds: list[float] = field(default_factory=list)
     _store: ProgressStore | None = field(default=None, init=False)
@@ -885,6 +1115,8 @@ class RunProgress:
     _done: int = field(default=0, init=False)
     _armed: list[float] = field(default_factory=list, init=False)
     _final_paths: list[Path] = field(default_factory=list, init=False)
+    _run_keys: set[str] = field(default_factory=set, init=False)
+    _lock: ProgressLock | None = field(default=None, init=False)
 
     def header(self, spec: str, task_config: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -896,6 +1128,7 @@ class RunProgress:
             "harness_hash": self.harness_hash,
             "engine_version": self.engine_version,
             "git_commit": self.git_commit,
+            "diff_hash": self.diff_hash,
             "execution": self.execution,
             "task_config": task_config,
         }
@@ -927,6 +1160,20 @@ class RunProgress:
         Writes a header for every task not yet finalized that has none, and folds
         restored instances' failures and token usage into the trackers.
         """
+        self._lock = ProgressLock(_model_dir(self.output_dir, self.model_name))
+        self._lock.acquire()
+        try:
+            return self._restore(trackers, items, harness_config)
+        except BaseException:
+            self.close()
+            raise
+
+    def _restore(
+        self,
+        trackers: Mapping[str, TaskTracker],
+        items: Sequence[QueueItem],
+        harness_config: HarnessConfig,
+    ) -> Restored:
         from olmo_eval.runners.asynq.types import ResultItem
 
         by_task: dict[str, dict[int, QueueItem]] = {}
@@ -942,6 +1189,7 @@ class RunProgress:
                 continue
             header = self.header(spec, tracker.task.config.to_dict())
             expected[spec] = header
+            self._run_keys.add(task_key(spec, header["task_hash"]))
             path = final_path(self.output_dir, self.model_name, spec, header["task_hash"])
             self._final_paths.append(path)
             final = self._load_final(spec, header, path)
@@ -964,6 +1212,7 @@ class RunProgress:
         }
         has_header: set[str | None] = set()
         mismatched = 0
+        foreign: set[str] = set()
         for entry in store.read():
             if "runtime" in entry:
                 if self._runtime is None:
@@ -977,6 +1226,8 @@ class RunProgress:
                 if spec in expected:
                     check_header(store.path, recorded, expected[spec])
                     has_header.add(key)
+                elif isinstance(spec, str):
+                    foreign.add(spec)
                 continue
             if key not in active:
                 continue
@@ -1023,6 +1274,11 @@ class RunProgress:
                 restored.responses[spec] = responses
             self._done += len(outcomes[spec])
 
+        for path in _model_dir(self.output_dir, self.model_name).glob(f"*{FINAL_SUFFIX}"):
+            if path not in self._final_paths and (spec := _final_spec(path)) is not None:
+                foreign.add(spec)
+        if foreign:
+            logger.info(f"keeping progress for {', '.join(sorted(foreign))} from another run")
         if mismatched:
             logger.warning(
                 f"{mismatched} recorded instance(s) no longer match their prepared instance "
@@ -1161,30 +1417,41 @@ class RunProgress:
             logger.error(f"Could not record the finalized result of {spec}: {e}")
 
     def discard(self) -> None:
-        """Delete this run's records: its model's stream and its tasks' finalized results.
+        """Delete this run's records: its tasks' entries and finalized results.
 
-        Other models' streams and tasks in the same output directory are left alone, and
-        directories this empties are removed.
+        Records of other tasks, in the model's stream or beside it, and other models'
+        progress in the same output directory are left alone, and directories this
+        empties are removed. A failure leaves the records as they were (see
+        :meth:`ProgressStore.drop`), so a rerun resumes from them.
         """
-        self.close()
-        shutil.rmtree(stream_dir(self.output_dir, self.model_name), ignore_errors=True)
-        for path in self._final_paths:
-            path.unlink(missing_ok=True)
-        root = Path(self.output_dir) / PROGRESS_DIR
-        for directory in (_model_dir(self.output_dir, self.model_name), root):
+        self._flush()
+        if self._store is not None:
             try:
-                directory.rmdir()
-            except OSError:
-                break
+                self._store.drop(keys=self._run_keys)
+                for path in self._final_paths:
+                    path.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning(f"Could not delete the progress records in {self._store.path}: {e}")
+                self.close()
+                return
+        self.close()
+        _remove_empty_dirs(
+            _model_dir(self.output_dir, self.model_name), Path(self.output_dir) / PROGRESS_DIR
+        )
 
-    def close(self) -> None:
-        """Write out and fsync every record."""
+    def _flush(self) -> None:
         if self._store is None:
             return
         try:
             self._store.close()
         except OSError as e:
             logger.warning(f"Could not write progress record {self._store.path}: {e}")
+
+    def close(self) -> None:
+        """Write out and fsync every record, and release the model's lock."""
+        self._flush()
+        if self._lock is not None:
+            self._lock.release()
 
 
 def open_run_progress(
@@ -1194,7 +1461,16 @@ def open_run_progress(
 ) -> RunProgress:
     """RunProgress for this run, with its identity and debug settings from the environment."""
     from olmo_eval.common.types import compute_model_hash
-    from olmo_eval.upload.provenance import git_info
+    from olmo_eval.upload.provenance import git_info, uncommitted_diff_hash
+
+    git = git_info()
+    dirty = git.get("dirty")
+    diff_hash = None if dirty is None else uncommitted_diff_hash() if dirty else CLEAN_TREE
+    if diff_hash not in (None, CLEAN_TREE):
+        logger.warning(
+            f"Recording progress from a working tree with uncommitted changes ({diff_hash}); "
+            "resuming this run will require the same uncommitted changes"
+        )
 
     return RunProgress(
         output_dir=output_dir,
@@ -1202,8 +1478,9 @@ def open_run_progress(
         model_hash=compute_model_hash(harness_config.provider.to_dict()),
         model_revision=harness_config.provider.revision,
         harness_hash=harness_hash(harness_config),
-        git_commit=git_info().get("commit"),
+        git_commit=git.get("commit"),
         engine_version=engine_version(harness_config),
+        diff_hash=diff_hash,
         execution=execution_info(harness_config),
         exit_thresholds=parse_exit_thresholds(os.environ.get(DEBUG_EXIT_AT_ENV)),
     )
@@ -1213,6 +1490,8 @@ __all__ = [
     "DEBUG_EXIT_AT_ENV",
     "DroppedLogprobs",
     "DroppedLogprobsError",
+    "ProgressLock",
+    "ProgressLockedError",
     "ProgressMismatchError",
     "ProgressStore",
     "Restored",

@@ -622,7 +622,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         experiment_start = time.time()
 
         if self.fresh:
-            discard_progress(self.output_dir)
+            discard_progress(self.output_dir, self.model_name, expand_tasks(self.task_specs))
         elif not self.resume and has_progress(self.output_dir):
             runner_logger.warning(
                 f"{self.output_dir} holds progress from an earlier run, which this run "

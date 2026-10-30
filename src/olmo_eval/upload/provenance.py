@@ -188,6 +188,24 @@ def _local_git_info() -> dict[str, Any]:
     }
 
 
+@lru_cache(maxsize=1)
+def uncommitted_diff_hash() -> str | None:
+    """Short hash of the tracked files' uncommitted changes in the olmo_eval checkout.
+
+    Staged and unstaged edits are both in ``git diff HEAD``. Untracked files are not,
+    which matches the dirty flag of :func:`git_info`. None when git cannot say.
+    """
+    import hashlib
+
+    import olmo_eval
+
+    cwd = Path(olmo_eval.__file__).resolve().parent
+    diff = _run(["git", "diff", "HEAD", "--no-ext-diff", "--no-color"], cwd=cwd, timeout=30.0)
+    if diff is None:
+        return None
+    return hashlib.sha256(diff.encode()).hexdigest()[:12]
+
+
 def git_info(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Repository, commit, branch and dirty flag.
 
