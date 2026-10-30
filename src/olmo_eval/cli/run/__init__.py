@@ -149,6 +149,7 @@ def run(
     from olmo_eval.cli.run.factory import RunnerFactory
     from olmo_eval.common.logging import configure_logging
     from olmo_eval.runners import ValidationError
+    from olmo_eval.runners.asynq.progress import ProgressLockedError
     from olmo_eval.upload import mark_run_failed, mark_run_interrupted, resolve_upload_config
     from olmo_eval.upload.config import upload_param_hint
 
@@ -260,6 +261,10 @@ def run(
                     runner.output_dir, upload_config, error=f"Run {reason}", since=started
                 )
             raise SystemExit(143 if isinstance(e, Terminated) else 130) from None
+        except ProgressLockedError as e:
+            # Another run owns this directory's manifest and run: report nothing for it.
+            console.print(f"\n[bold red]Not started:[/bold red] {e}")
+            raise SystemExit(1) from None
         except Exception as e:
             console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
             console.print_exception()

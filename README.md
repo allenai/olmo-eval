@@ -1110,7 +1110,8 @@ into its replacement, so a requeued job continues where the last one stopped (se
   Editing code after an interruption therefore stops a resume; revert the edits, pass
   `--fresh`, or use another output directory. A run that starts from a dirty tree warns
   that resuming will need the same changes. Without git (an installed package), the
-  commit and changes are not compared. A difference
+  commit and changes are not compared. New untracked files, such as a new scorer module,
+  are not covered either; `git add -N <file>` includes one. A difference
   stops the run with an error naming the setting; pass `--fresh` or use another output
   directory. Where the run executes (GPU count, cluster, tensor parallelism, concurrency)
   may differ and only logs a warning. An instance whose prepared request, gold
@@ -1119,8 +1120,10 @@ into its replacement, so a requeued job continues where the last one stopped (se
   keeps the others' records when it completes and logs which tasks it is keeping. Only one
   run at a time may record for a model: `progress/<model>/.lock` names the holder (host,
   PID, start time, Beaker job). A second run fails with an error naming it. A lock whose
-  process is gone from this host is taken over; on Beaker, a job takes over the lock its
-  predecessor left in the copied `/results`. For a lock from another host outside Beaker,
+  process is gone from this host is taken over; on Beaker, a job takes over any lock in its
+  own `/results` (the predecessor's, copied there) and any lock left by an earlier attempt of
+  the same job. In a shared directory (`-O /weka/...`), another job's lock is treated as any
+  lock from another host. For a lock from another host outside Beaker,
   delete the file once that run is gone.
 - **Failures.** An instance is recorded only when an uninterrupted run would keep its
   outcome: a scored response, or a failure the request itself caused, such as a context
@@ -1135,7 +1138,7 @@ into its replacement, so a requeued job continues where the last one stopped (se
 - **Dashboard status.** A `--resume` run stopped by SIGTERM, as a preemption or a canceled
   Beaker job stops it, shows as `interrupted` instead of `failed`. The resumed run keeps
   the run ID and shows as running again, then finishes with its final status. A run that
-  nobody resumes stays `interrupted`; `olmo-eval results upload` on its directory uploads
+  nobody resumes shows as stale, like a stale running run, after the same delay; `olmo-eval results upload` on its directory uploads
   it as finished, with the status its saved results support. Other crashes, Ctrl-C, and
   runs without `--resume` are still reported as `failed`.
 - **Testing.** `OLMO_EVAL_DEBUG_EXIT_AT=0.5` makes a `--resume` run send itself SIGTERM

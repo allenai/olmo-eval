@@ -27,10 +27,13 @@ from olmo_eval.runners.asynq.monitoring import (
 )
 from olmo_eval.runners.asynq.preparation import prepare_task_items
 from olmo_eval.runners.asynq.progress import (
+    ProgressLock,
     Restored,
     discard_progress,
     has_progress,
+    model_lock,
     open_run_progress,
+    remove_empty_progress_dirs,
 )
 from olmo_eval.runners.asynq.results import (
     aggregate_results,
@@ -621,12 +624,31 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # startup (imports and config resolution), which it does not cover.
         experiment_start = time.time()
 
+        # A run that records or discards progress takes the model's lock before it
+        # touches the output directory: another live run's manifest, run ID and records
+        # must not change because this one started.
+        lock = model_lock(self.output_dir, self.model_name) if self.resume or self.fresh else None
+        if lock is not None:
+            lock.acquire()
+        try:
+            return await self._run_locked(experiment_start, lock)
+        finally:
+            if lock is not None and lock.held:
+                lock.release()
+                remove_empty_progress_dirs(self.output_dir, self.model_name)
+
+    async def _run_locked(
+        self, experiment_start: float, lock: ProgressLock | None
+    ) -> dict[str, Any]:
         if self.fresh:
-            discard_progress(self.output_dir, self.model_name, expand_tasks(self.task_specs))
+            discard_progress(
+                self.output_dir, self.model_name, expand_tasks(self.task_specs), lock=lock
+            )
         elif not self.resume and has_progress(self.output_dir):
             runner_logger.warning(
-                f"{self.output_dir} holds progress from an earlier run, which this run "
-                "ignores. Pass --resume to continue it, or --fresh to discard it."
+                f"{self.output_dir} holds progress recorded by another run, which this run "
+                "ignores. Pass --resume to continue it, or --fresh to discard the records "
+                "of this run's tasks (other tasks' records stay)."
             )
 
         # Generate experiment ID early so metrics can include it. A resumed run keeps
@@ -651,7 +673,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         progress: RunProgress | None = None
         restored = Restored(remaining=items)
         if self.resume:
-            progress = open_run_progress(self.output_dir, self.model_name, self.harness_config)
+            progress = open_run_progress(
+                self.output_dir, self.model_name, self.harness_config, lock=lock
+            )
             try:
                 restored = progress.restore(trackers, items, self.harness_config)
             except BaseException:
@@ -1330,9 +1354,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             progress.discard()
         elif progress is None and has_progress(self.output_dir):
             runner_logger.warning(
-                f"{self.output_dir} still holds progress from an earlier run. It is stale: "
-                "this run did not use it. Delete the progress/ directory, or pass --fresh, "
-                "before using --resume here."
+                f"{self.output_dir} still holds progress recorded by another run, which this "
+                "run did not use. Pass --resume to continue it, or --fresh to discard the "
+                "records of this run's tasks (other tasks' records stay)."
             )
         check_failure_budget(results)
         return final_results

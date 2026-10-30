@@ -191,3 +191,31 @@ def test_only_sigterm_under_resume_records_an_interrupted_run(
     else:
         mark_interrupted.assert_not_called()
         mark_failed.assert_called_once()
+
+
+def test_a_run_refused_by_another_runs_lock_reports_nothing(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from olmo_eval.runners.asynq.progress import ProgressLockedError
+
+    class RefusedRunner(SimpleNamespace):
+        def validate(self) -> None:
+            pass
+
+        def run(self) -> None:
+            raise ProgressLockedError("Another run is recording progress here: x")
+
+    runner = RefusedRunner(output_dir=str(tmp_path))
+    argv = ["run", "-m", "mock", "-t", "arc_easy", "-O", str(tmp_path), "--no-upload", "--resume"]
+    monkeypatch.setattr("sys.argv", ["olmo-eval", *argv])
+    with (
+        patch("olmo_eval.cli.run.factory.RunnerFactory.create", return_value=runner),
+        patch("olmo_eval.upload.mark_run_failed") as mark_failed,
+        patch("olmo_eval.upload.mark_run_interrupted") as mark_interrupted,
+    ):
+        result = CliRunner().invoke(main, argv)
+
+    assert result.exit_code == 1
+    mark_failed.assert_not_called()
+    mark_interrupted.assert_not_called()
+    assert "Another run is recording progress here" in result.output
