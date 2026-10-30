@@ -1532,7 +1532,11 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 provider_kind=results_dict.get("provider") or str(self.provider_config.kind),
                 provider_config=results_dict.get("model_config", {}),
             )
-            suites = suite_results(results_dict.get("suites") or {}, results_dict.get("tasks"))
+            suites = suite_results(
+                results_dict.get("suites") or {},
+                results_dict.get("tasks"),
+                task_specs=self.task_specs,
+            )
             write_manifest(
                 self.output_dir,
                 build_manifest(run, model, tasks, suites, resume=self._resume_record),
