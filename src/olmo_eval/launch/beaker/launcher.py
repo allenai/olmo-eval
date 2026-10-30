@@ -997,6 +997,7 @@ class BeakerLauncher:
             "UV_CACHE_DIR",
             "OLMO_EVAL_RUNTIME_TORCH_VERSION",
             "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
+            "OLMO_EVAL_RUNTIME_TORCH_EXTRA_PACKAGES",
         )
         for key in install_env_keys:
             if key in config.env_vars:
