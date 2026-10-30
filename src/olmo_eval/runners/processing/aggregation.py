@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.processing.generation_counts import sum_generation_counts
+
+if TYPE_CHECKING:
+    from olmo_eval.evals.suites.registry import Suite
 
 logger = get_logger(__name__)
 
@@ -133,6 +136,70 @@ def _log_tasks_excluded_from_suite(
         )
 
 
+def _compute_gap(
+    suite_name: str,
+    task_specs: list[str],
+    task_results: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Report a GAP definition, scored when both tasks share a primary metric."""
+    reference_spec, companion_spec = task_specs
+    definition: dict[str, Any] = {
+        "metrics": {},
+        "tasks": list(task_specs),
+        "num_tasks": 2,
+        "aggregation": "gap",
+        "reference_task": reference_spec,
+        "companion_task": companion_spec,
+        "primary_metric": None,
+    }
+    scores: list[float] = []
+    for spec in task_specs:
+        task_data = task_results.get(spec) or {}
+        score = _extract_primary_score(task_data) if task_data.get("metrics") else None
+        if score is None:
+            logger.warning(f"Suite {suite_name}: no primary score for {spec}; omitting the gap.")
+            return definition
+        scores.append(score)
+
+    reference_metric = task_results[reference_spec].get("primary_metric")
+    companion_metric = task_results[companion_spec].get("primary_metric")
+    if not isinstance(reference_metric, str) or reference_metric != companion_metric:
+        logger.warning(
+            f"Suite {suite_name}: {reference_spec} reports {reference_metric} but "
+            f"{companion_spec} reports {companion_metric}; omitting the gap."
+        )
+        return definition
+
+    reference, companion = scores
+    from olmo_eval.upload.metadata import metric_meta_for_spec
+
+    metric_name = reference_metric.rsplit(":", 1)[0]
+    meta = task_results[companion_spec].get("metric_meta") or {}
+    display_format = (meta.get(companion_metric) or meta.get(metric_name) or {}).get(
+        "display_format"
+    )
+    if display_format is None:
+        registered_meta = metric_meta_for_spec(companion_spec, [metric_name])
+        display_format = (registered_meta.get(metric_name) or {}).get("display_format", "raw")
+    return {
+        "metrics": {
+            "primary_score": {
+                "reference": reference,
+                "companion": companion,
+                "gap": companion - reference,
+            }
+        },
+        "tasks": list(task_specs),
+        "num_tasks": 2,
+        "aggregation": "gap",
+        "reference_task": reference_spec,
+        "companion_task": companion_spec,
+        "scored_metric": reference_metric,
+        "primary_metric": "primary_score:companion",
+        "display_format": display_format,
+    }
+
+
 def _compute_child_average(
     child: str | Any,  # str or Suite
     priority_suffix: str,
@@ -253,6 +320,8 @@ def compute_suite_aggregations(
       the task's instance count
     - AVERAGE_OF_AVERAGES: Average over children, where nested suites are
       averaged first (each child gets equal weight)
+    - GAP: Both tasks' primary scores and the companion minus the reference
+    - NONE: No aggregate for the suite itself; each nested suite reports its own
 
     Handles specs with priority suffixes (@priority).
     When a suite has these suffixes, they are propagated to expanded task lookups.
@@ -265,10 +334,8 @@ def compute_suite_aggregations(
         Dict mapping suite name -> {"metrics": {...}, "tasks": [...], "aggregation": ...}
     """
     from olmo_eval.evals.suites import get_suite, suite_exists
-    from olmo_eval.evals.suites.registry import AggregationStrategy
 
-    suite_aggregations: dict[str, dict[str, Any]] = {}
-
+    suites: list[tuple[str, Suite, str]] = []
     for spec in task_specs:
         # Parse out priority suffix (e.g., "suite@high" -> "suite", "@high")
         priority_suffix = ""
@@ -278,11 +345,64 @@ def compute_suite_aggregations(
             priority_suffix = f"@{priority}"
 
         # Check if the base spec (without priority) is a suite
-        if not suite_exists(base_spec):
+        if suite_exists(base_spec):
+            suites.append((spec, get_suite(base_spec), priority_suffix))
+
+    return _aggregate_suites(suites, task_results)
+
+
+def _aggregate_suites(
+    suites: list[tuple[str, Suite, str]],
+    task_results: dict[str, dict[str, Any]],
+    *,
+    report_descendants: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Aggregate each (result key, suite, priority suffix) entry by its strategy."""
+    from olmo_eval.evals.suites.registry import AggregationStrategy, Suite
+
+    suite_aggregations: dict[str, dict[str, Any]] = {}
+
+    for spec, suite, priority_suffix in suites:
+        if suite.aggregation == AggregationStrategy.NONE:
+            # No score of its own; nested suites report under their own names.
+            nested = [
+                (f"{child.name}{priority_suffix}", child, priority_suffix)
+                for child in suite.tasks
+                if isinstance(child, Suite)
+            ]
+            for key, result in _aggregate_suites(
+                nested, task_results, report_descendants=True
+            ).items():
+                suite_aggregations.setdefault(key, {"container_suite": spec, **result})
             continue
 
-        suite = get_suite(base_spec)
-        if suite.aggregation == AggregationStrategy.NONE:
+        if report_descendants:
+            nested = [
+                (f"{child.name}{priority_suffix}", child, priority_suffix)
+                for child in suite.tasks
+                if isinstance(child, Suite)
+            ]
+            for key, result in _aggregate_suites(
+                nested, task_results, report_descendants=True
+            ).items():
+                suite_aggregations.setdefault(key, result)
+
+        if report_descendants and suite.aggregation == AggregationStrategy.DISPLAY_ONLY:
+            suite_aggregations[spec] = {
+                "metrics": {},
+                "tasks": [f"{name}{priority_suffix}" for name in suite.expand()],
+                "num_tasks": len(suite.expand()),
+                "aggregation": suite.aggregation.value,
+            }
+            continue
+
+        if suite.aggregation == AggregationStrategy.GAP:
+            gap_result = _compute_gap(
+                spec,
+                [f"{task_spec}{priority_suffix}" for task_spec in suite.expand()],
+                task_results,
+            )
+            suite_aggregations[spec] = gap_result
             continue
 
         _log_tasks_excluded_from_suite(
@@ -328,7 +448,19 @@ def compute_suite_aggregations(
                         "aggregation": result.nested_suite.aggregation.value,
                         "parent_suite": spec,
                     }
-                    if result.primary_score is not None:
+                    existing = suite_aggregations.get(result.nested_suite_key)
+                    if existing is not None:
+                        nested_result = {**existing, "parent_suite": spec}
+                    unscored_child = (
+                        result.nested_suite.aggregation == AggregationStrategy.NONE
+                        or (
+                            report_descendants
+                            and result.nested_suite.aggregation == AggregationStrategy.DISPLAY_ONLY
+                        )
+                    )
+                    if unscored_child:
+                        nested_result["metrics"] = {}
+                    elif existing is None and result.primary_score is not None:
                         nested_result["metrics"] = dict(result.metrics)
                         nested_result["metrics"]["primary_score"] = {
                             "average": result.primary_score
