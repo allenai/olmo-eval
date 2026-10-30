@@ -668,6 +668,44 @@ async def test_cached_compare_reflects_tag_and_suite_changes(
     assert p3["tasks_used"] == ["arc"]
 
 
+@pytest.mark.parametrize("previous_namespace", ["matrix-v6", "matrix-v7"])
+async def test_matrix_recomputes_previous_cached_scores(
+    client: httpx.AsyncClient,
+    seeded: dict,
+    session: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    previous_namespace: str,
+) -> None:
+    from olmo_eval_api.routers.api import compare
+    from olmo_eval_api.schemas.api import MatrixResponse
+    from olmo_eval_api.services.cache import put_cached
+
+    request = {
+        "subjects": [f"r:{seeded['step1000']}", f"r:{seeded['step3000']}"],
+        "scope": "suite:core",
+        "metric": "primary",
+    }
+    current_cache_key = compare.cache_key
+    previous_keys: list[str] = []
+
+    def previous_cache_key(endpoint: str, *args: Any, **kwargs: Any) -> str:
+        key = current_cache_key(previous_namespace, *args, **kwargs)
+        previous_keys.append(key)
+        return key
+
+    with monkeypatch.context() as legacy:
+        legacy.setattr(compare, "cache_key", previous_cache_key)
+        stale = await post(client, "/api/compare/matrix", request, "MatrixResponse")
+    expected = stale["rows"][0]["cells"][0]["score"]
+    assert expected is not None
+    stale["rows"][0]["cells"][0]["score"] = 0.0 if expected != 0.0 else 1.0
+    await put_cached(session, previous_keys[0], MatrixResponse.model_validate(stale))
+
+    fresh = await post(client, "/api/compare/matrix", request, "MatrixResponse")
+    assert fresh["rows"][0]["cells"][0]["score"] == pytest.approx(expected)
+    assert fresh["rows"][0]["cells"][0]["score"] != stale["rows"][0]["cells"][0]["score"]
+
+
 async def test_compare_pairwise_rejects_too_much_work(
     client: httpx.AsyncClient, seeded: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
