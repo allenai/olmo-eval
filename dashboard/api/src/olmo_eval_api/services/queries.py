@@ -187,7 +187,11 @@ def model_detail(row: Mapping[Any, Any], prefix: str = "m_") -> a.ModelDetail:
 
 
 def is_stale(row: Mapping[Any, Any]) -> bool:
-    return row["status"] == "running" and row["updated_at"] < now_utc() - STALE_AFTER
+    """A run that should still be updating (running, or interrupted and awaiting a resume)
+    has not been updated for a day."""
+    return (
+        row["status"] in ("running", "interrupted") and row["updated_at"] < now_utc() - STALE_AFTER
+    )
 
 
 def run_summary_fields(row: Mapping[Any, Any]) -> dict[str, Any]:

@@ -177,7 +177,7 @@ function OrgActivity() {
                     <RelativeTime value={item.created_at} />
                   </span>
                 </span>
-                <StatusBadge status={item.status === "running" && first.stale ? "stale" : item.status} iconOnly />
+                <StatusBadge status={(item.status === "running" || item.status === "interrupted") && first.stale ? "stale" : item.status} iconOnly />
                 <span className={h.feedMain}>
                   <span>
                     <strong>{item.user ?? "someone"}</strong> <span className="muted">{verb}</span> {models.slice(0, 2).join(", ")}

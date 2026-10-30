@@ -141,6 +141,37 @@ async def test_interrupted_runs_are_listed_but_not_scored(
     assert item["status"] == "interrupted"
 
 
+@pytest.mark.parametrize(
+    ("status", "age", "stale"),
+    [
+        ("interrupted", timedelta(days=2), True),
+        ("interrupted", timedelta(hours=1), False),
+        ("running", timedelta(days=2), True),
+        ("running", timedelta(hours=1), False),
+    ],
+)
+async def test_an_unresumed_interrupted_run_goes_stale_like_a_running_one(
+    client: httpx.AsyncClient, session: Any, status: str, age: timedelta, stale: bool
+) -> None:
+    from tests.factories import run_payload
+
+    body = run_payload(run_id="stal00000001", model_name="test-org/test-model")
+    for step in ("running", status):
+        body["run"]["status"] = step
+        assert (await client.put("/v1/runs/stal00000001", json=body)).status_code == 200
+    await session.execute(
+        text("UPDATE runs SET updated_at = :t WHERE run_id = 'stal00000001'"),
+        {"t": datetime.now(UTC) - age},
+    )
+    await session.commit()
+
+    listed = await get(client, "/api/runs", "RunsListResponse")
+    detail = await get(client, "/api/runs/stal00000001", "RunDetail")
+
+    assert [r["stale"] for r in listed["items"]] == [stale]
+    assert detail["stale"] is stale
+
+
 async def test_runs_list_and_facets(client: httpx.AsyncClient, seeded: dict) -> None:
     body = await get(client, "/api/runs", "RunsListResponse")
     assert body["total"] == 6

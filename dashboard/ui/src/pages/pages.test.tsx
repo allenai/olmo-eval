@@ -4,7 +4,7 @@ import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
-import { runSuites, runTaskResults } from "@/mocks/api";
+import { runDetail, runSuites, runTaskResults } from "@/mocks/api";
 import { server } from "@/mocks/node";
 import { getWorld } from "@/mocks/fixtures";
 import { createQueryClient } from "@/queryClient";
@@ -46,6 +46,25 @@ describe("pages", () => {
     expect(await screen.findByText("Suites and tasks", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(await screen.findByText("Health")).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText("olmes:base").length).toBeGreaterThan(0), { timeout: 5000 });
+  });
+
+  it.each([
+    ["interrupted", "This run was interrupted before recording task results."],
+    ["running", "This run is still running. Task results appear as they finish."],
+    ["failed", "This run recorded no task results."],
+  ] as const)("Run overview of a %s run without results says so", async (status, message) => {
+    const target = world.runs.find((r) => r.summary.status === "interrupted")!.summary.run_id;
+    server.use(
+      http.get(`/api/runs/${target}`, () => HttpResponse.json({ ...runDetail(target), status })),
+      http.get(`/api/runs/${target}/task-results`, ({ request }) =>
+        HttpResponse.json({ ...runTaskResults(target, new URL(request.url).searchParams), items: [] }),
+      ),
+      http.get(`/api/runs/${target}/suites`, ({ request }) =>
+        HttpResponse.json({ ...runSuites(target, new URL(request.url).searchParams), items: [], unsuited_tasks: [] }),
+      ),
+    );
+    renderAt(`/runs/${target}`);
+    expect(await screen.findByText(message, {}, { timeout: 8000 })).toBeInTheDocument();
   });
 
   it("Run tasks and config tabs render", async () => {

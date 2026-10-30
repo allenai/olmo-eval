@@ -1085,7 +1085,7 @@ function buildWorld(): World {
       experiment_group: plan.group,
       status,
       upload_state: plan.uploadState,
-      stale: status === "running" && NOW - plan.createdAt > DAY,
+      stale: (status === "running" || status === "interrupted") && NOW - plan.createdAt > DAY,
       model: {
         model_id: model.model_id,
         name: model.name,

@@ -469,8 +469,9 @@ export function BaseTag() {
 export type DisplayStatus = RunStatus | "uploading" | "stale";
 
 export function displayStatus(run: Pick<RunSummary, "status" | "stale" | "upload_state">): DisplayStatus {
-  if (run.status === "running") return run.stale ? "stale" : "running";
-  if (run.status === "interrupted") return "interrupted";
+  if (run.status === "running" || run.status === "interrupted") {
+    return run.stale ? "stale" : run.status;
+  }
   if (run.upload_state === "uploading") return "uploading";
   return run.status;
 }
@@ -498,7 +499,7 @@ export function StatusBadge({ status, iconOnly }: { status: DisplayStatus; iconO
   const meta = STATUS_META[status];
   const title =
     status === "stale"
-      ? "Running, but no update for over 24 hours. The job may have crashed."
+      ? "Running or interrupted, but no update for over 24 hours. The job may have crashed or never been resumed."
       : status === "interrupted"
         ? "Stopped before it finished, for example by preemption. A resumed job continues it under this run ID."
         : meta.label;

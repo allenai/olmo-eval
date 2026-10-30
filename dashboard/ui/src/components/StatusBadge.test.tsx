@@ -7,6 +7,12 @@ describe("displayStatus", () => {
     expect(displayStatus({ status: "interrupted", stale: false, upload_state: "uploading" })).toBe("interrupted");
   });
 
+  it("shows a run that nobody resumed as stale, like a running one", () => {
+    expect(displayStatus({ status: "interrupted", stale: true, upload_state: "uploading" })).toBe("stale");
+    expect(displayStatus({ status: "running", stale: true, upload_state: "uploading" })).toBe("stale");
+    expect(displayStatus({ status: "running", stale: false, upload_state: "uploading" })).toBe("running");
+  });
+
   it("still shows a finished run whose upload is in progress as uploading", () => {
     expect(displayStatus({ status: "failed", stale: false, upload_state: "uploading" })).toBe("uploading");
   });
