@@ -1073,6 +1073,57 @@ uv run olmo-eval run -m allenai/OLMo-2-1124-7B -t mmlu --force-download-model
 uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 ```
 
+### Resuming Interrupted Runs
+
+With `--resume`, a run records each instance as it finishes. Restarted on the same
+output directory, it skips the instances an earlier attempt finished and writes the same
+predictions and metrics as an uninterrupted run.
+
+```bash
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --resume   # interrupted
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --resume   # continues
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --fresh    # discards progress
+```
+
+| Flag | Description |
+|------|-------------|
+| `--resume` | Record progress under `<output_dir>/progress/` and continue from any already there |
+| `--fresh` | Delete recorded progress before the run; cannot be combined with `--resume` |
+
+Without either flag, a run records nothing and ignores progress it finds, with a warning.
+Beaker launches always pass `--resume`, and Beaker copies a preempted job's `/results`
+into its replacement, so a requeued job continues where the last one stopped (see
+[Preemption](#preemption)).
+
+- **What is recorded.** `progress/<model>/run.segments/` holds one stream for the run: a
+  header per task, then one entry per finished instance with its outputs, scores and a
+  hash of its prepared request. Prompts are rebuilt from the task, not stored. A
+  generation's per-token logprobs are left out unless one of the task's metrics scores
+  from them (`Scorer.reads_logprobs`); its `sum_logits` and `num_tokens` are kept. Each
+  finished task also gets a `<task>_<hash>.final.json`. Entries reach the disk every two
+  minutes. The `progress/` directory is never uploaded, and a run that completes deletes
+  it.
+- **What must match.** The record format, task spec and hash, model hash and revision,
+  the harness settings that affect outputs, the inference engine version (such as
+  `vllm==0.11.2`), the git commit and, for SGLang, the resolved runtime. A difference
+  stops the run with an error naming the setting; pass `--fresh` or use another output
+  directory. Where the run executes (GPU count, cluster, tensor parallelism, concurrency,
+  batching) may differ and only logs a warning. An instance whose prepared request, gold
+  answer or metadata changed is run again.
+- **Failures.** An instance is recorded only when an uninterrupted run would keep its
+  outcome: a scored response, or a failure the request itself caused, such as a context
+  overflow. Connection and server errors, judge or sandbox outages, and results that
+  arrive after SIGTERM are not recorded, so the resumed run tries them again. A task that
+  fails or exceeds its failure budget is computed again from its recorded instances.
+- **Results return per request.** While recording, providers that send requests one at
+  a time (`vllm_server`, `litellm`) return each result when it finishes, not when its
+  batch does. In-process engines (`vllm`, `sglang`, `hf`) return a batch at once; to
+  record them more often, lower the batch size with
+  `--harness default -o batching.chunk_size=16`.
+- **Testing.** `OLMO_EVAL_DEBUG_EXIT_AT=0.5` makes a `--resume` run send itself SIGTERM
+  once half of its instances are recorded, which ends it as a preemption does (exit code
+  143).
+
 ## Debugging and Inspection
 
 olmo-eval provides tools for inspecting tasks, requests, and responses at various stages of evaluation.
@@ -1567,8 +1618,10 @@ budget: ai2/oe-other
 
 ### Preemption
 
-By default, Beaker can preempt a job at any time and requeues it afterward. Use
-`--min-runtime` (or `min_runtime:` in a config file) to protect a job from preemption:
+By default, Beaker can preempt a job at any time and requeues it afterward. The requeued
+job continues from the instances the preempted one recorded (see
+[Resuming Interrupted Runs](#resuming-interrupted-runs)). Use `--min-runtime` (or
+`min_runtime:` in a config file) to protect a job from preemption:
 
 ```bash
 uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
