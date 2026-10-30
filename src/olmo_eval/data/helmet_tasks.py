@@ -213,8 +213,8 @@ _BASE_TASKS: dict[str, dict] = {
             "use_chat_template": True,
         }
         for name, metrics_key, gen_toks, shots in [
-            ("alce_asqa", "alce_asqa", _ALCE_MAX_GEN_TOKS, 2),
-            ("alce_qampari", "alce_qampari", _ALCE_MAX_GEN_TOKS, 2),
+            ("alce_asqa", "alce_asqa_cite", _ALCE_MAX_GEN_TOKS, 2),
+            ("alce_qampari", "alce_qampari_cite", _ALCE_MAX_GEN_TOKS, 2),
             ("alce_asqa_nocite", "alce_asqa", _ALCE_NOCITE_MAX_GEN_TOKS, 0),
             ("alce_qampari_nocite", "alce_qampari", _ALCE_NOCITE_MAX_GEN_TOKS, 0),
         ]

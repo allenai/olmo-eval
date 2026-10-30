@@ -178,6 +178,46 @@ class TestJudgeProvider:
         assert trackers[self.SPEC].error is None
 
 
+class TestAutoAisProvider(TestJudgeProvider):
+    """A Cite task fails before its data loads without a provider for its NLI model."""
+
+    SPEC = "helmet_alce_asqa__4096"
+
+    def test_the_provider_serving_the_recorded_judge_is_accepted(self, loaded):
+        from olmo_eval.harness.presets import get_harness_preset
+
+        runner = self._runner(**get_harness_preset("helmet").auxiliary_providers)
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+        assert loaded == [self.SPEC]
+
+    def test_a_provider_serving_another_model_is_refused(self, loaded):
+        runner = self._runner(autoais=ProviderConfig(model="org/other-nli"))
+
+        with pytest.raises(RuntimeError, match="serves 'org/other-nli'"):
+            runner._prepare_tasks()
+
+        assert loaded == []
+
+    def test_a_judge_model_override_names_the_judge_to_expect(self, loaded):
+        runner = self._runner(autoais=ProviderConfig(model="org/other-nli"))
+        runner.task_overrides = {self.SPEC: {"judge_model": "org/other-nli"}}
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+
+    def test_the_no_autoais_variant_runs_without_one(self, loaded):
+        runner = self._runner()
+        runner.task_specs = [f"{self.SPEC}:no_autoais"]
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[f"{self.SPEC}:no_autoais"].error is None
+
+
 class TestRequiredSandbox:
     """A task that scores by running code fails before its data loads without a sandbox."""
 

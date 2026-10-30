@@ -45,6 +45,15 @@ MEASURED_CONSTANTS = {
 }
 
 
+def citation_document(doc: dict[str, Any]) -> dict[str, str]:
+    """The title and text AutoAIS reads for a document, as upstream's `_format_document`.
+
+    QA-extracted documents carry the extracted sentence in `sent`, which is what
+    upstream checks instead of the full text.
+    """
+    return {"title": doc["title"], "text": doc["sent"] if "sent" in doc else doc["text"]}
+
+
 def load_alce_manifest() -> dict[str, dict[str, Any]]:
     with open(download_helmet_plus_file(ALCE_MANIFEST), encoding="utf-8") as f:
         return json.load(f)
@@ -129,7 +138,9 @@ def load_alce_dataset(
             "answer": item.get("answer"),
         }
         # scoring inputs, kept separate from the prompt: ASQA scores coverage of
-        # its disambiguated sub-questions, QAMPARI recall over an answer set
+        # its disambiguated sub-questions, QAMPARI recall over an answer set, and
+        # AutoAIS checks each citation [k] against the k-th document shown
+        record["citation_docs"] = [citation_document(doc) for doc in item["docs"][:num_docs]]
         if item.get("qa_pairs"):
             record["qa_pairs"] = item["qa_pairs"]
         if item.get("answers"):

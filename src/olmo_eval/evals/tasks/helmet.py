@@ -10,6 +10,11 @@ from the Hub at load time. `narrativeqa` and both summarization tasks are
 graded by an LLM judge (see `helmet_judge.py`) and therefore need a judge
 configured -- the `helmet_nojudge__*` suites exclude them.
 
+The Cite tasks check citations with AutoAIS's T5 NLI model, served on a GPU of
+its own by the `helmet` harness preset, so runs that include them launch with
+`-H helmet`. `helmet_alce_*:no_autoais` scores answer correctness alone for runs
+without that GPU; those scores are not HELMET's Cite scores.
+
 Upstream reference: princeton-nlp/HELMET at commit aeadacc6.
 """
 
@@ -28,7 +33,13 @@ from olmo_eval.common.metrics import (
     RougeLF1Metric,
 )
 from olmo_eval.common.scorers import Scorer
-from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
+from olmo_eval.common.scorers.alce import (
+    AUTOAIS_KEY,
+    AUTOAIS_MODEL,
+    AlceQampariRecTop5Scorer,
+    AlceStrEmScorer,
+    AutoAisScorer,
+)
 from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
 from olmo_eval.common.types import (
@@ -211,7 +222,7 @@ class HelmetTask(RulerTask):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
-        for scoring_field in ("qa_pairs", "qampari_answers"):
+        for scoring_field in ("qa_pairs", "qampari_answers", "citation_docs"):
             if scoring_field in doc:
                 # ALCE scoring inputs, kept out of the prompt
                 metadata[scoring_field] = doc[scoring_field]
@@ -423,6 +434,76 @@ CONTEXT_TRUNCATION_RATE = ContextTruncationRateMetric()
 
 
 @dataclass(frozen=True, slots=True)
+class CitationMetric(Metric):
+    """ALCE's ``citation_rec`` or ``citation_prec``, read from each output's AutoAIS result.
+
+    Averaged over the instances that made a claim: upstream skips an output with
+    no claims when it averages both.
+    """
+
+    name: str = "citation_rec"
+    scorer: type[Scorer] | Scorer = AutoAisScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        values = [v for r in responses if (v := self.compute_instance(r)) is not None]
+        return sum(values) / len(values) if values else 0.0
+
+    def compute_instance(self, response: Response) -> float | None:
+        if not response.outputs:
+            return None
+        return response.outputs[0].metadata.get(AUTOAIS_KEY, {}).get(self.name)
+
+    def supports_scorer_fallback(self) -> bool:
+        return False
+
+    def display_format(self) -> str:
+        return "percentage"
+
+
+@dataclass(frozen=True, slots=True)
+class CiteScoreMetric(Metric):
+    """The mean of a Cite task's answer, citation-recall and citation-precision metrics.
+
+    HELMET's Cite score averages these three for ASQA and for QAMPARI, so the
+    category suite's mean of the two tasks' scores is HELMET's six-number mean.
+    """
+
+    name: str = "cite_score"
+    scorer: type[Scorer] | Scorer = AutoAisScorer
+    parts: tuple[Metric, ...] = ()
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        return sum(part.compute(responses) for part in self.parts) / len(self.parts)
+
+    def compute_instance(self, response: Response) -> float | None:
+        values = [v for part in self.parts if (v := part.compute_instance(response)) is not None]
+        return sum(values) / len(values) if values else None
+
+    def supports_scorer_fallback(self) -> bool:
+        return False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**Metric.to_dict(self), "parts": [part.to_dict() for part in self.parts]}
+
+    def display_format(self) -> str:
+        return "percentage"
+
+
+def _cite_metrics(answer: Metric, *, qampari: bool) -> tuple[tuple[Metric, ...], str]:
+    """A Cite task's metrics: answer correctness, AutoAIS, and their mean as primary."""
+    autoais = AutoAisScorer(qampari=qampari)
+    recall = CitationMetric(name="citation_rec", scorer=autoais)
+    precision = CitationMetric(name="citation_prec", scorer=autoais)
+    return (answer, recall, precision, CiteScoreMetric(parts=(answer, recall, precision))), (
+        "cite_score"
+    )
+
+
+STR_EM = AccuracyMetric(name="str_em", scorer=AlceStrEmScorer)
+QAMPARI_REC_TOP5 = AccuracyMetric(name="qampari_rec_top5", scorer=AlceQampariRecTop5Scorer)
+
+
+@dataclass(frozen=True, slots=True)
 class HelmetExactMatchScorer(Scorer):
     """Exact match under HELMET's answer normalization.
 
@@ -570,9 +651,11 @@ class HelmetMultiLexSumTask(HelmetTask):
 class HelmetAlceTask(HelmetTask):
     """HELMET Cite task: answer a question and cite the documents used.
 
-    Only ALCE's answer-correctness metrics are scored here. Whether the
-    citations actually support the claims is AutoAIS's job, which needs an NLI
-    model this task does not yet wire up.
+    Scored as HELMET scores it: ALCE's answer correctness, and AutoAIS's
+    citation recall and precision, judged by the T5 NLI model an auxiliary
+    provider named "autoais" serves (the `helmet` harness preset sets one up).
+    The nocite ablations, and the `:no_autoais` variant for runs without that
+    model, score answer correctness alone.
     """
 
     def _load_dataset(self) -> dict[str, Any]:
@@ -638,13 +721,13 @@ _TASK_METRICS: dict[str, tuple] = {
         (AccuracyMetric(name="substring_exact_match", scorer=SubstringExactMatchScorer),),
         "substring_exact_match",
     ),
-    # ALCE answer correctness. The citation-grounding half (citation_rec /
-    # citation_prec) needs AutoAIS and is not wired up yet.
-    "alce_asqa": ((AccuracyMetric(name="str_em", scorer=AlceStrEmScorer),), "str_em"),
-    "alce_qampari": (
-        (AccuracyMetric(name="qampari_rec_top5", scorer=AlceQampariRecTop5Scorer),),
-        "qampari_rec_top5",
-    ),
+    # ALCE as HELMET's Cite category scores it: answer correctness and AutoAIS
+    "alce_asqa_cite": _cite_metrics(STR_EM, qampari=False),
+    "alce_qampari_cite": _cite_metrics(QAMPARI_REC_TOP5, qampari=True),
+    # answer correctness alone, for the nocite ablations, which upstream scores
+    # without --citations, and for the :no_autoais variant
+    "alce_asqa": ((STR_EM,), "str_em"),
+    "alce_qampari": ((QAMPARI_REC_TOP5,), "qampari_rec_top5"),
     # HELMET's gpt-4-f1: fluency-gated F1 over key points, via three judge calls
     "summ_book": (SUMM_METRICS, "gpt4_f1"),
     "summ_lawsuit": (SUMM_METRICS, "gpt4_f1"),
@@ -773,8 +856,35 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
         primary_metric=next(m for m in metrics if m.name == primary_name),
         stop_sequences=HELMET_STOP_SEQUENCES,
         extra_bases=() if judged_cls is None else (judged_cls,),
-        attrs={"task_settings": _task_settings(task_cfg)},
+        attrs=_task_attrs(task_cfg),
     )
+
+
+#: The answer-only metrics key of each Cite metrics key, for `:no_autoais`.
+_NO_AUTOAIS_METRICS = {"alce_asqa_cite": "alce_asqa", "alce_qampari_cite": "alce_qampari"}
+
+
+def _task_attrs(task_cfg: dict) -> dict[str, Any]:
+    """Task configuration the factory sets on each class besides its metrics."""
+    attrs: dict[str, Any] = {"task_settings": _task_settings(task_cfg)}
+    if task_cfg["metrics_key"] in _NO_AUTOAIS_METRICS:
+        # the model the "autoais" provider must serve, checked before generation
+        attrs["judge_model"] = AUTOAIS_MODEL
+    return attrs
+
+
+def _no_autoais_overrides(metrics_key: str) -> dict[str, Any]:
+    """The `:no_autoais` variant: a Cite task scored on answer correctness alone.
+
+    For runs without a GPU for the NLI model. Its scores are not HELMET's Cite
+    scores, so it is a variant and stays out of the category suites.
+    """
+    metrics, primary_name = _TASK_METRICS[_NO_AUTOAIS_METRICS[metrics_key]]
+    return {
+        "metrics": (*metrics, CONTEXT_TRUNCATION_RATE),
+        "primary_metric": next(m for m in metrics if m.name == primary_name),
+        "judge_model": None,
+    }
 
 
 def _base_task_settings(task_settings: dict[str, Any]) -> dict[str, Any]:
@@ -800,3 +910,9 @@ for _task_name, _task_config in HELMET_TASKS.items():
         )
     else:
         register_variant(f"helmet_{_task_name}", "base")
+    if _task_config["metrics_key"] in _NO_AUTOAIS_METRICS:
+        register_variant(
+            f"helmet_{_task_name}",
+            "no_autoais",
+            **_no_autoais_overrides(_task_config["metrics_key"]),
+        )

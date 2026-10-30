@@ -1042,6 +1042,47 @@ def test_context_truncation_rate_counts_cut_instances():
         assert CONTEXT_TRUNCATION_RATE in get_task(name).config.metrics
 
 
+@pytest.mark.parametrize(
+    ("task_name", "answer"),
+    [("helmet_alce_asqa__8192", "str_em"), ("helmet_alce_qampari__8192", "qampari_rec_top5")],
+)
+def test_cite_tasks_are_scored_with_autoais(task_name, answer):
+    """HELMET's Cite score averages each task's answer metric with AutoAIS's
+    citation recall and precision; the nocite ablations and :no_autoais don't."""
+    from olmo_eval.common.scorers.alce import AUTOAIS_MODEL, AutoAisScorer
+
+    config = get_task(task_name).config
+    names = [m.name for m in config.metrics]
+
+    assert names[:4] == [answer, "citation_rec", "citation_prec", "cite_score"]
+    assert config.primary_metric.name == "cite_score"
+    assert config.judge_model == AUTOAIS_MODEL
+    scorer = config.metrics[1].scorer
+    assert isinstance(scorer, AutoAisScorer)
+    assert scorer.qampari == ("qampari" in task_name)
+
+    for spec in (f"{task_name}:no_autoais", task_name.replace("__", "_nocite__")):
+        other = get_task(spec).config
+        assert [m.name for m in other.metrics] == [answer, "context_truncation_rate"], spec
+        assert other.primary_metric.name == answer
+        assert other.judge_model is None
+
+
+def test_alce_instances_keep_the_documents_their_citations_point_to():
+    from olmo_eval.data.helmet_alce_loader import citation_document
+
+    task = get_task("helmet_alce_asqa__8192")
+    task._templates = {"user": "{context}\n\nQuestion: {question}", "system": "Answer:"}
+    docs = [{"title": "T", "text": "full text"}]
+    instance = task.process_doc({"context": "c", "question": "q", "citation_docs": docs})
+
+    assert instance.metadata["citation_docs"] == docs
+    assert citation_document({"title": "T", "text": "full", "sent": "the sentence"}) == {
+        "title": "T",
+        "text": "the sentence",
+    }
+
+
 def test_judged_tasks_are_judged_tasks_and_require_the_openai_key():
     """Exactly the tasks flagged as judged grade through JudgedTask and need the key."""
     for name, config in HELMET_TASKS.items():

@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LOCAL_SERVER_KINDS = frozenset({"vllm_server"})
+#: Local providers that load their model in the scoring process rather than a server;
+#: each instance gets one GPU, handed to it as its ``device``.
+IN_PROCESS_KINDS = frozenset({"hf"})
 
 
 def _create_server(
@@ -164,10 +167,35 @@ class InferenceManager:
                         servers=servers,
                     )
 
+                elif config.kind in IN_PROCESS_KINDS:
+                    if config.kwargs.get("tensor_parallel_size", 1) != 1:
+                        raise ValueError(f"{name!r} ({config.kind}) runs on a single GPU")
+                    if len(gpu_pool) < config.num_instances:
+                        raise RuntimeError(
+                            f"Not enough GPUs for {name!r}. Needs {config.num_instances}, "
+                            f"available: {len(gpu_pool)}"
+                        )
+                    # loaded lazily by the scoring process, on the GPU set aside here
+                    in_process = [
+                        replace(
+                            config,
+                            num_instances=1,
+                            kwargs={**config.kwargs, "device": f"cuda:{gpu_pool.pop(0)}"},
+                        )
+                        for _ in range(config.num_instances)
+                    ]
+                    devices = [c.kwargs["device"] for c in in_process]
+                    logger.info(f"Provider {name!r} ({config.kind}) will load on {devices}")
+                    self._servers[name] = ServerInfo(
+                        name=name,
+                        resolved_configs=in_process,
+                        servers=[None] * len(in_process),
+                    )
+
                 else:
                     raise ValueError(
-                        f"Unsupported local GPU provider kind: {config.kind!r}. "
-                        f"Use {sorted(LOCAL_SERVER_KINDS)} for local servers."
+                        f"Unsupported local GPU provider kind: {config.kind!r}. Use "
+                        f"{sorted(LOCAL_SERVER_KINDS | IN_PROCESS_KINDS)} for auxiliary providers."
                     )
 
         except Exception:

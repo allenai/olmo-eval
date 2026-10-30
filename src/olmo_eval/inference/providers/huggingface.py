@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.images import resolve_images
@@ -302,6 +303,7 @@ class HuggingFaceProvider(InferenceProvider):
         max_crops: int = 24,
         max_multi_image_crops: int = 8,
         autocast_dtype: str | None = None,
+        device: str | None = None,
         **model_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -318,6 +320,9 @@ class HuggingFaceProvider(InferenceProvider):
                 ``torch.autocast`` with this dtype. Pair with fp32 weights (``dtype="float32"``)
                 to match mm_olmo's ``amp_bf16`` eval numerics (fp32 master weights + bf16
                 autocast); the model keeps attention in fp32 via its own ``float32_attention``.
+            device: Torch device to load the model on, such as ``"cuda:1"``. Defaults to
+                the best available device; an auxiliary provider gets the GPU the run
+                set aside for it.
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
         # Strip kwargs meant for other providers (e.g., vLLM)
@@ -332,7 +337,14 @@ class HuggingFaceProvider(InferenceProvider):
         self.autocast_dtype = autocast_dtype
         self.processor = None
         self.is_encoder_decoder: bool = False
-        self.device = _get_device()
+        # generate() is not thread-safe, and the async methods run it in threads
+        self._model_lock = threading.Lock()
+        if device is None:
+            self.device = _get_device()
+        else:
+            import torch
+
+            self.device = torch.device(device)
         if self.is_multimodal:
             self._init_multimodal(model_name, model_kwargs)
         else:
@@ -728,7 +740,8 @@ class HuggingFaceProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         """Async generate completions.
 
-        Runs the synchronous HuggingFace generate in a thread pool to avoid blocking.
+        Runs the synchronous HuggingFace generate in a thread pool to avoid blocking,
+        one call at a time, so concurrent scorers can share an auxiliary provider.
 
         Args:
             requests: Batch of requests to process.
@@ -737,7 +750,7 @@ class HuggingFaceProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
-        return await asyncio.to_thread(self.generate, requests, sampling_params)
+        return await asyncio.to_thread(self._locked, self.generate, requests, sampling_params)
 
     async def alogprobs(
         self,
@@ -754,4 +767,9 @@ class HuggingFaceProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return await asyncio.to_thread(self.logprobs, requests, sampling_params)
+        return await asyncio.to_thread(self._locked, self.logprobs, requests, sampling_params)
+
+    def _locked(self, method: Any, *args: Any) -> Any:
+        """Call a model method while holding the model lock."""
+        with self._model_lock:
+            return method(*args)
