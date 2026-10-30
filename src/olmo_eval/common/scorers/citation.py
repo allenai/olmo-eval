@@ -17,7 +17,7 @@ import logging
 import re
 from typing import Any, TypedDict
 
-from olmo_eval.common.scorers.llm_judge import JudgeFn
+from olmo_eval.common.scorers.llm_judge import Judge
 
 logger = logging.getLogger(__name__)
 
@@ -364,8 +364,14 @@ def _empty_group_result(citation_group: str) -> GroupedCitationResult:
 
 
 # from astabench citation_eval.py:CitationEval.score_citation_group
+def _claims(reply: str) -> dict[str, Any] | None:
+    """Return the claims JSON a citation judge replied with, or None if it holds none."""
+    parsed = extract_json_from_response(reply)
+    return parsed if parsed and "claims" in parsed else None
+
+
 async def score_citation_group(
-    judge_fn: JudgeFn,
+    judge: Judge,
     citation_group: str,
     citations: list[Citation],
 ) -> GroupedCitationResult:
@@ -380,11 +386,7 @@ async def score_citation_group(
         citation_group,
         "\n\n".join(c["id"] + ": " + c["snippets"] for c in citations),
     )
-    raw = await judge_fn(prompt)
-    parsed = extract_json_from_response(raw)
-    if not parsed or "claims" not in parsed:
-        return _empty_group_result(citation_group)
-
+    parsed, _ = await judge.ask(prompt, _claims)
     claims = parsed["claims"]
     half_credit_ids = [c["id"] for c in citations if c["snippets"].startswith(JUST_HAS_A_TITLE)]
 
@@ -449,13 +451,14 @@ def _build_section_citations(raw_citations: list[dict[str, Any]], sec_text: str)
 
 # from astabench citation_eval.py:CitationEval
 async def score_citations_for_sections(
-    judge_fn: JudgeFn,
+    judge: Judge,
     parsed_response: dict[str, Any],
 ) -> dict[str, float]:
     """Score citation precision and recall over a structured, sectioned report.
 
     Args:
-        judge_fn: Async LLM-judge callable used for per-section claim validation.
+        judge: The judge that validates each section's claims. A section whose reply
+            holds no claims raises :class:`JudgeParseError` after the judge's attempts.
         parsed_response: Report dict with a ``sections`` list; each section has
             ``text`` and ``citations``, and optionally a ``table`` subsection.
 
@@ -477,6 +480,6 @@ async def score_citations_for_sections(
         return {"citation_precision": 0.0, "citation_recall": 0.0}
 
     group_results = await asyncio.gather(
-        *(score_citation_group(judge_fn, text, citations) for text, citations in sections_to_judge)
+        *(score_citation_group(judge, text, citations) for text, citations in sections_to_judge)
     )
     return compute_citation_scores_from_groups(list(group_results))
