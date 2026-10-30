@@ -17,15 +17,29 @@ import json
 import os
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-from olmo_eval.common.metrics import AccuracyMetric, NDCGMetric, RecallMetric, RougeLF1Metric
+from olmo_eval.common.metrics import (
+    AccuracyMetric,
+    Metric,
+    NDCGMetric,
+    RecallMetric,
+    RougeLF1Metric,
+)
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    ContextFit,
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+)
 from olmo_eval.data import (
     helmet_alce_loader,
     helmet_icl_loader,
@@ -99,6 +113,13 @@ class HelmetTask(RulerTask):
     `--use_chat_template False` does for models without instruction tuning: the
     chat-format categories then go out as completions ending in their answer
     prefix, and the prefix is put back on each output before it is scored.
+
+    Like upstream's `tokenize`, every request also carries its document context as
+    a `ContextFit` with a budget of the tier length less the generation budget, so
+    a provider that supports it cuts the end of the context, measured with the
+    evaluated model's own tokenizer, until the prompt fits; the reference-tokenizer
+    truncation in the loaders alone lets a model whose tokenizer splits text more
+    finely overflow its window.
     """
 
     _tasks_registry: dict[str, dict[str, Any]] = HELMET_TASKS
@@ -207,6 +228,12 @@ class HelmetTask(RulerTask):
             # the whole rendered prompt. An LLM judge needs this one -- handing it
             # the prompt would ship a book-length context to the judge.
             metadata["judge_question"] = doc["question"]
+        context = doc.get("context")
+        if isinstance(context, str) and context and question.count(context) == 1:
+            # where the document sits in the prompt, so the request can name it
+            # as the text to cut when the prompt is too long for the model
+            start = question.index(context)
+            metadata["context_span"] = [start, start + len(context)]
 
         return Instance(
             question=question,
@@ -223,12 +250,28 @@ class HelmetTask(RulerTask):
         return RequestType.COMPLETION
 
     def format_request(self, instance: Instance) -> LMRequest:
-        if self.config.formatter is None and self.request_type == RequestType.CHAT:
-            return LMRequest(
+        if self.config.formatter is not None:
+            return super().format_request(instance)
+        if self.request_type == RequestType.CHAT:
+            request = LMRequest(
                 request_type=RequestType.CHAT,
                 messages=({"role": "user", "content": instance.question},),
             )
-        return super().format_request(instance)
+        else:
+            request = super().format_request(instance)
+        span = (instance.metadata or {}).get("context_span")
+        if not span:
+            return request
+        # Upstream's budget: the tier is the whole sequence, generation included.
+        max_tokens = self.config.sampling_params.max_tokens or 0
+        start, end = span
+        return replace(
+            request,
+            context_fit=ContextFit(
+                text=instance.question[start:end],
+                max_prompt_tokens=self.context_size - max_tokens,
+            ),
+        )
 
     @property
     def prefixes_outputs(self) -> bool:
@@ -336,6 +379,47 @@ class HelmetInfbenchTask(HelmetTask):
         # for a chat model that echoes the prefix, and a no-op otherwise.
         parsed = _parse_labeled_output(output.text, prefix="Answer:")
         return parsed if parsed else output.text
+
+
+@dataclass(frozen=True, slots=True)
+class ContextCutScorer(Scorer):
+    """1.0 when the provider cut the instance's context to fit the model, else 0.0."""
+
+    name: str = "context_cut"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        return 1.0 if output.metadata.get(CONTEXT_CUT_TOKENS_KEY) else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ContextTruncationRateMetric(Metric):
+    """Share of instances whose context was cut to fit the evaluated model.
+
+    Read from the outputs rather than a score channel, so the judged tasks, which
+    skip the scorers, report it too. Lower is better: a cut instance was answered
+    from less of its document than the tier promises.
+    """
+
+    name: str = "context_truncation_rate"
+    scorer: type[Scorer] | Scorer = ContextCutScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        return sum(self.compute_instance(response) for response in responses) / len(responses)
+
+    def compute_instance(self, response: Response) -> float:
+        cut = any(output.metadata.get(CONTEXT_CUT_TOKENS_KEY) for output in response.outputs)
+        return 1.0 if cut else 0.0
+
+    def higher_is_better(self) -> bool:
+        return False
+
+    def display_format(self) -> str:
+        return "percentage"
+
+
+CONTEXT_TRUNCATION_RATE = ContextTruncationRateMetric()
 
 
 @dataclass(frozen=True, slots=True)
@@ -682,7 +766,7 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
         base_cls=_TASK_CLASSES[task_cfg["kind"]],
         class_prefix="Helmet",
         limit=task_cfg["limit"],
-        metrics=metrics,
+        metrics=(*metrics, CONTEXT_TRUNCATION_RATE),
         # Hand over the Metric itself, not its name: TaskConfig only resolves a
         # Metric instance, and an unresolved primary drops the task out of its
         # suite's average-of-averages.

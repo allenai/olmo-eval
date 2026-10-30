@@ -374,6 +374,7 @@ class Harness:
             max_length=request.max_length,
             images=request.images,
             metadata=request.metadata,
+            context_fit=request.context_fit,
         )
 
     def _inject_system_prompt(

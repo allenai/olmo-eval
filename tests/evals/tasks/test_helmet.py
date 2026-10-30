@@ -1004,6 +1004,44 @@ def test_base_variant_strips_thinking_before_prefixing():
     assert response.outputs[0].text == "Answer: the North Pole"
 
 
+@pytest.mark.parametrize(
+    "task_name",
+    ["helmet_kilt_nq__8192", "helmet_infbench_qa_eng__8192", "helmet_infbench_qa_eng__8192:base"],
+)
+def test_requests_name_their_context_for_the_model_side_cut(task_name):
+    """Upstream cuts the end of the context, with the evaluated model's tokenizer,
+    until the prompt fits the tier less the generation budget."""
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    task = get_task(task_name)
+    task._templates = {"user": "Read. {context}\n\nQuestion: {question}", "system": "Answer:"}
+    instance = task.process_doc({"context": "THE DOCUMENT", "question": "q", "answer": ["a"]})
+    request = task.format_request(instance)
+
+    assert request.context_fit is not None
+    assert request.context_fit.text == "THE DOCUMENT"
+    max_tokens = task.config.sampling_params.max_tokens
+    assert request.context_fit.max_prompt_tokens == 8192 - max_tokens
+
+
+def test_context_truncation_rate_counts_cut_instances():
+    from olmo_eval.common.types import CONTEXT_CUT_TOKENS_KEY
+    from olmo_eval.evals.tasks.helmet import CONTEXT_TRUNCATION_RATE
+
+    def response(*cuts):
+        outputs = [
+            LMOutput(text="x", metadata={CONTEXT_CUT_TOKENS_KEY: c} if c else {}) for c in cuts
+        ]
+        return Response(instance=_instance(), request=None, outputs=outputs)
+
+    responses = [response(0), response(12), response(0), response(3, 3)]
+
+    assert CONTEXT_TRUNCATION_RATE.compute(responses) == 0.5
+    assert not CONTEXT_TRUNCATION_RATE.higher_is_better()
+    for name in ("helmet_json_kv__8192", "helmet_narrativeqa__8192"):
+        assert CONTEXT_TRUNCATION_RATE in get_task(name).config.metrics
+
+
 def test_judged_tasks_are_judged_tasks_and_require_the_openai_key():
     """Exactly the tasks flagged as judged grade through JudgedTask and need the key."""
     for name, config in HELMET_TASKS.items():
