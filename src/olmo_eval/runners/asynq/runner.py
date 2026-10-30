@@ -1381,11 +1381,11 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     def _previous_run(self) -> tuple[str | None, dict[str, Any]]:
         """The run ID to continue and this run's restart record for the manifest.
 
-        The ID is that of a manifest in the output directory that is still running or failed,
-        for the same task specs and model, when resuming; its upload secret, if it has one,
-        is reused with the directory. Otherwise it is None.
+        The ID is that of a manifest in the output directory that is running, interrupted or
+        failed, for the same task specs and model, when resuming; its upload secret, if it
+        has one, is reused with the directory. Otherwise it is None.
         """
-        from olmo_eval.upload.manifest import RUN_ID_RE, read_manifest
+        from olmo_eval.upload.manifest import RESUMABLE_STATUSES, RUN_ID_RE, read_manifest
 
         job_id = os.environ.get("BEAKER_JOB_ID")
         job_ids = [job_id] if job_id else []
@@ -1399,7 +1399,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         run = manifest.get("run") or {}
         run_id = run.get("run_id")
         if (
-            run.get("status") not in ("running", "failed")
+            run.get("status") not in RESUMABLE_STATUSES
             or list(run.get("task_specs") or []) != list(self.task_specs)
             or (manifest.get("model") or {}).get("path") != self.model_name
             or not isinstance(run_id, str)

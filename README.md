@@ -1120,6 +1120,12 @@ into its replacement, so a requeued job continues where the last one stopped (se
   batch does. In-process engines (`vllm`, `sglang`, `hf`, `olmo_core`, `olmo_core_vlm`) return a batch at once; to
   record them more often, lower the batch size with
   `--harness default -o batching.chunk_size=16`.
+- **Dashboard status.** A `--resume` run stopped by SIGTERM, as a preemption or a canceled
+  Beaker job stops it, shows as `interrupted` instead of `failed`. The resumed run keeps
+  the run ID and shows as running again, then finishes with its final status. A run that
+  nobody resumes stays `interrupted`; `olmo-eval results upload` on its directory uploads
+  it as finished, with the status its saved results support. Other crashes, Ctrl-C, and
+  runs without `--resume` are still reported as `failed`.
 - **Testing.** `OLMO_EVAL_DEBUG_EXIT_AT=0.5` makes a `--resume` run send itself SIGTERM
   once half of its instances are recorded, which ends it as a preemption does (exit code
   143).
