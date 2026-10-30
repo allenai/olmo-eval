@@ -21,6 +21,7 @@ from olmo_eval_api.services.common import latest_by_task, now_utc
 from olmo_eval_api.services.instances import INSTANCE_SORTS, InstanceFilters, query_instances
 from olmo_eval_api.services.links import gcs_console_url, run_links, split_gs_uri
 from olmo_eval_api.services.queries import (
+    VISIBLE,
     clamp_limit,
     fetch_models,
     fetch_run_rows,
@@ -1101,8 +1102,7 @@ async def baseline_suggestions(
     if run["experiment_group"]:
         same_group = await fetch_run_rows(
             session,
-            "r.experiment_group = :g AND r.run_id <> :r AND "
-            "(r.upload_state = 'complete' OR r.status = 'running')",
+            f"r.experiment_group = :g AND r.run_id <> :r AND {VISIBLE}",
             {"g": run["experiment_group"], "r": run_id},
             limit=3,
         )

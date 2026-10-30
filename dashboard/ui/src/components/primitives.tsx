@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Info,
   Loader2,
+  PauseCircle,
   Search,
   X,
   XCircle,
@@ -469,6 +470,7 @@ export type DisplayStatus = RunStatus | "uploading" | "stale";
 
 export function displayStatus(run: Pick<RunSummary, "status" | "stale" | "upload_state">): DisplayStatus {
   if (run.status === "running") return run.stale ? "stale" : "running";
+  if (run.status === "interrupted") return "interrupted";
   if (run.upload_state === "uploading") return "uploading";
   return run.status;
 }
@@ -478,6 +480,7 @@ const STATUS_META: Record<DisplayStatus, { label: string; color: string; icon: R
   partial: { label: "Partial", color: "var(--status-partial)", icon: <HalfCircle /> },
   failed: { label: "Failed", color: "var(--status-failed)", icon: <XCircle /> },
   running: { label: "Running", color: "var(--status-running)", icon: <Loader2 className={s.spin} /> },
+  interrupted: { label: "Interrupted", color: "var(--status-interrupted)", icon: <PauseCircle /> },
   stale: { label: "Stale", color: "var(--muted)", icon: <CircleDashed /> },
   uploading: { label: "Uploading", color: "var(--status-uploading)", icon: <ArrowUpFromLine /> },
 };
@@ -494,7 +497,11 @@ function HalfCircle() {
 export function StatusBadge({ status, iconOnly }: { status: DisplayStatus; iconOnly?: boolean }) {
   const meta = STATUS_META[status];
   const title =
-    status === "stale" ? "Running, but no update for over 24 hours. The job may have crashed." : meta.label;
+    status === "stale"
+      ? "Running, but no update for over 24 hours. The job may have crashed."
+      : status === "interrupted"
+        ? "Stopped before it finished, for example by preemption. A resumed job continues it under this run ID."
+        : meta.label;
   return (
     <span className={cx(s.status, iconOnly && s.statusIconOnly)} title={title} aria-label={meta.label}>
       <span style={{ color: meta.color, display: "inline-flex" }}>{meta.icon}</span>

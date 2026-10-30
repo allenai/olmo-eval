@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from fastapi import Query
 
 from olmo_eval_api.errors import bad_request
-from olmo_eval_api.services.queries import VISIBLE
+from olmo_eval_api.services.queries import UNFINISHED, VISIBLE
 
 DATE_WINDOWS = {
     "24h": timedelta(days=1),
@@ -20,7 +20,7 @@ DATE_WINDOWS = {
     "30d": timedelta(days=30),
     "90d": timedelta(days=90),
 }
-STATUSES = {"running", "complete", "partial", "failed", "uploading"}
+STATUSES = {"running", "interrupted", "complete", "partial", "failed", "uploading"}
 
 
 def glob_to_like(value: str) -> str:
@@ -196,10 +196,12 @@ def build_where(
         plain = [s for s in f.status if s != "uploading"]
         if plain:
             items.append(f"(r.status = ANY({p(plain)}) AND r.upload_state = 'complete')")
-            if "running" in plain:
-                items.append("r.status = 'running'")
+            # Unfinished runs are shown before their upload completes.
+            unfinished = [s for s in plain if s in ("running", "interrupted")]
+            if unfinished:
+                items.append(f"r.status = ANY({p(unfinished)})")
         if "uploading" in f.status:
-            items.append("(r.status <> 'running' AND r.upload_state = 'uploading')")
+            items.append(f"(NOT {UNFINISHED} AND r.upload_state = 'uploading')")
         ors(items)
     if f.after is not None:
         clauses.append(f"r.created_at >= {p(f.after)}")
