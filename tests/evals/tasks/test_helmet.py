@@ -638,6 +638,18 @@ class TestSummJudge:
         assert "  A short summary.  " not in prompts["fluency"][0]
 
     @pytest.mark.anyio
+    async def test_base_variant_judges_the_summary_behind_its_prefix(self, monkeypatch):
+        task, response = _summ_response("helmet_multi_lexsum__8192:base", prepend_text="Summary:")
+        judge, prompts = _rubric_judge({k: [v] for k, v in SUMM_REPLIES.items()})
+        use_judge(monkeypatch, judge)
+
+        task.strip_thinking_traces([response])
+        await task.score_responses([response])
+
+        # upstream judges "Summary:" + generation, stripped
+        assert 'Text: "Summary:  A short summary."' in prompts["fluency"][0]
+
+    @pytest.mark.anyio
     async def test_one_rubric_that_never_parses_leaves_the_output_unscored(self, monkeypatch):
         task, response = _summ_response("helmet_multi_lexsum__8192")
         replies = {k: [v] for k, v in SUMM_REPLIES.items()}
@@ -890,6 +902,106 @@ def test_chat_template_tasks_send_a_single_user_turn(task_name, chat):
         assert request.request_type == RequestType.COMPLETION
         assert request.messages == ()
         assert request.prompt == "CONTEXT\nQuestion: q\nAnswer:"
+
+
+@pytest.mark.parametrize(
+    ("task_name", "prefix", "separator"),
+    [
+        ("helmet_infbench_qa_eng__8192", "Answer:", "\n\n"),
+        ("helmet_infbench_sum_eng__8192", "Summary:", "\n\n"),
+        ("helmet_narrativeqa__8192", "Answer:", "\n"),
+        ("helmet_alce_asqa__8192", "Answer:", "\n\n"),
+        ("helmet_multi_lexsum__8192", "Summary:", "\n\n"),
+    ],
+)
+def test_base_variant_sends_upstreams_completion_prompt(task_name, prefix, separator):
+    """Without a chat template, upstream sends its prompt_template as a completion:
+    the user template, then a newline or a blank line, then the answer prefix."""
+    from olmo_eval.common.types import RequestType
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    task = get_task(f"{task_name}:base")
+    task._templates = {"user": "CONTEXT {question}", "system": prefix}
+    instance = task.process_doc({"question": "q", "answer": ["a"]})
+    request = task.format_request(instance)
+
+    assert instance.metadata["prepend_text"] == prefix
+    assert request.request_type == RequestType.COMPLETION
+    assert request.prompt == f"CONTEXT q{separator}{prefix}"
+
+
+def test_base_variant_changes_only_the_chat_format_tasks():
+    from olmo_eval.evals.tasks.common.registry import get_task
+
+    for name, config in HELMET_TASKS.items():
+        task = get_task(f"helmet_{name}")
+        base = get_task(f"helmet_{name}:base")
+        assert base.settings.get("use_chat_template") in (None, False), name
+        if config.get("use_chat_template"):
+            assert base.config.to_dict() != task.config.to_dict(), name
+        else:
+            assert base.config.to_dict() == task.config.to_dict(), name
+
+
+def test_base_suites_run_every_tasks_base_variant():
+    import olmo_eval.evals.suites.helmet  # noqa: F401 - triggers registration
+    from olmo_eval.evals.suites.registry import get_suite
+
+    for suite in ("helmet_all__4096", "helmet_nojudge__8192", "helmet_longqa__131072"):
+        tasks = get_suite(suite).expanded_tasks
+        assert get_suite(f"{suite}:base").expanded_tasks == tuple(f"{t}:base" for t in tasks)
+
+
+def _prefixed(spec: str, text: str, prefix: str = "Answer:", **metadata):
+    task, response = _judged_response(spec, text, prepend_text=prefix, **metadata)
+    task.strip_thinking_traces([response])
+    return task, response
+
+
+def test_base_variant_scores_outputs_with_the_answer_prefix_in_front():
+    """Upstream prepends the answer prefix before parsing, so LongQA's parser
+    starts at the model's answer rather than at a later "Answer:" it invents."""
+    generation = " the North Pole\nQuestion: Who?\nAnswer: Santa"
+    task, response = _prefixed(f"{LONGQA_SPEC}:base", generation)
+    output = response.outputs[0]
+
+    assert output.text == "Answer:" + generation
+    assert output.metadata["original_text"] == generation
+    assert task.extract_answer(output) == "the North Pole Question: Who? Answer: Santa"
+    assert task.extract_answer(LMOutput(text=generation)) == "Santa"
+    # the runner may prepare a response more than once
+    task.strip_thinking_traces([response])
+    assert output.text.count("Answer:") == 2
+
+
+@pytest.mark.parametrize("spec", [LONGQA_SPEC, "helmet_json_kv__8192:base"])
+def test_other_tasks_score_the_bare_output(spec):
+    """Chat requests carry no prefix to put back, and the completion-format
+    categories keep the scoring their parity runs validated."""
+    task = get_task(spec)
+    instance = Instance(question="q", metadata={"prepend_text": "Answer:"})
+    response = Response(
+        instance=instance, request=task.format_request(instance), outputs=[LMOutput(text="x")]
+    )
+
+    task.strip_thinking_traces([response])
+
+    assert response.outputs[0].text == "x"
+    assert "original_text" not in response.outputs[0].metadata
+
+
+def test_base_variant_strips_thinking_before_prefixing():
+    task = get_task(f"{LONGQA_SPEC}:base", {"strip_thinking": True})
+    instance = Instance(question="q", metadata={"prepend_text": "Answer:"})
+    response = Response(
+        instance=instance,
+        request=task.format_request(instance),
+        outputs=[LMOutput(text="<think>hmm</think> the North Pole")],
+    )
+
+    task.strip_thinking_traces([response])
+
+    assert response.outputs[0].text == "Answer: the North Pole"
 
 
 def test_judged_tasks_are_judged_tasks_and_require_the_openai_key():

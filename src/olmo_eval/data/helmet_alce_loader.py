@@ -29,6 +29,9 @@ _USER_TEMPLATE = "{demo_text}{instruction}\n\nQuestion: {question}\n\n{context}"
 _SYSTEM_TEMPLATE = "Answer:"
 _DOC_SEPARATOR = "\n\n"
 _DEMO_SEPARATOR = "\n\n\n"
+# Upstream's prompt_template puts a blank line before the answer prefix here,
+# where most HELMET loaders use a single newline.
+_ANSWER_PREFIX_SEPARATOR = "\n\n"
 
 #: Every piece of text and every selection threshold this loader builds prompts
 #: from; the instruction and the demo and document prompts come from the pinned
@@ -38,6 +41,7 @@ MEASURED_CONSTANTS = {
     "system_template": _SYSTEM_TEMPLATE,
     "doc_separator": _DOC_SEPARATOR,
     "demo_separator": _DEMO_SEPARATOR,
+    "answer_prefix_separator": _ANSWER_PREFIX_SEPARATOR,
 }
 
 

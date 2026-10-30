@@ -63,6 +63,10 @@ _DEMO_PREFIX = "Example summaries:\n\n"
 _SEPARATOR = "\n\n"
 _DEMO_SUFFIX = "\n\nNow, write a summary of the following legal documents.\n"
 
+# Upstream's prompt_template puts a blank line before the answer prefix here,
+# where most HELMET loaders use a single newline.
+_ANSWER_PREFIX_SEPARATOR = "\n\n"
+
 #: Every piece of text and every selection threshold this loader builds prompts
 #: from. HELMET's task settings list it, so changing one moves the task hash.
 MEASURED_CONSTANTS = {
@@ -74,6 +78,7 @@ MEASURED_CONSTANTS = {
     "demo_suffix": _DEMO_SUFFIX,
     "truncation_postfix": TRUNCATION_POSTFIX,
     "min_source_tokens": MIN_SOURCE_TOKENS,
+    "answer_prefix_separator": _ANSWER_PREFIX_SEPARATOR,
 }
 
 

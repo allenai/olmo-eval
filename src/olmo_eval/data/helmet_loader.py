@@ -166,7 +166,9 @@ _DEMO_TEMPLATE = "Key: {key}\nCorresponding value: {value}"
 _DEMO_SEPARATOR = "\n\n"
 
 #: What a completion prompt puts between the rendered user template and the
-#: answer prefix (the system template), as HELMET's prompt_template does.
+#: answer prefix (the system template), as HELMET's prompt_template does. The
+#: loaders whose upstream prompt_template uses a blank line instead (InfBench,
+#: Multi-LexSum and ALCE) declare their own in MEASURED_CONSTANTS.
 ANSWER_PREFIX_SEPARATOR = "\n"
 
 #: Every piece of text and every selection threshold this loader builds prompts

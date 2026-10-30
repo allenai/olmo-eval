@@ -5,6 +5,9 @@ Mirrors the suite structure in `suites/ruler.py`:
 - Combined suites for each size: helmet_all__4096, etc.
 - A judge-free execution split: helmet_nojudge__4096, etc.
 
+Each suite also has a `:base` twin (helmet_all__4096:base, ...) made of every
+task's `:base` variant, for models without instruction tuning.
+
 Three deliberate differences from `suites/ruler.py`:
 
 1. `helmet_all__*` aggregates the *category* suites rather than flat-averaging
@@ -48,39 +51,45 @@ def _tasks_for(category: str, size: int, judged: bool | None = None) -> list[str
     ]
 
 
-for size in CONTEXT_SIZES:
+def _register_suites(size: int, suffix: str) -> None:
+    """Register every HELMET suite at one size for one prompting regime.
+
+    `suffix` is appended to every task and suite name: "" for the tasks as
+    configured, ":base" for their variants without a chat template.
+    """
+    regime = " without a chat template" if suffix else ""
     category_suites: list[Suite] = []
     nojudge_suites: list[Suite] = []
     extra_suites: list[Suite] = []
 
     for category in CATEGORIES:
-        tasks = _tasks_for(category, size)
+        tasks = [f"{task}{suffix}" for task in _tasks_for(category, size)]
         if not tasks:
             continue
 
         suite = Suite(
-            name=f"helmet_{category}__{size}",
+            name=f"helmet_{category}__{size}{suffix}",
             tasks=tuple(tasks),
             aggregation=AggregationStrategy.AVERAGE,
-            description=f"HELMET-plus {category} tasks at {size} context length",
+            description=f"HELMET-plus {category} tasks at {size} context length{regime}",
         )
         register(suite)
         category_suites.append(suite)
 
         # judge-free counterpart, used to build helmet_nojudge__*; it only needs
         # to exist as its own suite when the category has a judged task in it
-        unjudged = _tasks_for(category, size, judged=False)
+        unjudged = [f"{task}{suffix}" for task in _tasks_for(category, size, judged=False)]
         if not unjudged:
             continue
         if len(unjudged) == len(tasks):
             nojudge_suites.append(suite)
         else:
             nojudge_suite = Suite(
-                name=f"helmet_{category}_nojudge__{size}",
+                name=f"helmet_{category}_nojudge__{size}{suffix}",
                 tasks=tuple(unjudged),
                 aggregation=AggregationStrategy.AVERAGE,
                 description=(
-                    f"HELMET-plus {category} tasks at {size} context length, "
+                    f"HELMET-plus {category} tasks at {size} context length{regime}, "
                     "excluding LLM-judged tasks"
                 ),
             )
@@ -90,11 +99,11 @@ for size in CONTEXT_SIZES:
     if len(category_suites) > 1:
         register(
             Suite(
-                name=f"helmet_all__{size}",
+                name=f"helmet_all__{size}{suffix}",
                 tasks=tuple(category_suites),
                 aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
                 description=(
-                    f"All HELMET-plus tasks at {size} context length "
+                    f"All HELMET-plus tasks at {size} context length{regime} "
                     f"(mean over category averages: {', '.join(CATEGORIES)}). "
                     "Includes LLM-judged tasks; use helmet_nojudge__* to skip them."
                 ),
@@ -107,12 +116,17 @@ for size in CONTEXT_SIZES:
             register(suite)
         register(
             Suite(
-                name=f"helmet_nojudge__{size}",
+                name=f"helmet_nojudge__{size}{suffix}",
                 tasks=tuple(nojudge_suites),
                 aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
                 description=(
-                    f"HELMET-plus tasks at {size} context length that need no LLM "
-                    "judge (mean over category averages)"
+                    f"HELMET-plus tasks at {size} context length{regime} that need no "
+                    "LLM judge (mean over category averages)"
                 ),
             )
         )
+
+
+for size in CONTEXT_SIZES:
+    for suffix in ("", ":base"):
+        _register_suites(size, suffix)

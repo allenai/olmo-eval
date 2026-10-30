@@ -47,6 +47,10 @@ _DEMO_PREFIX = "For example:\n\n"
 _DEMO_SEPARATOR = "\n\n"
 _DEMO_SUFFIX = "\n\nNow, read the following story:\n\n"
 
+# Upstream's prompt_template puts a blank line before the answer prefix here,
+# where most HELMET loaders use a single newline.
+_ANSWER_PREFIX_SEPARATOR = "\n\n"
+
 #: Every piece of text this loader builds prompts from, besides each subset's
 #: templates, which are listed with its source. HELMET's task settings list it,
 #: so changing one moves the task hash.
@@ -55,6 +59,7 @@ MEASURED_CONSTANTS = {
     "demo_separator": _DEMO_SEPARATOR,
     "demo_suffix": _DEMO_SUFFIX,
     "truncation_postfix": TRUNCATION_POSTFIX,
+    "answer_prefix_separator": _ANSWER_PREFIX_SEPARATOR,
 }
 
 # HELMET passes explicit features when loading InfiniteBench to work around a

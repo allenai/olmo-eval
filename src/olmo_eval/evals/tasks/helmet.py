@@ -16,6 +16,7 @@ Upstream reference: princeton-nlp/HELMET at commit aeadacc6.
 import json
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,7 +25,7 @@ from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
 from olmo_eval.common.scorers.base import _squad_normalize_answer
 from olmo_eval.common.scorers.substring import SubstringExactMatchScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.data import (
     helmet_alce_loader,
     helmet_icl_loader,
@@ -73,7 +74,7 @@ from olmo_eval.data.ruler_loader import (
 )
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import TaskConfig
-from olmo_eval.evals.tasks.common.registry import register
+from olmo_eval.evals.tasks.common.registry import register, register_variant
 from olmo_eval.evals.tasks.helmet_judge import (
     LONGQA_METRICS,
     SUMM_METRICS,
@@ -93,15 +94,23 @@ class HelmetTask(RulerTask):
     `_load_dataset` -- in always rendering prompts from its templates, in the
     scoring inputs it keeps in metadata, and in sending its chat-format categories
     as chat requests.
+
+    The `:base` variant turns `use_chat_template` off, as upstream's
+    `--use_chat_template False` does for models without instruction tuning: the
+    chat-format categories then go out as completions ending in their answer
+    prefix, and the prefix is put back on each output before it is scored.
     """
 
     _tasks_registry: dict[str, dict[str, Any]] = HELMET_TASKS
     _name_prefix: str = "helmet_"
-    answer_prefix_separator = ANSWER_PREFIX_SEPARATOR
+    #: The task's default settings (see `_task_settings`), set on each task class.
+    task_settings: dict[str, Any]
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
         self.settings = self._measured_settings(config)
+        constants = type(self).task_settings["constants"]
+        self.answer_prefix_separator = constants["answer_prefix_separator"]
 
     def _measured_settings(self, config: TaskConfig) -> dict[str, Any]:
         """Return the HELMET settings this run uses: `config.task_settings["helmet"]`.
@@ -220,6 +229,40 @@ class HelmetTask(RulerTask):
                 messages=({"role": "user", "content": instance.question},),
             )
         return super().format_request(instance)
+
+    @property
+    def prefixes_outputs(self) -> bool:
+        """Whether outputs are scored with the answer prefix put back in front.
+
+        Upstream prepends the answer prefix to every completion before parsing it.
+        For the chat-format categories run as completions, the `:base` variant,
+        that decides what the parsers and judges see: LongQA's parser keys on the
+        leading "Answer:", and the summarization judge reads "Summary: ...". The
+        completion-format categories keep scoring the bare output, which their
+        parsers and substring scorers were validated on.
+        """
+        default = type(self).task_settings["helmet"]
+        return bool(default.get("use_chat_template")) and not self.settings.get("use_chat_template")
+
+    def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
+        """Strip thinking traces, then put the answer prefix back where upstream does.
+
+        Runners call this on every response before scoring, so the prefix reaches
+        `extract_answer`, the scorers that read `output.text`, and the judges. The
+        generation itself stays in `metadata["original_text"]`. Repeated calls
+        leave already prefixed outputs unchanged.
+        """
+        super().strip_thinking_traces(responses)
+        if not self.prefixes_outputs:
+            return
+        for response in responses:
+            prefix = (response.instance.metadata or {}).get("prepend_text", "")
+            for output in response.outputs:
+                if not prefix or output.metadata.get("answer_prefixed"):
+                    continue
+                output.metadata.setdefault("original_text", output.text)
+                output.text = prefix + (output.text or "")
+                output.metadata["answer_prefixed"] = True
 
 
 class HelmetJsonKvTask(HelmetTask):
@@ -609,7 +652,7 @@ def _task_settings(task_cfg: dict) -> dict[str, Any]:
         constants: dict[str, Any] = {"user_template": user, "system_template": system}
     else:
         constants = dict(_LOADER_MODULES[kind].MEASURED_CONSTANTS)
-    constants["answer_prefix_separator"] = ANSWER_PREFIX_SEPARATOR
+    constants.setdefault("answer_prefix_separator", ANSWER_PREFIX_SEPARATOR)
 
     return {
         "upstream": HELMET_UPSTREAM,
@@ -650,9 +693,26 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
     )
 
 
+def _base_task_settings(task_settings: dict[str, Any]) -> dict[str, Any]:
+    """A task's settings with the chat template off, for models without instruction tuning.
+
+    The completion-format categories already run without one, so their `:base`
+    variant is the task itself and shares its hash.
+    """
+    return {**task_settings, "helmet": {**task_settings["helmet"], "use_chat_template": False}}
+
+
 # Dynamically register all HELMET-plus tasks
 for _task_name, _task_config in HELMET_TASKS.items():
     _cls = _make_helmet_task_class(_task_name, _task_config)
     # Inject into module globals so pickle can find the class by name
     globals()[_cls.__name__] = _cls
     register(f"helmet_{_task_name}")(_cls)
+    if _task_config.get("use_chat_template"):
+        register_variant(
+            f"helmet_{_task_name}",
+            "base",
+            task_settings=_base_task_settings(_task_settings(_task_config)),
+        )
+    else:
+        register_variant(f"helmet_{_task_name}", "base")
