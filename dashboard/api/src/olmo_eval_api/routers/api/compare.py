@@ -31,7 +31,7 @@ from olmo_eval_api.services.subjects import (
     resolve_for_compare,
     validate_subject_key,
 )
-from olmo_eval_api.services.suites import SuiteNode, leaf_weights, leaves
+from olmo_eval_api.services.suites import NO_SCORE_AGGREGATIONS, SuiteNode, leaf_weights, leaves
 from olmo_eval_api.stats.bootstrap import align, union_keys
 from olmo_eval_api.stats.mde import mde80
 from olmo_eval_api.stats.paired import (
@@ -288,7 +288,7 @@ async def compare_matrix(
     if is_runtime_metric(body.metric):
         # No bootstraps, so nothing worth caching.
         return await _runtime_matrix(session, body, subjects, baseline, rows, stats.alpha)
-    ckey = cache_key("matrix-v7", request, used, scope_hashes(node, defs))
+    ckey = cache_key("matrix-v8", request, used, scope_hashes(node, defs))
     cached = await get_cached(session, ckey, a.MatrixResponse)
     if cached is not None:
         return cached.model_copy(update={"subjects": live_subjects(cached.subjects, by_key)})
@@ -494,8 +494,10 @@ def _matrix_suite_row(
     }
     hib = hib_set.pop() if len(hib_set) == 1 else None
     deltas: dict[str, a.DeltaStats] = {}
-    if baseline is not None and (
-        node.aggregation != "gap" or results[baseline.key].score is not None
+    if (
+        baseline is not None
+        and node.aggregation not in NO_SCORE_AGGREGATIONS
+        and (node.aggregation != "gap" or results[baseline.key].score is not None)
     ):
         others = [s.key for s in subjects if s.key != baseline.key]
         tasks = [(n, {k: v for k, v in sides.get(n, {}).items() if v is not None}) for n in names]
@@ -793,6 +795,8 @@ async def compare_pairwise(
         raise bad_request("margin must be >= 0")
     used = [tr for s in subjects for tr in s.trs.values()]
     rows, node, defs = await resolve_scope(session, body.scope, subjects)
+    if node is not None and node.aggregation in {"none", "display_only"}:
+        raise bad_request("This suite has no aggregate score. Choose a child suite or a task.")
     ckey = cache_key("pairwise-v6", body.model_dump(mode="json"), used, scope_hashes(node, defs))
     cached = await get_cached(session, ckey, a.PairwiseResponse)
     if cached is not None:

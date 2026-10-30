@@ -127,6 +127,19 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   Counts that tasks keep of their own errors, such as omniscience's
   `judge_parsing_errors`, now count only failures that did not raise.
 
+## 2026-10-21: No-score suite headings stop publishing synthetic aggregates (#422)
+
+- **Affected**: all `DISPLAY_ONLY` and `NONE` suites, including `arena_hard`, BFCL,
+  CTC, Molmo2, OCR, and science suite headings.
+- **Change**: dashboard suite cells, run-suite baseline deltas, and run headlines no longer
+  treat these headings as aggregate scores. Ingestion clears legacy score and primary-metric
+  values even when a saved manifest still supplies them. Individual task scores remain.
+- **Identity**: task hashes and suite names are unchanged; the suite definition already
+  identifies its no-score aggregation strategy.
+- **Comparability**: compare individual task scores. Previously stored synthetic suite
+  averages are not comparable suite measurements. Historical rows retain their stored values
+  until re-ingestion; no automatic backfill is included.
+
 ## 2026-10-16: `ctc_contradiction` scores its high-low gold pairs (#490)
 
 - **Affected**: `ctc_contradiction` at rungs `r64k`, `r128k`, `r256k`, `r512k` and `r1m`,
