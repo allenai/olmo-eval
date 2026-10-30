@@ -551,3 +551,26 @@ class TestValidateGPUPlan:
 )
 def test_served_model_is_the_loaded_adapter_or_the_model(kwargs, served):
     assert ProviderConfig(model="google/gemma-2b", kwargs=kwargs).served_model == served
+
+
+class TestInProcessAuxiliaryProviders:
+    """An hf auxiliary provider loads in the scoring process on a GPU set aside for it."""
+
+    def test_each_instance_gets_its_own_gpu_as_its_device(self):
+        from olmo_eval.inference.manager import InferenceManager
+
+        config = ProviderConfig(kind=ProviderKind.HF, model="google/t5-nli", num_instances=2)
+        manager = InferenceManager(configs={"nli": config}, available_gpu_ids=[2, 3])
+
+        resolved = manager.start()["nli"]
+
+        assert [c["kwargs"]["device"] for c in resolved] == ["cuda:2", "cuda:3"]
+        assert all(c.get("num_instances", 1) == 1 for c in resolved)
+
+    def test_too_few_gpus_are_refused(self):
+        from olmo_eval.inference.manager import InferenceManager
+
+        config = ProviderConfig(kind=ProviderKind.HF, model="google/t5-nli")
+
+        with pytest.raises(RuntimeError, match="Not enough GPUs"):
+            InferenceManager(configs={"nli": config}, available_gpu_ids=[]).start()

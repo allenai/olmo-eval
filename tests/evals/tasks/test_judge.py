@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -20,7 +21,7 @@ from olmo_eval.common.types import (
     Response,
 )
 from olmo_eval.evals.tasks import mt_bench
-from olmo_eval.evals.tasks.common import OutputScoreAggregation, TaskConfig, get_task
+from olmo_eval.evals.tasks.common import OutputScoreAggregation, TaskConfig, get_task, registry
 from olmo_eval.evals.tasks.common import judge as judge_module
 from olmo_eval.evals.tasks.common.judge import (
     JUDGE_ATTEMPTS,
@@ -31,6 +32,7 @@ from olmo_eval.evals.tasks.common.judge import (
     is_truncated,
     visible_response,
 )
+from olmo_eval.evals.tasks.common.registry import parse_overrides
 from olmo_eval.evals.tasks.hle import HLEAccuracyMetric, HLETruncationRateMetric
 from olmo_eval.inference.retry import retry_with_backoff
 from olmo_eval.runners.asynq.preparation import configure_task
@@ -243,6 +245,49 @@ class TestJudgeConfiguration:
         assert built[0]["max_tokens"] == 64
         assert built[0]["reasoning_effort"] == "low"
         assert built[0]["temperature"] == 0.0
+
+    def test_judge_temperature_reaches_the_judge(self, monkeypatch):
+        built: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            llm_judge, "build_openai_judge_fn", lambda **kwargs: built.append(kwargs)
+        )
+
+        _PassFailTask(_config(judge_temperature=0.3))._get_judge()
+
+        assert built[0]["temperature"] == 0.3
+        assert parse_overrides("judge_temperature=0.3") == {"judge_temperature": 0.3}
+
+    @pytest.fixture
+    def warm_mt_bench(self, monkeypatch):
+        """mt_bench with a default judge temperature, as a task tuned for its judge has."""
+        monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
+        config = registry._configs["mt_bench"]
+        monkeypatch.setitem(registry._configs, "mt_bench", replace(config, judge_temperature=0.1))
+
+    def test_the_default_judge_keeps_the_default_temperature(self, warm_mt_bench, monkeypatch):
+        default = get_task("mt_bench").config
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", default.judge_model)
+
+        assert get_task("mt_bench").config.judge_temperature == 0.1
+        overrides = {"judge_model": default.judge_model}
+        assert get_task("mt_bench", config_overrides=overrides).config.judge_temperature == 0.1
+
+    def test_another_judge_drops_the_default_temperature(self, warm_mt_bench, monkeypatch):
+        overridden = get_task("mt_bench", config_overrides={"judge_model": "o3-2025-04-16"})
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5.4-2026-03-05:medium")
+        from_env = get_task("mt_bench")
+
+        for task in (overridden, from_env):
+            assert task.config.judge_temperature is None
+            assert "judge_temperature" not in task.config.to_dict()
+
+    def test_another_judge_keeps_a_temperature_the_overrides_set(self, warm_mt_bench, monkeypatch):
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-4o")
+        overrides = {"judge_model": "gpt-4.1-2025-04-14", "judge_temperature": 0.3}
+
+        assert get_task("mt_bench", config_overrides=overrides).config.judge_temperature == 0.3
+        overrides = {"judge_temperature": 0.3}
+        assert get_task("mt_bench", config_overrides=overrides).config.judge_temperature == 0.3
 
     def test_incomplete_judge_configuration_is_rejected(self):
         task = _PassFailTask(_config(judge_max_tokens=None))
