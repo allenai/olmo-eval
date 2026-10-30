@@ -2213,7 +2213,12 @@ class TestPerRequestResults:
         from olmo_eval.runners.asynq.batching import BatchConfig
 
         kinds = {str(kind) for kind in ProviderKind}
-        assert kinds >= BatchConfig._SEQUENTIAL_ONLY
+        # Spelled out: in-process engines batch inside the engine, so splitting their
+        # batches per request would change what they compute.
+        engines = {"vllm", "sglang", "hf", "olmo_core", "olmo_core_vlm"}
+        assert engines == BatchConfig._SEQUENTIAL_ONLY
+        for kind in engines:
+            assert not BatchConfig.dispatches_per_request(kind)
         for kind in sorted(kinds):
             assert BatchConfig.dispatches_per_request(kind) is (
                 kind not in BatchConfig._SEQUENTIAL_ONLY
