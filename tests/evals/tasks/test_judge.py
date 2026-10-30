@@ -31,6 +31,7 @@ from olmo_eval.evals.tasks.common.judge import (
     is_truncated,
     visible_response,
 )
+from olmo_eval.evals.tasks.common.registry import parse_overrides
 from olmo_eval.evals.tasks.hle import HLEAccuracyMetric, HLETruncationRateMetric
 from olmo_eval.inference.retry import retry_with_backoff
 from olmo_eval.runners.asynq.preparation import configure_task
@@ -243,6 +244,17 @@ class TestJudgeConfiguration:
         assert built[0]["max_tokens"] == 64
         assert built[0]["reasoning_effort"] == "low"
         assert built[0]["temperature"] == 0.0
+
+    def test_judge_temperature_reaches_the_judge(self, monkeypatch):
+        built: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            llm_judge, "build_openai_judge_fn", lambda **kwargs: built.append(kwargs)
+        )
+
+        _PassFailTask(_config(judge_temperature=0.3))._get_judge()
+
+        assert built[0]["temperature"] == 0.3
+        assert parse_overrides("judge_temperature=0.3") == {"judge_temperature": 0.3}
 
     def test_incomplete_judge_configuration_is_rejected(self):
         task = _PassFailTask(_config(judge_max_tokens=None))

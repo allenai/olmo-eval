@@ -183,12 +183,19 @@ class TaskConfig:
     judge_model: str | None = None
     judge_reasoning_effort: str | None = None
     judge_max_tokens: int | None = None
+    #: Sampling temperature for the judge; unset means the shared judge's 0.
+    judge_temperature: float | None = None
 
     #: How a task that builds its prompt from a bare label should render it. The
     #: vision tasks read these; they follow the checkpoint, since instruction-tuned
     #: and pretrain models were trained on different prompt forms.
     prompt_templates: str | None = None
     system_prompt_style: str | None = None
+
+    #: Task-specific settings that shape the data or prompts but have no field of
+    #: their own, such as shot counts, token budgets or source revisions. Set them
+    #: here so that changing one changes the task hash.
+    task_settings: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
@@ -330,6 +337,8 @@ class TaskConfig:
             serialized["strip_unclosed_thinking"] = True
         if self.thinking_prefilled:
             serialized["thinking_prefilled"] = True
+        if self.task_settings is not None:
+            serialized["task_settings"] = self.task_settings
         if any(
             value is not None
             for value in (
@@ -345,6 +354,10 @@ class TaskConfig:
                     "judge_max_tokens": self.judge_max_tokens,
                 }
             )
+        # Emitted on its own, only when set, so hashes of judges at the default
+        # temperature are unchanged from before the field existed.
+        if self.judge_temperature is not None:
+            serialized["judge_temperature"] = self.judge_temperature
         return serialized
 
     def get_primary_metric(self) -> Metric | None:

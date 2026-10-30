@@ -3,8 +3,8 @@
 A judged task generates as usual and grades every output in ``score_responses``.
 The judge model, reasoning effort, and token budget are task configuration, so they
 are part of the task hash: runs with different judges are stored and compared as
-separate results. ``-o judge_model=<model>`` (and ``-o judge_reasoning_effort=<effort>``
-or ``-o judge_max_tokens=<n>``) changes the judge of one task;
+separate results. ``-o judge_model=<model>`` (and ``-o judge_reasoning_effort=<effort>``,
+``-o judge_max_tokens=<n>`` or ``-o judge_temperature=<t>``) changes the judge of one task;
 ``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]`` changes the judge of every task
 with ``judged = True`` in a run whose ``-o`` overrides name no judge model. A task's
 default reasoning effort goes with its default model, so the environment override
@@ -215,7 +215,12 @@ def grade_with_config_judge(
     calls. Metrics graded otherwise, including by a judge served from the inference
     pool, are kept. A config that sets no judge field is returned unchanged.
     """
-    judge_fields = (config.judge_model, config.judge_reasoning_effort, config.judge_max_tokens)
+    judge_fields = (
+        config.judge_model,
+        config.judge_reasoning_effort,
+        config.judge_max_tokens,
+        config.judge_temperature,
+    )
     if all(value is None for value in judge_fields):
         return config
     judge = scorer_type(judge_fn=default.with_config(config).build_fn(scorer_name))
@@ -238,11 +243,11 @@ class JudgedTask(Task):
     """A task whose outputs an OpenAI-compatible model judge grades.
 
     Subclasses set ``judge_model`` and ``judge_max_tokens`` (and optionally
-    ``judge_reasoning_effort``) as task configuration, name their score channel with
-    ``judge_scorer_name``, and implement :meth:`_score_output`. Each instance gets
-    its score under ``judge_score_key``, and each of ``judge_extra_score_keys``,
-    aggregated over its judged outputs, and ``truncation_rate``. An instance with no
-    model output scores ``unanswered_score``.
+    ``judge_reasoning_effort`` and ``judge_temperature``) as task configuration, name
+    their score channel with ``judge_scorer_name``, and implement :meth:`_score_output`.
+    Each instance gets its score under ``judge_score_key``, and each of
+    ``judge_extra_score_keys``, aggregated over its judged outputs, and ``truncation_rate``.
+    An instance with no model output scores ``unanswered_score``.
     """
 
     required_secrets = ("OPENAI_API_KEY",)
@@ -294,6 +299,8 @@ class JudgedTask(Task):
                 max_tokens=self.config.judge_max_tokens,
                 reasoning_effort=self.config.judge_reasoning_effort,
             )
+            if self.config.judge_temperature is not None:
+                settings = replace(settings, temperature=self.config.judge_temperature)
             judge = Judge(
                 call=settings.build_fn(type(self).__name__),
                 label=f"{self.config.name} judge",

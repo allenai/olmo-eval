@@ -454,7 +454,10 @@ class TestJudgeSettings:
     def test_a_config_replaces_the_judge_fields_it_sets(self):
         default = JudgeSettings(model="judge-a", max_tokens=10, reasoning_effort="low")
         config = types.SimpleNamespace(
-            judge_model="judge-b", judge_reasoning_effort=None, judge_max_tokens=None
+            judge_model="judge-b",
+            judge_reasoning_effort=None,
+            judge_max_tokens=None,
+            judge_temperature=None,
         )
 
         assert default.with_config(config) == JudgeSettings(model="judge-b", max_tokens=10)
@@ -462,16 +465,35 @@ class TestJudgeSettings:
     def test_a_config_naming_another_model_drops_the_default_effort(self):
         default = JudgeSettings(model="judge-a", max_tokens=10, reasoning_effort="medium")
         other = types.SimpleNamespace(
-            judge_model="judge-b", judge_reasoning_effort=None, judge_max_tokens=None
+            judge_model="judge-b",
+            judge_reasoning_effort=None,
+            judge_max_tokens=None,
+            judge_temperature=None,
         )
         same = types.SimpleNamespace(
-            judge_model="judge-a", judge_reasoning_effort=None, judge_max_tokens=64
+            judge_model="judge-a",
+            judge_reasoning_effort=None,
+            judge_max_tokens=64,
+            judge_temperature=None,
         )
 
         assert default.with_config(other).reasoning_effort is None
         assert default.with_config(same) == JudgeSettings(
             model="judge-a", max_tokens=64, reasoning_effort="medium"
         )
+
+    def test_a_config_temperature_replaces_the_default(self):
+        default = JudgeSettings(model="judge-a", max_tokens=10, temperature=0.2)
+        warm = types.SimpleNamespace(
+            judge_model=None,
+            judge_reasoning_effort=None,
+            judge_max_tokens=None,
+            judge_temperature=0.7,
+        )
+        unset = types.SimpleNamespace(**{**vars(warm), "judge_temperature": None})
+
+        assert default.with_config(warm).temperature == 0.7
+        assert default.with_config(unset).temperature == 0.2
 
     def test_builds_a_judge_that_records_its_settings(self):
         settings = JudgeSettings(model="judge-a", max_tokens=64, reasoning_effort="high")
