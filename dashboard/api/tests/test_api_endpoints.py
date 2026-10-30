@@ -729,6 +729,44 @@ async def test_cached_compare_reflects_tag_and_suite_changes(
     assert p3["tasks_used"] == ["arc"]
 
 
+@pytest.mark.parametrize("previous_namespace", ["matrix-v6", "matrix-v7"])
+async def test_matrix_recomputes_previous_cached_scores(
+    client: httpx.AsyncClient,
+    seeded: dict,
+    session: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    previous_namespace: str,
+) -> None:
+    from olmo_eval_api.routers.api import compare
+    from olmo_eval_api.schemas.api import MatrixResponse
+    from olmo_eval_api.services.cache import put_cached
+
+    request = {
+        "subjects": [f"r:{seeded['step1000']}", f"r:{seeded['step3000']}"],
+        "scope": "suite:core",
+        "metric": "primary",
+    }
+    current_cache_key = compare.cache_key
+    previous_keys: list[str] = []
+
+    def previous_cache_key(endpoint: str, *args: Any, **kwargs: Any) -> str:
+        key = current_cache_key(previous_namespace, *args, **kwargs)
+        previous_keys.append(key)
+        return key
+
+    with monkeypatch.context() as legacy:
+        legacy.setattr(compare, "cache_key", previous_cache_key)
+        stale = await post(client, "/api/compare/matrix", request, "MatrixResponse")
+    expected = stale["rows"][0]["cells"][0]["score"]
+    assert expected is not None
+    stale["rows"][0]["cells"][0]["score"] = 0.0 if expected != 0.0 else 1.0
+    await put_cached(session, previous_keys[0], MatrixResponse.model_validate(stale))
+
+    fresh = await post(client, "/api/compare/matrix", request, "MatrixResponse")
+    assert fresh["rows"][0]["cells"][0]["score"] == pytest.approx(expected)
+    assert fresh["rows"][0]["cells"][0]["score"] != stale["rows"][0]["cells"][0]["score"]
+
+
 async def test_compare_pairwise_rejects_too_much_work(
     client: httpx.AsyncClient, seeded: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1225,3 +1263,282 @@ async def test_baseline_generation_counts_cover_task_and_suite_cells_without_pre
         "cap_hit": 3,
         "empty": 2,
     }
+
+
+async def test_matrix_shared_gap_tasks_keep_independent_metric_anchors(
+    client: httpx.AsyncClient,
+    session: Any,
+) -> None:
+    root = suite("bothpairs", [], score=None, aggregation="none")
+    root["children"] = [{"type": "suite", "name": "pair_a"}, {"type": "suite", "name": "pair_b"}]
+    root["num_tasks"] = 3
+    for run_id, metric, scores in (
+        ("anchorstrict", "strict:default", {"in": 0.6, "out_a": 0.4, "out_b": None}),
+        ("anchorflex", "flex:default", {"in": 0.7, "out_a": None, "out_b": 0.5}),
+    ):
+        pair_a = suite("pair_a", ["in", "out_a"], score=scores["out_a"], aggregation="gap")
+        pair_b = suite("pair_b", ["in", "out_b"], score=scores["out_b"], aggregation="gap")
+        pair_a["parent"] = pair_b["parent"] = "bothpairs"
+        await seed_run(
+            client,
+            run_id=run_id,
+            tasks={name: [score] * 32 for name, score in scores.items()},
+            primary_metric=metric,
+            suites=[pair_a, pair_b],
+        )
+    from olmo_eval_api.db.models import suite_defs_t
+    from olmo_eval_api.services.suites import suite_definition_hash
+
+    # Read paths retain historical definitions independently of current upload validation.
+    await session.execute(
+        suite_defs_t.insert().values(
+            suite_name=root["name"],
+            definition_hash=suite_definition_hash("none", root["children"]),
+            aggregation="none",
+            children=root["children"],
+            first_seen_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+    response = await post(
+        client,
+        "/api/compare/matrix",
+        {
+            "subjects": ["r:anchorstrict", "r:anchorflex"],
+            "scope": "suite:bothpairs",
+            "metric": "primary",
+        },
+        "MatrixResponse",
+    )
+    suites = {row["name"]: row for row in response["rows"] if row["kind"] == "suite"}
+    assert suites["pair_a"]["cells"][0]["score"] == pytest.approx(0.4)
+    assert suites["pair_b"]["cells"][1]["score"] == pytest.approx(0.5)
+    task_rows = [row for row in response["rows"] if row["name"] == "in"]
+    assert [(row["parent"], row["metric_key"]) for row in task_rows] == [
+        ("pair_a", "strict:default"),
+        ("pair_b", "flex:default"),
+    ]
+
+
+@pytest.mark.parametrize("merge", ["latest", "all"])
+@pytest.mark.parametrize("heading", [None, "none", "average"])
+async def test_gap_progression_keeps_checkpoint_and_reference_metrics_consistent(
+    client: httpx.AsyncClient, merge: str, heading: str | None, session: Any
+) -> None:
+    nested = heading is not None
+    for run_id, step, metric, score in [
+        ("progstrict01", 1000, "strict:default", 0.4),
+        ("progflex01", 2000, "flex:default", 0.9),
+    ]:
+        await seed_run(
+            client,
+            run_id=run_id,
+            model_name=f"test-org/prog-model-step{step}",
+            step=step,
+            primary_metric=metric,
+            tasks={"in": [score] * 32, "out": [score] * 32, "other": [0.2] * 32},
+            suites=[suite("progpair", ["in", "out"], score=score, aggregation="gap")],
+        )
+    await seed_run(
+        client,
+        run_id="progref01",
+        model_name="test-org/reference-model",
+        primary_metric="strict:default",
+        tasks={"in": [0.8] * 32, "out": [0.8] * 32, "other": [0.2] * 32},
+    )
+    scope_name = "progpair"
+    if nested:
+        from olmo_eval_api.db.models import suite_defs_t
+        from olmo_eval_api.services.suites import suite_definition_hash
+
+        children = [{"type": "suite", "name": "progpair"}, {"type": "task", "name": "other"}]
+        # Historical definitions remain readable even when upload validation changes.
+        await session.execute(
+            suite_defs_t.insert().values(
+                suite_name="progheading",
+                definition_hash=suite_definition_hash(heading, children),
+                aggregation=heading,
+                children=children,
+                first_seen_at=datetime.now(UTC),
+                last_seen_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+        scope_name = "progheading"
+    result = await get(
+        client,
+        "/api/models/progression",
+        "ProgressionResponse",
+        series="test-org/prog-model",
+        scope=f"suite:{scope_name}",
+        merge=merge,
+        references="r:progflex01,r:progref01",
+    )
+    panel = next(panel for panel in result["panels"] if panel["key"] == f"suite:{scope_name}")
+    expected_points = [] if heading == "none" else [(1000, 0.4)]
+    if heading == "average":
+        expected_points = [(1000, 1 / 3), (2000, 2 / 3)]
+    assert [point["step"] for point in panel["points"]] == [step for step, _ in expected_points]
+    assert [point["score"] for point in panel["points"]] == pytest.approx(
+        [score for _, score in expected_points]
+    )
+    reference_scores = {ref["subject"]: ref["score"] for ref in panel["references"]}
+    assert reference_scores["r:progflex01"] == (
+        pytest.approx(2 / 3) if heading == "average" else None
+    )
+    expected_ref = None if heading == "none" else 0.6 if heading == "average" else 0.8
+    assert reference_scores["r:progref01"] == (
+        pytest.approx(expected_ref) if expected_ref is not None else None
+    )
+    if not nested:
+        assert panel["meta"]["display_format"] == "percent"
+    concrete = await get(
+        client,
+        "/api/models/progression",
+        "ProgressionResponse",
+        series="test-org/prog-model",
+        scope=f"suite:{scope_name}",
+        merge=merge,
+        metric="flex:default",
+    )
+    for explicit_panel in concrete["panels"]:
+        expected_score = (
+            0.2
+            if explicit_panel["key"] == "task:other"
+            else 2 / 3
+            if heading == "average" and explicit_panel["key"] == "suite:progheading"
+            else 0.9
+        )
+        expected = (
+            []
+            if heading == "none" and explicit_panel["key"] == "suite:progheading"
+            else [(2000, expected_score)]
+        )
+        assert [p["step"] for p in explicit_panel["points"]] == [step for step, _ in expected]
+        assert [p["score"] for p in explicit_panel["points"]] == pytest.approx(
+            [score for _, score in expected]
+        )
+    for task_name in ("in", "out"):
+        child = next(p for p in result["panels"] if p["key"] == f"task:{task_name}")
+        assert [(point["step"], point["score"]) for point in child["points"]] == [(1000, 0.4)]
+        assert (
+            next(r for r in child["references"] if r["subject"] == "r:progflex01")["score"] is None
+        )
+
+
+async def test_generated_gap_task_panel_survives_a_missing_companion(client):
+    await seed_run(
+        client,
+        run_id="noanchor001",
+        model_name="test-org/noanchor-step1000",
+        step=1000,
+        tasks={"in": [0.4]},
+        suites=[suite("unanchored", ["in", "out"], score=None, aggregation="gap")],
+    )
+    body = await get(
+        client,
+        "/api/models/progression",
+        "ProgressionResponse",
+        series="test-org/noanchor",
+        scope="suite:unanchored",
+    )
+    panels = {panel["key"]: panel for panel in body["panels"]}
+    assert panels["suite:unanchored"]["points"] == []
+    assert [point["score"] for point in panels["task:in"]["points"]] == [0.4]
+
+
+@pytest.mark.parametrize("merge", ["latest", "all"])
+@pytest.mark.parametrize(
+    ("aggregation", "metric", "mixed_primary"),
+    [
+        ("gap", "primary", True),
+        ("gap", "strict:default", True),
+        ("average", "strict:default", True),
+        ("weighted_average", "strict:default", True),
+        ("average_of_averages", "strict:default", True),
+        ("average", "strict:default", False),
+        ("weighted_average", "strict:default", False),
+        ("average_of_averages", "strict:default", False),
+    ],
+)
+@pytest.mark.parametrize(
+    ("display_format", "higher_is_better"), [("percent", False), ("raw", True)]
+)
+async def test_progression_uses_selected_primary_metadata_from_later_checkpoint(
+    client: httpx.AsyncClient,
+    session: Any,
+    merge: str,
+    aggregation: str,
+    metric: str,
+    mixed_primary: bool,
+    display_format: str,
+    higher_is_better: bool,
+) -> None:
+    now = datetime.now(UTC)
+    for run_id, step, primary, scores in [
+        ("secondarymeta01", 1000, "flex:default", (0.9, 0.9)),
+        ("primarymeta01", 2000, "strict:default", (0.6, 0.8)),
+    ]:
+        await seed_run(
+            client,
+            run_id=run_id,
+            model_name=f"test-org/selected-meta-step{step}",
+            step=step,
+            primary_metric=primary,
+            tasks={"in": [scores[0]] * 2, "out": [scores[1]] * 6},
+            suites=[suite("selected_meta", ["in", "out"], aggregation=aggregation)],
+            created_at=now - timedelta(hours=3 - step // 1000),
+            session=session,
+        )
+    # The earlier checkpoint can supply strict scores, but not their metadata.
+    # GAP cases use mixed primaries to avoid anchoring to flex; the others also
+    # cover strict being secondary on every earlier task.
+    await session.execute(
+        text(
+            "UPDATE task_results SET "
+            "metrics = metrics || jsonb_build_object('strict:default', "
+            "CASE WHEN task_name = 'in' THEN 0.2 ELSE 0.4 END), "
+            "primary_metric = CASE WHEN :mixed_primary AND task_name = 'out' "
+            "THEN 'strict:default' ELSE primary_metric END, "
+            "score = CASE WHEN :mixed_primary AND task_name = 'out' THEN 0.4 ELSE score END, "
+            "metric_meta = '{}'::jsonb, display_format = :format, higher_is_better = :direction "
+            "WHERE run_id = 'secondarymeta01'"
+        ),
+        {
+            "format": "raw" if display_format == "percent" else "percent",
+            "direction": not higher_is_better,
+            "mixed_primary": mixed_primary,
+        },
+    )
+    await session.execute(
+        text(
+            "UPDATE task_results SET metric_meta = '{}'::jsonb, "
+            "display_format = :format, higher_is_better = :direction "
+            "WHERE run_id = 'primarymeta01'"
+        ),
+        {"format": display_format, "direction": higher_is_better},
+    )
+    await session.commit()
+
+    body = await get(
+        client,
+        "/api/models/progression",
+        "ProgressionResponse",
+        series="test-org/selected-meta",
+        scope="suite:selected_meta",
+        metric=metric,
+        merge=merge,
+    )
+    panel = next(panel for panel in body["panels"] if panel["key"] == "suite:selected_meta")
+    assert [point["step"] for point in panel["points"]] == [1000, 2000]
+    expected_scores = (
+        [0.4, 0.8]
+        if aggregation == "gap"
+        else [0.35, 0.75]
+        if aggregation == "weighted_average"
+        else [0.3, 0.7]
+    )
+    assert [point["score"] for point in panel["points"]] == pytest.approx(expected_scores)
+    assert panel["meta"]["display_format"] == display_format
+    assert panel["meta"]["higher_is_better"] is higher_is_better
