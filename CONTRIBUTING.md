@@ -148,6 +148,32 @@ results and hashed to identify it.
   unset), keep explicit token budgets within the model's context, and don't let a
   class-level `split` overwrite a requested one.
 
+### Judged tasks
+
+- Build on the shared judge code in `common/scorers/llm_judge.py`, not a new client,
+  retry loop, or limiter. Use `JudgedTask` for a task that grades each output with an
+  OpenAI-compatible judge, an `LLMJudgeScorer` subclass for a single-verdict scorer, and
+  `JudgeSettings` with `Judge` or `call_judge` for other multi-call scoring.
+- Keep judge settings in `TaskConfig` (`judge_model`, `judge_reasoning_effort`,
+  `judge_max_tokens`): set them as class defaults, or leave them unset to mean a
+  `JudgeSettings` default named in the task module. Set `judged = True` so `get_task`
+  applies `OLMO_EVAL_JUDGE`, and don't read the variable while scoring; leave it unset
+  only when the task's judge settings cannot take an arbitrary judge, as for
+  Omniscience's 10-token letter grade. A judge served by
+  an auxiliary provider records the model that provider must serve in `judge_model`, and
+  the runner checks it before generating.
+- Call the judge through `Judge.ask` or `call_judge`. They retry transient API failures,
+  hold the run's `judge_limiter` for each call, and raise `ScoringIncompleteError` when
+  the judge stays unavailable. `Judge.ask` asks an API judge again for a reply with no
+  verdict and then raises `JudgeParseError`, which leaves the output unscored; a judge
+  served from the inference pool at temperature 0 raises on the first such reply.
+  Scoring an unparseable reply as wrong needs a parity reason, an explicit
+  `except JudgeParseError`, and a logged count. A score that does not depend on the
+  verdict, such as 0.0 for an empty response, can stand without one.
+- Record `judge_result`, with the raw reply and any flags the score depends on, and the
+  scores on each judged output, so every sample keeps its own. Of the output metadata,
+  saved predictions keep `judge_result` and scores, not arbitrary keys.
+
 ### Shared interfaces and environment
 
 - `SamplingParams` and `LMRequest` are shared by every provider. A change must work for
