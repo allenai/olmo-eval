@@ -1557,10 +1557,17 @@ def _run_id(out: Path) -> str:
 
 
 class TestRunIdentity:
+    # The CLI rewrites a stopped run's manifest as interrupted (SIGTERM under --resume) or
+    # failed; the runner itself leaves it running.
+    @pytest.mark.parametrize("stored_status", ["running", "interrupted", "failed"])
     def test_a_resumed_run_keeps_its_id_and_counts_its_restarts(
-        self, interrupted_run, tmp_path
+        self, interrupted_run, tmp_path, stored_status
     ) -> None:
         out = _resume_copy(interrupted_run, tmp_path)
+        path = out / "manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["run"]["status"] = stored_status
+        path.write_text(json.dumps(manifest))
 
         run_eval(out, INTERRUPTED_LIMITS, env={"BEAKER_JOB_ID": "job-2"})
 

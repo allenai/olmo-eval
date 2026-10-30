@@ -149,7 +149,7 @@ def run(
     from olmo_eval.cli.run.factory import RunnerFactory
     from olmo_eval.common.logging import configure_logging
     from olmo_eval.runners import ValidationError
-    from olmo_eval.upload import mark_run_failed, resolve_upload_config
+    from olmo_eval.upload import mark_run_failed, mark_run_interrupted, resolve_upload_config
     from olmo_eval.upload.config import upload_param_hint
 
     if resume and fresh:
@@ -249,7 +249,16 @@ def run(
         except (KeyboardInterrupt, Terminated) as e:
             reason = "terminated (SIGTERM)" if isinstance(e, Terminated) else "interrupted"
             console.print(f"\n[bold red]Evaluation {reason}[/bold red]")
-            mark_run_failed(runner.output_dir, upload_config, error=f"Run {reason}", since=started)
+            if resume and isinstance(e, Terminated):
+                # Usually preemption: Beaker requeues the job, which resumes this run under
+                # the same run ID, so it is not reported as failed.
+                mark_run_interrupted(
+                    runner.output_dir, upload_config, reason=f"Run {reason}", since=started
+                )
+            else:
+                mark_run_failed(
+                    runner.output_dir, upload_config, error=f"Run {reason}", since=started
+                )
             raise SystemExit(143 if isinstance(e, Terminated) else 130) from None
         except Exception as e:
             console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")

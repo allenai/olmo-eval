@@ -2,7 +2,8 @@
 
 metrics.json alone cannot rebuild a run: it lacks the original task specs, suite
 definitions, per-task errors, metric directions and provenance. The runner writes
-this manifest next to it (once at start with status "running", again at the end),
+this manifest next to it (once at start with status "running", again at the end,
+or with status "interrupted" when a resumable run is stopped),
 and the uploader reads only files on disk, so ``olmo-eval results upload`` and the
 in-run upload share one code path.
 """
@@ -38,6 +39,9 @@ METRICS_NAME = "metrics.json"
 RUN_SECRET_NAME = ".upload-secret"
 MANIFEST_VERSION = 1
 RUN_ID_RE = re.compile(r"^[a-z0-9]{6,32}$")
+# Statuses of a run that --resume continues under the same run ID. "interrupted" is a
+# resumable run that was stopped (SIGTERM); "failed" covers runs recorded before it existed.
+RESUMABLE_STATUSES = ("running", "interrupted", "failed")
 
 
 class ManifestError(Exception):

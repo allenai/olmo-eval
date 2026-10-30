@@ -134,7 +134,16 @@ function ActiveGroups() {
 
 function activityText(item: ActivityItem) {
   const models = Array.from(new Set(item.runs.map((r) => r.model.series_label)));
-  const verb = item.status === "failed" ? "run failed" : item.status === "running" ? "is running" : item.status === "partial" ? "finished with failures" : "launched";
+  const verb =
+    item.status === "failed"
+      ? "run failed"
+      : item.status === "running"
+        ? "is running"
+        : item.status === "interrupted"
+          ? "was interrupted"
+          : item.status === "partial"
+            ? "finished with failures"
+            : "launched";
   return { models, verb };
 }
 

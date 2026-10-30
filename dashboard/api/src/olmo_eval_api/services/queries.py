@@ -21,8 +21,11 @@ STALE_AFTER = timedelta(hours=24)
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
 
+# Runs that have not finished. Their upload is not complete, but they are shown; an
+# interrupted run waits for a resumed job to continue it under the same run ID.
+UNFINISHED = "r.status IN ('running', 'interrupted')"
 # Runs that list and aggregate endpoints show (spec 4.1).
-VISIBLE = "(r.upload_state = 'complete' OR r.status = 'running')"
+VISIBLE = f"(r.upload_state = 'complete' OR {UNFINISHED})"
 
 # Whether a task result (alias tr) ran with an instance limit, such as a smoke run.
 LIMITED = (
