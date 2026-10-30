@@ -24,7 +24,12 @@ def _compute_batch_hash(items: list[QueueItem]) -> str:
 
 
 class BatchedStrategy(BatchingStrategy):
-    """Process items in chunks with continuous dispatch within each chunk."""
+    """Process items in chunks with continuous dispatch within each chunk.
+
+    With ``per_request``, a chunk's requests go to the provider as separate calls and
+    each result is queued when its request finishes, so a chunk with one long
+    generation does not hold back the others' results until it ends.
+    """
 
     async def run(
         self,
@@ -74,6 +79,7 @@ class BatchedStrategy(BatchingStrategy):
                     max_concurrency,
                     worker_logger,
                     clock=self.clock,
+                    per_request=self.per_request,
                 )
 
                 elapsed = time.perf_counter() - start_time

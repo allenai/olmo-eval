@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import multiprocessing as mp
 import time
@@ -401,6 +402,44 @@ async def process_batch(
             result_queue.put(result)
 
 
+async def process_batch_per_request(
+    items: list[QueueItem],
+    harness: Harness,
+    result_queue: mp.Queue,
+    max_concurrency: int | None = None,
+    worker_logger: logging.Logger | None = None,
+    clock: ShareClock | None = None,
+) -> None:
+    """Process a batch as single-request provider calls, queueing each result when it ends.
+
+    For providers that dispatch a batch's requests one at a time anyway (``vllm_server``,
+    ``litellm``), so each request reaches the server exactly as in one batched call, and
+    the batch's requests run at once up to the same limit the provider would apply,
+    its ``max_concurrency``. A result is queued as soon as its request finishes, so a
+    batch with one slow request no longer holds back the results of the others. Each
+    request is a unit on the worker's clock, as in the streaming strategy.
+    """
+    if not items:
+        return
+    if clock is None:
+        clock = ShareClock()
+    limit = getattr(harness.provider, "max_concurrency", None) or max_concurrency or len(items)
+    semaphore = asyncio.Semaphore(limit)
+
+    async def one(item: QueueItem) -> None:
+        async with semaphore:
+            await process_batch([item], harness, result_queue, worker_logger, clock)
+
+    tasks = [asyncio.create_task(one(item)) for item in items]
+    try:
+        # The first error (a terminal provider error) propagates as itself.
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def process_items(
     items: list[QueueItem],
     harness: Harness,
@@ -409,6 +448,7 @@ async def process_items(
     worker_logger: logging.Logger | None = None,
     show_progress: bool = True,
     clock: ShareClock | None = None,
+    per_request: bool = False,
 ) -> None:
     """Process queue items, batching where possible.
 
@@ -426,6 +466,9 @@ async def process_items(
         clock: The worker's clock, shared by every batch and rollout the worker
             runs so overlapping work splits worker time. Defaults to a clock for
             these items alone.
+        per_request: Send each request of a batch to the provider on its own and
+            queue its result as soon as it finishes, instead of when the whole batch
+            has. See :func:`process_batch_per_request`.
     """
     from olmo_eval.common.types import RequestType, SamplingParams
 
@@ -453,7 +496,12 @@ async def process_items(
             batches[key].append(item)
 
         for batch in batches.values():
-            await process_batch(batch, harness, result_queue, log, clock)
+            if per_request:
+                await process_batch_per_request(
+                    batch, harness, result_queue, max_concurrency, log, clock
+                )
+            else:
+                await process_batch(batch, harness, result_queue, log, clock)
 
     if chat_items:
         from olmo_eval.inference.dispatch import dispatch_concurrent
@@ -494,5 +542,6 @@ __all__ = [
     "attribute_batch_seconds",
     "process_chat_request",
     "process_batch",
+    "process_batch_per_request",
     "process_items",
 ]

@@ -54,6 +54,7 @@ from olmo_eval.runners.asynq.progress import (
 from olmo_eval.runners.asynq.results import process_results
 from olmo_eval.runners.asynq.runner import AsyncEvalRunner
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem, TaskTracker
+from olmo_eval.runners.asynq.workers import inference_worker as real_inference_worker
 from olmo_eval.upload.manifest import RUN_SECRET_NAME, read_manifest, run_secret
 
 LAYOUTS = ["segments", "append"]
@@ -1408,3 +1409,212 @@ def test_the_resume_flags_reach_the_runner(tmp_path) -> None:
         )
         runner = RunnerFactory(config.build(), UploadConfig(enabled=False)).create()
         assert isinstance(runner, AsyncEvalRunner) and getattr(runner, flag)
+
+
+# --- Results return per request while progress is recorded ---
+
+
+class _SlowProvider:
+    """Answers each request with its prompt; the request "slow" waits to be released."""
+
+    max_concurrency = 8
+
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+        self.calls: list[list[str]] = []
+
+    def describe_request(self, request: LMRequest, params: Any) -> None:
+        return None
+
+    async def agenerate(self, requests: list[LMRequest], params: Any) -> list[list[LMOutput]]:
+        from olmo_eval.inference.errors import TerminalProviderError
+
+        self.calls.append([str(request.prompt) for request in requests])
+
+        async def one(request: LMRequest) -> list[LMOutput]:
+            if request.prompt == "slow":
+                await self.release.wait()
+            if request.prompt == "dead":
+                raise TerminalProviderError("engine died")
+            return [LMOutput(text=str(request.prompt))]
+
+        return list(await asyncio.gather(*(one(request) for request in requests)))
+
+
+class _FakeHarness:
+    def __init__(self, provider: _SlowProvider) -> None:
+        self.provider = provider
+        self.config = HarnessConfig(name="default", provider=ProviderConfig(kind="mock"))
+
+    def _apply_config(self, request: LMRequest) -> LMRequest:
+        return request
+
+    def flush_metrics(self, batch_hash: str) -> None:
+        return None
+
+
+def _queued(prompts: list[str]) -> queue.Queue[QueueItem | None]:
+    items: queue.Queue[QueueItem | None] = queue.Queue()
+    for idx, prompt in enumerate(prompts):
+        items.put(
+            QueueItem(
+                model_name="mock",
+                task_id="local",
+                instance_idx=idx,
+                instance=Instance(question=prompt),
+                request=LMRequest(request_type=RequestType.COMPLETION, prompt=prompt),
+            )
+        )
+    items.put(None)
+    return items
+
+
+async def _run_batched(
+    prompts: list[str], per_request: bool, wait_for: int
+) -> tuple[list[str], _SlowProvider, list[ResultItem]]:
+    """Run one batch through the batched strategy; return what arrived before "slow" ended."""
+    from olmo_eval.runners.asynq.batching import BatchConfig, get_strategy
+
+    provider = _SlowProvider()
+    results: queue.Queue[ResultItem] = queue.Queue()
+    strategy = get_strategy(
+        BatchConfig(chunk_size=len(prompts), chunk_timeout=0.05), per_request=per_request
+    )
+    run = asyncio.create_task(
+        strategy.run(
+            _queued(prompts),  # type: ignore[arg-type]
+            _FakeHarness(provider),  # type: ignore[arg-type]
+            results,  # type: ignore[arg-type]
+            None,
+            logging.getLogger(__name__),
+            len(prompts),
+        )
+    )
+    deadline = time.monotonic() + 1.0
+    while results.qsize() < wait_for and time.monotonic() < deadline and not run.done():
+        await asyncio.sleep(0.01)
+    early = [str(results.get_nowait().request.prompt) for _ in range(results.qsize())]
+    provider.release.set()
+    try:
+        await run
+    finally:
+        rest = [results.get_nowait() for _ in range(results.qsize())]
+    return early, provider, rest
+
+
+class TestPerRequestResults:
+    def test_a_slow_request_does_not_hold_back_its_batch(self) -> None:
+        early, provider, rest = asyncio.run(_run_batched(["slow", "a", "b", "c"], True, 3))
+
+        # Each finished request reached the result queue while "slow" was still running.
+        assert sorted(early) == ["a", "b", "c"]
+        assert [result.request.prompt for result in rest] == ["slow"]
+        assert sorted(provider.calls) == [["a"], ["b"], ["c"], ["slow"]]
+        assert all(result.error is None for result in rest)
+
+    def test_without_progress_a_batch_returns_whole(self) -> None:
+        early, provider, rest = asyncio.run(_run_batched(["slow", "a", "b", "c"], False, 3))
+
+        assert early == []
+        assert provider.calls == [["slow", "a", "b", "c"]]
+        assert sorted(str(result.request.prompt) for result in rest) == ["a", "b", "c", "slow"]
+
+    def test_a_terminal_error_still_stops_the_worker(self) -> None:
+        from olmo_eval.inference.errors import TerminalProviderError
+
+        with pytest.raises(TerminalProviderError, match="engine died"):
+            asyncio.run(_run_batched(["slow", "dead", "a"], True, 3))
+
+    def test_only_providers_that_dispatch_one_by_one_split_batches(self) -> None:
+        from olmo_eval.runners.asynq.batching import BatchConfig
+
+        split = {kind for kind in ("vllm_server", "litellm", "mock")}
+        engines = {"vllm", "sglang", "hf", "olmo_core", "olmo_core_vlm"}
+        assert all(BatchConfig.dispatches_per_request(kind) for kind in split)
+        assert not any(BatchConfig.dispatches_per_request(kind) for kind in engines)
+
+    @pytest.mark.parametrize("record_progress", [True, False])
+    def test_the_worker_asks_for_per_request_results_only_with_progress(
+        self, monkeypatch, record_progress
+    ) -> None:
+        from olmo_eval.runners.asynq import batching
+
+        chosen: list[bool] = []
+        real = batching.get_strategy
+
+        def spy(*args: Any, **kwargs: Any) -> Any:
+            chosen.append(kwargs["per_request"])
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(batching, "get_strategy", spy)
+        items: queue.Queue[QueueItem | None] = queue.Queue()
+        items.put(None)
+        # The real worker, in this process; the module fixture replaced the spawned one.
+        real_inference_worker(
+            "worker-0",
+            [],
+            items,  # type: ignore[arg-type]
+            queue.Queue(),  # type: ignore[arg-type]
+            _harness().to_dict(),
+            0,
+            record_progress=record_progress,
+        )
+
+        assert chosen == [record_progress]
+
+    @pytest.mark.parametrize("resume", [True, False])
+    def test_the_runner_tells_workers_whether_it_records_progress(
+        self, tmp_path, monkeypatch, resume
+    ) -> None:
+        from olmo_eval.inference.provider_manager import ProviderManager
+
+        sent: list[Any] = []
+
+        class Context:
+            def Process(self, target: Any, args: tuple[Any, ...]) -> Any:
+                from inspect import signature
+
+                parameters = signature(real_inference_worker).parameters
+                sent.append(dict(zip(parameters, args, strict=False)))
+                raise RuntimeError("stop before starting workers")
+
+        manager = ProviderManager(
+            harness_config=_harness(),
+            num_inference_workers=1,
+            gpu_ids=[],
+            item_queue=queue.Queue(),  # type: ignore[arg-type]
+            result_queue=queue.Queue(),  # type: ignore[arg-type]
+            record_progress=resume,
+        )
+        with pytest.raises(RuntimeError, match="stop before"):
+            manager.start(Context(), 0, queue.Queue())  # type: ignore[arg-type]
+        assert sent[0]["record_progress"] is resume
+
+        made: list[bool] = []
+        real_init = ProviderManager.__init__
+
+        def init(self: Any, *args: Any, **kwargs: Any) -> None:
+            made.append(kwargs.get("record_progress", False))
+            real_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(ProviderManager, "__init__", init)
+        run_eval(tmp_path, "segments", {"gsm8k": 2}, resume=resume)
+        assert made == [resume]
+
+    def test_the_batching_strategy_is_not_part_of_what_must_match(self, tmp_path) -> None:
+        from olmo_eval.runners.asynq.batching import BatchConfig
+
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        restored = progress.restore(trackers, items, _harness())
+        _process(trackers, restored.remaining, progress, restored.responses)
+        progress.close()
+        _drop_final(tmp_path)
+
+        streaming = replace(_harness(), batching=BatchConfig.streaming())
+        trackers, items = _local_setup(undecidable=set())
+        progress = open_run_progress(str(tmp_path), "mock", streaming)
+        restored = progress.restore(trackers, items, streaming)
+        progress.close()
+
+        assert sorted(restored.responses["local"]) == [0, 1, 2, 3]

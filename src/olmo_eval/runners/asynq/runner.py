@@ -710,6 +710,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 item_queue=item_queue,
                 result_queue=result_queue,
                 output_dir=self.output_dir,
+                record_progress=progress is not None,
             )
 
             # Add poison pills (one per worker)
