@@ -75,7 +75,7 @@ logger = get_logger(__name__)
 
 PROGRESS_DIR = "progress"
 DEBUG_EXIT_AT_ENV = "OLMO_EVAL_DEBUG_EXIT_AT"
-RECORD_VERSION = 5
+RECORD_VERSION = 6
 FINAL_SUFFIX = ".final.json"
 LOCK_NAME = ".lock"
 
@@ -499,6 +499,10 @@ class ProgressLock:
     - Elsewhere, a lock whose process is gone from this host. A lock from another host
       (or another Beaker job in a shared directory) cannot be checked, so it stops the
       run until its holder is gone and the file is deleted.
+
+    Two runs that judge the same stale lock within milliseconds of each other can both
+    proceed. This is accepted: Beaker runs one job per task and local runs are started by
+    hand.
     """
 
     def __init__(self, model_dir: Path) -> None:
@@ -530,13 +534,22 @@ class ProgressLock:
             return False
         output_dir = self.path.parent.parent.parent
         try:
-            return output_dir.resolve() == Path(BEAKER_RESULT_DIR).resolve()
+            return output_dir.resolve().is_relative_to(Path(BEAKER_RESULT_DIR).resolve())
         except OSError:
             return False
 
     def _stale(self, holder: Mapping[str, Any] | None) -> str | None:
         """Why the holder's lock can be taken over, or None when it may still be running."""
         job_id = os.environ.get("BEAKER_JOB_ID")
+        if holder is not None:
+            pid = holder.get("pid")
+            if (
+                holder.get("host") == socket.gethostname()
+                and isinstance(pid, int)
+                and pid != os.getpid()
+                and _pid_alive(pid)
+            ):
+                return None
         if job_id and holder is not None and holder.get("beaker_job_id") == job_id:
             return f"it was left by an earlier attempt of this Beaker job ({job_id})"
         if self._in_job_results():
@@ -560,9 +573,23 @@ class ProgressLock:
             f"{holder.get('started')}{job}"
         )
 
+    def _create(self) -> int:
+        """Create the lock file exclusively, recreating a model directory removed meanwhile."""
+        # Another run releasing its lock can remove the directory between the mkdir and
+        # the open.
+        for _ in range(5):
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                return os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileNotFoundError:
+                continue
+        raise ProgressLockedError(
+            f"{self.path.parent} kept disappearing while this run was taking the lock; "
+            "another run may be removing it."
+        )
+
     def acquire(self) -> None:
         """Take the lock, or raise :class:`ProgressLockedError` naming who holds it."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         token = uuid.uuid4().hex
         mine = {
             "host": socket.gethostname(),
@@ -573,7 +600,7 @@ class ProgressLock:
         }
         for _ in range(2):
             try:
-                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = self._create()
             except FileExistsError:
                 holder = self._read()
                 reason = self._stale(holder)

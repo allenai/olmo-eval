@@ -339,6 +339,35 @@ def test_uncommitted_diff_hash_covers_a_file_that_is_not_utf8(checkout) -> None:
     assert _diff_hash() not in (None, first)
 
 
+def test_uncommitted_diff_hash_tells_two_binary_edits_apart(checkout) -> None:
+    blob = checkout / "pkg" / "data.bin"
+    blob.write_bytes(b"\x00\x01\x02")
+    _git(checkout, "add", "data.bin" if False else "pkg/data.bin")
+    _git(checkout, "commit", "-q", "-m", "binary")
+    blob.write_bytes(b"\x00\x01\x03")
+    first = _diff_hash()
+    blob.write_bytes(b"\x00\x01\x04")
+
+    assert first is not None
+    assert _diff_hash() not in (None, first)
+
+
+def test_uncommitted_diff_hash_of_a_binary_edit_ignores_the_users_abbrev_setting(
+    checkout,
+) -> None:
+    # Without --binary the diff names a binary file's blobs only by abbreviated hash.
+    blob = checkout / "pkg" / "data.bin"
+    blob.write_bytes(b"\x00\x01\x02")
+    _git(checkout, "add", "pkg/data.bin")
+    _git(checkout, "commit", "-q", "-m", "binary")
+    blob.write_bytes(b"\x00\x01\x03")
+    default = _diff_hash()
+    _git(checkout, "config", "core.abbrev", "4")
+
+    assert default is not None
+    assert _diff_hash() == default
+
+
 def test_uncommitted_diff_hash_ignores_the_users_textconv_and_ext_diff(checkout) -> None:
     (checkout / "pkg" / "notes.txt").write_bytes(b"one\nthree\n")
     (checkout / ".gitattributes").write_text("*.txt diff=shout\n")

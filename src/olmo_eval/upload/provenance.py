@@ -199,7 +199,8 @@ def uncommitted_diff_hash() -> str | None:
     Staged and unstaged edits are both in ``git diff HEAD``. Untracked files are not,
     which matches the dirty flag of :func:`git_info`. The diff is hashed as bytes, so a
     file that is not UTF-8 is covered, and without text conversion or external diff
-    drivers, so the hash does not depend on the user's git configuration. None when git
+    drivers, so the hash does not depend on the user's git configuration. ``--binary``
+    puts a binary file's full content in the diff. None when git
     cannot say, in which case a resume does not detect code changes.
     """
     import hashlib
@@ -209,7 +210,7 @@ def uncommitted_diff_hash() -> str | None:
     cwd = Path(olmo_eval.__file__).resolve().parent
     try:
         result = subprocess.run(
-            ["git", "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color"],
+            ["git", "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color", "--binary"],
             cwd=cwd,
             capture_output=True,
             timeout=30.0,

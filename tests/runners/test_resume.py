@@ -1991,6 +1991,25 @@ class TestCompactRecords:
         ):
             _progress(tmp_path).restore(trackers, items, _harness())
 
+    def test_records_without_task_keyed_runtimes_are_refused(self, tmp_path) -> None:
+        # Version 5 runtime entries carry no task key and would be ignored silently.
+        trackers, items = _local_setup(undecidable=set())
+        progress = _progress(tmp_path)
+        progress.restore(trackers, items, _harness())
+        progress.close()
+        store = _stream(tmp_path)
+        entries = list(store.read())
+        store.reset()
+        for entry in entries:
+            if "header" in entry:
+                entry["header"]["version"] = 5
+            store.append(entry)
+        store.close()
+
+        trackers, items = _local_setup(undecidable=set())
+        with pytest.raises(ProgressMismatchError, match=r"record format 5.*--fresh"):
+            _progress(tmp_path).restore(trackers, items, _harness())
+
 
 # --- Results return per request while progress is recorded ---
 
@@ -2742,6 +2761,46 @@ class TestLockTakeover:
 
         with pytest.raises(ProgressLockedError):
             ProgressLock(stream_dir(tmp_path, "mock").parent).acquire()
+
+    def test_a_job_does_not_take_a_live_lock_of_its_own_job_on_this_host(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Two --resume runs of one model in one Beaker interactive session.
+        self._beaker(monkeypatch, tmp_path / "results", job="job-2")
+        _write_lock(tmp_path, pid=os.getppid(), beaker_job_id="job-2")
+
+        with pytest.raises(ProgressLockedError):
+            ProgressLock(stream_dir(tmp_path, "mock").parent).acquire()
+
+    def test_a_subdirectory_of_the_result_directory_is_not_the_jobs_own(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # -O /results/sub is not copied into a replacement job like /results is.
+        self._beaker(monkeypatch, tmp_path / "results")
+        out = tmp_path / "results" / "sub"
+        _write_lock(out, host="another-node", beaker_job_id="job-1")
+
+        ProgressLock(stream_dir(out, "mock").parent).acquire()
+
+    def test_a_removed_model_directory_is_recreated_during_acquire(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Another run released its lock and removed the directory after our mkdir.
+        real_open = os.open
+        calls: list[int] = []
+
+        def racing_open(path, *args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                Path(path).parent.rmdir()
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(progress_module.os, "open", racing_open)
+        lock = ProgressLock(stream_dir(tmp_path, "mock").parent)
+        lock.acquire()
+
+        assert lock.held and len(calls) == 2
+        lock.release()
 
     def test_a_job_takes_a_dead_processs_lock_in_a_shared_directory(
         self, tmp_path, monkeypatch, caplog
