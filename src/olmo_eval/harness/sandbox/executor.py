@@ -507,7 +507,10 @@ class SandboxExecutor:
                     CloseBashSessionRequest,
                 )
 
-                await self._runtime.close_session(CloseBashSessionRequest(session="default"))
+                await asyncio.wait_for(
+                    self._runtime.close_session(CloseBashSessionRequest(session="default")),
+                    timeout=5.0,
+                )
             except Exception as e:
                 self._log(logging.DEBUG, f"Failed to close session: {e}")
             self._session_created = False
@@ -523,7 +526,19 @@ class SandboxExecutor:
                         await sandbox.terminate.aio()
 
             try:
-                await self._deployment.stop()
+                owned_deployment = False
+                if self.config.mode == SandboxMode.DOCKER:
+                    try:
+                        from .docker_deployment import OwnedDockerDeployment
+                    except ImportError:
+                        pass
+                    else:
+                        owned_deployment = isinstance(self._deployment, OwnedDockerDeployment)
+                if owned_deployment:
+                    # Owned cleanup already bounds its operations and waits through cancellation.
+                    await self._deployment.stop()
+                else:
+                    await asyncio.wait_for(self._deployment.stop(), timeout=10.0)
             except Exception as e:
                 self._log(logging.DEBUG, f"Failed to stop deployment: {e}")
             self._deployment = None
@@ -1303,14 +1318,13 @@ class SandboxExecutor:
         if self._runtime is None:
             raise RuntimeError("Sandbox not started.")
 
-        await self._ensure_session()
-
         from swerex.runtime.abstract import BashAction
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
         prefix = log_prefix or self.name or "sandbox"
 
         try:
+            await self._ensure_session()
             observation = await self._runtime.run_in_session(
                 BashAction(
                     command=command,
@@ -1320,6 +1334,9 @@ class SandboxExecutor:
                 )
             )
         except Exception as e:
+            if self._is_transport_error(e) and "CommandTimeoutError" not in type(e).__name__:
+                await self._quarantine_if_unresponsive(e)
+                raise SandboxTransportError(f"Session transport failed: {e}") from e
             if _is_bash_syntax_error(e):
                 # swe-rex checks a command's syntax before running it. A model
                 # that writes a malformed command should read bash's complaint,
