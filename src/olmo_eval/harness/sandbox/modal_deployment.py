@@ -25,6 +25,11 @@ async def stop_modal_app(app_name: str) -> None:
 class ManagedModalDeployment(ModalDeployment):
     """SWE-ReX Modal deployment with managed lifecycle and encrypted transport."""
 
+    def _start_swerex_cmd(self, token: str) -> str:
+        from .server_command import server_command
+
+        return server_command("swerex-remote", token, self._port)
+
     async def start(self) -> None:
         if self._runtime is not None and self._sandbox is not None:
             self.logger.warning("Deployment is already started. Ignoring duplicate start() call.")
