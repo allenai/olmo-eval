@@ -757,38 +757,27 @@ def _get_task_configs(
     Returns:
         Dict mapping task_spec -> TaskConfig (with overrides applied).
     """
-    from copy import deepcopy
+    from dataclasses import fields
 
     from olmo_eval.cli.run.config import _apply_dotlist_overrides
-    from olmo_eval.evals.tasks.common import get_task as get_task_instance
-    from olmo_eval.evals.tasks.common import parse_task_spec
+    from olmo_eval.common.types import SamplingParams
+    from olmo_eval.evals.tasks.common import TaskConfig
+    from olmo_eval.runners.asynq.preparation import configure_task
 
     task_overrides = task_overrides or {}
     task_configs = {}
+    task_fields = {f.name for f in fields(TaskConfig)}
+    sampling_fields = {f.name for f in fields(SamplingParams)}
 
     for task_spec in valid_tasks:
-        task_name, variants, _overrides = parse_task_spec(task_spec)
+        parsed = _apply_dotlist_overrides({}, task_overrides.get(task_spec, []))
+        overrides = {key: value for key, value in parsed.items() if key in task_fields}
+        sampling = {key: value for key, value in parsed.items() if key in sampling_fields}
         try:
-            task_instance = get_task_instance(task_spec)
+            task_configs[task_spec] = configure_task(task_spec, overrides, sampling).config
         except ValueError as e:
             console.print(f"[red]Error loading task '{task_spec}':[/red] {e}")
             raise SystemExit(1) from None
-
-        # Deep copy the config so we can apply overrides directly
-        task_cfg = deepcopy(task_instance.config)
-
-        # Apply CLI overrides using dotlist format (supports nested keys and JSON)
-        cli_overrides = task_overrides.get(task_spec, [])
-        if cli_overrides:
-            # Convert config to dict, apply overrides, convert back
-            task_dict = task_cfg.to_dict() if hasattr(task_cfg, "to_dict") else vars(task_cfg)
-            task_dict = _apply_dotlist_overrides(task_dict, cli_overrides)
-            # Update config attributes from dict
-            for key, value in task_dict.items():
-                if hasattr(task_cfg, key):
-                    setattr(task_cfg, key, value)
-
-        task_configs[task_spec] = task_cfg
 
     return task_configs
 
