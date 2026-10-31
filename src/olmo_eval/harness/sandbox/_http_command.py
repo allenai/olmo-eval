@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fcntl
 import os
 import signal
 import tempfile
@@ -18,6 +19,11 @@ from swerex.runtime.local import LocalRuntime
 async def execute(self: LocalRuntime, command: Command) -> CommandResponse:
     """Execute independent commands without occupying the HTTP server loop."""
     with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        # The child shares these offsets; append prevents background writes from
+        # overwriting captured output when the reader seeks back to the start.
+        for output in (stdout_file, stderr_file):
+            flags = fcntl.fcntl(output, fcntl.F_GETFL)
+            fcntl.fcntl(output, fcntl.F_SETFL, flags | os.O_APPEND)
         kwargs: dict[str, Any] = {
             "env": command.env,
             "cwd": command.cwd,
@@ -28,15 +34,35 @@ async def execute(self: LocalRuntime, command: Command) -> CommandResponse:
         args = [command.command] if isinstance(command.command, str) else command.command
         if command.shell:
             # Match subprocess.run's sequence handling with shell=True.
-            process = await asyncio.create_subprocess_exec("/bin/sh", "-c", *args, **kwargs)
-        else:
-            process = await asyncio.create_subprocess_exec(*args, **kwargs)
+            args = ["/bin/sh", "-c", *args]
+        spawning = asyncio.create_task(asyncio.create_subprocess_exec(*args, **kwargs))
+        cancelled: asyncio.CancelledError | None = None
+        while True:
+            try:
+                process = await asyncio.shield(spawning)
+                break
+            except asyncio.CancelledError as exc:
+                if spawning.cancelled():
+                    raise
+                cancelled = exc
         try:
+            if cancelled is not None:
+                raise cancelled
             await asyncio.wait_for(process.wait(), command.timeout)
-        except (TimeoutError, asyncio.CancelledError) as exc:
+        # SWE-ReX can run on Python 3.10, where this is not built-in TimeoutError.
+        except (asyncio.TimeoutError, asyncio.CancelledError) as exc:  # noqa: UP041
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            await asyncio.wait_for(process.wait(), 2.0)
+            cleanup = asyncio.create_task(asyncio.wait_for(process.wait(), 2.0))
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    pass
+                except asyncio.TimeoutError:  # noqa: UP041
+                    break
+            with contextlib.suppress(asyncio.TimeoutError):  # noqa: UP041
+                cleanup.result()
             if isinstance(exc, asyncio.CancelledError):
                 raise
             raise CommandTimeoutError(
@@ -44,11 +70,9 @@ async def execute(self: LocalRuntime, command: Command) -> CommandResponse:
             ) from exc
 
         def read_output() -> tuple[bytes, bytes]:
-            stdout_file.seek(0)
-            stderr_file.seek(0)
             return (
-                stdout_file.read(os.fstat(stdout_file.fileno()).st_size),
-                stderr_file.read(os.fstat(stderr_file.fileno()).st_size),
+                os.pread(stdout_file.fileno(), os.fstat(stdout_file.fileno()).st_size, 0),
+                os.pread(stderr_file.fileno(), os.fstat(stderr_file.fileno()).st_size, 0),
             )
 
         # Regular files keep a detached child from holding communicate() open.
@@ -59,6 +83,8 @@ async def execute(self: LocalRuntime, command: Command) -> CommandResponse:
                 stdout, stderr = await asyncio.shield(reader)
                 break
             except asyncio.CancelledError as exc:
+                if reader.cancelled():
+                    raise
                 cancelled = exc
         if cancelled is not None:
             raise cancelled

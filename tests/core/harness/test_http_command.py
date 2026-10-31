@@ -2,9 +2,11 @@
 
 import asyncio
 import os
+import signal
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 import httpx
 import pytest
@@ -84,24 +86,24 @@ async def test_command_preserves_environment_cwd_streams_and_status(tmp_path, sh
 async def test_deadline_and_cancellation_kill_descendants_holding_output(tmp_path, cancel):
     marker = tmp_path / "orphan"
     started = tmp_path / "started"
-    script = f"(sleep 0.7; touch {marker}) & touch {started}; sleep 30"
+    script = f"(sleep 2; touch {marker}) & touch {started}; sleep 30"
     task = asyncio.create_task(
         execute(
             LocalRuntime(),
             Command(
                 command=["/bin/sh", "-c", script],
-                timeout=None if cancel else 0.1,
+                timeout=None if cancel else 1.0,
             ),
         )
     )
+    async with asyncio.timeout(3):
+        while not started.exists():
+            await asyncio.sleep(0.01)
     if cancel:
-        async with asyncio.timeout(3):
-            while not started.exists():
-                await asyncio.sleep(0.01)
         task.cancel()
     with pytest.raises(asyncio.CancelledError if cancel else CommandTimeoutError):
         await asyncio.wait_for(task, 3)
-    await asyncio.sleep(0.8)
+    await asyncio.sleep(2.1)
     assert not marker.exists()
     response = await execute(LocalRuntime(), Command(command=["/bin/echo", "recovered"]))
     assert response.stdout == "recovered\n"
@@ -113,8 +115,9 @@ def test_bootstrap_uses_installed_shebang_and_preserves_shell_environment(tmp_pa
     entrypoint.write_text(
         f"#!{sys.executable}\n"
         "import os, sys\n"
-        "from swerex.runtime.local import LocalRuntime\n"
-        "print(LocalRuntime.execute.__module__, os.environ['BOOT_ENV'], sys.argv[1:])\n"
+        "from swerex.server import runtime\n"
+        "print(any(c.__name__ == 'ResponsiveLocalRuntime' for c in type(runtime).__mro__), "
+        "os.environ['BOOT_ENV'], sys.argv[1:])\n"
     )
     entrypoint.chmod(0o700)
     executable = "swerex-remote" if use_path else str(entrypoint)
@@ -126,7 +129,7 @@ def test_bootstrap_uses_installed_shebang_and_preserves_shell_environment(tmp_pa
         timeout=5,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.startswith("__main__ preserved")
+    assert result.stdout.startswith("True preserved")
     assert "token with" in result.stdout
     assert "--port', '8123'" in result.stdout
     assert entrypoint.read_text().startswith(f"#!{sys.executable}\nimport os")
@@ -226,3 +229,118 @@ async def test_cancellation_waits_for_output_reader_before_closing_files(monkeyp
     with pytest.raises(asyncio.CancelledError):
         await task
     assert all(file.closed for file in files)
+
+
+@pytest.mark.anyio
+async def test_cancel_during_spawn_settles_and_kills_created_process(monkeypatch):
+    import olmo_eval.harness.sandbox._http_command as adapter
+
+    created = asyncio.Event()
+    release = asyncio.Event()
+    original_spawn = asyncio.create_subprocess_exec
+    processes = []
+
+    async def spawn(*args, **kwargs):
+        process = await original_spawn(*args, **kwargs)
+        processes.append(process)
+        created.set()
+        await release.wait()
+        return process
+
+    monkeypatch.setattr(adapter.asyncio, "create_subprocess_exec", spawn)
+    task = asyncio.create_task(execute(LocalRuntime(), Command(command=["/bin/sleep", "30"])))
+    try:
+        await asyncio.wait_for(created.wait(), 3)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert processes[0].returncode is not None
+    finally:
+        release.set()
+        for process in processes:
+            if process.returncode is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                await process.wait()
+
+
+@pytest.mark.anyio
+async def test_embedded_source_handles_legacy_asyncio_timeout(monkeypatch):
+    import olmo_eval.harness.sandbox._http_command as adapter
+
+    class LegacyTimeoutError(Exception):
+        pass
+
+    original_wait = asyncio.wait_for
+
+    async def wait_for(awaitable, timeout):
+        if timeout == 0.01:
+            awaitable.close()
+            raise LegacyTimeoutError
+        return await original_wait(awaitable, timeout)
+
+    namespace = {"__name__": "embedded_adapter"}
+    exec(compile(Path(adapter.__file__).read_text(), "embedded_adapter", "exec"), namespace)
+    monkeypatch.setattr(adapter.asyncio, "TimeoutError", LegacyTimeoutError)
+    monkeypatch.setattr(adapter.asyncio, "wait_for", wait_for)
+    with pytest.raises(CommandTimeoutError):
+        await namespace["execute"](
+            LocalRuntime(), Command(command=["/bin/sleep", "30"], timeout=0.01)
+        )
+
+
+def test_bootstrap_rejects_shell_entrypoint_with_clear_error(tmp_path):
+    entrypoint = tmp_path / "swerex-remote"
+    entrypoint.write_text("#!/bin/sh\necho should-not-run\n")
+    entrypoint.chmod(0o700)
+    result = subprocess.run(
+        ["/bin/sh", "-c", server_command(str(entrypoint), "token", 8123)],
+        text=True,
+        capture_output=True,
+        timeout=3,
+    )
+    assert result.returncode == 1
+    assert "requires a Python-shebang entrypoint" in result.stderr
+    assert not result.stdout
+
+
+@pytest.mark.anyio
+async def test_background_writes_do_not_move_the_readers_position(monkeypatch, tmp_path):
+    import olmo_eval.harness.sandbox._http_command as adapter
+
+    release = tmp_path / "release"
+    done = tmp_path / "done"
+    original_pread = adapter.os.pread
+
+    def pread(descriptor, size, offset):
+        if size:
+            release.touch()
+            # The real child appends between the reader's size snapshot and read.
+            import time
+
+            until = time.monotonic() + 3
+            while not done.exists():
+                assert time.monotonic() < until
+                time.sleep(0.01)
+        return original_pread(descriptor, size, offset)
+
+    monkeypatch.setattr(adapter.os, "pread", pread)
+    try:
+        response = await execute(
+            LocalRuntime(),
+            Command(
+                command=[
+                    "/bin/sh",
+                    "-c",
+                    "printf foreground; "
+                    f"(while [ ! -f {release} ]; do sleep 0.01; done; "
+                    f"printf background; touch {done}) &",
+                ]
+            ),
+        )
+        assert done.exists()
+        assert response.stdout == "foreground"
+    finally:
+        release.touch()
