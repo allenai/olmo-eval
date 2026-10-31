@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -172,6 +173,8 @@ async def retry_with_backoff[T](
     *,
     max_retries: int = 3,
     retry_delay: float = 1.0,
+    max_delay: float | None = None,
+    jitter: bool = False,
     context: str = "",
     sdk_module: Any | None = None,
 ) -> T:
@@ -181,6 +184,10 @@ async def retry_with_backoff[T](
         func: Async callable to execute.
         max_retries: Maximum number of retries (default 3).
         retry_delay: Base delay in seconds between retries (exponential backoff).
+        max_delay: Longest wait between retries, in seconds; None leaves the doubling
+                   uncapped.
+        jitter: Scale each wait by a random factor in [0.5, 1.5), so many calls that
+                fail together (a rate limit) do not all retry at the same moment.
         context: Optional human-readable label (e.g., "generate model=llama3")
                  included in log messages.
         sdk_module: Optional SDK module for exception type checking.
@@ -230,6 +237,10 @@ async def retry_with_backoff[T](
                 raise
 
             delay = retry_delay * (2**attempt)
+            if max_delay is not None:
+                delay = min(delay, max_delay)
+            if jitter:
+                delay *= 0.5 + random.random()
             logger.warning(
                 f"Retryable error{ctx} "
                 f"(attempt {attempt + 1}/{max_retries + 1}):\n{detail}\n"

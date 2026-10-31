@@ -36,6 +36,16 @@ JudgeFn = Callable[..., Coroutine[Any, Any, str]]
 JudgeContent = str | list[dict[str, Any]]
 
 
+#: Retries of a judge call that fails transiently (a timeout, rate limit or server
+#: error). The waits double from ``JUDGE_RETRY_DELAY`` seconds up to
+#: ``JUDGE_MAX_RETRY_DELAY``, randomized by half either way, so a stretch of rate
+#: limiting or a slow API, which hits many concurrent calls at once, is waited out
+#: (about 4.5 minutes of waiting in all) rather than leaving outputs unscored.
+JUDGE_RETRIES = 6
+JUDGE_RETRY_DELAY = 5.0
+JUDGE_MAX_RETRY_DELAY = 120.0
+
+
 async def call_judge(
     judge_fn: JudgeFn,
     prompt: JudgeContent,
@@ -43,8 +53,9 @@ async def call_judge(
     label: str,
     limiter: asyncio.Semaphore | None = None,
     system_prompt: str | None = None,
-    max_retries: int = 3,
-    retry_delay: float = 1.0,
+    max_retries: int = JUDGE_RETRIES,
+    retry_delay: float = JUDGE_RETRY_DELAY,
+    max_retry_delay: float = JUDGE_MAX_RETRY_DELAY,
 ) -> str:
     """Call a judge once, retrying transient API failures with backoff.
 
@@ -61,6 +72,7 @@ async def call_judge(
         system_prompt: The judge's system message, if any.
         max_retries: Retries of a call that fails, as ``retry_with_backoff`` makes them.
         retry_delay: Base wait in seconds between those retries.
+        max_retry_delay: Longest wait between those retries, in seconds.
     """
     kwargs = {} if system_prompt is None else {"system_prompt": system_prompt}
 
@@ -72,7 +84,12 @@ async def call_judge(
 
     try:
         return await retry_with_backoff(
-            attempt, max_retries=max_retries, retry_delay=retry_delay, context=label
+            attempt,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            max_delay=max_retry_delay,
+            jitter=True,
+            context=label,
         )
     except Exception as exc:
         raise ScoringIncompleteError(f"{label} call failed: {type(exc).__name__}: {exc}") from exc
@@ -379,8 +396,9 @@ class Judge:
     call: JudgeFn
     label: str = "judge"
     attempts: int = JUDGE_ATTEMPTS
-    max_retries: int = 3
-    retry_delay: float = 1.0
+    max_retries: int = JUDGE_RETRIES
+    retry_delay: float = JUDGE_RETRY_DELAY
+    max_retry_delay: float = JUDGE_MAX_RETRY_DELAY
     #: Limiter :meth:`ask` holds when the caller passes none.
     limiter: asyncio.Semaphore | None = None
 
@@ -424,6 +442,7 @@ class Judge:
                 system_prompt=system_prompt,
                 max_retries=self.max_retries,
                 retry_delay=self.retry_delay,
+                max_retry_delay=self.max_retry_delay,
             )
             verdict = parse(raw)
             if verdict is not None:
