@@ -273,14 +273,17 @@ class HelmetTask(RulerTask):
         span = (instance.metadata or {}).get("context_span")
         if not span:
             return request
-        # Upstream's budget: the tier is the whole sequence, generation included.
+        # Upstream's tier budget is the whole sequence, generation included; with
+        # CONTEXT_CUT "model_window" the provider cuts only to fit the model's window.
         max_tokens = self.config.sampling_params.max_tokens or 0
         start, end = span
         return replace(
             request,
             context_fit=ContextFit(
                 text=instance.question[start:end],
-                max_prompt_tokens=self.context_size - max_tokens,
+                max_prompt_tokens=(
+                    self.context_size - max_tokens if CONTEXT_CUT == "tier" else None
+                ),
             ),
         )
 
@@ -782,6 +785,15 @@ MEASURED_KEYS = (
 #: The reference implementation these tasks port.
 HELMET_UPSTREAM = "princeton-nlp/HELMET@aeadacc6"
 
+#: How far a provider cuts a prompt's context. HELMET sizes each tier's text in
+#: Llama-2 tokens. Upstream then cuts it to the tier again in the evaluated model's
+#: own tokens ("tier"), which drops the end of the text, a needle or gold passage
+#: included, for any tokenizer that splits it into more tokens than Llama-2's, even
+#: when the model has room for it. "model_window" cuts only as far as the model's
+#: context window requires, so every model with room reads the same text. Part of
+#: the task hash.
+CONTEXT_CUT = "model_window"
+
 
 def _canonical(value: Any) -> str:
     """A comparable form of task settings, which may have come through JSON."""
@@ -823,6 +835,7 @@ def _task_settings(task_cfg: dict) -> dict[str, Any]:
 
     return {
         "upstream": HELMET_UPSTREAM,
+        "context_cut": CONTEXT_CUT,
         "helmet": {key: task_cfg[key] for key in MEASURED_KEYS if key in task_cfg},
         "sources": sources,
         "constants": constants,

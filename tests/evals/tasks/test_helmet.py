@@ -1009,8 +1009,8 @@ def test_base_variant_strips_thinking_before_prefixing():
     ["helmet_kilt_nq__8192", "helmet_infbench_qa_eng__8192", "helmet_infbench_qa_eng__8192:base"],
 )
 def test_requests_name_their_context_for_the_model_side_cut(task_name):
-    """Upstream cuts the end of the context, with the evaluated model's tokenizer,
-    until the prompt fits the tier less the generation budget."""
+    """The provider cuts the end of the context, with the evaluated model's tokenizer,
+    only as far as the model's window requires: no tier budget."""
     from olmo_eval.evals.tasks.common.registry import get_task
 
     task = get_task(task_name)
@@ -1020,8 +1020,7 @@ def test_requests_name_their_context_for_the_model_side_cut(task_name):
 
     assert request.context_fit is not None
     assert request.context_fit.text == "THE DOCUMENT"
-    max_tokens = task.config.sampling_params.max_tokens
-    assert request.context_fit.max_prompt_tokens == 8192 - max_tokens
+    assert request.context_fit.max_prompt_tokens is None
 
 
 def test_context_truncation_rate_counts_cut_instances():
