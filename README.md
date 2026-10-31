@@ -1443,6 +1443,9 @@ await manager.stop()
 
 ## Launching on Beaker
 
+For BF16 Olmo MoE failures during B300 profiling, see the
+[B300 vLLM compatibility checks](docs/b300-vllm.md).
+
 olmo-eval includes built-in support for launching evaluation jobs on [Beaker](https://beaker.org).
 
 ### Installation
