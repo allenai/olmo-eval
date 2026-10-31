@@ -172,7 +172,8 @@ async def test_background_child_does_not_hold_command_output_open(tmp_path):
                 command=[
                     "/bin/sh",
                     "-c",
-                    f"(while [ ! -f {release} ]; do sleep 0.05; done; touch {child}) & printf foreground",
+                    f"(while [ ! -f {release} ]; do sleep 0.05; done; "
+                    f"touch {child}) & printf foreground",
                 ]
             ),
         ),
