@@ -1433,6 +1433,14 @@ result = await manager.execute_code("print('hello')", capabilities=Capability.PY
 await manager.stop()
 ```
 
+Independent `execute_command` and `execute_code` calls preserve the sandbox server's
+initialized environment. Docker/Podman uses container execution when process
+supervision is available; other container and Modal paths use asynchronous HTTP
+commands so a long command does not block health checks or file requests.
+Command deadlines terminate the command process group. Commands that finish
+normally can leave background processes running. Persistent bash sessions retain
+shell state between calls and currently use SWE-ReX's session execution path.
+
 ### Sandbox Modes
 
 | Mode | Description |
