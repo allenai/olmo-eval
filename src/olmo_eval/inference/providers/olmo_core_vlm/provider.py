@@ -214,6 +214,8 @@ class OlmoCoreVLMProvider(InferenceProvider):
             preprocessing.VLMTokenizerProtocol,
             AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs),
         )
+        if preprocessing.dataset_tokenizer_json_split(self.checkpoint_info):
+            self._use_tokenizer_json_split(tokenizer_path, revision)
         self._add_missing_image_tokens()
         self._resolve_special_token_ids(tokenizer_path)
 
@@ -271,6 +273,23 @@ class OlmoCoreVLMProvider(InferenceProvider):
         # KV-cached decoding mutates per-block cache state on the shared model,
         # so concurrent agenerate/alogprobs threads must take turns.
         self._model_lock = threading.Lock()
+
+    def _use_tokenizer_json_split(self, tokenizer_path: str, revision: str | None) -> None:
+        """Split text with ``tokenizer.json``'s pre-tokenizer, as the checkpoint was trained."""
+        from tokenizers import Tokenizer
+        from transformers.utils.hub import cached_file
+
+        path = cached_file(tokenizer_path, "tokenizer.json", revision=revision)
+        if path is None:
+            raise ValueError(f"{tokenizer_path} has no tokenizer.json")
+        reference = Tokenizer.from_file(path)
+        self.tokenizer.backend_tokenizer.pre_tokenizer = reference.pre_tokenizer  # type: ignore[attr-defined]
+        probe = "The total was 2024.\n\nNext"
+        if (
+            self.tokenizer.encode(probe, add_special_tokens=False)
+            != reference.encode(probe, add_special_tokens=False).ids
+        ):
+            raise ValueError("Tokenizer still differs from tokenizer.json")
 
     def _add_missing_image_tokens(self) -> None:
         """Append the Molmo2 image tokens to a text tokenizer that lacks them.
