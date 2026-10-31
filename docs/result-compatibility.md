@@ -16,6 +16,16 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-10-31: Empty scoring-text diagnostics
+
+- **Affected**: `expertqa`, `researchqa`, their variants, and `geneturing_*` tasks.
+- **Change**: `generation_counts.empty` uses the text remaining after each task's
+  internal thinking removal. The `scoring_text_empty` flag is saved with predictions.
+  Earlier empty counts may undercount reasoning-only outputs.
+- **Identity**: task hashes and scores do not change; only diagnostics change.
+- **Comparability**: quality scores remain comparable. Historical diagnostic counts
+  are not automatically recomputed.
+
 ## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
 
 - **Affected**:
