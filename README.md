@@ -1439,7 +1439,8 @@ supervision is available; other container and Modal paths use asynchronous HTTP
 commands so a long command does not block health checks or file requests.
 Command deadlines terminate the command process group. Commands that finish
 normally can leave background processes running. Persistent bash sessions retain
-shell state between calls and currently use SWE-ReX's session execution path.
+shell state between calls. Each session serializes shell operations in a worker
+thread, so waiting for its prompt leaves health checks and file requests responsive.
 
 ### Sandbox Modes
 
