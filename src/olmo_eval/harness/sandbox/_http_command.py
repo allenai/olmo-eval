@@ -19,8 +19,7 @@ from swerex.runtime.local import LocalRuntime
 async def execute(self: LocalRuntime, command: Command) -> CommandResponse:
     """Execute independent commands without occupying the HTTP server loop."""
     with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
-        # The child shares these offsets; append prevents background writes from
-        # overwriting captured output when the reader seeks back to the start.
+        # Keep inherited output append-only even if a descriptor's offset changes.
         for output in (stdout_file, stderr_file):
             flags = fcntl.fcntl(output, fcntl.F_GETFL)
             fcntl.fcntl(output, fcntl.F_SETFL, flags | os.O_APPEND)

@@ -210,6 +210,20 @@ class SandboxExecutor:
         self._health_check_lock: asyncio.Lock = asyncio.Lock()
         self._local_command_supported: bool | None = None
 
+    @property
+    def _has_container_cli(self) -> bool:
+        return self.config.mode == SandboxMode.DOCKER and bool(
+            getattr(self._deployment, "container_name", None)
+        )
+
+    @property
+    def _can_supervise_local_commands(self) -> bool:
+        return (
+            self._has_container_cli
+            and not self.config.exec_shell
+            and self._local_command_supported is not False
+        )
+
     def _log(self, level: int, msg: str) -> None:
         """Log a message with optional name prefix."""
         if self.name:
@@ -284,9 +298,7 @@ class SandboxExecutor:
             self._quarantined_reason = None
             if self.config.exec_shell:
                 self._local_command_supported = False
-            elif self.config.mode == SandboxMode.DOCKER and getattr(
-                self._deployment, "container_name", None
-            ):
+            elif self._has_container_cli:
                 probe = await self._execute_stream_control(
                     [
                         "sh",
@@ -607,12 +619,7 @@ class SandboxExecutor:
         if stream:
             return await self._execute_streaming(command, effective_timeout, prefix)
 
-        if (
-            self.config.mode == SandboxMode.DOCKER
-            and getattr(self._deployment, "container_name", None)
-            and not self.config.exec_shell
-            and self._local_command_supported is not False
-        ):
+        if self._can_supervise_local_commands:
             return await self._execute_local_command(command, effective_timeout)
 
         return await self._execute_remote_command(["bash", "-c", command], effective_timeout)
@@ -1032,7 +1039,8 @@ class SandboxExecutor:
         """Run a sandbox command with bounded captured output and a client deadline."""
         argv = ["bash", "-c", command] if isinstance(command, str) else list(command)
         container_name = getattr(self._deployment, "container_name", None)
-        if self.config.mode == SandboxMode.DOCKER and container_name:
+        if self._has_container_cli:
+            assert container_name is not None
             process = await asyncio.create_subprocess_exec(
                 self.config.container_runtime,
                 "exec",
@@ -1259,12 +1267,7 @@ class SandboxExecutor:
         try:
             effective_timeout = timeout if timeout is not None else self.config.command_timeout
             argv = [interpreter, "-c", code]
-            if (
-                self.config.mode == SandboxMode.DOCKER
-                and getattr(self._deployment, "container_name", None)
-                and not self.config.exec_shell
-                and self._local_command_supported is not False
-            ):
+            if self._can_supervise_local_commands:
                 return await self._execute_local_command(argv, effective_timeout)
             return await self._execute_remote_command(argv, effective_timeout)
         except SandboxTransportError:
@@ -1468,9 +1471,7 @@ class SandboxExecutor:
             last_health_error = "health check returned false"
             for attempt in range(1, max_attempts + 1):
                 try:
-                    if self.config.mode == SandboxMode.DOCKER and getattr(
-                        self._deployment, "container_name", None
-                    ):
+                    if self._has_container_cli:
                         probe = await self._execute_stream_control(
                             "true", timeout=_HEALTH_CHECK_TIMEOUT
                         )
