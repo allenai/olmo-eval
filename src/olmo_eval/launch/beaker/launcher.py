@@ -938,6 +938,7 @@ class BeakerLauncher:
         has_vllm = "vllm" in extras
         use_isolated_vllm_venv = vllm_isolated_venv and (has_vllm or bool(provider_packages))
         vllm_venv: str | None = None
+        vllm_constraints: str | None = None
 
         # Build the install steps
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
@@ -1043,6 +1044,17 @@ class BeakerLauncher:
                 )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
+            # Provider packages install into this venv, so they are held to its own
+            # Torch/CUDA set. The vLLM extra above may have replaced the symlinked
+            # Torch with another build of the same version (e.g. torch==2.10.0 for the
+            # image's torch==2.10.0+cu128), which the main venv's constraints would
+            # make unresolvable for any provider package that depends on vLLM.
+            vllm_constraints = "/tmp/vllm-cuda-constraints.txt"
+            steps.append(
+                f"uv pip freeze -q --python {vllm_venv}/bin/python "
+                f"| grep -E '^(torch(==| @ )|nvidia-)' "
+                f"| grep -vE '^nvidia-cutlass-dsl' > {vllm_constraints}"
+            )
 
         # Install main package (without vllm extra only when using isolated venv)
         main_extras = [e for e in extras if e != "vllm"] if use_isolated_vllm_venv else list(extras)
@@ -1068,7 +1080,7 @@ class BeakerLauncher:
                 steps.append(
                     build_install_command(
                         provider_package_spec(pkg),
-                        constraints,
+                        vllm_constraints if use_isolated_vllm_venv else constraints,
                         venv_path=vllm_venv if use_isolated_vllm_venv else None,
                         force_reinstall=True,
                     )
