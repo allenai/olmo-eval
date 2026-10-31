@@ -52,7 +52,16 @@ async def execute(self: LocalRuntime, command: Command) -> CommandResponse:
             )
 
         # Regular files keep a detached child from holding communicate() open.
-        stdout, stderr = await asyncio.to_thread(read_output)
+        reader = asyncio.create_task(asyncio.to_thread(read_output))
+        cancelled: asyncio.CancelledError | None = None
+        while True:
+            try:
+                stdout, stderr = await asyncio.shield(reader)
+                break
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+        if cancelled is not None:
+            raise cancelled
         response = CommandResponse(
             stdout=stdout.decode(errors="backslashreplace"),
             stderr=stderr.decode(errors="backslashreplace"),

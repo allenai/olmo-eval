@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
 
 import httpx
 import pytest
@@ -163,6 +164,7 @@ def test_bootstrap_installs_with_module_when_pipx_is_not_on_path(tmp_path):
 @pytest.mark.anyio
 async def test_background_child_does_not_hold_command_output_open(tmp_path):
     child = tmp_path / "done"
+    release = tmp_path / "release"
     response = await asyncio.wait_for(
         execute(
             LocalRuntime(),
@@ -170,12 +172,56 @@ async def test_background_child_does_not_hold_command_output_open(tmp_path):
                 command=[
                     "/bin/sh",
                     "-c",
-                    f"(sleep 0.3; touch {child}) & printf foreground",
+                    f"(while [ ! -f {release} ]; do sleep 0.05; done; touch {child}) & printf foreground",
                 ]
             ),
         ),
-        0.2,
+        3,
     )
     assert response.stdout == "foreground"
-    await asyncio.sleep(0.5)
-    assert child.exists()
+    release.touch()
+    async with asyncio.timeout(3):
+        while not child.exists():
+            await asyncio.sleep(0.01)
+
+
+@pytest.mark.anyio
+async def test_cancellation_waits_for_output_reader_before_closing_files(monkeypatch):
+    import olmo_eval.harness.sandbox._http_command as adapter
+
+    started = threading.Event()
+    release = threading.Event()
+    files = []
+    original_file = adapter.tempfile.TemporaryFile
+    original_thread = asyncio.to_thread
+
+    def temporary_file():
+        file = original_file()
+        files.append(file)
+        return file
+
+    async def to_thread(function, *args, **kwargs):
+        def blocked_read():
+            started.set()
+            assert release.wait(5)
+            assert all(not file.closed for file in files)
+            return function(*args, **kwargs)
+
+        return await original_thread(blocked_read)
+
+    monkeypatch.setattr(adapter.tempfile, "TemporaryFile", temporary_file)
+    monkeypatch.setattr(adapter.asyncio, "to_thread", to_thread)
+    task = asyncio.create_task(execute(LocalRuntime(), Command(command=["/bin/echo", "output"])))
+    try:
+        async with asyncio.timeout(3):
+            while not started.is_set():
+                await asyncio.sleep(0.01)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert all(not file.closed for file in files)
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert all(file.closed for file in files)
