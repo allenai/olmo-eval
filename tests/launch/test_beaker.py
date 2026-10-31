@@ -876,8 +876,17 @@ class TestBuildCommandWithTaskPackages:
         assert (
             "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package repo --reinstall-package repo "
-            "'repo @ git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
+            "'repo @ git+https://github.com/user/repo@v1.0' -c /tmp/vllm-cuda-constraints.txt"
         ) in install_cmd
+        assert (
+            "uv pip freeze -q --python /opt/vllm-venv/bin/python "
+            "| grep -E '^(torch(==| @ )|nvidia-)' "
+            "| grep -vE '^nvidia-cutlass-dsl' > /tmp/vllm-cuda-constraints.txt"
+        ) in install_cmd
+        # The venv's constraints are taken after its vLLM install, which may replace Torch.
+        assert install_cmd.index("-e '.[vllm]'") < install_cmd.index(
+            "> /tmp/vllm-cuda-constraints.txt"
+        )
         assert "[isolated-vllm-check]" not in install_cmd
 
     def test_task_packages_stay_in_main_env_with_isolated_vllm(self):
@@ -896,7 +905,7 @@ class TestBuildCommandWithTaskPackages:
         assert (
             "uv pip install --python /opt/vllm-venv/bin/python "
             "--refresh-package provider-dep --reinstall-package provider-dep "
-            "'provider-dep==1.0' -c /tmp/cuda-constraints.txt"
+            "'provider-dep==1.0' -c /tmp/vllm-cuda-constraints.txt"
         ) in install_cmd
         assert "uv pip install 'task-dep==1.0' -c /tmp/cuda-constraints.txt" in install_cmd
         assert (
@@ -927,7 +936,7 @@ class TestBuildCommandWithTaskPackages:
         assert (
             "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package vllm --reinstall-package vllm "
-            "'vllm @ git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
+            "'vllm @ git+https://github.com/user/vllm@custom' -c /tmp/vllm-cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check]" not in install_cmd
 
