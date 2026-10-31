@@ -768,7 +768,7 @@ class TestRunnerShapedScoring:
 
         await olympiad.score_responses([response])
 
-        assert calls == 4
+        assert calls == 1 + llm_judge.JUDGE_RETRIES
         assert "accuracy" not in response.scores
         error = response.outputs[0].metadata["scoring_errors"]["frontierscience_judge"]
         assert error["phase"] == "judge"
