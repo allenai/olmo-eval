@@ -390,7 +390,7 @@ def test_helmet_task_inventory():
     for config in HELMET_TASKS.values():
         by_tag[config["tag"]] = by_tag.get(config["tag"], 0) + 1
     assert by_tag == {
-        "recall": 24,
+        "recall": 28,  # 24 at 4k-128k, plus json_kv at 256k-2m
         "rag": 24,
         "rerank": 6,
         "longqa": 18,
@@ -398,7 +398,15 @@ def test_helmet_task_inventory():
         "icl": 30,
         "cite": 24,
     }
-    assert len(HELMET_TASKS) == 138
+    assert len(HELMET_TASKS) == 142
+
+
+def test_only_recall_extends_past_standard_lengths():
+    longest_standard = max(STANDARD_CONTEXT_SIZES)
+    for name, config in HELMET_TASKS.items():
+        size = int(name.rsplit("__", 1)[1])
+        if size > longest_standard:
+            assert config["tag"] == "recall", name
 
 
 def test_helmet_context_budgets_match_helmet():
@@ -462,6 +470,10 @@ def test_helmet_suite_structure():
         "helmet_infbench_sum_eng__4096",
         "helmet_multi_lexsum__4096",
     }
+    # above 128k only recall extends; a combined suite there would mislead
+    with pytest.raises(KeyError):
+        get_suite("helmet_all__2097152")
+    assert len(get_suite("helmet_recall__2097152").expanded_tasks) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1210,3 +1222,14 @@ def test_multi_lexsum_refuses_incomplete_data(tmp_path, monkeypatch):
     path.write_text("".join(json.dumps(r) + "\n" for r in hosted[1:]), encoding="utf-8")
     with pytest.raises(ValueError, match="missing from"):
         loader.load_multi_lexsum_dataset(max_context_tokens=100, shots=0)
+
+
+def test_recall_suite_is_json_kv_alone_past_standard_lengths():
+    """The RULER recall tasks stop at 128k, so recall's composition changes there."""
+    import olmo_eval.evals.suites.helmet  # noqa: F401 - triggers registration
+    from olmo_eval.evals.suites.registry import get_suite
+
+    longest = max(STANDARD_CONTEXT_SIZES)
+    assert len(get_suite(f"helmet_recall__{longest}").expanded_tasks) == 4
+    for size in (262144, 524288, 1048576, 2097152):
+        assert get_suite(f"helmet_recall__{size}").expanded_tasks == (f"helmet_json_kv__{size}",)
