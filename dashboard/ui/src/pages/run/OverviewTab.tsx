@@ -412,7 +412,7 @@ function HealthPanel({ ctx }: { ctx: RunCtx }) {
       tone: s.warn,
       text: (
         <>
-          {formatRate(t.truncation_rate, 0)} of <strong>{t.task_name}</strong> outputs hit max length
+          {formatRate(t.truncation_rate, 0)} of <strong>{t.task_name}</strong> stored instances have a sample that hit max length
         </>
       ),
       href: buildHref(`/runs/${ctx.run.run_id}`, { tab: "instances", task: t.task_name, fin: "length" }),

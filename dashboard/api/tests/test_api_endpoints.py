@@ -411,7 +411,13 @@ async def test_suite_rows_report_member_generation_counts(
         )
     await session.commit()
     body = await get(client, f"/api/runs/{run_id}/suites", "RunSuitesResponse")
-    assert body["items"][0]["generation_counts"] == {"generations": 10, "cap_hit": 2, "empty": 1}
+    assert body["items"][0]["generation_counts"] == {
+        "generations": 10,
+        "cap_hit": 2,
+        "empty": 1,
+        "unclosed_think": 0,
+        "finish_reason_unknown": 0,
+    }
 
 
 async def test_run_task_results_with_baseline(client: httpx.AsyncClient, seeded: dict) -> None:
@@ -1333,6 +1339,8 @@ async def test_baseline_generation_counts_cover_task_and_suite_cells_without_pre
         "generations": 27,
         "cap_hit": 3,
         "empty": 2,
+        "unclosed_think": 0,
+        "finish_reason_unknown": 0,
     }
 
 

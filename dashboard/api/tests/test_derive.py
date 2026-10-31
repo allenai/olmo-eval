@@ -284,7 +284,13 @@ def test_suite_generation_counts_match_scored_members_and_omit_legacy_counts() -
         "outside": {"metrics": {"acc:x": 1.0}, "generation_counts": {"generations": 99}},
     }
     node = build_tree("root", DEFS)
-    assert suite_generation_counts(node, tasks) == {"generations": 10, "cap_hit": 2, "empty": 1}
+    assert suite_generation_counts(node, tasks) == {
+        "generations": 10,
+        "cap_hit": 2,
+        "empty": 1,
+        "unclosed_think": 0,
+        "finish_reason_unknown": 0,
+    }
     assert suite_generation_counts(node, {"a": {"metrics": {"acc:x": 0.5}}}) is None
 
 
@@ -698,7 +704,13 @@ def test_suite_counts_include_derived_scores_even_without_corpus_metrics_or_with
         "b": {"score": 0.6, "error": "partial", "generation_counts": {"generations": 6}},
         "c": {"score": None, "metrics": {"acc:x": 0.5}, "generation_counts": {"generations": 99}},
     }
-    assert suite_generation_counts(node, tasks) == {"generations": 10}
+    assert suite_generation_counts(node, tasks) == {
+        "generations": 10,
+        "cap_hit": 0,
+        "empty": 0,
+        "unclosed_think": 0,
+        "finish_reason_unknown": 0,
+    }
 
 
 def test_gap_progression_points_use_one_population_metric() -> None:
@@ -1049,4 +1061,21 @@ def test_progression_withholds_a_leaf_with_conflicting_gap_anchors():
         "in": "strict",
         "shared": None,
         "out": "flex",
+    }
+
+
+def test_suite_generation_counts_deduplicate_members_and_ignore_unknown_keys() -> None:
+    from olmo_eval_api.services.read_suites import suite_generation_counts
+
+    node = build_tree("root", {"root": ("average", [{"type": "task", "name": "a"}] * 2)})
+    counts = suite_generation_counts(
+        node,
+        {"a": {"score": 0.5, "generation_counts": {"generations": 10, "cap_hit": 2, "other": 99}}},
+    )
+    assert counts == {
+        "generations": 10,
+        "cap_hit": 2,
+        "empty": 0,
+        "unclosed_think": 0,
+        "finish_reason_unknown": 0,
     }
