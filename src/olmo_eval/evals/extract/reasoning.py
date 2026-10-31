@@ -41,3 +41,36 @@ def extract_think_answer_only(text: str) -> str | None:
     if _THINK_END not in text:
         return ""
     return _after_last_think(text)
+
+
+# OpenAI Harmony's documented token names and gpt-oss tokenizer spellings.
+# https://github.com/openai/harmony/blob/main/docs/format.md
+_HARMONY_HEADER = re.compile(
+    r"(?P<start><\|(?:start|im_start)\|>assistant(?: to=[^\s<]+)?)?"
+    r"<\|(?:channel|meta_sep)\|>(?P<channel>\w+)(?: to=[^\s<]+)?"
+    r"<\|(?:message|im_sep)\|>"
+)
+_HARMONY_END = re.compile(r"<\|(?:end|im_end|return|fim_suffix|call|ghissue|start|im_start)\|>")
+
+
+def extract_harmony_answer(text: str) -> str:
+    """Keep a Harmony final-channel body, preserving its whitespace.
+
+    Plain responses already parsed by a provider pass through. A recognized
+    Harmony transcript with no final channel has no answer. Special token
+    delimiters must be preserved by the provider's decoder.
+    """
+    first = _HARMONY_HEADER.match(text)
+    if first is None:
+        if text.startswith(
+            ("<|channel|>", "<|meta_sep|>", "<|start|>assistant", "<|im_start|>assistant")
+        ):
+            return ""
+        return text
+    for header in _HARMONY_HEADER.finditer(text):
+        if header.start() and header.group("start") is None:
+            continue
+        if header.group("channel") == "final" and " to=" not in header.group():
+            end = _HARMONY_END.search(text, header.end())
+            return text[header.end() : end.start() if end else len(text)]
+    return ""

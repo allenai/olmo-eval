@@ -599,9 +599,24 @@ documents the rest.
 | `primary_metric` | `MetricName \| Metric \| None` | `None` | Primary metric for ranking (defaults to single metric if only one) |
 | `sampling_params` | `SamplingParams \| None` | `None` | Default sampling parameters for this task |
 | `answer_extractor` | `Callable[[str], str] \| None` | `None` | Function applied to output text by the default `extract_answer` |
+| `response_parser` | `str` | unset | Set `harmony` to score only structured Harmony final-channel text |
 | `strip_thinking` | `bool` | `False` | Drop `<think>...</think>` traces before scoring |
 | `dependencies` | `list[str] \| None` | `None` | Runtime packages to install (e.g., `["pkg==1.0"]`) |
 | `judge_model` | `str \| None` | `None` | Judge model for LLM-as-judge scoring |
+
+For inline vLLM, or a provider that returns raw Harmony delimiters, use
+`-o response_parser=harmony`. Inline vLLM preserves the generated Harmony token
+boundaries before its default decoder removes special tokens, saving them in
+`text_with_special_tokens` for auditing or re-scoring. Saved predictions also
+record `response_parser_found`: false means no delimited transcript was found
+(including an already parsed plain answer).
+This opt-in changes the task hash, keeps the original decoded generation in `original_text`,
+and scores an empty answer when a Harmony analysis trace has no final channel.
+It accepts the documented `<|start|>/<|channel|>/<|message|>` spellings and the
+gpt-oss `<|im_start|>/<|meta_sep|>/<|im_sep|>` spellings. Already parsed plain text
+passes through. Decoding with special tokens removed loses message boundaries:
+`analysis...assistantfinal...` cannot be parsed reliably; retain special tokens or
+use a provider's native Harmony reasoning parser before evaluating.
 
 ### Data Sources
 

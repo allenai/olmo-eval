@@ -16,6 +16,23 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-10-31: Opt-in Harmony response parsing (#398)
+
+- **Affected:** only runs explicitly setting `response_parser=harmony`; existing
+  specs, suites and default parsing are unchanged.
+- **Change:** structured Harmony transcripts score only the final-channel body;
+  a recognized analysis trace without a final channel scores an empty answer.
+  Inline vLLM retains reserved token delimiters for the opt-in parser; its default
+  output is unchanged. Saved predictions keep the original decoded text as
+  `original_text` and the delimited text as `text_with_special_tokens`.
+  Already saved token-stripped `analysis...assistantfinal...` transcripts are not
+  recoverable unambiguously.
+- **Identity:** the parser setting is serialized and changes the task hash; absent
+  settings preserve every existing hash.
+- **Comparability:** parsed results are a different measurement from older runs
+  that scored reasoning and answer together. Compare only runs with the same
+  parser and decoding settings. This adds no numerical parity claim.
+
 ## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
 
 - **Affected**:

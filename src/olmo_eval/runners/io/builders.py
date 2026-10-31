@@ -92,6 +92,10 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
             # trace length and termination can be audited from the predictions file.
             if "original_text" in meta:
                 out_data["original_text"] = meta["original_text"]
+            if "text_with_special_tokens" in meta:
+                out_data["text_with_special_tokens"] = meta["text_with_special_tokens"]
+            if "response_parser_found" in meta:
+                out_data["response_parser_found"] = meta["response_parser_found"]
 
             # Include execution result if present
             if "execution_result" in meta:

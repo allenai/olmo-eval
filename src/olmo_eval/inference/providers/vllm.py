@@ -292,6 +292,13 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
 
+        tokenizer = self.llm.get_tokenizer()
+        added_vocab = tokenizer.get_added_vocab() if hasattr(tokenizer, "get_added_vocab") else {}
+        harmony_starts = {
+            added_vocab[token]
+            for token in ("<|channel|>", "<|meta_sep|>", "<|start|>", "<|im_start|>")
+            if token in added_vocab
+        }
         results: list[list[LMOutput]] = []
         for output in outputs:
             request_outputs: list[LMOutput] = []
@@ -311,6 +318,14 @@ class VLLMProvider(InferenceProvider):
 
                 metadata["finish_reason"] = completion.finish_reason
                 metadata["completion_tokens"] = len(completion.token_ids)
+                if completion.token_ids and completion.token_ids[0] in harmony_starts:
+                    # vLLM's default decoder drops Harmony's reserved delimiters.
+                    # Keep them for opt-in parsing; baseline text stays unchanged.
+                    raw_text = tokenizer.decode(completion.token_ids, skip_special_tokens=False)
+                    stop_reason = getattr(completion, "stop_reason", None)
+                    if completion.finish_reason == "stop" and isinstance(stop_reason, str):
+                        raw_text = raw_text.split(stop_reason, 1)[0]
+                    metadata["text_with_special_tokens"] = raw_text
 
                 request_outputs.append(
                     LMOutput(
