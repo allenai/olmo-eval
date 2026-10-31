@@ -723,16 +723,19 @@ class Task(ABC):
                     continue
                 text = output.text or ""
                 if self.config.response_parser and not output.metadata.get("response_parsed"):
+                    if output.metadata.get("response_parser_error"):
+                        raise ValueError(output.metadata["response_parser_error"])
                     from olmo_eval.evals.extract.reasoning import extract_harmony_answer
 
                     raw_text = output.metadata.get("text_with_special_tokens", text)
                     parsed = extract_harmony_answer(raw_text)
-                    output.metadata["response_parser_found"] = parsed != raw_text
-                    if parsed != text or raw_text != text:
+                    found = parsed != raw_text
+                    output.metadata["response_parser_found"] = found
+                    if found:
                         output.metadata.setdefault("original_text", text)
                         output.text = parsed
+                        text = parsed
                     output.metadata["response_parsed"] = True
-                    text = parsed
                 closed = "</think>" in text
                 suffix = text.rpartition("</think>")[2] if closed else text
                 unclosed = "<think>" in suffix or (prefilled and not closed)

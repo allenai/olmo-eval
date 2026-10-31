@@ -96,6 +96,8 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 out_data["text_with_special_tokens"] = meta["text_with_special_tokens"]
             if "response_parser_found" in meta:
                 out_data["response_parser_found"] = meta["response_parser_found"]
+            if "response_parser_error" in meta:
+                out_data["response_parser_error"] = meta["response_parser_error"]
 
             # Include execution result if present
             if "execution_result" in meta:

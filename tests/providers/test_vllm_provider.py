@@ -168,14 +168,15 @@ def test_generate_preserves_termination_without_logprobs(fake_provider) -> None:
         ("<|meta_sep|>", "<|im_sep|>", "<|im_end|>", "<|im_start|>", "<|fim_suffix|>"),
     ],
 )
-@pytest.mark.parametrize("string_stop", [False, True])
+@pytest.mark.parametrize("stop_case", ["eos", "string", "delimiter_substring", "spanning_channels"])
+@pytest.mark.parametrize("special_registration", ["named", "decoder"])
 def test_harmony_token_boundaries_reach_runner_predictions(
-    fake_provider, monkeypatch, specials, string_stop
+    fake_provider, monkeypatch, specials, stop_case, special_registration
 ) -> None:
     import asyncio
     from dataclasses import replace
 
-    from tokenizers import Tokenizer, decoders, models
+    from tokenizers import AddedToken, Tokenizer, decoders, models
     from transformers import PreTrainedTokenizerFast
 
     from olmo_eval.common.types import Instance, Response
@@ -197,37 +198,62 @@ def test_harmony_token_boundaries_reach_runner_predictions(
         "final",
         message,
         "good",
-        "HALT" if string_stop else done,
+        done,
     ]
+    stop_reason = {
+        "eos": 200002,
+        "string": "HALT",
+        "delimiter_substring": "end",
+        "spanning_channels": "wrongassistantfinalgood",
+    }[stop_case]
+    if stop_case == "spanning_channels":
+        tokens.pop()
+    elif stop_case != "eos":
+        tokens[-1] = stop_reason
     raw = "".join(tokens)
     codec = Tokenizer(
         models.WordLevel(
             {
                 word: i
                 for i, word in enumerate(
-                    ["analysis", "wrong", "assistant", "final", "good", "HALT"]
+                    ["analysis", "wrong", "assistant", "final", "good", "HALT", "end"]
                 )
             }
         )
     )
     codec.decoder = decoders.Fuse()
-    real_tokenizer = PreTrainedTokenizerFast(
-        tokenizer_object=codec, additional_special_tokens=list(specials)
-    )
+    if special_registration == "decoder":
+        codec.add_special_tokens([AddedToken(token, special=True) for token in specials])
+        real_tokenizer = PreTrainedTokenizerFast(tokenizer_object=codec)
+    else:
+        real_tokenizer = PreTrainedTokenizerFast(
+            tokenizer_object=codec, additional_special_tokens=list(specials)
+        )
     token_ids = real_tokenizer.convert_tokens_to_ids(tokens)
     decoded = real_tokenizer.decode(token_ids, skip_special_tokens=True)
-    if string_stop:
-        decoded = decoded.removesuffix("HALT")
-    assert decoded == "analysiswrongassistantfinalgood"
+    if isinstance(stop_reason, str):
+        decoded = decoded.split(stop_reason, 1)[0]
+    assert decoded == (
+        "analysis" if stop_case == "spanning_channels" else "analysiswrongassistantfinalgood"
+    )
     assert real_tokenizer.decode(token_ids, skip_special_tokens=False) == raw
     monkeypatch.setattr(tokenizer, "get_added_vocab", real_tokenizer.get_added_vocab, raising=False)
     monkeypatch.setattr(tokenizer, "decode", real_tokenizer.decode, raising=False)
+    monkeypatch.setattr(
+        tokenizer,
+        "all_special_tokens",
+        real_tokenizer.all_special_tokens if special_registration == "named" else [],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        tokenizer, "added_tokens_decoder", real_tokenizer.added_tokens_decoder, raising=False
+    )
     completion = SimpleNamespace(
         text=decoded,
         token_ids=token_ids,
         logprobs=None,
         finish_reason="stop",
-        stop_reason="HALT" if string_stop else 200002,
+        stop_reason=stop_reason,
     )
     monkeypatch.setattr(
         llm, "generate", lambda *args, **kwargs: [SimpleNamespace(outputs=[completion])]
@@ -242,7 +268,10 @@ def test_harmony_token_boundaries_reach_runner_predictions(
         },
     )
     request = task.format_request(instance)
-    params = replace(task.config.sampling_params, stop_sequences=("<|im_end|>", "HALT"))
+    params = replace(
+        task.config.sampling_params,
+        stop_sequences=("<|im_end|>", "HALT", "end", "wrongassistantfinalgood"),
+    )
     outputs = provider.generate([request], params)[0]
     assert outputs[0].text == decoded
     response = Response(instance=instance, request=request, outputs=outputs)
@@ -257,8 +286,55 @@ def test_harmony_token_boundaries_reach_runner_predictions(
     result = asyncio.run(finalize_task(tracker))
     assert result.error is None
     row = result.predictions[0]["model_output"][0]
-    assert row["text"] == "good"
+    assert row["text"] == ("" if stop_case == "spanning_channels" else "good")
     assert row["original_text"] == decoded
-    assert row["text_with_special_tokens"] == (raw.removesuffix("HALT") if string_stop else raw)
+    expected_raw = {
+        "eos": raw,
+        "string": raw.removesuffix("HALT"),
+        "delimiter_substring": raw.removesuffix("end"),
+        "spanning_channels": channel + "analysis",
+    }[stop_case]
+    assert row["text_with_special_tokens"] == expected_raw
     assert row["response_parser_found"] is True
-    assert outputs[0].metadata["ifeval"] == {"strict": [True], "loose": [True]}
+    passed = stop_case != "spanning_channels"
+    assert outputs[0].metadata["ifeval"] == {"strict": [passed], "loose": [passed]}
+
+
+def test_harmony_mapping_failure_only_errors_when_parsing_is_enabled(
+    fake_provider, monkeypatch
+) -> None:
+    from olmo_eval.common.types import Instance, Response
+    from olmo_eval.evals.tasks.common import get_task
+    from olmo_eval.runners.io.builders import build_predictions
+
+    provider, llm, tokenizer = fake_provider
+    raw = "<|channel|>analysis<|message|>trace"
+    monkeypatch.setattr(
+        tokenizer, "get_added_vocab", lambda: {"<|channel|>": 200005}, raising=False
+    )
+    monkeypatch.setattr(
+        tokenizer, "all_special_tokens", ["<|channel|>", "<|message|>"], raising=False
+    )
+    monkeypatch.setattr(tokenizer, "decode", lambda *args, **kwargs: raw, raising=False)
+    completion = SimpleNamespace(
+        text="unmatched visible output",
+        token_ids=[200005],
+        logprobs=None,
+        finish_reason="stop",
+        stop_reason="end",
+    )
+    monkeypatch.setattr(
+        llm, "generate", lambda *args, **kwargs: [SimpleNamespace(outputs=[completion])]
+    )
+    request = LMRequest(request_type=RequestType.COMPLETION, prompt="Q")
+    output = provider.generate([request])[0][0]
+    response = Response(instance=Instance(question="Q"), request=request, outputs=[output])
+    get_task("ifeval").strip_thinking_traces([response])
+    assert output.text == completion.text
+    with pytest.raises(ValueError, match="Cannot align Harmony"):
+        get_task("ifeval", {"response_parser": "harmony"}).strip_thinking_traces([response])
+    row = build_predictions([response])[0]["model_output"][0]
+    assert row["text"] == completion.text
+    assert row["text_with_special_tokens"] == raw
+    assert "Cannot align Harmony" in row["response_parser_error"]
+    assert not response.scores

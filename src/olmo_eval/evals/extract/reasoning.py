@@ -50,7 +50,9 @@ _HARMONY_HEADER = re.compile(
     r"<\|(?:channel|meta_sep)\|>(?P<channel>\w+)(?: to=[^\s<]+)?"
     r"<\|(?:message|im_sep)\|>"
 )
-_HARMONY_END = re.compile(r"<\|(?:end|im_end|return|fim_suffix|call|ghissue|start|im_start)\|>")
+_HARMONY_END = re.compile(
+    r"<\|(?:end|im_end|return|fim_suffix|endoftext|call|ghissue|start|im_start)\|>"
+)
 
 
 def extract_harmony_answer(text: str) -> str:

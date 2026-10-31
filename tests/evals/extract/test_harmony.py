@@ -20,6 +20,7 @@ from olmo_eval.evals.extract.reasoning import extract_harmony_answer
         ("<|meta_sep|>analysis<|im_sep|>unfinished", ""),
         ("<|channel|>analysis<|message|>unfinished", ""),
         ("<|meta_sep|>final<|im_sep|>\n\n 4 <|fim_suffix|>", "\n\n 4 "),
+        ("<|channel|>final<|message|>4<|endoftext|>", "4"),
         (
             "<|channel|>analysis<|message|>wrong<|end|>"
             "<|start|>assistant<|channel|>final<|message|>right<|return|>",

@@ -81,3 +81,20 @@ def test_harmony_noop_is_visible_in_predictions(text: str) -> None:
     row = build_predictions([response])[0]["model_output"][0]
     assert row["text"] == text
     assert row["response_parser_found"] is False
+
+
+def test_unrecognized_raw_decode_does_not_replace_provider_text() -> None:
+    from olmo_eval.runners.io.builders import build_predictions
+
+    task = get_task("ifeval", {"response_parser": "harmony"})
+    decoded = "userplain"
+    raw = "<|im_start|>user<|im_sep|>plain<|im_end|>"
+    output = LMOutput(text=decoded, metadata={"text_with_special_tokens": raw})
+    instance = Instance(question="Q")
+    response = Response(instance=instance, request=task.format_request(instance), outputs=[output])
+    task.strip_thinking_traces([response])
+    row = build_predictions([response])[0]["model_output"][0]
+    assert row["text"] == decoded
+    assert row["response_parser_found"] is False
+    assert row["text_with_special_tokens"] == raw
+    assert "original_text" not in row

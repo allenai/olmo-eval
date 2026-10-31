@@ -609,7 +609,9 @@ For inline vLLM, or a provider that returns raw Harmony delimiters, use
 boundaries before its default decoder removes special tokens, saving them in
 `text_with_special_tokens` for auditing or re-scoring. Saved predictions also
 record `response_parser_found`: false means no delimited transcript was found
-(including an already parsed plain answer).
+(including an already parsed plain answer). If a known structured decode cannot
+be aligned with the stopped completion, explicit parsing raises a scoring error;
+the diagnostic and raw text remain in saved predictions.
 This opt-in changes the task hash, keeps the original decoded generation in `original_text`,
 and scores an empty answer when a Harmony analysis trace has no final channel.
 It accepts the documented `<|start|>/<|channel|>/<|message|>` spellings and the
