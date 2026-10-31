@@ -29,6 +29,8 @@ def server_command(executable: str, token: str, port: int, *, install_pipx: bool
     return (
         f"original=$(command -v {shlex.quote(executable)}) || "
         f"{{ {fallback}; }} || exit 1; "
+        'case "$(head -n 1 "$original")" in *python*) ;; '
+        "*) echo 'SWE-ReX bootstrap requires a Python-shebang entrypoint' >&2; exit 1;; esac; "
         "bootstrap=$(mktemp -d) || exit 1; "
         "trap 'rm -rf \"$bootstrap\"' EXIT; "
         '{ head -n 1 "$original"; '
