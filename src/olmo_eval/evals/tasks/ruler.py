@@ -21,7 +21,14 @@ from typing import Any, cast
 from olmo_eval.common.formatters import ChatFormatter, PPLFormatter
 from olmo_eval.common.metrics import Metric, RecallMetric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    ContextFit,
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
@@ -196,12 +203,27 @@ class RulerTask(Task):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
+        haystack = doc.get("context")
+        if self.cuts_haystack and isinstance(haystack, str) and haystack:
+            start = question.find(haystack)
+            if start >= 0 and question.count(haystack) == 1:
+                metadata["haystack_span"] = (start, start + len(haystack))
 
         return Instance(
             question=question,
             gold_answer=answer,
             metadata=metadata,
         )
+
+    @property
+    def cuts_haystack(self) -> bool:
+        """Whether the haystack is marked so a provider cuts it to the model's window.
+
+        Set by ``task_settings["context_cut"] == "model_window"`` (the ``:v2`` variant).
+        Without it a prompt that the model's tokenizer makes longer than its window is
+        rejected, which fails its batch.
+        """
+        return (self.config.task_settings or {}).get("context_cut") == "model_window"
 
     @property
     def request_type(self) -> RequestType:
@@ -233,7 +255,10 @@ class RulerTask(Task):
                     gold_answer=", ".join(str(a) for a in instance.gold_answer),
                     metadata=instance.metadata,
                 )
-            return self.config.formatter.format(instance, self.get_fewshot())
+            request = self.config.formatter.format(instance, self.get_fewshot())
+            if isinstance(self.config.formatter, PPLFormatter):
+                return request
+            return self._with_haystack_fit(request, instance)
 
         # Build prompt: append system template as completion prefix for non-chat format.
         # For base models, the prefix anchors the expected output format.
@@ -242,10 +267,22 @@ class RulerTask(Task):
         if prepend_text:
             prompt = prompt + self.answer_prefix_separator + prepend_text
 
-        return LMRequest(
-            request_type=self.request_type,
-            prompt=prompt,
+        return self._with_haystack_fit(
+            LMRequest(request_type=self.request_type, prompt=prompt), instance
         )
+
+    def _with_haystack_fit(self, request: LMRequest, instance: Instance) -> LMRequest:
+        """Return ``request`` with the haystack marked as a ContextFit, when there is one.
+
+        No prompt budget is set: the provider cuts only what the model's window
+        requires, so a model with room sees the whole haystack. The instructions
+        before it and the question after it are never cut.
+        """
+        span = (instance.metadata or {}).get("haystack_span")
+        if not span:
+            return request
+        start, end = span
+        return replace(request, context_fit=ContextFit(text=instance.question[start:end]))
 
     def extract_answer(self, output: LMOutput) -> Any:
         """Extract answer from model output.
@@ -325,6 +362,15 @@ def make_ruler_task_class(
     )
 
 
+#: Settings of the `:v2` variant: a provider cuts the haystack's end only as far as the
+#: model's window requires. Part of the task hash.
+RULER_V2_TASK_SETTINGS = {"context_cut": "model_window"}
+
+#: Generation budgets that `:v2` raises, by task type. An answer that restates the VT
+#: chain ("1. VAR X = 12345 2. VAR Y = VAR X ...") needs about 60 tokens for five names,
+#: so the default 50 cut the fifth name off correct answers.
+RULER_V2_MAX_GEN_TOKS = {"vt": 100}
+
 # Dynamically register all RULER tasks
 for _task_name, _task_config in RULER_TASKS.items():
     _cls = make_ruler_task_class(_task_name, _task_config)
@@ -337,4 +383,18 @@ for _task_name, _task_config in RULER_TASKS.items():
     # item-for-item with the completion cell on the same checkpoint.
     register_variant(
         f"ruler_{_task_name}", "chat", formatter=ChatFormatter(user_template="{question}")
+    )
+    # `:v2` fixes two ways the task fails a model rather than measuring it: the haystack is
+    # cut to the model's window instead of the prompt being rejected (see `cuts_haystack`),
+    # and generation budgets that cut correct answers short are raised (RULER_V2_MAX_GEN_TOKS).
+    _v2_budget = RULER_V2_MAX_GEN_TOKS.get(_task_name.rsplit("__", 1)[0])
+    register_variant(
+        f"ruler_{_task_name}",
+        "v2",
+        task_settings=RULER_V2_TASK_SETTINGS,
+        **(
+            {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
+            if _v2_budget is not None
+            else {}
+        ),
     )
