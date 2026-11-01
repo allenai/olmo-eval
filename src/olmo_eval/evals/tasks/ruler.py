@@ -21,7 +21,14 @@ from typing import Any, cast
 from olmo_eval.common.formatters import ChatFormatter, PPLFormatter
 from olmo_eval.common.metrics import Metric, RecallMetric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    ContextFit,
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
@@ -85,6 +92,11 @@ class RulerTask(Task):
     _name_prefix: str = "ruler_"
     #: Joins the rendered question and the answer prefix in a completion prompt.
     answer_prefix_separator: str = "\n"
+    #: Mark the haystack as a ContextFit so a provider cuts its end, with the model's
+    #: own tokenizer, only as far as the model's window requires. Without it a prompt
+    #: that a tokenizer makes longer than the window is rejected and fails its batch.
+    #: Set for plain RULER (and recorded in its task hash); off for subclasses.
+    cut_haystack: bool = False
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
@@ -196,6 +208,11 @@ class RulerTask(Task):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
+        haystack = doc.get("context")
+        if self.cut_haystack and isinstance(haystack, str) and haystack:
+            start = question.find(haystack)
+            if start >= 0 and question.count(haystack) == 1:
+                metadata["haystack_span"] = (start, start + len(haystack))
 
         return Instance(
             question=question,
@@ -233,7 +250,10 @@ class RulerTask(Task):
                     gold_answer=", ".join(str(a) for a in instance.gold_answer),
                     metadata=instance.metadata,
                 )
-            return self.config.formatter.format(instance, self.get_fewshot())
+            request = self.config.formatter.format(instance, self.get_fewshot())
+            if isinstance(self.config.formatter, PPLFormatter):
+                return request
+            return self._with_haystack_fit(request, instance)
 
         # Build prompt: append system template as completion prefix for non-chat format.
         # For base models, the prefix anchors the expected output format.
@@ -242,10 +262,22 @@ class RulerTask(Task):
         if prepend_text:
             prompt = prompt + self.answer_prefix_separator + prepend_text
 
-        return LMRequest(
-            request_type=self.request_type,
-            prompt=prompt,
+        return self._with_haystack_fit(
+            LMRequest(request_type=self.request_type, prompt=prompt), instance
         )
+
+    def _with_haystack_fit(self, request: LMRequest, instance: Instance) -> LMRequest:
+        """Return ``request`` with the haystack marked as a ContextFit, when there is one.
+
+        No prompt budget is set: the provider cuts only what the model's window
+        requires, so a model with room sees the whole haystack. The instructions
+        before it and the question after it are never cut.
+        """
+        span = (instance.metadata or {}).get("haystack_span")
+        if not span:
+            return request
+        start, end = span
+        return replace(request, context_fit=ContextFit(text=instance.question[start:end]))
 
     def extract_answer(self, output: LMOutput) -> Any:
         """Extract answer from model output.
@@ -326,8 +358,16 @@ def make_ruler_task_class(
 
 
 # Dynamically register all RULER tasks
+#: How far a provider cuts a RULER prompt: the haystack loses its end only as far as
+#: the model's window requires (see ``RulerTask.cut_haystack``). Part of the task hash.
+RULER_TASK_SETTINGS = {"context_cut": "model_window"}
+
 for _task_name, _task_config in RULER_TASKS.items():
-    _cls = make_ruler_task_class(_task_name, _task_config)
+    _cls = make_ruler_task_class(
+        _task_name,
+        _task_config,
+        attrs={"cut_haystack": True, "task_settings": RULER_TASK_SETTINGS},
+    )
     # Inject into module globals so pickle can find the class by name
     globals()[_cls.__name__] = _cls
     register(f"ruler_{_task_name}")(_cls)
