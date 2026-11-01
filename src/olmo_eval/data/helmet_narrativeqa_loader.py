@@ -53,6 +53,8 @@ MEASURED_CONSTANTS = {
     "demo_suffix": _DEMO_SUFFIX,
     "truncation_postfix": TRUNCATION_POSTFIX,
     "min_document_tokens": MIN_DOCUMENT_TOKENS,
+    # What the judge reads of an output (helmet_judge.parse_longqa_answer).
+    "judged_answer": "first_paragraph",
 }
 
 

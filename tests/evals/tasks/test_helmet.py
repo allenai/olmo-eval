@@ -246,13 +246,21 @@ def test_summ_parsing_falls_back_to_a_fenced_json_block():
     ("raw", "expected"),
     [
         ("Answer: the North Pole", "the North Pole"),
-        # newlines become spaces, so everything after the prefix is kept
-        ("Answer: the North\nPole", "the North Pole"),
+        # a hard-wrapped answer is joined back into one line
+        ("Answer: he marries the rector of\nthe parish.", "he marries the rector of the parish."),
         ("They head north.\nAnswer: Answer: the Pole", "the Pole"),
         ("no prefix here\nsecond line", "no prefix here second line"),
+        # the base model's own next question and answer are not judged
+        ("Answer: the North Pole.\n\nQuestion: Who leads?\nAnswer: Hatteras", "the North Pole."),
+        ("Answer: the North Pole.\nQuestion: Who leads?", "the North Pole."),
+        # nor more of the book after a blank line
+        ("Answer: A lifeboat\n\n\n\nCHAPTER II\n\nThe next day", "A lifeboat"),
+        # a blank line before the answer is skipped
+        ("Answer:\n\nthe North Pole\n\nmore", "the North Pole"),
+        ("Answer:", ""),
     ],
 )
-def test_longqa_judged_answer_matches_helmets_parse_output(raw, expected):
+def test_longqa_judged_answer_is_the_first_paragraph(raw, expected):
     assert parse_longqa_answer(raw) == expected
 
 
@@ -979,7 +987,8 @@ def test_base_variant_scores_outputs_with_the_answer_prefix_in_front():
 
     assert output.text == "Answer:" + generation
     assert output.metadata["original_text"] == generation
-    assert task.extract_answer(output) == "the North Pole Question: Who? Answer: Santa"
+    # the judged answer stops where the model starts its own next question
+    assert task.extract_answer(output) == "the North Pole"
     assert task.extract_answer(LMOutput(text=generation)) == "Santa"
     # the runner may prepare a response more than once
     task.strip_thinking_traces([response])

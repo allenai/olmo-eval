@@ -132,15 +132,33 @@ parse_recall_verdict = _summ_parser("recall")
 parse_precision_verdict = _summ_parser("precision", "sentence_count")
 
 
-def parse_longqa_answer(text: str, prefix: str = "Answer:") -> str:
-    """The answer HELMET's LongQA judge sees: ``parse_output`` from eval_gpt4_longqa.py.
+#: A line where a base model starts writing its own next question after answering.
+_NEXT_QUESTION = re.compile(r"\s*(?:question|q)\s*:", flags=re.IGNORECASE)
 
-    Newlines become spaces first, so this is everything after the first ``prefix``,
-    or the whole reply when there is none, with an echoed prefix stripped.
+
+def parse_longqa_answer(text: str, prefix: str = "Answer:") -> str:
+    """The answer HELMET's LongQA judge sees: the first paragraph after ``prefix``.
+
+    A base model does not stop after answering: it goes on with a question and
+    answer of its own, or with more of the book. Upstream's ``parse_output`` keeps
+    only the first line, which also cuts answers the model hard-wraps the way the
+    books are wrapped. This keeps the lines up to the first blank line or the first
+    line that opens a new ``Question:``, joined with spaces, after the first
+    ``prefix`` (or from the start when there is none), with an echoed prefix
+    stripped. Part of the task hash (``judged_answer`` in the NarrativeQA loader).
     """
-    text = text.replace("\n", " ")
-    match = re.search(f"(?:{re.escape(prefix)})(.*)", text, flags=re.IGNORECASE)
-    answer = (match[1] if match is not None else text).strip()
+    match = re.search(re.escape(prefix), text, flags=re.IGNORECASE)
+    body = text[match.end() :] if match is not None else text
+    lines: list[str] = []
+    for line in body.split("\n"):
+        if not line.strip():
+            if lines:
+                break
+            continue
+        if lines and _NEXT_QUESTION.match(line):
+            break
+        lines.append(line.strip())
+    answer = " ".join(lines)
     return re.sub(f"^{re.escape(prefix)}", "", answer, flags=re.IGNORECASE).strip()
 
 
