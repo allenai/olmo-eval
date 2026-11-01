@@ -341,7 +341,7 @@ class TestEndToEndOrdering:
         assert sampling_overrides == {"max_tokens": None}
         task_class = type(get_task("lab_bench_litqa2"))
         monkeypatch.setattr(task_class, "instances", property(lambda self: iter(())))
-        task, _ = prepare_task_items("lab_bench_litqa2", "model", sampling_overrides=sampling_overrides)
+        task, _ = prepare_task_items("lab_bench_litqa2", "model", None, sampling_overrides=sampling_overrides)
         assert task.config.sampling_params is not None
         assert task.config.sampling_params.max_tokens is None
 
