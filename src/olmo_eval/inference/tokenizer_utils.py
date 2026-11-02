@@ -33,6 +33,32 @@ def has_bos_token(tokenizer: Any) -> bool:
     return tokenizer.bos_token_id is not None
 
 
+def adds_bos_token(tokenizer: Any) -> bool:
+    """Check whether the tokenizer starts an encoded text with its BOS token.
+
+    True when ``add_bos_token`` is set, as lm_eval checks, or when encoding with
+    special tokens puts BOS first. The second case covers tokenizers that add BOS
+    through their post-processor template (Llama 3, Gemma 3 and 4, LFM2.5,
+    Nemotron-H): their ``add_bos_token`` attribute is False, yet ``tokenizer(text)``
+    and a server tokenizing the text itself both put BOS first.
+
+    Args:
+        tokenizer: A tokenizer object with bos_token_id and an encode method.
+
+    Returns:
+        True if the tokenizer adds BOS when encoding text by default.
+    """
+    if getattr(tokenizer, "add_bos_token", False):
+        return True
+    bos_id = tokenizer.bos_token_id
+    if bos_id is None:
+        return False
+    probe = "a"
+    with_special = tokenizer.encode(probe, add_special_tokens=True)
+    without_special = tokenizer.encode(probe, add_special_tokens=False)
+    return with_special[:1] == [bos_id] and without_special[:1] != [bos_id]
+
+
 def get_context_token_ids(
     tokenizer: Any,
     context: str,
@@ -63,6 +89,7 @@ def encode_context_and_continuation(
     *,
     use_bos_for_empty: bool = True,
     fallback_to_eos: bool = True,
+    add_bos: bool | None = None,
 ) -> tuple[list[int], list[int]]:
     """Encode context/continuation pair with proper BOS handling and trailing space logic.
 
@@ -77,6 +104,9 @@ def encode_context_and_continuation(
         continuation: The continuation string to evaluate.
         use_bos_for_empty: If True and context is empty, use BOS token as context.
         fallback_to_eos: If True and BOS is None, use EOS token ID instead.
+        add_bos: Whether a non-empty context starts with BOS. None follows the
+            tokenizer (see ``adds_bos_token``); a provider with its own BOS setting
+            passes it here.
 
     Returns:
         Tuple of (context_token_ids, continuation_token_ids).
@@ -93,9 +123,10 @@ def encode_context_and_continuation(
         continuation = context[-n_spaces:] + continuation
         context = context[:-n_spaces]
 
-    # Match lm_eval behavior: add BOS token if the tokenizer is configured for it
-    # (lm_eval's tok_encode uses add_special_tokens=tokenizer.add_bos_token)
-    add_bos = getattr(tokenizer, "add_bos_token", False)
+    # Add BOS when the tokenizer adds it to encoded text by default, as generation does
+    # when the server tokenizes the prompt (see adds_bos_token)
+    if add_bos is None:
+        add_bos = adds_bos_token(tokenizer)
     bos_ids = get_bos_token_ids(tokenizer, fallback_to_eos=fallback_to_eos) if add_bos else []
 
     # Encode the full sequence and extract continuation tokens
