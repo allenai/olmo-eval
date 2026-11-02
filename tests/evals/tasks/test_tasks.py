@@ -1,5 +1,7 @@
 """Tests for all task module registrations and basic functionality."""
 
+from dataclasses import replace
+
 import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
@@ -66,6 +68,32 @@ class TestGSMNumberExtraction:
 def test_gsm8k_olmo3base_uses_first_sample_exact_match() -> None:
     task = get_task("gsm8k:olmo3base")
     assert task.config.output_score_aggregation == OutputScoreAggregation.FIRST
+
+
+def test_gsm8k_olmo3base_multiparagraph_drops_only_blank_line_stop() -> None:
+    parity = get_task("gsm8k:olmo3base").config
+    multiparagraph = get_task("gsm8k:olmo3base_multiparagraph").config
+    assert parity.sampling_params is not None
+    assert multiparagraph.sampling_params is not None
+
+    assert "\n\n" in parity.sampling_params.stop_sequences
+    assert multiparagraph.sampling_params.stop_sequences == ("Question:", "</s>", "<|im_end|>")
+    assert multiparagraph.sampling_params == replace(
+        parity.sampling_params,
+        stop_sequences=multiparagraph.sampling_params.stop_sequences,
+    )
+    assert multiparagraph.metrics == parity.metrics
+    assert multiparagraph.primary_metric == parity.primary_metric
+    assert multiparagraph.num_fewshot == parity.num_fewshot
+    assert multiparagraph.output_score_aggregation == parity.output_score_aggregation
+
+
+def test_gsm8k_olmo3base_multiparagraph_has_its_own_task_hash() -> None:
+    parity = get_task("gsm8k:olmo3base")
+    multiparagraph = get_task("gsm8k:olmo3base_multiparagraph")
+    assert compute_task_hash(multiparagraph.config.to_dict()) != compute_task_hash(
+        parity.config.to_dict()
+    )
 
 
 def test_gsm8k_platinum_uses_pinned_platinum_data() -> None:
