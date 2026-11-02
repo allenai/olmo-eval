@@ -98,7 +98,8 @@ vllm = [
     # differently from the model's tokenizer.json (5.12.1 matches it). 5.13 nests
     # rope_parameters per layer type; vLLM 0.19.1 reads it flat, so Olmo-3 (mixed
     # sliding/full attention) fails to load with a rope_theta KeyError.
-    # Keep the previously locked vLLM dependency versions below. Without these
+    # Keep the previously locked vLLM dependency versions below (transformers is the
+    # deliberate exception, see above). Without these
     # bounds, a fresh uv lock can reuse SGLang's newer transitive dependencies
     # even in the mutually exclusive vLLM resolution. The lock alone also cannot
     # constrain Beaker's uv pip install, which installs the published extra.
