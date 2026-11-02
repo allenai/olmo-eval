@@ -210,9 +210,17 @@ class OlmoCoreVLMProvider(InferenceProvider):
             }.items()
             if value
         }
+        if preprocessing.dataset_tokenizer_json_split(self.checkpoint_info):
+            # As OLMo-core trained the checkpoint: tokenizer.json exactly as written, not the
+            # class tokenizer_config.json names (GPT2Tokenizer for Dolma2 re-splits with GPT-2's
+            # regex).
+            from olmo_core.nn.hf.tokenizer import load_tokenizer_losslessly
+
+            tokenizer, _, _ = load_tokenizer_losslessly(tokenizer_path, revision=revision)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
         self.tokenizer: preprocessing.VLMTokenizerProtocol = cast(
-            preprocessing.VLMTokenizerProtocol,
-            AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs),
+            preprocessing.VLMTokenizerProtocol, tokenizer
         )
         self._add_missing_image_tokens()
         self._resolve_special_token_ids(tokenizer_path)

@@ -1045,6 +1045,15 @@ class TestDocumentLayoutDetection:
         assert preprocessing.dataset_tokenizer(unadapted) is None
         assert preprocessing.resolve_tokenizer_path(unadapted, None) == "allenai/Molmo2-4B"
 
+    def test_tokenizer_json_split_follows_the_checkpoint(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import preprocessing
+
+        split = self._info({"dataset": {"tokenizer_json_split": True}})
+        assert preprocessing.dataset_tokenizer_json_split(split)
+        # Checkpoints trained before the flag existed keep the tokens they were trained on.
+        assert not preprocessing.dataset_tokenizer_json_split(self._info({"dataset": {}}))
+        assert not preprocessing.dataset_tokenizer_json_split(self._info({}))
+
 
 class TestDocumentPrompt:
     """Document prompts are [EOS] + image tokens + plain text turns, no chat template."""
