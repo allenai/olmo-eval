@@ -6,6 +6,7 @@ These tests use mock tokenizers and don't require GPU.
 from __future__ import annotations
 
 from olmo_eval.inference.tokenizer_utils import (
+    adds_bos_token,
     encode_context_and_continuation,
     get_bos_token_ids,
     get_context_token_ids,
@@ -29,6 +30,23 @@ class MockTokenizer:
     def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
         """Simple character-level encoding."""
         return [ord(c) for c in text]
+
+
+class TemplateBosTokenizer(MockTokenizer):
+    """Adds BOS through its post-processor, as Llama 3, Gemma 3/4 and LFM2.5 do: encoding
+    with special tokens puts BOS first, yet ``add_bos_token`` is False."""
+
+    add_bos_token = False
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        ids = [ord(c) for c in text]
+        return [self.bos_token_id, *ids] if add_special_tokens else ids
+
+
+class FlagBosTokenizer(MockTokenizer):
+    """Declares ``add_bos_token = True`` (the lm_eval check) without a post-processor."""
+
+    add_bos_token = True
 
 
 class TestGetBosTokenIds:
@@ -148,6 +166,60 @@ class TestEncodeContextAndContinuation:
         assert ctx == []
         # Spaces get prepended to continuation
         assert cont == [ord(" "), ord(" "), ord("c"), ord("d")]
+
+
+class TestAddsBosToken:
+    """Tests for adds_bos_token()."""
+
+    def test_post_processor_bos_is_detected(self):
+        assert adds_bos_token(TemplateBosTokenizer(bos_token_id=1)) is True
+
+    def test_add_bos_token_flag_is_honoured(self):
+        assert adds_bos_token(FlagBosTokenizer(bos_token_id=1)) is True
+
+    def test_bos_defined_but_not_added(self):
+        """dolma2 and SmolLM2 name a BOS token but never add it."""
+        assert adds_bos_token(MockTokenizer(bos_token_id=1)) is False
+
+    def test_no_bos_token(self):
+        """Qwen tokenizers define no BOS."""
+        assert adds_bos_token(TemplateBosTokenizer(bos_token_id=None)) is False
+
+
+class TestBosForTemplateTokenizers:
+    """A tokenizer that adds BOS when encoding text gets BOS before every context."""
+
+    def test_non_empty_context_starts_with_bos(self):
+        tokenizer = TemplateBosTokenizer(bos_token_id=1)
+        ctx, cont = encode_context_and_continuation(tokenizer, "ab", "cd")
+        assert ctx == [1, ord("a"), ord("b")]
+        assert cont == [ord("c"), ord("d")]
+
+    def test_continuation_never_gets_bos(self):
+        tokenizer = TemplateBosTokenizer(bos_token_id=1)
+        _, cont = encode_context_and_continuation(tokenizer, "ab ", "cd")
+        assert cont == [ord(" "), ord("c"), ord("d")]
+
+    def test_empty_context_gets_one_bos(self):
+        tokenizer = TemplateBosTokenizer(bos_token_id=1)
+        ctx, _ = encode_context_and_continuation(tokenizer, "", "cd")
+        assert ctx == [1]
+
+    def test_explicit_setting_overrides_the_tokenizer(self):
+        """A provider with its own BOS setting (olmo_core) passes it as add_bos."""
+        ctx, _ = encode_context_and_continuation(
+            TemplateBosTokenizer(bos_token_id=1), "ab", "cd", add_bos=False
+        )
+        assert ctx == [ord("a"), ord("b")]
+        ctx, _ = encode_context_and_continuation(
+            MockTokenizer(bos_token_id=1), "ab", "cd", add_bos=True
+        )
+        assert ctx == [1, ord("a"), ord("b")]
+
+    def test_tokenizer_without_bos_is_unchanged(self):
+        tokenizer = MockTokenizer(bos_token_id=1)
+        ctx, _ = encode_context_and_continuation(tokenizer, "ab", "cd")
+        assert ctx == [ord("a"), ord("b")]
 
 
 class TestEdgeCases:
