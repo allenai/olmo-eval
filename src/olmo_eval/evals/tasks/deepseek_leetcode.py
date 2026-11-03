@@ -18,31 +18,6 @@ from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import OLMO3_HUMANEVAL_STOP_SEQUENCES
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
-#: The header DeepSeek-Coder's harness puts before every program
-#: (Evaluation/LeetCode/human_eval/evaluation.py, IMPORT_HELPER["python"]). 135 of the
-#: 180 prompts annotate with List or Optional without importing them; without the
-#: header every program for those problems fails with NameError before a test runs.
-DEEPSEEK_IMPORT_HEADER = "\n".join(
-    (
-        "import math",
-        "import re",
-        "import sys",
-        "import copy",
-        "import datetime",
-        "import itertools",
-        "import collections",
-        "import heapq",
-        "import functools",
-        "import hashlib",
-        "import numpy",
-        "import numpy as np",
-        "import string",
-        "from typing import *",
-        "from collections import *",
-        "from functools import *",
-    )
-)
-
 
 @dataclass(frozen=True, slots=True)
 class CodeExecutionScorer3s(CodeExecutionScorer):
@@ -118,14 +93,12 @@ class DeepSeekLeetCode(Task):
         return text
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
-        settings = self.config.task_settings or {}
-        header = DEEPSEEK_IMPORT_HEADER + "\n" if settings.get("import_header") else ""
         for response in responses:
             prompt = response.instance.metadata["prompt"]
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
-                    output.extracted_answer = header + prompt + code
+                    output.extracted_answer = prompt + code
                 else:
                     output.extracted_answer = None
 
@@ -155,8 +128,22 @@ class DeepSeekLeetCodeOlmo3BaseV2(DeepSeekLeetCode):
 
 @register("deepseek_leetcode:olmo3base:v3")
 class DeepSeekLeetCodeOlmo3BaseV3(DeepSeekLeetCodeOlmo3BaseV2):
-    """v2 with the upstream import header before every program, so the problems whose
-    prompts use List or Optional can pass."""
+    """v2 with the import header DeepSeek-Coder's harness puts before every program
+    (IMPORT_HELPER["python"] in Evaluation/LeetCode/human_eval/evaluation.py). 135 of
+    the 180 prompts use List or Optional without importing them."""
 
-    # Sets the header in the task hash, apart from the specs that run without it
+    IMPORT_HEADER = (
+        "import math\nimport re\nimport sys\nimport copy\nimport datetime\n"
+        "import itertools\nimport collections\nimport heapq\nimport functools\n"
+        "import hashlib\nimport numpy\nimport numpy as np\nimport string\n"
+        "from typing import *\nfrom collections import *\nfrom functools import *\n"
+    )
+    # Gives v3 its own task hash
     task_settings = {"import_header": "deepseek_coder"}
+
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        super()._extract_answers(responses)
+        for response in responses:
+            for output in response.outputs:
+                if output.extracted_answer is not None:
+                    output.extracted_answer = self.IMPORT_HEADER + output.extracted_answer
