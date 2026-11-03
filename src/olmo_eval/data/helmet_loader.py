@@ -4,7 +4,9 @@ Loads HELMET (https://github.com/princeton-nlp/HELMET) data from the
 ai2-internal `allenai/helmet-plus` dataset on the Hub, which re-hosts
 HELMET's pre-generated and pre-retrieved files so consumers can fetch them
 per task. The synthetic `json_kv` tiers are regenerated with HELMET's own
-generator, calibrated against the Olmo 3 tokenizer.
+generator, calibrated against the Olmo 3 tokenizer, and extended past
+standard HELMET's 128k ceiling to 2m tokens; synthetic context can be scaled
+where real documents cannot.
 
 Downloads are pinned to a fixed revision of the dataset so that results stay
 reproducible as the dataset grows.
