@@ -6,11 +6,13 @@ These tests use mock tokenizers and don't require GPU.
 from __future__ import annotations
 
 from olmo_eval.inference.tokenizer_utils import (
-    adds_bos_token,
+    default_prefix_ids,
     encode_context_and_continuation,
+    encode_prompt,
     get_bos_token_ids,
     get_context_token_ids,
     has_bos_token,
+    resolve_prefix_ids,
 )
 
 
@@ -44,9 +46,17 @@ class TemplateBosTokenizer(MockTokenizer):
 
 
 class FlagBosTokenizer(MockTokenizer):
-    """Declares ``add_bos_token = True`` (the lm_eval check) without a post-processor."""
+    """Declares ``add_bos_token = True`` but puts nothing in front when encoding."""
 
     add_bos_token = True
+
+
+class BosEosTokenizer(MockTokenizer):
+    """Wraps text in BOS ... EOS when encoding with special tokens."""
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        ids = [ord(c) for c in text]
+        return [self.bos_token_id, *ids, self.eos_token_id] if add_special_tokens else ids
 
 
 class TestGetBosTokenIds:
@@ -168,22 +178,60 @@ class TestEncodeContextAndContinuation:
         assert cont == [ord(" "), ord(" "), ord("c"), ord("d")]
 
 
-class TestAddsBosToken:
-    """Tests for adds_bos_token()."""
+class TestDefaultPrefixIds:
+    """Tests for default_prefix_ids()."""
 
-    def test_post_processor_bos_is_detected(self):
-        assert adds_bos_token(TemplateBosTokenizer(bos_token_id=1)) is True
+    def test_template_bos_is_measured(self):
+        """The flag reads False, but encoding puts BOS first."""
+        assert default_prefix_ids(TemplateBosTokenizer(bos_token_id=1)) == [1]
 
-    def test_add_bos_token_flag_is_honoured(self):
-        assert adds_bos_token(FlagBosTokenizer(bos_token_id=1)) is True
+    def test_flag_alone_adds_nothing(self):
+        """What the tokenizer does decides, not what its flag says."""
+        assert default_prefix_ids(FlagBosTokenizer(bos_token_id=1)) == []
 
-    def test_bos_defined_but_not_added(self):
-        """dolma2 and SmolLM2 name a BOS token but never add it."""
-        assert adds_bos_token(MockTokenizer(bos_token_id=1)) is False
+    def test_tokenizer_that_adds_nothing(self):
+        assert default_prefix_ids(MockTokenizer(bos_token_id=1)) == []
 
-    def test_no_bos_token(self):
-        """Qwen tokenizers define no BOS."""
-        assert adds_bos_token(TemplateBosTokenizer(bos_token_id=None)) is False
+    def test_trailing_eos_is_not_prefix(self):
+        assert default_prefix_ids(BosEosTokenizer(bos_token_id=1, eos_token_id=2)) == [1]
+
+
+class TestResolvePrefixIds:
+    """Tests for resolve_prefix_ids()."""
+
+    def test_none_follows_the_tokenizer(self):
+        assert resolve_prefix_ids(TemplateBosTokenizer(bos_token_id=1), None) == [1]
+        assert resolve_prefix_ids(MockTokenizer(bos_token_id=1), None) == []
+
+    def test_false_adds_nothing(self):
+        assert resolve_prefix_ids(TemplateBosTokenizer(bos_token_id=1), False) == []
+
+    def test_true_keeps_the_tokenizer_prefix(self):
+        assert resolve_prefix_ids(TemplateBosTokenizer(bos_token_id=1), True) == [1]
+
+    def test_true_adds_bos_when_the_tokenizer_adds_nothing(self):
+        assert resolve_prefix_ids(MockTokenizer(bos_token_id=1), True) == [1]
+        assert resolve_prefix_ids(FlagBosTokenizer(bos_token_id=1), True) == [1]
+
+    def test_true_falls_back_to_eos(self):
+        assert resolve_prefix_ids(MockTokenizer(bos_token_id=None, eos_token_id=2), True) == [2]
+
+
+class TestEncodePrompt:
+    """Tests for encode_prompt()."""
+
+    def test_prepends_prefix(self):
+        tokenizer = MockTokenizer(bos_token_id=1)
+        assert encode_prompt(tokenizer, "ab", [1]) == [1, ord("a"), ord("b")]
+
+    def test_empty_prefix(self):
+        tokenizer = TemplateBosTokenizer(bos_token_id=1)
+        assert encode_prompt(tokenizer, "ab", []) == [ord("a"), ord("b")]
+
+    def test_prefix_already_in_text_is_not_doubled(self):
+        """A chat template that writes BOS itself keeps a single BOS."""
+        tokenizer = MockTokenizer(bos_token_id=ord("<"))
+        assert encode_prompt(tokenizer, "<ab", [ord("<")]) == [ord("<"), ord("a"), ord("b")]
 
 
 class TestBosForTemplateTokenizers:
@@ -205,14 +253,14 @@ class TestBosForTemplateTokenizers:
         ctx, _ = encode_context_and_continuation(tokenizer, "", "cd")
         assert ctx == [1]
 
-    def test_explicit_setting_overrides_the_tokenizer(self):
-        """A provider with its own BOS setting (olmo_core) passes it as add_bos."""
+    def test_provider_prefix_overrides_the_tokenizer(self):
+        """A provider passes its resolved prefix, which wins over the tokenizer default."""
         ctx, _ = encode_context_and_continuation(
-            TemplateBosTokenizer(bos_token_id=1), "ab", "cd", add_bos=False
+            TemplateBosTokenizer(bos_token_id=1), "ab", "cd", prefix_ids=[]
         )
         assert ctx == [ord("a"), ord("b")]
         ctx, _ = encode_context_and_continuation(
-            MockTokenizer(bos_token_id=1), "ab", "cd", add_bos=True
+            MockTokenizer(bos_token_id=1), "ab", "cd", prefix_ids=[1]
         )
         assert ctx == [1, ord("a"), ord("b")]
 
@@ -220,6 +268,23 @@ class TestBosForTemplateTokenizers:
         tokenizer = MockTokenizer(bos_token_id=1)
         ctx, _ = encode_context_and_continuation(tokenizer, "ab", "cd")
         assert ctx == [ord("a"), ord("b")]
+
+    def test_flag_only_tokenizer_gets_no_bos(self):
+        tokenizer = FlagBosTokenizer(bos_token_id=1)
+        ctx, _ = encode_context_and_continuation(tokenizer, "ab", "cd")
+        assert ctx == [ord("a"), ord("b")]
+
+    def test_generation_and_likelihood_start_the_same(self):
+        """The context a provider scores starts like the prompt it generates from."""
+        for tokenizer in (
+            TemplateBosTokenizer(bos_token_id=1),
+            MockTokenizer(bos_token_id=1),
+            FlagBosTokenizer(bos_token_id=1),
+        ):
+            for setting in (None, True, False):
+                prefix = resolve_prefix_ids(tokenizer, setting)
+                ctx, _ = encode_context_and_continuation(tokenizer, "ab", "cd", prefix_ids=prefix)
+                assert ctx == encode_prompt(tokenizer, "ab", prefix)
 
 
 class TestEdgeCases:

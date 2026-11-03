@@ -33,30 +33,76 @@ def has_bos_token(tokenizer: Any) -> bool:
     return tokenizer.bos_token_id is not None
 
 
-def adds_bos_token(tokenizer: Any) -> bool:
-    """Check whether the tokenizer starts an encoded text with its BOS token.
+def default_prefix_ids(tokenizer: Any) -> list[int]:
+    """Return the special tokens the tokenizer puts in front of a text by default.
 
-    True when ``add_bos_token`` is set, as lm_eval checks, or when encoding with
-    special tokens puts BOS first. The second case covers tokenizers that add BOS
-    through their post-processor template (Llama 3, Gemma 3 and 4, LFM2.5,
-    Nemotron-H): their ``add_bos_token`` attribute is False, yet ``tokenizer(text)``
-    and a server tokenizing the text itself both put BOS first.
+    Measured, not read from a flag: a probe is encoded with and without special
+    tokens, and whatever comes before the probe's own tokens is the prefix. This is
+    the BOS for tokenizers that add it through their post-processor template (Llama 3,
+    Gemma 3 and 4, LFM2.5, Nemotron-H), whose ``add_bos_token`` attribute reads False
+    under transformers 5, and it works the same for a tokenizer that encodes on a
+    server. Special tokens appended after the text (an EOS) are not part of the prefix.
 
     Args:
-        tokenizer: A tokenizer object with bos_token_id and an encode method.
+        tokenizer: A tokenizer object with an encode method.
 
     Returns:
-        True if the tokenizer adds BOS when encoding text by default.
+        The prefix token IDs; empty for tokenizers that add nothing in front.
     """
-    if getattr(tokenizer, "add_bos_token", False):
-        return True
-    bos_id = tokenizer.bos_token_id
-    if bos_id is None:
-        return False
     probe = "a"
     with_special = tokenizer.encode(probe, add_special_tokens=True)
     without_special = tokenizer.encode(probe, add_special_tokens=False)
-    return with_special[:1] == [bos_id] and without_special[:1] != [bos_id]
+    if not without_special:
+        return []
+    width = len(without_special)
+    for start in range(len(with_special) - width + 1):
+        if with_special[start : start + width] == without_special:
+            return list(with_special[:start])
+    return []
+
+
+def resolve_prefix_ids(tokenizer: Any, add_bos_token: bool | None) -> list[int]:
+    """Resolve a provider's ``add_bos_token`` setting to the token IDs every input starts with.
+
+    This is the one place that decides BOS. Providers call it with their setting and
+    use the result for both generation and log-likelihood inputs, so the two always
+    start the same way.
+
+    Args:
+        tokenizer: A tokenizer object with an encode method and a bos_token_id.
+        add_bos_token: None follows the tokenizer (see ``default_prefix_ids``); False
+            adds nothing; True adds the tokenizer's own prefix, or its BOS (EOS when it
+            has none) for a tokenizer that adds nothing by default.
+
+    Returns:
+        The prefix token IDs.
+    """
+    if add_bos_token is False:
+        return []
+    prefix = default_prefix_ids(tokenizer)
+    if add_bos_token is None or prefix:
+        return prefix
+    return get_bos_token_ids(tokenizer, fallback_to_eos=True)
+
+
+def encode_prompt(tokenizer: Any, text: str, prefix_ids: list[int]) -> list[int]:
+    """Encode a prompt without special tokens and start it with ``prefix_ids``.
+
+    The prefix is not repeated when the text already starts with it, as a chat template
+    that writes its own BOS does.
+
+    Args:
+        tokenizer: A tokenizer object with an encode method.
+        text: The prompt text.
+        prefix_ids: The resolved prefix (see ``resolve_prefix_ids``).
+
+    Returns:
+        The prompt's token IDs.
+    """
+    ids = tokenizer.encode(text, add_special_tokens=False)
+    if prefix_ids and ids[: len(prefix_ids)] != prefix_ids:
+        return [*prefix_ids, *ids]
+    return ids
 
 
 def get_context_token_ids(
@@ -89,7 +135,7 @@ def encode_context_and_continuation(
     *,
     use_bos_for_empty: bool = True,
     fallback_to_eos: bool = True,
-    add_bos: bool | None = None,
+    prefix_ids: list[int] | None = None,
 ) -> tuple[list[int], list[int]]:
     """Encode context/continuation pair with proper BOS handling and trailing space logic.
 
@@ -104,9 +150,9 @@ def encode_context_and_continuation(
         continuation: The continuation string to evaluate.
         use_bos_for_empty: If True and context is empty, use BOS token as context.
         fallback_to_eos: If True and BOS is None, use EOS token ID instead.
-        add_bos: Whether a non-empty context starts with BOS. None follows the
-            tokenizer (see ``adds_bos_token``); a provider with its own BOS setting
-            passes it here.
+        prefix_ids: The tokens a non-empty context starts with, as resolved by the
+            provider (``resolve_prefix_ids``). None resolves them here with the
+            tokenizer's default, for callers without a provider setting.
 
     Returns:
         Tuple of (context_token_ids, continuation_token_ids).
@@ -123,15 +169,13 @@ def encode_context_and_continuation(
         continuation = context[-n_spaces:] + continuation
         context = context[:-n_spaces]
 
-    # Add BOS when the tokenizer adds it to encoded text by default, as generation does
-    # when the server tokenizes the prompt (see adds_bos_token)
-    if add_bos is None:
-        add_bos = adds_bos_token(tokenizer)
-    bos_ids = get_bos_token_ids(tokenizer, fallback_to_eos=fallback_to_eos) if add_bos else []
+    # Start the context the way the provider starts its generation prompts
+    if prefix_ids is None:
+        prefix_ids = resolve_prefix_ids(tokenizer, None)
 
     # Encode the full sequence and extract continuation tokens
     whole_enc = tokenizer.encode(context + continuation, add_special_tokens=False)
     context_enc = tokenizer.encode(context, add_special_tokens=False)
     continuation_enc = whole_enc[len(context_enc) :]
 
-    return bos_ids + context_enc, continuation_enc
+    return [*prefix_ids, *context_enc], continuation_enc

@@ -27,7 +27,11 @@ from olmo_eval.inference.errors import (
     is_context_overflow,
 )
 from olmo_eval.inference.hf_cache import refresh_hf_cache
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.tokenizer_utils import (
+    encode_context_and_continuation,
+    encode_prompt,
+    resolve_prefix_ids,
+)
 from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
@@ -122,17 +126,6 @@ class RemoteTokenizer:
         if self._client is not None:
             self._client.close()
             self._client = None
-
-
-class TokenizerBosOverride:
-    """Tokenizer proxy that overrides add_bos_token without mutating the underlying tokenizer."""
-
-    def __init__(self, tokenizer: Any, add_bos_token: bool) -> None:
-        self._tokenizer = tokenizer
-        self.add_bos_token = add_bos_token
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._tokenizer, name)
 
 
 def _cut_at_stop_sequence(text: str, stop_sequences: list[str] | None) -> str:
@@ -318,9 +311,11 @@ class VLLMServerProvider(InferenceProvider):
                 local tokenizer loading.
             force_download: Force-refresh Hugging Face model/tokenizer cache entries
                 before managed server startup and local tokenizer loads.
-            add_bos_token: Optional provider-level BOS override for local tokenization paths.
-                This matches the old oe-eval-internal runtime behavior and is not forwarded
-                as a vLLM server CLI argument.
+            add_bos_token: Whether inputs start with BOS. None (default) follows the
+                tokenizer, as the server does when it tokenizes text; True or False forces
+                it on or off for generation and log-likelihood inputs alike. Set False to
+                reproduce the old oe-eval-internal completions, which sent no special
+                tokens. Not forwarded as a vLLM server CLI argument.
             prompt_logprobs: Number of prompt logprobs to request for loglikelihood scoring.
                 Defaults to 5 in the current runtime.
             completion_use_prompt_token_ids: If True, locally tokenize completion prompts
@@ -676,11 +671,14 @@ class VLLMServerProvider(InferenceProvider):
     async def _count_request_tokens(self, request: LMRequest) -> int | None:
         """Return a request's prompt length as the server will tokenize it."""
         if self._uses_completions(request):
+            payload = self._get_completion_prompt_payload(request.prompt)
+            if not isinstance(payload, str):
+                return len(payload)
             return await self._count_tokens(
                 {
                     "model": self._request_model_name,
-                    "prompt": request.prompt,
-                    "add_special_tokens": bool(self._add_bos_token),
+                    "prompt": payload,
+                    "add_special_tokens": True,
                 }
             )
         messages = (
@@ -721,6 +719,8 @@ class VLLMServerProvider(InferenceProvider):
             and request.prompt
         )
         if use_completions:
+            # Same rule as _get_completion_prompt_payload, without tokenizing for a trace
+            sends_text = not self._completion_use_prompt_token_ids and self._add_bos_token is None
             trace["provider"] = "VLLMServerProvider"
             trace["endpoint"] = "/completions"
             trace["generation_kwargs"] = {
@@ -729,7 +729,7 @@ class VLLMServerProvider(InferenceProvider):
                 "temperature": params.temperature,
                 "logprobs": 1,
                 "num_samples": params.num_samples,
-                "add_special_tokens": False,
+                "add_special_tokens": sends_text,
             }
             if params.top_p is not None:
                 trace["generation_kwargs"]["top_p"] = params.top_p
@@ -741,9 +741,7 @@ class VLLMServerProvider(InferenceProvider):
             if truncation_side is not None:
                 trace["generation_kwargs"]["truncation_side"] = truncation_side
             trace["stop_sequences"] = self._get_completion_stop_sequences(params) or []
-            trace["input_mode"] = (
-                "prompt_token_ids" if self._completion_use_prompt_token_ids else "text"
-            )
+            trace["input_mode"] = "text" if sends_text else "prompt_token_ids"
             return trace
 
         trace["provider"] = "VLLMServerProvider"
@@ -799,13 +797,31 @@ class VLLMServerProvider(InferenceProvider):
             stop_sequences.append(eos_stop)
         return stop_sequences or None
 
-    def _get_completion_prompt_payload(self, prompt: str) -> str | list[int]:
-        """Build completion prompt payload, optionally using local token IDs for parity."""
-        if not self._completion_use_prompt_token_ids:
-            return prompt
+    def _prefix_tokenizer(self) -> Any:
+        """The local tokenizer when it can be loaded, else the server's."""
+        try:
+            return self._get_tokenizer(require_local=True)
+        except Exception:
+            return self._get_tokenizer(require_local=False)
 
-        tokenizer = self._get_tokenizer(require_local=True)
-        return tokenizer.encode(prompt, add_special_tokens=bool(self._add_bos_token))
+    def _prefix_ids(self) -> list[int]:
+        """The tokens every prompt and log-likelihood context starts with (resolved once)."""
+        cache: dict[bool | None, list[int]] = self.__dict__.setdefault("_prefix_cache", {})
+        setting = getattr(self, "_add_bos_token", None)
+        if setting not in cache:
+            cache[setting] = resolve_prefix_ids(self._prefix_tokenizer(), setting)
+        return cache[setting]
+
+    def _get_completion_prompt_payload(self, prompt: str) -> str | list[int]:
+        """Build the completion prompt: text, or token IDs that start with the prefix.
+
+        Text is sent only when add_bos_token is unset and token IDs were not asked for:
+        the server then tokenizes it with the tokenizer's defaults, which put the resolved
+        prefix first by construction. Otherwise the prompt is tokenized here.
+        """
+        if not self._completion_use_prompt_token_ids and self._add_bos_token is None:
+            return prompt
+        return encode_prompt(self._prefix_tokenizer(), prompt, self._prefix_ids())
 
     def _get_prompt_truncation(
         self,
@@ -913,9 +929,10 @@ class VLLMServerProvider(InferenceProvider):
         self, client: AsyncOpenAI, request: LMRequest, params: SamplingParams
     ) -> list[LMOutput]:
         """Generate using the /v1/completions endpoint."""
+        prompt_payload = self._get_completion_prompt_payload(request.prompt)
         kwargs: dict[str, Any] = {
             "model": self._request_model_name,
-            "prompt": request.prompt,
+            "prompt": prompt_payload,
             "n": params.num_samples,
             "logprobs": 1,  # Request logprobs for metrics
         }
@@ -923,7 +940,8 @@ class VLLMServerProvider(InferenceProvider):
         # rather than sending null, which some OpenAI-compatible servers reject.
         if params.max_tokens is not None:
             kwargs["max_tokens"] = params.max_tokens
-        extra_body: dict[str, Any] = {"add_special_tokens": bool(self._add_bos_token)}
+        # Token IDs already carry the prefix; text gets it from the server's tokenizer.
+        extra_body: dict[str, Any] = {"add_special_tokens": isinstance(prompt_payload, str)}
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
@@ -945,7 +963,7 @@ class VLLMServerProvider(InferenceProvider):
                 f"{self.base_url}/completions",
                 json={
                     **kwargs,
-                    "prompt": self._get_completion_prompt_payload(request.prompt),
+                    "prompt": prompt_payload,
                     **extra_body,
                 },
             )
@@ -1261,8 +1279,6 @@ class VLLMServerProvider(InferenceProvider):
             tokenizer = self._get_tokenizer(require_local=True)
         except (ImportError, Exception):
             tokenizer = self._get_tokenizer(require_local=False)
-        if self._add_bos_token is not None:
-            tokenizer = TokenizerBosOverride(tokenizer, self._add_bos_token)
         params = self._default_sampling_params(params)
 
         # Get the context/prompt text
@@ -1279,7 +1295,7 @@ class VLLMServerProvider(InferenceProvider):
             ctx = cont_prompts[i] if cont_prompts else context
             # Use shared utility for proper tokenization (handles BOS, trailing spaces)
             context_enc, continuation_enc = encode_context_and_continuation(
-                tokenizer, ctx, continuation
+                tokenizer, ctx, continuation, prefix_ids=self._prefix_ids()
             )
 
             # RemoteTokenizer doesn't have BOS/EOS token IDs, so for empty contexts
