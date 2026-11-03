@@ -88,8 +88,8 @@ separate and provisional. Do not choose seeds or parameters to fit aggregate tot
   second one. An empty context still gets BOS (EOS when there is none), as before. The
   `add_bos_token` provider setting is removed and passing it raises an error; a model
   whose tokenizer does not match its training should be given a tokenizer that does
-  (`tokenizer=`). SGLang keeps its own `add_bos_token`, which only applies to its
-  multimodal prompt formats. What changes:
+  (`tokenizer=`). The `sglang` provider is unchanged: it keeps its own `add_bos_token`,
+  which also turns BOS off for text prompts, though no preset sets it. What changes:
   - Log-likelihood contexts of the affected models now start with BOS, as their
     generation prompts already did. Before, BOS was added only when
     `tokenizer.add_bos_token` was set, which is False for post-processor tokenizers, so
