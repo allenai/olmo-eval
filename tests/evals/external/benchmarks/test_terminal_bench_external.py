@@ -749,6 +749,29 @@ class TestExecuteTask:
         assert not result.errored
         assert result.reward == 1.0
 
+    def test_a_verifier_failure_overrides_an_earlier_model_error(self) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        args = tb_eval.TerminalBenchArgs.from_dict({})
+
+        async def misbehaving_agent(manager, task, provider, tb_args):
+            return AgentTrajectory(turns=()), "complete", 0, "model_error: refusal"
+
+        verification = tb_eval.TerminalBenchVerifier.run_verification
+
+        async def timed_out(self, *args, **kwargs):
+            result = await verification(self, *args, **kwargs)
+            result.error = "verifier_timeout"
+            return result
+
+        with (
+            mock.patch.object(eval_obj, "_run_agent", side_effect=misbehaving_agent),
+            mock.patch.object(tb_eval.TerminalBenchVerifier, "run_verification", timed_out),
+        ):
+            result = self._run(eval_obj, make_task(), args)
+
+        assert result.error == "verifier_timeout (after model_error: refusal)"
+        assert result.errored
+
     def test_an_infrastructure_failure_is_an_error(self) -> None:
         eval_obj = tb_eval.TerminalBenchExternalEval()
         args = tb_eval.TerminalBenchArgs.from_dict({})

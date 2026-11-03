@@ -16,6 +16,7 @@ from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.failures import (
     DEFAULT_MAX_ERROR_RATE,
+    add_harness_failure,
     failure_budget_error,
     is_harness_failure,
     scaffold_error,
@@ -582,7 +583,11 @@ class TerminalBenchExternalEval(ExternalEval):
                 agent_duration=agent_duration,
                 verification_output=verification.test_output,
                 verification_exit_code=verification.test_exit_code,
-                error=verification.error or agent_error,
+                error=(
+                    add_harness_failure(agent_error, verification.error)
+                    if verification.error
+                    else agent_error
+                ),
                 difficulty=task.difficulty,
                 category=task.category,
                 attempt=attempt,
