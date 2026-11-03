@@ -52,7 +52,8 @@ class ReplayProvider(InferenceProvider):
     them; each file is paired with the requests file written beside it, which holds the
     prompts. A request whose prompt was not saved, or was saved with a different number
     of samples, fails like a generation error, so the task's failure budget catches a
-    replay against the wrong run. Prompts saved more than once are served in order.
+    replay against the wrong run. Prompts saved more than once by one file are served
+    in order; a prompt saved by two files (two configurations of a task) is rejected.
     Requests with images or tools fail too: the saved files keep neither image
     identities nor native tool calls.
     """
@@ -73,11 +74,17 @@ class ReplayProvider(InferenceProvider):
             )
 
         self._saved: dict[str, deque[list[dict[str, Any]]]] = defaultdict(deque)
+        sources: dict[str, Path] = {}
         for path in files:
             requests = {r["doc_id"]: r for r in _read_jsonl(_requests_path(path))}
             for prediction in _read_jsonl(path):
                 request = requests[prediction["doc_id"]]["request"]
                 key = _prompt_key(request.get("context"), request.get("system_prompt"))
+                if sources.setdefault(key, path) != path:
+                    raise ValueError(
+                        f"{sources[key].name} and {path.name} saved the same prompt; "
+                        "point provider.predictions at the predictions file to replay"
+                    )
                 self._saved[key].append(prediction["model_output"])
 
     def _replay(self, request: LMRequest, num_samples: int) -> list[LMOutput]:

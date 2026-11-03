@@ -1112,8 +1112,9 @@ uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 The `replay` provider answers each request with the generation an earlier run saved
 for the same prompt, so scorer and metric changes can be measured without a model or
 GPU. Point it at a predictions file or a results directory holding one model's
-predictions (each file is read with the requests file saved beside it), and repeat the
-original run's model and task options so the prompts match:
+predictions (each file is read with the requests file saved beside it; a prompt saved by
+two task configurations needs the file), and repeat the original run's model and task
+options so the prompts match:
 
 ```bash
 uv run olmo-eval run -m mock -t gsm8k -o limit=100 \

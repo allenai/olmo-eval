@@ -123,3 +123,16 @@ def test_image_and_tool_requests_fail(tmp_path: Path) -> None:
 
     for outputs in provider.generate([image, tool]):
         assert "images or tools" in str(request_error(outputs))
+
+
+def test_rejects_a_prompt_saved_by_two_task_configurations(tmp_path: Path) -> None:
+    _save(tmp_path, "task", [("Q", [{"text": "A"}])])
+    _save(tmp_path, "task:variant", [("Q", [{"text": "B"}, {"text": "C"}])])
+
+    with pytest.raises(ValueError, match="saved the same prompt"):
+        ReplayProvider(predictions=str(tmp_path))
+    path = next(tmp_path.rglob("task_variant*-predictions.jsonl"))
+    outputs = ReplayProvider(predictions=str(path)).generate(
+        [_completion("Q")], SamplingParams(num_samples=2)
+    )
+    assert [o.text for o in outputs[0]] == ["B", "C"]
