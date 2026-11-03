@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider, is_debug_requests
@@ -95,6 +96,29 @@ def _convert_logprobs(
         )
 
     return result
+
+
+def _raw_visible_prefix(raw: str, visible: str, special_tokens: list[str]) -> str | None:
+    """Keep a raw token decode through the visible prefix actually returned."""
+    if not special_tokens:
+        return None
+    pattern = re.compile(
+        "|".join(
+            re.escape(token)
+            for token in sorted(special_tokens, key=lambda token: len(token), reverse=True)
+        )
+    )
+    if not pattern.sub("", raw).startswith(visible):
+        return None
+    remaining = len(visible)
+    position = 0
+    for marker in pattern.finditer(raw):
+        size = marker.start() - position
+        if remaining <= size:
+            return raw[: position + remaining]
+        remaining -= size
+        position = marker.end()
+    return raw[: position + remaining]
 
 
 class VLLMProvider(InferenceProvider):
@@ -292,6 +316,19 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
 
+        tokenizer = self.llm.get_tokenizer()
+        added_vocab = tokenizer.get_added_vocab() if hasattr(tokenizer, "get_added_vocab") else {}
+        harmony_starts = {
+            added_vocab[token]
+            for token in ("<|channel|>", "<|meta_sep|>", "<|start|>", "<|im_start|>")
+            if token in added_vocab
+        }
+        special_tokens = set(getattr(tokenizer, "all_special_tokens", []))
+        special_tokens.update(
+            str(token)
+            for token in getattr(tokenizer, "added_tokens_decoder", {}).values()
+            if token.special
+        )
         results: list[list[LMOutput]] = []
         for output in outputs:
             request_outputs: list[LMOutput] = []
@@ -311,6 +348,24 @@ class VLLMProvider(InferenceProvider):
 
                 metadata["finish_reason"] = completion.finish_reason
                 metadata["completion_tokens"] = len(completion.token_ids)
+                if completion.token_ids and completion.token_ids[0] in harmony_starts:
+                    # vLLM's default decoder drops Harmony's reserved delimiters.
+                    # Keep them for opt-in parsing; baseline text stays unchanged.
+                    raw_text = tokenizer.decode(completion.token_ids, skip_special_tokens=False)
+                    stop_reason = getattr(completion, "stop_reason", None)
+                    if completion.finish_reason == "stop" and isinstance(stop_reason, str):
+                        # Stop strings match the visible decode, and can also occur
+                        # inside raw delimiter spellings or span removed delimiters.
+                        truncated = _raw_visible_prefix(
+                            raw_text, completion.text, list(special_tokens)
+                        )
+                        if truncated is None:
+                            metadata["response_parser_error"] = (
+                                "Cannot align Harmony token decode with returned completion text"
+                            )
+                        else:
+                            raw_text = truncated
+                    metadata["text_with_special_tokens"] = raw_text
 
                 request_outputs.append(
                     LMOutput(
