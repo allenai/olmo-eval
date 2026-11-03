@@ -1233,3 +1233,91 @@ def test_recall_suite_is_json_kv_alone_past_standard_lengths():
     assert len(get_suite(f"helmet_recall__{longest}").expanded_tasks) == 4
     for size in (262144, 524288, 1048576, 2097152):
         assert get_suite(f"helmet_recall__{size}").expanded_tasks == (f"helmet_json_kv__{size}",)
+
+
+@pytest.mark.parametrize(
+    ("spec", "window_cut"),
+    [
+        ("helmet_kilt_nq__8192", False),
+        ("helmet_kilt_nq__8192:v2", True),
+        ("helmet_infbench_qa_eng__8192:base", False),
+        ("helmet_infbench_qa_eng__8192:base_v2", True),
+    ],
+)
+def test_v2_cuts_the_context_only_to_the_model_window(spec, window_cut):
+    task = get_task(spec)
+    task._templates = {"user": "Read. {context}\n\nQuestion: {question}", "system": "Answer:"}
+    instance = task.process_doc({"context": "THE DOCUMENT", "question": "q", "answer": ["a"]})
+    fit = task.format_request(instance).context_fit
+
+    assert fit is not None and fit.text == "THE DOCUMENT"
+    expected = None if window_cut else 8192 - task.config.sampling_params.max_tokens
+    assert fit.max_prompt_tokens == expected
+
+
+def test_v2_variants_keep_each_mode_and_add_their_fixes():
+    chat, base = get_task(f"{LONGQA_SPEC}:v2"), get_task(f"{LONGQA_SPEC}:base_v2")
+
+    assert chat.settings["use_chat_template"] and not base.settings["use_chat_template"]
+    for task in (chat, base):
+        assert task.fixes == {"context_cut": "model_window", "answer_cut": "first_paragraph"}
+    assert get_task("helmet_kilt_nq__8192:v2").fixes == {"context_cut": "model_window"}
+    assert get_task(LONGQA_SPEC).fixes == {}
+
+
+def test_fixes_cannot_be_overridden_to_something_else():
+    settings = get_task(f"{LONGQA_SPEC}:v2").config.task_settings
+    bad = {**settings, "fixes": {"context_cut": "model_window"}}
+
+    with pytest.raises(ValueError, match="fixes"):
+        get_task(LONGQA_SPEC, {"task_settings": bad})
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Answer: the North Pole", "the North Pole"),
+        ("Answer: he marries the rector of\nthe parish.", "he marries the rector of the parish."),
+        ("They head north.\nAnswer: Answer: the Pole", "the Pole"),
+        ("no prefix here\nsecond line", "no prefix here second line"),
+        ("Answer: the North Pole.\n\nQuestion: Who leads?\nAnswer: Hatteras", "the North Pole."),
+        ("Answer: the North Pole.\nQuestion: Who leads?", "the North Pole."),
+        ("Answer: A lifeboat\n\n\n\nCHAPTER II\n\nThe next day", "A lifeboat"),
+        ("Answer:\n\nthe North Pole\n\nmore", "the North Pole"),
+        ("Answer:", ""),
+    ],
+)
+def test_v2_longqa_judged_answer_is_the_first_paragraph(raw, expected):
+    assert parse_longqa_answer(raw, first_para=True) == expected
+
+
+def test_base_v2_longqa_judges_the_answer_before_the_models_next_question():
+    generation = " the North Pole\nQuestion: Who?\nAnswer: Santa"
+    task, response = _prefixed(f"{LONGQA_SPEC}:base_v2", generation)
+
+    assert task.extract_answer(response.outputs[0]) == "the North Pole"
+
+
+@pytest.mark.parametrize("spec", ["helmet_alce_asqa__8192:base_v2", "helmet_alce_asqa__8192:v2"])
+def test_v2_asqa_scores_the_first_paragraph(spec):
+    task = get_task(spec)
+    prefix = "Answer:" if spec.endswith("base_v2") else ""
+    text = prefix + " Paris [1].\nIt is in France [2].\n\nInstruction: Write a new answer."
+    instance = Instance(question="q", metadata={"prepend_text": "Answer:"})
+    response = Response(
+        instance=instance,
+        request=task.format_request(instance),
+        outputs=[LMOutput(text=text[len(prefix) :])],
+    )
+
+    task.strip_thinking_traces([response])
+    task.strip_thinking_traces([response])  # the runner may prepare a response twice
+
+    output = response.outputs[0]
+    assert output.text == prefix + " Paris [1].\nIt is in France [2]."
+    assert output.metadata["uncut_text"] == text
+
+
+def test_qampari_v2_keeps_the_whole_output():
+    task = get_task("helmet_alce_qampari__8192:base_v2")
+    assert task.fixes == {"context_cut": "model_window"}

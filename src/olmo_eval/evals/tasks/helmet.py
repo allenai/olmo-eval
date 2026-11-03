@@ -111,6 +111,7 @@ from olmo_eval.evals.tasks.helmet_judge import (
     HelmetLongQAJudgedTask,
     HelmetSummBookJudgedTask,
     HelmetSummJudgedTask,
+    first_paragraph,
 )
 from olmo_eval.evals.tasks.ruler import RulerTask, make_ruler_task_class
 
@@ -136,16 +137,23 @@ class HelmetTask(RulerTask):
     evaluated model's own tokenizer, until the prompt fits; the reference-tokenizer
     truncation in the loaders alone lets a model whose tokenizer splits text more
     finely overflow its window.
+
+    The `:v2` and `:base_v2` variants (chat and base mode) apply the fixes that
+    `_v2_fixes` names, recorded in the task hash as `task_settings["fixes"]`.
     """
 
     _tasks_registry: dict[str, dict[str, Any]] = HELMET_TASKS
     _name_prefix: str = "helmet_"
     #: The task's default settings (see `_task_settings`), set on each task class.
     task_settings: dict[str, Any]
+    #: What `:v2` changes for this task (see `_v2_fixes`), set on each task class.
+    v2_fixes: dict[str, str]
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
         self.settings = self._measured_settings(config)
+        #: The fixes this run applies: `v2_fixes` for the `:v2` variants, else none.
+        self.fixes: dict[str, str] = (config.task_settings or {}).get("fixes") or {}
         constants = type(self).task_settings["constants"]
         self.answer_prefix_separator = constants["answer_prefix_separator"]
 
@@ -163,11 +171,17 @@ class HelmetTask(RulerTask):
         if settings is None or default is None:
             raise ValueError(f"{config.name} has no task_settings")
         fixed = {key: value for key, value in default.items() if key != "helmet"}
-        given = {key: value for key, value in settings.items() if key != "helmet"}
+        given = {key: value for key, value in settings.items() if key not in ("helmet", "fixes")}
         if _canonical(given) != _canonical(fixed):
             raise ValueError(
                 f"{config.name}: only task_settings['helmet'] can be overridden; "
                 f"{sorted(fixed)} are set by the code"
+            )
+        fixes = settings.get("fixes")
+        if fixes is not None and _canonical(fixes) != _canonical(type(self).v2_fixes):
+            raise ValueError(
+                f"{config.name}: task_settings['fixes'] is set by the :v2 variants; "
+                f"for this task it is {type(self).v2_fixes}"
             )
         helmet = settings.get("helmet")
         if not isinstance(helmet, dict) or set(helmet) != set(default["helmet"]):
@@ -279,13 +293,18 @@ class HelmetTask(RulerTask):
         if not span:
             return request
         # Upstream's budget: the tier is the whole sequence, generation included.
+        # With the "model_window" fix the provider cuts only to fit the model's window.
         max_tokens = self.config.sampling_params.max_tokens or 0
         start, end = span
         return replace(
             request,
             context_fit=ContextFit(
                 text=instance.question[start:end],
-                max_prompt_tokens=self.context_size - max_tokens,
+                max_prompt_tokens=(
+                    None
+                    if self.fixes.get("context_cut") == "model_window"
+                    else self.context_size - max_tokens
+                ),
             ),
         )
 
@@ -673,6 +692,32 @@ class HelmetAlceTask(HelmetTask):
             seed=self.config.seed,
         )
 
+    def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
+        """With the "first_paragraph" answer cut, score only the first paragraph.
+
+        A base model that has answered goes on with a new `Instruction:` block, a
+        new question or more documents; AutoAIS would judge those sentences as
+        claims and STR-EM would credit answers found in them. The uncut output stays
+        in `metadata["uncut_text"]`.
+        """
+        super().strip_thinking_traces(responses)
+        if self.fixes.get("answer_cut") != "first_paragraph":
+            return
+        for response in responses:
+            prefix = (
+                (response.instance.metadata or {}).get("prepend_text", "")
+                if self.prefixes_outputs
+                else ""
+            )
+            for output in response.outputs:
+                if output.metadata.get("answer_cut"):
+                    continue
+                text = output.text or ""
+                body = text[len(prefix) :] if prefix and text.startswith(prefix) else text
+                output.metadata["uncut_text"] = text
+                output.text = text[: len(text) - len(body)] + first_paragraph(body, ALCE_NEXT_BLOCK)
+                output.metadata["answer_cut"] = True
+
 
 class HelmetRulerTask(HelmetTask):
     """HELMET recall task: one of the RULER needle-in-a-haystack variants.
@@ -788,6 +833,34 @@ MEASURED_KEYS = (
 #: The reference implementation these tasks port.
 HELMET_UPSTREAM = "princeton-nlp/HELMET@aeadacc6"
 
+#: What the `:v2` variants fix, where upstream's method fails a model rather than
+#: measuring it. Recorded in the task hash as `task_settings["fixes"]`.
+#:
+#: - `context_cut: model_window` (every task): HELMET sizes each tier's text in
+#:   Llama-2 tokens, and upstream cuts it to the tier again in the evaluated model's
+#:   own tokens, which drops the end of the text, a needle or gold passage included,
+#:   for any tokenizer that splits it into more tokens than Llama-2's, though the
+#:   model has room for it. The provider now cuts only as far as the model's window
+#:   requires, so every model with room reads the same text.
+#: - `answer_cut: first_paragraph` (NarrativeQA and ASQA): these chat-format tasks
+#:   have no stop sequence, and a base model goes on after answering with a question
+#:   or instruction of its own. The judge (NarrativeQA) or the scorers (ASQA) read
+#:   only the first paragraph. Decoding is greedy, so this equals stopping there.
+V2_CONTEXT_CUT = {"context_cut": "model_window"}
+V2_ANSWER_CUT = {"answer_cut": "first_paragraph"}
+_V2_ANSWER_CUT_ALCE_TASKS = ("alce_asqa", "alce_asqa_nocite")
+
+#: A line where a base model starts a new block after its ASQA answer.
+ALCE_NEXT_BLOCK = re.compile(r"\s*(?:Instruction:|Question:|Document \[\d+\]|Answer:)")
+
+
+def _v2_fixes(task_cfg: dict) -> dict[str, str]:
+    """The fixes the `:v2` variants apply to one task (see `V2_CONTEXT_CUT`)."""
+    answer_cut = (
+        task_cfg["kind"] == "narrativeqa" or task_cfg.get("alce_task") in _V2_ANSWER_CUT_ALCE_TASKS
+    )
+    return {**V2_CONTEXT_CUT, **(V2_ANSWER_CUT if answer_cut else {})}
+
 
 def _canonical(value: Any) -> str:
     """A comparable form of task settings, which may have come through JSON."""
@@ -872,7 +945,10 @@ _NO_AUTOAIS_METRICS = {"alce_asqa_cite": "alce_asqa", "alce_qampari_cite": "alce
 
 def _task_attrs(task_cfg: dict) -> dict[str, Any]:
     """Task configuration the factory sets on each class besides its metrics."""
-    attrs: dict[str, Any] = {"task_settings": _task_settings(task_cfg)}
+    attrs: dict[str, Any] = {
+        "task_settings": _task_settings(task_cfg),
+        "v2_fixes": _v2_fixes(task_cfg),
+    }
     if task_cfg["metrics_key"] in _NO_AUTOAIS_METRICS:
         # the model the "autoais" provider must serve, checked before generation
         attrs["judge_model"] = AUTOAIS_MODEL
@@ -908,14 +984,31 @@ for _task_name, _task_config in HELMET_TASKS.items():
     # Inject into module globals so pickle can find the class by name
     globals()[_cls.__name__] = _cls
     register(f"helmet_{_task_name}")(_cls)
+    _settings = _task_settings(_task_config)
+    _fixes = {"fixes": _v2_fixes(_task_config)}
     if _task_config.get("use_chat_template"):
         register_variant(
             f"helmet_{_task_name}",
             "base",
-            task_settings=_base_task_settings(_task_settings(_task_config)),
+            task_settings=_base_task_settings(_settings),
         )
     else:
         register_variant(f"helmet_{_task_name}", "base")
+    # Variants replace task_settings whole, so `:base:v2` would drop `:base`'s setting:
+    # the base-mode fixes are their own variant.
+    register_variant(f"helmet_{_task_name}", "v2", task_settings={**_settings, **_fixes})
+    register_variant(
+        f"helmet_{_task_name}",
+        "base_v2",
+        task_settings={
+            **(
+                _base_task_settings(_settings)
+                if _task_config.get("use_chat_template")
+                else _settings
+            ),
+            **_fixes,
+        },
+    )
     if _task_config["metrics_key"] in _NO_AUTOAIS_METRICS:
         register_variant(
             f"helmet_{_task_name}",

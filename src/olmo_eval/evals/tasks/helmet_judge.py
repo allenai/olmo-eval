@@ -132,12 +132,43 @@ parse_recall_verdict = _summ_parser("recall")
 parse_precision_verdict = _summ_parser("precision", "sentence_count")
 
 
-def parse_longqa_answer(text: str, prefix: str = "Answer:") -> str:
+#: A line where a base model starts writing its own next question after answering.
+NEXT_QUESTION = re.compile(r"\s*(?:question|q)\s*:", flags=re.IGNORECASE)
+
+
+def first_paragraph(text: str, stop: re.Pattern[str] | None = None) -> str:
+    """The lines of ``text`` up to the first blank line, or the first line matching
+    ``stop``, after leading blank lines; joined with newlines.
+
+    A base model does not stop after answering: it goes on with a question and
+    answer of its own, a new instruction, or more of the document, and a judge or
+    scorer that reads all of it scores that too. Upstream keeps only the first line
+    for LongQA, which also cuts answers the model hard-wraps the way the books are
+    wrapped.
+    """
+    lines: list[str] = []
+    for line in text.split("\n"):
+        if not line.strip():
+            if lines:
+                break
+            continue
+        if lines and stop is not None and stop.match(line):
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def parse_longqa_answer(text: str, prefix: str = "Answer:", first_para: bool = False) -> str:
     """The answer HELMET's LongQA judge sees: ``parse_output`` from eval_gpt4_longqa.py.
 
     Newlines become spaces first, so this is everything after the first ``prefix``,
-    or the whole reply when there is none, with an echoed prefix stripped.
+    or the whole reply when there is none, with an echoed prefix stripped. With
+    ``first_para`` (the `:v2` variants), only the first paragraph after ``prefix``
+    is kept, ending before a line that opens a new ``Question:``.
     """
+    if first_para:
+        match = re.search(re.escape(prefix), text, flags=re.IGNORECASE)
+        text = first_paragraph(text[match.end() :] if match is not None else text, NEXT_QUESTION)
     text = text.replace("\n", " ")
     match = re.search(f"(?:{re.escape(prefix)})(.*)", text, flags=re.IGNORECASE)
     answer = (match[1] if match is not None else text).strip()
@@ -208,7 +239,8 @@ class HelmetLongQAJudgedTask(JudgedTask):
     judge_score_key = "gpt4_score"
 
     def extract_answer(self, output: LMOutput) -> str:
-        return parse_longqa_answer(visible_response(output.text))
+        first_para = getattr(self, "fixes", {}).get("answer_cut") == "first_paragraph"
+        return parse_longqa_answer(visible_response(output.text), first_para=first_para)
 
     async def _score_output(self, response: Response, output: LMOutput, judge: Judge) -> float:
         metadata = response.instance.metadata
