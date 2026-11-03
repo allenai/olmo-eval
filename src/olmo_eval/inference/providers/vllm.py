@@ -183,6 +183,13 @@ class VLLMProvider(InferenceProvider):
         self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
 
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
+        self._closed = False
+
+    def close(self) -> None:
+        """Release the engine core when the evaluation worker finishes."""
+        if not self._closed:
+            self.llm.llm_engine.engine_core.shutdown()
+            self._closed = True
 
     @property
     def max_length(self) -> int:
