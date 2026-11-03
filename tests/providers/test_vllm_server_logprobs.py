@@ -55,7 +55,6 @@ class TestVLLMServerProviderLogprobs:
             p._request_model_name = "test-model"
             p.base_url = "http://localhost:8000/v1"
             p._tokenizer = mock_tokenizer
-            p._add_bos_token = None
             p._client = None
             p._http_client = None
             p._raw_http_client = None
@@ -181,38 +180,58 @@ class TestVLLMServerProviderLogprobs:
         assert call_kwargs["prompt"] == "Test prompt"
         assert call_kwargs["extra_body"]["add_special_tokens"] is True
 
+    @staticmethod
+    def _add_bos(tokenizer, bos_id):
+        """Make the mock tokenizer add BOS when encoding with special tokens."""
+        tokenizer.bos_token_id = bos_id
+        tokenizer.encode.side_effect = lambda text, add_special_tokens=False: (
+            ([bos_id] if add_special_tokens else []) + list(range(len(text.split())))
+        )
+
     @pytest.mark.anyio
-    @pytest.mark.parametrize(("add_bos_token", "expected"), [(False, [0, 1]), (True, [7, 0, 1])])
-    async def test_generate_completion_honours_explicit_add_bos_token(
-        self, provider, mock_tokenizer, add_bos_token, expected
+    async def test_generate_completion_token_ids_start_like_logprob_contexts(
+        self, provider, mock_tokenizer
     ):
-        """An explicit setting sends token IDs, with no server-side specials added."""
-        mock_tokenizer.bos_token_id = 7
-        provider._add_bos_token = add_bos_token
-        client = MagicMock()
-        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+        """Locally tokenized completion prompts carry the tokenizer's BOS, once."""
+        self._add_bos(mock_tokenizer, 7)
+        provider._completion_use_prompt_token_ids = True
+        provider.timeout = 30
+        raw_response = MagicMock()
+        raw_response.raise_for_status = MagicMock()
+        raw_response.json.return_value = {
+            "choices": [{"text": "ok", "logprobs": None}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1},
+        }
+        mock_http = AsyncMock()
+        mock_http.post.return_value = raw_response
+        provider._get_raw_http_client = MagicMock(return_value=mock_http)
 
         request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
-        await provider._generate_completion(client, request, SamplingParams(max_tokens=32))
+        await provider._generate_completion(MagicMock(), request, SamplingParams(max_tokens=32))
 
-        call_kwargs = client.completions.create.call_args.kwargs
-        assert call_kwargs["prompt"] == expected
-        assert call_kwargs["extra_body"]["add_special_tokens"] is False
+        payload = mock_http.post.call_args.kwargs["json"]
+        assert payload["prompt"] == [7, 0, 1]
+        assert payload["add_special_tokens"] is False
+        assert provider._prefix_ids == [7]
 
     @pytest.mark.anyio
     async def test_count_request_tokens_follows_the_payload(self, provider, mock_tokenizer):
         """Text is counted by the server with specials; token IDs are counted locally."""
+        self._add_bos(mock_tokenizer, 7)
         provider._count_tokens = AsyncMock(return_value=3)
         request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
 
         assert await provider._count_request_tokens(request) == 3
         assert provider._count_tokens.call_args.args[0]["add_special_tokens"] is True
 
-        mock_tokenizer.bos_token_id = 7
-        provider._add_bos_token = True
+        provider._completion_use_prompt_token_ids = True
         provider._count_tokens.reset_mock()
         assert await provider._count_request_tokens(request) == 3  # [7, 0, 1]
         provider._count_tokens.assert_not_called()
+
+    def test_add_bos_token_is_rejected(self):
+        with pytest.raises(ValueError, match="add_bos_token was removed"):
+            self._make_provider(add_bos_token=False)
 
     @pytest.mark.anyio
     async def test_generate_completion_omits_max_tokens_when_none(self, provider):
@@ -466,7 +485,6 @@ class TestVLLMServerProviderLogprobs:
     async def test_generate_completion_with_explicit_runtime_flags_uses_token_ids(self):
         """Explicit completion runtime flags should tokenize locally and post-process output."""
         provider = self._make_provider(
-            add_bos_token=False,
             completion_use_prompt_token_ids=True,
             completion_client_side_stop_trim=True,
             completion_sentencepiece_cleanup=True,

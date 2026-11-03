@@ -274,7 +274,6 @@ class TestVLLMServerProviderStartup:
             provider = VLLMServerProvider(
                 "test-model",
                 enforce_eager=True,
-                add_bos_token=False,
                 prompt_logprobs=1,
                 completion_use_prompt_token_ids=True,
                 completion_client_side_stop_trim=True,
@@ -284,7 +283,6 @@ class TestVLLMServerProviderStartup:
         assert provider.base_url == "http://127.0.0.1:8000/v1"
         server_kwargs = mock_server_cls.call_args.kwargs
         assert server_kwargs["enforce_eager"] is True
-        assert "add_bos_token" not in server_kwargs
         assert "prompt_logprobs" not in server_kwargs
         assert "completion_use_prompt_token_ids" not in server_kwargs
         assert "completion_client_side_stop_trim" not in server_kwargs

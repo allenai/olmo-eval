@@ -46,21 +46,26 @@ class _TemplateBosTokenizer:
         return [self.bos_token_id, *ids] if add_special_tokens else ids
 
 
-@pytest.mark.parametrize(("add_bos_token", "first"), [(None, [1]), (True, [1]), (False, [])])
-def test_generation_and_likelihood_start_the_same(add_bos_token, first) -> None:
-    """Generation prompts and scored contexts start with the same resolved prefix."""
-    from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+def test_generation_and_likelihood_start_the_same() -> None:
+    """Generation prompts and scored contexts start with the tokenizer's BOS, once."""
+    from olmo_eval.inference.tokenizer_utils import (
+        default_prefix_ids,
+        encode_context_and_continuation,
+    )
 
     instance = HuggingFaceProvider.__new__(HuggingFaceProvider)
     instance.tokenizer = _TemplateBosTokenizer()
-    instance.device = "cpu"
-    instance._add_bos_token = add_bos_token
+    instance._prefix_ids = default_prefix_ids(instance.tokenizer)
 
     ctx, _ = encode_context_and_continuation(
-        instance.tokenizer, "ab", "cd", prefix_ids=instance._prefix_ids()
+        instance.tokenizer, "ab", "cd", prefix_ids=instance._prefix_ids
     )
-    assert ctx == [*first, ord("a"), ord("b")]
-    if add_bos_token is not None:
-        pytest.importorskip("torch")
-        encoded = instance._encode_generation_prompt("ab")
-        assert encoded["input_ids"].tolist() == [ctx]
+    assert ctx == [1, ord("a"), ord("b")]
+    assert instance._generation_prompt_ids("ab") == ctx
+    # A chat template that wrote BOS into the text does not get a second one
+    assert instance._generation_prompt_ids("\x01ab") == ctx
+
+
+def test_add_bos_token_is_rejected() -> None:
+    with pytest.raises(ValueError, match="add_bos_token was removed"):
+        HuggingFaceProvider("test-model", add_bos_token=True)

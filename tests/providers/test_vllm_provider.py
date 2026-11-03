@@ -7,6 +7,7 @@ import pytest
 
 from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.providers.vllm import VLLMProvider
+from olmo_eval.inference.tokenizer_utils import default_prefix_ids
 
 
 class FakeVllmModule(ModuleType):
@@ -27,7 +28,11 @@ def test_build_sampling_params_passes_none_max_tokens_through(monkeypatch) -> No
 
 
 class FakeTokenizer:
-    def __init__(self) -> None:
+    """Character-level tokenizer; with a bos_token_id it adds BOS like Gemma or Llama 3."""
+
+    def __init__(self, bos_token_id: int | None = None) -> None:
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = None
         self.template_calls: list[dict[str, object]] = []
         self.encode_calls: list[dict[str, object]] = []
 
@@ -45,7 +50,9 @@ class FakeTokenizer:
             }
         )
         rendered_messages = "|".join(f"{m['role']}:{m['content']}" for m in messages)
-        return f"<chat>{rendered_messages}<assistant>"
+        # Like Gemma's and Llama 3's templates, write BOS into the text
+        bos = chr(self.bos_token_id) if self.bos_token_id is not None else ""
+        return f"{bos}<chat>{rendered_messages}<assistant>"
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
         self.encode_calls.append(
@@ -54,7 +61,13 @@ class FakeTokenizer:
                 "add_special_tokens": add_special_tokens,
             }
         )
-        return [ord(char) for char in text]
+        ids = [ord(char) for char in text]
+        if add_special_tokens and self.bos_token_id is not None:
+            return [self.bos_token_id, *ids]
+        return ids
+
+    def decode(self, ids: list[int]) -> str:
+        return "".join(chr(i) for i in ids)
 
 
 class FakeLLM:
@@ -81,7 +94,16 @@ class FakeLLM:
         completion = SimpleNamespace(
             text="ok", logprobs=None, finish_reason="length", token_ids=[7]
         )
-        return [SimpleNamespace(outputs=[completion]) for _ in prompts]
+        return [
+            SimpleNamespace(
+                outputs=[completion],
+                # Every input token is the argmax with log-prob -0.5
+                prompt_logprobs=[None] + [{t: -0.5} for t in p["prompt_token_ids"][1:]]
+                if isinstance(p, dict)
+                else None,
+            )
+            for p in prompts
+        ]
 
 
 @pytest.fixture
@@ -91,7 +113,7 @@ def fake_provider() -> tuple[VLLMProvider, FakeLLM, FakeTokenizer]:
     provider = VLLMProvider.__new__(VLLMProvider)
     provider.model_name = "test-model"
     provider.llm = llm
-    provider._add_bos_token = None
+    provider._prefix_ids = []
     provider._build_sampling_params = lambda params: "fake-sampling-params"
     return provider, llm, tokenizer
 
@@ -115,30 +137,71 @@ def test_generate_formats_chat_messages_with_template(
             "add_generation_prompt": True,
         }
     ]
-    assert llm.generate_calls[0]["prompts"] == ["<chat>user:Hello<assistant>"]
-
-
-def test_generate_tokenizes_formatted_chat_prompt_when_bos_disabled(
-    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
-) -> None:
-    provider, llm, tokenizer = fake_provider
-    provider._add_bos_token = False
-    request = LMRequest(
-        request_type=RequestType.CHAT,
-        messages=({"role": "user", "content": "Hello"},),
-    )
-
-    provider.generate([request], SamplingParams(max_tokens=1))
-
     assert tokenizer.encode_calls == [
-        {
-            "text": "<chat>user:Hello<assistant>",
-            "add_special_tokens": False,
-        }
+        {"text": "<chat>user:Hello<assistant>", "add_special_tokens": True}
     ]
     assert llm.generate_calls[0]["prompts"] == [
         {"prompt_token_ids": [ord(char) for char in "<chat>user:Hello<assistant>"]}
     ]
+
+
+def _bos_provider(monkeypatch) -> tuple[VLLMProvider, FakeLLM]:
+    """A provider whose tokenizer adds BOS (id 1) in front of every text."""
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.SamplingParams = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+    llm = FakeLLM(FakeTokenizer(bos_token_id=1))
+    provider = VLLMProvider.__new__(VLLMProvider)
+    provider.model_name = "test-model"
+    provider.llm = llm
+    provider._max_length = 4096
+    provider._prefix_ids = default_prefix_ids(llm.tokenizer)
+    provider._build_sampling_params = lambda params: "fake-sampling-params"
+    return provider, llm
+
+
+def test_chat_prompt_gets_one_bos_when_the_template_writes_it(monkeypatch) -> None:
+    provider, llm = _bos_provider(monkeypatch)
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "Hi"},),
+    )
+
+    provider.generate([request], SamplingParams(max_tokens=1))
+
+    ids = llm.generate_calls[0]["prompts"][0]["prompt_token_ids"]
+    assert ids[:2] == [1, ord("<")]
+
+
+def test_generation_and_logprobs_start_with_the_tokenizer_bos(monkeypatch) -> None:
+    """Log-likelihood inputs start with BOS like generation prompts, and the
+    scored span is exactly the continuation."""
+    provider, llm = _bos_provider(monkeypatch)
+
+    provider.generate(
+        [LMRequest(request_type=RequestType.COMPLETION, prompt="ab")],
+        SamplingParams(max_tokens=1),
+    )
+    outputs = provider.logprobs(
+        [
+            LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt="ab",
+                continuations=(" cd",),
+            )
+        ]
+    )
+
+    generated = llm.generate_calls[0]["prompts"][0]["prompt_token_ids"]
+    scored = llm.generate_calls[1]["prompts"][0]["prompt_token_ids"]
+    assert generated == [1, ord("a"), ord("b")]
+    assert scored == [1, ord("a"), ord("b"), ord(" "), ord("c"), ord("d")]
+    assert [e["token_id"] for e in outputs[0][0].logprobs] == [ord(" "), ord("c"), ord("d")]
+
+
+def test_add_bos_token_is_rejected() -> None:
+    with pytest.raises(ValueError, match="add_bos_token was removed"):
+        VLLMProvider("test-model", add_bos_token=False)
 
 
 def test_generate_keeps_completion_prompt_unchanged(
@@ -150,7 +213,9 @@ def test_generate_keeps_completion_prompt_unchanged(
     provider.generate([request], SamplingParams(max_tokens=1))
 
     assert tokenizer.template_calls == []
-    assert llm.generate_calls[0]["prompts"] == ["Complete me"]
+    assert llm.generate_calls[0]["prompts"] == [
+        {"prompt_token_ids": [ord(char) for char in "Complete me"]}
+    ]
 
 
 def test_generate_preserves_termination_without_logprobs(fake_provider) -> None:

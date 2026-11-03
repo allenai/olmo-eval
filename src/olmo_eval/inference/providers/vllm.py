@@ -12,9 +12,10 @@ from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestTyp
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.tokenizer_utils import (
+    default_prefix_ids,
     encode_context_and_continuation,
     encode_prompt,
-    resolve_prefix_ids,
+    reject_add_bos_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,8 @@ class VLLMProvider(InferenceProvider):
                 before initializing vLLM.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
+        reject_add_bos_token(engine_kwargs)
+
         # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_PROVIDER=1, otherwise WARNING
         if is_debug_provider():
             os.environ["VLLM_LOGGING_LEVEL"] = "DEBUG"
@@ -181,12 +184,9 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm loading bar by default, enable with --debug-provider
         engine_kwargs.setdefault("use_tqdm_on_load", is_debug_provider())
 
-        # Extract add_bos_token before passing to LLM (not a valid vLLM EngineArgs parameter).
-        # None follows the tokenizer; True or False forces BOS on or off. Generation and
-        # log-likelihood inputs both start with the prefix it resolves to (_prefix_ids).
-        self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
-
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
+        # Generation prompts and log-likelihood contexts both start with this
+        self._prefix_ids: list[int] = default_prefix_ids(self.llm.get_tokenizer())
 
     @property
     def max_length(self) -> int:
@@ -198,14 +198,6 @@ class VLLMProvider(InferenceProvider):
     def get_tokenizer(self) -> Any:
         """Get the tokenizer for this provider."""
         return self.llm.get_tokenizer()
-
-    def _prefix_ids(self) -> list[int]:
-        """The tokens every prompt and log-likelihood context starts with (resolved once)."""
-        cache: dict[bool | None, list[int]] = self.__dict__.setdefault("_prefix_cache", {})
-        setting = getattr(self, "_add_bos_token", None)
-        if setting not in cache:
-            cache[setting] = resolve_prefix_ids(self.llm.get_tokenizer(), setting)
-        return cache[setting]
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
         """Convert SamplingParams to vLLM SamplingParams."""
@@ -269,17 +261,12 @@ class VLLMProvider(InferenceProvider):
             for i, prompt in enumerate(prompt_strs):
                 logger.info(f"Prompt {i}:\n{prompt}")
 
-        # With add_bos_token unset, vLLM tokenizes the text with the tokenizer's defaults,
-        # which put the resolved prefix first by construction. An explicit setting is
-        # applied here: the prompt is tokenized without special tokens and given the prefix.
-        if self._add_bos_token is None:
-            vllm_prompts: list = prompt_strs
-        else:
-            tokenizer = self.llm.get_tokenizer()
-            prefix = self._prefix_ids()
-            vllm_prompts = [
-                {"prompt_token_ids": encode_prompt(tokenizer, p, prefix)} for p in prompt_strs
-            ]
+        # Tokenized here, like log-likelihood contexts: a prompt whose chat template
+        # already wrote BOS does not get a second one.
+        tokenizer = self.llm.get_tokenizer()
+        vllm_prompts = [
+            {"prompt_token_ids": encode_prompt(tokenizer, p, self._prefix_ids)} for p in prompt_strs
+        ]
 
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
@@ -353,7 +340,7 @@ class VLLMProvider(InferenceProvider):
         if getattr(vllm_params, "top_k", None) is not None:
             trace["generation_kwargs"]["top_k"] = vllm_params.top_k
         trace["stop_sequences"] = list(params.stop_sequences or ())
-        trace["input_mode"] = "text" if self._add_bos_token is None else "prompt_token_ids"
+        trace["input_mode"] = "prompt_token_ids"
         return trace
 
     def logprobs(
@@ -390,7 +377,7 @@ class VLLMProvider(InferenceProvider):
             for i, continuation in enumerate(continuations):
                 prompt = cont_prompts[i] if cont_prompts else request.prompt
                 context_enc, continuation_enc = encode_context_and_continuation(
-                    tokenizer, prompt, continuation, prefix_ids=self._prefix_ids()
+                    tokenizer, prompt, continuation, prefix_ids=self._prefix_ids
                 )
 
                 # Calculate overflow and left-truncate to max_length - 1

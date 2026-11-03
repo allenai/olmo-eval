@@ -12,7 +12,7 @@ from .tokenizer_utils import (
     get_bos_token_ids,
     get_context_token_ids,
     has_bos_token,
-    resolve_prefix_ids,
+    reject_add_bos_token,
 )
 
 __all__ = [
@@ -34,7 +34,7 @@ __all__ = [
     "get_bos_token_ids",
     "get_context_token_ids",
     "has_bos_token",
-    "resolve_prefix_ids",
+    "reject_add_bos_token",
     # Metrics (lazy import via __getattr__)
     "metrics",
 ]

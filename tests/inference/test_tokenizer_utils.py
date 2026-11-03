@@ -5,6 +5,8 @@ These tests use mock tokenizers and don't require GPU.
 
 from __future__ import annotations
 
+import pytest
+
 from olmo_eval.inference.tokenizer_utils import (
     default_prefix_ids,
     encode_context_and_continuation,
@@ -12,7 +14,7 @@ from olmo_eval.inference.tokenizer_utils import (
     get_bos_token_ids,
     get_context_token_ids,
     has_bos_token,
-    resolve_prefix_ids,
+    reject_add_bos_token,
 )
 
 
@@ -196,41 +198,34 @@ class TestDefaultPrefixIds:
         assert default_prefix_ids(BosEosTokenizer(bos_token_id=1, eos_token_id=2)) == [1]
 
 
-class TestResolvePrefixIds:
-    """Tests for resolve_prefix_ids()."""
+class TestRejectAddBosToken:
+    """The removed provider setting fails loudly instead of being ignored."""
 
-    def test_none_follows_the_tokenizer(self):
-        assert resolve_prefix_ids(TemplateBosTokenizer(bos_token_id=1), None) == [1]
-        assert resolve_prefix_ids(MockTokenizer(bos_token_id=1), None) == []
+    @pytest.mark.parametrize("value", [None, True, False])
+    def test_any_value_is_rejected(self, value):
+        with pytest.raises(ValueError, match="add_bos_token was removed"):
+            reject_add_bos_token({"add_bos_token": value})
 
-    def test_false_adds_nothing(self):
-        assert resolve_prefix_ids(TemplateBosTokenizer(bos_token_id=1), False) == []
-
-    def test_true_keeps_the_tokenizer_prefix(self):
-        assert resolve_prefix_ids(TemplateBosTokenizer(bos_token_id=1), True) == [1]
-
-    def test_true_adds_bos_when_the_tokenizer_adds_nothing(self):
-        assert resolve_prefix_ids(MockTokenizer(bos_token_id=1), True) == [1]
-        assert resolve_prefix_ids(FlagBosTokenizer(bos_token_id=1), True) == [1]
-
-    def test_true_falls_back_to_eos(self):
-        assert resolve_prefix_ids(MockTokenizer(bos_token_id=None, eos_token_id=2), True) == [2]
+    def test_other_kwargs_pass(self):
+        reject_add_bos_token({"gpu_memory_utilization": 0.9})
 
 
 class TestEncodePrompt:
     """Tests for encode_prompt()."""
 
-    def test_prepends_prefix(self):
-        tokenizer = MockTokenizer(bos_token_id=1)
-        assert encode_prompt(tokenizer, "ab", [1]) == [1, ord("a"), ord("b")]
-
-    def test_empty_prefix(self):
+    def test_follows_the_tokenizer(self):
         tokenizer = TemplateBosTokenizer(bos_token_id=1)
-        assert encode_prompt(tokenizer, "ab", []) == [ord("a"), ord("b")]
+        assert encode_prompt(tokenizer, "ab", [1]) == [1, ord("a"), ord("b")]
+        assert encode_prompt(MockTokenizer(bos_token_id=1), "ab", []) == [ord("a"), ord("b")]
 
-    def test_prefix_already_in_text_is_not_doubled(self):
-        """A chat template that writes BOS itself keeps a single BOS."""
-        tokenizer = MockTokenizer(bos_token_id=ord("<"))
+    def test_keeps_trailing_specials(self):
+        """Generation keeps what the tokenizer appends (an encoder-decoder's EOS)."""
+        tokenizer = BosEosTokenizer(bos_token_id=1, eos_token_id=2)
+        assert encode_prompt(tokenizer, "ab", [1]) == [1, ord("a"), ord("b"), 2]
+
+    def test_bos_written_by_a_chat_template_is_not_doubled(self):
+        tokenizer = TemplateBosTokenizer(bos_token_id=ord("<"))
+        assert tokenizer.encode("<ab") == [ord("<"), ord("<"), ord("a"), ord("b")]
         assert encode_prompt(tokenizer, "<ab", [ord("<")]) == [ord("<"), ord("a"), ord("b")]
 
 
@@ -253,12 +248,11 @@ class TestBosForTemplateTokenizers:
         ctx, _ = encode_context_and_continuation(tokenizer, "", "cd")
         assert ctx == [1]
 
-    def test_provider_prefix_overrides_the_tokenizer(self):
-        """A provider passes its resolved prefix, which wins over the tokenizer default."""
-        ctx, _ = encode_context_and_continuation(
-            TemplateBosTokenizer(bos_token_id=1), "ab", "cd", prefix_ids=[]
-        )
-        assert ctx == [ord("a"), ord("b")]
+    def test_empty_context_gets_bos_even_from_a_tokenizer_without_a_prefix(self):
+        ctx, _ = encode_context_and_continuation(MockTokenizer(bos_token_id=1), "", "cd")
+        assert ctx == [1]
+
+    def test_passed_prefix_is_used(self):
         ctx, _ = encode_context_and_continuation(
             MockTokenizer(bos_token_id=1), "ab", "cd", prefix_ids=[1]
         )
@@ -274,17 +268,18 @@ class TestBosForTemplateTokenizers:
         ctx, _ = encode_context_and_continuation(tokenizer, "ab", "cd")
         assert ctx == [ord("a"), ord("b")]
 
-    def test_generation_and_likelihood_start_the_same(self):
-        """The context a provider scores starts like the prompt it generates from."""
+    @pytest.mark.parametrize("context", ["ab", "<ab"])
+    def test_generation_and_likelihood_start_the_same(self, context):
+        """The context a provider scores starts like the prompt it generates from,
+        also when the text already starts with the BOS string."""
         for tokenizer in (
-            TemplateBosTokenizer(bos_token_id=1),
-            MockTokenizer(bos_token_id=1),
-            FlagBosTokenizer(bos_token_id=1),
+            TemplateBosTokenizer(bos_token_id=ord("<")),
+            MockTokenizer(bos_token_id=ord("<")),
+            FlagBosTokenizer(bos_token_id=ord("<")),
         ):
-            for setting in (None, True, False):
-                prefix = resolve_prefix_ids(tokenizer, setting)
-                ctx, _ = encode_context_and_continuation(tokenizer, "ab", "cd", prefix_ids=prefix)
-                assert ctx == encode_prompt(tokenizer, "ab", prefix)
+            prefix = default_prefix_ids(tokenizer)
+            ctx, _ = encode_context_and_continuation(tokenizer, context, "cd", prefix_ids=prefix)
+            assert ctx == encode_prompt(tokenizer, context, prefix)
 
 
 class TestEdgeCases:
