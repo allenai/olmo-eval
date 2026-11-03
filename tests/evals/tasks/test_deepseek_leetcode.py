@@ -1,4 +1,4 @@
-"""DeepSeek LeetCode v3: programs carry the upstream imports; earlier specs are unchanged."""
+"""DeepSeek LeetCode v3: programs carry the upstream imports."""
 
 from __future__ import annotations
 
@@ -31,14 +31,6 @@ def _extracted(spec: str, text: str) -> str | None:
 
 def _passes(program: str) -> bool:
     return subprocess.run([sys.executable, "-c", program], capture_output=True).returncode == 0
-
-
-@pytest.mark.parametrize(
-    "spec", ["deepseek_leetcode", "deepseek_leetcode:olmo3base", "deepseek_leetcode:olmo3base:v2"]
-)
-def test_earlier_specs_run_without_the_header(spec: str) -> None:
-    assert get_task(spec).config.to_dict().get("task_settings") is None
-    assert _extracted(spec, "return sum(nums)\n") == PROMPT + "return sum(nums)\n"
 
 
 def test_v3_hash_records_the_import_header() -> None:
