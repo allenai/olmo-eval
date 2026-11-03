@@ -9,7 +9,13 @@ from typing import Any
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
 from olmo_eval.common.scorers.base import SCORER_RESULTS_KEY
-from olmo_eval.common.types import CONTEXT_CUT_TOKENS_KEY, TURNS_KEY, Response, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    SCORING_TEXT_EMPTY_KEY,
+    TURNS_KEY,
+    Response,
+    SamplingParams,
+)
 
 
 def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> list[dict]:
@@ -72,7 +78,12 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 if num_bytes > 0:
                     out_data["bits_per_byte"] = -sum_logits / (num_bytes * math.log(2))
 
-            for key in ("finish_reason", "completion_tokens", "prompt_tokens"):
+            for key in (
+                "finish_reason",
+                "completion_tokens",
+                "prompt_tokens",
+                SCORING_TEXT_EMPTY_KEY,
+            ):
                 if key in meta:
                     out_data[key] = meta[key]
 

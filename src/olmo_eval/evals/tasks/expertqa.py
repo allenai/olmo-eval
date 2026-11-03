@@ -45,6 +45,7 @@ from olmo_eval.common.scorers.citation import (
 )
 from olmo_eval.common.scorers.llm_judge import ATTRIBUTED_QA_JUDGE, Judge
 from olmo_eval.common.types import (
+    SCORING_TEXT_EMPTY_KEY,
     Instance,
     LMOutput,
     LMRequest,
@@ -337,6 +338,7 @@ class ExpertQA(Task):
         """Parse JSON from model output and store the structured response."""
         # Strip <think>...</think> blocks so JSON extraction ignores reasoning braces.
         text = _strip_think_block(output.text)
+        output.metadata[SCORING_TEXT_EMPTY_KEY] = not text.strip()
         parsed = extract_json_from_response(text)
         if parsed is not None:
             parsed = normalize_agent_response_dict(parsed)
@@ -457,6 +459,7 @@ class ExpertQACite(ExpertQA):
     def extract_answer(self, output: LMOutput) -> Any:
         """Parse cite-tag prose into the structured response shape."""
         text = _strip_think_block(output.text)
+        output.metadata[SCORING_TEXT_EMPTY_KEY] = not text.strip()
         parsed = parse_cite_tag_response(text)
         output.metadata["parsed_response"] = parsed
         return parsed
