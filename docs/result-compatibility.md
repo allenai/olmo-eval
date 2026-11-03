@@ -72,30 +72,6 @@ mismatch or a recovery of the original random choices. Prefer original scored me
 otherwise retain the reconciled loose analysis and keep reconstructed strict labels
 separate and provisional. Do not choose seeds or parameters to fit aggregate totals.
 
-## 2026-11-02: DeepSeek LeetCode programs get the upstream imports; old specs and code suites removed (#TBD)
-
-- **Affected**: removed `deepseek_leetcode`, `deepseek_leetcode:olmo3base` and
-  `deepseek_leetcode:olmo3base:v2`, and the suites `olmobase:code` and `olmobase:code:v2`
-  that contained them. Added `deepseek_leetcode:olmo3base:v3`.
-  `bigcodebench:olmo3base:v2` no longer appears in `task_hashes.json` because no suite
-  lists it any more; it still resolves, with the same hash.
-- **Change**: 135 of the 180 prompts annotate their method with `List` or `Optional`
-  and import nothing, and the removed specs ran `prompt + completion + test` with no
-  imports. On Python before 3.14 every compiling program for those problems raised
-  `NameError` before a test ran, so the score measured only the other 45 problems (OLMicro
-  2.7B: 0 passes in 12,960 samples on the 135). DeepSeek-Coder's harness puts an import
-  header before every program (`IMPORT_HELPER["python"]` in
-  `Evaluation/LeetCode/human_eval/evaluation.py`); OLMES and the removed specs left it
-  out. v3 is v2 (zero-shot, 2048-token prompt limit) with that header, recorded in
-  `task_settings`. Prompts, sampling and extraction are unchanged.
-- **Identity**: v3 has a new hash; the removed specs' hashes are gone from
-  `task_hashes.json`.
-- **Comparability**: earlier DeepSeek LeetCode results, and `olmobase:code` /
-  `olmobase:code:v2` aggregates, are not comparable with v3 and should not be compared
-  with each other across models; re-run with v3. Offline rescoring of saved v2
-  predictions with the header moves OLMicro 2.7B pass@1 from 0.1 / 0.5 / 0.3 to
-  1.9 / 3.7 / 4.7 (pretrain / midtrain / long-context) and Qwen3.5-2B from 2.0 to 11.5.
-
 ## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
 
 - **Affected**:

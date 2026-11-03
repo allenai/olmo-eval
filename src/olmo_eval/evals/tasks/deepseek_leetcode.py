@@ -2,11 +2,6 @@
 
 LeetCode-style problems from the DeepSeek Coder paper.
 
-Only ``deepseek_leetcode:olmo3base:v3`` is registered. The earlier specs
-(``deepseek_leetcode``, ``:olmo3base``, ``:olmo3base:v2``) ran programs without the
-upstream import header, so 135 of the 180 problems could not pass; they were removed
-so their scores cannot be compared with v3 by mistake.
-
 Paper: https://github.com/deepseek-ai/DeepSeek-Coder/tree/main/Evaluation/LeetCode
 Dataset: davidheineman/deepseek-leetcode
 """
@@ -21,7 +16,7 @@ from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import OLMO3_HUMANEVAL_STOP_SEQUENCES
-from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 #: The header DeepSeek-Coder's harness puts before every program
 #: (Evaluation/LeetCode/human_eval/evaluation.py, IMPORT_HELPER["python"]). 135 of the
@@ -55,6 +50,7 @@ class CodeExecutionScorer3s(CodeExecutionScorer):
     separator: str = "\n"
 
 
+@register("deepseek_leetcode")
 class DeepSeekLeetCode(Task):
     """DeepSeek LeetCode code generation task."""
 
@@ -134,10 +130,18 @@ class DeepSeekLeetCode(Task):
                     output.extracted_answer = None
 
 
-@register("deepseek_leetcode:olmo3base:v3")
-class DeepSeekLeetCodeOlmo3BaseV3(DeepSeekLeetCode):
-    """OLMo3 base preset, zero-shot, with the upstream import header before every
-    program so the problems whose prompts use List or Optional can pass."""
+register_variant(
+    "deepseek_leetcode",
+    "olmo3base",
+    num_fewshot=3,
+    fewshot_seed=1234,
+    primary_metric=PassAtKMetric(k=1, scorer=CodeExecutionScorer),
+)
+
+
+@register("deepseek_leetcode:olmo3base:v2")
+class DeepSeekLeetCodeOlmo3BaseV2(DeepSeekLeetCode):
+    """OLMo3 preset without invalid, unanswered few-shot examples."""
 
     # The public dataset has prompts and tests but no reference solutions, so
     # valid answered few-shot examples cannot be constructed from it.
@@ -147,5 +151,12 @@ class DeepSeekLeetCodeOlmo3BaseV3(DeepSeekLeetCode):
         DeepSeekLeetCode.sampling_params,
         truncate_prompt_tokens=2048,
     )
-    # Sets the header in the task hash, apart from the removed specs that ran without it
+
+
+@register("deepseek_leetcode:olmo3base:v3")
+class DeepSeekLeetCodeOlmo3BaseV3(DeepSeekLeetCodeOlmo3BaseV2):
+    """v2 with the upstream import header before every program, so the problems whose
+    prompts use List or Optional can pass."""
+
+    # Sets the header in the task hash, apart from the specs that run without it
     task_settings = {"import_header": "deepseek_coder"}
