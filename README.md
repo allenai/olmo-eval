@@ -57,7 +57,7 @@ uv sync --frozen --no-group vllm --extra openhands
 # Browse a few suites
 uv run olmo-eval suite inspect mmlu
 uv run olmo-eval suite inspect gpqa
-uv run olmo-eval suite inspect olmobase:code
+uv run olmo-eval suite inspect olmobase:code_small:v2
 
 # Preview a run without loading a model
 uv run olmo-eval run -m mock -t gsm8k --dry-run

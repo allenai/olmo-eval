@@ -2,6 +2,11 @@
 
 LeetCode-style problems from the DeepSeek Coder paper.
 
+Only ``deepseek_leetcode:olmo3base:v3`` is registered. The earlier specs
+(``deepseek_leetcode``, ``:olmo3base``, ``:olmo3base:v2``) ran programs without the
+upstream import header, so 135 of the 180 problems could not pass; they were removed
+so their scores cannot be compared with v3 by mistake.
+
 Paper: https://github.com/deepseek-ai/DeepSeek-Coder/tree/main/Evaluation/LeetCode
 Dataset: davidheineman/deepseek-leetcode
 """
@@ -16,7 +21,32 @@ from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import OLMO3_HUMANEVAL_STOP_SEQUENCES
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register
+
+#: The header DeepSeek-Coder's harness puts before every program
+#: (Evaluation/LeetCode/human_eval/evaluation.py, IMPORT_HELPER["python"]). 135 of the
+#: 180 prompts annotate with List or Optional without importing them; without the
+#: header every program for those problems fails with NameError before a test runs.
+DEEPSEEK_IMPORT_HEADER = "\n".join(
+    (
+        "import math",
+        "import re",
+        "import sys",
+        "import copy",
+        "import datetime",
+        "import itertools",
+        "import collections",
+        "import heapq",
+        "import functools",
+        "import hashlib",
+        "import numpy",
+        "import numpy as np",
+        "import string",
+        "from typing import *",
+        "from collections import *",
+        "from functools import *",
+    )
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +55,6 @@ class CodeExecutionScorer3s(CodeExecutionScorer):
     separator: str = "\n"
 
 
-@register("deepseek_leetcode")
 class DeepSeekLeetCode(Task):
     """DeepSeek LeetCode code generation task."""
 
@@ -93,28 +122,22 @@ class DeepSeekLeetCode(Task):
         return text
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
+        settings = self.config.task_settings or {}
+        header = DEEPSEEK_IMPORT_HEADER + "\n" if settings.get("import_header") else ""
         for response in responses:
             prompt = response.instance.metadata["prompt"]
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
-                    output.extracted_answer = prompt + code
+                    output.extracted_answer = header + prompt + code
                 else:
                     output.extracted_answer = None
 
 
-register_variant(
-    "deepseek_leetcode",
-    "olmo3base",
-    num_fewshot=3,
-    fewshot_seed=1234,
-    primary_metric=PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-)
-
-
-@register("deepseek_leetcode:olmo3base:v2")
-class DeepSeekLeetCodeOlmo3BaseV2(DeepSeekLeetCode):
-    """OLMo3 preset without invalid, unanswered few-shot examples."""
+@register("deepseek_leetcode:olmo3base:v3")
+class DeepSeekLeetCodeOlmo3BaseV3(DeepSeekLeetCode):
+    """OLMo3 base preset, zero-shot, with the upstream import header before every
+    program so the problems whose prompts use List or Optional can pass."""
 
     # The public dataset has prompts and tests but no reference solutions, so
     # valid answered few-shot examples cannot be constructed from it.
@@ -124,3 +147,5 @@ class DeepSeekLeetCodeOlmo3BaseV2(DeepSeekLeetCode):
         DeepSeekLeetCode.sampling_params,
         truncate_prompt_tokens=2048,
     )
+    # Sets the header in the task hash, apart from the removed specs that ran without it
+    task_settings = {"import_header": "deepseek_coder"}

@@ -69,9 +69,9 @@ def test_mbpp_fewshot_prompt_does_not_repeat_function_signature() -> None:
     assert "def identity(value):\n    return value" in prompt
 
 
-def test_v2_deepseek_leetcode_does_not_claim_unavailable_fewshots() -> None:
+def test_deepseek_leetcode_does_not_claim_unavailable_fewshots() -> None:
     """The source dataset does not contain reference solutions for demonstrations."""
-    task = get_task("deepseek_leetcode:olmo3base:v2")
+    task = get_task("deepseek_leetcode:olmo3base:v3")
 
     assert task.config.num_fewshot == 0
 
@@ -89,11 +89,6 @@ def test_v2_deepseek_leetcode_does_not_claim_unavailable_fewshots() -> None:
 def test_v2_formatter_fixes_do_not_mutate_legacy_tasks(legacy_spec: str, v2_spec: str) -> None:
     assert get_task(legacy_spec).config.formatter is None
     assert isinstance(get_task(v2_spec).config.formatter, CompletionFormatter)
-
-
-def test_deepseek_v2_preserves_legacy_fewshot_configuration() -> None:
-    assert get_task("deepseek_leetcode:olmo3base").config.num_fewshot == 3
-    assert get_task("deepseek_leetcode:olmo3base:v2").config.num_fewshot == 0
 
 
 def test_ds1000_v2_preserves_protocol_and_declares_prompt_limit() -> None:

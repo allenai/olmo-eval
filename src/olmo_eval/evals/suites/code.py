@@ -188,22 +188,8 @@ make_suite(
 # OLMoBase Evaluation Suites
 # =============================================================================
 
-register(
-    Suite(
-        name="olmobase:code",
-        tasks=(
-            "bigcodebench:olmo3base",
-            "humaneval:olmo3base",
-            "deepseek_leetcode:olmo3base",
-            "ds1000:olmo3base",
-            "mbpp:olmo3base",
-            _MULTIPL_E_HUMANEVAL_OLMO3BASE,
-            _MULTIPL_E_MBPP_OLMO3BASE,
-        ),
-        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description="OLMoBase code generation evaluation suite",
-    )
-)
+# olmobase:code and olmobase:code:v2 were removed with the DeepSeek LeetCode specs
+# they contained, which could not pass 135 of their 180 problems.
 
 register(
     Suite(
@@ -217,23 +203,6 @@ register(
         ),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
         description="OLMoBase code generation evaluation suite for small models",
-    )
-)
-
-register(
-    Suite(
-        name="olmobase:code:v2",
-        tasks=(
-            "bigcodebench:olmo3base:v2",
-            "humaneval:olmo3base:v2",
-            "deepseek_leetcode:olmo3base:v2",
-            "ds1000:olmo3base:v2",
-            "mbpp:olmo3base:v2",
-            _MULTIPL_E_HUMANEVAL_OLMO3BASE_V2,
-            _MULTIPL_E_MBPP_OLMO3BASE_V2,
-        ),
-        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description="OLMoBase code generation evaluation suite (v2)",
     )
 )
 
