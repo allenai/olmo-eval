@@ -274,15 +274,19 @@ class TestMetrics:
             make_result("b", 0.0, difficulty="hard", category="y z"),
             make_result("c", 0.0, error="reward_file_missing", completion_reason="error"),
             make_result("d", 1.0, completion_reason="timeout"),
+            make_result("e", 0.0, error="model_error: bad tool arguments"),
         ]
 
         metrics = tb_eval.compute_metrics(results, n_attempts=1)
 
+        # The verifier failure on "c" is left out of the pass rate; the model's own
+        # protocol error on "e" is a scored 0.
         assert metrics["pass_rate"] == pytest.approx(0.5)
-        assert metrics["pass_rate_adjusted"] == pytest.approx(2 / 3)
-        assert metrics["error_rate"] == pytest.approx(0.25)
-        assert metrics["num_tasks"] == 4
-        assert metrics["num_trials"] == 4
+        assert "pass_rate_adjusted" not in metrics
+        assert metrics["error_rate"] == pytest.approx(0.2)
+        assert metrics["num_tasks"] == 5
+        assert metrics["num_trials"] == 5
+        assert metrics["num_measured"] == 4
         assert metrics["num_passed"] == 2
         assert metrics["num_errors"] == 1
         assert metrics["num_agent_timeouts"] == 1
@@ -309,6 +313,25 @@ class TestMetrics:
         # attempt means are 0.5 and 0.0
         assert metrics["pass_rate_std"] == pytest.approx(0.3535533906)
         assert metrics["pass_rate_sem"] == pytest.approx(0.25)
+
+    def test_errored_trials_are_left_out_of_pass_at_k(self) -> None:
+        results = [
+            make_result("a", 1.0, attempt=0),
+            make_result("a", 0.0, attempt=1, error="verifier_timeout"),
+            make_result("b", 0.0, attempt=0, error="no container"),
+            make_result("b", 0.0, attempt=1, error="no container"),
+        ]
+
+        metrics = tb_eval.compute_metrics(results, n_attempts=2)
+
+        # Only task a's first attempt was measured.
+        assert metrics["pass_rate"] == 1.0
+        assert metrics["pass@1"] == 1.0
+        assert metrics["pass@2"] == 1.0
+        assert metrics["num_tasks"] == 2
+        assert metrics["num_measured"] == 1
+        assert metrics["error_rate"] == pytest.approx(0.75)
+        assert "pass_rate_std" not in metrics
 
     def test_no_results(self) -> None:
         metrics = tb_eval.compute_metrics([], n_attempts=3)
@@ -712,6 +735,43 @@ class TestExecuteTask:
         assert result.error == "Connection error."
         assert result.errored
 
+    def test_a_model_protocol_error_is_scored(self) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        args = tb_eval.TerminalBenchArgs.from_dict({})
+
+        async def misbehaving_agent(manager, task, provider, tb_args):
+            return AgentTrajectory(turns=()), "complete", 0, "model_error: bad tool arguments"
+
+        with mock.patch.object(eval_obj, "_run_agent", side_effect=misbehaving_agent):
+            result = self._run(eval_obj, make_task(), args)
+
+        assert result.error == "model_error: bad tool arguments"
+        assert not result.errored
+        assert result.reward == 1.0
+
+    def test_a_verifier_failure_overrides_an_earlier_model_error(self) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        args = tb_eval.TerminalBenchArgs.from_dict({})
+
+        async def misbehaving_agent(manager, task, provider, tb_args):
+            return AgentTrajectory(turns=()), "complete", 0, "model_error: refusal"
+
+        verification = tb_eval.TerminalBenchVerifier.run_verification
+
+        async def timed_out(self, *args, **kwargs):
+            result = await verification(self, *args, **kwargs)
+            result.error = "verifier_timeout"
+            return result
+
+        with (
+            mock.patch.object(eval_obj, "_run_agent", side_effect=misbehaving_agent),
+            mock.patch.object(tb_eval.TerminalBenchVerifier, "run_verification", timed_out),
+        ):
+            result = self._run(eval_obj, make_task(), args)
+
+        assert result.error == "verifier_timeout (after model_error: refusal)"
+        assert result.errored
+
     def test_an_infrastructure_failure_is_an_error(self) -> None:
         eval_obj = tb_eval.TerminalBenchExternalEval()
         args = tb_eval.TerminalBenchArgs.from_dict({})
@@ -833,6 +893,33 @@ class TestRunAgent:
         assert steps == 4
         assert error is None
 
+    @pytest.mark.parametrize(
+        ("metadata", "expected"),
+        [
+            ({"completion_reason": "error"}, "agent_error: Connection error."),
+            ({}, "model_error: Connection error."),
+        ],
+    )
+    def test_a_scaffold_error_is_classified(self, metadata, expected) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        args = tb_eval.TerminalBenchArgs.from_dict({"scaffold": "openai_agents"})
+        scaffold = mock.Mock()
+        scaffold.run = mock.AsyncMock(
+            return_value=mock.Mock(
+                trajectory=None,
+                metadata=metadata,
+                max_turns_reached=False,
+                error="Connection error.",
+            )
+        )
+
+        with mock.patch("olmo_eval.harness.scaffolds.get_scaffold", return_value=scaffold):
+            _, _, _, error = asyncio.run(
+                eval_obj._run_agent(mock.Mock(), make_task(), FakeProvider(), args)
+            )
+
+        assert error == expected
+
 
 class TestExecute:
     def test_unsupported_scaffolds_are_refused_before_any_work(self) -> None:
@@ -887,8 +974,38 @@ class TestExecute:
 
         assert result.metrics["num_errors"] == 1
         assert result.metrics["error_rate"] == 1.0
+        assert result.success is False
+        assert result.error == (
+            "All 1 trials hit a harness or infrastructure failure. First failure: boom"
+        )
         assert result.predictions is not None
         assert result.predictions[0]["error"] == "boom"
+        assert result.predictions[0]["instance_metrics"]["reward"]["external"] is None
+
+    @pytest.mark.parametrize(("max_error_rate", "success"), [(None, False), ("0.25", True)])
+    def test_harness_failures_above_the_budget_fail_the_run(
+        self, tmp_path: Path, max_error_rate, success
+    ) -> None:
+        for name in ("alpha", "beta", "gamma", "delta"):
+            write_task(tmp_path / "tasks", name)
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+
+        async def fake_trial(task, attempt, provider, container_runtime, tb_args, image_lock=None):
+            if task.task_id == "delta":
+                return make_result(task.task_id, 0.0, error="verifier_timeout")
+            return make_result(task.task_id, 1.0)
+
+        args = {"repo_path": str(tmp_path)}
+        if max_error_rate is not None:
+            args["max_error_rate"] = max_error_rate
+        with mock.patch.object(eval_obj, "_execute_task", side_effect=fake_trial):
+            result = asyncio.run(eval_obj.execute(FakeProvider(), args))
+
+        assert result.success is success
+        assert result.metrics["pass_rate"] == 1.0
+        assert result.metrics["num_errors"] == 1
+        if not success:
+            assert "1 of 4 trials (25.0%)" in (result.error or "")
 
     def test_no_tasks_is_a_failed_result(self, tmp_path: Path) -> None:
         eval_obj = tb_eval.TerminalBenchExternalEval()
