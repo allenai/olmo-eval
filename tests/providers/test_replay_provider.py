@@ -13,12 +13,14 @@ from olmo_eval.runners.io.writers import write_predictions_jsonl, write_requests
 CHAT = ({"role": "user", "content": "What is 6 x 7?"},)
 
 
-def _save(output_dir: Path, spec: str, saved: list[tuple[object, list[dict]]]) -> None:
+def _save(
+    output_dir: Path, spec: str, saved: list[tuple[object, list[dict]]], model: str = "model"
+) -> None:
     """Write a run's files for (context, model_output) pairs, as the runner does."""
     requests = [{"doc_id": i, "request": {"context": c}} for i, (c, _) in enumerate(saved)]
     predictions = [{"doc_id": i, "model_output": out} for i, (_, out) in enumerate(saved)]
-    write_requests_jsonl(str(output_dir), spec, requests, "model")
-    write_predictions_jsonl(str(output_dir), spec, predictions, "model")
+    write_requests_jsonl(str(output_dir), spec, requests, model)
+    write_predictions_jsonl(str(output_dir), spec, predictions, model)
 
 
 def _completion(prompt: str) -> LMRequest:
@@ -101,3 +103,23 @@ def test_missing_predictions_are_reported(tmp_path: Path) -> None:
         ReplayProvider()
     with pytest.raises(FileNotFoundError):
         ReplayProvider(predictions=str(tmp_path))
+
+
+def test_rejects_a_directory_with_several_models(tmp_path: Path) -> None:
+    _save(tmp_path, "task", [("Q", [{"text": "A"}])], model="a")
+    _save(tmp_path, "task", [("Q", [{"text": "B"}])], model="b")
+
+    with pytest.raises(ValueError, match="several models"):
+        ReplayProvider(predictions=str(tmp_path))
+    provider = ReplayProvider(predictions=str(tmp_path / "predictions" / "b"))
+    assert provider.generate([_completion("Q")])[0][0].text == "B"
+
+
+def test_image_and_tool_requests_fail(tmp_path: Path) -> None:
+    _save(tmp_path, "task", [(list(CHAT), [{"text": "A"}])])
+    provider = ReplayProvider(predictions=str(tmp_path))
+    image = LMRequest(request_type=RequestType.CHAT, messages=CHAT, images=("img",))
+    tool = LMRequest(request_type=RequestType.CHAT, messages=CHAT, tools=(object(),))
+
+    for outputs in provider.generate([image, tool]):
+        assert "images or tools" in str(request_error(outputs))

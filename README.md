@@ -1111,9 +1111,9 @@ uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 
 The `replay` provider answers each request with the generation an earlier run saved
 for the same prompt, so scorer and metric changes can be measured without a model or
-GPU. Point it at a predictions file or a results directory (each predictions file is
-read with the requests file saved beside it), and repeat the original run's model and
-task options so the prompts match:
+GPU. Point it at a predictions file or a results directory holding one model's
+predictions (each file is read with the requests file saved beside it), and repeat the
+original run's model and task options so the prompts match:
 
 ```bash
 uv run olmo-eval run -m mock -t gsm8k -o limit=100 \
@@ -1122,8 +1122,9 @@ uv run olmo-eval run -m mock -t gsm8k -o limit=100 \
 ```
 
 A prompt with no saved generation, or saved with a different number of samples, fails
-like a generation error and counts against the task's failure budget. Only
-generations are replayed, not logprobs or multi-turn and tool-calling rollouts.
+like a generation error and counts against the task's failure budget. Only text
+generations are replayed: logprob tasks, image or tool requests and multi-turn
+rollouts are not.
 
 ### Resuming Interrupted Runs
 

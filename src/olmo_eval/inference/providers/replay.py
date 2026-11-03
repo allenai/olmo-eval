@@ -53,10 +53,9 @@ class ReplayProvider(InferenceProvider):
     prompts. A request whose prompt was not saved, or was saved with a different number
     of samples, fails like a generation error, so the task's failure budget catches a
     replay against the wrong run. Prompts saved more than once are served in order.
+    Requests with images or tools fail too: the saved files keep neither image
+    identities nor native tool calls.
     """
-
-    supports_images = True
-    supports_tools = True
 
     def __init__(self, model_name: str = "replay", predictions: str = "") -> None:
         super().__init__(model_name)
@@ -66,6 +65,12 @@ class ReplayProvider(InferenceProvider):
         files = [root] if root.is_file() else sorted(root.rglob(f"*{PREDICTIONS_SUFFIX}"))
         if not files:
             raise FileNotFoundError(f"No *{PREDICTIONS_SUFFIX} files found under {root}")
+        models = sorted({path.parent.name for path in files})
+        if len(models) > 1:
+            raise ValueError(
+                f"{root} holds predictions for several models ({', '.join(models)}); "
+                "point provider.predictions at one model's predictions directory or file"
+            )
 
         self._saved: dict[str, deque[list[dict[str, Any]]]] = defaultdict(deque)
         for path in files:
@@ -77,7 +82,9 @@ class ReplayProvider(InferenceProvider):
 
     def _replay(self, request: LMRequest, num_samples: int) -> list[LMOutput]:
         queue = self._saved.get(_request_key(request))
-        if not queue:
+        if request.images or request.tools:
+            error = "requests with images or tools cannot be replayed"
+        elif not queue:
             error = "no saved generation matches this prompt"
         elif len(queue[0]) != num_samples:
             error = (
