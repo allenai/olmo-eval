@@ -6,10 +6,13 @@ from olmo_eval.common.types import ProviderKind
 
 from .base import InferenceProvider
 from .tokenizer_utils import (
+    default_prefix_ids,
     encode_context_and_continuation,
+    encode_prompt,
     get_bos_token_ids,
     get_context_token_ids,
     has_bos_token,
+    resolve_prefix_ids,
 )
 
 __all__ = [
@@ -25,10 +28,13 @@ __all__ = [
     "LiteLLMProvider",
     "create_provider",
     # Tokenizer utilities
+    "default_prefix_ids",
     "encode_context_and_continuation",
+    "encode_prompt",
     "get_bos_token_ids",
     "get_context_token_ids",
     "has_bos_token",
+    "resolve_prefix_ids",
     # Metrics (lazy import via __getattr__)
     "metrics",
 ]

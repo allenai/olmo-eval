@@ -262,7 +262,7 @@ def test_provider_loads_checkpoint_with_olmes_defaults(tmp_path, monkeypatch) ->
     checkpoint_kwargs = provider.generation_module.checkpoint_kwargs
     generation_config = checkpoint_kwargs["generation_config"]
     assert provider.max_length == 4096
-    assert provider.add_bos_token is False
+    assert provider.add_bos_token is None
     assert provider.pad_token_id == 0
     assert provider.eos_token_id == 2
     assert provider.tokenizer.pad_token_id == 0

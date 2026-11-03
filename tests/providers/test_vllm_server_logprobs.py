@@ -167,8 +167,8 @@ class TestVLLMServerProviderLogprobs:
         return resp
 
     @pytest.mark.anyio
-    async def test_generate_completion_sets_add_special_tokens_false(self, provider):
-        """Completion payloads should disable server-side special token insertion."""
+    async def test_generate_completion_follows_the_tokenizer_by_default(self, provider):
+        """Unset add_bos_token sends text and lets the server tokenizer add its specials."""
         client = MagicMock()
         client.completions.create = AsyncMock(return_value=self._make_completion_response())
 
@@ -178,7 +178,41 @@ class TestVLLMServerProviderLogprobs:
         await provider._generate_completion(client, request, params)
 
         call_kwargs = client.completions.create.call_args.kwargs
+        assert call_kwargs["prompt"] == "Test prompt"
+        assert call_kwargs["extra_body"]["add_special_tokens"] is True
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(("add_bos_token", "expected"), [(False, [0, 1]), (True, [7, 0, 1])])
+    async def test_generate_completion_honours_explicit_add_bos_token(
+        self, provider, mock_tokenizer, add_bos_token, expected
+    ):
+        """An explicit setting sends token IDs, with no server-side specials added."""
+        mock_tokenizer.bos_token_id = 7
+        provider._add_bos_token = add_bos_token
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        await provider._generate_completion(client, request, SamplingParams(max_tokens=32))
+
+        call_kwargs = client.completions.create.call_args.kwargs
+        assert call_kwargs["prompt"] == expected
         assert call_kwargs["extra_body"]["add_special_tokens"] is False
+
+    @pytest.mark.anyio
+    async def test_count_request_tokens_follows_the_payload(self, provider, mock_tokenizer):
+        """Text is counted by the server with specials; token IDs are counted locally."""
+        provider._count_tokens = AsyncMock(return_value=3)
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+
+        assert await provider._count_request_tokens(request) == 3
+        assert provider._count_tokens.call_args.args[0]["add_special_tokens"] is True
+
+        mock_tokenizer.bos_token_id = 7
+        provider._add_bos_token = True
+        provider._count_tokens.reset_mock()
+        assert await provider._count_request_tokens(request) == 3  # [7, 0, 1]
+        provider._count_tokens.assert_not_called()
 
     @pytest.mark.anyio
     async def test_generate_completion_omits_max_tokens_when_none(self, provider):
@@ -730,7 +764,7 @@ class TestVLLMServerProviderLogprobs:
             "olmo_eval.inference.providers.vllm_server.encode_context_and_continuation"
         ) as mock_encode:
             # Context is always 2 tokens, continuation is 1 token
-            mock_encode.side_effect = lambda tok, ctx, cont: ([0, 1], [2])
+            mock_encode.side_effect = lambda tok, ctx, cont, **kw: ([0, 1], [2])
 
             async def mock_post(url, json=None):
                 call_count[0] += 1

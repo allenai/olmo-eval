@@ -15,7 +15,9 @@ from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestTyp
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import (
     encode_context_and_continuation,
+    encode_prompt,
     get_bos_token_ids,
+    resolve_prefix_ids,
 )
 
 if TYPE_CHECKING:
@@ -62,7 +64,7 @@ class OlmoCoreProvider(InferenceProvider):
         token: str | None = None,
         cache_dir: str | None = None,
         local_files_only: bool = False,
-        add_bos_token: bool = False,
+        add_bos_token: bool | None = None,
         **kwargs: object,
     ) -> None:
         max_model_len = core_utils._resolve_max_model_len_alias(max_model_len, kwargs)
@@ -280,11 +282,19 @@ class OlmoCoreProvider(InferenceProvider):
             for start in range(0, len(requests), self.batch_size)
         ]
 
+    def _prefix_ids(self) -> list[int]:
+        """The tokens every prompt and log-likelihood context starts with (resolved once).
+
+        add_bos_token None follows the tokenizer, True or False forces BOS on or off.
+        """
+        cache: dict[bool | None, list[int]] = self.__dict__.setdefault("_prefix_cache", {})
+        setting = getattr(self, "add_bos_token", None)
+        if setting not in cache:
+            cache[setting] = resolve_prefix_ids(self.tokenizer, setting)
+        return cache[setting]
+
     def _encode_prompt(self, prompt: str) -> list[int]:
-        token_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
-        if self.add_bos_token:
-            return get_bos_token_ids(self.tokenizer, fallback_to_eos=True) + token_ids
-        return token_ids
+        return encode_prompt(self.tokenizer, prompt, self._prefix_ids())
 
     def _format_prompt(self, request: LMRequest) -> str:
         if request.request_type == RequestType.CHAT and request.messages:
@@ -308,7 +318,7 @@ class OlmoCoreProvider(InferenceProvider):
             self.tokenizer,
             prompt,
             continuation,
-            add_bos=self.add_bos_token,
+            prefix_ids=self._prefix_ids(),
         )
         if continuation_ids and not context_ids:
             context_ids = get_bos_token_ids(self.tokenizer, fallback_to_eos=True) or [
