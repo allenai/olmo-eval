@@ -16,6 +16,7 @@ from olmo_eval.evals.external.args import as_bool, as_list, as_optional_int
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.failures import (
     DEFAULT_MAX_ERROR_RATE,
+    add_harness_failure,
     failure_budget_error,
     is_harness_failure,
     scaffold_error,
@@ -628,7 +629,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 result.patch = await extract_patch(manager.get_executor(frozenset()), baseline)
             except Exception as e:
                 logger.exception(f"[{instance.instance_id}] Agent sandbox failed")
-                result.error = result.error or f"sandbox_error: {e}"
+                result.error = add_harness_failure(result.error, f"sandbox_error: {e}")
             finally:
                 await manager.stop()
         result.agent_duration = time.time() - agent_start
@@ -656,7 +657,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             )
         except Exception as e:
             logger.exception(f"[{instance.instance_id}] Grading failed")
-            result.error = result.error or f"grading_error: {e}"
+            result.error = add_harness_failure(result.error, f"grading_error: {e}")
         finally:
             await grader.stop()
         result.eval_duration = time.time() - eval_start

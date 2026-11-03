@@ -29,6 +29,20 @@ def is_harness_failure(error: str | None) -> bool:
     return error is not None and not error.startswith(MODEL_ERROR)
 
 
+def add_harness_failure(earlier: str | None, error: str) -> str:
+    """Record a harness failure on an instance that may already carry an error.
+
+    The first harness failure is kept. A model error recorded earlier gives way, since
+    the failure that followed it stopped the instance from being measured, but its
+    message is kept after the new one.
+    """
+    if earlier is None:
+        return error
+    if is_harness_failure(earlier):
+        return earlier
+    return f"{error} (after {earlier})"
+
+
 def scaffold_error(harness_result: HarnessResult) -> str | None:
     """Classify the error a scaffold reports at the end of an agent run.
 

@@ -633,6 +633,34 @@ class TestRunInstanceAgent(unittest.TestCase):
         self.assertEqual(result.patch, GOLD_PATCH)
         self.assertTrue(result.grade.patch_applied)
 
+    def test_grading_failure_overrides_an_earlier_model_error(self) -> None:
+        async def model_error(*args: Any) -> None:
+            args[-1].error = "model_error: refusal"
+
+        manager = mock.MagicMock()
+        manager.start = mock.AsyncMock()
+        manager.stop = mock.AsyncMock()
+        with (
+            mock.patch("olmo_eval.harness.sandbox.image.remove_swerex_image"),
+            mock.patch(
+                "olmo_eval.harness.sandbox.image.get_swerex_image", return_value="derived:latest"
+            ),
+            mock.patch("olmo_eval.harness.sandbox.SandboxManager", return_value=manager),
+            mock.patch.object(swe_eval.SWEBenchVerifiedExternalEval, "_run_agent", model_error),
+            mock.patch.object(swe_eval, "snapshot_worktree", mock.AsyncMock(return_value="tree")),
+            mock.patch.object(swe_eval, "extract_patch", mock.AsyncMock(return_value=GOLD_PATCH)),
+            mock.patch.object(
+                swe_eval, "grade_in_sandbox", mock.AsyncMock(side_effect=RuntimeError("lost"))
+            ),
+        ):
+            result = asyncio.run(
+                swe_eval.SWEBenchVerifiedExternalEval()._run_instance(
+                    _instance(), mock.MagicMock(), swe_eval.SWEBenchArgs(), "docker"
+                )
+            )
+        self.assertEqual(result.error, "grading_error: lost (after model_error: refusal)")
+        self.assertTrue(result.harness_failed)
+
     def test_other_agent_failure_is_recorded_as_error(self) -> None:
         result = self._run(RuntimeError("connection reset"))
         self.assertEqual(result.error, "agent_error: connection reset")
