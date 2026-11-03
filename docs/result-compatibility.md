@@ -16,6 +16,25 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-03: SWE-bench Verified leaves harness failures out of its scores (#538)
+
+- **Affected**: the `swe_bench_verified` external eval, for runs in which some instance
+  hit a harness or infrastructure failure (`image_error`, `image_timeout`,
+  `sandbox_error`, `agent_error`, `grading_error`). Runs without one are unchanged.
+- **Change**: such an instance used to count as unresolved in `resolve_rate` and the
+  other rates, and the run reported success unless every instance failed. It now has
+  no score: the rates and per-repo and per-difficulty breakdowns leave it out, and
+  `num_errors` counts it. The run fails when more than `max_error_rate` (0.05 by
+  default) of its instances failed this way. `error_rate` no longer counts a reply that
+  broke the tool-call protocol (`model_error`), which stays a scored instance.
+  `resume_from` reruns harness failures instead of keeping them.
+- **Identity**: external evals have no task hash; results from before and after can
+  only be told apart by commit or date.
+- **Comparability**: an earlier result whose `error_rate` is 0 is unchanged. One with
+  errors understated `resolve_rate` by roughly that rate times the true resolve rate;
+  dividing `num_resolved` by the number of instances without an error gives the new
+  value, except where an errored instance's partial patch resolved and was counted.
+
 ## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
 
 - **Affected**:
