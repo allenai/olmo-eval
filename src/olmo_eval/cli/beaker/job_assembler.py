@@ -749,6 +749,9 @@ class JobConfigAssembler:
         command: list[str] = ["olmo-eval", "run"]
 
         command.extend(["-O", BEAKER_RESULT_DIR])
+        # Every Beaker job of a task runs this command, so a requeued or retried job
+        # continues from the progress the previous job left in its results.
+        command.append("--resume")
 
         command.extend(["-m", exp.model_spec])
 

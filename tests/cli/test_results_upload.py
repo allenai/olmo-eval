@@ -141,3 +141,81 @@ def test_run_killed_by_a_signal_records_a_failed_run(
     assert result.exit_code == exit_code
     assert mark_failed.call_args.kwargs["error"] == error
     assert signal.getsignal(signal.SIGTERM) == previous
+
+
+@pytest.mark.parametrize(
+    ("crash", "resume", "reported"),
+    [
+        ("sigterm", True, "interrupted"),
+        ("sigterm", False, "failed"),
+        ("interrupt", True, "failed"),
+        ("crash", True, "failed"),
+    ],
+)
+def test_only_sigterm_under_resume_records_an_interrupted_run(
+    tmp_path: Path, monkeypatch, crash: str, resume: bool, reported: str
+) -> None:
+    import os
+    import signal
+    from types import SimpleNamespace
+
+    class StoppedRunner(SimpleNamespace):
+        def validate(self) -> None:
+            pass
+
+        def run(self) -> None:
+            if crash == "interrupt":
+                raise KeyboardInterrupt
+            if crash == "crash":
+                raise RuntimeError("worker died")
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    runner = StoppedRunner(output_dir=str(tmp_path))
+    argv = ["run", "-m", "mock", "-t", "arc_easy", "-O", str(tmp_path), "--no-upload"]
+    if resume:
+        argv.append("--resume")
+    monkeypatch.setattr("sys.argv", ["olmo-eval", *argv])
+    with (
+        patch("olmo_eval.cli.run.factory.RunnerFactory.create", return_value=runner),
+        patch("olmo_eval.upload.mark_run_failed") as mark_failed,
+        patch("olmo_eval.upload.mark_run_interrupted") as mark_interrupted,
+    ):
+        CliRunner().invoke(main, argv)
+
+    if reported == "interrupted":
+        mark_failed.assert_not_called()
+        mark_interrupted.assert_called_once()
+        assert mark_interrupted.call_args.args[0] == str(tmp_path)
+        assert mark_interrupted.call_args.kwargs["reason"] == "Run terminated (SIGTERM)"
+        assert mark_interrupted.call_args.kwargs["since"] is not None
+    else:
+        mark_interrupted.assert_not_called()
+        mark_failed.assert_called_once()
+
+
+def test_a_run_refused_by_another_runs_lock_reports_nothing(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from olmo_eval.runners.asynq.progress import ProgressLockedError
+
+    class RefusedRunner(SimpleNamespace):
+        def validate(self) -> None:
+            pass
+
+        def run(self) -> None:
+            raise ProgressLockedError("Another run is recording progress here: x")
+
+    runner = RefusedRunner(output_dir=str(tmp_path))
+    argv = ["run", "-m", "mock", "-t", "arc_easy", "-O", str(tmp_path), "--no-upload", "--resume"]
+    monkeypatch.setattr("sys.argv", ["olmo-eval", *argv])
+    with (
+        patch("olmo_eval.cli.run.factory.RunnerFactory.create", return_value=runner),
+        patch("olmo_eval.upload.mark_run_failed") as mark_failed,
+        patch("olmo_eval.upload.mark_run_interrupted") as mark_interrupted,
+    ):
+        result = CliRunner().invoke(main, argv)
+
+    assert result.exit_code == 1
+    mark_failed.assert_not_called()
+    mark_interrupted.assert_not_called()
+    assert "Another run is recording progress here" in result.output

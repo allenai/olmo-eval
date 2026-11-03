@@ -213,7 +213,8 @@ class TestBeakerJobConfig:
         assert config.num_gpus == 4
         assert config.cluster == ["ai2/jupiter", "ai2/saturn"]
         assert config.priority == "high"
-        assert config.preemptible is False
+        assert config.preemptible is None
+        assert config.min_runtime == "8h"
         assert config.retries == 2
         assert config.nfs is True
         assert len(config.weka_buckets) == 1
@@ -282,6 +283,11 @@ class TestBeakerJobConfigMinRuntime:
         assert config.min_runtime == "2h"
         assert config.preemptible is None
 
+    def test_preemptible_false_becomes_8h_min_runtime(self):
+        config = self._config(preemptible=False)
+        assert config.min_runtime == "8h"
+        assert config.preemptible is None
+
     def test_preemptible_false_with_min_runtime_rejected(self):
         with pytest.raises(ValueError, match="cannot be combined with min_runtime"):
             self._config(preemptible=False, min_runtime="2h")
@@ -297,7 +303,7 @@ class TestBeakerJobConfigMinRuntime:
         ("kwargs", "expected_preemptible", "expected_min_runtime"),
         [
             ({}, True, None),
-            ({"preemptible": False}, False, None),
+            ({"preemptible": False}, None, "8h"),
             ({"min_runtime": "2h"}, None, "2h"),
         ],
     )
@@ -323,7 +329,7 @@ class TestBeakerJobConfigMinRuntime:
         ("kwargs", "expected_context"),
         [
             ({}, {"preemptible": True}),
-            ({"preemptible": False}, {"preemptible": False}),
+            ({"preemptible": False}, {"minRuntime": 8 * 3600 * 1_000_000_000}),
             ({"min_runtime": "1h30m"}, {"minRuntime": 90 * 60 * 1_000_000_000}),
         ],
     )
@@ -347,7 +353,7 @@ class TestBeakerJobConfigMinRuntime:
         ("kwargs", "expected_line"),
         [
             ({}, "Preemptible: yes"),
-            ({"preemptible": False}, "Preemptible: no"),
+            ({"preemptible": False}, "Min runtime: 8h"),
             ({"min_runtime": "1h30m"}, "Min runtime: 1h30m"),
         ],
     )
@@ -1495,10 +1501,15 @@ class TestLaunchConfigLoaderPreemption:
                 yaml_body=f"preemptible: {preemptible}\nmin_runtime: 4h\n", tmp_path=tmp_path
             )
 
+    def test_cli_no_preemptible_is_8h_min_runtime(self):
+        config = self._load({"preemptible": False})
+        assert config.preemptible is None
+        assert config.min_runtime == "8h"
+
     def test_config_file_preemptible_false(self, tmp_path):
         config = self._load(yaml_body="preemptible: false\n", tmp_path=tmp_path)
-        assert config.preemptible is False
-        assert config.min_runtime is None
+        assert config.preemptible is None
+        assert config.min_runtime == "8h"
 
     def test_cli_min_runtime_replaces_config_file_preemptible(self, tmp_path):
         config = self._load(
@@ -1511,5 +1522,5 @@ class TestLaunchConfigLoaderPreemption:
         config = self._load(
             {"preemptible": False}, yaml_body="min_runtime: 4h\n", tmp_path=tmp_path
         )
-        assert config.preemptible is False
-        assert config.min_runtime is None
+        assert config.preemptible is None
+        assert config.min_runtime == "8h"

@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import os
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from olmo_eval.common.beaker_status import BeakerStatusReporter
 from olmo_eval.common.logging import get_logger
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import (
@@ -601,17 +609,87 @@ class VLLMServerProvider(InferenceProvider):
         """Generate completions for a single request."""
         client = self._get_or_create_client()
 
+        cut_tokens = 0
+        if request.context_fit is not None:
+            request, cut_tokens = await self._fit_context(request, params)
+
         # Route to completions endpoint for COMPLETION requests without messages
-        use_completions = (
+        if self._uses_completions(request):
+            outputs = await self._generate_completion(client, request, params)
+        else:
+            outputs = await self._generate_chat(client, request, params)
+        if cut_tokens:
+            for output in outputs:
+                output.metadata[CONTEXT_CUT_TOKENS_KEY] = cut_tokens
+        return outputs
+
+    @staticmethod
+    def _uses_completions(request: LMRequest) -> bool:
+        """Whether a request goes to /v1/completions rather than chat completions."""
+        return bool(
             request.request_type == RequestType.COMPLETION
             and not request.messages
             and request.prompt
         )
 
-        if use_completions:
-            return await self._generate_completion(client, request, params)
-        else:
-            return await self._generate_chat(client, request, params)
+    #: How many times to recount and cut a ContextFit text. A cut can merge or
+    #: split tokens at its edge, so one pass may leave the prompt a token over.
+    _CONTEXT_FIT_PASSES = 3
+
+    async def _fit_context(
+        self, request: LMRequest, params: SamplingParams
+    ) -> tuple[LMRequest, int]:
+        """Cut the end of the request's ContextFit text until the prompt fits.
+
+        The prompt is counted as the server renders it, chat template included,
+        against the smaller of ``context_fit.max_prompt_tokens`` and the room the
+        context window leaves for ``max_tokens``. Like HELMET's ``tokenize``, the
+        overflow is removed from the end of the text, measured with the model's
+        own tokenizer. Returns the request to send and how many tokens of the
+        text were cut; a prompt that cannot be counted is sent unchanged.
+        """
+        fit = request.context_fit
+        if fit is None:
+            return request, 0
+        budget = fit.max_prompt_tokens
+        if self.max_length is not None:
+            room = self.max_length - (params.max_tokens or 0)
+            budget = room if budget is None else min(budget, room)
+        if budget is None:
+            return request, 0
+
+        text, cut_tokens = fit.text, 0
+        for _ in range(self._CONTEXT_FIT_PASSES):
+            prompt_tokens = await self._count_request_tokens(request)
+            if prompt_tokens is None or prompt_tokens <= budget or not text:
+                break
+            tokenizer = self._get_tokenizer(require_local=True)
+            offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)[
+                "offset_mapping"
+            ]
+            overflow = min(prompt_tokens - budget, len(offsets))
+            kept = text[: offsets[-overflow][0]] if overflow < len(offsets) else ""
+            request = _replace_context_text(request, text, kept)
+            text, cut_tokens = kept, cut_tokens + overflow
+        return request, cut_tokens
+
+    async def _count_request_tokens(self, request: LMRequest) -> int | None:
+        """Return a request's prompt length as the server will tokenize it."""
+        if self._uses_completions(request):
+            return await self._count_tokens(
+                {
+                    "model": self._request_model_name,
+                    "prompt": request.prompt,
+                    "add_special_tokens": bool(self._add_bos_token),
+                }
+            )
+        messages = (
+            [dict(m) for m in request.messages]
+            if request.messages
+            else [{"role": "user", "content": request.prompt}]
+        )
+        tools = [t.to_openai() for t in request.tools] if request.tools else None
+        return await self._count_chat_tokens(messages, tools)
 
     def describe_request(
         self,
@@ -940,7 +1018,10 @@ class VLLMServerProvider(InferenceProvider):
             payload["tools"] = tools
         if self.chat_template_kwargs:
             payload["chat_template_kwargs"] = dict(self.chat_template_kwargs)
+        return await self._count_tokens(payload)
 
+    async def _count_tokens(self, payload: dict[str, Any]) -> int | None:
+        """Return the token count the server's /tokenize endpoint gives a payload."""
         base_url = self.base_url.rstrip("/").removesuffix("/v1")
         try:
             async with httpx.AsyncClient(timeout=30.0) as http_client:
@@ -948,7 +1029,7 @@ class VLLMServerProvider(InferenceProvider):
                 response.raise_for_status()
                 data = response.json()
         except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Could not count prompt tokens for max_tokens fitting: %s", exc)
+            logger.warning("Could not count prompt tokens: %s", exc)
             return None
 
         count = data.get("count")
@@ -1369,3 +1450,21 @@ class VLLMServerProvider(InferenceProvider):
             List of output lists with logprobs populated.
         """
         return run_async(self.alogprobs(requests, sampling_params))
+
+
+def _replace_context_text(request: LMRequest, text: str, kept: str) -> LMRequest:
+    """Return ``request`` with its one occurrence of ``text`` replaced by ``kept``."""
+    if request.messages:
+        holders = [
+            i
+            for i, message in enumerate(request.messages)
+            if isinstance(message.get("content"), str) and text in message["content"]
+        ]
+        if len(holders) == 1 and request.messages[holders[0]]["content"].count(text) == 1:
+            messages = list(request.messages)
+            message = messages[holders[0]]
+            messages[holders[0]] = {**message, "content": message["content"].replace(text, kept)}
+            return replace(request, messages=tuple(messages))
+    elif request.prompt.count(text) == 1:
+        return replace(request, prompt=request.prompt.replace(text, kept))
+    raise ValueError("A request's ContextFit text must occur exactly once in its prompt")

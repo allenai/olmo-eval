@@ -30,27 +30,31 @@ from olmo_eval.cli.utils import (
     process_ordered_args,
     reconstruct_ordered_args,
 )
-
-
-class Terminated(BaseException):
-    """SIGTERM arrived while a run was in progress (for example, Beaker preemption)."""
+from olmo_eval.common.shutdown import Terminated, clear_shutdown, request_shutdown
 
 
 @contextlib.contextmanager
 def _sigterm_raises() -> Iterator[None]:
-    """Turn SIGTERM into Terminated so cleanup runs and the run is recorded as failed."""
+    """Turn SIGTERM into a shutdown request and Terminated, so cleanup runs.
+
+    The request comes first: results that arrive while the run unwinds are then not
+    recorded as final, and a resumed run does them again.
+    """
     if threading.current_thread() is not threading.main_thread():
         yield
         return
 
     def handler(signum: int, frame: object) -> None:
+        request_shutdown()
         raise Terminated()
 
+    clear_shutdown()
     previous = signal.signal(signal.SIGTERM, handler)
     try:
         yield
     finally:
         signal.signal(signal.SIGTERM, previous)
+        clear_shutdown()
 
 
 @click.command()
@@ -118,6 +122,8 @@ def run(
     output_dir: str,
     save_predictions: bool,
     save_requests: bool,
+    resume: bool,
+    fresh: bool,
     dry_run: bool,
     # Inspect options
     debug_requests: bool,
@@ -143,8 +149,12 @@ def run(
     from olmo_eval.cli.run.factory import RunnerFactory
     from olmo_eval.common.logging import configure_logging
     from olmo_eval.runners import ValidationError
-    from olmo_eval.upload import mark_run_failed, resolve_upload_config
+    from olmo_eval.runners.asynq.progress import ProgressLockedError
+    from olmo_eval.upload import mark_run_failed, mark_run_interrupted, resolve_upload_config
     from olmo_eval.upload.config import upload_param_hint
+
+    if resume and fresh:
+        raise click.UsageError("--resume and --fresh cannot be used together")
 
     try:
         upload_config = resolve_upload_config(upload, api_url, tags)
@@ -189,6 +199,8 @@ def run(
         experiment_group=experiment_group,
         save_predictions=save_predictions,
         save_requests=save_requests,
+        resume=resume,
+        fresh=fresh,
         inspect_instance=inspect_instance,
         inspect_formatted=inspect_formatted,
         inspect_tokens=inspect_tokens,
@@ -238,8 +250,21 @@ def run(
         except (KeyboardInterrupt, Terminated) as e:
             reason = "terminated (SIGTERM)" if isinstance(e, Terminated) else "interrupted"
             console.print(f"\n[bold red]Evaluation {reason}[/bold red]")
-            mark_run_failed(runner.output_dir, upload_config, error=f"Run {reason}", since=started)
+            if resume and isinstance(e, Terminated):
+                # Usually preemption: Beaker requeues the job, which resumes this run under
+                # the same run ID, so it is not reported as failed.
+                mark_run_interrupted(
+                    runner.output_dir, upload_config, reason=f"Run {reason}", since=started
+                )
+            else:
+                mark_run_failed(
+                    runner.output_dir, upload_config, error=f"Run {reason}", since=started
+                )
             raise SystemExit(143 if isinstance(e, Terminated) else 130) from None
+        except ProgressLockedError as e:
+            # Another run owns this directory's manifest and run: report nothing for it.
+            console.print(f"\n[bold red]Not started:[/bold red] {e}")
+            raise SystemExit(1) from None
         except Exception as e:
             console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
             console.print_exception()

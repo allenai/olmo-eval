@@ -88,7 +88,12 @@ export type NestedMetrics = { [metric: string]: { [scorer: string]: number | nul
 /** Flat metrics keyed by "metric_name:scorer_name". */
 export type FlatMetrics = { [metricKey: string]: number | null };
 
-export type RunStatus = "running" | "complete" | "partial" | "failed";
+/**
+ * "interrupted" is not final: the run stopped (SIGTERM) but can resume under the same run ID,
+ * so a later "running" upsert moves it back to "running". complete, partial and failed are
+ * final.
+ */
+export type RunStatus = "running" | "interrupted" | "complete" | "partial" | "failed";
 export type FinalRunStatus = "complete" | "partial" | "failed";
 export type UploadState = "uploading" | "complete";
 
@@ -242,7 +247,8 @@ export interface ModelInfo {
 
 /**
  * Create or update a run. Sent once when the run starts (status "running") and
- * again at the end with the final status. Re-sending is safe.
+ * again at the end with the final status, or with "interrupted" when a resumable run is
+ * stopped. Re-sending is safe.
  */
 export interface RunUpsertRequest {
     protocol_version: 1;
@@ -255,7 +261,7 @@ export interface RunUpsertResponse {
     run_id: RunId;
     /** True when this request created the run. */
     created: boolean;
-    /** Status after the upsert (a final status is never downgraded to "running"). */
+    /** Status after the upsert (a final status is never downgraded to "running" or "interrupted"). */
     status: RunStatus;
     upload_state: UploadState;
     /** gs:// URI of the run's artifact prefix, ending in "/". */
@@ -604,7 +610,7 @@ export interface SuiteChildIn {
 /** One suite aggregation from metrics/results "suites", plus its definition. */
 export interface SuiteResultIn {
     name: string;
-    /** none, average, weighted_average, average_of_averages, display_only. */
+    /** none, average, weighted_average, average_of_averages, display_only, gap. */
     /** @maxLength 32 */
     aggregation: string;
     /** Parent suite name for nested suites, else null. */
@@ -612,10 +618,11 @@ export interface SuiteResultIn {
     description: string | null;
     /** Direct children from the registered Suite definition (or the contributing tasks when unregistered). */
     children: SuiteChildIn[];
+    /** A gap suite retains primary_score reference, companion, and gap diagnostics. */
     metrics: NestedMetrics;
-    /** "primary_score:average" for olmo-eval suites. */
+    /** Suite primary metric, such as primary_score:average or primary_score:companion. */
     primary_metric: string | null;
-    /** Suite primary score, null for display_only/none. */
+    /** Suite primary score; the held-out companion for gap, null for display_only/none or an incomplete gap. */
     score: number | null;
     num_tasks: NonNegativeInt32 | null;
 }

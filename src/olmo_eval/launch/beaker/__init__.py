@@ -2,6 +2,7 @@
 
 from olmo_eval.launch.beaker.launcher import (
     DEFAULT_WEKA_BUCKETS,
+    PROTECTED_MIN_RUNTIME,
     BeakerEnvSecret,
     BeakerJobConfig,
     BeakerLauncher,
@@ -24,6 +25,7 @@ __all__ = [
     "BeakerEnvSecret",
     "BeakerJobConfig",
     "BeakerLauncher",
+    "PROTECTED_MIN_RUNTIME",
     "BeakerWekaBucket",
     "_parse_timeout",
     "build_install_command",

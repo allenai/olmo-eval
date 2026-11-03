@@ -105,6 +105,16 @@ def register_variant(task_name: str, variant: str, **overrides: Any) -> None:
     _variants.setdefault(task_name, {})[variant] = overrides
 
 
+def _parse_bool(value_str: str, key: str) -> bool:
+    """Coerce an override value to a bool (true/false/1/0, case-insensitive)."""
+    normalized = value_str.strip().lower()
+    if normalized in {"true", "1"}:
+        return True
+    if normalized in {"false", "0"}:
+        return False
+    raise ValueError(f"Invalid boolean for {key}: {value_str!r} (expected true/false or 1/0)")
+
+
 def parse_overrides(override_str: str) -> dict[str, Any]:
     """Parse 'key=value,key=value' into dict with type coercion.
 
@@ -172,8 +182,10 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
                 "truncate_prompt_tokens",
             }:
                 value = int(value_str)
-            elif key in {"temperature", "top_p"}:
+            elif key in {"temperature", "top_p", "judge_temperature"}:
                 value = float(value_str)
+            elif key in {"strip_thinking", "strip_unclosed_thinking", "thinking_prefilled"}:
+                value = _parse_bool(value_str, key)
             elif key == "dependencies":
                 # Dependencies should be parsed as JSON list
                 import json as json_module
@@ -307,12 +319,18 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
 
     # A judged task takes its judge from $OLMO_EVAL_JUDGE unless the overrides name a
     # judge model, which then wins with its task's default effort and budget.
+    default_judge = config.judge_model
     if _tasks[task_name].judged and "judge_model" not in (config_overrides or {}):
         config = replace(config, **judge_env_overrides())
 
     # Apply additional config overrides (highest priority)
     if config_overrides:
         config = replace(config, **config_overrides)
+
+    # A task's judge temperature is tuned for its default judge, and reasoning judges
+    # reject one, so another judge gets none unless the overrides set it too.
+    if config.judge_model != default_judge and "judge_temperature" not in (config_overrides or {}):
+        config = replace(config, judge_temperature=None)
 
     return _tasks[task_name](config)
 

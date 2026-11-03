@@ -38,7 +38,7 @@
         },
         "status": {
           "$ref": "#/definitions/RunStatus",
-          "description": "Worst status among the runs (failed > partial > running > complete)."
+          "description": "Worst status among the runs (failed > partial > interrupted > running > complete)."
         },
         "user": {
           "type": [
@@ -4576,8 +4576,10 @@
       "type": "object"
     },
     "RunStatus": {
+      "description": "\"interrupted\": stopped and waiting to resume under the same run ID; not final.",
       "enum": [
         "running",
+        "interrupted",
         "complete",
         "partial",
         "failed"

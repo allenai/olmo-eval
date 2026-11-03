@@ -88,6 +88,7 @@
   --status-partial: #e09b00;
   --status-failed: #d03b3b;
   --status-running: var(--teal-line);
+  --status-interrupted: var(--warn-fg);
   --status-uploading: var(--muted);
   --danger-soft: #fbeaea;
   --warn-soft: #fdf3dc;

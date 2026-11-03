@@ -23,7 +23,7 @@ NonNeg = Annotated[int, Field(ge=0, le=2**63 - 1)]
 NonNeg32 = Annotated[int, Field(ge=0, le=2**31 - 1)]
 NestedMetrics = dict[str, dict[str, float | None]]
 FlatMetrics = dict[str, float | None]
-RunStatus = Literal["running", "complete", "partial", "failed"]
+RunStatus = Literal["running", "interrupted", "complete", "partial", "failed"]
 FinalRunStatus = Literal["complete", "partial", "failed"]
 UploadState = Literal["uploading", "complete"]
 ArtifactKind = Literal[

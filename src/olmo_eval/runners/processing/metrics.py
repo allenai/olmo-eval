@@ -21,6 +21,14 @@ from olmo_eval.runners.processing.utils import get_primary_metric
 logger = get_logger("runners.metrics")
 
 
+def _suite_metrics(results: dict[str, Any]) -> dict[str, Any]:
+    return {
+        name: data["metrics"]
+        for name, data in results.get("suites", {}).items()
+        if data.get("metrics")
+    }
+
+
 def build_single_model_metrics(
     results: dict[str, Any],
     experiment_id: str | None = None,
@@ -116,11 +124,13 @@ def build_single_model_metrics(
                 )
 
     return MetricsOutput(
+        suite_metrics=_suite_metrics(results) or None,
         timestamp=results.get("timestamp", ""),
         config=config_dict,
         tasks=[t.to_dict() for t in tasks_list],
         summary={k: v.to_dict() for k, v in summary.items()},
         errors=results.get("errors", []),
+        task_specs=results.get("task_specs"),
         experiment_id=experiment_id,
         experiment_name=experiment_name,
         experiment_group=experiment_group,
@@ -219,6 +229,12 @@ def build_multi_model_metrics(
                     )
 
     return MetricsOutput(
+        suite_metrics={
+            name: metrics
+            for name, data in results.get("models", {}).items()
+            if (metrics := _suite_metrics(data))
+        }
+        or None,
         timestamp=results.get("timestamp", ""),
         config={"models": models_config},
         tasks=[t.to_dict() for t in tasks_list],
@@ -227,6 +243,7 @@ def build_multi_model_metrics(
             for model, tasks in summary.items()
         },
         errors=results.get("errors", []),
+        task_specs=results.get("task_specs"),
         experiment_id=experiment_id,
         experiment_name=experiment_name,
         experiment_group=experiment_group,
@@ -342,13 +359,20 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
                 name, "[red]Failed[/red]", instances, generations, metric_name, str(error)
             )
         elif primary:
+            result = f"{primary[1]:.4f}"
+            if task_data.get("aggregation") == "gap":
+                gap = metrics.get("primary_score", {}).get("gap")
+                if gap is not None:
+                    if task_data.get("display_format") in {"percent", "percentage"}:
+                        result += f" (gap {gap * 100:+.2f} pp)"
+                    else:
+                        result += f" (gap {gap:+.4f})"
             table.add_row(
-                name,
-                "[green]Success[/green]",
-                instances,
-                generations,
-                metric_name,
-                f"{primary[1]:.4f}",
+                name, "[green]Success[/green]", instances, generations, metric_name, result
+            )
+        elif task_data.get("aggregation") == "gap":
+            table.add_row(
+                name, "[yellow]Incomplete[/yellow]", instances, generations, metric_name, "-"
             )
         else:
             table.add_row(name, "[green]Success[/green]", instances, generations, metric_name, "-")
@@ -368,7 +392,11 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
         }
         collapsed: set[str] = set()
         for suite_data in suites.values():
-            if suite_data.get("parent_suite") and suite_data.get("aggregation") in averaging:
+            if (
+                suite_data.get("parent_suite")
+                and not suite_data.get("container_suite")
+                and suite_data.get("aggregation") in averaging
+            ):
                 collapsed.update(suite_data.get("tasks", []))
         return collapsed
 

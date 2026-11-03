@@ -9,7 +9,7 @@ from typing import Any
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
 from olmo_eval.common.scorers.base import SCORER_RESULTS_KEY
-from olmo_eval.common.types import TURNS_KEY, Response, SamplingParams
+from olmo_eval.common.types import CONTEXT_CUT_TOKENS_KEY, TURNS_KEY, Response, SamplingParams
 
 
 def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> list[dict]:
@@ -100,6 +100,8 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 out_data["scoring_errors"] = meta["scoring_errors"]
             if "judge_result" in meta:
                 out_data["judge_result"] = meta["judge_result"]
+            if CONTEXT_CUT_TOKENS_KEY in meta:
+                out_data[CONTEXT_CUT_TOKENS_KEY] = meta[CONTEXT_CUT_TOKENS_KEY]
             # Whether the answer was stated in the requested format (scorer-set).
             if "answer_format_correct" in meta:
                 out_data["answer_format_correct"] = meta["answer_format_correct"]

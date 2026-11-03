@@ -332,32 +332,38 @@ class JudgeSettings:
     model: str
     max_tokens: int
     reasoning_effort: str | None = None
+    temperature: float = 0.0
 
     def with_config(self, config: Any) -> "JudgeSettings":
         """Return these settings with the judge fields a task config sets.
 
-        ``config`` is a ``TaskConfig``; its ``judge_model``, ``judge_reasoning_effort``
-        and ``judge_max_tokens`` replace the matching setting when they are not None.
-        The default effort belongs to the default model, so a config that names
-        another model and no effort gets none.
+        ``config`` is a ``TaskConfig``; its ``judge_model``, ``judge_reasoning_effort``,
+        ``judge_max_tokens`` and ``judge_temperature`` replace the matching setting when
+        they are not None.
+        The default effort and temperature belong to the default model, so a config
+        that names another model and neither gets the effort none and the temperature 0.
         """
         model = config.judge_model or self.model
         reasoning_effort = config.judge_reasoning_effort
         if reasoning_effort is None and model == self.model:
             reasoning_effort = self.reasoning_effort
+        temperature = config.judge_temperature
+        if temperature is None:
+            temperature = self.temperature if model == self.model else 0.0
         return JudgeSettings(
             model=model,
             max_tokens=config.judge_max_tokens or self.max_tokens,
             reasoning_effort=reasoning_effort,
+            temperature=temperature,
         )
 
     def build_fn(self, scorer_name: str) -> ConfiguredJudgeFn:
-        """Build the OpenAI-compatible judge function these settings describe, at temperature 0."""
+        """Build the OpenAI-compatible judge function these settings describe."""
         return build_openai_judge_fn(
             model=self.model,
             scorer_name=scorer_name,
             max_tokens=self.max_tokens,
-            temperature=0.0,
+            temperature=self.temperature,
             reasoning_effort=self.reasoning_effort,
         )
 

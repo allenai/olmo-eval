@@ -229,6 +229,28 @@ TURNS_KEY = "turns"
 
 
 @dataclass(frozen=True, slots=True)
+class ContextFit:
+    """Text in a request's prompt that may be cut short so the prompt fits.
+
+    Long-context tasks whose reference harness truncates the document with the
+    evaluated model's own tokenizer name that document here. A provider that
+    supports it counts the rendered prompt with the model's tokenizer and, when
+    it is longer than ``max_prompt_tokens`` or than the room the context window
+    leaves for ``max_tokens``, removes the overflow from the end of ``text`` so
+    the instructions and the question around it survive. ``text`` must occur
+    exactly once in the prompt, or in one message.
+    """
+
+    text: str
+    max_prompt_tokens: int | None = None
+
+
+#: ``LMOutput.metadata`` key holding how many tokens a provider cut from a request's
+#: ``ContextFit`` text before generating; absent when nothing was cut.
+CONTEXT_CUT_TOKENS_KEY = "context_cut_tokens"
+
+
+@dataclass(frozen=True, slots=True)
 class LMRequest:
     """Request to send to a language model."""
 
@@ -244,6 +266,8 @@ class LMRequest:
     #: Per-instance payload for a scaffold that needs more than the messages,
     #: such as the state a multi-turn rollout acts on. Not sent to the model.
     metadata: dict[str, Any] | None = None
+    #: Text the provider may shorten to fit the prompt; see ``ContextFit``.
+    context_fit: ContextFit | None = None
 
 
 @hide_unset()

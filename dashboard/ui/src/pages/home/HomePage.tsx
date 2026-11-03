@@ -134,7 +134,16 @@ function ActiveGroups() {
 
 function activityText(item: ActivityItem) {
   const models = Array.from(new Set(item.runs.map((r) => r.model.series_label)));
-  const verb = item.status === "failed" ? "run failed" : item.status === "running" ? "is running" : item.status === "partial" ? "finished with failures" : "launched";
+  const verb =
+    item.status === "failed"
+      ? "run failed"
+      : item.status === "running"
+        ? "is running"
+        : item.status === "interrupted"
+          ? "was interrupted"
+          : item.status === "partial"
+            ? "finished with failures"
+            : "launched";
   return { models, verb };
 }
 
@@ -168,7 +177,7 @@ function OrgActivity() {
                     <RelativeTime value={item.created_at} />
                   </span>
                 </span>
-                <StatusBadge status={item.status === "running" && first.stale ? "stale" : item.status} iconOnly />
+                <StatusBadge status={(item.status === "running" || item.status === "interrupted") && first.stale ? "stale" : item.status} iconOnly />
                 <span className={h.feedMain}>
                   <span>
                     <strong>{item.user ?? "someone"}</strong> <span className="muted">{verb}</span> {models.slice(0, 2).join(", ")}

@@ -46,6 +46,8 @@ class RunnerFactory:
             experiment_group=self.config.experiment_group,
             save_predictions=self.config.save_predictions,
             save_requests=self.config.save_requests,
+            resume=self.config.resume,
+            fresh=self.config.fresh,
             inspect_instance=self.config.inspect_instance,
             inspect_formatted=self.config.inspect_formatted,
             inspect_tokens=self.config.inspect_tokens,

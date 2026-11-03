@@ -155,6 +155,16 @@ class TaskConfig:
     #: Drop ``<think>...</think>`` traces before scoring; see :meth:`Task.strip_thinking_traces`.
     strip_thinking: bool = False
 
+    #: Treat an unterminated ``<think>`` trace as no answer: the output text is
+    #: emptied before scoring. Off by default so scoring matches the reference
+    #: harness, which scores the raw trace.
+    strip_unclosed_thinking: bool = False
+
+    #: The generation prompt already opens a ``<think>`` trace. With
+    #: ``strip_unclosed_thinking``, an output with no ``</think>`` is treated as
+    #: an unterminated trace and emptied. Off by default.
+    thinking_prefilled: bool = False
+
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
     dependencies: list[str] | None = None
 
@@ -173,12 +183,19 @@ class TaskConfig:
     judge_model: str | None = None
     judge_reasoning_effort: str | None = None
     judge_max_tokens: int | None = None
+    #: Sampling temperature for the judge; unset means the shared judge's 0.
+    judge_temperature: float | None = None
 
     #: How a task that builds its prompt from a bare label should render it. The
     #: vision tasks read these; they follow the checkpoint, since instruction-tuned
     #: and pretrain models were trained on different prompt forms.
     prompt_templates: str | None = None
     system_prompt_style: str | None = None
+
+    #: Task-specific settings that shape the data or prompts but have no field of
+    #: their own, such as shot counts, token budgets or source revisions. Set them
+    #: here so that changing one changes the task hash.
+    task_settings: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
@@ -316,6 +333,12 @@ class TaskConfig:
             serialized["system_prompt_style"] = self.system_prompt_style
         if self.strip_thinking:
             serialized["strip_thinking"] = True
+        if self.task_settings is not None:
+            serialized["task_settings"] = self.task_settings
+        if self.strip_unclosed_thinking:
+            serialized["strip_unclosed_thinking"] = True
+        if self.thinking_prefilled:
+            serialized["thinking_prefilled"] = True
         if any(
             value is not None
             for value in (
@@ -331,6 +354,10 @@ class TaskConfig:
                     "judge_max_tokens": self.judge_max_tokens,
                 }
             )
+        # Emitted on its own, only when set, so hashes of judges at the default
+        # temperature are unchanged from before the field existed.
+        if self.judge_temperature is not None:
+            serialized["judge_temperature"] = self.judge_temperature
         return serialized
 
     def get_primary_metric(self) -> Metric | None:
@@ -651,29 +678,56 @@ class Task(ABC):
     def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
         """Drop ``<think>...</think>`` traces so scorers see only the final answer.
 
-        No-op unless ``config.strip_thinking`` is set. Runners call this before
-        ``score_responses`` (which tasks may override). Idempotent: a stripped
-        output has no ``</think>`` left, so a second pass leaves it alone.
+        No-op unless ``config.strip_thinking`` or ``config.strip_unclosed_thinking``
+        is set. Runners call this before ``score_responses`` (which tasks may
+        override). Repeated calls leave already processed outputs unchanged.
 
-        Mirrors the reference harness's ``r1_style`` processing: everything
-        through the *last* ``</think>`` goes, the text after it is kept
-        byte-for-byte, and an unterminated trace is left as-is. Whitespace
-        matters — the IFEval loose variants drop the response's first line, and
-        paragraph checks index on blank-line splits — so nothing is trimmed.
+        With ``strip_thinking``, this mirrors the reference harness's ``r1_style``
+        processing: everything through the *last* ``</think>`` goes, the text
+        after it is kept byte-for-byte, and an unterminated trace is left as-is.
+        Whitespace matters (the IFEval loose variants drop the response's first
+        line, and paragraph checks index on blank-line splits), so nothing is
+        trimmed.
+
+        With ``strip_unclosed_thinking``, an unterminated trace (``<think>`` after
+        the last ``</think>``, or with no closing tag) is treated as no answer:
+        the text becomes empty and ``metadata["unclosed_thinking"]`` is set. This
+        stops answer extractors from crediting stray matches inside a trace that
+        ran to the token cap.
+
+        With ``thinking_prefilled`` (the prompt itself ends in ``<think>``), outputs
+        start inside the trace, so the unterminated case is "no ``</think>``" rather
+        than "``<think>`` with no ``</think>``".
+
         Only ``outputs[*].text`` is touched; trajectories and request traces
-        keep the trace.
+        keep the trace. The raw text is kept in ``metadata["original_text"]``.
         """
-        if not self.config.strip_thinking:
+        strip_closed = self.config.strip_thinking
+        strip_unclosed = self.config.strip_unclosed_thinking
+        if not (strip_closed or strip_unclosed):
             return
+        prefilled = self.config.thinking_prefilled
         from olmo_eval.evals.extract import extract_think_answer
 
         for response in responses:
             for output in response.outputs:
-                text = output.text or ""
-                if "</think>" not in text:
+                if prefilled and output.metadata.get("thinking_processed"):
                     continue
-                output.metadata.setdefault("original_text", text)
-                output.text = extract_think_answer(text) or ""
+                text = output.text or ""
+                closed = "</think>" in text
+                suffix = text.rpartition("</think>")[2] if closed else text
+                unclosed = "<think>" in suffix or (prefilled and not closed)
+                if strip_unclosed and unclosed:
+                    output.metadata.setdefault("original_text", text)
+                    output.metadata["unclosed_thinking"] = True
+                    output.text = ""
+                elif strip_closed and closed:
+                    output.metadata.setdefault("original_text", text)
+                    output.text = extract_think_answer(text) or ""
+                else:
+                    continue
+                if prefilled:
+                    output.metadata["thinking_processed"] = True
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Extract answers from outputs. Override for complex multi-output logic."""

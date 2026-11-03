@@ -254,6 +254,9 @@ class RunConfig:
     # Output options
     save_predictions: bool = True
     save_requests: bool = True
+    # Continue from progress recorded in output_dir, or discard it
+    resume: bool = False
+    fresh: bool = False
 
     # Debug/inspection options
     inspect_instance: bool = False
@@ -307,6 +310,8 @@ class RunConfigBuilder:
         experiment_group: str | None = None,
         save_predictions: bool = True,
         save_requests: bool = True,
+        resume: bool = False,
+        fresh: bool = False,
         inspect_instance: bool = False,
         inspect_formatted: bool = False,
         inspect_tokens: bool = False,
@@ -340,6 +345,8 @@ class RunConfigBuilder:
         self.experiment_group = experiment_group
         self.save_predictions = save_predictions
         self.save_requests = save_requests
+        self.resume = resume
+        self.fresh = fresh
         self.inspect_instance = inspect_instance
         self.inspect_formatted = inspect_formatted
         self.inspect_tokens = inspect_tokens
@@ -393,6 +400,8 @@ class RunConfigBuilder:
             experiment_group=self.experiment_group,
             save_predictions=self.save_predictions,
             save_requests=self.save_requests,
+            resume=self.resume,
+            fresh=self.fresh,
             inspect_instance=self.inspect_instance,
             inspect_formatted=self.inspect_formatted,
             inspect_tokens=self.inspect_tokens,

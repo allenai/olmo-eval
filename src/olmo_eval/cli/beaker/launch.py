@@ -98,7 +98,10 @@ def _validate_weka_buckets(
 @click.option(
     "--preemptible/--no-preemptible",
     default=None,
-    help="Allow preemption (deprecated by Beaker; prefer --min-runtime)",
+    help=(
+        "Allow preemption (deprecated by Beaker; prefer --min-runtime). "
+        "--no-preemptible is the same as --min-runtime 8h and keeps auto-resume on."
+    ),
 )
 @click.option(
     "--min-runtime",

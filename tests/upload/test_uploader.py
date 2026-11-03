@@ -12,6 +12,7 @@ import pytest
 from olmo_eval.upload import (
     UploadConfig,
     mark_run_failed,
+    mark_run_interrupted,
     register_run_start,
     upload_results_dir,
 )
@@ -517,3 +518,144 @@ def test_mark_run_failed_without_upload_still_updates_manifest(tmp_path: Path, s
     mark_run_failed(out, UploadConfig(enabled=False), error="boom")
 
     assert json.loads((out / "manifest.json").read_text())["run"]["status"] == "failed"
+
+
+def test_mark_run_interrupted_reports_a_non_final_status(
+    tmp_path: Path, server: FakeIngest, client
+) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    write_manifest(out, status="running")
+
+    result = mark_run_interrupted(out, CONFIG, reason="Run terminated (SIGTERM)", client=client)
+
+    assert result.ok, result.error
+    assert result.dashboard_url == f"https://dash.test/runs/{RUN_ID}"
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["run"]["status"] == "interrupted"
+    assert manifest["run"]["finished_at"] is None
+    assert manifest["run"]["errors"][-1] == {"task": None, "error": "Run terminated (SIGTERM)"}
+    # Only the run is updated: completing the upload would make the status final.
+    assert server.calls == [("PUT", f"/v1/runs/{RUN_ID}")]
+    assert server.runs[RUN_ID]["run"]["status"] == "interrupted"
+    assert server.runs[RUN_ID]["run"]["tags"] == ["smoke", "cli-tag"]
+    assert server.completed is None
+    assert server.schema_errors == []
+
+
+def test_a_resumed_run_registers_as_running_again(
+    tmp_path: Path, server: FakeIngest, client
+) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    write_manifest(out, status="running")
+    mark_run_interrupted(out, CONFIG, reason="Run terminated (SIGTERM)", client=client)
+
+    # The resumed job writes a new running manifest under the same run ID and registers it.
+    write_manifest(out, status="running")
+    assert register_run_start(out, CONFIG, client=client)
+
+    assert server.runs[RUN_ID]["run"]["status"] == "running"
+    assert server.schema_errors == []
+
+
+def test_mark_run_interrupted_falls_back_to_failed_on_an_older_service(
+    tmp_path: Path, server: FakeIngest, client
+) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    write_manifest(out, status="running")
+    server.fail[f"PUT /v1/runs/{RUN_ID}"] = [422]
+    server.error_body = {
+        "error": {"code": "validation_error", "message": "request validation failed"}
+    }
+
+    result = mark_run_interrupted(out, CONFIG, reason="Run terminated (SIGTERM)", client=client)
+
+    assert result.ok, result.error
+    assert server.calls == [
+        ("PUT", f"/v1/runs/{RUN_ID}"),
+        ("PUT", f"/v1/runs/{RUN_ID}"),
+        ("POST", f"/v1/runs/{RUN_ID}/complete"),
+    ]
+    reported = server.runs[RUN_ID]["run"]
+    assert reported["status"] == "failed"
+    assert reported["finished_at"] is not None and reported["duration_seconds"] is not None
+    assert reported["errors"][-1] == {"task": None, "error": "Run terminated (SIGTERM)"}
+    assert server.completed is not None and server.completed["status"] == "failed"
+    # The run can still be resumed locally.
+    assert json.loads((out / "manifest.json").read_text())["run"]["status"] == "interrupted"
+
+
+def test_mark_run_interrupted_does_not_fall_back_on_other_errors(
+    tmp_path: Path, server: FakeIngest, client
+) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    write_manifest(out, status="running")
+    server.fail[f"PUT /v1/runs/{RUN_ID}"] = [403]
+    server.error_body = {"error": {"code": "forbidden", "message": "nope", "request_id": "r"}}
+
+    result = mark_run_interrupted(out, CONFIG, reason="Run terminated (SIGTERM)", client=client)
+
+    assert not result.ok
+    assert server.calls == [("PUT", f"/v1/runs/{RUN_ID}")]
+    assert server.completed is None
+
+
+@pytest.mark.parametrize("status", ["complete", "failed", "interrupted"])
+def test_mark_run_interrupted_ignores_runs_that_are_not_running(
+    tmp_path: Path, server, client, status: str
+) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    write_manifest(out, status=status)
+
+    result = mark_run_interrupted(out, CONFIG, reason="Run terminated (SIGTERM)", client=client)
+
+    assert not result.ok
+    assert server.calls == []
+    assert json.loads((out / "manifest.json").read_text())["run"]["status"] == status
+
+
+def test_mark_run_interrupted_ignores_a_manifest_from_an_earlier_run(
+    tmp_path: Path, server, client
+) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    write_manifest(out, status="running")
+    started = json.loads((out / "manifest.json").read_text())["run"]["started_at"]
+    later = datetime.fromisoformat(started) + timedelta(hours=1)
+
+    result = mark_run_interrupted(out, CONFIG, reason="x", since=later, client=client)
+
+    assert not result.ok
+    assert server.calls == []
+
+
+def test_mark_run_interrupted_without_upload_still_updates_manifest(tmp_path: Path, server) -> None:
+    out = tmp_path / "run"
+    out.mkdir()
+    write_manifest(out, status="running")
+
+    mark_run_interrupted(out, UploadConfig(enabled=False), reason="Run terminated (SIGTERM)")
+
+    assert json.loads((out / "manifest.json").read_text())["run"]["status"] == "interrupted"
+    assert server.calls == []
+
+
+def test_uploading_an_interrupted_run_finishes_it_with_a_warning(
+    tmp_path: Path, server: FakeIngest, client
+) -> None:
+    out = make_arc_run(tmp_path / "run")
+    manifest = json.loads((out / "manifest.json").read_text())
+    manifest["run"]["status"] = "interrupted"
+    (out / "manifest.json").write_text(json.dumps(manifest))
+
+    result = upload_results_dir(out, CONFIG, client=client)
+
+    assert result.ok, result.error
+    assert server.completed is not None
+    assert server.completed["status"] in ("complete", "partial")
+    assert server.runs[RUN_ID]["run"]["status"] == server.completed["status"]
+    assert any("was interrupted" in w and "--resume" in w for w in result.warnings)

@@ -434,10 +434,12 @@ class TestPreemptionForwarding:
     """Tests that preemption settings reach the Beaker job config."""
 
     @pytest.mark.parametrize(
-        ("preemptible", "min_runtime"),
-        [(True, None), (False, None), (None, "2h")],
+        ("preemptible", "min_runtime", "expected_preemptible", "expected_min_runtime"),
+        [(True, None, True, None), (False, None, None, "8h"), (None, "2h", None, "2h")],
     )
-    def test_task_job_forwards_preemption(self, preemptible, min_runtime):
+    def test_task_job_forwards_preemption(
+        self, preemptible, min_runtime, expected_preemptible, expected_min_runtime
+    ):
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
         from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
@@ -474,8 +476,8 @@ class TestPreemptionForwarding:
 
         job_config = assembler.assemble(exp)
 
-        assert job_config.preemptible is preemptible
-        assert job_config.min_runtime == min_runtime
+        assert job_config.preemptible is expected_preemptible
+        assert job_config.min_runtime == expected_min_runtime
 
     def test_external_eval_job_forwards_min_runtime(self):
         from olmo_eval.cli.beaker.job_assembler import assemble_external_eval_job
@@ -515,7 +517,8 @@ class TestPreemptionForwarding:
         from olmo_eval.cli.beaker.config_loader import resolve_preemption
 
         assert resolve_preemption(None, None) == (True, None)
-        assert resolve_preemption(False, None) == (False, None)
+        assert resolve_preemption(True, None) == (True, None)
+        assert resolve_preemption(False, None) == (None, "8h")
         assert resolve_preemption(None, "2h") == (None, "2h")
         with pytest.raises(ValueError, match="cannot both be set"):
             resolve_preemption(True, "2h")
