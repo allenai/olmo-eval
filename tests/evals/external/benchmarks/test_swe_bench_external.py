@@ -244,18 +244,31 @@ class TestMetrics(unittest.TestCase):
                 repo="b/b",
                 difficulty="<15 min fix",
                 grade=swe_grader.GradeResult(empty_patch=True),
-                error="agent_error: boom",
+                error="model_error: invalid tool arguments",
+            ),
+            swe_eval.InstanceResult(
+                instance_id="c",
+                repo="c/c",
+                difficulty="<15 min fix",
+                grade=swe_grader.GradeResult(empty_patch=True),
+                error="agent_error: connection refused",
             ),
         ]
         metrics = swe_eval.compute_metrics(results)
+        # The harness failure on "c" is left out of every rate but error_rate; the
+        # model's own protocol error on "b" is scored as unresolved.
         self.assertEqual(next(iter(metrics)), "resolve_rate")
         self.assertEqual(metrics["resolve_rate"], 0.5)
         self.assertEqual(metrics["num_resolved"], 1.0)
+        self.assertEqual(metrics["num_instances"], 3.0)
+        self.assertEqual(metrics["num_measured"], 2.0)
         self.assertEqual(metrics["patch_apply_rate"], 0.5)
         self.assertEqual(metrics["tests_ran_rate"], 0.5)
         self.assertEqual(metrics["empty_patch_rate"], 0.5)
-        self.assertEqual(metrics["error_rate"], 0.5)
+        self.assertEqual(metrics["num_errors"], 1.0)
+        self.assertAlmostEqual(metrics["error_rate"], 1 / 3)
         self.assertEqual(metrics["resolve_rate_repo_a_a"], 1.0)
+        self.assertNotIn("resolve_rate_repo_c_c", metrics)
         self.assertEqual(metrics["resolve_rate_difficulty__15_min_fix"], 0.5)
 
     def test_compute_metrics_empty(self) -> None:
@@ -499,8 +512,63 @@ class TestExecuteOracle(unittest.TestCase):
                 swe_eval.SWEBenchVerifiedExternalEval().execute(provider, {"oracle": True})
             )
         self.assertFalse(result.success)
-        self.assertEqual(result.error, "All 1 instances failed")
+        self.assertEqual(
+            result.error,
+            "All 1 instances hit a harness or infrastructure failure. "
+            "First failure: image_error: toomanyrequests",
+        )
         self.assertEqual(result.metrics["error_rate"], 1.0)
+
+    def _execute_with_one_provider_failure(self, args: dict[str, Any]) -> Any:
+        """Run an agent on four instances, one of which loses its model server."""
+        instances = [_instance(instance_id=f"owner__repo-{i}") for i in range(4)]
+        manager = mock.MagicMock()
+        manager.start = mock.AsyncMock()
+        manager.stop = mock.AsyncMock()
+        grade = swe_grader.GradeResult(resolved=True, patch_applied=True, tests_ran=True)
+
+        async def fake_agent(
+            _self: Any, _manager: Any, instance: SWEBenchInstance, *_: Any
+        ) -> None:
+            if instance.instance_id == "owner__repo-3":
+                raise RuntimeError("connection refused")
+
+        with (
+            mock.patch.object(swe_eval, "load_instances", return_value=instances),
+            mock.patch("olmo_eval.harness.scaffolds.validate_scaffold"),
+            mock.patch("olmo_eval.harness.sandbox.image.remove_swerex_image"),
+            mock.patch(
+                "olmo_eval.harness.sandbox.image.get_swerex_image", return_value="derived:latest"
+            ),
+            mock.patch("olmo_eval.harness.sandbox.SandboxManager", return_value=manager),
+            mock.patch.object(swe_eval.SWEBenchVerifiedExternalEval, "_run_agent", fake_agent),
+            mock.patch.object(swe_eval, "snapshot_worktree", mock.AsyncMock(return_value="tree")),
+            mock.patch.object(swe_eval, "extract_patch", mock.AsyncMock(return_value=GOLD_PATCH)),
+            mock.patch.object(swe_eval, "grade_in_sandbox", mock.AsyncMock(return_value=grade)),
+        ):
+            return asyncio.run(
+                swe_eval.SWEBenchVerifiedExternalEval().execute(
+                    mock.MagicMock(model_name="test-model"), args
+                )
+            )
+
+    def test_harness_failure_above_the_budget_fails_the_run(self) -> None:
+        result = self._execute_with_one_provider_failure({})
+        self.assertFalse(result.success)
+        self.assertIn("1 of 4 instances (25.0%)", result.error or "")
+        self.assertIn("agent_error: connection refused", result.error or "")
+        # The failed instance is not scored, even though its partial patch resolved.
+        self.assertEqual(result.metrics["resolve_rate"], 1.0)
+        self.assertEqual(result.metrics["num_errors"], 1.0)
+        failed = next(p for p in result.predictions if p["native_id"] == "owner__repo-3")
+        self.assertIsNone(failed["instance_metrics"]["resolved"]["external"])
+
+    def test_harness_failure_within_the_budget_is_a_success(self) -> None:
+        result = self._execute_with_one_provider_failure({"max_error_rate": "0.25"})
+        self.assertTrue(result.success)
+        self.assertIsNone(result.error)
+        self.assertEqual(result.metrics["resolve_rate"], 1.0)
+        self.assertEqual(result.metrics["num_measured"], 3.0)
 
     def test_unknown_image_source_is_error(self) -> None:
         provider = mock.MagicMock(model_name="test-model")
@@ -564,6 +632,34 @@ class TestRunInstanceAgent(unittest.TestCase):
         self.assertIsNone(result.error)
         self.assertEqual(result.patch, GOLD_PATCH)
         self.assertTrue(result.grade.patch_applied)
+
+    def test_grading_failure_overrides_an_earlier_model_error(self) -> None:
+        async def model_error(*args: Any) -> None:
+            args[-1].error = "model_error: refusal"
+
+        manager = mock.MagicMock()
+        manager.start = mock.AsyncMock()
+        manager.stop = mock.AsyncMock()
+        with (
+            mock.patch("olmo_eval.harness.sandbox.image.remove_swerex_image"),
+            mock.patch(
+                "olmo_eval.harness.sandbox.image.get_swerex_image", return_value="derived:latest"
+            ),
+            mock.patch("olmo_eval.harness.sandbox.SandboxManager", return_value=manager),
+            mock.patch.object(swe_eval.SWEBenchVerifiedExternalEval, "_run_agent", model_error),
+            mock.patch.object(swe_eval, "snapshot_worktree", mock.AsyncMock(return_value="tree")),
+            mock.patch.object(swe_eval, "extract_patch", mock.AsyncMock(return_value=GOLD_PATCH)),
+            mock.patch.object(
+                swe_eval, "grade_in_sandbox", mock.AsyncMock(side_effect=RuntimeError("lost"))
+            ),
+        ):
+            result = asyncio.run(
+                swe_eval.SWEBenchVerifiedExternalEval()._run_instance(
+                    _instance(), mock.MagicMock(), swe_eval.SWEBenchArgs(), "docker"
+                )
+            )
+        self.assertEqual(result.error, "grading_error: lost (after model_error: refusal)")
+        self.assertTrue(result.harness_failed)
 
     def test_other_agent_failure_is_recorded_as_error(self) -> None:
         result = self._run(RuntimeError("connection reset"))
@@ -659,6 +755,36 @@ class TestProgressAndResume(unittest.TestCase):
         self.assertEqual(result.metrics["num_instances"], 3.0)
         self.assertEqual(result.metrics["num_resolved"], 2.0)
         self.assertEqual(len(progress), 3)
+
+    def test_resume_reruns_instances_the_harness_failed(self) -> None:
+        def record(instance_id: str, error: str | None) -> str:
+            result = swe_eval.InstanceResult(
+                instance_id=instance_id,
+                repo="owner/repo",
+                difficulty="<15 min fix",
+                grade=swe_grader.GradeResult(empty_patch=True),
+                completion_reason="complete",
+                error=error,
+            )
+            return json.dumps(result.to_record())
+
+        with tempfile.TemporaryDirectory() as tmp:
+            earlier = Path(tmp) / "earlier.jsonl"
+            earlier.write_text(
+                record("owner__repo-0", "image_timeout: pull stalled")
+                + "\n"
+                + record("owner__repo-1", "model_error: invalid tool arguments")
+                + "\n"
+            )
+            graded: list[str] = []
+            result = self._execute({"resume_from": str(earlier)}, str(Path(tmp) / "out"), graded)
+
+        # The image timeout runs again; the model's own error stays a scored result.
+        self.assertEqual(sorted(graded), ["owner__repo-0", "owner__repo-2"])
+        self.assertTrue(result.success)
+        self.assertEqual(result.metrics["num_errors"], 0.0)
+        self.assertEqual(result.metrics["num_resolved"], 2.0)
+        self.assertAlmostEqual(result.metrics["resolve_rate"], 2 / 3)
 
 
 class TestImageTimeout(unittest.TestCase):
@@ -807,6 +933,13 @@ class TestVanilluxAgent(unittest.TestCase):
     def test_provider_failure_is_an_error(self) -> None:
         _, result = self._run_agent({"completion_reason": "error"}, error="server down")
         self.assertEqual(result.error, "agent_error: server down")
+        self.assertTrue(result.harness_failed)
+
+    def test_model_protocol_error_is_scored(self) -> None:
+        # openai_agents reports a ModelBehaviorError or refusal without a completion reason.
+        _, result = self._run_agent({}, error="bad tool arguments", scaffold="openai_agents")
+        self.assertEqual(result.error, "model_error: bad tool arguments")
+        self.assertFalse(result.harness_failed)
 
     def test_unsupported_scaffold_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported scaffold"):
