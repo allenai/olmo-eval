@@ -7,9 +7,11 @@ v1.5.0's ``DataAnalysisEnv`` in Docker mode.
 
 Each step is one model call and the environment's reply to it:
 
-- The model sees the problem, then the notebook as markdown, then each of its
-  earlier replies with their tool results and the notebook render that followed.
-  Only the newest render is shown; older ones are replaced by a placeholder.
+- The model sees the problem, the notebook as markdown and the system prompt, in
+  that order as upstream's environment sends them, then each of its earlier replies
+  with their tool results and the notebook render that followed. Only the newest
+  render is shown; older ones are replaced by a placeholder. A chat template that
+  requires the system message first cannot run this eval.
 - The calls of a reply run one after another. ``edit_cell`` appends or replaces a
   code cell, saves the notebook and reruns all of it with ``jupyter nbconvert
   --execute --allow-errors``, so cell errors land in outputs. ``list_workdir``
@@ -22,8 +24,6 @@ Each step is one model call and the environment's reply to it:
 
 Differences from upstream:
 
-- The system prompt comes first. Upstream's environment puts it after the problem
-  and the first notebook render, which many chat templates reject.
 - Upstream asks for a tool call on every reply (``tool_choice="required"``); the
   providers here do not send ``tool_choice``, so a reply may have no call. Such a
   reply uses its step and gets the notebook render, as an empty action would.
@@ -226,9 +226,9 @@ class NotebookEpisode:
         result = self.result
         problem = build_problem(self.question)
         nb.write_notebook(self.notebook, self.nb_path)
-        self.messages.append({"role": "system", "content": CAPSULE_SYSTEM_PROMPT_OPEN})
         self._add_user(problem)
         self._add_env_state()
+        self.messages.append({"role": "system", "content": CAPSULE_SYSTEM_PROMPT_OPEN})
         result.completion_reason = "max_steps"
         try:
             while result.steps < self.max_steps:

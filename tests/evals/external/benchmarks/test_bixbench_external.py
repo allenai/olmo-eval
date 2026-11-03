@@ -363,13 +363,14 @@ class TestEpisode:
         assert "--allow-errors" in executor.scripts[0]
 
         first = provider.requests[0].messages
-        assert [m["role"] for m in first] == ["system", "user", "user"]
-        assert contents(first[0]) == CAPSULE_SYSTEM_PROMPT_OPEN
-        assert contents(first[2]) == (
+        # Upstream's order: the problem, the first notebook render, then the system prompt.
+        assert [m["role"] for m in first] == ["user", "user", "system"]
+        assert contents(first[2]) == CAPSULE_SYSTEM_PROMPT_OPEN
+        assert contents(first[1]) == (
             "Markdown representation of notebook contents (/workspace/notebook.ipynb):\n\n"
         )
         second = provider.requests[1].messages
-        assert contents(second[2]) == HIDDEN_ENV_STATE
+        assert contents(second[1]) == HIDDEN_ENV_STATE
         assert [contents(m) for m in second if m["role"] == "tool"] == ["Appended new cell (#0)."]
         assert "ran print('hi')" in contents(second[-1])
         assert json.loads((tmp_path / nb.NOTEBOOK_NAME).read_text())["cells"][0]["outputs"]
@@ -456,6 +457,7 @@ class TestMetrics:
         assert metrics["accuracy_attempt_1"] == 1.0
         assert metrics["accuracy_std"] == pytest.approx(0.3535533)
         assert metrics["accuracy_str_verifier"] == 0.5
+        assert "accuracy_range_verifier" not in metrics
         assert metrics["max_steps_rate"] == 0.25
         assert metrics["num_failed_trials"] == 1.0
 

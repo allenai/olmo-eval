@@ -51,8 +51,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: The BixBench-env image, rebuilt for linux/amd64 from upstream's
-#: ``src/fhda/Dockerfile.pinned``. Upstream publishes only an arm64 build.
+#: The BixBench-env image, built for linux/amd64 from ``sandbox/Dockerfile``, the recipe
+#: of upstream's arm64-only ``futurehouse/bixbench:aviary-notebook-env``.
 SANDBOX_IMAGE = ""
 SANDBOX_STARTUP_TIMEOUT = 600.0
 #: Extra time past the step and notebook budgets before an episode is cut off from
@@ -154,7 +154,9 @@ def compute_metrics(trials: list[TrialResult]) -> dict[str, float]:
     scored = [t for t in trials if t.error is None]
     metrics: dict[str, float] = {"accuracy": _accuracy(scored)}
     for mode in EVAL_MODES:
-        metrics[f"accuracy_{mode}"] = _accuracy([t for t in scored if t.question.eval_mode == mode])
+        of_mode = [t for t in scored if t.question.eval_mode == mode]
+        if of_mode:
+            metrics[f"accuracy_{mode}"] = _accuracy(of_mode)
 
     attempts = sorted({t.attempt for t in scored})
     per_attempt = [_accuracy([t for t in scored if t.attempt == a]) for a in attempts]
