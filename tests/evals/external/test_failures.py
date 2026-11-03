@@ -6,6 +6,7 @@ import pytest
 
 from olmo_eval.common.types import LMOutput
 from olmo_eval.evals.external.failures import (
+    add_harness_failure,
     failure_budget_error,
     is_harness_failure,
     scaffold_error,
@@ -76,3 +77,17 @@ def test_budget_fails_when_nothing_was_measured_at_any_rate() -> None:
 
 def test_budget_with_no_instances_is_not_a_breach() -> None:
     assert failure_budget_error([], max_error_rate=0.05) is None
+
+
+@pytest.mark.parametrize(
+    ("earlier", "expected"),
+    [
+        (None, "grading_error: boom"),
+        ("agent_error: first", "agent_error: first"),
+        ("model_error: refusal", "grading_error: boom (after model_error: refusal)"),
+    ],
+)
+def test_add_harness_failure(earlier: str | None, expected: str) -> None:
+    combined = add_harness_failure(earlier, "grading_error: boom")
+    assert combined == expected
+    assert is_harness_failure(combined)
