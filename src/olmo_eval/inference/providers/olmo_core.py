@@ -14,10 +14,11 @@ from olmo_eval.common.debug import is_debug_requests
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import (
+    default_prefix_ids,
     encode_context_and_continuation,
     encode_prompt,
     get_bos_token_ids,
-    resolve_prefix_ids,
+    reject_add_bos_token,
 )
 
 if TYPE_CHECKING:
@@ -64,9 +65,9 @@ class OlmoCoreProvider(InferenceProvider):
         token: str | None = None,
         cache_dir: str | None = None,
         local_files_only: bool = False,
-        add_bos_token: bool | None = None,
         **kwargs: object,
     ) -> None:
+        reject_add_bos_token(kwargs)
         max_model_len = core_utils._resolve_max_model_len_alias(max_model_len, kwargs)
         core_utils._validate_max_model_len(max_model_len)
         core_utils._validate_batch_size(batch_size)
@@ -108,7 +109,8 @@ class OlmoCoreProvider(InferenceProvider):
             tokenizer_path,
             **tokenizer_kwargs,
         )
-        self.add_bos_token = add_bos_token
+        # Generation prompts and log-likelihood contexts both start with this
+        self._prefix_ids: list[int] = default_prefix_ids(self.tokenizer)
 
         resolved_pad_token_id, resolved_eos_token_id = core_utils._validate_token_ids(
             checkpoint_dir=model_name,
@@ -282,19 +284,8 @@ class OlmoCoreProvider(InferenceProvider):
             for start in range(0, len(requests), self.batch_size)
         ]
 
-    def _prefix_ids(self) -> list[int]:
-        """The tokens every prompt and log-likelihood context starts with (resolved once).
-
-        add_bos_token None follows the tokenizer, True or False forces BOS on or off.
-        """
-        cache: dict[bool | None, list[int]] = self.__dict__.setdefault("_prefix_cache", {})
-        setting = getattr(self, "add_bos_token", None)
-        if setting not in cache:
-            cache[setting] = resolve_prefix_ids(self.tokenizer, setting)
-        return cache[setting]
-
     def _encode_prompt(self, prompt: str) -> list[int]:
-        return encode_prompt(self.tokenizer, prompt, self._prefix_ids())
+        return encode_prompt(self.tokenizer, prompt, self._prefix_ids)
 
     def _format_prompt(self, request: LMRequest) -> str:
         if request.request_type == RequestType.CHAT and request.messages:
@@ -318,7 +309,7 @@ class OlmoCoreProvider(InferenceProvider):
             self.tokenizer,
             prompt,
             continuation,
-            prefix_ids=self._prefix_ids(),
+            prefix_ids=self._prefix_ids,
         )
         if continuation_ids and not context_ids:
             context_ids = get_bos_token_ids(self.tokenizer, fallback_to_eos=True) or [

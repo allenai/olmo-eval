@@ -19,9 +19,10 @@ from olmo_eval.common.types import (
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.request_utils import chat_messages_for_request
 from olmo_eval.inference.tokenizer_utils import (
+    default_prefix_ids,
     encode_context_and_continuation,
     encode_prompt,
-    resolve_prefix_ids,
+    reject_add_bos_token,
 )
 
 logger = get_logger(__name__)
@@ -307,7 +308,6 @@ class HuggingFaceProvider(InferenceProvider):
         max_multi_image_crops: int = 8,
         autocast_dtype: str | None = None,
         device: str | None = None,
-        add_bos_token: bool | None = None,
         **model_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -327,11 +327,9 @@ class HuggingFaceProvider(InferenceProvider):
             device: Torch device to load the model on, such as ``"cuda:1"``. Defaults to
                 the best available device; an auxiliary provider gets the GPU the run
                 set aside for it.
-            add_bos_token: Whether inputs start with BOS. None (default) follows the
-                tokenizer; True or False forces it on or off for generation and
-                log-likelihood inputs alike.
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
+        reject_add_bos_token(model_kwargs)
         # Strip kwargs meant for other providers (e.g., vLLM)
         for key in self._IGNORED_KWARGS:
             model_kwargs.pop(key, None)
@@ -344,7 +342,6 @@ class HuggingFaceProvider(InferenceProvider):
         self.autocast_dtype = autocast_dtype
         self.processor = None
         self.is_encoder_decoder: bool = False
-        self._add_bos_token = add_bos_token
         # generate() is not thread-safe, and the async methods run it in threads
         self._model_lock = threading.Lock()
         if device is None:
@@ -359,6 +356,8 @@ class HuggingFaceProvider(InferenceProvider):
             self._init_text(model_name, tokenizer, model_kwargs)
         self.model.to(self.device)
         self.model.eval()
+        # Generation prompts and log-likelihood contexts both start with this
+        self._prefix_ids: list[int] = default_prefix_ids(self.tokenizer)
 
     def _init_text(
         self, model_name: str, tokenizer: str | None, model_kwargs: dict[str, Any]
@@ -426,24 +425,15 @@ class HuggingFaceProvider(InferenceProvider):
         _patch_molmo2_generation_cache_position(self.model)
         self.tokenizer = self.processor.tokenizer
 
-    def _prefix_ids(self) -> list[int]:
-        """The tokens every prompt and log-likelihood context starts with (resolved once)."""
-        cache: dict[bool | None, list[int]] = self.__dict__.setdefault("_prefix_cache", {})
-        setting = getattr(self, "_add_bos_token", None)
-        if setting not in cache:
-            cache[setting] = resolve_prefix_ids(self.tokenizer, setting)
-        return cache[setting]
+    def _generation_prompt_ids(self, prompt: str) -> list[int]:
+        """Token IDs of a generation prompt; they start like log-likelihood contexts."""
+        return encode_prompt(self.tokenizer, prompt, self._prefix_ids)
 
     def _encode_generation_prompt(self, prompt: str) -> Any:
-        """Tokenize a generation prompt so it starts with the resolved prefix."""
-        if getattr(self, "_add_bos_token", None) is None:
-            # The tokenizer's defaults put the resolved prefix first by construction
-            return self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        """Tokenize a generation prompt into model inputs."""
         import torch
 
-        ids = torch.tensor(
-            [encode_prompt(self.tokenizer, prompt, self._prefix_ids())], device=self.device
-        )
+        ids = torch.tensor([self._generation_prompt_ids(prompt)], device=self.device)
         return {"input_ids": ids, "attention_mask": torch.ones_like(ids)}
 
     def get_tokenizer(self) -> Any:
@@ -724,7 +714,7 @@ class HuggingFaceProvider(InferenceProvider):
                 prompt = cont_prompts[i] if cont_prompts else request.prompt
                 # Use shared utility for BOS handling and trailing space logic
                 context_enc, continuation_enc = encode_context_and_continuation(
-                    self.tokenizer, prompt, continuation, prefix_ids=self._prefix_ids()
+                    self.tokenizer, prompt, continuation, prefix_ids=self._prefix_ids
                 )
 
                 # Build full sequence as tensor

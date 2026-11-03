@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -36,12 +37,14 @@ def has_bos_token(tokenizer: Any) -> bool:
 def default_prefix_ids(tokenizer: Any) -> list[int]:
     """Return the special tokens the tokenizer puts in front of a text by default.
 
-    Measured, not read from a flag: a probe is encoded with and without special
-    tokens, and whatever comes before the probe's own tokens is the prefix. This is
-    the BOS for tokenizers that add it through their post-processor template (Llama 3,
-    Gemma 3 and 4, LFM2.5, Nemotron-H), whose ``add_bos_token`` attribute reads False
-    under transformers 5, and it works the same for a tokenizer that encodes on a
-    server. Special tokens appended after the text (an EOS) are not part of the prefix.
+    This is the one rule for BOS: providers start every generation prompt and every
+    non-empty log-likelihood context with these tokens. They are measured, not read from
+    a flag: a probe is encoded with and without special tokens, and whatever comes before
+    the probe's own tokens is the prefix. This is the BOS for tokenizers that add it
+    through their post-processor template (Llama 3, Gemma 3 and 4, LFM2.5, Nemotron-H),
+    whose ``add_bos_token`` attribute reads False under transformers 5, and it works the
+    same for a tokenizer that encodes on a server. Special tokens appended after the text
+    (an EOS) are not part of the prefix.
 
     Args:
         tokenizer: A tokenizer object with an encode method.
@@ -61,47 +64,37 @@ def default_prefix_ids(tokenizer: Any) -> list[int]:
     return []
 
 
-def resolve_prefix_ids(tokenizer: Any, add_bos_token: bool | None) -> list[int]:
-    """Resolve a provider's ``add_bos_token`` setting to the token IDs every input starts with.
+ADD_BOS_TOKEN_REMOVED = (
+    "add_bos_token was removed: inputs start with whatever the tokenizer puts in front of "
+    "a text when encoding it. If that is wrong for the model, use a tokenizer whose "
+    "defaults match how the model was trained (provider tokenizer=...)."
+)
 
-    This is the one place that decides BOS. Providers call it with their setting and
-    use the result for both generation and log-likelihood inputs, so the two always
-    start the same way.
 
-    Args:
-        tokenizer: A tokenizer object with an encode method and a bos_token_id.
-        add_bos_token: None follows the tokenizer (see ``default_prefix_ids``); False
-            adds nothing; True adds the tokenizer's own prefix, or its BOS (EOS when it
-            has none) for a tokenizer that adds nothing by default.
-
-    Returns:
-        The prefix token IDs.
-    """
-    if add_bos_token is False:
-        return []
-    prefix = default_prefix_ids(tokenizer)
-    if add_bos_token is None or prefix:
-        return prefix
-    return get_bos_token_ids(tokenizer, fallback_to_eos=True)
+def reject_add_bos_token(kwargs: Mapping[str, Any]) -> None:
+    """Fail on the removed ``add_bos_token`` provider setting instead of ignoring it."""
+    if "add_bos_token" in kwargs:
+        raise ValueError(ADD_BOS_TOKEN_REMOVED)
 
 
 def encode_prompt(tokenizer: Any, text: str, prefix_ids: list[int]) -> list[int]:
-    """Encode a prompt without special tokens and start it with ``prefix_ids``.
+    """Encode a generation prompt with the tokenizer's defaults, without a doubled prefix.
 
-    The prefix is not repeated when the text already starts with it, as a chat template
-    that writes its own BOS does.
+    A chat template that writes BOS into the text would otherwise get a second one from
+    the tokenizer (``[bos, bos, ...]``); the duplicate is dropped.
 
     Args:
         tokenizer: A tokenizer object with an encode method.
         text: The prompt text.
-        prefix_ids: The resolved prefix (see ``resolve_prefix_ids``).
+        prefix_ids: The tokenizer's prefix (see ``default_prefix_ids``).
 
     Returns:
         The prompt's token IDs.
     """
-    ids = tokenizer.encode(text, add_special_tokens=False)
-    if prefix_ids and ids[: len(prefix_ids)] != prefix_ids:
-        return [*prefix_ids, *ids]
+    ids = tokenizer.encode(text, add_special_tokens=True)
+    n = len(prefix_ids)
+    if n and ids[:n] == prefix_ids and ids[n : 2 * n] == prefix_ids:
+        return ids[n:]
     return ids
 
 
@@ -150,9 +143,8 @@ def encode_context_and_continuation(
         continuation: The continuation string to evaluate.
         use_bos_for_empty: If True and context is empty, use BOS token as context.
         fallback_to_eos: If True and BOS is None, use EOS token ID instead.
-        prefix_ids: The tokens a non-empty context starts with, as resolved by the
-            provider (``resolve_prefix_ids``). None resolves them here with the
-            tokenizer's default, for callers without a provider setting.
+        prefix_ids: The tokens a non-empty context starts with (``default_prefix_ids``).
+            Providers pass the prefix they computed once; None measures it here.
 
     Returns:
         Tuple of (context_token_ids, continuation_token_ids).
@@ -169,13 +161,15 @@ def encode_context_and_continuation(
         continuation = context[-n_spaces:] + continuation
         context = context[:-n_spaces]
 
-    # Start the context the way the provider starts its generation prompts
+    # Start the context the way generation prompts start (encode_prompt)
     if prefix_ids is None:
-        prefix_ids = resolve_prefix_ids(tokenizer, None)
+        prefix_ids = default_prefix_ids(tokenizer)
 
     # Encode the full sequence and extract continuation tokens
     whole_enc = tokenizer.encode(context + continuation, add_special_tokens=False)
     context_enc = tokenizer.encode(context, add_special_tokens=False)
     continuation_enc = whole_enc[len(context_enc) :]
 
-    return [*prefix_ids, *context_enc], continuation_enc
+    if prefix_ids and context_enc[: len(prefix_ids)] != prefix_ids:
+        context_enc = [*prefix_ids, *context_enc]
+    return context_enc, continuation_enc
