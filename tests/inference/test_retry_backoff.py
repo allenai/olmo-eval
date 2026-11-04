@@ -73,7 +73,7 @@ async def test_gives_up_after_max_retries(monkeypatch):
 async def test_a_judge_call_waits_out_a_long_stretch_of_failures(monkeypatch):
     sleeps = _record_sleeps(monkeypatch)
     monkeypatch.setattr(retry.random, "random", lambda: 0.5)
-    replies: list[str | Exception] = [TimeoutError("request timed out")] * 6 + ["PASS"]
+    replies: list[str | Exception] = [TimeoutError("request timed out")] * 5 + ["PASS"]
 
     async def judge(prompt: str) -> str:
         reply = replies.pop(0)
@@ -82,7 +82,7 @@ async def test_a_judge_call_waits_out_a_long_stretch_of_failures(monkeypatch):
         return reply
 
     assert await llm_judge.call_judge(judge, "grade this", label="test judge") == "PASS"
-    assert sleeps == [5.0, 10.0, 20.0, 40.0, 80.0, 120.0]
+    assert sleeps == [5.0, 10.0, 20.0, 40.0, 80.0]
 
 
 @pytest.mark.anyio

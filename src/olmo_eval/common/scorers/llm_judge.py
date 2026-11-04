@@ -40,8 +40,8 @@ JudgeContent = str | list[dict[str, Any]]
 #: error). The waits double from ``JUDGE_RETRY_DELAY`` seconds up to
 #: ``JUDGE_MAX_RETRY_DELAY``, randomized by half either way, so a stretch of rate
 #: limiting or a slow API, which hits many concurrent calls at once, is waited out
-#: (about 4.5 minutes of waiting in all) rather than leaving outputs unscored.
-JUDGE_RETRIES = 6
+#: (about 2.5 minutes of waiting in all) rather than leaving outputs unscored.
+JUDGE_RETRIES = 5
 JUDGE_RETRY_DELAY = 5.0
 JUDGE_MAX_RETRY_DELAY = 120.0
 
