@@ -6,7 +6,8 @@ Mirrors the suite structure in `suites/ruler.py`:
 - A judge-free execution split: helmet_nojudge__4096, etc.
 
 Each suite also has a `:base` twin (helmet_all__4096:base, ...) made of every
-task's `:base` variant, for models without instruction tuning.
+task's `:base` variant, for models without instruction tuning, and `:v2` and
+`:base_v2` twins made of the tasks' fixed variants (see `helmet._v2_fixes`).
 
 Three deliberate differences from `suites/ruler.py`:
 
@@ -59,9 +60,15 @@ def _register_suites(size: int, suffix: str) -> None:
     """Register every HELMET suite at one size for one prompting regime.
 
     `suffix` is appended to every task and suite name: "" for the tasks as
-    configured, ":base" for their variants without a chat template.
+    configured, ":base" for their variants without a chat template, and ":v2"
+    and ":base_v2" for the fixed variants of each.
     """
-    regime = " without a chat template" if suffix else ""
+    regime = {
+        "": "",
+        ":base": " without a chat template",
+        ":v2": " with the v2 fixes",
+        ":base_v2": " without a chat template, with the v2 fixes",
+    }[suffix]
     category_suites: list[Suite] = []
     nojudge_suites: list[Suite] = []
     extra_suites: list[Suite] = []
@@ -132,5 +139,5 @@ def _register_suites(size: int, suffix: str) -> None:
 
 
 for size in CONTEXT_SIZES:
-    for suffix in ("", ":base"):
+    for suffix in ("", ":base", ":v2", ":base_v2"):
         _register_suites(size, suffix)
