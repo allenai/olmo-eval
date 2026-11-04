@@ -1260,64 +1260,43 @@ def test_v2_variants_keep_each_mode_and_add_their_fixes():
 
     assert chat.settings["use_chat_template"] and not base.settings["use_chat_template"]
     for task in (chat, base):
-        assert task.fixes == {"context_cut": "model_window", "answer_cut": "first_paragraph"}
+        assert task.fixes == {"context_cut": "model_window"}
     assert get_task("helmet_kilt_nq__8192:v2").fixes == {"context_cut": "model_window"}
     assert get_task(LONGQA_SPEC).fixes == {}
 
 
 def test_fixes_cannot_be_overridden_to_something_else():
     settings = get_task(f"{LONGQA_SPEC}:v2").config.task_settings
-    bad = {**settings, "fixes": {"context_cut": "model_window"}}
+    bad = {**settings, "fixes": {"context_cut": "tier"}}
 
     with pytest.raises(ValueError, match="fixes"):
         get_task(LONGQA_SPEC, {"task_settings": bad})
 
 
 @pytest.mark.parametrize(
-    ("raw", "expected"),
+    "task",
     [
-        ("Answer: the North Pole", "the North Pole"),
-        ("Answer: he marries the rector of\nthe parish.", "he marries the rector of the parish."),
-        ("They head north.\nAnswer: Answer: the Pole", "the Pole"),
-        ("no prefix here\nsecond line", "no prefix here second line"),
-        ("Answer: the North Pole.\n\nQuestion: Who leads?\nAnswer: Hatteras", "the North Pole."),
-        ("Answer: the North Pole.\nQuestion: Who leads?", "the North Pole."),
-        ("Answer: A lifeboat\n\n\n\nCHAPTER II\n\nThe next day", "A lifeboat"),
-        ("Answer:\n\nthe North Pole\n\nmore", "the North Pole"),
-        ("Answer:", ""),
+        "narrativeqa",
+        "alce_asqa",
+        "alce_asqa_nocite",
+        "alce_qampari",
+        "alce_qampari_nocite",
     ],
 )
-def test_v2_longqa_judged_answer_is_the_first_paragraph(raw, expected):
-    assert parse_longqa_answer(raw, first_para=True) == expected
+def test_base_v2_stops_chat_format_qa_at_a_blank_line(task):
+    spec = f"helmet_{task}__8192"
+    base, base_v2 = get_task(f"{spec}:base"), get_task(f"{spec}:base_v2")
+
+    assert base_v2.config.sampling_params.stop_sequences == ("\n\n",)
+    assert base.config.sampling_params.stop_sequences is None
+    assert get_task(f"{spec}:v2").config.sampling_params.stop_sequences is None
+    assert base_v2.config.sampling_params.max_tokens == base.config.sampling_params.max_tokens
 
 
-def test_base_v2_longqa_judges_the_answer_before_the_models_next_question():
-    generation = " the North Pole\nQuestion: Who?\nAnswer: Santa"
-    task, response = _prefixed(f"{LONGQA_SPEC}:base_v2", generation)
-
-    assert task.extract_answer(response.outputs[0]) == "the North Pole"
-
-
-@pytest.mark.parametrize("spec", ["helmet_alce_asqa__8192:base_v2", "helmet_alce_asqa__8192:v2"])
-def test_v2_asqa_scores_the_first_paragraph(spec):
-    task = get_task(spec)
-    prefix = "Answer:" if spec.endswith("base_v2") else ""
-    text = prefix + " Paris [1].\nIt is in France [2].\n\nInstruction: Write a new answer."
-    instance = Instance(question="q", metadata={"prepend_text": "Answer:"})
-    response = Response(
-        instance=instance,
-        request=task.format_request(instance),
-        outputs=[LMOutput(text=text[len(prefix) :])],
+def test_base_v2_leaves_other_stops_alone():
+    # Multi-LexSum's demonstration summaries have paragraph breaks, so a blank line
+    # is not a stop for it; the completion-format tasks keep their newline stop.
+    assert (
+        get_task("helmet_multi_lexsum__8192:base_v2").config.sampling_params.stop_sequences is None
     )
-
-    task.strip_thinking_traces([response])
-    task.strip_thinking_traces([response])  # the runner may prepare a response twice
-
-    output = response.outputs[0]
-    assert output.text == prefix + " Paris [1].\nIt is in France [2]."
-    assert output.metadata["uncut_text"] == text
-
-
-def test_qampari_v2_keeps_the_whole_output():
-    task = get_task("helmet_alce_qampari__8192:base_v2")
-    assert task.fixes == {"context_cut": "model_window"}
+    assert get_task("helmet_kilt_nq__8192:base_v2").config.sampling_params.stop_sequences == ("\n",)
