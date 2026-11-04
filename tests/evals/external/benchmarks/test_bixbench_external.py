@@ -44,6 +44,7 @@ from olmo_eval.evals.external.benchmarks.bixbench.prompts import (
     build_problem,
 )
 from olmo_eval.evals.external.registry import get_external_eval
+from olmo_eval.evals.external.result import ExternalEvalResult
 from olmo_eval.harness.sandbox import DetachedRun
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import REQUEST_ERROR_KEY
@@ -505,3 +506,98 @@ class TestMetrics:
         assert args.system_first is False
         assert BixBenchArgs.from_dict({"system_first": "true"}).system_first is True
         assert get_external_eval("bixbench_verified").name == "bixbench_verified"
+
+
+class FakeBinding:
+    def __init__(self, executor: FakeNotebookExecutor) -> None:
+        self.executor = executor
+
+    async def release(self) -> None:
+        return None
+
+
+class FlakySandboxManager:
+    """Fails to start a set number of times across all instances, then works."""
+
+    failures_left = 0
+    starts = 0
+
+    def __init__(self, configs: list[Any], owner: str = "") -> None:
+        self.workdir = Path(configs[0].docker_args[1].split("src=")[1].split(",")[0])
+
+    async def start(self) -> None:
+        FlakySandboxManager.starts += 1
+        if FlakySandboxManager.failures_left > 0:
+            FlakySandboxManager.failures_left -= 1
+            raise RuntimeError("only 0/1 required instances started (1 failed)")
+
+    async def acquire_binding(self, capability: Any) -> FakeBinding:
+        return FakeBinding(FakeNotebookExecutor(self.workdir))
+
+    async def stop(self) -> None:
+        return None
+
+
+class TestExecute:
+    def run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, start_failures: int
+    ) -> ExternalEvalResult:
+        import olmo_eval.harness.sandbox as sandbox_module
+        from olmo_eval.evals.external.benchmarks.bixbench import eval as eval_module
+
+        rows = tmp_path / "questions.jsonl"
+        rows.write_text(
+            json.dumps(
+                {
+                    "question_id": "bix-1-q1",
+                    "question": "Which gene?",
+                    "ideal": "CD14",
+                    "eval_mode": "str_verifier",
+                    "capsule_uuid": "u",
+                    "data_folder": "CapsuleFolder-u.zip",
+                }
+            )
+            + "\n"
+        )
+        capsule = tmp_path / "capsule"
+        capsule.mkdir()
+        (capsule / "counts.csv").write_text("gene\nCD14\n")
+
+        async def no_sleep(_: float) -> None:
+            return None
+
+        FlakySandboxManager.failures_left = start_failures
+        FlakySandboxManager.starts = 0
+        monkeypatch.setattr(sandbox_module, "SandboxManager", FlakySandboxManager)
+        monkeypatch.setattr(eval_module, "download_questions", lambda revision: rows)
+        monkeypatch.setattr(eval_module, "prepare_capsule", lambda folder, revision: capsule)
+        monkeypatch.setattr(eval_module, "build_judge_fn", lambda *a: FakeJudge([]))
+        monkeypatch.setattr(
+            eval_module.BixBenchVerifiedExternalEval, "_sandbox_image", lambda *a: "img"
+        )
+        monkeypatch.setattr(eval_module.asyncio, "sleep", no_sleep)
+        monkeypatch.setenv("OPENAI_API_KEY", "test")
+        provider = ScriptedProvider(
+            [reply(call("submit_answer", {"answer": "CD14"}))],
+        )
+        return asyncio.run(
+            get_external_eval("bixbench_verified").execute(
+                provider, {"n_attempts": 1}, output_dir=str(tmp_path / "out")
+            )
+        )
+
+    def test_a_sandbox_that_fails_to_start_is_started_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = self.run(tmp_path, monkeypatch, start_failures=2)
+        assert result.success, result.error
+        assert FlakySandboxManager.starts == 3
+        assert result.metrics["accuracy"] == 1.0
+
+    def test_a_sandbox_that_never_starts_fails_the_trial(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = self.run(tmp_path, monkeypatch, start_failures=10)
+        assert not result.success
+        assert result.error is not None and "sandbox_error" in result.error
+        assert result.metrics["num_failed_trials"] == 1.0

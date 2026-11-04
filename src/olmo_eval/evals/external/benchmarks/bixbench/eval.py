@@ -58,6 +58,8 @@ SANDBOX_IMAGE = (
     "@sha256:624403103a4cfbcb9a33091cf56d8f164901f91e5fabe9a5c5fe3b4864421227"
 )
 SANDBOX_STARTUP_TIMEOUT = 600.0
+SANDBOX_START_ATTEMPTS = 3
+SANDBOX_START_BACKOFF = 10.0
 #: Extra time past the step and notebook budgets before an episode is cut off from
 #: outside, bounding a model call or command that never returns.
 EPISODE_GRACE = 1800.0
@@ -398,9 +400,20 @@ class BixBenchVerifiedExternalEval(ExternalEval):
         from olmo_eval.harness.sandbox import Capability, SandboxManager
 
         config = self._sandbox_config(image, runtime, workdir, bb_args.exec_timeout)
-        manager = SandboxManager([config], owner=f"bixbench-{trial.native_id}")
+        # Containers sometimes fail to come up when many start at once on a cold image.
+        # Nothing has reached the model yet, so starting again leaves the episode as is.
+        for attempt in range(1, SANDBOX_START_ATTEMPTS + 1):
+            manager = SandboxManager([config], owner=f"bixbench-{trial.native_id}")
+            try:
+                await manager.start()
+                break
+            except RuntimeError as e:
+                await manager.stop()
+                if attempt == SANDBOX_START_ATTEMPTS:
+                    raise
+                logger.warning(f"[{trial.native_id}] Sandbox start {attempt} failed: {e}")
+                await asyncio.sleep(SANDBOX_START_BACKOFF * attempt)
         try:
-            await manager.start()
             binding = await manager.acquire_binding(Capability.BASH)
             try:
                 episode = NotebookEpisode(
