@@ -16,6 +16,63 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-03: Auditable IFEval per-question exports
+
+- **Affected**: predictions produced with the four IFEval metrics, including `ifeval`,
+  `ifeval_ood` (IFBench), and all `ifeval_mt_*` specs and their variants. Consumers of
+  those predictions, including uploaded per-instance metrics, inherit the old error.
+  Multi-IF uses separate metrics and is not changed.
+- **Change**: all four exact metric keys previously inherited the `ifeval` scorer's
+  prompt-level loose scalar. They now use their own strict/loose instruction outcomes.
+  Predictions retain the boolean lists and any verifier construction errors in
+  `model_output[i].scorer_results.ifeval`. List order follows the request's
+  `doc.instruction_id_list`. Like the aggregate metrics, per-question metrics use
+  output zero. No verifier, extraction, or aggregate calculation changes.
+- **Identity**: task hashes are unchanged. Identify fixed exports by evaluator revision
+  and the retained instruction evidence, not by the presence of an exact metric key:
+  old exports already contained incorrectly labeled exact keys.
+- **Aggregation**: prompt accuracy is the fraction of questions with a nonempty list
+  whose entries all pass. Instruction accuracy is the total number of passing entries
+  divided by the total number of entries. Do not average per-question instruction
+  accuracies without weighting by list length: scores of 1/2 and 1/1 pool to 2/3,
+  not 3/4. An explicitly empty list contributes zero instructions and a failed prompt;
+  an all-empty instruction population scores zero, matching the aggregate metric.
+- **Missing evidence**: fresh responses without the relevant list omit that metric;
+  only prompt-level loose may use the scorer scalar. Missing or malformed lists are
+  unavailable, not zero. Calling `augment_prediction_instance_metrics` on an older
+  prediction recomputes IF values from retained lists if present; otherwise it removes
+  unsupported strict/instruction keys, including old exact-looking keys. A scalar-only
+  exact key cannot distinguish a valid value from the historical alias. The valid loose
+  prompt value remains usable. This helper changes the supplied object only: it does
+  not migrate existing files or database rows, and uploading an old file does not repair it.
+- **Comparability and recovery**: valid saved aggregate scores remain comparable.
+  Historical strict per-question gains, regressions, and paired uncertainty calculated
+  from the aliased values are invalid. Original scored `Response` metadata or retained
+  per-instruction verdicts can reconstruct all four metrics exactly without verification.
+  Scorer scalars alone cannot recover strict outcomes or partial instruction success.
+  Keep original artifacts immutable and write any repaired export separately.
+
+Rechecking saved answers is a new measurement unless the original verifier state can be
+reproduced. In the mixing baseline (`01M6C80EK9Y2BT5RM131DCFWF1`), the completed attempt
+for `ifeval_mt_ood_wildchat_unused_withRewrite` has 1,387 rows: every exported IF metric
+averages 0.33813987022350395, while aggregate strict is 0.2581110310021629. All 28 checked
+IF task/snapshot artifacts (28,014 rows) contain the alias and lack instruction verdicts.
+Their saved loose prompt values reconcile; the existing answer reconstructions fully
+reconcile in only 15 of 28 cases. Even full aggregate reconciliation does not prove each
+historical strict label: opposite row errors can cancel.
+
+CPU probes in the original evaluator image reproduce two sources of uncertainty:
+IFBench `b281f8d4` randomly fills unspecified parameters (the multi-turn letter-frequency
+rows omit `let_relation`), and its unseeded `langdetect` checks can vary even on the same
+verifier and answer. Both explicit language instructions and English-capitalization
+checks use that detector. Pinning the image and Python's random seed alone is insufficient;
+runtime-downloaded NLTK resources are another environment dependency to record. These
+probes establish replay variability, not a complete attribution of every historical
+mismatch or a recovery of the original random choices. Prefer original scored metadata;
+otherwise retain the reconciled loose analysis and keep reconstructed strict labels
+separate and provisional. Do not choose seeds or parameters to fit aggregate totals.
+
+
 ## 2026-10-22: Scoring failures are left out and budgeted, not scored as zero (#492)
 
 - **Affected**: every task run by `AsyncEvalRunner` whose scoring failed for some output:
