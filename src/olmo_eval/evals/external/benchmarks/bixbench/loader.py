@@ -142,5 +142,15 @@ def extract_capsule(zip_path: Path, extract_dir: Path) -> None:
 
 
 def stage_workdir(capsule_dir: Path, workdir: Path) -> None:
-    """Copy a capsule's data into a fresh working directory for one agent run."""
+    """Copy a capsule's data into a fresh working directory for one agent run.
+
+    Everything in it is made writable by any user: the sandbox's root can be an
+    unprivileged user on this host (Podman's user namespaces), and the agent may
+    write anywhere in its working directory, as root can upstream.
+    """
     shutil.copytree(capsule_dir, workdir, dirs_exist_ok=True)
+    for path in [workdir, *workdir.rglob("*")]:
+        if path.is_symlink():
+            continue
+        mode = path.stat().st_mode
+        path.chmod(mode | (0o777 if path.is_dir() else 0o666))

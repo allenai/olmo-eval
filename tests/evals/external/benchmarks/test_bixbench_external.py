@@ -37,6 +37,7 @@ from olmo_eval.evals.external.benchmarks.bixbench.loader import (
     extract_capsule,
     load_questions,
     select_questions,
+    stage_workdir,
 )
 from olmo_eval.evals.external.benchmarks.bixbench.prompts import (
     CAPSULE_SYSTEM_PROMPT_OPEN,
@@ -89,6 +90,21 @@ class TestLoader:
         assert select_questions(questions, None) == questions
         with pytest.raises(ValueError, match="bix-9-q9"):
             select_questions(questions, ["bix-9-q9"])
+
+    def test_staged_workdir_is_writable_by_any_user(self, tmp_path: Path) -> None:
+        capsule = tmp_path / "capsule"
+        (capsule / "sub").mkdir(parents=True)
+        (capsule / "sub").chmod(0o755)
+        (capsule / "counts.csv").write_text("a\n")
+        (capsule / "counts.csv").chmod(0o644)
+        (capsule / "run.sh").write_text("true\n")
+        (capsule / "run.sh").chmod(0o755)
+        workdir = tmp_path / "work"
+        stage_workdir(capsule, workdir)
+        assert workdir.stat().st_mode & 0o777 == 0o777
+        assert (workdir / "sub").stat().st_mode & 0o777 == 0o777
+        assert (workdir / "counts.csv").stat().st_mode & 0o777 == 0o666
+        assert (workdir / "run.sh").stat().st_mode & 0o777 == 0o777
 
     def test_extraction_keeps_only_the_input_data(self, tmp_path: Path) -> None:
         zip_path = tmp_path / "CapsuleFolder-u.zip"
@@ -374,6 +390,8 @@ class TestEpisode:
         assert [contents(m) for m in second if m["role"] == "tool"] == ["Appended new cell (#0)."]
         assert "ran print('hi')" in contents(second[-1])
         assert json.loads((tmp_path / nb.NOTEBOOK_NAME).read_text())["cells"][0]["outputs"]
+        # The sandbox rewrites the notebook, possibly as another user.
+        assert (tmp_path / nb.NOTEBOOK_NAME).stat().st_mode & 0o777 == 0o666
 
     def test_system_first_moves_only_the_system_prompt(self, tmp_path: Path) -> None:
         _, provider, _ = run_episode(

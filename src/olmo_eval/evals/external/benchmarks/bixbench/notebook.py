@@ -56,6 +56,9 @@ def read_notebook(path: Path) -> dict[str, Any]:
 
 def write_notebook(notebook: dict[str, Any], path: Path) -> None:
     path.write_text(json.dumps(notebook, indent=1))
+    # nbconvert rewrites the notebook from inside the sandbox, whose root can be an
+    # unprivileged user here (Podman's user namespaces).
+    path.chmod(0o666)
 
 
 def edit_cell(notebook: dict[str, Any], contents: str, idx: Any = None) -> str:

@@ -366,8 +366,6 @@ class BixBenchVerifiedExternalEval(ExternalEval):
         workdir = scratch / f"{question.question_id}-{attempt}"
         try:
             await asyncio.to_thread(stage_workdir, capsule_dir, workdir)
-            # The container may run as another user than this process.
-            workdir.chmod(0o777)
             await self._run_episode(question, provider, image, runtime, bb_args, workdir, trial)
         except Exception as e:
             logger.exception(f"[{trial.native_id}] Episode failed")
