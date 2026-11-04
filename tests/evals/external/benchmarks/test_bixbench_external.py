@@ -446,6 +446,15 @@ class TestEpisode:
         )
         assert tools[2].startswith("Encountered exception during tool call: Tool call arguments")
 
+    def test_edit_before_the_first_cell_gets_upstreams_message(self, tmp_path: Path) -> None:
+        result, provider, _ = run_episode(
+            tmp_path, [reply(call("edit_cell", {"contents": "x", "idx": -3}))], max_steps=2
+        )
+        tool = next(m for m in provider.requests[1].messages if m["role"] == "tool")
+        assert contents(tool) == "Encountered exception during tool call: list index out of range"
+        assert result.counts["tool_exceptions"] == 1
+        assert result.completion_reason == "max_steps"
+
     def test_failed_run_replaces_the_edit_reply(self, tmp_path: Path) -> None:
         result, provider, _ = run_episode(
             tmp_path, [reply(call("edit_cell", {"contents": "x"}))], ["crash"], max_steps=2

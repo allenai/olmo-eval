@@ -353,7 +353,8 @@ class NotebookEpisode:
             self.done = True
             self.result.completion_reason = "exec_timeout"
             return _exception_result(call, e)
-        except (TypeError, ValueError) as e:
+        # IndexError: an edit_cell idx before the first cell, as upstream raises it.
+        except (TypeError, ValueError, IndexError) as e:
             self.result.counts["tool_exceptions"] += 1
             return _exception_result(call, e)
         return ToolResult(tool_call_id=call.id, content=content)
