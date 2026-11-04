@@ -19,7 +19,7 @@ import random
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg
@@ -275,6 +275,8 @@ def _extract_cot_answer(text: str) -> ExtractedAnswer:
 @dataclass(frozen=True, slots=True)
 class GPQACoTExactMatchScorer(Scorer):
     """Exact match on the answer letter extracted from a CoT response."""
+
+    supports_final_answer_only: ClassVar[bool] = True
 
     name: str = "exact_match"
 

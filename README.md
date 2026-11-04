@@ -600,6 +600,7 @@ documents the rest.
 | `sampling_params` | `SamplingParams \| None` | `None` | Default sampling parameters for this task |
 | `answer_extractor` | `Callable[[str], str] \| None` | `None` | Function applied to output text by the default `extract_answer` |
 | `strip_thinking` | `bool` | `False` | Drop `<think>...</think>` traces before scoring |
+| `reward_final_answer_only` | `bool` | `False` | [Score delivered final answers only](docs/final-answer-only.md); missing final sections receive zero on supported correctness metrics |
 | `dependencies` | `list[str] \| None` | `None` | Runtime packages to install (e.g., `["pkg==1.0"]`) |
 | `judge_model` | `str \| None` | `None` | Judge model for LLM-as-judge scoring |
 

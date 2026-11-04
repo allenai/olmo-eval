@@ -18,6 +18,7 @@ from olmo_eval.common.scoring_time import install_child_task_timing, measure_ins
 from olmo_eval.common.shutdown import Terminated, shutdown_requested
 from olmo_eval.common.types import Response
 from olmo_eval.common.types.trajectory import AgentTrajectory
+from olmo_eval.evals.tasks.common.final_answer import score_with_answer_region
 from olmo_eval.runners.asynq.monitoring import check_workers_alive
 from olmo_eval.runners.asynq.preparation import compute_task_metrics, finalize_task
 from olmo_eval.runners.asynq.types import (
@@ -83,8 +84,7 @@ async def _score_response(
     task: Task, response: Response, context: ScoringContext | None
 ) -> Response:
     """Score one response with its task's scorers."""
-    task.strip_thinking_traces([response])
-    scored = await task.score_responses([response], context=context)
+    scored = await score_with_answer_region(task, [response], context=context)
     return scored[0] if scored else response
 
 

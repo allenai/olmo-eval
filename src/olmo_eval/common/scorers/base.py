@@ -45,6 +45,9 @@ class Scorer(ABC):
     #: Scores from an output's per-token logprobs. Metrics with such a scorer read them
     #: when they are computed, so resumable runs keep them in their progress records.
     reads_logprobs: ClassVar[bool] = False
+    #: Explicit audit: this concrete scorer uses only answer text/extraction and
+    #: zero means incorrect. Subclasses must redeclare this capability.
+    supports_final_answer_only: ClassVar[bool] = False
 
     def __call__(self) -> Scorer:
         """Allow scorer instances to be used where classes are expected.
@@ -90,6 +93,8 @@ class ProcessScorer(Scorer):
 class ExactMatchScorer(Scorer):
     """Score 1.0 if extracted answer exactly matches gold, else 0.0."""
 
+    supports_final_answer_only: ClassVar[bool] = True
+
     name: str = "exact_match"
     case_sensitive: bool = False
     strip_whitespace: bool = True
@@ -109,6 +114,8 @@ class ExactMatchScorer(Scorer):
 @dataclass(frozen=True, slots=True)
 class MultipleChoiceScorer(Scorer):
     """Score multiple choice by comparing selected index/letter."""
+
+    supports_final_answer_only: ClassVar[bool] = True
 
     name: str = "multiple_choice"
 
@@ -159,6 +166,8 @@ def _compute_f1(pred: str, gold: str) -> float:
 @dataclass(frozen=True, slots=True)
 class F1Scorer(Scorer):
     """Score using token-level F1 between prediction and gold answer."""
+
+    supports_final_answer_only: ClassVar[bool] = True
 
     name: str = "f1"
 
@@ -213,6 +222,8 @@ class SQuADF1Scorer(Scorer):
     Uses metadata["all_answers"] for multiple references. Falls back to
     instance.gold_answer if metadata is not present.
     """
+
+    supports_final_answer_only: ClassVar[bool] = True
 
     name: str = "f1"
 
@@ -324,6 +335,8 @@ class ExactMatchFlexScorer(Scorer):
 
     Falls back to standard exact match if these metadata fields are not present.
     """
+
+    supports_final_answer_only: ClassVar[bool] = True
 
     name: str = "exact_match_flex"
     case_sensitive: bool = False

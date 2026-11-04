@@ -29,6 +29,7 @@ from olmo_eval.common.types import (
     SamplingParams,
     Split,
 )
+from olmo_eval.evals.tasks.common.final_answer import prepare_final_answers, score_final_answers
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ScoringContext
@@ -155,6 +156,9 @@ class TaskConfig:
     #: Drop ``<think>...</think>`` traces before scoring; see :meth:`Task.strip_thinking_traces`.
     strip_thinking: bool = False
 
+    #: Score only a nonblank suffix after the last </think>; otherwise correctness is zero.
+    reward_final_answer_only: bool = False
+
     #: Treat an unterminated ``<think>`` trace as no answer: the output text is
     #: emptied before scoring. Off by default so scoring matches the reference
     #: harness, which scores the raw trace.
@@ -199,6 +203,8 @@ class TaskConfig:
 
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
+        if not isinstance(self.reward_final_answer_only, bool):
+            raise ValueError("reward_final_answer_only must be a boolean")
         if isinstance(self.output_score_aggregation, str):
             try:
                 self.output_score_aggregation = OutputScoreAggregation(
@@ -331,6 +337,8 @@ class TaskConfig:
         if self.prompt_templates is not None or self.system_prompt_style is not None:
             serialized["prompt_templates"] = self.prompt_templates
             serialized["system_prompt_style"] = self.system_prompt_style
+        if self.reward_final_answer_only:
+            serialized["reward_final_answer_only"] = True
         if self.strip_thinking:
             serialized["strip_thinking"] = True
         if self.task_settings is not None:
@@ -633,6 +641,8 @@ class Task(ABC):
         Subclasses needing custom answer extraction should override
         `_extract_answers()` rather than this method.
         """
+        if self.config.reward_final_answer_only:
+            return score_final_answers(self, responses)
         self._extract_answers(responses)
 
         # Check if any scorers need async execution
@@ -678,7 +688,11 @@ class Task(ABC):
     def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
         """Drop ``<think>...</think>`` traces so scorers see only the final answer.
 
-        No-op unless ``config.strip_thinking`` or ``config.strip_unclosed_thinking``
+        With ``reward_final_answer_only``, select the final region from the original
+        response and record the gate decision; scoring assigns explicit zeros to
+        missing answers. This policy takes precedence over the stripping flags.
+
+        Otherwise, no-op unless ``config.strip_thinking`` or ``config.strip_unclosed_thinking``
         is set. Runners call this before ``score_responses`` (which tasks may
         override). Repeated calls leave already processed outputs unchanged.
 
@@ -702,6 +716,9 @@ class Task(ABC):
         Only ``outputs[*].text`` is touched; trajectories and request traces
         keep the trace. The raw text is kept in ``metadata["original_text"]``.
         """
+        if self.config.reward_final_answer_only:
+            prepare_final_answers(self, responses)
+            return
         strip_closed = self.config.strip_thinking
         strip_unclosed = self.config.strip_unclosed_thinking
         if not (strip_closed or strip_unclosed):
