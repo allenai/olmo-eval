@@ -375,6 +375,24 @@ class TestEpisode:
         assert "ran print('hi')" in contents(second[-1])
         assert json.loads((tmp_path / nb.NOTEBOOK_NAME).read_text())["cells"][0]["outputs"]
 
+    def test_system_first_moves_only_the_system_prompt(self, tmp_path: Path) -> None:
+        _, provider, _ = run_episode(
+            tmp_path,
+            [
+                reply(call("edit_cell", {"contents": "print('hi')"})),
+                reply(call("submit_answer", {"answer": "<answer>CD14</answer>"}, "c2")),
+            ],
+            system_first=True,
+        )
+        first = provider.requests[0].messages
+        assert [m["role"] for m in first] == ["system", "user", "user"]
+        assert contents(first[0]) == CAPSULE_SYSTEM_PROMPT_OPEN
+        assert contents(first[2]).startswith("Markdown representation of notebook contents")
+        second = provider.requests[1].messages
+        assert contents(second[0]) == CAPSULE_SYSTEM_PROMPT_OPEN
+        assert contents(second[2]) == HIDDEN_ENV_STATE
+        assert "ran print('hi')" in contents(second[-1])
+
     def test_listing_reports_the_workdir(self, tmp_path: Path) -> None:
         _, provider, _ = run_episode(tmp_path, [reply(call("list_workdir", {}))], max_steps=2)
         listing = json.loads(
@@ -466,4 +484,6 @@ class TestMetrics:
         assert args.question_ids == ["bix-1-q1", "bix-2-q2"]
         assert args.n_attempts == 5 and args.max_steps == 20
         assert args.judge_model == "gpt-6-luna"
+        assert args.system_first is False
+        assert BixBenchArgs.from_dict({"system_first": "true"}).system_first is True
         assert get_external_eval("bixbench_verified").name == "bixbench_verified"

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.types import SamplingParams
 from olmo_eval.common.types.trajectory import AgentTrajectory
-from olmo_eval.evals.external.args import as_list, as_optional_float
+from olmo_eval.evals.external.args import as_bool, as_list, as_optional_float
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.result import ExternalEvalResult
 from olmo_eval.harness.sandbox.config import ContainerRuntime, SandboxConfig, SandboxMode
@@ -84,6 +84,7 @@ class BixBenchArgs:
     judge_concurrency: int = 8
     image: str = SANDBOX_IMAGE
     image_timeout: float = 3600.0
+    system_first: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BixBenchArgs:
@@ -104,6 +105,7 @@ class BixBenchArgs:
             judge_concurrency=int(data.get("judge_concurrency", defaults.judge_concurrency)),
             image=str(data.get("image", defaults.image)),
             image_timeout=float(data.get("image_timeout", defaults.image_timeout)),
+            system_first=as_bool(data.get("system_first", defaults.system_first)),
         )
 
     @property
@@ -232,6 +234,11 @@ class BixBenchVerifiedExternalEval(ExternalEval):
             "image_timeout": (
                 "Timeout in seconds for preparing the sandbox image",
                 defaults.image_timeout,
+            ),
+            "system_first": (
+                "Send the system prompt first instead of after the problem and the "
+                "first notebook render, for chat templates that require it",
+                defaults.system_first,
             ),
         }
 
@@ -405,6 +412,7 @@ class BixBenchVerifiedExternalEval(ExternalEval):
                     max_steps=bb_args.max_steps,
                     exec_timeout=bb_args.exec_timeout,
                     label=trial.native_id,
+                    system_first=bb_args.system_first,
                 )
                 budget = bb_args.max_steps * bb_args.exec_timeout + EPISODE_GRACE
                 try:

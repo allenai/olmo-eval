@@ -45,9 +45,11 @@ The episode follows upstream's v1.5 open-answer runs
   episode. The schemas are what fhaviary builds from upstream's functions.
 - **Message order.** The question comes first, then the first notebook render, then the
   system prompt, as upstream's environment sends them. Olmo 3, Qwen3 and gpt-oss chat
-  templates accept this; a template that requires the system message first cannot run
-  this eval. With gpt-5.5, putting the system prompt first instead made episodes about
-  1.6 steps longer.
+  templates accept this. Templates that require the system message first, such as
+  Qwen3.5's, need `-A system_first=true`, which sends it first; results from such runs
+  are not comparable with upstream's order. With gpt-5.5 on ten questions, system-first
+  scored 0.867 against 0.833, with the same outcome on nine of the ten questions, and
+  made episodes about 1.6 steps longer.
 - **Observations.** After each step the agent sees its tool results and the whole
   notebook rendered as markdown, each output cut to 3000 characters. Only the newest
   render stays in the conversation; older ones are replaced by a placeholder.

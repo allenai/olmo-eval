@@ -10,8 +10,9 @@ Each step is one model call and the environment's reply to it:
 - The model sees the problem, the notebook as markdown and the system prompt, in
   that order as upstream's environment sends them, then each of its earlier replies
   with their tool results and the notebook render that followed. Only the newest
-  render is shown; older ones are replaced by a placeholder. A chat template that
-  requires the system message first cannot run this eval.
+  render is shown; older ones are replaced by a placeholder. A model whose chat
+  template requires the system message first runs with ``system_first``, which moves
+  the system prompt to the front and departs from upstream's order.
 - The calls of a reply run one after another. ``edit_cell`` appends or replaces a
   code cell, saves the notebook and reruns all of it with ``jupyter nbconvert
   --execute --allow-errors``, so cell errors land in outputs. ``list_workdir``
@@ -201,6 +202,7 @@ class NotebookEpisode:
         max_steps: int = DEFAULT_MAX_STEPS,
         exec_timeout: float = DEFAULT_EXEC_TIMEOUT,
         label: str = "bixbench",
+        system_first: bool = False,
     ) -> None:
         self.question = question
         self.workdir = workdir
@@ -208,6 +210,7 @@ class NotebookEpisode:
         self.max_steps = max_steps
         self.exec_timeout = exec_timeout
         self.label = label
+        self.system_first = system_first
         self.nb_path = workdir / nb.NOTEBOOK_NAME
         self.notebook = nb.new_notebook()
         self.messages: list[dict[str, Any]] = []
@@ -226,9 +229,13 @@ class NotebookEpisode:
         result = self.result
         problem = build_problem(self.question)
         nb.write_notebook(self.notebook, self.nb_path)
+        system = {"role": "system", "content": CAPSULE_SYSTEM_PROMPT_OPEN}
+        if self.system_first:
+            self.messages.append(system)
         self._add_user(problem)
         self._add_env_state()
-        self.messages.append({"role": "system", "content": CAPSULE_SYSTEM_PROMPT_OPEN})
+        if not self.system_first:
+            self.messages.append(system)
         result.completion_reason = "max_steps"
         try:
             while result.steps < self.max_steps:
