@@ -1,8 +1,12 @@
-"""RULER's `:v2` variant: the haystack is cut to the window, and VT's budget is raised."""
+"""RULER's `:v2` variant: the haystack is cut to the window, and VT's budget is raised
+with only its first paragraph scored."""
 
-from olmo_eval.common.types import ContextFit
+import pytest
+
+from olmo_eval.common.types import ContextFit, Instance, LMOutput, Response
 from olmo_eval.evals.suites.registry import get_suite
 from olmo_eval.evals.tasks.common.registry import get_task
+from olmo_eval.evals.tasks.ruler import first_paragraph
 
 
 def _ruler_doc(context: str = "HAYSTACK WITH THE NEEDLE") -> dict:
@@ -71,3 +75,56 @@ def test_v2_suites_run_every_task_as_v2():
     assert get_suite("ruler_all_chat_v2__4096").tasks == tuple(
         f"{t}:chat:v2" for t in original.tasks
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # a wrong answer, then questions of the model's own that name gold variables
+        ("1, 2, 3, 4, 5.\n\nQuestion: What is VAR AB? Answer: VAR AB is 1", "1, 2, 3, 4, 5."),
+        # an answer after leading blank lines is kept (Gemma-3-4B writes these)
+        ("\n\n* XAJIK\n* VKOEM\n\nQuestion: ...", "\n\n* XAJIK\n* VKOEM"),
+        ("\nVAR SOZGN, VAR REGGD\n\nQuestion:", "\nVAR SOZGN, VAR REGGD"),
+        # a chain written one step per line is one paragraph
+        ("1. VAR A = 1\n2. VAR B = VAR A", "1. VAR A = 1\n2. VAR B = VAR A"),
+        (" A B C.\n   \nmore", " A B C."),
+        ("x\r\n\r\ny", "x"),
+        ("\n\n", "\n\n"),
+    ],
+)
+def test_first_paragraph(text, expected):
+    assert first_paragraph(text) == expected
+
+
+def test_v2_vt_scores_only_the_first_paragraph():
+    task = get_task("ruler_vt__4096:v2")
+    text = " SOZGN, REGGD.\n\nQuestion: What is VAR EHHUJ? Answer: VAR EHHUJ is 1"
+    instance = Instance(question="q", gold_answer=["SOZGN", "REGGD", "EHHUJ"], metadata={})
+    response = Response(
+        instance=instance, request=task.format_request(instance), outputs=[LMOutput(text=text)]
+    )
+
+    task.strip_thinking_traces([response])
+    task.strip_thinking_traces([response])  # the runner may prepare a response twice
+
+    output = response.outputs[0]
+    assert output.text == " SOZGN, REGGD."
+    assert output.metadata["uncut_text"] == text
+    assert task.config.task_settings == {
+        "context_cut": "model_window",
+        "answer_cut": "first_paragraph",
+    }
+
+
+@pytest.mark.parametrize("spec", ["ruler_vt__4096", "ruler_niah_mv__4096:v2", "ruler_cwe__4096:v2"])
+def test_only_vt_v2_cuts_the_answer(spec):
+    task = get_task(spec)
+    text = "a\n\nb"
+    instance = Instance(question="q", gold_answer=["b"], metadata={})
+    response = Response(
+        instance=instance, request=task.format_request(instance), outputs=[LMOutput(text=text)]
+    )
+
+    task.strip_thinking_traces([response])
+
+    assert response.outputs[0].text == text

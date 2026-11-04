@@ -14,7 +14,7 @@ Original implementation: https://github.com/hsiehjackson/RULER
 import os
 import re
 import string
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
@@ -27,6 +27,7 @@ from olmo_eval.common.types import (
     LMOutput,
     LMRequest,
     RequestType,
+    Response,
     SamplingParams,
 )
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
@@ -226,6 +227,36 @@ class RulerTask(Task):
         return (self.config.task_settings or {}).get("context_cut") == "model_window"
 
     @property
+    def cuts_answer(self) -> bool:
+        """Whether only the first paragraph of each output is scored.
+
+        Set by ``task_settings["answer_cut"] == "first_paragraph"`` (VT's ``:v2``).
+        """
+        return (self.config.task_settings or {}).get("answer_cut") == "first_paragraph"
+
+    def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
+        """Strip thinking traces, then, with the answer cut, keep the first paragraph.
+
+        Substring recall credits a gold string anywhere in the output, and a base model
+        that has answered goes on writing questions of its own that name variables from
+        the text. The output is cut at the first blank line after it begins, so leading
+        blank lines before an answer are kept. Decoding is greedy, so this is what a stop
+        there would have generated. The uncut output stays in
+        ``metadata["uncut_text"]``; repeated calls leave a cut output unchanged.
+        """
+        super().strip_thinking_traces(responses)
+        if not self.cuts_answer:
+            return
+        for response in responses:
+            for output in response.outputs:
+                if output.metadata.get("answer_cut"):
+                    continue
+                text = output.text or ""
+                output.metadata["uncut_text"] = text
+                output.text = first_paragraph(text)
+                output.metadata["answer_cut"] = True
+
+    @property
     def request_type(self) -> RequestType:
         """Return the request type for this task."""
         return super().request_type
@@ -297,6 +328,17 @@ class RulerTask(Task):
             Raw output text
         """
         return output.text
+
+
+#: A blank line: a newline, then only spaces or tabs, then another newline.
+_BLANK_LINE = re.compile(r"\r?\n[ \t\r]*\n")
+
+
+def first_paragraph(text: str) -> str:
+    """``text`` up to its first blank line after the first non-whitespace character."""
+    begins = len(text) - len(text.lstrip())
+    match = _BLANK_LINE.search(text, begins)
+    return text if match is None else text[: match.start()]
 
 
 #: RULER's newline stops: the newline character and the byte-level spellings some
@@ -371,6 +413,13 @@ RULER_V2_TASK_SETTINGS = {"context_cut": "model_window"}
 #: so the default 50 cut the fifth name off correct answers.
 RULER_V2_MAX_GEN_TOKS = {"vt": 100}
 
+#: Task types whose `:v2` scores only the output's first paragraph (see
+#: `RulerTask.strip_thinking_traces`). VT's context names no variable but the five gold
+#: ones, so with a larger budget a model that answers wrongly and then writes questions
+#: of its own about the variables earns recall for them. No correct answer in stored
+#: outputs of 27 models runs past a blank line.
+RULER_V2_ANSWER_CUT = ("vt",)
+
 # Dynamically register all RULER tasks
 for _task_name, _task_config in RULER_TASKS.items():
     _cls = make_ruler_task_class(_task_name, _task_config)
@@ -384,14 +433,20 @@ for _task_name, _task_config in RULER_TASKS.items():
     register_variant(
         f"ruler_{_task_name}", "chat", formatter=ChatFormatter(user_template="{question}")
     )
-    # `:v2` fixes two ways the task fails a model rather than measuring it: the haystack is
+    # `:v2` fixes ways the task fails a model rather than measuring it: the haystack is
     # cut to the model's window instead of the prompt being rejected (see `cuts_haystack`),
-    # and generation budgets that cut correct answers short are raised (RULER_V2_MAX_GEN_TOKS).
-    _v2_budget = RULER_V2_MAX_GEN_TOKS.get(_task_name.rsplit("__", 1)[0])
+    # generation budgets that cut correct answers short are raised (RULER_V2_MAX_GEN_TOKS),
+    # and where a larger budget lets text after the answer earn recall, only the first
+    # paragraph is scored (RULER_V2_ANSWER_CUT).
+    _v2_type = _task_name.rsplit("__", 1)[0]
+    _v2_budget = RULER_V2_MAX_GEN_TOKS.get(_v2_type)
     register_variant(
         f"ruler_{_task_name}",
         "v2",
-        task_settings=RULER_V2_TASK_SETTINGS,
+        task_settings={
+            **RULER_V2_TASK_SETTINGS,
+            **({"answer_cut": "first_paragraph"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
+        },
         **(
             {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
             if _v2_budget is not None
