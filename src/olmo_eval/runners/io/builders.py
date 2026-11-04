@@ -108,6 +108,11 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
             # Per-instance results scorers keep, keyed by scorer name.
             if SCORER_RESULTS_KEY in meta:
                 out_data[SCORER_RESULTS_KEY] = meta[SCORER_RESULTS_KEY]
+            if "ifeval" in meta:
+                out_data[SCORER_RESULTS_KEY] = {
+                    **out_data.get(SCORER_RESULTS_KEY, {}),
+                    "ifeval": meta["ifeval"],
+                }
             # Each turn of a scripted conversation; ``text`` is only the last reply.
             if TURNS_KEY in meta:
                 out_data[TURNS_KEY] = meta[TURNS_KEY]
