@@ -51,9 +51,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: The BixBench-env image, built for linux/amd64 from ``sandbox/Dockerfile``, the recipe
-#: of upstream's arm64-only ``futurehouse/bixbench:aviary-notebook-env``.
-SANDBOX_IMAGE = ""
+#: The BixBench-env image: upstream's arm64-only ``futurehouse/bixbench:aviary-notebook-env``
+#: rebuilt for linux/amd64 from ``sandbox/Dockerfile``.
+SANDBOX_IMAGE = (
+    "ghcr.io/allenai/olmo-eval-bixbench-env:2026.11.03"
+    "@sha256:624403103a4cfbcb9a33091cf56d8f164901f91e5fabe9a5c5fe3b4864421227"
+)
 SANDBOX_STARTUP_TIMEOUT = 600.0
 #: Extra time past the step and notebook budgets before an episode is cut off from
 #: outside, bounding a model call or command that never returns.

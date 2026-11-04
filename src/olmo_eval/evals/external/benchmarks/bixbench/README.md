@@ -108,8 +108,20 @@ kept under `bixbench_verified/<question>-<attempt>/` in the output directory.
   whose pinned packages match that image's layer history: `packages/notebook/docker/` of
   Future-House/aviary at `dc6fe209` (`sandbox/`). data-analysis-crow's own
   `Dockerfile.pinned` differs from the published image (other Python requirements,
-  numpy 1.26 instead of 2.0, no BUSCO), so it is not used. Unpinned transitive packages
-  resolve at build time and can differ from the arm64 image.
+  numpy 1.26 instead of 2.0, no BUSCO), so it is not used. The conda environment is the
+  arm64 image's package list solved for linux-64 (`sandbox/conda-pins.txt`). The
+  unversioned lines there are low-level packages (certificates, compiler headers,
+  compression and FFI libraries, conda's own dependencies) whose arm64 version cannot be
+  installed on linux-64 with the rest or has no conda-forge build; they take other
+  versions. Analysis results can still differ in the last digits between architectures:
+  replaying notebooks in both images gave the same answers, with DESeq2 fits differing by
+  about 0.3% in standard errors. BUSCO, which the image runs through udocker, works here;
+  the arm64 image cannot run its amd64-only container.
+- **No Anaconda packages.** The image takes nothing from Anaconda's repositories: its base
+  is Debian 12.7 instead of `continuumio/miniconda3`, the packages the arm64 image takes
+  from Anaconda's channel come from conda-forge at the same versions where they exist, its
+  `anaconda-anon-usage` telemetry plugin is left out, and conda installs from conda-forge
+  and bioconda.
 
 ## Pins
 
@@ -119,4 +131,4 @@ kept under `bixbench_verified/<question>-<attempt>/` in the output directory.
 | Benchmark harness and grader | `Future-House/BixBench` @ `49311180bdacb324c596f2e07596c126f2004008` |
 | Agent environment and prompts | `Future-House/data-analysis-crow` v1.5.0 @ `953a6b13c5f8e15354525bca08636f620994f954` |
 | Image recipe | `Future-House/aviary` @ `dc6fe209cddb7b99343ff26bae3d4ac607ea0b19`, `packages/notebook/docker/` |
-| Sandbox image | see `SANDBOX_IMAGE` in `eval.py` |
+| Sandbox image | `ghcr.io/allenai/olmo-eval-bixbench-env:2026.11.03` @ `sha256:624403103a4cfbcb9a33091cf56d8f164901f91e5fabe9a5c5fe3b4864421227` (`SANDBOX_IMAGE` in `eval.py`) |
