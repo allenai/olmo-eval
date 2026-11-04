@@ -408,7 +408,20 @@ uv run olmo-eval run \
 | `auxiliary_providers.judge.model` | Model to use for judging |
 | `auxiliary_providers.judge.num_instances` | Number of parallel vLLM instances |
 | `auxiliary_providers.judge.base_url` | URL for external servers (when not spawning locally) |
+| `auxiliary_providers.judge.kwargs.startup_timeout` | Managed server startup deadline in seconds (default: 1200) |
 | `scoring_concurrency` | Number of concurrent scoring requests |
+
+Managed vLLM servers report `[vllm-startup]` progress every 30 seconds and when
+their logs identify a new phase: downloading, loading weights, compiling/autotuning,
+or waiting for readiness. These are the last observed phases, not diagnoses; logs
+without a recognized phase remain explicitly unknown. Each message includes elapsed
+time, the deadline, and the full server log path. Child logs retain INFO-level startup
+messages even when the parent suppresses vLLM verbosity.
+
+Process exit is checked independently of HTTP readiness probes, so a crashed child
+fails promptly without consuming its startup allowance. Exceptions distinguish exit
+codes from readiness timeouts and include a bounded log tail. This lifecycle setting
+is not a vLLM CLI argument and does not change generation or scoring settings.
 
 #### Defining Tools
 
