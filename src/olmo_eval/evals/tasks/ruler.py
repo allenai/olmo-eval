@@ -20,8 +20,10 @@ from typing import Any, cast
 
 from olmo_eval.common.formatters import ChatFormatter, PPLFormatter
 from olmo_eval.common.metrics import Metric, RecallMetric
+from olmo_eval.common.scorers import SubstringRecallScorer
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
     ContextFit,
     Instance,
     LMOutput,
@@ -227,6 +229,16 @@ class RulerTask(Task):
         return (self.config.task_settings or {}).get("context_cut") == "model_window"
 
     @property
+    def zeroes_overflow(self) -> bool:
+        """Whether an instance whose haystack had to be cut scores 0.
+
+        Set by ``task_settings["overflow"] == "score_zero"`` (the ``:v2`` variant). A
+        length-N item that does not fit the model's window, with room for the generation
+        budget, was not read at length N; the cut only keeps it from failing its batch.
+        """
+        return (self.config.task_settings or {}).get("overflow") == "score_zero"
+
+    @property
     def cuts_answer(self) -> bool:
         """Whether only the first paragraph of each output is scored.
 
@@ -235,21 +247,30 @@ class RulerTask(Task):
         return (self.config.task_settings or {}).get("answer_cut") == "first_paragraph"
 
     def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
-        """Strip thinking traces, then, with the answer cut, keep the first paragraph.
+        """Strip thinking traces, empty overflowing outputs, and cut answers.
 
-        Substring recall credits a gold string anywhere in the output, and a base model
-        that has answered goes on writing questions of its own that name variables from
-        the text. The output is cut at the first blank line after it begins, so leading
-        blank lines before an answer are kept. Decoding is greedy, so this is what a stop
-        there would have generated. The uncut output stays in
-        ``metadata["uncut_text"]``; repeated calls leave a cut output unchanged.
+        With ``zeroes_overflow``, an output whose haystack a provider cut is emptied, so
+        it scores 0; its text stays in ``metadata["overflow_text"]``.
+
+        With the answer cut, only the first paragraph is scored. Substring recall credits
+        a gold string anywhere in the output, and a base model that has answered goes on
+        writing questions of its own that name variables from the text. The output is cut
+        at the first blank line after it begins, so leading blank lines before an answer
+        are kept. Decoding is greedy, so this is what a stop there would have generated.
+        The uncut output stays in ``metadata["uncut_text"]``.
+
+        Repeated calls leave an output unchanged.
         """
         super().strip_thinking_traces(responses)
-        if not self.cuts_answer:
-            return
         for response in responses:
             for output in response.outputs:
-                if output.metadata.get("answer_cut"):
+                if self.zeroes_overflow and output.metadata.get(CONTEXT_CUT_TOKENS_KEY):
+                    if not output.metadata.get(OVERFLOW_KEY):
+                        output.metadata["overflow_text"] = output.text or ""
+                        output.text = ""
+                        output.metadata[OVERFLOW_KEY] = True
+                    continue
+                if not self.cuts_answer or output.metadata.get("answer_cut"):
                     continue
                 text = output.text or ""
                 output.metadata["uncut_text"] = text
@@ -330,6 +351,32 @@ class RulerTask(Task):
         return output.text
 
 
+#: ``LMOutput.metadata`` key marking an output emptied because its haystack was cut.
+OVERFLOW_KEY = "overflow"
+
+
+@dataclass(frozen=True, slots=True)
+class OverflowRateMetric(Metric):
+    """Fraction of instances that scored 0 because the prompt did not fit the window.
+
+    Shares the task's scorer, so it adds no scoring; it reads ``OVERFLOW_KEY``.
+    """
+
+    name: str = "overflow_rate"
+    scorer: type[Scorer] = SubstringRecallScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        overflowed = sum(
+            1 for r in responses if any(o.metadata.get(OVERFLOW_KEY) for o in r.outputs)
+        )
+        return overflowed / len(responses)
+
+    def supports_scorer_fallback(self) -> bool:
+        return False
+
+
 #: A blank line: a newline, then only spaces or tabs, then another newline.
 _BLANK_LINE = re.compile(r"\r?\n[ \t\r]*\n")
 
@@ -405,8 +452,9 @@ def make_ruler_task_class(
 
 
 #: Settings of the `:v2` variant: a provider cuts the haystack's end only as far as the
-#: model's window requires. Part of the task hash.
-RULER_V2_TASK_SETTINGS = {"context_cut": "model_window"}
+#: model's window requires, so the prompt is not rejected and its batch runs, and an
+#: instance that was cut scores 0. Part of the task hash.
+RULER_V2_TASK_SETTINGS = {"context_cut": "model_window", "overflow": "score_zero"}
 
 #: Generation budgets that `:v2` raises, by task type. An answer that restates the VT
 #: chain ("1. VAR X = 12345 2. VAR Y = VAR X ...") needs about 60 tokens for five names,
@@ -433,8 +481,10 @@ for _task_name, _task_config in RULER_TASKS.items():
     register_variant(
         f"ruler_{_task_name}", "chat", formatter=ChatFormatter(user_template="{question}")
     )
-    # `:v2` fixes ways the task fails a model rather than measuring it: the haystack is
-    # cut to the model's window instead of the prompt being rejected (see `cuts_haystack`),
+    # `:v2` fixes ways the task fails a model rather than measuring it: a prompt that does
+    # not fit the model's window scores 0 instead of failing its batch (the haystack is cut
+    # so it can be sent; see `cuts_haystack` and `zeroes_overflow`), with the share of such
+    # instances reported as `overflow_rate`;
     # generation budgets that cut correct answers short are raised (RULER_V2_MAX_GEN_TOKS),
     # and where a larger budget lets text after the answer earn recall, only the first
     # paragraph is scored (RULER_V2_ANSWER_CUT).
@@ -447,6 +497,10 @@ for _task_name, _task_config in RULER_TASKS.items():
             **RULER_V2_TASK_SETTINGS,
             **({"answer_cut": "first_paragraph"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
         },
+        metrics=(
+            *vars(_cls)["metrics"],
+            OverflowRateMetric(scorer=vars(_cls)["metrics"][0].scorer),
+        ),
         **(
             {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
             if _v2_budget is not None

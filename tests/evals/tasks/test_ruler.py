@@ -1,9 +1,9 @@
-"""RULER's `:v2` variant: the haystack is cut to the window, and VT's budget is raised
-with only its first paragraph scored."""
+"""RULER's `:v2` variant: a prompt that does not fit the window is cut so it can be sent
+and scores 0, and VT's budget is raised with only its first paragraph scored."""
 
 import pytest
 
-from olmo_eval.common.types import ContextFit, Instance, LMOutput, Response
+from olmo_eval.common.types import CONTEXT_CUT_TOKENS_KEY, ContextFit, Instance, LMOutput, Response
 from olmo_eval.evals.suites.registry import get_suite
 from olmo_eval.evals.tasks.common.registry import get_task
 from olmo_eval.evals.tasks.ruler import first_paragraph
@@ -29,7 +29,7 @@ def test_v2_marks_the_haystack_for_a_window_only_cut():
     before, after = request.prompt.split("HAYSTACK WITH THE NEEDLE")
     assert before == "Read the text.\n"
     assert after.startswith("\nWhat is the needle?")
-    assert task.config.task_settings == {"context_cut": "model_window"}
+    assert task.config.task_settings == {"context_cut": "model_window", "overflow": "score_zero"}
 
 
 def test_the_original_spec_is_unchanged():
@@ -112,6 +112,7 @@ def test_v2_vt_scores_only_the_first_paragraph():
     assert output.metadata["uncut_text"] == text
     assert task.config.task_settings == {
         "context_cut": "model_window",
+        "overflow": "score_zero",
         "answer_cut": "first_paragraph",
     }
 
@@ -128,3 +129,48 @@ def test_only_vt_v2_cuts_the_answer(spec):
     task.strip_thinking_traces([response])
 
     assert response.outputs[0].text == text
+
+
+def _response(task, text: str, cut_tokens: int = 0) -> Response:
+    instance = Instance(question="q", gold_answer=["needle"], metadata={})
+    metadata = {CONTEXT_CUT_TOKENS_KEY: cut_tokens} if cut_tokens else {}
+    return Response(
+        instance=instance,
+        request=task.format_request(instance),
+        outputs=[LMOutput(text=text, metadata=metadata)],
+    )
+
+
+@pytest.mark.parametrize("spec", ["ruler_niah_s_1__4096:v2", "ruler_vt__4096:v2"])
+def test_v2_scores_an_overflowing_instance_zero(spec):
+    """An output whose haystack was cut is emptied, idempotently, and counted."""
+    task = get_task(spec)
+    cut, fits = _response(task, "the needle\n\nmore", cut_tokens=12), _response(task, "the needle")
+
+    task.strip_thinking_traces([cut, fits])
+    task.strip_thinking_traces([cut, fits])  # the runner may prepare a response twice
+
+    assert cut.outputs[0].text == ""
+    assert cut.outputs[0].metadata["overflow_text"] == "the needle\n\nmore"
+    assert "uncut_text" not in cut.outputs[0].metadata
+    assert fits.outputs[0].text == "the needle"
+    metric = next(m for m in task.config.metrics if m.name == "overflow_rate")
+    assert metric.compute([cut, fits]) == 0.5
+    assert task.config.primary_metric == get_task(spec.removesuffix(":v2")).config.primary_metric
+
+
+def test_the_original_spec_keeps_a_cut_output_and_has_no_overflow_metric():
+    task = get_task("ruler_niah_s_1__4096")
+    response = _response(task, "the needle", cut_tokens=12)
+
+    task.strip_thinking_traces([response])
+
+    assert response.outputs[0].text == "the needle"
+    assert [m.name for m in task.config.metrics] == ["recall"]
+
+
+def test_qa_v2_overflow_metric_shares_the_qa_scorer():
+    task = get_task("ruler_qa_1__4096:v2")
+    recall, overflow = task.config.metrics
+    assert overflow.name == "overflow_rate"
+    assert overflow.scorer is recall.scorer
