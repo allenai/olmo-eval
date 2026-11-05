@@ -74,3 +74,23 @@ def test_math_v2_uses_multiparagraph_variants() -> None:
     assert list(v2) == [task.replace(":olmo3base", ":olmo3base_multiparagraph") for task in legacy]
     for spec in v2:
         get_task(spec)
+
+
+def test_v3_clusters_carry_the_fixes() -> None:
+    swaps = {
+        "olmobase:mcqa_stem": {},
+        "olmobase:mcqa_non_stem": {"drop:mc:olmo3base": "drop:mc:olmo3base:v3"},
+        "olmobase:gen": {},
+        "olmobase:math:v2": {},
+        "olmobase:code:v2": {"deepseek_leetcode:olmo3base:v2": "deepseek_leetcode:olmo3base:v3"},
+    }
+    for base, swap in swaps.items():
+        cluster = base.split(":")[1]
+        v3 = get_suite(f"olmobase:{cluster}:v3").expand()
+        assert list(v3) == [swap.get(task, task) for task in get_suite(base).expand()]
+
+    clusters = [
+        get_suite(f"olmobase:{c}:v3")
+        for c in swaps.keys() and ("mcqa_stem", "mcqa_non_stem", "gen", "math", "code")
+    ]
+    assert get_suite("olmobase:v3").tasks == tuple(clusters)
