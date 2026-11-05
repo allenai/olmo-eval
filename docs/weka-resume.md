@@ -196,3 +196,21 @@ Volume claims must be restricted to mutually trusted writers. Checksums are corr
 checks, not authentication, and progress decoding supports pickle. Per-run UUIDs and
 locks prevent accidental collisions; they do not isolate mutually hostile jobs that
 can write the same volume under the same operating-system identity.
+
+### Post-review Beaker qualification on `9008bd88`
+
+- `01M6N06K5Y44NJXAE9YW55863Q`: uninterrupted 80-instance fixture with 1 GiB state,
+  refreshing retention every 50 milliseconds to stress concurrent publication.
+  Completed with exit zero and no retention errors.
+- `01M6N0CQ51R9FNKVB6NSP2J64N`: same rapid-refresh workload with the debug midpoint
+  SIGTERM hook and one retry. First attempt exited 143; replacement restored 40/80
+  instances, scored the remaining 40, and finished with exit zero.
+- `01M6N0HDHZR9XM1WW1HE1DA3SH`: independent read-only audit confirmed byte-identical
+  requests and predictions versus the uninterrupted control, 80 unique instances,
+  zero failed instances, correct source revision, valid artifact checksums, durable
+  session/stream registration, and checkpoint cleanup after completion. The same run
+  ID, `c24d494ff432`, covered both attempts.
+
+Both prune-fixture files still existed at this audit. Live prune-cycle verification
+and live test-dashboard upload remain separate rollout gates. The post-review checks
+used zero GPUs; the earlier pinned-model canary exercised the model execution path.
