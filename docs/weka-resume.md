@@ -22,7 +22,8 @@ have a claim. Never create claims implicitly during launch.
    `resume_volume`, allowing a different volume. Gantry
    prepares the existing environment and saves its spec. Add the native volume mount
    to that spec and submit with the volume-capable Beaker CLI. Keep credentials in
-   secret mappings. This bridge is necessary until SDK/Gantry accept native mounts.
+   secret mappings. This bridge supports the locked SDK (2.6.0) and Gantry (3.7.0);
+   SDK 2.8.0+ supports native mounts and permits a future SDK-only submission path.
 3. Wrap the task command in a shared-run lifecycle. Allocate a unique directory per
    submission, stable across replacement jobs, and put the complete output directory
    there. Take an advisory lock before touching manifests or progress. Reclaim the
@@ -146,13 +147,12 @@ tiny CPU operations. That timeout was a scheduling/test-coordination failure. No
 mount, volume I/O, or distributed-lock failures were observed. No volume incidents
 needed escalation.
 
-### Remaining gates before changing the default
+### Remaining deployment checks
 
-- Observe a real Starfish prune cycle and confirm scan/prune coverage for the new
-  volume. The audit seeded a disposable fixture at
-  `/eval-cache/qualification/tmp-1d/expiry-20261104/`: `eligible.txt` has an mtime
-  three days old and `fresh.txt` was newly created. Naming and unit tests do not
-  verify that the live deleter has run. Scans can delay deletion by a day or more.
+- Confirm Starfish scan/prune coverage with storage engineering. The aged/fresh
+  fixture now shows selective disappearance consistent with pruning (see the latest
+  audit below), but the exact deleter job has not been identified. Scans can delay
+  deletion by a day or more.
 - Verify a live dashboard upload from the WEKA directory against the designated
   test deployment. Client unit tests and failed-upload recovery passed; the Beaker
   canary deliberately did not publish development results to production.
@@ -233,13 +233,22 @@ External runners and arbitrary low-level Beaker commands do not gain task resuma
 
 The current [volume documentation](https://beaker-docs.apps.allenai.org/concept/volumes.html)
 documents native mounts through experiment YAML and the CLI, using `source.volume`
-and explicit `mode: readwrite`. That is the submission path used here. Rechecking
-beaker-py branch `v2` at `dc4c805042e929fb691e3a9d0d6ad34afa0d4a08` and
-Gantry main at `30fa3a74b7865520d48cf8728fe58968941daaf7` confirms that their
-Python mount APIs still expose legacy `weka` fields without native `volume`/mount
-mode fields. Gantry prepares the environment and spec; the volume-capable CLI submits
-the final native spec. This is a tooling compatibility bridge; the mounted storage
-is the new claimed volume. Dependency and lockfile changes remain outside this PR.
+and explicit `mode: readwrite`. That is the submission path used here. Gantry 3.7.0
+prepares the environment and spec; the volume-capable CLI submits the final native
+spec. This supports the repository's locked beaker-py 2.6.0, which has no native
+volume/mount-mode fields. The native claimed-volume mount is verified on Beaker.
+
+**Tooling correction:** the older `allenai/beaker-py` repository is not the source of
+current releases. The SDK now lives in `allenai/beaker/bindings/python`. Its
+[changelog](https://github.com/allenai/beaker/blob/main/bindings/python/CHANGELOG.md)
+records native `volume` and `mode` support in **2.8.0**. Isolated inspection of the
+released **2.8.1** package confirmed both fields and `BeakerDataMount.new(volume=…,
+mode=…)`; Gantry 3.7.0 still exposes only legacy WEKA mounts. Therefore the previous
+claim that the latest SDK lacks native-volume support was incorrect. Upgrading the
+SDK would allow replacing CLI submission with SDK submission after Gantry prepares
+the spec. The current bridge is a tested compatibility path for the lockfile's 2.6.0,
+not a requirement imposed by the volume service. Per repository scope rules,
+dependency and lockfile changes belong in a separate dependency PR.
 
 The default/retention delta was independently re-reviewed by the same correctness
 and adversarial agents. Both reported no scoped blockers; their focused runs passed
@@ -261,3 +270,26 @@ uv run --frozen --no-group vllm olmo-eval beaker launch \
 Local validation of the default/retention delta passed: Ruff lint and format,
 `ty check src/`, and the full CPU suite: **5,199 passed, 40 skipped, 20 subtests
 passed**. The focused launcher/lifecycle run passed 192 tests.
+
+
+### Default-volume Beaker verification on `0f234981`
+
+- Experiment `01M6PK581S6SY75EXVMR42S1PK`, job `01M6PK586AXAZV8B8V3QK4FKDN`:
+  the public CLI command above selected `ai2/olmo-eval` automatically, mounted native
+  volume `v_X2K0I2O2N3` read-write, and used `tmp-2d`. The spec pinned
+  `0f2349815e990c19046af7052984a5f62eed5b99`, requested zero GPUs, five-minute
+  minimum runtime, ten-minute timeout, one failure retry, the explicit debug
+  workspace and bound budget, and only the existing `chrisg_BEAKER_TOKEN` secret.
+  Completed with exit zero. Run ID `9d181664143f`; UUID
+  `ff388e85-28ba-4038-be26-30bf353677f7`. Receipt records two-day retention.
+- Read-only audit `01M6PK9Y8FGEB4SK8HE6CQ9FN5`, job
+  `01M6PK9YE7J42ZH95W1Z83EE3Z`: completed with exit zero. Verified source revision,
+  all artifact checksums, complete session, cleanup after completion, five unique
+  requests and predictions, five saved instances and zero failed instances.
+- At 11:35 am PT on November 5, the audit found the seeded `tmp-1d` fixture's
+  three-day-old `eligible.txt` absent and `fresh.txt` still present. This is
+  consistent with the temporary-file pruning policy operating on the volume.
+  The exact deleter job and complete scan coverage remain unverified.
+
+No volume failures occurred in this validation. Live dashboard-upload validation and
+production-workspace claims remain deployment checks.
