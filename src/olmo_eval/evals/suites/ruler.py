@@ -3,8 +3,7 @@
 Matches the suite structure from the old framework:
 - Per-category suites for each size: ruler_niah__4096, ruler_aggregation__8192, etc.
 - Combined suites for each size: ruler_all__4096, ruler_all__8192, etc.
-- The same suites over the `:v2` tasks (haystack cut to the model's window, raised
-  budgets): ruler_niah_v2__4096, ruler_all_v2__4096, ruler_all_chat_v2__4096, etc.
+- ruler_all over the `:v2` tasks: ruler_all_v2__4096, etc.
 """
 
 from olmo_eval.data.ruler_tasks import RULER_TASKS
@@ -40,14 +39,6 @@ for size in CONTEXT_SIZES:
             description=f"RULER {category} tasks at {size} context length",
         )
         register(suite)
-        register(
-            Suite(
-                name=f"ruler_{category}_v2__{size}",
-                tasks=tuple(f"{t}:v2" for t in tasks),
-                aggregation=AggregationStrategy.AVERAGE,
-                description=f"ruler_{category}__{size} over the :v2 tasks",
-            )
-        )
         all_tasks.extend(tasks)
 
     # Create combined suite: flat average of all 13 tasks, matching the paper
@@ -74,13 +65,5 @@ for size in CONTEXT_SIZES:
                 tasks=tuple(f"{t}:v2" for t in all_tasks),
                 aggregation=AggregationStrategy.AVERAGE,
                 description=f"ruler_all__{size} over the :v2 tasks",
-            )
-        )
-        register(
-            Suite(
-                name=f"ruler_all_chat_v2__{size}",
-                tasks=tuple(f"{t}:chat:v2" for t in all_tasks),
-                aggregation=AggregationStrategy.AVERAGE,
-                description=f"ruler_all_chat__{size} over the :v2 tasks",
             )
         )

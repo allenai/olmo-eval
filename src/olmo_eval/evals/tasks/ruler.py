@@ -206,7 +206,7 @@ class RulerTask(Task):
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
         haystack = doc.get("context")
-        if self.cuts_haystack and isinstance(haystack, str) and haystack:
+        if self.scores_overflow_zero and isinstance(haystack, str) and haystack:
             start = question.find(haystack)
             if start >= 0 and question.count(haystack) == 1:
                 metadata["haystack_span"] = (start, start + len(haystack))
@@ -218,64 +218,32 @@ class RulerTask(Task):
         )
 
     @property
-    def cuts_haystack(self) -> bool:
-        """Whether the haystack is marked so a provider cuts it to the model's window.
+    def scores_overflow_zero(self) -> bool:
+        """Whether a prompt too long for the model's window scores 0 (the ``:v2`` variant).
 
-        Set by ``task_settings["context_cut"] == "model_window"`` (the ``:v2`` variant).
-        Without it a prompt that the model's tokenizer makes longer than its window is
-        rejected, which fails its batch.
-        """
-        return (self.config.task_settings or {}).get("context_cut") == "model_window"
-
-    @property
-    def zeroes_overflow(self) -> bool:
-        """Whether an instance whose haystack had to be cut scores 0.
-
-        Set by ``task_settings["overflow"] == "score_zero"`` (the ``:v2`` variant). A
-        length-N item that does not fit the model's window, with room for the generation
-        budget, was not read at length N; the cut only keeps it from failing its batch.
+        The haystack is marked so a provider cuts its end to fit, so the prompt can be sent
+        without failing its batch, and an output whose haystack was cut is emptied.
         """
         return (self.config.task_settings or {}).get("overflow") == "score_zero"
 
     @property
     def cuts_answer(self) -> bool:
-        """Whether each output is scored only up to the first ``Question:`` it writes.
+        """Whether outputs are scored only up to their first ``Question:`` (VT's ``:v2``).
 
-        Set by ``task_settings["answer_cut"] == "before_question"`` (VT's ``:v2``).
+        Having answered, base models go on writing questions of their own in the prompt's
+        ``Question: ... Answer:`` format, naming variables that substring recall credits.
         """
         return (self.config.task_settings or {}).get("answer_cut") == "before_question"
 
     def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
-        """Strip thinking traces, empty overflowing outputs, and cut answers.
-
-        With ``zeroes_overflow``, an output whose haystack a provider cut is emptied, so
-        it scores 0; its text stays in ``metadata["overflow_text"]``.
-
-        With the answer cut, the output is scored only up to the first ``Question:``.
-        Substring recall credits a gold string anywhere in the output, and a base model
-        that has answered goes on in the prompt's own ``Question: ... Answer: ...`` format,
-        writing questions of its own that name variables from the text. A new
-        ``Question:`` starts another item, as GSM8K's ``Question:`` stop assumes. Decoding
-        is greedy, so this is what a stop there would have generated. The uncut output
-        stays in ``metadata["uncut_text"]``.
-
-        Repeated calls leave an output unchanged.
-        """
+        """Strip thinking traces, then apply the ``:v2`` scoring rules (idempotent)."""
         super().strip_thinking_traces(responses)
         for response in responses:
             for output in response.outputs:
-                if self.zeroes_overflow and output.metadata.get(CONTEXT_CUT_TOKENS_KEY):
-                    if not output.metadata.get(OVERFLOW_KEY):
-                        output.metadata["overflow_text"] = output.text or ""
-                        output.text = ""
-                        output.metadata[OVERFLOW_KEY] = True
-                    continue
-                if not self.cuts_answer or output.metadata.get("answer_cut"):
-                    continue
-                text = output.text or ""
-                output.metadata["uncut_text"] = text
-                output.text = before_question(text)
-                output.metadata["answer_cut"] = True
+                if self.scores_overflow_zero and output.metadata.get(CONTEXT_CUT_TOKENS_KEY):
+                    output.text = ""
+                elif self.cuts_answer and output.text:
+                    output.text = output.text.partition("Question:")[0]
 
     @property
     def request_type(self) -> RequestType:
@@ -308,8 +276,6 @@ class RulerTask(Task):
                     metadata=instance.metadata,
                 )
             request = self.config.formatter.format(instance, self.get_fewshot())
-            if isinstance(self.config.formatter, PPLFormatter):
-                return request
             return self._with_haystack_fit(request, instance)
 
         # Build prompt: append system template as completion prefix for non-chat format.
@@ -324,12 +290,7 @@ class RulerTask(Task):
         )
 
     def _with_haystack_fit(self, request: LMRequest, instance: Instance) -> LMRequest:
-        """Return ``request`` with the haystack marked as a ContextFit, when there is one.
-
-        No prompt budget is set: the provider cuts only what the model's window
-        requires, so a model with room sees the whole haystack. The instructions
-        before it and the question after it are never cut.
-        """
+        """Mark the haystack, if any, as a ContextFit with no budget beyond the window."""
         span = (instance.metadata or {}).get("haystack_span")
         if not span:
             return request
@@ -349,19 +310,6 @@ class RulerTask(Task):
             Raw output text
         """
         return output.text
-
-
-#: ``LMOutput.metadata`` key marking an output emptied because its haystack was cut.
-OVERFLOW_KEY = "overflow"
-
-
-#: Where an answer ends: the prompt's own item marker.
-QUESTION_MARKER = "Question:"
-
-
-def before_question(text: str) -> str:
-    """``text`` up to its first ``Question:``, or all of it."""
-    return text.partition(QUESTION_MARKER)[0]
 
 
 #: RULER's newline stops: the newline character and the byte-level spellings some
@@ -427,21 +375,13 @@ def make_ruler_task_class(
     )
 
 
-#: Settings of the `:v2` variant: a provider cuts the haystack's end only as far as the
-#: model's window requires, so the prompt is not rejected and its batch runs, and an
-#: instance that was cut scores 0. Part of the task hash.
-RULER_V2_TASK_SETTINGS = {"context_cut": "model_window", "overflow": "score_zero"}
+#: `:v2`: a prompt too long for the model's window scores 0 instead of failing its batch.
+RULER_V2_TASK_SETTINGS = {"overflow": "score_zero"}
 
-#: Generation budgets that `:v2` raises, by task type. An answer that restates the VT
-#: chain ("1. VAR X = 12345 2. VAR Y = VAR X ...") needs about 60 tokens for five names,
-#: so the default 50 cut the fifth name off correct answers.
+#: `:v2` generation budgets by task type: VT answers that restate the chain need ~60 tokens.
 RULER_V2_MAX_GEN_TOKS = {"vt": 100}
 
-#: Task types whose `:v2` scores the output only up to its first `Question:` (see
-#: `RulerTask.strip_thinking_traces`). VT's context names no variable but the five gold
-#: ones, so with a larger budget a model that answers wrongly and then writes questions
-#: of its own about the variables earns recall for them. In stored outputs of 27 models,
-#: every continuation that earned recall after the answer starts with `Question:`.
+#: Task types whose `:v2` outputs are scored only up to their first `Question:`.
 RULER_V2_ANSWER_CUT = ("vt",)
 
 # Dynamically register all RULER tasks
@@ -457,12 +397,7 @@ for _task_name, _task_config in RULER_TASKS.items():
     register_variant(
         f"ruler_{_task_name}", "chat", formatter=ChatFormatter(user_template="{question}")
     )
-    # `:v2` fixes ways the task fails a model rather than measuring it: a prompt that does
-    # not fit the model's window scores 0 instead of failing its batch (the haystack is cut
-    # so it can be sent; see `cuts_haystack` and `zeroes_overflow`);
-    # generation budgets that cut correct answers short are raised (RULER_V2_MAX_GEN_TOKS),
-    # and where a larger budget lets text after the answer earn recall, the output is
-    # scored only up to its first `Question:` (RULER_V2_ANSWER_CUT).
+    # `:v2`: see RULER_V2_TASK_SETTINGS, RULER_V2_MAX_GEN_TOKS and RULER_V2_ANSWER_CUT.
     _v2_type = _task_name.rsplit("__", 1)[0]
     _v2_budget = RULER_V2_MAX_GEN_TOKS.get(_v2_type)
     register_variant(

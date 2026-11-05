@@ -273,12 +273,9 @@ class VLLMProvider(InferenceProvider):
     def _fit_context(self, request: LMRequest, max_tokens: int | None) -> tuple[LMRequest, int]:
         """Cut the end of the request's ContextFit text until the prompt fits.
 
-        As ``VLLMServerProvider._fit_context`` does: the prompt is counted as it is
-        sent, chat template included, against the smaller of
-        ``context_fit.max_prompt_tokens`` and the room the context window leaves for
-        ``max_tokens``, and the overflow is removed from the end of the text with the
-        model's own tokenizer. Returns the request to send and how many tokens of the
-        text were cut.
+        As ``VLLMServerProvider._fit_context`` does: the prompt is counted as sent against
+        the smaller of ``max_prompt_tokens`` and the window's room for ``max_tokens``.
+        Returns the request to send and how many tokens of the text were cut.
         """
         fit = request.context_fit
         if fit is None:
