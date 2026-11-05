@@ -1561,6 +1561,27 @@ def _run_id(out: Path) -> str:
 
 
 class TestRunIdentity:
+    def test_shared_run_keeps_records_and_identity_until_supervisor_publishes_completion(
+        self, tmp_path
+    ) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        out = tmp_path / "shared" / "output"
+        env = {SHARED_RUN_ENV: str(out.parent)}
+        run_eval(out, {"gsm8k": 4}, env=env)
+        first_id = _run_id(out)
+        assert has_progress(out)
+        predictions = {p.name: p.read_bytes() for p in (out / "predictions").rglob("*.jsonl")}
+
+        # A kill after upload but before the supervisor's completion marker leaves
+        # the completed manifest and records. Re-entry must keep the dashboard ID.
+        resumed = run_eval(out, {"gsm8k": 4}, env=env)
+        assert _run_id(out) == first_id
+        assert resumed.finalized == {"gsm8k"}
+        assert predictions == {
+            p.name: p.read_bytes() for p in (out / "predictions").rglob("*.jsonl")
+        }
+
     # The CLI rewrites a stopped run's manifest as interrupted (SIGTERM under --resume) or
     # failed; the runner itself leaves it running.
     @pytest.mark.parametrize("stored_status", ["running", "interrupted", "failed"])

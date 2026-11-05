@@ -135,6 +135,7 @@ class EvalConfig:
     min_runtime: str | None = None
     timeout: str = "24h"
     retries: int | None = None
+    resume_volume: str | None = None
 
     gpus: int = 1
 

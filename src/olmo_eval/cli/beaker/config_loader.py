@@ -64,6 +64,7 @@ class LaunchConfig:
 
     # Weka buckets mounted in addition to the defaults
     weka_buckets: list[str] = field(default_factory=list)
+    resume_volume: str | None = None
 
     # Secret env overrides: maps beaker_secret_name -> env_var_name
     # Allows overriding default {username}_{ENV_VAR} pattern
@@ -214,6 +215,16 @@ class LaunchConfigLoader:
         assert cluster is not None
         assert workspace is not None
 
+        resume_volume = self.cli_args.get("resume_volume") or (cfg.resume_volume if cfg else None)
+        if resume_volume is not None:
+            from olmo_eval.launch.beaker.volume import validate_volume
+
+            try:
+                validate_volume(resume_volume)
+            except ValueError as e:
+                console.print(f"[red]Error:[/red] {e}")
+                raise SystemExit(1) from None
+
         effective_groups = list(cli_groups)
         if cfg is not None and cfg.groups:
             for g in cfg.groups:
@@ -254,6 +265,7 @@ class LaunchConfigLoader:
             harness_overrides=self.cli_args.get("harness_overrides", []),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
             weka_buckets=list(self.cli_args.get("weka_buckets", [])),
+            resume_volume=resume_volume,
             secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),
             env_vars=self.cli_args.get("env_vars", {}),
         )
