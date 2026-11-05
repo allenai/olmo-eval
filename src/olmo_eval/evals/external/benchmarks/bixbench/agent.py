@@ -157,6 +157,10 @@ class NotebookTimeoutError(TimeoutError):
 # Signatures of upstream's tools, called with the model's arguments so that a bad
 # call fails with the TypeError Python gives upstream's methods.
 def _edit_cell_args(contents: str, idx: int | None = None) -> tuple[str, Any]:
+    # Upstream's nbformat rejects such a cell when it saves the notebook, and the
+    # agent gets the exception; here it is refused before the notebook changes.
+    if not isinstance(contents, str):
+        raise TypeError(f"contents must be a string, not {type(contents).__name__}")
     return contents, idx
 
 

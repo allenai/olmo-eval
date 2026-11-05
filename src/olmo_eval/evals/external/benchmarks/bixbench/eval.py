@@ -453,10 +453,15 @@ class BixBenchVerifiedExternalEval(ExternalEval):
         source = workdir / nb.NOTEBOOK_NAME
         if not source.is_file():
             return
-        artifacts.mkdir(parents=True, exist_ok=True)
-        shutil.copy(source, artifacts / nb.NOTEBOOK_NAME)
-        markdown, _ = nb.view_notebook(nb.read_notebook(source))
-        (artifacts / "notebook.md").write_text(markdown)
+        # The notebook is a diagnostic: failing to keep it must not cost the run
+        # its other trials, which an exception escaping the trial would.
+        try:
+            artifacts.mkdir(parents=True, exist_ok=True)
+            shutil.copy(source, artifacts / nb.NOTEBOOK_NAME)
+            markdown, _ = nb.view_notebook(nb.read_notebook(source))
+            (artifacts / "notebook.md").write_text(markdown)
+        except (OSError, ValueError, TypeError, KeyError) as e:
+            logger.warning(f"Could not keep the notebook of {workdir.name}: {e!r}")
 
     def _prediction(self, trial: TrialResult) -> dict[str, Any]:
         instance_metrics: dict[str, Any] = {}

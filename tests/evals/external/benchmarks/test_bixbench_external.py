@@ -549,7 +549,11 @@ class FlakySandboxManager:
 
 class TestExecute:
     def run(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, start_failures: int
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        start_failures: int = 0,
+        replies: list[LMOutput] | None = None,
     ) -> ExternalEvalResult:
         import olmo_eval.harness.sandbox as sandbox_module
         from olmo_eval.evals.external.benchmarks.bixbench import eval as eval_module
@@ -587,7 +591,7 @@ class TestExecute:
         monkeypatch.setattr(eval_module.asyncio, "sleep", no_sleep)
         monkeypatch.setenv("OPENAI_API_KEY", "test")
         provider = ScriptedProvider(
-            [reply(call("submit_answer", {"answer": "CD14"}))],
+            [*(replies or []), reply(call("submit_answer", {"answer": "CD14"}))],
         )
         return asyncio.run(
             get_external_eval("bixbench_verified").execute(
@@ -610,3 +614,30 @@ class TestExecute:
         assert not result.success
         assert result.error is not None and "sandbox_error" in result.error
         assert result.metrics["num_failed_trials"] == 1.0
+
+    @pytest.mark.parametrize("contents", [None, 7, {"code": "x"}])
+    def test_a_cell_that_is_not_text_is_refused_and_the_run_completes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, contents: Any
+    ) -> None:
+        result = self.run(
+            tmp_path, monkeypatch, replies=[reply(call("edit_cell", {"contents": contents}))]
+        )
+        assert result.success, result.error
+        assert result.metrics["accuracy"] == 1.0
+        (prediction,) = result.predictions or []
+        assert prediction["counts"]["tool_exceptions"] == 1
+
+    def test_a_notebook_that_cannot_be_kept_does_not_fail_the_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from olmo_eval.evals.external.benchmarks.bixbench import eval as eval_module
+
+        def refuse(*_: Any) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(eval_module.shutil, "copy", refuse)
+        result = self.run(
+            tmp_path, monkeypatch, replies=[reply(call("edit_cell", {"contents": "x = 1"}))]
+        )
+        assert result.success, result.error
+        assert result.metrics["accuracy"] == 1.0
