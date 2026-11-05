@@ -1255,48 +1255,30 @@ def test_v2_cuts_the_context_only_to_the_model_window(spec, window_cut):
     assert fit.max_prompt_tokens == expected
 
 
-def test_v2_variants_keep_each_mode_and_add_their_fixes():
+def test_v2_variants_keep_each_mode():
     chat, base = get_task(f"{LONGQA_SPEC}:v2"), get_task(f"{LONGQA_SPEC}:base_v2")
 
     assert chat.settings["use_chat_template"] and not base.settings["use_chat_template"]
-    for task in (chat, base):
-        assert task.fixes == {"context_cut": "model_window"}
-    assert get_task("helmet_kilt_nq__8192:v2").fixes == {"context_cut": "model_window"}
-    assert get_task(LONGQA_SPEC).fixes == {}
-
-
-def test_fixes_cannot_be_overridden_to_something_else():
-    settings = get_task(f"{LONGQA_SPEC}:v2").config.task_settings
-    bad = {**settings, "fixes": {"context_cut": "tier"}}
-
-    with pytest.raises(ValueError, match="fixes"):
-        get_task(LONGQA_SPEC, {"task_settings": bad})
+    with pytest.raises(ValueError, match="context_cut"):
+        get_task(
+            LONGQA_SPEC, {"task_settings": {**chat.config.task_settings, "context_cut": "tier"}}
+        )
 
 
 @pytest.mark.parametrize(
-    "task",
+    ("task", "stop"),
     [
-        "narrativeqa",
-        "alce_asqa",
-        "alce_asqa_nocite",
-        "alce_qampari",
-        "alce_qampari_nocite",
+        ("narrativeqa", ("\n\n",)),
+        ("alce_asqa", ("\n\n",)),
+        ("alce_qampari_nocite", ("\n\n",)),
+        ("multi_lexsum", None),
+        ("kilt_nq", ("\n",)),
     ],
 )
-def test_base_v2_stops_chat_format_qa_at_a_blank_line(task):
+def test_base_v2_stops_only_chat_format_qa_at_a_blank_line(task, stop):
     spec = f"helmet_{task}__8192"
     base, base_v2 = get_task(f"{spec}:base"), get_task(f"{spec}:base_v2")
 
-    assert base_v2.config.sampling_params.stop_sequences == ("\n\n",)
-    assert base.config.sampling_params.stop_sequences is None
-    assert get_task(f"{spec}:v2").config.sampling_params.stop_sequences is None
+    assert base_v2.config.sampling_params.stop_sequences == stop
+    assert get_task(f"{spec}:v2").config.sampling_params == base.config.sampling_params
     assert base_v2.config.sampling_params.max_tokens == base.config.sampling_params.max_tokens
-
-
-def test_base_v2_leaves_other_stops_alone():
-    # Multi-LexSum's demonstration summaries have paragraph breaks, so a blank line
-    # is not a stop for it; the completion-format tasks keep their newline stop.
-    assert (
-        get_task("helmet_multi_lexsum__8192:base_v2").config.sampling_params.stop_sequences is None
-    )
-    assert get_task("helmet_kilt_nq__8192:base_v2").config.sampling_params.stop_sequences == ("\n",)
