@@ -618,3 +618,103 @@ def test_yaml_volume_config_reaches_unique_native_job_commands(tmp_path, monkeyp
     assert "-O" not in first.command
     overridden = LaunchConfigLoader(str(path), {"resume_volume": "ai2/other"}).load()
     assert overridden.resume_volume == "ai2/other"
+
+
+@pytest.mark.parametrize("days", [1, 14])
+def test_custom_retention_selects_directory_and_expiry(shared, days):
+    root, run_uuid, results, _ = shared
+    command = child("(out/'prediction').write_text('result')")
+    assert run_shared(root, run_uuid, results, command, retention_days=days) == 0
+    directory = root / f"tmp-{days}d" / run_uuid
+    receipt = json.loads((results / "weka-resume.json").read_text())
+    assert receipt["retention_days"] == days
+    assert receipt["output_dir"] == str(directory / "output")
+    # A completed replacement reuses and verifies the original output.
+    assert run_shared(root, run_uuid, results, command, retention_days=days) == 0
+    old = time.time() - days * 86400 - 1
+    os.utime(directory / "session.json", (old, old))
+    with pytest.raises(RuntimeError, match="expired"):
+        run_shared(root, run_uuid, results, command, retention_days=days)
+
+
+@pytest.mark.parametrize("days", [0, -1, True, 1.5])
+def test_invalid_retention_cannot_start_child(shared, days):
+    root, run_uuid, results, _ = shared
+    with pytest.raises(ValueError, match="positive integer"):
+        run_shared(
+            root, run_uuid, results, child("raise AssertionError('started')"), retention_days=days
+        )
+
+
+@pytest.mark.parametrize(
+    ("yaml_options", "cli_options", "volume", "days"),
+    [
+        ("", {}, "ai2/olmo-eval", 7),
+        ("resume_volume: ai2/custom\nresume_retention_days: 14\n", {}, "ai2/custom", 14),
+        (
+            "resume_volume: ai2/custom\nresume_retention_days: 14\n",
+            {"resume_volume": "ai2/other", "resume_retention_days": 3},
+            "ai2/other",
+            3,
+        ),
+    ],
+)
+def test_automatic_volume_and_retention_yaml_cli_precedence(
+    tmp_path, monkeypatch, yaml_options, cli_options, volume, days
+):
+    import importlib
+
+    from olmo_eval.cli.beaker.config_loader import LaunchConfigLoader
+    from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+    from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+
+    path = tmp_path / "eval.yaml"
+    path.write_text(
+        "name: defaults\nmodels: [mock]\ntasks: [gsm8k]\ngpus: 0\n"
+        "cluster: h100\nworkspace: ai2/test\nbudget: ai2/test\n" + yaml_options
+    )
+    config = LaunchConfigLoader(str(path), {"upload": False, **cli_options}).load()
+    assert config.resume_volume == volume
+    assert config.resume_retention_days == days
+    monkeypatch.setattr(
+        importlib.import_module("olmo_eval.cli.beaker.job_assembler"),
+        "cluster_has_weka",
+        lambda _: False,
+    )
+    assembler = JobConfigAssembler(
+        config=config,
+        effective_image="image",
+        effective_groups=[],
+        beaker_username="tester",
+        common_secrets=[],
+        task_secrets=[],
+        inject_aws_credentials=False,
+        inject_gcs_credentials=False,
+    )
+    plan = ExperimentPlan(
+        name="defaults",
+        model_spec="mock",
+        priority="normal",
+        tasks=["gsm8k"],
+        original_task_specs=["gsm8k"],
+        total_expanded_tasks=1,
+        num_gpus=0,
+    )
+    job = assembler.assemble(plan)
+    assert job.resume_volume == volume
+    assert job.command[job.command.index("--volume") + 1] == volume
+    assert job.command[job.command.index("--retention-days") + 1] == str(days)
+    assert "--resume" in job.command
+
+
+@pytest.mark.parametrize("value", ["0", "-2", "true", "1.5"])
+def test_invalid_yaml_retention_rejected_before_launch(tmp_path, value):
+    from olmo_eval.cli.beaker.config_loader import LaunchConfigLoader
+
+    path = tmp_path / "eval.yaml"
+    path.write_text(
+        "models: [mock]\ntasks: [gsm8k]\ncluster: h100\nworkspace: ai2/test\n"
+        "budget: ai2/test\nresume_retention_days: " + value + "\n"
+    )
+    with pytest.raises((SystemExit, ValueError)):
+        LaunchConfigLoader(str(path), {}).load()

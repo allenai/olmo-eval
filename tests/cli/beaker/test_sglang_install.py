@@ -66,7 +66,8 @@ def test_job_installs_selected_provider(provider_kind, custom_package, image, li
             "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/cuda13_driver",
         ]
     else:
-        assert job.command[0] == "olmo-eval"
+        assert job.command[:3] == ["python", "-m", "olmo_eval.launch.beaker.resume"]
+        assert job.command[job.command.index("--") + 1] == "olmo-eval"
     assert job.env_vars.get("LD_LIBRARY_PATH") == (
         None if library_path == "secret" else library_path
     )

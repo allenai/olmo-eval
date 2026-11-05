@@ -23,12 +23,15 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
-from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+from olmo_eval.common.constants.infrastructure import (
+    BEAKER_DEFAULT_RESUME_RETENTION_DAYS,
+    SHARED_RUN_ENV,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-RETENTION_SECONDS = 7 * 24 * 3600
+RETENTION_SECONDS = BEAKER_DEFAULT_RESUME_RETENTION_DAYS * 24 * 3600
 REFRESH_SECONDS = 3600
 
 
@@ -97,13 +100,16 @@ def run_shared(
     *,
     refresh_seconds: float = REFRESH_SECONDS,
     volume: str | None = None,
+    retention_days: int = BEAKER_DEFAULT_RESUME_RETENTION_DAYS,
 ) -> int:
     """Run once or resume under exclusive ownership; return the child's exit status."""
     if str(uuid.UUID(run_uuid)) != run_uuid:
         raise ValueError("run UUID must be a canonical UUID")
     if not root.is_dir() or root.is_symlink():
         raise RuntimeError(f"Resume root {root} is not mounted; refusing local fallback")
-    root = root / "tmp-7d"
+    if type(retention_days) is not int or retention_days < 1:
+        raise ValueError("retention_days must be a positive integer")
+    root = root / f"tmp-{retention_days}d"
     root.mkdir(mode=0o755, exist_ok=True)
     directory = root / run_uuid
     directory.mkdir(mode=0o700, exist_ok=True)
@@ -118,7 +124,7 @@ def run_shared(
         except BlockingIOError as e:
             raise RuntimeError(f"Another attempt owns WEKA run {run_uuid} ({directory})") from e
         if session.exists():
-            if time.time() - session.stat().st_mtime >= RETENTION_SECONDS:
+            if time.time() - session.stat().st_mtime >= retention_days * 24 * 3600:
                 raise RuntimeError("WEKA recovery state expired; submit a new evaluation")
             session_data = json.loads(session.read_text())
             if session_data["command"] != list(command):
@@ -139,6 +145,7 @@ def run_shared(
             "output_dir": str(output),
             "status": "running",
             "volume": volume,
+            "retention_days": retention_days,
         }
         complete = directory / "complete.json"
         if complete.exists():
@@ -238,6 +245,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--run-uuid", required=True)
     parser.add_argument("--volume")
+    parser.add_argument("--retention-days", type=int, default=BEAKER_DEFAULT_RESUME_RETENTION_DAYS)
     parser.add_argument("--results", type=Path, default=Path("/results"))
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -247,7 +255,14 @@ def main() -> None:
     if not command:
         parser.error("an evaluation command is required")
     raise SystemExit(
-        run_shared(args.root, args.run_uuid, args.results, command, volume=args.volume)
+        run_shared(
+            args.root,
+            args.run_uuid,
+            args.results,
+            command,
+            volume=args.volume,
+            retention_days=args.retention_days,
+        )
     )
 
 

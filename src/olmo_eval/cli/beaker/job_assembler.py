@@ -825,6 +825,8 @@ class JobConfigAssembler:
                 str(uuid.uuid4()),
                 "--volume",
                 self.config.resume_volume,
+                "--retention-days",
+                str(self.config.resume_retention_days),
                 "--results",
                 BEAKER_RESULT_DIR,
                 "--",

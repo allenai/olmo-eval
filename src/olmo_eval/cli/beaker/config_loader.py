@@ -9,6 +9,11 @@ from typing import TYPE_CHECKING, Any
 import beaker
 from rich.console import Console
 
+from olmo_eval.common.constants.infrastructure import (
+    BEAKER_DEFAULT_RESUME_RETENTION_DAYS,
+    BEAKER_DEFAULT_RESUME_VOLUME,
+)
+
 if TYPE_CHECKING:
     from olmo_eval.launch import EvalConfig
 
@@ -64,7 +69,8 @@ class LaunchConfig:
 
     # Weka buckets mounted in addition to the defaults
     weka_buckets: list[str] = field(default_factory=list)
-    resume_volume: str | None = None
+    resume_volume: str | None = BEAKER_DEFAULT_RESUME_VOLUME
+    resume_retention_days: int = BEAKER_DEFAULT_RESUME_RETENTION_DAYS
 
     # Secret env overrides: maps beaker_secret_name -> env_var_name
     # Allows overriding default {username}_{ENV_VAR} pattern
@@ -215,7 +221,19 @@ class LaunchConfigLoader:
         assert cluster is not None
         assert workspace is not None
 
-        resume_volume = self.cli_args.get("resume_volume") or (cfg.resume_volume if cfg else None)
+        resume_volume = (
+            self.cli_args.get("resume_volume")
+            or (cfg.resume_volume if cfg else None)
+            or BEAKER_DEFAULT_RESUME_VOLUME
+        )
+        resume_retention_days = self.cli_args.get("resume_retention_days")
+        if resume_retention_days is None:
+            resume_retention_days = (
+                cfg.resume_retention_days if cfg else BEAKER_DEFAULT_RESUME_RETENTION_DAYS
+            )
+        if type(resume_retention_days) is not int or resume_retention_days < 1:
+            console.print("[red]Error:[/red] resume_retention_days must be a positive integer")
+            raise SystemExit(1)
         if resume_volume is not None:
             from olmo_eval.launch.beaker.volume import validate_volume
 
@@ -266,6 +284,7 @@ class LaunchConfigLoader:
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
             weka_buckets=list(self.cli_args.get("weka_buckets", [])),
             resume_volume=resume_volume,
+            resume_retention_days=resume_retention_days,
             secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),
             env_vars=self.cli_args.get("env_vars", {}),
         )

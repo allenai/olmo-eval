@@ -18,7 +18,8 @@ have a claim. Never create claims implicitly during launch.
 1. Qualify native volume mounts with a bounded CPU probe. Check file and directory
    fsync, rename visibility, SHA-256 integrity, advisory locking, and release after a
    killed process. Repeat across jobs and record their actual nodes.
-2. Add opt-in `--resume-volume` / YAML `resume_volume` to the task launcher. Gantry
+2. Default task launches to `--resume-volume ai2/olmo-eval` / YAML
+   `resume_volume`, allowing a different volume. Gantry
    prepares the existing environment and saves its spec. Add the native volume mount
    to that spec and submit with the volume-capable Beaker CLI. Keep credentials in
    secret mappings. This bridge is necessary until SDK/Gantry accept native mounts.
@@ -27,7 +28,7 @@ have a claim. Never create claims implicitly during launch.
    there. Take an advisory lock before touching manifests or progress. Reclaim the
    predecessor's progress locks only while holding this outer lock. Leave only a
    small receipt in Beaker `/results`, with no symlink to the volume.
-4. Refresh recovery files during active runs. Use one `tmp-7d` ancestor, never nested
+4. Refresh recovery files during active runs. Use one `tmp-<days>d` ancestor (default `tmp-7d`), never nested
    `tmp-*` directories. Refresh every file's mtime, not just a heartbeat: prune uses
    per-file mtime and reading files does not extend their lifetime. Preserve completed
    output for the inactive retention window; dashboard upload remains the durable
@@ -69,9 +70,13 @@ assign Sarah Tattersall. Do not hide mount failures by falling back to local sto
 
 ## Rollout
 
-Start with explicit `--resume-volume ai2/olmo-eval` in the debug workspace. Promote the
-default only after storage, recovery, upload, and retention gates pass and production
-workspace claims are verified. Existing submissions keep their original storage.
+Task launches use `ai2/olmo-eval` and seven-day inactive retention by default.
+Users can override the volume and positive retention days through CLI or YAML.
+The default is enabled at the owner's request following the storage and recovery
+qualification below. Live prune coverage and dashboard-upload validation remain
+outstanding. Each submitting workspace needs a read-write claim; the launcher never
+grants access or silently falls back to datasets. Existing submissions keep their
+original storage and retention path.
 
 ## Execution evidence
 
@@ -152,7 +157,8 @@ needed escalation.
   test deployment. Client unit tests and failed-upload recovery passed; the Beaker
   canary deliberately did not publish development results to production.
 - Verify read-write claims in each production workspace before enabling it there.
-  Keep the explicit `--resume-volume ai2/olmo-eval` pilot option until these gates pass.
+  The debug workspace is claimed; `ai2/oe-olmo3p5-eval` had no claim at the latest
+  access check. The new default does not itself grant workspace access.
 
 The small-model canary and deterministic workload qualify the shared-storage path.
 Long generation, agent, sandbox, and other engine canaries are additional rollout
@@ -214,3 +220,44 @@ can write the same volume under the same operating-system identity.
 Both prune-fixture files still existed at this audit. Live prune-cycle verification
 and live test-dashboard upload remain separate rollout gates. The post-review checks
 used zero GPUs; the earlier pinned-model canary exercised the model execution path.
+
+
+## Default volume and configurable retention
+
+Task launches now select `ai2/olmo-eval` without an opt-in flag. CLI options
+`--resume-volume` and `--resume-retention-days` override YAML `resume_volume` and
+`resume_retention_days`; omitted settings resolve to `ai2/olmo-eval` and 7.
+Retention selects `tmp-<days>d` and the supervisor's expiry check. The submitted
+command fixes that path for all replacements. Receipts record the selected days.
+External runners and arbitrary low-level Beaker commands do not gain task resumability.
+
+The current [volume documentation](https://beaker-docs.apps.allenai.org/concept/volumes.html)
+documents native mounts through experiment YAML and the CLI, using `source.volume`
+and explicit `mode: readwrite`. That is the submission path used here. Rechecking
+beaker-py branch `v2` at `dc4c805042e929fb691e3a9d0d6ad34afa0d4a08` and
+Gantry main at `30fa3a74b7865520d48cf8728fe58968941daaf7` confirms that their
+Python mount APIs still expose legacy `weka` fields without native `volume`/mount
+mode fields. Gantry prepares the environment and spec; the volume-capable CLI submits
+the final native spec. This is a tooling compatibility bridge; the mounted storage
+is the new claimed volume. Dependency and lockfile changes remain outside this PR.
+
+The default/retention delta was independently re-reviewed by the same correctness
+and adversarial agents. Both reported no scoped blockers; their focused runs passed
+79 and 52 tests respectively.
+
+The default-volume/custom-retention CPU trial uses the public CLI and deliberately
+omits `--resume-volume`. It requests no GPU or model API, limits GSM8K to five
+instances with the mock provider, and does not upload development results:
+
+```bash
+uv run --frozen --no-group vllm olmo-eval beaker launch \
+  -m mock -t gsm8k -o limit=5 -o num_fewshot=0 -G 0 \
+  -c ai2/ceres -w ai2/olmo-eval-debug -B 01KP6SET80STGTCC9EFRPAE2R6 \
+  --min-runtime 5m --timeout 10m --retries 1 --no-upload --no-follow \
+  --no-aws-credentials --no-hf-token --resume-retention-days 2 --yes \
+  -n weka-default-retention-20261105
+```
+
+Local validation of the default/retention delta passed: Ruff lint and format,
+`ty check src/`, and the full CPU suite: **5,199 passed, 40 skipped, 20 subtests
+passed**. The focused launcher/lifecycle run passed 192 tests.

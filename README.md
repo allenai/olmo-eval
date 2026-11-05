@@ -1125,21 +1125,24 @@ uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --fresh    # discards p
 | `--fresh` | Delete the recorded progress of this run's tasks and model before the run; cannot be combined with `--resume` |
 
 Without either flag, a run records nothing and ignores progress it finds, with a warning.
-Beaker launches always pass `--resume`. With `--resume-volume`, replacement jobs mount
-the same WEKA directory directly. Otherwise Beaker copies the predecessor's `/results`
-into its replacement (see [Preemption](#preemption)).
+Beaker task launches always pass `--resume` and use `--resume-volume ai2/olmo-eval`
+by default. Replacement jobs mount the same WEKA directory directly. Use
+`--resume-volume <org>/<name>` to select a different native volume.
 
-To use a native volume, first grant the submitting workspace read-write access:
+Before the first launch in a workspace, grant it read-write access to the volume:
 
 ```bash
 beaker volume claim create --workspace <workspace> --volume ai2/olmo-eval --mode readwrite
 uv run olmo-eval beaker launch -m <model> -t <task> -c <cluster> -w <workspace> \
-    --resume-volume ai2/olmo-eval --min-runtime 30m --timeout 2h
+    --min-runtime 30m --timeout 2h
 ```
 
 This requires a volume-capable Beaker CLI (v1.5.346 is qualified). Claims are managed
 once per workspace; the launcher never changes access. Every submission gets its own
-UUID directory under `/eval-cache/tmp-7d/`. Replacement jobs reuse that UUID and take
+UUID directory under `/eval-cache/tmp-7d/` by default. Set
+`--resume-retention-days 14` (YAML: `resume_retention_days: 14`) to use `tmp-14d`
+and retain inactive recovery files for fourteen days. Any positive whole number of
+days is accepted. Replacement jobs reuse their original UUID and retention path and take
 an exclusive run lock. The full output lives on WEKA. Beaker results contain a small
 `weka-resume.json` receipt plus Gantry setup diagnostics. The receipt names the volume,
 UUID, output path, and dashboard run ID.
@@ -1148,9 +1151,10 @@ Grant read-write claims only to workspaces whose submitters are mutually trusted
 Progress records can contain serialized Python objects; checksums detect corruption
 and do not authenticate writers.
 
-Active runs refresh every recovery file's modification time hourly. After seven days
-of inactivity, files are eligible for WEKA prune deletion. Final results still upload
-to the dashboard normally; `--no-upload` leaves only temporary WEKA artifacts. Expired,
+Active runs refresh every recovery file's modification time hourly. After the selected
+retention period of inactivity (seven days by default), files are eligible for WEKA
+prune deletion. Actual deletion depends on the volume's prune schedule. Final results
+still upload to the dashboard normally; `--no-upload` leaves only temporary WEKA artifacts. Expired,
 missing, or corrupt committed progress stops recovery with an error. Shared-storage
 progress flushes every five seconds and on graceful shutdown. A completion marker
 prevents a replacement from repeating a successfully finished run. External evals do
@@ -1690,7 +1694,8 @@ budget: ai2/oe-other
 | `--force-download-model` | | `false` | Refresh Hugging Face model/tokenizer cache before loading |
 | `--uv-cache-dir` | | default | UV cache directory for package downloads |
 | `--weka-bucket` | | none | Extra Weka bucket to mount at `/weka/<bucket>`, on top of `oe-training-default`, `oe-eval-default` and `oe-adapt-default` (can specify multiple) |
-| `--resume-volume` | | none | Native Beaker volume for resumable task state; requires a read-write workspace claim |
+| `--resume-volume` | | `ai2/olmo-eval` | Native Beaker volume for resumable task state; requires a read-write workspace claim |
+| `--resume-retention-days` | | 7 | Positive whole number of days to retain inactive recovery files |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--yes` | `-y` | `false` | Skip confirmation prompt |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
@@ -1958,7 +1963,8 @@ retries: 2
 | `preemptible` | bool | no | Deprecated by Beaker; `false` means `min_runtime: 8h`; cannot be combined with `min_runtime` |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
-| `resume_volume` | string | no | Native Beaker volume for resumable task state, e.g. `ai2/olmo-eval` |
+| `resume_volume` | string | no | Native Beaker volume for resumable task state (default: `ai2/olmo-eval`) |
+| `resume_retention_days` | int | no | Days to retain inactive recovery files (default: 7; must be positive) |
 | `beaker_image` | string | no | Container image to use (config-only) |
 | `groups` | list | no | Beaker groups to add experiments to |
 
