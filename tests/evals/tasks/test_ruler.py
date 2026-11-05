@@ -144,7 +144,7 @@ def _response(task, text: str, cut_tokens: int = 0) -> Response:
 
 @pytest.mark.parametrize("spec", ["ruler_niah_s_1__4096:v2", "ruler_vt__4096:v2"])
 def test_v2_scores_an_overflowing_instance_zero(spec):
-    """An output whose haystack was cut is emptied, idempotently, and counted."""
+    """An output whose haystack was cut is emptied, idempotently, and marked."""
     task = get_task(spec)
     cut, fits = _response(task, "the needle\n\nmore", cut_tokens=12), _response(task, "the needle")
 
@@ -154,44 +154,31 @@ def test_v2_scores_an_overflowing_instance_zero(spec):
     assert cut.outputs[0].text == ""
     assert cut.outputs[0].metadata["overflow_text"] == "the needle\n\nmore"
     assert "uncut_text" not in cut.outputs[0].metadata
+    assert cut.outputs[0].metadata["overflow"] is True
     assert fits.outputs[0].text == "the needle"
-    metric = next(m for m in task.config.metrics if m.name == "overflow_rate")
-    assert metric.compute([cut, fits]) == 0.5
+    assert "overflow" not in fits.outputs[0].metadata
 
 
-def test_the_original_spec_keeps_a_cut_output_and_has_no_overflow_metric():
+def test_the_original_spec_keeps_a_cut_output():
     task = get_task("ruler_niah_s_1__4096")
     response = _response(task, "the needle", cut_tokens=12)
 
     task.strip_thinking_traces([response])
 
     assert response.outputs[0].text == "the needle"
-    assert [m.name for m in task.config.metrics] == ["recall"]
-
-
-def test_qa_v2_overflow_metric_shares_the_qa_scorer():
-    task = get_task("ruler_qa_1__4096:v2")
-    recall, overflow = task.config.metrics
-    assert overflow.name == "overflow_rate"
-    assert overflow.scorer is recall.scorer
 
 
 @pytest.mark.parametrize(
     "spec", ["ruler_niah_s_1__4096:v2", "ruler_qa_1__4096:v2", "ruler_vt__4096"]
 )
 def test_the_runner_reports_recall_as_the_score(spec):
-    """metrics.json's summary score is recall, not overflow_rate."""
+    """metrics.json's summary score is recall, a :v2 task's only metric, as for plain specs."""
     from olmo_eval.runners.processing.utils import get_metric_metadata, get_primary_metric
 
     task = get_task(spec)
-    metrics = {"recall": {"substring_recall": 0.75}, "overflow_rate": {"substring_recall": 0.25}}
-    if not spec.endswith(":v2"):
-        del metrics["overflow_rate"]
-
-    # A plain spec names its one metric, which the runner picks as the only one.
-    preferred = get_metric_metadata(task)
-    assert preferred == ("recall:substring_recall" if spec.endswith(":v2") else None)
-    assert get_primary_metric(metrics, preferred) == (
+    assert [m.name for m in task.config.metrics] == ["recall"]
+    metrics = {"recall": {"substring_recall": 0.75}}
+    assert get_primary_metric(metrics, get_metric_metadata(task)) == (
         "recall:substring_recall",
         0.75,
     )

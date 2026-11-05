@@ -20,7 +20,6 @@ from typing import Any, cast
 
 from olmo_eval.common.formatters import ChatFormatter, PPLFormatter
 from olmo_eval.common.metrics import Metric, RecallMetric
-from olmo_eval.common.scorers import SubstringRecallScorer
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import (
     CONTEXT_CUT_TOKENS_KEY,
@@ -356,28 +355,6 @@ class RulerTask(Task):
 OVERFLOW_KEY = "overflow"
 
 
-@dataclass(frozen=True, slots=True)
-class OverflowRateMetric(Metric):
-    """Fraction of instances that scored 0 because the prompt did not fit the window.
-
-    Shares the task's scorer, so it adds no scoring; it reads ``OVERFLOW_KEY``.
-    """
-
-    name: str = "overflow_rate"
-    scorer: type[Scorer] = SubstringRecallScorer
-
-    def compute(self, responses: Sequence[Response]) -> float:
-        if not responses:
-            return 0.0
-        overflowed = sum(
-            1 for r in responses if any(o.metadata.get(OVERFLOW_KEY) for o in r.outputs)
-        )
-        return overflowed / len(responses)
-
-    def supports_scorer_fallback(self) -> bool:
-        return False
-
-
 #: Where an answer ends: the prompt's own item marker.
 QUESTION_MARKER = "Question:"
 
@@ -482,8 +459,7 @@ for _task_name, _task_config in RULER_TASKS.items():
     )
     # `:v2` fixes ways the task fails a model rather than measuring it: a prompt that does
     # not fit the model's window scores 0 instead of failing its batch (the haystack is cut
-    # so it can be sent; see `cuts_haystack` and `zeroes_overflow`), with the share of such
-    # instances reported as `overflow_rate`;
+    # so it can be sent; see `cuts_haystack` and `zeroes_overflow`);
     # generation budgets that cut correct answers short are raised (RULER_V2_MAX_GEN_TOKS),
     # and where a larger budget lets text after the answer earn recall, the output is
     # scored only up to its first `Question:` (RULER_V2_ANSWER_CUT).
@@ -496,13 +472,6 @@ for _task_name, _task_config in RULER_TASKS.items():
             **RULER_V2_TASK_SETTINGS,
             **({"answer_cut": "before_question"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
         },
-        metrics=(
-            *vars(_cls)["metrics"],
-            OverflowRateMetric(scorer=vars(_cls)["metrics"][0].scorer),
-        ),
-        # The metric itself, not its name: with two metrics, a name does not resolve and
-        # the runner would report the alphabetically first one (overflow_rate).
-        primary_metric=vars(_cls)["metrics"][0],
         **(
             {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
             if _v2_budget is not None
