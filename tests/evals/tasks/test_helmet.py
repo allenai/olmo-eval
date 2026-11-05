@@ -9,6 +9,7 @@ scripts/eval_gpt4_*.py) -- where a case is labeled "HELMET gives X", it was
 checked against upstream code.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -22,7 +23,7 @@ from olmo_eval.common.scorers import (
 )
 from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
 from olmo_eval.common.scorers.llm_judge import JUDGE_ATTEMPTS
-from olmo_eval.common.types import Instance, LMOutput, Response
+from olmo_eval.common.types import CONTEXT_CUT_TOKENS_KEY, Instance, LMOutput, Response
 from olmo_eval.data.helmet_icl_loader import _balance_labels
 from olmo_eval.data.helmet_kilt_loader import _load_jsonl, _question_key
 from olmo_eval.data.helmet_loader import sample_jsonl_by_key
@@ -1259,10 +1260,8 @@ def test_v2_variants_keep_each_mode():
     chat, base = get_task(f"{LONGQA_SPEC}:v2"), get_task(f"{LONGQA_SPEC}:base_v2")
 
     assert chat.settings["use_chat_template"] and not base.settings["use_chat_template"]
-    with pytest.raises(ValueError, match="context_cut"):
-        get_task(
-            LONGQA_SPEC, {"task_settings": {**chat.config.task_settings, "context_cut": "tier"}}
-        )
+    with pytest.raises(ValueError, match="overflow"):
+        get_task(LONGQA_SPEC, {"task_settings": {**chat.config.task_settings, "overflow": "cut"}})
 
 
 @pytest.mark.parametrize(
@@ -1282,3 +1281,63 @@ def test_base_v2_stops_only_chat_format_qa_at_a_blank_line(task, stop):
     assert base_v2.config.sampling_params.stop_sequences == stop
     assert get_task(f"{spec}:v2").config.sampling_params == base.config.sampling_params
     assert base_v2.config.sampling_params.max_tokens == base.config.sampling_params.max_tokens
+
+
+def _cut_response(spec: str, text: str, gold: list[str], cut_tokens: int) -> Response:
+    task = get_task(spec)
+    metadata = {CONTEXT_CUT_TOKENS_KEY: cut_tokens} if cut_tokens else {}
+    instance = Instance(question="q", gold_answer=gold, metadata={"all_gold_answers": gold})
+    return Response(
+        instance=instance,
+        request=task.format_request(instance),
+        outputs=[LMOutput(text=text, metadata=metadata)],
+    )
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "helmet_kilt_nq__8192:v2",
+        "helmet_json_kv__8192:base_v2",
+        "helmet_alce_asqa__8192:base_v2",
+        "helmet_narrativeqa__8192:base_v2",
+        "helmet_infbench_sum_eng__8192:base_v2",
+    ],
+)
+def test_v2_scores_an_overflowing_instance_zero_without_scoring_it(spec):
+    """Every metric reads 0 for an instance whose context was cut, and no judge or
+    AutoAIS is called (none is configured here)."""
+    task = get_task(spec)
+    response = _cut_response(spec, "the answer", ["the answer"], cut_tokens=12)
+
+    asyncio.run(task.score_responses([response]))
+    metrics = task.compute_metrics([response])
+
+    primary = task.config.get_primary_metric()
+    assert next(iter(metrics[primary.name].values())) == 0.0
+    assert next(iter(metrics["context_truncation_rate"].values())) == 1.0
+    # Scored as 0, not left unscored: an unscored instance would drop out of the mean.
+    channels = [n for n in task._get_scorers() if n != "context_cut"]
+    channels += [k for k in (getattr(task, "judge_score_key", None),) if k]
+    assert all(response.scores.get(name) == 0.0 for name in channels), response.scores
+    assert not any("scoring_error" in key for key in response.outputs[0].metadata)
+
+
+def test_v2_scores_the_instances_that_fit_as_before():
+    task = get_task("helmet_kilt_nq__8192:v2")
+    cut = _cut_response("helmet_kilt_nq__8192:v2", "Paris", ["Paris"], cut_tokens=12)
+    fits = _cut_response("helmet_kilt_nq__8192:v2", "Paris", ["Paris"], cut_tokens=0)
+
+    asyncio.run(task.score_responses([cut, fits]))
+
+    assert cut.scores["substring_exact_match"] == 0.0
+    assert fits.scores["substring_exact_match"] == 1.0
+
+
+def test_the_original_spec_scores_a_cut_instance():
+    task = get_task("helmet_kilt_nq__8192")
+    cut = _cut_response("helmet_kilt_nq__8192", "Paris", ["Paris"], cut_tokens=12)
+
+    asyncio.run(task.score_responses([cut]))
+
+    assert cut.scores["substring_exact_match"] == 1.0
