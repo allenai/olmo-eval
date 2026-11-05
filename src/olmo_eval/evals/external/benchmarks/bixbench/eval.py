@@ -18,6 +18,7 @@ from olmo_eval.evals.external.args import as_bool, as_list, as_optional_float
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.result import ExternalEvalResult
 from olmo_eval.harness.sandbox.config import ContainerRuntime, SandboxConfig, SandboxMode
+from olmo_eval.inference.base import require_tool_support
 
 from . import notebook as nb
 from .agent import (
@@ -252,6 +253,7 @@ class BixBenchVerifiedExternalEval(ExternalEval):
         container_runtime: str = "podman",
     ) -> ExternalEvalResult:
         """Run the agent on each selected question, then grade what it submitted."""
+        require_tool_support(provider)
         start_time = time.time()
         bb_args = BixBenchArgs.from_dict(args)
         runtime = cast(ContainerRuntime, container_runtime)
@@ -431,8 +433,11 @@ class BixBenchVerifiedExternalEval(ExternalEval):
                         episode.run(provider, bb_args.sampling_params), timeout=budget
                     )
                 except TimeoutError:
-                    trial.error = "agent_stuck: the episode outlasted its time budget"
-                    return
+                    # Keep the steps taken so the prediction shows where it stalled.
+                    result = episode.snapshot()
+                    result.completion_reason = "error"
+                    result.duration_s = budget
+                    result.error = "agent_stuck: the episode outlasted its time budget"
             finally:
                 await binding.release()
         finally:

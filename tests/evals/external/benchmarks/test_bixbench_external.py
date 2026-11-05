@@ -478,6 +478,22 @@ class TestEpisode:
         assert result.completion_reason == "exec_timeout"
         assert result.answer is None and result.steps == 1
 
+    def test_calls_after_a_notebook_timeout_are_not_run(self, tmp_path: Path) -> None:
+        result, _, executor = run_episode(
+            tmp_path,
+            [
+                reply(
+                    call("edit_cell", {"contents": "slow"}, "c1"),
+                    call("edit_cell", {"contents": "x"}, "c2"),
+                    call("submit_answer", {"answer": "CD14"}, "c3"),
+                )
+            ],
+            ["timeout"],
+        )
+        assert result.completion_reason == "exec_timeout"
+        assert len(executor.scripts) == 1
+        assert result.answer is None
+
     def test_provider_failure_is_an_error_not_a_score(self, tmp_path: Path) -> None:
         failed = LMOutput(text="", metadata={REQUEST_ERROR_KEY: "server down"})
         result, _, _ = run_episode(tmp_path, [failed])
@@ -558,6 +574,7 @@ class TestExecute:
         monkeypatch: pytest.MonkeyPatch,
         start_failures: int = 0,
         replies: list[LMOutput] | None = None,
+        args: dict[str, Any] | None = None,
     ) -> ExternalEvalResult:
         import olmo_eval.harness.sandbox as sandbox_module
         from olmo_eval.evals.external.benchmarks.bixbench import eval as eval_module
@@ -599,7 +616,7 @@ class TestExecute:
         )
         return asyncio.run(
             get_external_eval("bixbench_verified").execute(
-                provider, {"n_attempts": 1}, output_dir=str(tmp_path / "out")
+                provider, {"n_attempts": 1, **(args or {})}, output_dir=str(tmp_path / "out")
             )
         )
 
@@ -645,3 +662,31 @@ class TestExecute:
         )
         assert result.success, result.error
         assert result.metrics["accuracy"] == 1.0
+
+    def test_a_provider_without_tool_support_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(ScriptedProvider, "supports_tools", False)
+        with pytest.raises(ValueError, match="does not support tool requests"):
+            self.run(tmp_path, monkeypatch)
+
+    def test_a_stalled_episode_keeps_its_steps(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from olmo_eval.evals.external.benchmarks.bixbench import eval as eval_module
+
+        monkeypatch.setattr(eval_module, "EPISODE_GRACE", 0.5)
+        stall = asyncio.Event()
+
+        async def stalled_run(self: Any, *_: Any) -> None:
+            self.result.steps = 4
+            self._add_user("stuck here")
+            await stall.wait()
+
+        monkeypatch.setattr(eval_module.NotebookEpisode, "run", stalled_run)
+        result = self.run(tmp_path, monkeypatch, args={"exec_timeout": 0})
+        assert not result.success
+        (prediction,) = result.predictions or []
+        assert prediction["error"].startswith("agent_stuck")
+        assert prediction["steps"] == 4
+        assert prediction["trajectory"]["turns"]

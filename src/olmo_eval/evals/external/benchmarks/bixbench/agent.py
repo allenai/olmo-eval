@@ -265,19 +265,28 @@ class NotebookEpisode:
             result.completion_reason = "error"
             result.error = f"sandbox_error: {type(e).__name__}: {e}"
         result.duration_s = round(time.monotonic() - started, 1)
-        result.trajectory = AgentTrajectory(
-            turns=tuple(self.turns),
-            metadata={
-                "completion_reason": result.completion_reason,
-                "steps": result.steps,
-                **result.counts,
-            },
-        )
+        self.snapshot()
         logger.info(
             f"[{self.label}] {result.completion_reason} after {result.steps} steps "
             f"({', '.join(f'{k}={v}' for k, v in result.counts.items() if v)})"
         )
         return result
+
+    def snapshot(self) -> EpisodeResult:
+        """The result so far, with the trajectory of the turns taken.
+
+        ``run`` ends with it; a caller that cancels the episode calls it to keep
+        what happened before the cancellation.
+        """
+        self.result.trajectory = AgentTrajectory(
+            turns=tuple(self.turns),
+            metadata={
+                "completion_reason": self.result.completion_reason,
+                "steps": self.result.steps,
+                **self.result.counts,
+            },
+        )
+        return self.result
 
     def _add_user(self, content: str) -> None:
         self.messages.append({"role": "user", "content": content})
@@ -329,7 +338,12 @@ class NotebookEpisode:
         if not calls:
             self.result.counts["no_tool_call_steps"] += 1
 
-        results = [await self._call_tool(call) for call in calls]
+        results: list[ToolResult] = []
+        for call in calls:
+            # A notebook timeout ends the episode; later calls would only rerun it.
+            if self.result.completion_reason == "exec_timeout":
+                break
+            results.append(await self._call_tool(call))
         for tool_result in results:
             self.messages.append(tool_result.to_openai())
         if results:

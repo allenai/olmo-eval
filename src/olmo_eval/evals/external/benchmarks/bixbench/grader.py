@@ -7,7 +7,8 @@ Follows ``bixbench/graders.py`` of Future-House/BixBench at 49311180 as
 - ``str_verifier``: answers equal after keeping only lowercased letters and digits
   are correct; otherwise an answer whose cleaned form is a substring of the cleaned
   target is correct; otherwise the judge decides. The substring rule is upstream's,
-  so a predicted "1" matches a target of "11".
+  so a predicted "1" matches a target of "11", and an answer with no letters or
+  digits matches every target.
 - ``range_verifier``: the judge decides, with the same prompt as ``llm_verifier``
   and the target range as a "(lower,upper)" string, because upstream passes its
   default template here too.
