@@ -95,3 +95,65 @@ submitted experiment is not a verified result.
   after correction, final verification passed: 5,165 passed, 40 skipped, 20 subtests.
   Ruff lint, format checking, and `ty check src/` also passed. Commands used the
   CI-compatible `uv run --frozen --no-group vllm` prefix.
+
+### Beaker results on `1190cef0`
+
+| Gate | Experiment | Observed result |
+| --- | --- | --- |
+| Second-host POSIX probe | `01M6MMD629REA4BG95QKBRHQG9` | Passed on Ceres 447, reading the payload originally written on Ceres 450 |
+| Actual preemption, 10 GiB state | `01M6MMB6GF0EXY8TVW8NJXFYNA` | Exit 143 after `beaker job preempt`; replacement restored 49/80 instances, ran 31, and finished with exit zero |
+| Uninterrupted fixture control | `01M6MMMK1ZZESXVCNVBD9YHVK4` | 80/80 scored, exit zero |
+| Artifact comparison | `01M6MMT8AJ6PNARVGE6G0HPAER` | All 80 request rows and all 80 prediction rows byte-identical to control; scores equal; no duplicates; completion checksums valid |
+| Cross-node advisory lock | `01M6MMX4MDCBGCFN602461GBMD` | Writer on Ceres 451 excluded reader on Ceres 442; reader acquired after release; payload identical |
+| Pinned-model interruption/retry | `01M6MMCM0H7B64VMGY4DNAHRTH` | One H100, Qwen2.5-0.5B-Instruct; intentional SIGTERM at 16/32; retry restored 16, generated 16, finished 32/32 |
+| Model artifact audit | `01M6MN43XT53P0A2JZ44Y6FS5Q` | 32 unique predictions and requests, zero failed instances, correct model/code revisions, all completion checksums valid |
+
+The fixture moved from Ceres 442 to Ceres 441. Both attempts verified the same 10 GiB
+payload SHA-256, `e4c296c41d3a9605f0348961e41ed835b5f42c220751ed2269a726951546c935`.
+The replacement retained dashboard run ID `b441a482b60f`. Its Beaker output held a
+219-byte receipt plus small Gantry setup logs. The bulk payload, progress, requests,
+predictions, metrics, and provider logs remained on WEKA.
+
+The real-model run used model revision
+`7ae557604adf67be50417f59c2c2f167def9a775`, `gsm8k` with `limit=32` and
+`max_tokens=128`, a 10-minute min-runtime, a 30-minute per-attempt timeout, and one
+retry. Its dashboard run ID remained `cb1a46fbe810`. The final score was 0.3125;
+6/32 generations reached the token cap. This is a storage/recovery canary, not a
+benchmark-quality estimate. The model interruption was the existing debug SIGTERM
+hook; the fixture above exercised an actual Beaker preemption.
+
+All evaluation trials used the explicit debug workspace and its bound budget, with
+`--no-upload` for development validation. A further local regression simulates a
+failed upload and verifies that retry keeps the same run ID and finalized records.
+The added YAML-export and upload tests pass in the focused suite (36 selected tests).
+GitHub CI for `1190cef0` passed, including Python 3.12 and 3.13.
+The final full local suite, including the added upload regression, passed with
+5,166 tests, 40 skipped, and 20 subtests. Final lint, formatting, and type checks passed.
+
+### Scheduling and failures
+
+The CPU-only-cluster probe `01M6MKG5N83S8YMFT95DYKDXZY` never started because both
+clusters were full; it was canceled when the allocated Ceres probe replaced it.
+The first two-host coordination test `01M6MMJHFSS76F3JDAYD7GTDAA` could not schedule
+its writer before the reader's peer-wait deadline. It was stopped and replaced by
+the passing test above, with zero-GPU requests that avoid reserving GPU slots for
+tiny CPU operations. That timeout was a scheduling/test-coordination failure. No
+mount, volume I/O, or distributed-lock failures were observed. No volume incidents
+needed escalation.
+
+### Remaining gates before changing the default
+
+- Observe a real Starfish prune cycle and confirm scan/prune coverage for the new
+  volume. The audit seeded a disposable fixture at
+  `/eval-cache/qualification/tmp-1d/expiry-20261104/`: `eligible.txt` has an mtime
+  three days old and `fresh.txt` was newly created. Naming and unit tests do not
+  verify that the live deleter has run. Scans can delay deletion by a day or more.
+- Verify a live dashboard upload from the WEKA directory against the designated
+  test deployment. Client unit tests and failed-upload recovery passed; the Beaker
+  canary deliberately did not publish development results to production.
+- Verify read-write claims in each production workspace before enabling it there.
+  Keep the explicit `--resume-volume ai2/olmo-eval` pilot option until these gates pass.
+
+The small-model canary and deterministic workload qualify the shared-storage path.
+Long generation, agent, sandbox, and other engine canaries are additional rollout
+coverage; external runners remain unsupported by this option.

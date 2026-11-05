@@ -1708,6 +1708,20 @@ class TestProgressLifetime:
 
         assert has_progress(tmp_path)
 
+    def test_shared_run_retries_a_failed_upload_with_the_same_run_id(self, tmp_path) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        out = tmp_path / "shared" / "output"
+        env = {SHARED_RUN_ENV: str(out.parent)}
+        with pytest.raises(RuntimeError, match="upload unavailable"):
+            self._upload_run(out, RuntimeError("upload unavailable"), env=env)
+        run_id = _run_id(out)
+        assert has_progress(out)
+        assert self._upload_run(out, env=env) == [True]
+        assert _run_id(out) == run_id
+        # The supervisor publishes completion before deleting these records.
+        assert has_progress(out)
+
     def test_a_completed_run_deletes_only_its_own_records(self, interrupted_run, tmp_path) -> None:
         out = _resume_copy(interrupted_run, tmp_path)
         other = out / PROGRESS_DIR / "other-model"

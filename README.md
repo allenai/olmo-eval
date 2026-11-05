@@ -1140,8 +1140,9 @@ uv run olmo-eval beaker launch -m <model> -t <task> -c <cluster> -w <workspace> 
 This requires a volume-capable Beaker CLI (v1.5.346 is qualified). Claims are managed
 once per workspace; the launcher never changes access. Every submission gets its own
 UUID directory under `/eval-cache/tmp-7d/`. Replacement jobs reuse that UUID and take
-an exclusive run lock. The full output lives on WEKA. Beaker results contain only
-`weka-resume.json`, which names the UUID, output path, and dashboard run ID.
+an exclusive run lock. The full output lives on WEKA. Beaker results contain a small
+`weka-resume.json` receipt plus Gantry setup diagnostics. The receipt names the volume,
+UUID, output path, and dashboard run ID.
 Retrieve full artifacts from the dashboard or a job/session mounting the same volume.
 
 Active runs refresh every recovery file's modification time hourly. After seven days

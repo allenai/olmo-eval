@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import yaml
 
 from olmo_eval.launch.beaker.resume import RETENTION_SECONDS, refresh_files, run_shared
 from olmo_eval.launch.beaker.volume import launch_with_volume
@@ -156,7 +157,7 @@ def test_native_submission_preserves_gantry_spec_and_adds_volume(monkeypatch):
     def gantry(**kwargs):
         assert kwargs["dry_run"] is True
         Path(kwargs["save_spec"]).write_text(
-            json.dumps(
+            yaml.safe_dump(
                 {
                     "version": "v2",
                     "groups": ["test-group"],
