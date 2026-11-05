@@ -240,11 +240,11 @@ class RulerTask(Task):
 
     @property
     def cuts_answer(self) -> bool:
-        """Whether only the first paragraph of each output is scored.
+        """Whether each output is scored only up to the first ``Question:`` it writes.
 
-        Set by ``task_settings["answer_cut"] == "first_paragraph"`` (VT's ``:v2``).
+        Set by ``task_settings["answer_cut"] == "before_question"`` (VT's ``:v2``).
         """
-        return (self.config.task_settings or {}).get("answer_cut") == "first_paragraph"
+        return (self.config.task_settings or {}).get("answer_cut") == "before_question"
 
     def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
         """Strip thinking traces, empty overflowing outputs, and cut answers.
@@ -252,12 +252,13 @@ class RulerTask(Task):
         With ``zeroes_overflow``, an output whose haystack a provider cut is emptied, so
         it scores 0; its text stays in ``metadata["overflow_text"]``.
 
-        With the answer cut, only the first paragraph is scored. Substring recall credits
-        a gold string anywhere in the output, and a base model that has answered goes on
-        writing questions of its own that name variables from the text. The output is cut
-        at the first blank line after it begins, so leading blank lines before an answer
-        are kept. Decoding is greedy, so this is what a stop there would have generated.
-        The uncut output stays in ``metadata["uncut_text"]``.
+        With the answer cut, the output is scored only up to the first ``Question:``.
+        Substring recall credits a gold string anywhere in the output, and a base model
+        that has answered goes on in the prompt's own ``Question: ... Answer: ...`` format,
+        writing questions of its own that name variables from the text. A new
+        ``Question:`` starts another item, as GSM8K's ``Question:`` stop assumes. Decoding
+        is greedy, so this is what a stop there would have generated. The uncut output
+        stays in ``metadata["uncut_text"]``.
 
         Repeated calls leave an output unchanged.
         """
@@ -274,7 +275,7 @@ class RulerTask(Task):
                     continue
                 text = output.text or ""
                 output.metadata["uncut_text"] = text
-                output.text = first_paragraph(text)
+                output.text = before_question(text)
                 output.metadata["answer_cut"] = True
 
     @property
@@ -377,15 +378,13 @@ class OverflowRateMetric(Metric):
         return False
 
 
-#: A blank line: a newline, then only spaces or tabs, then another newline.
-_BLANK_LINE = re.compile(r"\r?\n[ \t\r]*\n")
+#: Where an answer ends: the prompt's own item marker.
+QUESTION_MARKER = "Question:"
 
 
-def first_paragraph(text: str) -> str:
-    """``text`` up to its first blank line after the first non-whitespace character."""
-    begins = len(text) - len(text.lstrip())
-    match = _BLANK_LINE.search(text, begins)
-    return text if match is None else text[: match.start()]
+def before_question(text: str) -> str:
+    """``text`` up to its first ``Question:``, or all of it."""
+    return text.partition(QUESTION_MARKER)[0]
 
 
 #: RULER's newline stops: the newline character and the byte-level spellings some
@@ -461,11 +460,11 @@ RULER_V2_TASK_SETTINGS = {"context_cut": "model_window", "overflow": "score_zero
 #: so the default 50 cut the fifth name off correct answers.
 RULER_V2_MAX_GEN_TOKS = {"vt": 100}
 
-#: Task types whose `:v2` scores only the output's first paragraph (see
+#: Task types whose `:v2` scores the output only up to its first `Question:` (see
 #: `RulerTask.strip_thinking_traces`). VT's context names no variable but the five gold
 #: ones, so with a larger budget a model that answers wrongly and then writes questions
-#: of its own about the variables earns recall for them. No correct answer in stored
-#: outputs of 27 models runs past a blank line.
+#: of its own about the variables earns recall for them. In stored outputs of 27 models,
+#: every continuation that earned recall after the answer starts with `Question:`.
 RULER_V2_ANSWER_CUT = ("vt",)
 
 # Dynamically register all RULER tasks
@@ -486,8 +485,8 @@ for _task_name, _task_config in RULER_TASKS.items():
     # so it can be sent; see `cuts_haystack` and `zeroes_overflow`), with the share of such
     # instances reported as `overflow_rate`;
     # generation budgets that cut correct answers short are raised (RULER_V2_MAX_GEN_TOKS),
-    # and where a larger budget lets text after the answer earn recall, only the first
-    # paragraph is scored (RULER_V2_ANSWER_CUT).
+    # and where a larger budget lets text after the answer earn recall, the output is
+    # scored only up to its first `Question:` (RULER_V2_ANSWER_CUT).
     _v2_type = _task_name.rsplit("__", 1)[0]
     _v2_budget = RULER_V2_MAX_GEN_TOKS.get(_v2_type)
     register_variant(
@@ -495,7 +494,7 @@ for _task_name, _task_config in RULER_TASKS.items():
         "v2",
         task_settings={
             **RULER_V2_TASK_SETTINGS,
-            **({"answer_cut": "first_paragraph"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
+            **({"answer_cut": "before_question"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
         },
         metrics=(
             *vars(_cls)["metrics"],

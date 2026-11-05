@@ -1,12 +1,12 @@
 """RULER's `:v2` variant: a prompt that does not fit the window is cut so it can be sent
-and scores 0, and VT's budget is raised with only its first paragraph scored."""
+and scores 0, and VT's budget is raised with each output scored up to its first `Question:`."""
 
 import pytest
 
 from olmo_eval.common.types import CONTEXT_CUT_TOKENS_KEY, ContextFit, Instance, LMOutput, Response
 from olmo_eval.evals.suites.registry import get_suite
 from olmo_eval.evals.tasks.common.registry import get_task
-from olmo_eval.evals.tasks.ruler import first_paragraph
+from olmo_eval.evals.tasks.ruler import before_question
 
 
 def _ruler_doc(context: str = "HAYSTACK WITH THE NEEDLE") -> dict:
@@ -81,22 +81,23 @@ def test_v2_suites_run_every_task_as_v2():
     ("text", "expected"),
     [
         # a wrong answer, then questions of the model's own that name gold variables
-        ("1, 2, 3, 4, 5.\n\nQuestion: What is VAR AB? Answer: VAR AB is 1", "1, 2, 3, 4, 5."),
+        ("1, 2, 3, 4, 5.\n\nQuestion: What is VAR AB? Answer: VAR AB is 1", "1, 2, 3, 4, 5.\n\n"),
+        # with no blank line before the next question too
+        ("1, 2. Question: What is VAR AB?", "1, 2. "),
         # an answer after leading blank lines is kept (Gemma-3-4B writes these)
-        ("\n\n* XAJIK\n* VKOEM\n\nQuestion: ...", "\n\n* XAJIK\n* VKOEM"),
-        ("\nVAR SOZGN, VAR REGGD\n\nQuestion:", "\nVAR SOZGN, VAR REGGD"),
-        # a chain written one step per line is one paragraph
+        ("\n\n* XAJIK\n* VKOEM\n\nQuestion: ...", "\n\n* XAJIK\n* VKOEM\n\n"),
+        # one item per line, separated by blank or space-only lines (Nemotron-H), is kept
+        ("\nVAR FEUWW\n \nVAR YZLOH\n\nVAR BCSMI", "\nVAR FEUWW\n \nVAR YZLOH\n\nVAR BCSMI"),
         ("1. VAR A = 1\n2. VAR B = VAR A", "1. VAR A = 1\n2. VAR B = VAR A"),
-        (" A B C.\n   \nmore", " A B C."),
-        ("x\r\n\r\ny", "x"),
-        ("\n\n", "\n\n"),
+        ("Question: x", ""),
+        ("", ""),
     ],
 )
-def test_first_paragraph(text, expected):
-    assert first_paragraph(text) == expected
+def test_before_question(text, expected):
+    assert before_question(text) == expected
 
 
-def test_v2_vt_scores_only_the_first_paragraph():
+def test_v2_vt_scores_up_to_the_first_question():
     task = get_task("ruler_vt__4096:v2")
     text = " SOZGN, REGGD.\n\nQuestion: What is VAR EHHUJ? Answer: VAR EHHUJ is 1"
     instance = Instance(question="q", gold_answer=["SOZGN", "REGGD", "EHHUJ"], metadata={})
@@ -108,19 +109,19 @@ def test_v2_vt_scores_only_the_first_paragraph():
     task.strip_thinking_traces([response])  # the runner may prepare a response twice
 
     output = response.outputs[0]
-    assert output.text == " SOZGN, REGGD."
+    assert output.text == " SOZGN, REGGD.\n\n"
     assert output.metadata["uncut_text"] == text
     assert task.config.task_settings == {
         "context_cut": "model_window",
         "overflow": "score_zero",
-        "answer_cut": "first_paragraph",
+        "answer_cut": "before_question",
     }
 
 
 @pytest.mark.parametrize("spec", ["ruler_vt__4096", "ruler_niah_mv__4096:v2", "ruler_cwe__4096:v2"])
 def test_only_vt_v2_cuts_the_answer(spec):
     task = get_task(spec)
-    text = "a\n\nb"
+    text = "a Question: b"
     instance = Instance(question="q", gold_answer=["b"], metadata={})
     response = Response(
         instance=instance, request=task.format_request(instance), outputs=[LMOutput(text=text)]
