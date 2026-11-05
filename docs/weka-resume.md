@@ -157,3 +157,42 @@ needed escalation.
 The small-model canary and deterministic workload qualify the shared-storage path.
 Long generation, agent, sandbox, and other engine canaries are additional rollout
 coverage; external runners remain unsupported by this option.
+
+## Independent review and fixes
+
+Two GPT-6 Astra agents independently reviewed the change after the initial trials:
+one for correctness and one for adversarial storage/concurrency behavior. They found
+gaps the successful normal-path tests did not exercise:
+
+- An interruption between segment rename and inventory publication could block
+  recovery or leave replayed records outside checksum protection.
+- An early interruption during task preparation could replace the dashboard run ID.
+- Missing output or entire progress directories could be treated as fresh state.
+- Directory traversal errors could be hidden during retention refresh or completion.
+  A failed segment-directory listing could also reset numbering and overwrite data.
+
+The fixes make the durable inventory authoritative. An empty inventory is published
+before the first data segment, and the initialized stream is registered in the parent
+session before any data commit. Replay and compaction use only committed, validated
+segments. Consumed filenames are never reused after an uncertain index publication,
+including a failure after index replacement. Expected output/stream directories may
+not disappear and silently restart an evaluation. Shared manifests retain identity
+before the first instance is recorded.
+
+Retention and completion now enumerate directories strictly and propagate I/O errors.
+Live refresh tolerates files or directories disappearing during normal atomic rename
+or rotation; completion stays strict after the child exits. Fault-injection tests cover
+publication and compaction boundaries, uncertain commits, missing subtrees, traversal
+errors, and the temporary-file rename race.
+
+The same two agents re-reviewed their findings and the follow-up fixes. Both reported
+no remaining scoped blockers. The adversarial reviewer passed 39 lifecycle tests; the
+correctness reviewer passed 13 focused regressions. No reviewer modified source or
+submitted remote jobs.
+After the fixes, the full local suite passed with 5,186 tests, 40 skipped, and 20
+subtests. Ruff lint, formatting, and type checking passed.
+
+Volume claims must be restricted to mutually trusted writers. Checksums are corruption
+checks, not authentication, and progress decoding supports pickle. Per-run UUIDs and
+locks prevent accidental collisions; they do not isolate mutually hostile jobs that
+can write the same volume under the same operating-system identity.

@@ -45,9 +45,11 @@ import hashlib
 import json
 import os
 import pickle
+import re
 import shutil
 import signal
 import socket
+import stat
 import threading
 import time
 import uuid
@@ -264,6 +266,7 @@ class ProgressStore:
         self.path = path
         self.verify_integrity = verify_integrity
         self._published: dict[str, str] = {}
+        self._loaded = False
         self._buffer: list[str] = []
         self._buffered_bytes = 0
         self._next_segment = 0
@@ -271,17 +274,28 @@ class ProgressStore:
         self._stop: threading.Event | None = None
         self._thread: threading.Thread | None = None
 
-    def read(self) -> Iterator[dict[str, Any]]:
-        """Yield every complete entry in order; nothing when there is no record.
-
-        Drops (and logs) an entry that was cut off while being written. Appends after a
-        full read continue the record.
-        """
-        if not self.path.is_dir():
-            return
-        for leftover in self.path.glob("*.tmp"):
-            leftover.unlink()
-        segments = sorted(self.path.glob("[0-9]*.jsonl"))
+    def _segments(self) -> list[Path]:
+        """Load the committed file set; collect only unreferenced publication leftovers."""
+        try:
+            mode = self.path.stat().st_mode
+        except FileNotFoundError:
+            self._loaded = True
+            return []
+        if not stat.S_ISDIR(mode):
+            if self.verify_integrity:
+                raise ProgressMismatchError(f"WEKA progress stream is not a directory: {self.path}")
+            return []
+        # Glob suppresses directory-read errors. A failed listing must never look
+        # like an empty stream and cause a committed segment name to be reused.
+        with os.scandir(self.path) as entries:
+            names = [entry.name for entry in entries]
+        for name in names:
+            if name.endswith(".tmp"):
+                (self.path / name).unlink()
+        segments = sorted(
+            self.path / name for name in names if re.fullmatch(r"[0-9]+\.jsonl", name)
+        )
+        self._next_segment = max(self._next_segment, int(segments[-1].stem) + 1 if segments else 0)
         if self.verify_integrity:
             index = self.path / "index.json"
             if segments and not index.is_file():
@@ -290,15 +304,56 @@ class ProgressStore:
                 try:
                     self._published = json.loads(index.read_text())
                     for name, digest in self._published.items():
-                        if Path(name).name != name or self._digest(self.path / name) != digest:
+                        if (
+                            not re.fullmatch(r"[0-9]+\.jsonl", name)
+                            or self._digest(self.path / name) != digest
+                        ):
                             raise ValueError(f"segment {name} is missing or changed")
+                    self._next_segment = max(
+                        self._next_segment,
+                        max((int(Path(name).stem) + 1 for name in self._published), default=0),
+                    )
                 except (OSError, ValueError, TypeError, AttributeError) as e:
                     raise ProgressMismatchError(
                         f"WEKA progress is incomplete in {self.path}: {e}"
                     ) from e
-        self._next_segment = int(segments[-1].stem) + 1 if segments else 0
-        for segment in segments:
+            for segment in segments:
+                if segment.name not in self._published:
+                    segment.unlink()
+            segments = [self.path / name for name in sorted(self._published)]
+        self._loaded = True
+        return segments
+
+    def read(self) -> Iterator[dict[str, Any]]:
+        """Replay committed entries, ignoring a flush whose inventory never committed."""
+        for segment in self._segments():
             yield from _read_lines(segment)
+
+    def _register_shared_stream(self) -> None:
+        directory = os.environ.get(SHARED_RUN_ENV)
+        if directory is None:
+            return
+        session = Path(directory) / "session.json"
+        if not session.is_file():
+            return  # Direct runner/library use without the supervisor.
+        relative = str(self.path.resolve().relative_to(Path(directory).resolve()))
+        data = json.loads(session.read_text())
+        streams = data.setdefault("progress_streams", [])
+        if relative not in streams:
+            streams.append(relative)
+            _write_json_atomic(session, data)
+
+    def _initialize_inventory(self) -> None:
+        if not self.verify_integrity:
+            return
+        if not self._loaded:
+            self._segments()
+        index = self.path / "index.json"
+        if not index.exists():
+            if self._published:
+                raise OSError(f"Committed WEKA progress inventory disappeared: {index}")
+            _write_json_atomic(index, {})
+        self._register_shared_stream()
 
     def reset(self) -> None:
         """Discard every existing entry."""
@@ -308,6 +363,7 @@ class ProgressStore:
                 shutil.rmtree(self.path)
             self._next_segment = 0
             self._published = {}
+            self._loaded = False
 
     def drop(self, keys: Collection[str] = (), specs: Collection[str] = ()) -> None:
         """Remove the entries of the tasks in ``keys`` or whose header names a spec in ``specs``.
@@ -323,13 +379,13 @@ class ProgressStore:
         """
         with self._lock:
             self._buffer, self._buffered_bytes = [], 0
-        segments = sorted(self.path.glob("[0-9]*.jsonl")) if self.path.is_dir() else []
+        segments = self._segments()
         if not segments:
             return
         for leftover in self.path.glob("*.tmp"):
             leftover.unlink()
         dropped = set(keys)
-        final = self.path / f"{int(segments[-1].stem) + 1:06d}.jsonl"
+        final = self.path / f"{self._next_segment:06d}.jsonl"
         tmp = final.with_suffix(".tmp")
         kept_tasks, removed_any = False, False
         with open(tmp, "w", encoding="utf-8") as f:
@@ -351,15 +407,17 @@ class ProgressStore:
             return
         if kept_tasks:
             os.replace(tmp, final)
+            self._next_segment += 1
         else:
             tmp.unlink()
         if self.verify_integrity:
-            self._published = {final.name: self._digest(final)} if kept_tasks else {}
-            _write_json_atomic(self.path / "index.json", self._published)
+            published = {final.name: self._digest(final)} if kept_tasks else {}
+            _write_json_atomic(self.path / "index.json", published)
+            self._published = published
         for segment in reversed(segments):
             segment.unlink()
         self._next_segment = int(final.stem) + 1 if kept_tasks else 0
-        if not kept_tasks:
+        if not kept_tasks and not self.verify_integrity:
             (self.path / "index.json").unlink(missing_ok=True)
             with contextlib.suppress(OSError):
                 self.path.rmdir()
@@ -396,6 +454,7 @@ class ProgressStore:
         if not self._buffer:
             return
         self.path.mkdir(parents=True, exist_ok=True)
+        self._initialize_inventory()
         final = self.path / f"{self._next_segment:06d}.jsonl"
         tmp = final.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
@@ -403,10 +462,13 @@ class ProgressStore:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, final)
-        if self.verify_integrity:
-            self._published[final.name] = self._digest(final)
-            _write_json_atomic(self.path / "index.json", self._published)
+        # A failed directory fsync may still have published the new index. Never
+        # reuse this file name, even when the inventory write raises afterward.
         self._next_segment += 1
+        if self.verify_integrity:
+            published = {**self._published, final.name: self._digest(final)}
+            _write_json_atomic(self.path / "index.json", published)
+            self._published = published
         self._buffer, self._buffered_bytes = [], 0
 
     @staticmethod
@@ -484,7 +546,9 @@ def discard_progress(
     """
     model_dir = _model_dir(output_dir, model_name)
     with contextlib.nullcontext() if lock is not None and lock.held else ProgressLock(model_dir):
-        store = ProgressStore(stream_dir(output_dir, model_name))
+        store = ProgressStore(
+            stream_dir(output_dir, model_name), verify_integrity=is_shared_output(output_dir)
+        )
         try:
             store.drop(specs=specs)
         except ProgressMismatchError as e:

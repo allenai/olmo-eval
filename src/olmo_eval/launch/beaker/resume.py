@@ -15,20 +15,29 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
 RETENTION_SECONDS = 7 * 24 * 3600
 REFRESH_SECONDS = 3600
+
+
+class SharedRunSession(TypedDict):
+    uuid: str
+    command: list[str]
+    output_initialized: NotRequired[bool]
+    progress_streams: NotRequired[list[str]]
+    completed: NotRequired[bool]
 
 
 def write_atomic(path: Path, value: Any) -> None:
@@ -46,15 +55,33 @@ def write_atomic(path: Path, value: Any) -> None:
         os.close(fd)
 
 
-def refresh_files(directory: Path) -> None:
-    """Extend the prune lifetime of every recovery file, without following links."""
-    for root, directories, names in os.walk(directory, followlinks=False):
+def _files(directory: Path, *, allow_missing: bool = False) -> Iterator[Path]:
+    """Enumerate regular files without hiding unreadable subtrees or following links."""
+
+    def fail(error: OSError) -> None:
+        if allow_missing and isinstance(error, FileNotFoundError):
+            return
+        raise error
+
+    for root, directories, names in os.walk(directory, followlinks=False, onerror=fail):
         directories[:] = [d for d in directories if not (Path(root) / d).is_symlink()]
         for name in names:
             path = Path(root) / name
-            if not path.is_symlink():
-                with contextlib.suppress(FileNotFoundError):
-                    os.utime(path, follow_symlinks=False)
+            try:
+                mode = path.stat(follow_symlinks=False).st_mode
+            except FileNotFoundError:
+                if allow_missing:
+                    continue
+                raise
+            if stat.S_ISREG(mode):
+                yield path
+
+
+def refresh_files(directory: Path) -> None:
+    """Extend every recovery file's prune lifetime; traversal failures stop the run."""
+    for path in _files(directory, allow_missing=True):
+        with contextlib.suppress(FileNotFoundError):
+            os.utime(path, follow_symlinks=False)
 
 
 def _checksum(path: Path) -> str:
@@ -84,6 +111,7 @@ def run_shared(
     receipt_path = results / "weka-resume.json"
     session = directory / "session.json"
     output = directory / "output"
+    session_data: SharedRunSession
     with (directory / "run.lock").open("a+") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -98,9 +126,14 @@ def run_shared(
         elif receipt_path.exists() or output.exists():
             raise RuntimeError("WEKA recovery session is missing; submit a new evaluation")
         else:
-            session_data = {"uuid": run_uuid, "command": list(command)}
+            session_data = {"uuid": run_uuid, "command": list(command), "output_initialized": False}
             write_atomic(session, session_data)
+        if session_data.get("output_initialized", True) and not output.is_dir():
+            raise RuntimeError("WEKA recovery output is missing; submit a new evaluation")
         output.mkdir(mode=0o700, exist_ok=True)
+        if not session_data.get("output_initialized", True):
+            session_data["output_initialized"] = True
+            write_atomic(session, session_data)
         receipt = {
             "uuid": run_uuid,
             "output_dir": str(output),
@@ -121,6 +154,14 @@ def run_shared(
             return 0
         if session_data.get("completed"):
             raise RuntimeError("WEKA completion record is missing; submit a new evaluation")
+        for relative in session_data.get("progress_streams", []):
+            stream = directory / relative
+            if (
+                not stream.resolve().is_relative_to(directory.resolve())
+                or not stream.is_dir()
+                or not (stream / "index.json").is_file()
+            ):
+                raise RuntimeError(f"WEKA recovery stream is missing: {stream}")
         # This directory belongs to one submission. The outer lock proves the old
         # writer is gone, including on another node, so its PID lock can be reclaimed.
         for stale in (output / "progress").glob("*/.lock"):
@@ -169,13 +210,11 @@ def run_shared(
         if code == 0:
             artifacts = {
                 str(path.relative_to(output)): _checksum(path)
-                for path in output.rglob("*")
-                if path.is_file()
-                and not path.is_symlink()
-                and "progress" not in path.relative_to(output).parts
+                for path in _files(output)
+                if "progress" not in path.relative_to(output).parts
             }
             write_atomic(complete, {"artifacts": artifacts, "run_id": receipt.get("run_id")})
-            write_atomic(session, {**session_data, "completed": True})
+            write_atomic(session, {**json.loads(session.read_text()), "completed": True})
             if (output / "progress").exists():
                 shutil.rmtree(output / "progress")
         refresh_files(directory)

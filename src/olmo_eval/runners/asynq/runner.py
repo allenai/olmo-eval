@@ -1417,7 +1417,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         job_ids = [job_id] if job_id else []
         fresh = {"resumed_count": 0, "beaker_job_ids": job_ids}
         # Progress that was discarded (a completed run, or --fresh) has nothing to continue.
-        if not self.resume or not has_progress(self.output_dir):
+        if not self.resume or (
+            not is_shared_output(self.output_dir) and not has_progress(self.output_dir)
+        ):
             return None, fresh
         manifest = read_manifest(self.output_dir)
         if manifest is None:

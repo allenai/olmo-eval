@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -21,6 +23,185 @@ from olmo_eval.launch.beaker.volume import launch_with_volume
 from olmo_eval.runners.asynq.progress import ProgressMismatchError, ProgressStore
 
 
+@pytest.mark.parametrize("prior", [False, True])
+@pytest.mark.parametrize("published", [False, True])
+def test_interruption_during_inventory_commit_replays_only_committed_segments(
+    tmp_path, monkeypatch, prior, published
+):
+    from olmo_eval.runners.asynq import progress as module
+
+    store = ProgressStore(tmp_path / "segments", verify_integrity=True)
+    expected = []
+    if prior:
+        store.append({"score": 1})
+        store.close()
+        expected.append({"score": 1})
+    store.append({"score": 2})
+    write = module._write_json_atomic
+
+    def interrupted(path, data):
+        if path.name == "index.json" and data:
+            if published:
+                write(path, data)
+            raise OSError("interrupted inventory publication")
+        write(path, data)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(module, "_write_json_atomic", interrupted)
+        with pytest.raises(OSError, match="inventory publication"):
+            store.close()
+    if published:
+        expected.append({"score": 2})
+    restored = ProgressStore(store.path, verify_integrity=True)
+    assert list(restored.read()) == expected
+    restored.append({"score": 3})
+    restored.close()
+    assert list(ProgressStore(store.path, verify_integrity=True).read()) == [
+        *expected,
+        {"score": 3},
+    ]
+
+
+def test_retry_after_uncertain_commit_never_overwrites_a_referenced_segment(tmp_path, monkeypatch):
+    from olmo_eval.runners.asynq import progress as module
+
+    store = ProgressStore(tmp_path / "segments", verify_integrity=True)
+    store.append({"score": 1})
+    store.close()
+    write = module._write_json_atomic
+
+    def after_replace(path, data):
+        write(path, data)
+        raise OSError("index directory fsync failed after replace")
+
+    store.append({"score": 2})
+    with monkeypatch.context() as patch:
+        patch.setattr(module, "_write_json_atomic", after_replace)
+        with pytest.raises(OSError):
+            store.close()
+    committed = (store.path / "000001.jsonl").read_bytes()
+    store.append({"score": 3})
+    with monkeypatch.context() as patch:
+        patch.setattr(module, "_write_json_atomic", Mock(side_effect=OSError("next commit failed")))
+        with pytest.raises(OSError):
+            store.close()
+    assert (store.path / "000001.jsonl").read_bytes() == committed
+    assert list(ProgressStore(store.path, verify_integrity=True).read()) == [
+        {"score": 1},
+        {"score": 2},
+    ]
+
+
+def test_progress_directory_io_failure_cannot_reset_segment_numbering(tmp_path, monkeypatch):
+    store = ProgressStore(tmp_path / "segments", verify_integrity=True)
+    store.append({"score": 1})
+    store.close()
+    original = (store.path / "000000.jsonl").read_bytes()
+    scandir = os.scandir
+
+    def fail(path):
+        if Path(path) == store.path:
+            raise OSError(errno.EIO, "segment directory unavailable")
+        return scandir(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", fail)
+        with pytest.raises(OSError, match="segment directory unavailable"):
+            list(ProgressStore(store.path, verify_integrity=True).read())
+    resumed = ProgressStore(store.path, verify_integrity=True)
+    assert list(resumed.read()) == [{"score": 1}]
+    resumed.append({"score": 2})
+    resumed.close()
+    assert (store.path / "000000.jsonl").read_bytes() == original
+    assert list(ProgressStore(store.path, verify_integrity=True).read()) == [
+        {"score": 1},
+        {"score": 2},
+    ]
+
+
+def test_inventory_also_establishes_next_segment_id(tmp_path, monkeypatch):
+    import contextlib
+
+    store = ProgressStore(tmp_path / "segments", verify_integrity=True)
+    store.append({"score": 1})
+    store.close()
+    original = (store.path / "000000.jsonl").read_bytes()
+    scandir = os.scandir
+
+    @contextlib.contextmanager
+    def incomplete_listing(path):
+        if Path(path) == store.path:
+            yield iter(())
+        else:
+            with scandir(path) as entries:
+                yield entries
+
+    resumed = ProgressStore(store.path, verify_integrity=True)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", incomplete_listing)
+        assert list(resumed.read()) == [{"score": 1}]
+    resumed.append({"score": 2})
+    resumed.close()
+    assert (store.path / "000000.jsonl").read_bytes() == original
+    assert list(ProgressStore(store.path, verify_integrity=True).read()) == [
+        {"score": 1},
+        {"score": 2},
+    ]
+
+
+@pytest.mark.parametrize("stage", ["before_index", "after_index", "delete_old"])
+def test_compaction_interruption_preserves_the_committed_generation(tmp_path, monkeypatch, stage):
+    from olmo_eval.runners.asynq import progress as module
+
+    store = ProgressStore(tmp_path / "segments", verify_integrity=True)
+    store.append({"t": "a", "score": 1})
+    store.append({"t": "b", "score": 2})
+    store.close()
+    write = module._write_json_atomic
+    unlink = Path.unlink
+
+    def fail_index(path, data):
+        if stage == "after_index":
+            write(path, data)
+        raise OSError("compaction interrupted")
+
+    def fail_delete(path, *args, **kwargs):
+        if path.name == "000000.jsonl":
+            raise OSError("compaction interrupted")
+        return unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        if stage == "delete_old":
+            patch.setattr(Path, "unlink", fail_delete)
+        else:
+            patch.setattr(module, "_write_json_atomic", fail_index)
+        with pytest.raises(OSError):
+            store.drop(keys=["a"])
+    expected = [{"t": "b", "score": 2}]
+    if stage == "before_index":
+        expected.insert(0, {"t": "a", "score": 1})
+    assert list(ProgressStore(store.path, verify_integrity=True).read()) == expected
+
+
+def test_shared_discard_updates_inventory_and_keeps_empty_stream_initialized(tmp_path, monkeypatch):
+    from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+    from olmo_eval.runners.asynq.progress import discard_progress, stream_dir
+
+    out = tmp_path / "output"
+    monkeypatch.setenv(SHARED_RUN_ENV, str(tmp_path))
+    store = ProgressStore(stream_dir(out, "mock"), verify_integrity=True)
+    for spec in ("a", "b"):
+        store.append({"t": spec, "header": {"spec": spec}})
+    store.close()
+    discard_progress(out, "mock", ["a"])
+    assert list(ProgressStore(store.path, verify_integrity=True).read()) == [
+        {"t": "b", "header": {"spec": "b"}},
+    ]
+    discard_progress(out, "mock", ["b"])
+    assert (store.path / "index.json").is_file()
+    assert list(ProgressStore(store.path, verify_integrity=True).read()) == []
+
+
 @pytest.fixture
 def shared(tmp_path):
     root = tmp_path / "volume"
@@ -33,6 +214,115 @@ def shared(tmp_path):
 def child(code):
     # The wrapper appends the normal runner's output option.
     return [sys.executable, "-c", "import pathlib,sys; out=pathlib.Path(sys.argv[-1]); " + code]
+
+
+@pytest.mark.parametrize("missing", ["output", "progress", "stream"])
+def test_retry_refuses_disappearance_of_initialized_recovery_directories(shared, missing):
+    root, run_uuid, results, directory = shared
+    command = child(
+        "from olmo_eval.runners.asynq.progress import ProgressStore; "
+        "store=ProgressStore(out/'progress/model/run.segments',verify_integrity=True); "
+        "store.append({'score':1}); store.close(); sys.exit(143)"
+    )
+    assert run_shared(root, run_uuid, results, command) == 143
+    session = json.loads((directory / "session.json").read_text())
+    assert session["progress_streams"] == ["output/progress/model/run.segments"]
+    paths = {
+        "output": directory / "output",
+        "progress": directory / "output/progress",
+        "stream": directory / "output/progress/model/run.segments",
+    }
+    shutil.rmtree(paths[missing])
+    with pytest.raises(RuntimeError, match="recovery .*missing"):
+        run_shared(root, run_uuid, results, command)
+
+
+def test_retry_can_finish_output_initialization_before_any_child_started(shared):
+    root, run_uuid, results, directory = shared
+    directory.mkdir(parents=True)
+    command = child("(out/'prediction').write_text('result')")
+    (directory / "session.json").write_text(
+        json.dumps(
+            {
+                "uuid": run_uuid,
+                "command": command,
+                "output_initialized": False,
+            }
+        )
+    )
+    assert run_shared(root, run_uuid, results, command) == 0
+
+
+def test_retention_refresh_raises_when_a_subtree_cannot_be_scanned(tmp_path, monkeypatch):
+    directory = tmp_path / "progress"
+    directory.mkdir()
+    segment = directory / "old.jsonl"
+    segment.write_text("checkpoint")
+    os.utime(segment, (1, 1))
+    scandir = os.scandir
+
+    def fail(path):
+        if Path(path) == directory:
+            raise OSError(errno.EIO, "volume directory unavailable")
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", fail)
+    with pytest.raises(OSError, match="volume directory unavailable"):
+        refresh_files(tmp_path)
+    assert segment.stat().st_mtime == 1
+
+
+def test_retention_refresh_tolerates_atomic_publication_after_enumeration(tmp_path, monkeypatch):
+    temporary = tmp_path / "index.tmp"
+    published = tmp_path / "index.json"
+    temporary.write_text("inventory")
+    original_stat = Path.stat
+
+    def rename_before_stat(path, *args, **kwargs):
+        if path == temporary:
+            temporary.replace(published)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", rename_before_stat)
+    refresh_files(tmp_path)
+    assert published.read_text() == "inventory"
+
+
+def test_unreadable_artifact_subtree_prevents_completion_and_progress_cleanup(shared, monkeypatch):
+    root, run_uuid, results, directory = shared
+    output = directory / "output"
+    command = child(
+        "(out/'predictions').mkdir(); (out/'predictions/result').write_text('answer'); "
+        "(out/'progress').mkdir(); (out/'progress/checkpoint').write_text('saved')"
+    )
+    scandir = os.scandir
+
+    def fail(path):
+        if Path(path) == output / "predictions":
+            raise OSError(errno.EIO, "predictions directory unavailable")
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", fail)
+    with pytest.raises(OSError, match="predictions directory unavailable"):
+        run_shared(root, run_uuid, results, command)
+    assert not (directory / "complete.json").exists()
+    assert (output / "progress/checkpoint").read_text() == "saved"
+
+
+def test_retention_traversal_failure_stops_the_live_child(shared, monkeypatch):
+    root, run_uuid, results, directory = shared
+    command = child("(out/'predictions').mkdir(); import time; time.sleep(0.5)")
+    scandir = os.scandir
+
+    def fail(path):
+        if Path(path) == directory / "output/predictions":
+            raise OSError(errno.EIO, "volume directory unavailable")
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", fail)
+    with pytest.raises(RuntimeError, match="retention refresh failed"):
+        run_shared(root, run_uuid, results, command, refresh_seconds=0.01)
+    assert not (directory / "complete.json").exists()
 
 
 def test_independent_uuids_do_not_overwrite_and_completed_run_is_not_repeated(shared):

@@ -1561,6 +1561,38 @@ def _run_id(out: Path) -> str:
 
 
 class TestRunIdentity:
+    def test_shared_run_keeps_identity_when_interrupted_before_progress_exists(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        out = tmp_path / "shared" / "output"
+        identities = []
+        with monkeypatch.context() as patch:
+            patch.setattr(AsyncEvalRunner, "_prepare_tasks", Mock(side_effect=Terminated()))
+            for job in ("job-1", "job-2"):
+                with pytest.raises(Terminated):
+                    run_eval(
+                        out,
+                        {"gsm8k": 4},
+                        env={
+                            SHARED_RUN_ENV: str(out.parent),
+                            "BEAKER_JOB_ID": job,
+                        },
+                    )
+                assert not has_progress(out)
+                identities.append(_run_id(out))
+        run_eval(
+            out,
+            {"gsm8k": 4},
+            env={
+                SHARED_RUN_ENV: str(out.parent),
+                "BEAKER_JOB_ID": "job-3",
+            },
+        )
+        assert identities == [_run_id(out), _run_id(out)]
+        assert read_manifest(out)["resume"]["beaker_job_ids"] == ["job-1", "job-2", "job-3"]
+
     def test_shared_run_keeps_records_and_identity_until_supervisor_publishes_completion(
         self, tmp_path
     ) -> None:

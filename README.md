@@ -1144,6 +1144,9 @@ an exclusive run lock. The full output lives on WEKA. Beaker results contain a s
 `weka-resume.json` receipt plus Gantry setup diagnostics. The receipt names the volume,
 UUID, output path, and dashboard run ID.
 Retrieve full artifacts from the dashboard or a job/session mounting the same volume.
+Grant read-write claims only to workspaces whose submitters are mutually trusted.
+Progress records can contain serialized Python objects; checksums detect corruption
+and do not authenticate writers.
 
 Active runs refresh every recovery file's modification time hourly. After seven days
 of inactivity, files are eligible for WEKA prune deletion. Final results still upload
