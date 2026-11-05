@@ -28,7 +28,7 @@ import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 from olmo_eval.common.metrics import (
     AccuracyMetric,
@@ -103,7 +103,7 @@ from olmo_eval.data.ruler_loader import (
     load_ruler_dataset,
 )
 from olmo_eval.data.ruler_tasks import RULER_TASKS
-from olmo_eval.evals.tasks.common.base import TaskConfig
+from olmo_eval.evals.tasks.common.base import Task, TaskConfig, _store_output_score
 from olmo_eval.evals.tasks.common.registry import register, register_variant
 from olmo_eval.evals.tasks.helmet_judge import (
     LONGQA_METRICS,
@@ -112,7 +112,7 @@ from olmo_eval.evals.tasks.helmet_judge import (
     HelmetSummBookJudgedTask,
     HelmetSummJudgedTask,
 )
-from olmo_eval.evals.tasks.ruler import RulerTask, make_ruler_task_class
+from olmo_eval.evals.tasks.ruler import RULER_V2_TASK_SETTINGS, RulerTask, make_ruler_task_class
 
 
 class HelmetTask(RulerTask):
@@ -137,9 +137,11 @@ class HelmetTask(RulerTask):
     truncation in the loaders alone lets a model whose tokenizer splits text more
     finely overflow its window.
 
-    The `:v2` and `:base_v2` variants (chat and base mode) cut contexts only to the
-    model's window (`task_settings["context_cut"]`); `:base_v2` also stops the
-    chat-format QA tasks at a blank line (`BASE_V2_STOP_SEQUENCES`).
+    The `:v2` and `:base_v2` variants (chat and base mode) treat a prompt too long for
+    the model's window as RULER's `:v2` does (`task_settings["overflow"]`): the context
+    is cut only to fit the window, and the instance scores 0 (`_OverflowScoresZero`).
+    `:base_v2` also stops the chat-format QA tasks at a blank line
+    (`BASE_V2_STOP_SEQUENCES`).
     """
 
     _tasks_registry: dict[str, dict[str, Any]] = HELMET_TASKS
@@ -167,14 +169,14 @@ class HelmetTask(RulerTask):
         if settings is None or default is None:
             raise ValueError(f"{config.name} has no task_settings")
         fixed = {key: value for key, value in default.items() if key != "helmet"}
-        given = {key: value for key, value in settings.items() if key not in ("helmet", V2_CUT)}
+        given = {key: value for key, value in settings.items() if key not in ("helmet", "overflow")}
         if _canonical(given) != _canonical(fixed):
             raise ValueError(
                 f"{config.name}: only task_settings['helmet'] can be overridden; "
                 f"{sorted(fixed)} are set by the code"
             )
-        if settings.get(V2_CUT, "model_window") != "model_window":
-            raise ValueError(f"{config.name}: task_settings['{V2_CUT}'] can only be 'model_window'")
+        if settings.get("overflow", "score_zero") != "score_zero":
+            raise ValueError(f"{config.name}: task_settings['overflow'] can only be 'score_zero'")
         helmet = settings.get("helmet")
         if not isinstance(helmet, dict) or set(helmet) != set(default["helmet"]):
             raise ValueError(
@@ -287,9 +289,7 @@ class HelmetTask(RulerTask):
         # Upstream's budget: the tier is the whole sequence, generation included.
         # `:v2` sets no budget, so the provider cuts only to fit the model's window.
         max_tokens = self.config.sampling_params.max_tokens or 0
-        budget = (
-            None if V2_CUT in (self.config.task_settings or {}) else self.context_size - max_tokens
-        )
+        budget = None if self.scores_overflow_zero else self.context_size - max_tokens
         start, end = span
         return replace(
             request,
@@ -795,10 +795,6 @@ MEASURED_KEYS = (
 #: The reference implementation these tasks port.
 HELMET_UPSTREAM = "princeton-nlp/HELMET@aeadacc6"
 
-#: `:v2` setting: cut each context only to the model's window, not to the length tier.
-#: Upstream's tier cut, in the model's own tokens, drops text a model with room could read.
-V2_CUT = "context_cut"
-
 #: Where `:base_v2` stops NarrativeQA and ALCE: as completions, base models go on after
 #: their answer, and no demonstration answer contains a blank line. Multi-LexSum's do.
 BASE_V2_STOP_SEQUENCES = ("\n\n",)
@@ -857,6 +853,44 @@ def _task_settings(task_cfg: dict) -> dict[str, Any]:
 HELMET_STOP_SEQUENCES = ("\n",)
 
 
+class _OverflowScoresZero(Task):
+    """`:v2`: an instance whose context had to be cut to fit the window scores 0.
+
+    Such an instance is not scored at all (no judge or AutoAIS call): every score its
+    metrics read is recorded as 0, and `context_cut` as 1.
+    """
+
+    async def score_responses(
+        self, responses: Sequence[Response], context: Any = None
+    ) -> Sequence[Response]:
+        task = cast(HelmetTask, self)
+        cut = [
+            r for r in responses if any(o.metadata.get(CONTEXT_CUT_TOKENS_KEY) for o in r.outputs)
+        ]
+        if not task.scores_overflow_zero or not cut:
+            return await super().score_responses(responses, context)
+        cut_ids = {id(r) for r in cut}
+        rest = [r for r in responses if id(r) not in cut_ids]
+        await super().score_responses(rest, context)
+        task._extract_answers(cut)
+        scorers = [name for name in task._get_scorers() if name != ContextCutScorer.name]
+        judged = [
+            getattr(task, "judge_score_key", None),
+            *getattr(task, "judge_extra_score_keys", ()),
+        ]
+        for response in cut:
+            for output in response.outputs:
+                for name in scorers:
+                    _store_output_score(output, scorer_name=name, score=0.0)
+                _store_output_score(output, scorer_name=ContextCutScorer.name, score=1.0)
+                if AutoAisScorer.name in scorers:
+                    output.metadata[AUTOAIS_KEY] = {"citation_rec": 0.0, "citation_prec": 0.0}
+            for name in [*scorers, *filter(None, judged)]:
+                response.scores[name] = 0.0
+            response.scores[ContextCutScorer.name] = 1.0
+        return responses
+
+
 def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
     """Create a task subclass for a HELMET-plus task variant.
 
@@ -877,7 +911,7 @@ def _make_helmet_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
         # suite's average-of-averages.
         primary_metric=next(m for m in metrics if m.name == primary_name),
         stop_sequences=HELMET_STOP_SEQUENCES,
-        extra_bases=() if judged_cls is None else (judged_cls,),
+        extra_bases=(_OverflowScoresZero,) + (() if judged_cls is None else (judged_cls,)),
         attrs=_task_attrs(task_cfg),
     )
 
@@ -925,7 +959,7 @@ for _task_name, _task_config in HELMET_TASKS.items():
     globals()[_cls.__name__] = _cls
     register(f"helmet_{_task_name}")(_cls)
     _settings = _task_settings(_task_config)
-    _cut = {V2_CUT: "model_window"}
+    _cut = RULER_V2_TASK_SETTINGS
     if _task_config.get("use_chat_template"):
         register_variant(
             f"helmet_{_task_name}",
