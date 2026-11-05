@@ -1,5 +1,7 @@
 """Tests for all task module registrations and basic functionality."""
 
+from dataclasses import replace
+
 import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
@@ -12,6 +14,7 @@ from olmo_eval.evals.tasks.gsm8k import (
     _extract_boxed_or_last_number,
     _extract_last_number,
 )
+from olmo_eval.evals.tasks.minerva_math import MATH_SUBSETS
 
 
 class TestGSMNumberExtraction:
@@ -66,6 +69,49 @@ class TestGSMNumberExtraction:
 def test_gsm8k_olmo3base_uses_first_sample_exact_match() -> None:
     task = get_task("gsm8k:olmo3base")
     assert task.config.output_score_aggregation == OutputScoreAggregation.FIRST
+
+
+_MULTIPARAGRAPH_PAIRS = [
+    ("gsm8k:olmo3base", "gsm8k:olmo3base_multiparagraph"),
+    ("gsm_symbolic:olmo3base", "gsm_symbolic:olmo3base_multiparagraph"),
+    ("gsm_symbolic:p1:olmo3base", "gsm_symbolic:p1:olmo3base_multiparagraph"),
+    ("gsm_symbolic:p2:olmo3base", "gsm_symbolic:p2:olmo3base_multiparagraph"),
+    *[
+        (f"minerva_math_{subset}:olmo3base", f"minerva_math_{subset}:olmo3base_multiparagraph")
+        for subset in MATH_SUBSETS
+    ],
+]
+
+
+@pytest.mark.parametrize(("parity_spec", "multiparagraph_spec"), _MULTIPARAGRAPH_PAIRS)
+def test_olmo3base_multiparagraph_drops_only_blank_line_stop(
+    parity_spec: str, multiparagraph_spec: str
+) -> None:
+    parity = get_task(parity_spec)
+    multiparagraph = get_task(multiparagraph_spec)
+    parity_params = parity.config.sampling_params
+    multiparagraph_params = multiparagraph.config.sampling_params
+    assert parity_params is not None
+    assert multiparagraph_params is not None
+
+    assert "\n\n" in parity_params.stop_sequences
+    assert multiparagraph_params.stop_sequences == tuple(
+        stop for stop in parity_params.stop_sequences if stop != "\n\n"
+    )
+    assert multiparagraph_params == replace(
+        parity_params, stop_sequences=multiparagraph_params.stop_sequences
+    )
+    assert multiparagraph.config.data_source == parity.config.data_source
+    assert multiparagraph.config.metrics == parity.config.metrics
+    assert multiparagraph.config.primary_metric == parity.config.primary_metric
+    assert multiparagraph.config.num_fewshot == parity.config.num_fewshot
+    assert multiparagraph.config.output_score_aggregation == parity.config.output_score_aggregation
+
+    instance = next(iter(parity.instances))
+    assert multiparagraph.format_request(instance) == parity.format_request(instance)
+    assert compute_task_hash(multiparagraph.config.to_dict()) != compute_task_hash(
+        parity.config.to_dict()
+    )
 
 
 def test_gsm8k_platinum_uses_pinned_platinum_data() -> None:

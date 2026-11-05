@@ -254,6 +254,37 @@ for _subset in MATH_SUBSETS:
         ),
     )
 
+    # olmo3base without the "\n\n" stop sequence, matching gsm8k:olmo3base_multiparagraph.
+    # The olmo3base variant above stops at the first blank line, which cuts off solutions
+    # that span several paragraphs. MathExtractor then falls back to the last \boxed{} or
+    # $...$ in the partial text, so a cut-off solution can be scored on an intermediate
+    # expression. This variant keeps every other olmo3base setting so that the two differ
+    # only in where generation stops.
+    register_variant(
+        _task_name,
+        "olmo3base_multiparagraph",
+        fewshot_source="minerva_math_fixed",
+        formatter=MinervaCompletionFormatter(
+            template="Problem:\n{question}\n\nSolution:",
+            answer_prefix=" ",
+            fewshot_answer_key="solution_text",
+        ),
+        metrics=(
+            AccuracyMetric(scorer=MinervaMathScorer),
+            PassAtKMetric(k=1, scorer=MinervaMathScorer),
+            PassAtKMetric(k=2, scorer=MinervaMathScorer),
+            PassAtKMetric(k=4, scorer=MinervaMathScorer),
+        ),
+        primary_metric=PassAtKMetric(k=1, scorer=MinervaMathScorer),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.6,
+            top_p=0.6,
+            stop_sequences=("Problem:",),
+            num_samples=4,
+        ),
+    )
+
     register_variant(
         _task_name,
         "olmo3base_gen",

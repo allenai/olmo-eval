@@ -1561,6 +1561,59 @@ def _run_id(out: Path) -> str:
 
 
 class TestRunIdentity:
+    def test_shared_run_keeps_identity_when_interrupted_before_progress_exists(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        out = tmp_path / "shared" / "output"
+        identities = []
+        with monkeypatch.context() as patch:
+            patch.setattr(AsyncEvalRunner, "_prepare_tasks", Mock(side_effect=Terminated()))
+            for job in ("job-1", "job-2"):
+                with pytest.raises(Terminated):
+                    run_eval(
+                        out,
+                        {"gsm8k": 4},
+                        env={
+                            SHARED_RUN_ENV: str(out.parent),
+                            "BEAKER_JOB_ID": job,
+                        },
+                    )
+                assert not has_progress(out)
+                identities.append(_run_id(out))
+        run_eval(
+            out,
+            {"gsm8k": 4},
+            env={
+                SHARED_RUN_ENV: str(out.parent),
+                "BEAKER_JOB_ID": "job-3",
+            },
+        )
+        assert identities == [_run_id(out), _run_id(out)]
+        assert read_manifest(out)["resume"]["beaker_job_ids"] == ["job-1", "job-2", "job-3"]
+
+    def test_shared_run_keeps_records_and_identity_until_supervisor_publishes_completion(
+        self, tmp_path
+    ) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        out = tmp_path / "shared" / "output"
+        env = {SHARED_RUN_ENV: str(out.parent)}
+        run_eval(out, {"gsm8k": 4}, env=env)
+        first_id = _run_id(out)
+        assert has_progress(out)
+        predictions = {p.name: p.read_bytes() for p in (out / "predictions").rglob("*.jsonl")}
+
+        # A kill after upload but before the supervisor's completion marker leaves
+        # the completed manifest and records. Re-entry must keep the dashboard ID.
+        resumed = run_eval(out, {"gsm8k": 4}, env=env)
+        assert _run_id(out) == first_id
+        assert resumed.finalized == {"gsm8k"}
+        assert predictions == {
+            p.name: p.read_bytes() for p in (out / "predictions").rglob("*.jsonl")
+        }
+
     # The CLI rewrites a stopped run's manifest as interrupted (SIGTERM under --resume) or
     # failed; the runner itself leaves it running.
     @pytest.mark.parametrize("stored_status", ["running", "interrupted", "failed"])
@@ -1686,6 +1739,20 @@ class TestProgressLifetime:
             self._upload_run(tmp_path, RuntimeError("preempted"))
 
         assert has_progress(tmp_path)
+
+    def test_shared_run_retries_a_failed_upload_with_the_same_run_id(self, tmp_path) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        out = tmp_path / "shared" / "output"
+        env = {SHARED_RUN_ENV: str(out.parent)}
+        with pytest.raises(RuntimeError, match="upload unavailable"):
+            self._upload_run(out, RuntimeError("upload unavailable"), env=env)
+        run_id = _run_id(out)
+        assert has_progress(out)
+        assert self._upload_run(out, env=env) == [True]
+        assert _run_id(out) == run_id
+        # The supervisor publishes completion before deleting these records.
+        assert has_progress(out)
 
     def test_a_completed_run_deletes_only_its_own_records(self, interrupted_run, tmp_path) -> None:
         out = _resume_copy(interrupted_run, tmp_path)
