@@ -21,13 +21,13 @@ Each step is one model call and the environment's reply to it:
 - A tool that raises is answered with the exception's message, as aviary does with
   ``handle_tool_exc``; a notebook run that times out ends the episode without an
   answer.
+- Every request asks for a tool call (``tool_choice="required"``), as upstream's
+  does. A reply that still has none uses its step and gets the notebook render, as
+  an empty action would.
 - The episode ends after ``max_steps`` model calls.
 
 Differences from upstream:
 
-- Upstream asks for a tool call on every reply (``tool_choice="required"``); the
-  providers here do not send ``tool_choice``, so a reply may have no call. Such a
-  reply uses its step and gets the notebook render, as an empty action would.
 - Images in cell outputs are not sent to the model: the markdown keeps upstream's
   numbered placeholders. The prompt asks the agent to avoid plots.
 """
@@ -301,6 +301,7 @@ class NotebookEpisode:
                     request_type=RequestType.CHAT,
                     messages=tuple(self.messages),
                     tools=TOOL_SCHEMAS,
+                    tool_choice="required",
                 )
             ],
             params,

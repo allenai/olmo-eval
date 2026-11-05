@@ -43,6 +43,8 @@ The episode follows upstream's v1.5 open-answer runs
   the notebook and reruns all of it with `jupyter nbconvert --execute --allow-errors`.
   `list_workdir()` returns the directory tree as JSON. `submit_answer(answer)` ends the
   episode. The schemas are what fhaviary builds from upstream's functions.
+  Every request sets `tool_choice="required"`, as upstream's does, which vLLM enforces
+  by constraining decoding to tool calls.
 - **Message order.** The question comes first, then the first notebook render, then the
   system prompt, as upstream's environment sends them. Olmo 3, Qwen3 and gpt-oss chat
   templates accept this. Templates that require the system message first, such as
@@ -97,9 +99,6 @@ kept under `bixbench_verified/<question>-<attempt>/` in the output directory.
 
 ## Differences from upstream
 
-- **No forced tool call.** Upstream requests `tool_choice="required"`. The providers here
-  do not send `tool_choice`, so a reply can come without a call; it uses its step and
-  the agent gets the notebook render again, as an empty action would get upstream.
 - **No images.** Images in cell outputs are not sent; the markdown keeps upstream's
   numbered placeholders. The prompt already tells the agent to avoid plots.
 - **Ungradable judge replies.** A judge reply without a `<grade>` tag is asked again and,

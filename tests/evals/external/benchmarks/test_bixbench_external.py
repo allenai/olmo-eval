@@ -365,6 +365,10 @@ class TestEpisode:
         assert [t.name for t in TOOL_SCHEMAS] == ["edit_cell", "list_workdir", "submit_answer"]
         assert TOOL_SCHEMAS[0].parameters["required"] == ["contents"]
 
+    def test_every_request_requires_a_tool_call(self, tmp_path: Path) -> None:
+        _, provider, _ = run_episode(tmp_path, [reply(call("list_workdir", {}))], max_steps=2)
+        assert [r.tool_choice for r in provider.requests] == ["required", "required"]
+
     def test_edit_runs_the_notebook_and_submit_ends_the_episode(self, tmp_path: Path) -> None:
         result, provider, executor = run_episode(
             tmp_path,
