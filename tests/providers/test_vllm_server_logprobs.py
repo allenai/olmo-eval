@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from olmo_eval.common.types import Instance, LMRequest, RequestType, Response, SamplingParams
+from olmo_eval.inference.tokenizer_utils import encode_prompt
 from olmo_eval.runners.io.builders import build_predictions
 
 
@@ -228,6 +229,51 @@ class TestVLLMServerProviderLogprobs:
         provider._count_tokens.reset_mock()
         assert await provider._count_request_tokens(request) == 3  # [7, 0, 1]
         provider._count_tokens.assert_not_called()
+
+    @staticmethod
+    def _add_bos_text(tokenizer, bos_id, bos_text="<s>"):
+        """Like ``_add_bos``, and BOS written in the text encodes to ``bos_id`` too."""
+        TestVLLMServerProviderLogprobs._add_bos(tokenizer, bos_id)
+        tokenizer.encode.side_effect = lambda text, add_special_tokens=False: (
+            ([bos_id] if add_special_tokens else [])
+            + [bos_id if word == bos_text else i for i, word in enumerate(text.split())]
+        )
+        tokenizer.decode.side_effect = lambda ids: "".join(
+            bos_text if i == bos_id else f" tok{i}" for i in ids
+        )
+
+    @pytest.mark.anyio
+    async def test_text_completion_that_starts_with_bos_gets_it_once(
+        self, provider, mock_tokenizer
+    ):
+        """A text prompt that already starts with BOS is sent without the server's specials,
+        so the server sees [BOS, ...] as the token-ID path does, not [BOS, BOS, ...]."""
+        self._add_bos_text(mock_tokenizer, 7)
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+        provider._count_tokens = AsyncMock(return_value=3)
+        params = SamplingParams(max_tokens=32)
+
+        with_bos = LMRequest(request_type=RequestType.COMPLETION, prompt="<s> a b")
+        await provider._generate_completion(client, with_bos, params)
+        await provider._count_request_tokens(with_bos)
+        assert (
+            client.completions.create.call_args.kwargs["extra_body"]["add_special_tokens"] is False
+        )
+        assert provider._count_tokens.call_args.args[0]["add_special_tokens"] is False
+        assert (
+            provider.describe_request(with_bos, params)["generation_kwargs"]["add_special_tokens"]
+            is False
+        )
+
+        plain = LMRequest(request_type=RequestType.COMPLETION, prompt="a b")
+        await provider._generate_completion(client, plain, params)
+        assert (
+            client.completions.create.call_args.kwargs["extra_body"]["add_special_tokens"] is True
+        )
+
+        # The token-ID path drops the same duplicate.
+        assert encode_prompt(mock_tokenizer, "<s> a b", provider._prefix_ids) == [7, 1, 2]
 
     def test_add_bos_token_is_rejected(self):
         with pytest.raises(ValueError, match="add_bos_token was removed"):

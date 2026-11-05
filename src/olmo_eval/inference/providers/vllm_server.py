@@ -675,7 +675,7 @@ class VLLMServerProvider(InferenceProvider):
                 {
                     "model": self._request_model_name,
                     "prompt": payload,
-                    "add_special_tokens": True,
+                    "add_special_tokens": self._server_adds_prefix(payload),
                 }
             )
         messages = (
@@ -725,7 +725,7 @@ class VLLMServerProvider(InferenceProvider):
                 "temperature": params.temperature,
                 "logprobs": 1,
                 "num_samples": params.num_samples,
-                "add_special_tokens": sends_text,
+                "add_special_tokens": sends_text and self._server_adds_prefix(request.prompt),
             }
             if params.top_p is not None:
                 trace["generation_kwargs"]["top_p"] = params.top_p
@@ -805,11 +805,28 @@ class VLLMServerProvider(InferenceProvider):
         """The tokens every prompt and log-likelihood context starts with."""
         return default_prefix_ids(self._logprob_tokenizer())
 
+    @functools.cached_property
+    def _prefix_text(self) -> str:
+        """The prefix as text, as a prompt that already carries it starts."""
+        if not self._prefix_ids:
+            return ""
+        return self._logprob_tokenizer().decode(self._prefix_ids)
+
+    def _server_adds_prefix(self, prompt: str) -> bool:
+        """Whether the server should add the tokenizer's specials to a text prompt.
+
+        Not when the text already starts with the prefix (a chat template that writes
+        BOS), which would otherwise get it twice; ``encode_prompt`` drops the same
+        duplicate from token-ID prompts.
+        """
+        return not (self._prefix_text and prompt.startswith(self._prefix_text))
+
     def _get_completion_prompt_payload(self, prompt: str) -> str | list[int]:
         """Build the completion prompt: text, or local token IDs when asked for.
 
         The server tokenizes text with the tokenizer's defaults (add_special_tokens),
-        which start it with the same prefix as log-likelihood contexts.
+        which start it with the same prefix as log-likelihood contexts, unless the text
+        already starts with it (see ``_server_adds_prefix``).
         """
         if not self._completion_use_prompt_token_ids:
             return prompt
@@ -933,8 +950,12 @@ class VLLMServerProvider(InferenceProvider):
         # rather than sending null, which some OpenAI-compatible servers reject.
         if params.max_tokens is not None:
             kwargs["max_tokens"] = params.max_tokens
-        # Token IDs already carry the prefix; text gets it from the server's tokenizer.
-        extra_body: dict[str, Any] = {"add_special_tokens": isinstance(prompt_payload, str)}
+        # Token IDs already carry the prefix; text gets it from the server's tokenizer,
+        # unless it already starts with it.
+        extra_body: dict[str, Any] = {
+            "add_special_tokens": isinstance(prompt_payload, str)
+            and self._server_adds_prefix(prompt_payload)
+        }
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature

@@ -105,6 +105,8 @@ separate and provisional. Do not choose seeds or parameters to fit aggregate tot
     text or as token IDs (`completion_use_prompt_token_ids`). Before, they went out
     without special tokens unless `add_bos_token=true` was set. So they gain BOS for the
     affected models, matching upstream for tasks that call offline vLLM, such as APTBench.
+    A prompt whose text already starts with the prefix (a rendered chat template) gets it
+    once, not twice.
   - `olmo_core` no longer defaults to no BOS: a checkpoint with a BOS-adding tokenizer
     gets BOS in generation and log-likelihood. dolma2 adds nothing, so Olmo checkpoints
     are unchanged.
