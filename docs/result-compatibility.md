@@ -72,6 +72,54 @@ mismatch or a recovery of the original random choices. Prefer original scored me
 otherwise retain the reconciled loose analysis and keep reconstructed strict labels
 separate and provisional. Do not choose seeds or parameters to fit aggregate totals.
 
+## 2026-11-02: One BOS rule for every provider; `add_bos_token` removed (#TBD)
+
+- **Affected**: every log-likelihood request (multiple-choice, ranked-classification,
+  bits-per-byte, LAMBADA-style and long-context likelihood tasks) in the `vllm`,
+  `vllm_server`, `huggingface`, `olmo_core` and `olmo_core_vlm` providers, for models
+  whose tokenizer adds BOS when encoding text through its post-processor: for example
+  Llama 3.x, Gemma 2, 3 and 4, LFM2.5 and Nemotron-H. Tokenizers without a BOS (Qwen,
+  Olmo 3, SmolLM3) or with one they never add (Olmo 2, SmolLM2, Granite 4.0, Pythia,
+  dolma2) are unaffected. Generation is affected in the cases listed under **Change**.
+- **Change**: every input starts with the special tokens the tokenizer puts in front of
+  a text, measured by encoding a probe, not read from `tokenizer.add_bos_token`.
+  Generation prompts and non-empty log-likelihood contexts use the same prefix, and a
+  prompt that already starts with it (a chat template that writes BOS) does not get a
+  second one. An empty context still gets BOS (EOS when there is none), as before. The
+  `add_bos_token` provider setting is removed and passing it raises an error; a model
+  whose tokenizer does not match its training should be given a tokenizer that does
+  (`tokenizer=`). The `sglang` provider is unchanged: it keeps its own `add_bos_token`,
+  which also turns BOS off for text prompts, though no preset sets it. What changes:
+  - Log-likelihood contexts of the affected models now start with BOS, as their
+    generation prompts already did. Before, BOS was added only when
+    `tokenizer.add_bos_token` was set, which is False for post-processor tokenizers, so
+    scores were far below the model's (Gemma 4 E2B, 40 LAMBADA items: greedy accuracy
+    0.125 without BOS, 0.6 with it).
+  - In-process `vllm` chat requests on models whose chat template writes BOS (LFM2.5;
+    instruct models such as Gemma 3 and Llama 3.2) had BOS twice; they now have it once.
+    `vllm_server` chat requests were already correct.
+  - Runs that set `add_bos_token=false` (the `olmo-3-1025-7b` preset; `vllm`, where it
+    also applied to generation) or `true` (the safety judges on `vllm_server`) now follow
+    the tokenizer; for the tokenizers they used, the inputs are the same.
+  - `vllm_server` completions now start with the tokenizer's prefix, whether sent as
+    text or as token IDs (`completion_use_prompt_token_ids`). Before, they went out
+    without special tokens unless `add_bos_token=true` was set. So they gain BOS for the
+    affected models, matching upstream for tasks that call offline vLLM, such as APTBench.
+    A prompt whose text already starts with the prefix (a rendered chat template) gets it
+    once, not twice.
+  - `olmo_core` no longer defaults to no BOS: a checkpoint with a BOS-adding tokenizer
+    gets BOS in generation and log-likelihood. dolma2 adds nothing, so Olmo checkpoints
+    are unchanged.
+  - `olmo_core_vlm` generation keeps its own BOS-or-EOS rule; its log-likelihood
+    follows the tokenizer.
+  - A log-likelihood input longer than the context is still left-truncated, which
+    drops BOS first; such items are unchanged.
+- **Identity**: no task hash changes; results before and after share a hash and can only
+  be told apart by commit or date.
+- **Comparability**: results for unaffected tokenizers are unchanged. Earlier
+  log-likelihood results for affected models, and in-process `vllm` chat results for
+  models whose chat template writes BOS, are not comparable and should be re-run.
+
 ## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
 
 - **Affected**:

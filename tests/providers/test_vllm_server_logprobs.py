@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from olmo_eval.common.types import Instance, LMRequest, RequestType, Response, SamplingParams
+from olmo_eval.inference.tokenizer_utils import encode_prompt
 from olmo_eval.runners.io.builders import build_predictions
 
 
@@ -55,7 +56,6 @@ class TestVLLMServerProviderLogprobs:
             p._request_model_name = "test-model"
             p.base_url = "http://localhost:8000/v1"
             p._tokenizer = mock_tokenizer
-            p._add_bos_token = None
             p._client = None
             p._http_client = None
             p._raw_http_client = None
@@ -167,8 +167,8 @@ class TestVLLMServerProviderLogprobs:
         return resp
 
     @pytest.mark.anyio
-    async def test_generate_completion_sets_add_special_tokens_false(self, provider):
-        """Completion payloads should disable server-side special token insertion."""
+    async def test_generate_completion_follows_the_tokenizer_by_default(self, provider):
+        """Unset add_bos_token sends text and lets the server tokenizer add its specials."""
         client = MagicMock()
         client.completions.create = AsyncMock(return_value=self._make_completion_response())
 
@@ -178,7 +178,106 @@ class TestVLLMServerProviderLogprobs:
         await provider._generate_completion(client, request, params)
 
         call_kwargs = client.completions.create.call_args.kwargs
-        assert call_kwargs["extra_body"]["add_special_tokens"] is False
+        assert call_kwargs["prompt"] == "Test prompt"
+        assert call_kwargs["extra_body"]["add_special_tokens"] is True
+
+    @staticmethod
+    def _add_bos(tokenizer, bos_id):
+        """Make the mock tokenizer add BOS when encoding with special tokens."""
+        tokenizer.bos_token_id = bos_id
+        tokenizer.encode.side_effect = lambda text, add_special_tokens=False: (
+            ([bos_id] if add_special_tokens else []) + list(range(len(text.split())))
+        )
+
+    @pytest.mark.anyio
+    async def test_generate_completion_token_ids_start_like_logprob_contexts(
+        self, provider, mock_tokenizer
+    ):
+        """Locally tokenized completion prompts carry the tokenizer's BOS, once."""
+        self._add_bos(mock_tokenizer, 7)
+        provider._completion_use_prompt_token_ids = True
+        provider.timeout = 30
+        raw_response = MagicMock()
+        raw_response.raise_for_status = MagicMock()
+        raw_response.json.return_value = {
+            "choices": [{"text": "ok", "logprobs": None}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1},
+        }
+        mock_http = AsyncMock()
+        mock_http.post.return_value = raw_response
+        provider._get_raw_http_client = MagicMock(return_value=mock_http)
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        await provider._generate_completion(MagicMock(), request, SamplingParams(max_tokens=32))
+
+        payload = mock_http.post.call_args.kwargs["json"]
+        assert payload["prompt"] == [7, 0, 1]
+        assert payload["add_special_tokens"] is False
+        assert provider._prefix_ids == [7]
+
+    @pytest.mark.anyio
+    async def test_count_request_tokens_follows_the_payload(self, provider, mock_tokenizer):
+        """Text is counted by the server with specials; token IDs are counted locally."""
+        self._add_bos(mock_tokenizer, 7)
+        provider._count_tokens = AsyncMock(return_value=3)
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+
+        assert await provider._count_request_tokens(request) == 3
+        assert provider._count_tokens.call_args.args[0]["add_special_tokens"] is True
+
+        provider._completion_use_prompt_token_ids = True
+        provider._count_tokens.reset_mock()
+        assert await provider._count_request_tokens(request) == 3  # [7, 0, 1]
+        provider._count_tokens.assert_not_called()
+
+    @staticmethod
+    def _add_bos_text(tokenizer, bos_id, bos_text="<s>"):
+        """Like ``_add_bos``, and BOS written in the text encodes to ``bos_id`` too."""
+        TestVLLMServerProviderLogprobs._add_bos(tokenizer, bos_id)
+        tokenizer.encode.side_effect = lambda text, add_special_tokens=False: (
+            ([bos_id] if add_special_tokens else [])
+            + [bos_id if word == bos_text else i for i, word in enumerate(text.split())]
+        )
+        tokenizer.decode.side_effect = lambda ids: "".join(
+            bos_text if i == bos_id else f" tok{i}" for i in ids
+        )
+
+    @pytest.mark.anyio
+    async def test_text_completion_that_starts_with_bos_gets_it_once(
+        self, provider, mock_tokenizer
+    ):
+        """A text prompt that already starts with BOS is sent without the server's specials,
+        so the server sees [BOS, ...] as the token-ID path does, not [BOS, BOS, ...]."""
+        self._add_bos_text(mock_tokenizer, 7)
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+        provider._count_tokens = AsyncMock(return_value=3)
+        params = SamplingParams(max_tokens=32)
+
+        with_bos = LMRequest(request_type=RequestType.COMPLETION, prompt="<s> a b")
+        await provider._generate_completion(client, with_bos, params)
+        await provider._count_request_tokens(with_bos)
+        assert (
+            client.completions.create.call_args.kwargs["extra_body"]["add_special_tokens"] is False
+        )
+        assert provider._count_tokens.call_args.args[0]["add_special_tokens"] is False
+        assert (
+            provider.describe_request(with_bos, params)["generation_kwargs"]["add_special_tokens"]
+            is False
+        )
+
+        plain = LMRequest(request_type=RequestType.COMPLETION, prompt="a b")
+        await provider._generate_completion(client, plain, params)
+        assert (
+            client.completions.create.call_args.kwargs["extra_body"]["add_special_tokens"] is True
+        )
+
+        # The token-ID path drops the same duplicate.
+        assert encode_prompt(mock_tokenizer, "<s> a b", provider._prefix_ids) == [7, 1, 2]
+
+    def test_add_bos_token_is_rejected(self):
+        with pytest.raises(ValueError, match="add_bos_token was removed"):
+            self._make_provider(add_bos_token=False)
 
     @pytest.mark.anyio
     async def test_generate_completion_omits_max_tokens_when_none(self, provider):
@@ -432,7 +531,6 @@ class TestVLLMServerProviderLogprobs:
     async def test_generate_completion_with_explicit_runtime_flags_uses_token_ids(self):
         """Explicit completion runtime flags should tokenize locally and post-process output."""
         provider = self._make_provider(
-            add_bos_token=False,
             completion_use_prompt_token_ids=True,
             completion_client_side_stop_trim=True,
             completion_sentencepiece_cleanup=True,
@@ -730,7 +828,7 @@ class TestVLLMServerProviderLogprobs:
             "olmo_eval.inference.providers.vllm_server.encode_context_and_continuation"
         ) as mock_encode:
             # Context is always 2 tokens, continuation is 1 token
-            mock_encode.side_effect = lambda tok, ctx, cont: ([0, 1], [2])
+            mock_encode.side_effect = lambda tok, ctx, cont, **kw: ([0, 1], [2])
 
             async def mock_post(url, json=None):
                 call_count[0] += 1
