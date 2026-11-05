@@ -134,3 +134,12 @@ register_variant(
         stop_sequences=("\n\n", "Answer:", "Question:"),
     ),
 )
+
+# Test only: olmo3base with no stop sequence and a 100-token budget, so the raw greedy
+# continuation is stored and any stop rule can be applied to it afterwards.
+register_variant(
+    "coqa",
+    "olmo3base_nostop",
+    limit=10_000,
+    sampling_params=SamplingParams(max_tokens=100, temperature=0.0, stop_sequences=None),
+)
