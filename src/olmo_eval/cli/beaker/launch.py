@@ -113,6 +113,20 @@ def _validate_weka_buckets(
 )
 @click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
+@click.option(
+    "--resume-volume",
+    default=None,
+    help=(
+        "Native Beaker volume for resumable task state (<org>/<name> or v_...). "
+        "Default: ai2/olmo-eval. Requires a read-write claim."
+    ),
+)
+@click.option(
+    "--resume-retention-days",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Days to retain inactive recovery files in tmp-<days>d (default: 7).",
+)
 @click.option("--workspace", "-w", help="Beaker workspace")
 @click.option("--budget", "-B", help="Beaker budget")
 @click.option("--image", "-I", help="Beaker image (e.g., ai2-tylerm/olmo-eval-cu1261-trc280-amd64)")
@@ -300,6 +314,8 @@ def launch(
     min_runtime: str | None,
     timeout: str | None,
     retries: int | None,
+    resume_volume: str | None,
+    resume_retention_days: int | None,
     workspace: str | None,
     budget: str | None,
     image: str | None,
@@ -431,6 +447,8 @@ def launch(
         "min_runtime": min_runtime,
         "timeout": timeout,
         "retries": retries,
+        "resume_volume": resume_volume,
+        "resume_retention_days": resume_retention_days,
         "workspace": workspace,
         "budget": budget,
         "image": image,
@@ -459,6 +477,8 @@ def launch(
 
     # Handle external evaluations mode
     if external_evals:
+        if resume_volume is not None or resume_retention_days is not None:
+            raise click.UsageError("Resume volume options currently support task evaluations only")
         if task:
             console.print(
                 "[red]Error:[/red] Cannot mix --external-eval (-E) with --task (-t). "
