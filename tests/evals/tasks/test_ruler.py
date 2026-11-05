@@ -156,7 +156,6 @@ def test_v2_scores_an_overflowing_instance_zero(spec):
     assert fits.outputs[0].text == "the needle"
     metric = next(m for m in task.config.metrics if m.name == "overflow_rate")
     assert metric.compute([cut, fits]) == 0.5
-    assert task.config.primary_metric == get_task(spec.removesuffix(":v2")).config.primary_metric
 
 
 def test_the_original_spec_keeps_a_cut_output_and_has_no_overflow_metric():
@@ -174,3 +173,24 @@ def test_qa_v2_overflow_metric_shares_the_qa_scorer():
     recall, overflow = task.config.metrics
     assert overflow.name == "overflow_rate"
     assert overflow.scorer is recall.scorer
+
+
+@pytest.mark.parametrize(
+    "spec", ["ruler_niah_s_1__4096:v2", "ruler_qa_1__4096:v2", "ruler_vt__4096"]
+)
+def test_the_runner_reports_recall_as_the_score(spec):
+    """metrics.json's summary score is recall, not overflow_rate."""
+    from olmo_eval.runners.processing.utils import get_metric_metadata, get_primary_metric
+
+    task = get_task(spec)
+    metrics = {"recall": {"substring_recall": 0.75}, "overflow_rate": {"substring_recall": 0.25}}
+    if not spec.endswith(":v2"):
+        del metrics["overflow_rate"]
+
+    # A plain spec names its one metric, which the runner picks as the only one.
+    preferred = get_metric_metadata(task)
+    assert preferred == ("recall:substring_recall" if spec.endswith(":v2") else None)
+    assert get_primary_metric(metrics, preferred) == (
+        "recall:substring_recall",
+        0.75,
+    )

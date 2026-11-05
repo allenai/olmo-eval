@@ -501,6 +501,9 @@ for _task_name, _task_config in RULER_TASKS.items():
             *vars(_cls)["metrics"],
             OverflowRateMetric(scorer=vars(_cls)["metrics"][0].scorer),
         ),
+        # The metric itself, not its name: with two metrics, a name does not resolve and
+        # the runner would report the alphabetically first one (overflow_rate).
+        primary_metric=vars(_cls)["metrics"][0],
         **(
             {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
             if _v2_budget is not None
