@@ -873,7 +873,12 @@ class _OverflowScoresZero(Task):
         rest = [r for r in responses if id(r) not in cut_ids]
         await super().score_responses(rest, context)
         task._extract_answers(cut)
-        scorers = [name for name in task._get_scorers() if name != ContextCutScorer.name]
+        # The scorers' names from the instances: on these slotted dataclasses the class
+        # attribute is a member descriptor, not the name.
+        cut_name = ContextCutScorer().name
+        task_scorers = task._get_scorers()
+        scorers = [name for name in task_scorers if name != cut_name]
+        autoais = any(isinstance(s, AutoAisScorer) for s in task_scorers.values())
         judged = [
             getattr(task, "judge_score_key", None),
             *getattr(task, "judge_extra_score_keys", ()),
@@ -882,12 +887,12 @@ class _OverflowScoresZero(Task):
             for output in response.outputs:
                 for name in scorers:
                     _store_output_score(output, scorer_name=name, score=0.0)
-                _store_output_score(output, scorer_name=ContextCutScorer.name, score=1.0)
-                if AutoAisScorer.name in scorers:
+                _store_output_score(output, scorer_name=cut_name, score=1.0)
+                if autoais:
                     output.metadata[AUTOAIS_KEY] = {"citation_rec": 0.0, "citation_prec": 0.0}
             for name in [*scorers, *filter(None, judged)]:
                 response.scores[name] = 0.0
-            response.scores[ContextCutScorer.name] = 1.0
+            response.scores[cut_name] = 1.0
         return responses
 
 

@@ -1321,6 +1321,24 @@ def test_v2_scores_an_overflowing_instance_zero_without_scoring_it(spec):
     channels += [k for k in (getattr(task, "judge_score_key", None),) if k]
     assert all(response.scores.get(name) == 0.0 for name in channels), response.scores
     assert not any("scoring_error" in key for key in response.outputs[0].metadata)
+    # The instance is recorded as cut, under the scorer's own name.
+    assert response.scores["context_cut"] == 1.0
+    assert response.outputs[0].metadata["score:context_cut"] == 1.0
+    assert not any(key.startswith("<member") for key in response.scores)
+
+
+def test_v2_counts_an_overflowing_alce_instance_in_the_citation_means():
+    """A cut ALCE instance has 0 citation recall and precision, not none: it counts."""
+    spec = "helmet_alce_asqa__8192:base_v2"
+    task = get_task(spec)
+    cut = _cut_response(spec, "the answer", ["the answer"], cut_tokens=12)
+    asyncio.run(task.score_responses([cut]))
+    other = _cut_response(spec, "x", ["x"], cut_tokens=0)
+    other.outputs[0].metadata["judge_result"] = {"citation_rec": 1.0, "citation_prec": 1.0}
+
+    metrics = {m.name: m for m in task.config.metrics}
+    assert metrics["citation_rec"].compute([cut, other]) == 0.5
+    assert metrics["citation_prec"].compute([cut, other]) == 0.5
 
 
 def test_v2_scores_the_instances_that_fit_as_before():
