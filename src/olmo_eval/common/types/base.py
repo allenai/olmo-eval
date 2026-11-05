@@ -260,6 +260,10 @@ class LMRequest:
     continuations: tuple[str, ...] | None = None
     continuation_prompts: tuple[str, ...] | None = None
     tools: tuple[ToolSchema, ...] | None = None
+    #: Whether the reply must call one of ``tools`` (``"required"``), may
+    #: (``"auto"``) or must not (``"none"``), as the OpenAI chat API takes it.
+    #: Unset leaves it to the server, which defaults to ``"auto"``.
+    tool_choice: Literal["auto", "none", "required"] | None = None
     system_prompt: str | None = None
     max_length: int | None = None
     images: tuple[Any, ...] | None = None
