@@ -84,13 +84,10 @@ def test_v3_clusters_carry_the_fixes() -> None:
         "olmobase:math:v2": {},
         "olmobase:code:v2": {"deepseek_leetcode:olmo3base:v2": "deepseek_leetcode:olmo3base:v3"},
     }
+    clusters = []
     for base, swap in swaps.items():
-        cluster = base.split(":")[1]
-        v3 = get_suite(f"olmobase:{cluster}:v3").expand()
-        assert list(v3) == [swap.get(task, task) for task in get_suite(base).expand()]
+        cluster = get_suite(f"olmobase:{base.split(':')[1]}:v3")
+        assert list(cluster.expand()) == [swap.get(t, t) for t in get_suite(base).expand()]
+        clusters.append(cluster)
 
-    clusters = [
-        get_suite(f"olmobase:{c}:v3")
-        for c in swaps.keys() and ("mcqa_stem", "mcqa_non_stem", "gen", "math", "code")
-    ]
     assert get_suite("olmobase:v3").tasks == tuple(clusters)
