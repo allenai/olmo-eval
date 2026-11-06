@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -16,6 +17,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 VOLUME_MOUNT = "/eval-cache"
+
+
+class VolumeClaimError(RuntimeError):
+    """A workspace cannot mount the resume volume with read-write access."""
 
 
 class GantryLaunchKwargs(TypedDict):
@@ -131,6 +136,37 @@ def launch_with_volume(
         except FileNotFoundError as e:
             raise RuntimeError("Native volumes require a Beaker CLI with volume support") from e
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Native volume submission failed: {e.stderr.strip()}") from e
+            error = e.stderr.strip()
+            if (
+                "has no claim on volume" in error
+                or "claim is read-only; cannot mount with read-write mode" in error
+            ):
+                claim = shlex.join(
+                    [
+                        "beaker",
+                        "volume",
+                        "claim",
+                        "create",
+                        "--workspace",
+                        kwargs["workspace"],
+                        "--volume",
+                        volume,
+                        "--mode",
+                        "readwrite",
+                    ]
+                )
+                raise VolumeClaimError(
+                    f"Evaluation was not submitted: workspace {kwargs['workspace']!r} needs a "
+                    f"read-write claim on resume volume {volume!r}.\n\n"
+                    "Ask someone with write access to the workspace and the volume's parent "
+                    "workspace to grant access:\n"
+                    f"  {claim}\n"
+                    "For an existing read-only claim, an administrator must replace it with "
+                    "a read-write claim.\n\n"
+                    "Alternatively, rerun your launch with --no-resume to run without a "
+                    "resume-volume claim. Interrupted or retried attempts will start over.\n\n"
+                    f"Beaker reported: {error}"
+                ) from e
+            raise RuntimeError(f"Native volume submission failed: {error}") from e
         experiments = json.loads(result.stdout)
         return experiments[0]["id"]

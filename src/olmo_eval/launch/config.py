@@ -139,6 +139,7 @@ class EvalConfig:
     min_runtime: str | None = None
     timeout: str = "24h"
     retries: int | None = None
+    resume: bool = True
     resume_volume: str | None = BEAKER_DEFAULT_RESUME_VOLUME
     resume_retention_days: int = BEAKER_DEFAULT_RESUME_RETENTION_DAYS
 
