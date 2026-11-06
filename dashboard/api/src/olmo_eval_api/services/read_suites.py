@@ -26,16 +26,19 @@ def suite_generation_counts(
     node: SuiteNode, tasks: Mapping[str, Mapping[Any, Any]]
 ) -> dict[str, int] | None:
     """Sum generation diagnostics over the suite's contributing task results."""
-    total: dict[str, int] = {}
-    for name in leaves(node):
+    keys = ("generations", "cap_hit", "empty", "unclosed_think", "finish_reason_unknown")
+    total = dict.fromkeys(keys, 0)
+    found = False
+    for name in dict.fromkeys(leaves(node)):
         task = tasks.get(name)
         if task is None or task.get("score") is None:
             continue
         counts = task.get("generation_counts")
-        if counts is not None:
-            for key, value in counts.items():
-                total[key] = total.get(key, 0) + value
-    return total or None
+        if counts:
+            found = True
+            for key in keys:
+                total[key] += counts.get(key, 0)
+    return total if found else None
 
 
 async def load_defs(session: AsyncSession) -> SuiteDefs:
