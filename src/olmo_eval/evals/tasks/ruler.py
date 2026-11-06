@@ -14,14 +14,23 @@ Original implementation: https://github.com/hsiehjackson/RULER
 import os
 import re
 import string
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from olmo_eval.common.formatters import ChatFormatter, PPLFormatter
 from olmo_eval.common.metrics import Metric, RecallMetric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    ContextFit,
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+    SamplingParams,
+)
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
@@ -196,12 +205,55 @@ class RulerTask(Task):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
+        haystack = doc.get("context")
+        if self.scores_overflow_zero and isinstance(haystack, str) and haystack:
+            start = question.find(haystack)
+            if start >= 0 and question.count(haystack) == 1:
+                metadata["haystack_span"] = (start, start + len(haystack))
 
         return Instance(
             question=question,
             gold_answer=answer,
             metadata=metadata,
         )
+
+    @property
+    def scores_overflow_zero(self) -> bool:
+        """Whether a prompt too long for the model's window scores 0 (the ``:v2`` variant).
+
+        The haystack is marked so a provider cuts its end to fit, so the prompt can be sent
+        without failing its batch, and an output whose haystack was cut is emptied.
+        """
+        return (self.config.task_settings or {}).get("overflow") == "score_zero"
+
+    @property
+    def cuts_answer(self) -> bool:
+        """Whether outputs are scored only up to their first ``Question:`` (VT's ``:v2``).
+
+        Having answered, base models go on writing questions of their own in the prompt's
+        ``Question: ... Answer:`` format, naming variables that substring recall credits.
+        """
+        return (self.config.task_settings or {}).get("answer_cut") == "before_question"
+
+    def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
+        """Strip thinking traces, then apply the ``:v2`` scoring rules (idempotent).
+
+        As the base class does, a changed output keeps its text in
+        ``metadata["original_text"]``.
+        """
+        super().strip_thinking_traces(responses)
+        for response in responses:
+            for output in response.outputs:
+                text = output.text or ""
+                if self.scores_overflow_zero and output.metadata.get(CONTEXT_CUT_TOKENS_KEY):
+                    kept = ""
+                elif self.cuts_answer:
+                    kept = text.partition("Question:")[0]
+                else:
+                    continue
+                if kept != text:
+                    output.metadata.setdefault("original_text", text)
+                    output.text = kept
 
     @property
     def request_type(self) -> RequestType:
@@ -233,7 +285,8 @@ class RulerTask(Task):
                     gold_answer=", ".join(str(a) for a in instance.gold_answer),
                     metadata=instance.metadata,
                 )
-            return self.config.formatter.format(instance, self.get_fewshot())
+            request = self.config.formatter.format(instance, self.get_fewshot())
+            return self._with_haystack_fit(request, instance)
 
         # Build prompt: append system template as completion prefix for non-chat format.
         # For base models, the prefix anchors the expected output format.
@@ -242,10 +295,17 @@ class RulerTask(Task):
         if prepend_text:
             prompt = prompt + self.answer_prefix_separator + prepend_text
 
-        return LMRequest(
-            request_type=self.request_type,
-            prompt=prompt,
+        return self._with_haystack_fit(
+            LMRequest(request_type=self.request_type, prompt=prompt), instance
         )
+
+    def _with_haystack_fit(self, request: LMRequest, instance: Instance) -> LMRequest:
+        """Mark the haystack, if any, as a ContextFit with no budget beyond the window."""
+        span = (instance.metadata or {}).get("haystack_span")
+        if not span:
+            return request
+        start, end = span
+        return replace(request, context_fit=ContextFit(text=instance.question[start:end]))
 
     def extract_answer(self, output: LMOutput) -> Any:
         """Extract answer from model output.
@@ -325,6 +385,15 @@ def make_ruler_task_class(
     )
 
 
+#: `:v2`: a prompt too long for the model's window scores 0 instead of failing its batch.
+RULER_V2_TASK_SETTINGS = {"overflow": "score_zero"}
+
+#: `:v2` generation budgets by task type: VT answers that restate the chain need ~60 tokens.
+RULER_V2_MAX_GEN_TOKS = {"vt": 100}
+
+#: Task types whose `:v2` outputs are scored only up to their first `Question:`.
+RULER_V2_ANSWER_CUT = ("vt",)
+
 # Dynamically register all RULER tasks
 for _task_name, _task_config in RULER_TASKS.items():
     _cls = make_ruler_task_class(_task_name, _task_config)
@@ -337,4 +406,20 @@ for _task_name, _task_config in RULER_TASKS.items():
     # item-for-item with the completion cell on the same checkpoint.
     register_variant(
         f"ruler_{_task_name}", "chat", formatter=ChatFormatter(user_template="{question}")
+    )
+    # `:v2`: see RULER_V2_TASK_SETTINGS, RULER_V2_MAX_GEN_TOKS and RULER_V2_ANSWER_CUT.
+    _v2_type = _task_name.rsplit("__", 1)[0]
+    _v2_budget = RULER_V2_MAX_GEN_TOKS.get(_v2_type)
+    register_variant(
+        f"ruler_{_task_name}",
+        "v2",
+        task_settings={
+            **RULER_V2_TASK_SETTINGS,
+            **({"answer_cut": "before_question"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
+        },
+        **(
+            {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
+            if _v2_budget is not None
+            else {}
+        ),
     )
