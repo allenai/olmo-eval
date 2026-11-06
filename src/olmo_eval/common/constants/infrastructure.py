@@ -19,7 +19,7 @@ BEAKER_DEFAULT_BUDGET = "ai2/oe-other"
 BEAKER_DEFAULT_PRIORITY = "normal"
 """Default job priority level."""
 
-BEAKER_DEFAULT_RESUME_VOLUME = "ai2/olmo-eval"
+BEAKER_DEFAULT_RESUME_VOLUME: str | None = None  # DEBUG: ai2/linear-rnns has no claim on ai2/olmo-eval
 BEAKER_DEFAULT_RESUME_RETENTION_DAYS = 7
 
 SHARED_RUN_ENV = "OLMO_EVAL_SHARED_RUN_DIR"
