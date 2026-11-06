@@ -1283,7 +1283,7 @@ def test_base_v2_stops_only_chat_format_qa_at_a_blank_line(task, stop):
     assert base_v2.config.sampling_params.max_tokens == base.config.sampling_params.max_tokens
 
 
-def _cut_response(spec: str, text: str, gold: list[str], cut_tokens: int) -> Response:
+def _response(spec: str, text: str, gold: list[str], cut_tokens: int) -> Response:
     task = get_task(spec)
     metadata = {CONTEXT_CUT_TOKENS_KEY: cut_tokens} if cut_tokens else {}
     instance = Instance(question="q", gold_answer=gold, metadata={"all_gold_answers": gold})
@@ -1308,7 +1308,7 @@ def test_v2_scores_an_overflowing_instance_zero_without_scoring_it(spec):
     """Every metric reads 0 for an instance whose context was cut, and no judge or
     AutoAIS is called (none is configured here)."""
     task = get_task(spec)
-    response = _cut_response(spec, "the answer", ["the answer"], cut_tokens=12)
+    response = _response(spec, "the answer", ["the answer"], cut_tokens=12)
 
     asyncio.run(task.score_responses([response]))
     metrics = task.compute_metrics([response])
@@ -1331,9 +1331,9 @@ def test_v2_counts_an_overflowing_alce_instance_in_the_citation_means():
     """A cut ALCE instance has 0 citation recall and precision, not none: it counts."""
     spec = "helmet_alce_asqa__8192:base_v2"
     task = get_task(spec)
-    cut = _cut_response(spec, "the answer", ["the answer"], cut_tokens=12)
+    cut = _response(spec, "the answer", ["the answer"], cut_tokens=12)
     asyncio.run(task.score_responses([cut]))
-    other = _cut_response(spec, "x", ["x"], cut_tokens=0)
+    other = _response(spec, "x", ["x"], cut_tokens=0)
     other.outputs[0].metadata["judge_result"] = {"citation_rec": 1.0, "citation_prec": 1.0}
 
     metrics = {m.name: m for m in task.config.metrics}
@@ -1343,8 +1343,8 @@ def test_v2_counts_an_overflowing_alce_instance_in_the_citation_means():
 
 def test_v2_scores_the_instances_that_fit_as_before():
     task = get_task("helmet_kilt_nq__8192:v2")
-    cut = _cut_response("helmet_kilt_nq__8192:v2", "Paris", ["Paris"], cut_tokens=12)
-    fits = _cut_response("helmet_kilt_nq__8192:v2", "Paris", ["Paris"], cut_tokens=0)
+    cut = _response("helmet_kilt_nq__8192:v2", "Paris", ["Paris"], cut_tokens=12)
+    fits = _response("helmet_kilt_nq__8192:v2", "Paris", ["Paris"], cut_tokens=0)
 
     asyncio.run(task.score_responses([cut, fits]))
 
@@ -1354,7 +1354,7 @@ def test_v2_scores_the_instances_that_fit_as_before():
 
 def test_the_original_spec_scores_a_cut_instance():
     task = get_task("helmet_kilt_nq__8192")
-    cut = _cut_response("helmet_kilt_nq__8192", "Paris", ["Paris"], cut_tokens=12)
+    cut = _response("helmet_kilt_nq__8192", "Paris", ["Paris"], cut_tokens=12)
 
     asyncio.run(task.score_responses([cut]))
 

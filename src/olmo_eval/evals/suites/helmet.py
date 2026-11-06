@@ -7,7 +7,7 @@ Mirrors the suite structure in `suites/ruler.py`:
 
 Each suite also has a `:base` twin (helmet_all__4096:base, ...) made of every
 task's `:base` variant, for models without instruction tuning, and `:v2` and
-`:base_v2` twins made of the tasks' fixed variants (see `helmet._v2_fixes`).
+`:base_v2` twins made of the tasks' fixed variants (see `tasks.helmet.HelmetTask`).
 
 Three deliberate differences from `suites/ruler.py`:
 

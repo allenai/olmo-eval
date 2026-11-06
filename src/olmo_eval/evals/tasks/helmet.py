@@ -964,38 +964,31 @@ for _task_name, _task_config in HELMET_TASKS.items():
     globals()[_cls.__name__] = _cls
     register(f"helmet_{_task_name}")(_cls)
     _settings = _task_settings(_task_config)
-    _cut = RULER_V2_TASK_SETTINGS
     if _task_config.get("use_chat_template"):
-        register_variant(
-            f"helmet_{_task_name}",
-            "base",
-            task_settings=_base_task_settings(_settings),
-        )
+        _base = _base_task_settings(_settings)
+        register_variant(f"helmet_{_task_name}", "base", task_settings=_base)
     else:
+        _base = _settings
         register_variant(f"helmet_{_task_name}", "base")
     # Variants replace task_settings whole, so `:base:v2` would drop `:base`'s setting:
     # the base-mode fixes are their own variant.
-    register_variant(f"helmet_{_task_name}", "v2", task_settings={**_settings, **_cut})
+    register_variant(
+        f"helmet_{_task_name}", "v2", task_settings={**_settings, **RULER_V2_TASK_SETTINGS}
+    )
+    _stop = (
+        {
+            "sampling_params": replace(
+                vars(_cls)["sampling_params"], stop_sequences=BASE_V2_STOP_SEQUENCES
+            )
+        }
+        if _task_config["kind"] in _BASE_V2_STOP_KINDS
+        else {}
+    )
     register_variant(
         f"helmet_{_task_name}",
         "base_v2",
-        task_settings={
-            **(
-                _base_task_settings(_settings)
-                if _task_config.get("use_chat_template")
-                else _settings
-            ),
-            **_cut,
-        },
-        **(
-            {
-                "sampling_params": replace(
-                    vars(_cls)["sampling_params"], stop_sequences=BASE_V2_STOP_SEQUENCES
-                )
-            }
-            if _task_config["kind"] in _BASE_V2_STOP_KINDS
-            else {}
-        ),
+        task_settings={**_base, **RULER_V2_TASK_SETTINGS},
+        **_stop,
     )
     if _task_config["metrics_key"] in _NO_AUTOAIS_METRICS:
         register_variant(
