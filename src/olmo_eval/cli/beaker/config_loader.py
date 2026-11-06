@@ -69,6 +69,7 @@ class LaunchConfig:
 
     # Weka buckets mounted in addition to the defaults
     weka_buckets: list[str] = field(default_factory=list)
+    resume: bool = True
     resume_volume: str | None = BEAKER_DEFAULT_RESUME_VOLUME
     resume_retention_days: int = BEAKER_DEFAULT_RESUME_RETENTION_DAYS
 
@@ -221,6 +222,9 @@ class LaunchConfigLoader:
         assert cluster is not None
         assert workspace is not None
 
+        resume = self.cli_args.get("resume")
+        if resume is None:
+            resume = cfg.resume if cfg else True
         resume_volume = (
             self.cli_args.get("resume_volume")
             or (cfg.resume_volume if cfg else None)
@@ -234,6 +238,8 @@ class LaunchConfigLoader:
         if type(resume_retention_days) is not int or resume_retention_days < 1:
             console.print("[red]Error:[/red] resume_retention_days must be a positive integer")
             raise SystemExit(1)
+        if not resume:
+            resume_volume = None
         if resume_volume is not None:
             from olmo_eval.launch.beaker.volume import validate_volume
 
@@ -283,6 +289,7 @@ class LaunchConfigLoader:
             harness_overrides=self.cli_args.get("harness_overrides", []),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
             weka_buckets=list(self.cli_args.get("weka_buckets", [])),
+            resume=resume,
             resume_volume=resume_volume,
             resume_retention_days=resume_retention_days,
             secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),

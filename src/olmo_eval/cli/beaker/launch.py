@@ -114,6 +114,14 @@ def _validate_weka_buckets(
 @click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
 @click.option(
+    "--resume/--no-resume",
+    default=None,
+    help=(
+        "Recover interrupted task progress (default: enabled). "
+        "--no-resume needs no resume volume; interrupted attempts start over."
+    ),
+)
+@click.option(
     "--resume-volume",
     default=None,
     help=(
@@ -314,6 +322,7 @@ def launch(
     min_runtime: str | None,
     timeout: str | None,
     retries: int | None,
+    resume: bool | None,
     resume_volume: str | None,
     resume_retention_days: int | None,
     workspace: str | None,
@@ -447,6 +456,7 @@ def launch(
         "min_runtime": min_runtime,
         "timeout": timeout,
         "retries": retries,
+        "resume": resume,
         "resume_volume": resume_volume,
         "resume_retention_days": resume_retention_days,
         "workspace": workspace,
@@ -477,7 +487,7 @@ def launch(
 
     # Handle external evaluations mode
     if external_evals:
-        if resume_volume is not None or resume_retention_days is not None:
+        if resume is not None or resume_volume is not None or resume_retention_days is not None:
             raise click.UsageError("Resume volume options currently support task evaluations only")
         if task:
             console.print(
@@ -1082,10 +1092,15 @@ def _launch_jobs(
     Returns:
         List of launched experiment IDs.
     """
+    from olmo_eval.launch.beaker.volume import VolumeClaimError
+
     launched_experiments: list[str] = []
     for job_config in job_configs:
         if not dry_run:
-            experiment = launcher.launch(job_config)
+            try:
+                experiment = launcher.launch(job_config)
+            except VolumeClaimError as e:
+                raise click.ClickException(str(e)) from None
             if experiment:
                 console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
                 launched_experiments.append(experiment.id)
