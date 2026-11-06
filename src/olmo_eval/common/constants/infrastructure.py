@@ -214,6 +214,7 @@ BACKEND_OPTIONAL_GROUPS: dict[str, str | None] = {
     "olmo_core_vlm": "olmo_core_vlm",
     "litellm": "litellm",
     "mock": None,
+    "replay": None,
 }
 """Mapping of backend types to their pyproject.toml optional dependency group names.
 

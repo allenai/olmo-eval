@@ -14,11 +14,20 @@ class ProviderKind(StrEnum):
     OLMO_CORE = "olmo_core"
     OLMO_CORE_VLM = "olmo_core_vlm"
     MOCK = "mock"
+    REPLAY = "replay"
     LITELLM = "litellm"
 
 
 ProviderLiteral = Literal[
-    "sglang", "vllm", "vllm_server", "hf", "olmo_core", "olmo_core_vlm", "mock", "litellm"
+    "sglang",
+    "vllm",
+    "vllm_server",
+    "hf",
+    "olmo_core",
+    "olmo_core_vlm",
+    "mock",
+    "replay",
+    "litellm",
 ]
 DtypeLiteral = Literal["auto", "float16", "bfloat16", "float32"]
 PriorityLiteral = Literal["low", "normal", "high", "urgent"]
