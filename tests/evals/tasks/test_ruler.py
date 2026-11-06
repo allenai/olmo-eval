@@ -82,3 +82,44 @@ def test_the_v2_suite_reports_recall_over_every_task_as_v2():
     assert get_suite("ruler_all_v2__4096").tasks == tuple(
         f"{t}:v2" for t in get_suite("ruler_all__4096").tasks
     )
+
+
+@pytest.mark.parametrize(
+    ("spec", "text", "cut_tokens", "scored"),
+    [
+        (
+            "ruler_vt__4096:v2",
+            " VAR A, VAR B.\nQuestion: What is VAR C? Answer: 1",
+            0,
+            " VAR A, VAR B.\n",
+        ),
+        ("ruler_niah_s_1__4096:v2", "the needle", 12, ""),
+    ],
+)
+def test_v2_keeps_the_original_text_of_an_output_it_changes(spec, text, cut_tokens, scored):
+    task = get_task(spec)
+    instance = Instance(question="q", gold_answer=["needle"], metadata={})
+    metadata = {CONTEXT_CUT_TOKENS_KEY: cut_tokens} if cut_tokens else {}
+    response = Response(
+        instance=instance,
+        request=task.format_request(instance),
+        outputs=[LMOutput(text=text, metadata=metadata)],
+    )
+
+    task.strip_thinking_traces([response])
+    task.strip_thinking_traces([response])  # the runner may prepare a response twice
+
+    assert response.outputs[0].text == scored
+    assert response.outputs[0].metadata["original_text"] == text
+
+
+def test_v2_leaves_an_unchanged_output_without_original_text():
+    task = get_task("ruler_vt__4096:v2")
+    instance = Instance(question="q", gold_answer=["needle"], metadata={})
+    response = Response(
+        instance=instance, request=task.format_request(instance), outputs=[LMOutput(text=" VAR A.")]
+    )
+
+    task.strip_thinking_traces([response])
+
+    assert "original_text" not in response.outputs[0].metadata

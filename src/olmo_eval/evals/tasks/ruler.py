@@ -236,14 +236,24 @@ class RulerTask(Task):
         return (self.config.task_settings or {}).get("answer_cut") == "before_question"
 
     def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
-        """Strip thinking traces, then apply the ``:v2`` scoring rules (idempotent)."""
+        """Strip thinking traces, then apply the ``:v2`` scoring rules (idempotent).
+
+        As the base class does, a changed output keeps its text in
+        ``metadata["original_text"]``.
+        """
         super().strip_thinking_traces(responses)
         for response in responses:
             for output in response.outputs:
+                text = output.text or ""
                 if self.scores_overflow_zero and output.metadata.get(CONTEXT_CUT_TOKENS_KEY):
-                    output.text = ""
-                elif self.cuts_answer and output.text:
-                    output.text = output.text.partition("Question:")[0]
+                    kept = ""
+                elif self.cuts_answer:
+                    kept = text.partition("Question:")[0]
+                else:
+                    continue
+                if kept != text:
+                    output.metadata.setdefault("original_text", text)
+                    output.text = kept
 
     @property
     def request_type(self) -> RequestType:
