@@ -14,6 +14,10 @@ from olmo_eval.common.scoring_failures import (
 )
 from olmo_eval.common.types import Response, SamplingParams
 from olmo_eval.evals.tasks.common import Task, get_task
+from olmo_eval.evals.tasks.common.final_answer import (
+    score_with_answer_region,
+    validate_final_answer_only,
+)
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker, summarize_failed_instances
 from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE, TaskResult
 from olmo_eval.runners.io.builders import build_predictions, build_requests_from_responses
@@ -47,6 +51,7 @@ def configure_task(
 
     # Always update task config with final sampling params (so finalize_task captures them)
     task.config = replace(task.config, sampling_params=existing_params)
+    validate_final_answer_only(task)
     return task
 
 
@@ -175,8 +180,7 @@ async def finalize_task(
     # Sort responses by index (only successful ones)
     responses = [tracker.responses[i] for i in sorted(tracker.responses.keys())]
 
-    tracker.task.strip_thinking_traces(responses)
-    scored = await tracker.task.score_responses(responses)
+    scored = await score_with_answer_region(tracker.task, responses)
     return compute_task_metrics(
         spec=tracker.spec,
         task=tracker.task,

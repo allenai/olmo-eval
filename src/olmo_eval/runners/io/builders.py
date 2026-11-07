@@ -93,6 +93,9 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
             if "original_text" in meta:
                 out_data["original_text"] = meta["original_text"]
 
+            if "final_answer_gate" in meta:
+                out_data["final_answer_gate"] = meta["final_answer_gate"]
+
             # Include execution result if present
             if "execution_result" in meta:
                 out_data["execution_result"] = meta["execution_result"]
@@ -141,6 +144,10 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
             "instance_metrics": instance_metrics,
             "label": label,
         }
+
+        if any("final_answer_gate" in (out.metadata or {}) for out in resp.outputs):
+            # Numeric labels may be choice indices rather than the scorer's gold text.
+            prediction["gold_answer"] = resp.instance.gold_answer
 
         # Add judge result if present (LLM-as-judge tasks)
         if "judge_result" in resp.instance.metadata:
