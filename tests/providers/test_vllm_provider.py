@@ -15,6 +15,7 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.inference.providers.vllm import VLLMProvider
+from olmo_eval.inference.tokenizer_utils import default_prefix_ids
 
 
 class FakeVllmModule(ModuleType):
@@ -35,7 +36,11 @@ def test_build_sampling_params_passes_none_max_tokens_through(monkeypatch) -> No
 
 
 class FakeTokenizer:
-    def __init__(self) -> None:
+    """Character-level tokenizer; with a bos_token_id it adds BOS like Gemma or Llama 3."""
+
+    def __init__(self, bos_token_id: int | None = None) -> None:
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = None
         self.template_calls: list[dict[str, object]] = []
         self.encode_calls: list[dict[str, object]] = []
 
@@ -53,7 +58,9 @@ class FakeTokenizer:
             }
         )
         rendered_messages = "|".join(f"{m['role']}:{m['content']}" for m in messages)
-        return f"<chat>{rendered_messages}<assistant>"
+        # Like Gemma's and Llama 3's templates, write BOS into the text
+        bos = chr(self.bos_token_id) if self.bos_token_id is not None else ""
+        return f"{bos}<chat>{rendered_messages}<assistant>"
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
         self.encode_calls.append(
@@ -62,7 +69,13 @@ class FakeTokenizer:
                 "add_special_tokens": add_special_tokens,
             }
         )
-        return [ord(char) for char in text]
+        ids = [ord(char) for char in text]
+        if add_special_tokens and self.bos_token_id is not None:
+            return [self.bos_token_id, *ids]
+        return ids
+
+    def decode(self, ids: list[int]) -> str:
+        return "".join(chr(i) for i in ids)
 
 
 class FakeLLM:
@@ -89,7 +102,16 @@ class FakeLLM:
         completion = SimpleNamespace(
             text="ok", logprobs=None, finish_reason="length", token_ids=[7]
         )
-        return [SimpleNamespace(outputs=[completion]) for _ in prompts]
+        return [
+            SimpleNamespace(
+                outputs=[completion],
+                # Every input token is the argmax with log-prob -0.5
+                prompt_logprobs=[None] + [{t: -0.5} for t in p["prompt_token_ids"][1:]]
+                if isinstance(p, dict)
+                else None,
+            )
+            for p in prompts
+        ]
 
 
 @pytest.fixture
@@ -99,7 +121,7 @@ def fake_provider() -> tuple[VLLMProvider, FakeLLM, FakeTokenizer]:
     provider = VLLMProvider.__new__(VLLMProvider)
     provider.model_name = "test-model"
     provider.llm = llm
-    provider._add_bos_token = None
+    provider._prefix_ids = []
     provider._build_sampling_params = lambda params: "fake-sampling-params"
     return provider, llm, tokenizer
 
@@ -123,30 +145,71 @@ def test_generate_formats_chat_messages_with_template(
             "add_generation_prompt": True,
         }
     ]
-    assert llm.generate_calls[0]["prompts"] == ["<chat>user:Hello<assistant>"]
-
-
-def test_generate_tokenizes_formatted_chat_prompt_when_bos_disabled(
-    fake_provider: tuple[VLLMProvider, FakeLLM, FakeTokenizer],
-) -> None:
-    provider, llm, tokenizer = fake_provider
-    provider._add_bos_token = False
-    request = LMRequest(
-        request_type=RequestType.CHAT,
-        messages=({"role": "user", "content": "Hello"},),
-    )
-
-    provider.generate([request], SamplingParams(max_tokens=1))
-
     assert tokenizer.encode_calls == [
-        {
-            "text": "<chat>user:Hello<assistant>",
-            "add_special_tokens": False,
-        }
+        {"text": "<chat>user:Hello<assistant>", "add_special_tokens": True}
     ]
     assert llm.generate_calls[0]["prompts"] == [
         {"prompt_token_ids": [ord(char) for char in "<chat>user:Hello<assistant>"]}
     ]
+
+
+def _bos_provider(monkeypatch) -> tuple[VLLMProvider, FakeLLM]:
+    """A provider whose tokenizer adds BOS (id 1) in front of every text."""
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.SamplingParams = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+    llm = FakeLLM(FakeTokenizer(bos_token_id=1))
+    provider = VLLMProvider.__new__(VLLMProvider)
+    provider.model_name = "test-model"
+    provider.llm = llm
+    provider._max_length = 4096
+    provider._prefix_ids = default_prefix_ids(llm.tokenizer)
+    provider._build_sampling_params = lambda params: "fake-sampling-params"
+    return provider, llm
+
+
+def test_chat_prompt_gets_one_bos_when_the_template_writes_it(monkeypatch) -> None:
+    provider, llm = _bos_provider(monkeypatch)
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": "Hi"},),
+    )
+
+    provider.generate([request], SamplingParams(max_tokens=1))
+
+    ids = llm.generate_calls[0]["prompts"][0]["prompt_token_ids"]
+    assert ids[:2] == [1, ord("<")]
+
+
+def test_generation_and_logprobs_start_with_the_tokenizer_bos(monkeypatch) -> None:
+    """Log-likelihood inputs start with BOS like generation prompts, and the
+    scored span is exactly the continuation."""
+    provider, llm = _bos_provider(monkeypatch)
+
+    provider.generate(
+        [LMRequest(request_type=RequestType.COMPLETION, prompt="ab")],
+        SamplingParams(max_tokens=1),
+    )
+    outputs = provider.logprobs(
+        [
+            LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt="ab",
+                continuations=(" cd",),
+            )
+        ]
+    )
+
+    generated = llm.generate_calls[0]["prompts"][0]["prompt_token_ids"]
+    scored = llm.generate_calls[1]["prompts"][0]["prompt_token_ids"]
+    assert generated == [1, ord("a"), ord("b")]
+    assert scored == [1, ord("a"), ord("b"), ord(" "), ord("c"), ord("d")]
+    assert [e["token_id"] for e in outputs[0][0].logprobs] == [ord(" "), ord("c"), ord("d")]
+
+
+def test_add_bos_token_is_rejected() -> None:
+    with pytest.raises(ValueError, match="add_bos_token was removed"):
+        VLLMProvider("test-model", add_bos_token=False)
 
 
 def test_generate_keeps_completion_prompt_unchanged(
@@ -158,7 +221,9 @@ def test_generate_keeps_completion_prompt_unchanged(
     provider.generate([request], SamplingParams(max_tokens=1))
 
     assert tokenizer.template_calls == []
-    assert llm.generate_calls[0]["prompts"] == ["Complete me"]
+    assert llm.generate_calls[0]["prompts"] == [
+        {"prompt_token_ids": [ord(char) for char in "Complete me"]}
+    ]
 
 
 def test_generate_preserves_termination_without_logprobs(fake_provider) -> None:
@@ -170,11 +235,29 @@ def test_generate_preserves_termination_without_logprobs(fake_provider) -> None:
 
 
 class WordTokenizer(FakeTokenizer):
-    """One token per whitespace-separated word, with character offsets."""
+    """One token per whitespace-separated word, with character offsets; with a
+    bos_token_id it adds BOS, and reads a BOS its chat template wrote as one token."""
+
+    def __init__(self, bos_token_id: int | None = None) -> None:
+        super().__init__(bos_token_id)
+        self.pieces: list[str] = []
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
         super().encode(text, add_special_tokens)
-        return list(range(len(text.split())))
+        ids = []
+        if add_special_tokens and self.bos_token_id is not None:
+            ids.append(self.bos_token_id)
+        if self.bos_token_id is not None and text.startswith(chr(self.bos_token_id)):
+            ids.append(self.bos_token_id)
+            text = text[1:]
+        for piece in re.findall(r"\s*\S+\s*", text):
+            if piece not in self.pieces:
+                self.pieces.append(piece)
+            ids.append(1000 + self.pieces.index(piece))
+        return ids
+
+    def decode(self, ids: list[int]) -> str:
+        return "".join(self.pieces[i - 1000] for i in ids if i >= 1000)
 
     def __call__(self, text, add_special_tokens=True, return_offsets_mapping=False):  # noqa: ANN001, ANN204
         return {"offset_mapping": [m.span() for m in re.finditer(r"\S+", text)]}
@@ -183,15 +266,22 @@ class WordTokenizer(FakeTokenizer):
 CONTEXT = "one two three four five six seven eight"
 
 
-def _cutting_provider(max_length: int) -> tuple[VLLMProvider, FakeLLM]:
-    llm = FakeLLM(WordTokenizer())
+def _cutting_provider(
+    max_length: int, bos_token_id: int | None = None
+) -> tuple[VLLMProvider, FakeLLM]:
+    llm = FakeLLM(WordTokenizer(bos_token_id))
     provider = VLLMProvider.__new__(VLLMProvider)
     provider.model_name = "test-model"
     provider.llm = llm
-    provider._add_bos_token = None
+    provider._prefix_ids = default_prefix_ids(llm.tokenizer)
     provider._max_length = max_length
     provider._build_sampling_params = lambda params: "fake-sampling-params"
     return provider, llm
+
+
+def _sent(llm: FakeLLM) -> list[str]:
+    """The prompts the provider sent, decoded back to text."""
+    return [llm.tokenizer.decode(p["prompt_token_ids"]) for p in llm.generate_calls[0]["prompts"]]
 
 
 def _completion(budget: int | None = None) -> LMRequest:
@@ -208,7 +298,7 @@ def test_a_prompt_within_budget_is_sent_unchanged() -> None:
 
     output = provider.generate([request], SamplingParams(max_tokens=1))[0][0]
 
-    assert llm.generate_calls[0]["prompts"] == [request.prompt]
+    assert _sent(llm) == [request.prompt]
     assert CONTEXT_CUT_TOKENS_KEY not in output.metadata
 
 
@@ -220,9 +310,7 @@ def test_the_overflow_is_cut_from_the_end_of_the_context() -> None:
 
     output = provider.generate([_completion(budget=10)], SamplingParams(max_tokens=1))[0][0]
 
-    assert llm.generate_calls[0]["prompts"] == [
-        "Read this. one two three four five  Question: q\nAnswer:"
-    ]
+    assert _sent(llm) == ["Read this. one two three four five  Question: q\nAnswer:"]
     assert output.metadata[CONTEXT_CUT_TOKENS_KEY] == 3
 
 
@@ -232,7 +320,7 @@ def test_the_window_caps_the_budget_after_the_generation() -> None:
 
     output = provider.generate([_completion(budget=100)], SamplingParams(max_tokens=8))[0][0]
 
-    assert len(llm.generate_calls[0]["prompts"][0].split()) == 12
+    assert len(_sent(llm)[0].split()) == 12
     assert output.metadata[CONTEXT_CUT_TOKENS_KEY] == 1
 
 
@@ -247,10 +335,39 @@ def test_a_chat_request_is_counted_with_its_template() -> None:
     output = provider.generate([request], SamplingParams(max_tokens=1))[0][0]
 
     # counted as rendered: the template fuses into the first and last words, 12 against 10
-    assert llm.generate_calls[0]["prompts"] == [
+    assert _sent(llm) == [
         "<chat>user:Read this. one two three four five six  Question: q<assistant>"
     ]
     assert output.metadata[CONTEXT_CUT_TOKENS_KEY] == 2
+
+
+def test_the_bos_counts_against_the_budget() -> None:
+    # 13 words and the BOS the tokenizer adds: 14 fits a budget of 14, and 13 cuts a word
+    for budget, cut in ((14, 0), (13, 1)):
+        provider, llm = _cutting_provider(max_length=100, bos_token_id=1)
+
+        output = provider.generate([_completion(budget=budget)], SamplingParams(max_tokens=1))[0][0]
+
+        sent = llm.generate_calls[0]["prompts"][0]["prompt_token_ids"]
+        assert len(sent) == budget
+        assert output.metadata.get(CONTEXT_CUT_TOKENS_KEY, 0) == cut
+
+
+def test_a_bos_the_chat_template_writes_is_counted_once() -> None:
+    # 12 rendered words and one BOS, as sent: the template's BOS is not doubled
+    provider, llm = _cutting_provider(max_length=100, bos_token_id=1)
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": f"Read this. {CONTEXT} Question: q"},),
+        context_fit=ContextFit(text=CONTEXT, max_prompt_tokens=13),
+    )
+
+    output = provider.generate([request], SamplingParams(max_tokens=1))[0][0]
+
+    sent = llm.generate_calls[0]["prompts"][0]["prompt_token_ids"]
+    assert sent[:2] != [1, 1]
+    assert len(sent) == 13
+    assert CONTEXT_CUT_TOKENS_KEY not in output.metadata
 
 
 def test_text_that_is_not_in_the_prompt_is_refused() -> None:

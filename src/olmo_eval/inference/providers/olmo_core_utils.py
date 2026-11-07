@@ -23,7 +23,6 @@ class TokenizerProtocol(Protocol):
     pad_token_id: int | None
     eos_token_id: int | None
     model_max_length: int
-    add_bos_token: bool
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]: ...
 

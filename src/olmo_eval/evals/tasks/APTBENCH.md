@@ -152,10 +152,6 @@ kept.
 
 ## Differences from upstream
 
-- **BOS token.** Upstream's offline vLLM tokenizes with the tokenizer's
-  defaults, which add BOS for models that use one (e.g. Llama). The
-  `vllm_server` provider sends no special tokens unless you pass
-  `-o provider.kwargs.add_bos_token=true`.
 - **Flex match.** For `summ_ans_*`, upstream also prints a secondary "flex"
   accuracy that ignores surrounding quotes. It is not implemented.
 - **ROUGE.** Upstream also prints ROUGE-1/2/L, tokenized with a Llama-3

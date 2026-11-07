@@ -18,7 +18,12 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.request_utils import chat_messages_for_request
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.tokenizer_utils import (
+    default_prefix_ids,
+    encode_context_and_continuation,
+    encode_prompt,
+    reject_add_bos_token,
+)
 
 logger = get_logger(__name__)
 
@@ -275,7 +280,6 @@ class HuggingFaceProvider(InferenceProvider):
             "gpu_memory_utilization",
             "attention_backend",
             "use_tqdm_on_load",
-            "add_bos_token",
             "max_model_len",
             "load_format",
             "model_loader_extra_config",
@@ -325,6 +329,7 @@ class HuggingFaceProvider(InferenceProvider):
                 set aside for it.
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
+        reject_add_bos_token(model_kwargs)
         # Strip kwargs meant for other providers (e.g., vLLM)
         for key in self._IGNORED_KWARGS:
             model_kwargs.pop(key, None)
@@ -351,6 +356,8 @@ class HuggingFaceProvider(InferenceProvider):
             self._init_text(model_name, tokenizer, model_kwargs)
         self.model.to(self.device)
         self.model.eval()
+        # Generation prompts and log-likelihood contexts both start with this
+        self._prefix_ids: list[int] = default_prefix_ids(self.tokenizer)
 
     def _init_text(
         self, model_name: str, tokenizer: str | None, model_kwargs: dict[str, Any]
@@ -417,6 +424,17 @@ class HuggingFaceProvider(InferenceProvider):
         _reinit_rope_buffers(self.model)
         _patch_molmo2_generation_cache_position(self.model)
         self.tokenizer = self.processor.tokenizer
+
+    def _generation_prompt_ids(self, prompt: str) -> list[int]:
+        """Token IDs of a generation prompt; they start like log-likelihood contexts."""
+        return encode_prompt(self.tokenizer, prompt, self._prefix_ids)
+
+    def _encode_generation_prompt(self, prompt: str) -> Any:
+        """Tokenize a generation prompt into model inputs."""
+        import torch
+
+        ids = torch.tensor([self._generation_prompt_ids(prompt)], device=self.device)
+        return {"input_ids": ids, "attention_mask": torch.ones_like(ids)}
 
     def get_tokenizer(self) -> Any:
         """Get the tokenizer for this provider."""
@@ -586,8 +604,7 @@ class HuggingFaceProvider(InferenceProvider):
 
         results = []
         for request in requests:
-            prompt = request.prompt
-            encoded = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+            encoded = self._encode_generation_prompt(request.prompt)
             prompt_len = encoded["input_ids"].shape[1]
             gen_kwargs = self._build_generate_kwargs(params, prompt_len)
 
@@ -657,7 +674,11 @@ class HuggingFaceProvider(InferenceProvider):
         if request.request_type != RequestType.LOGLIKELIHOOD:
             # Pass the prompt length so an uncapped (max_tokens=None) trace shows the
             # same per-prompt max_new_tokens budget that generate() will use.
-            prompt_len = len(self.tokenizer.encode(request.prompt)) if request.prompt else 0
+            prompt_len = (
+                self._encode_generation_prompt(request.prompt)["input_ids"].shape[1]
+                if request.prompt
+                else 0
+            )
             trace["provider"] = "HuggingFaceProvider"
             trace["endpoint"] = "transformers.generate"
             trace["generation_kwargs"] = {
@@ -693,7 +714,7 @@ class HuggingFaceProvider(InferenceProvider):
                 prompt = cont_prompts[i] if cont_prompts else request.prompt
                 # Use shared utility for BOS handling and trailing space logic
                 context_enc, continuation_enc = encode_context_and_continuation(
-                    self.tokenizer, prompt, continuation
+                    self.tokenizer, prompt, continuation, prefix_ids=self._prefix_ids
                 )
 
                 # Build full sequence as tensor

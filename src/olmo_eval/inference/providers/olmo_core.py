@@ -14,8 +14,11 @@ from olmo_eval.common.debug import is_debug_requests
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import (
+    default_prefix_ids,
     encode_context_and_continuation,
+    encode_prompt,
     get_bos_token_ids,
+    reject_add_bos_token,
 )
 
 if TYPE_CHECKING:
@@ -30,17 +33,6 @@ _OLMO_CORE_CONFIG_LOG_PREFIXES = ("TransformerConfig(", "GenerationConfig(")
 class _OlmoCoreConfigLogFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return not record.getMessage().startswith(_OLMO_CORE_CONFIG_LOG_PREFIXES)
-
-
-class _TokenizerBosOverride:
-    """Tokenizer proxy that gives logprob encoding the provider's BOS setting."""
-
-    def __init__(self, tokenizer: core_utils.TokenizerProtocol, add_bos_token: bool) -> None:
-        self._tokenizer = tokenizer
-        self.add_bos_token = add_bos_token
-
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._tokenizer, name)
 
 
 class OlmoCoreProvider(InferenceProvider):
@@ -73,9 +65,9 @@ class OlmoCoreProvider(InferenceProvider):
         token: str | None = None,
         cache_dir: str | None = None,
         local_files_only: bool = False,
-        add_bos_token: bool = False,
         **kwargs: object,
     ) -> None:
+        reject_add_bos_token(kwargs)
         max_model_len = core_utils._resolve_max_model_len_alias(max_model_len, kwargs)
         core_utils._validate_max_model_len(max_model_len)
         core_utils._validate_batch_size(batch_size)
@@ -117,7 +109,8 @@ class OlmoCoreProvider(InferenceProvider):
             tokenizer_path,
             **tokenizer_kwargs,
         )
-        self.add_bos_token = add_bos_token
+        # Generation prompts and log-likelihood contexts both start with this
+        self._prefix_ids: list[int] = default_prefix_ids(self.tokenizer)
 
         resolved_pad_token_id, resolved_eos_token_id = core_utils._validate_token_ids(
             checkpoint_dir=model_name,
@@ -292,10 +285,7 @@ class OlmoCoreProvider(InferenceProvider):
         ]
 
     def _encode_prompt(self, prompt: str) -> list[int]:
-        token_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
-        if self.add_bos_token:
-            return get_bos_token_ids(self.tokenizer, fallback_to_eos=True) + token_ids
-        return token_ids
+        return encode_prompt(self.tokenizer, prompt, self._prefix_ids)
 
     def _format_prompt(self, request: LMRequest) -> str:
         if request.request_type == RequestType.CHAT and request.messages:
@@ -310,21 +300,16 @@ class OlmoCoreProvider(InferenceProvider):
             return self.tokenizer.apply_chat_template(list(request.messages), **kwargs)
         return request.prompt
 
-    def _logprob_tokenizer(self) -> core_utils.TokenizerProtocol:
-        return cast(
-            core_utils.TokenizerProtocol,
-            _TokenizerBosOverride(self.tokenizer, self.add_bos_token),
-        )
-
     def _encode_logprob_context_and_continuation(
         self,
         prompt: str,
         continuation: str,
     ) -> tuple[list[int], list[int]]:
         context_ids, continuation_ids = encode_context_and_continuation(
-            self._logprob_tokenizer(),
+            self.tokenizer,
             prompt,
             continuation,
+            prefix_ids=self._prefix_ids,
         )
         if continuation_ids and not context_ids:
             context_ids = get_bos_token_ids(self.tokenizer, fallback_to_eos=True) or [
