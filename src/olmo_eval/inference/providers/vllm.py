@@ -267,12 +267,12 @@ class VLLMProvider(InferenceProvider):
         room = self.max_length - (max_tokens or 0)
         budget = room if fit.max_prompt_tokens is None else min(fit.max_prompt_tokens, room)
         tokenizer = self.llm.get_tokenizer()
-        add_special_tokens = self._add_bos_token is not False
 
         text, cut_tokens = fit.text, 0
         for _ in range(self._CONTEXT_FIT_PASSES):
             prompt = self._format_prompt(request)
-            prompt_tokens = len(tokenizer.encode(prompt, add_special_tokens=add_special_tokens))
+            # counted as generate() sends it: with the prefix, once
+            prompt_tokens = len(encode_prompt(tokenizer, prompt, self._prefix_ids))
             if prompt_tokens <= budget or not text:
                 break
             offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)[

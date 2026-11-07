@@ -72,7 +72,7 @@ mismatch or a recovery of the original random choices. Prefer original scored me
 otherwise retain the reconciled loose analysis and keep reconstructed strict labels
 separate and provisional. Do not choose seeds or parameters to fit aggregate totals.
 
-## 2026-11-02: One BOS rule for every provider; `add_bos_token` removed (#TBD)
+## 2026-11-02: One BOS rule for every provider; `add_bos_token` removed (#530)
 
 - **Affected**: every log-likelihood request (multiple-choice, ranked-classification,
   bits-per-byte, LAMBADA-style and long-context likelihood tasks) in the `vllm`,
@@ -97,7 +97,9 @@ separate and provisional. Do not choose seeds or parameters to fit aggregate tot
     0.125 without BOS, 0.6 with it).
   - In-process `vllm` chat requests on models whose chat template writes BOS (LFM2.5;
     instruct models such as Gemma 3 and Llama 3.2) had BOS twice; they now have it once.
-    `vllm_server` chat requests were already correct.
+    `vllm_server` chat requests were already correct. The in-process context fit
+    (`ContextFit`, #529) counts a prompt as it is now sent, so such a prompt is no longer
+    counted one token too long.
   - Runs that set `add_bos_token=false` (the `olmo-3-1025-7b` preset; `vllm`, where it
     also applied to generation) or `true` (the safety judges on `vllm_server`) now follow
     the tokenizer; for the tokenizers they used, the inputs are the same.
