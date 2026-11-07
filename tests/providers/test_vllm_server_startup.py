@@ -78,7 +78,7 @@ class TestVLLMServerStartupTimeout:
         mock_process.wait.return_value = 0
 
         # Create a log file with error content
-        log_file = log_dir / "vllm_server.log"
+        log_file = log_dir / "vllm_server_8000.log"
         log_content = "CUDA out of memory error"
         log_file.write_text(log_content)
 
