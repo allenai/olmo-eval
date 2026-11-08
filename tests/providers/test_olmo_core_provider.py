@@ -14,6 +14,7 @@ import olmo_eval.inference.providers.olmo_core_utils as olmo_core_utils
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.providers.olmo_core import OlmoCoreProvider
 from olmo_eval.inference.providers.olmo_core_utils import _TRANSFORMERS_UNSET_MODEL_MAX_LENGTH
+from olmo_eval.inference.tokenizer_utils import default_prefix_ids
 
 
 class FakeTokenizerConfig:
@@ -32,8 +33,9 @@ class FakeTokenizer:
     bos_token_id = 1
     model_max_length = 32
 
-    def __init__(self) -> None:
-        self.add_bos_token = False
+    def __init__(self, adds_bos: bool = False) -> None:
+        # Like dolma2 by default: encoding adds no special tokens
+        self.adds_bos = adds_bos
         self.encode_calls: list[dict[str, Any]] = []
         self.decode_calls: list[list[int]] = []
         self.vocab = {
@@ -73,9 +75,9 @@ class FakeTokenizer:
             token_ids = self.vocab[text]
         else:
             token_ids = [ord(char) % 13 + 3 for char in text]
-        if add_special_tokens:
+        if add_special_tokens and self.adds_bos:
             return [self.bos_token_id, *token_ids]
-        return token_ids
+        return list(token_ids)
 
     def decode(self, token_ids: int | list[int], skip_special_tokens: bool = True) -> str:
         if isinstance(token_ids, int):
@@ -229,7 +231,7 @@ def fake_provider() -> tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokeniz
     provider.pad_token_id = tokenizer.pad_token_id
     provider.eos_token_id = tokenizer.eos_token_id
     provider.use_cache = True
-    provider.add_bos_token = False
+    provider._prefix_ids = []
     provider.batch_size = None
     provider.chat_template = None
     provider.max_length = 32
@@ -262,7 +264,7 @@ def test_provider_loads_checkpoint_with_olmes_defaults(tmp_path, monkeypatch) ->
     checkpoint_kwargs = provider.generation_module.checkpoint_kwargs
     generation_config = checkpoint_kwargs["generation_config"]
     assert provider.max_length == 4096
-    assert provider.add_bos_token is False
+    assert provider._prefix_ids == default_prefix_ids(provider.tokenizer)
     assert provider.pad_token_id == 0
     assert provider.eos_token_id == 2
     assert provider.tokenizer.pad_token_id == 0
@@ -400,32 +402,17 @@ def test_generate_left_truncates_to_leave_completion_room(
     assert module.generate_calls == []
 
 
-def test_generation_encoding_uses_provider_bos_flag(
+@pytest.mark.parametrize(("adds_bos", "prefix"), [(False, []), (True, [1])])
+def test_generation_and_logprob_encoding_follow_the_tokenizer(
     fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
+    adds_bos: bool,
+    prefix: list[int],
 ) -> None:
     provider, _, tokenizer = fake_provider
-    tokenizer.add_bos_token = True
+    tokenizer.adds_bos = adds_bos
+    provider._prefix_ids = default_prefix_ids(tokenizer)
 
-    assert provider._encode_prompt("Prompt") == [10, 11]
-    assert tokenizer.encode_calls[-1] == {
-        "text": "Prompt",
-        "add_special_tokens": False,
-    }
-
-    provider.add_bos_token = True
-    assert provider._encode_prompt("Prompt") == [1, 10, 11]
-    assert tokenizer.encode_calls[-1] == {
-        "text": "Prompt",
-        "add_special_tokens": False,
-    }
-
-
-def test_logprob_encoding_uses_provider_bos_flag(
-    fake_provider: tuple[OlmoCoreProvider, FakeGenerationModule, FakeTokenizer],
-) -> None:
-    provider, _, tokenizer = fake_provider
-    tokenizer.add_bos_token = True
-
+    assert provider._encode_prompt("Prompt") == [*prefix, 10, 11]
     rows = provider._logprob_inputs_for_request(
         LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
@@ -433,19 +420,13 @@ def test_logprob_encoding_uses_provider_bos_flag(
             continuations=("!",),
         )
     )
-    assert rows[0].input_ids == [10, 11]
+    assert rows[0].input_ids == [*prefix, 10, 11]
     assert rows[0].continuation_token_ids == [6]
 
-    provider.add_bos_token = True
-    rows = provider._logprob_inputs_for_request(
-        LMRequest(
-            request_type=RequestType.LOGLIKELIHOOD,
-            prompt="Prompt",
-            continuations=("!",),
-        )
-    )
-    assert rows[0].input_ids == [1, 10, 11]
-    assert rows[0].continuation_token_ids == [6]
+
+def test_add_bos_token_is_rejected() -> None:
+    with pytest.raises(ValueError, match="add_bos_token was removed"):
+        OlmoCoreProvider("fake-model", add_bos_token=False)
 
 
 def test_logprob_encoding_adds_prefix_when_context_tokenizes_empty(

@@ -42,6 +42,7 @@ from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import REQUEST_ERROR_KEY
 from olmo_eval.inference.providers.olmo_core_vlm import cache, checkpoint, preprocessing
 from olmo_eval.inference.request_utils import chat_messages_for_request
+from olmo_eval.inference.tokenizer_utils import reject_add_bos_token
 
 if TYPE_CHECKING:
     import torch
@@ -53,7 +54,6 @@ _IGNORED_KWARGS = frozenset(
     {
         "gpu_memory_utilization",
         "use_tqdm_on_load",
-        "add_bos_token",
         "load_format",
         "model_loader_extra_config",
         "enable_auto_tool_choice",
@@ -137,6 +137,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
             )
         if batch_size is not None and (not isinstance(batch_size, int) or batch_size <= 0):
             raise ValueError("OlmoCoreVLMProvider batch_size must be a positive integer or None")
+        reject_add_bos_token(kwargs)
         for key in list(kwargs):
             if key in _IGNORED_KWARGS:
                 kwargs.pop(key)

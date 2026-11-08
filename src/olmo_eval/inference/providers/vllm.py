@@ -19,7 +19,12 @@ from olmo_eval.common.types import (
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.providers.vllm_server import _replace_context_text
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.tokenizer_utils import (
+    default_prefix_ids,
+    encode_context_and_continuation,
+    encode_prompt,
+    reject_add_bos_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +135,8 @@ class VLLMProvider(InferenceProvider):
                 before initializing vLLM.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
+        reject_add_bos_token(engine_kwargs)
+
         # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_PROVIDER=1, otherwise WARNING
         if is_debug_provider():
             os.environ["VLLM_LOGGING_LEVEL"] = "DEBUG"
@@ -185,12 +192,9 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm loading bar by default, enable with --debug-provider
         engine_kwargs.setdefault("use_tqdm_on_load", is_debug_provider())
 
-        # Extract add_bos_token before passing to LLM (not a valid vLLM EngineArgs parameter).
-        # When False, prompts will be pre-tokenized without special tokens and passed as token IDs,
-        # matching the old framework's behavior (tokenizer(text, add_special_tokens=False)).
-        self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
-
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
+        # Generation prompts and log-likelihood contexts both start with this
+        self._prefix_ids: list[int] = default_prefix_ids(self.llm.get_tokenizer())
 
     @property
     def max_length(self) -> int:
@@ -202,26 +206,6 @@ class VLLMProvider(InferenceProvider):
     def get_tokenizer(self) -> Any:
         """Get the tokenizer for this provider."""
         return self.llm.get_tokenizer()
-
-    def _encode_pair(self, context: str, continuation: str) -> tuple[list[int], list[int]]:
-        """Encode context and continuation separately (robust to non-additive tokenization).
-
-        Matches lm_eval behavior: trailing spaces from context are moved to continuation
-        before tokenization to ensure consistent token boundaries.
-        """
-        tokenizer = self.llm.get_tokenizer()
-
-        # Match lm_eval behavior: move trailing spaces from context to continuation
-        n_spaces = len(context) - len(context.rstrip())
-        if n_spaces > 0:
-            continuation = context[-n_spaces:] + continuation
-            context = context[:-n_spaces]
-
-        whole_enc = tokenizer.encode(context + continuation, add_special_tokens=False)
-        context_enc = tokenizer.encode(context, add_special_tokens=False)
-        continuation_enc = whole_enc[len(context_enc) :]
-
-        return context_enc, continuation_enc
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
         """Convert SamplingParams to vLLM SamplingParams."""
@@ -283,12 +267,12 @@ class VLLMProvider(InferenceProvider):
         room = self.max_length - (max_tokens or 0)
         budget = room if fit.max_prompt_tokens is None else min(fit.max_prompt_tokens, room)
         tokenizer = self.llm.get_tokenizer()
-        add_special_tokens = self._add_bos_token is not False
 
         text, cut_tokens = fit.text, 0
         for _ in range(self._CONTEXT_FIT_PASSES):
             prompt = self._format_prompt(request)
-            prompt_tokens = len(tokenizer.encode(prompt, add_special_tokens=add_special_tokens))
+            # counted as generate() sends it: with the prefix, once
+            prompt_tokens = len(encode_prompt(tokenizer, prompt, self._prefix_ids))
             if prompt_tokens <= budget or not text:
                 break
             offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)[
@@ -320,17 +304,12 @@ class VLLMProvider(InferenceProvider):
             for i, prompt in enumerate(prompt_strs):
                 logger.info(f"Prompt {i}:\n{prompt}")
 
-        # When add_bos_token=False, pre-tokenize without special tokens and pass token IDs.
-        # This bypasses vLLM's internal tokenization, matching the old framework behavior of
-        # calling tokenizer(text, add_special_tokens=False) before passing to vLLM.
-        if self._add_bos_token is False:
-            tokenizer = self.llm.get_tokenizer()
-            vllm_prompts: list = [
-                {"prompt_token_ids": tokenizer.encode(p, add_special_tokens=False)}
-                for p in prompt_strs
-            ]
-        else:
-            vllm_prompts = prompt_strs
+        # Tokenized here, like log-likelihood contexts: a prompt whose chat template
+        # already wrote BOS does not get a second one.
+        tokenizer = self.llm.get_tokenizer()
+        vllm_prompts = [
+            {"prompt_token_ids": encode_prompt(tokenizer, p, self._prefix_ids)} for p in prompt_strs
+        ]
 
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
@@ -406,7 +385,7 @@ class VLLMProvider(InferenceProvider):
         if getattr(vllm_params, "top_k", None) is not None:
             trace["generation_kwargs"]["top_k"] = vllm_params.top_k
         trace["stop_sequences"] = list(params.stop_sequences or ())
-        trace["input_mode"] = "prompt_token_ids" if self._add_bos_token is False else "text"
+        trace["input_mode"] = "prompt_token_ids"
         return trace
 
     def logprobs(
@@ -443,7 +422,7 @@ class VLLMProvider(InferenceProvider):
             for i, continuation in enumerate(continuations):
                 prompt = cont_prompts[i] if cont_prompts else request.prompt
                 context_enc, continuation_enc = encode_context_and_continuation(
-                    tokenizer, prompt, continuation
+                    tokenizer, prompt, continuation, prefix_ids=self._prefix_ids
                 )
 
                 # Calculate overflow and left-truncate to max_length - 1
