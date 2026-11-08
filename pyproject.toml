@@ -111,6 +111,10 @@ vllm = [
     "grpcio==1.80.0 ; sys_platform != 'darwin'",
     "mistral-common==1.11.0 ; sys_platform != 'darwin'",
     "protobuf==5.29.6 ; sys_platform != 'darwin'",
+    # sentencepiece 0.2.3 (2026-11-05) ships protobuf 7 gencode, which the pinned
+    # protobuf 5.29.6 runtime refuses: loading a slow tokenizer (e.g. WildGuard's)
+    # fails with a VersionError.
+    "sentencepiece==0.2.1 ; sys_platform != 'darwin'",
     "xgrammar==0.1.34 ; sys_platform != 'darwin'",
 ]
 litellm = [
@@ -247,6 +251,7 @@ vllm = [
     "grpcio==1.80.0 ; sys_platform != 'darwin'",
     "mistral-common==1.11.0 ; sys_platform != 'darwin'",
     "protobuf==5.29.6 ; sys_platform != 'darwin'",
+    "sentencepiece==0.2.1 ; sys_platform != 'darwin'",
     "transformers==5.12.1 ; sys_platform != 'darwin'",
     "xgrammar==0.1.34 ; sys_platform != 'darwin'",
 ]
