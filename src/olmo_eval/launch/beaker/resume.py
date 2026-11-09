@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 from olmo_eval.common.constants.infrastructure import (
     BEAKER_DEFAULT_RESUME_RETENTION_DAYS,
+    RESUME_COPY_RESULTS_ENV,
     SHARED_RUN_ENV,
 )
 
@@ -92,6 +93,21 @@ def _checksum(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def copy_results(output: Path, results: Path) -> None:
+    """Copy the run's output, without its progress records, into the Beaker results.
+
+    Opt-in (RESUME_COPY_RESULTS_ENV=1) for launches that read results from the Beaker
+    result dataset (for example with --no-upload): otherwise they live only on WEKA,
+    where they expire after the retention period.
+    """
+    shutil.copytree(
+        output,
+        results,
+        dirs_exist_ok=True,
+        ignore=lambda directory, _names: ["progress"] if Path(directory) == output else [],
+    )
+
+
 def run_shared(
     root: Path,
     run_uuid: str,
@@ -101,8 +117,15 @@ def run_shared(
     refresh_seconds: float = REFRESH_SECONDS,
     volume: str | None = None,
     retention_days: int = BEAKER_DEFAULT_RESUME_RETENTION_DAYS,
+    copy_output: bool | None = None,
 ) -> int:
-    """Run once or resume under exclusive ownership; return the child's exit status."""
+    """Run once or resume under exclusive ownership; return the child's exit status.
+
+    With `copy_output` (default: RESUME_COPY_RESULTS_ENV is "1"), the output is also
+    copied into `results` once the child has exited, whatever its exit code.
+    """
+    if copy_output is None:
+        copy_output = os.environ.get(RESUME_COPY_RESULTS_ENV) == "1"
     if str(uuid.UUID(run_uuid)) != run_uuid:
         raise ValueError("run UUID must be a canonical UUID")
     if not root.is_dir() or root.is_symlink():
@@ -154,6 +177,8 @@ def run_shared(
                 path = output / name
                 if not path.is_file() or _checksum(path) != digest:
                     raise RuntimeError(f"Completed WEKA run is missing or changed: {path}")
+            if copy_output:
+                copy_results(output, results)
             write_atomic(
                 receipt_path,
                 {**receipt, "status": "complete", "run_id": saved.get("run_id"), "exit_code": 0},
@@ -224,6 +249,8 @@ def run_shared(
             write_atomic(session, {**json.loads(session.read_text()), "completed": True})
             if (output / "progress").exists():
                 shutil.rmtree(output / "progress")
+        if copy_output:
+            copy_results(output, results)
         refresh_files(directory)
         write_atomic(
             receipt_path,
