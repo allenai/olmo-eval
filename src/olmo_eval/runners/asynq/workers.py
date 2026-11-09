@@ -26,6 +26,24 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# vLLM finds its torch.distributed port by binding port 0 and closing the socket, then
+# binds the number again later. In between, another worker starting at the same time, or
+# any outgoing connection (whose source port comes from the same ephemeral range), can
+# take it, and the engine fails with DistNetworkError. With VLLM_PORT set, vLLM scans
+# upward from it instead, so each worker gets its own base, below the ephemeral range.
+VLLM_PORT_BASE = 20000
+VLLM_PORTS_PER_GPU = 100
+
+
+def set_vllm_port(gpu_ids: list[int]) -> None:
+    """Give this worker's vLLM engine a port range no other worker uses.
+
+    Workers own disjoint GPUs, so the lowest GPU ID identifies the worker. A VLLM_PORT
+    already in the environment is left alone.
+    """
+    if gpu_ids and "VLLM_PORT" not in os.environ:
+        os.environ["VLLM_PORT"] = str(VLLM_PORT_BASE + VLLM_PORTS_PER_GPU * min(gpu_ids))
+
 
 def inference_worker(
     worker_id: str,
@@ -77,6 +95,7 @@ def inference_worker(
     try:
         if gpu_ids:
             os.environ["CUDA_VISIBLE_DEVICES"] = resolve_visible_devices(gpu_ids)
+        set_vllm_port(gpu_ids)
 
         provider_kind = str(provider_config.kind)
         tokenizer = provider_config.tokenizer
