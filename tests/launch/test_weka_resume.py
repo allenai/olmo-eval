@@ -718,3 +718,45 @@ def test_invalid_yaml_retention_rejected_before_launch(tmp_path, value):
     )
     with pytest.raises((SystemExit, ValueError)):
         LaunchConfigLoader(str(path), {}).load()
+
+
+def _write_output(code: int) -> list[str]:
+    return child(
+        "(out/'metrics.json').write_text('{}'); (out/'predictions').mkdir(exist_ok=True); "
+        "(out/'predictions/task.jsonl').write_text('row'); "
+        "s=out/'progress/model/run.segments'; s.mkdir(parents=True, exist_ok=True); "
+        f"(s/'seg.jsonl').write_text('x'); sys.exit({code})"
+    )
+
+
+@pytest.mark.parametrize("code", [0, 143])
+def test_copied_output_reaches_the_results_without_progress(shared, code):
+    root, run_uuid, results, _ = shared
+    assert run_shared(root, run_uuid, results, _write_output(code), copy_output=True) == code
+    assert (results / "metrics.json").read_text() == "{}"
+    assert (results / "predictions/task.jsonl").read_text() == "row"
+    assert not (results / "progress").exists()
+    assert json.loads((results / "weka-resume.json").read_text())["exit_code"] == code
+
+
+def test_a_replacement_of_a_completed_run_copies_its_output_again(shared):
+    root, run_uuid, results, _ = shared
+    command = _write_output(0)
+    assert run_shared(root, run_uuid, results, command, copy_output=True) == 0
+    replacement = results.parent / "replacement-results"
+    assert run_shared(root, run_uuid, replacement, command, copy_output=True) == 0
+    assert (replacement / "metrics.json").read_text() == "{}"
+    assert json.loads((replacement / "weka-resume.json").read_text())["status"] == "complete"
+
+
+def test_copying_is_off_unless_the_environment_asks_for_it(shared, monkeypatch):
+    root, run_uuid, results, _ = shared
+    monkeypatch.delenv("OLMO_EVAL_RESUME_COPY_RESULTS", raising=False)
+    assert run_shared(root, run_uuid, results, _write_output(0)) == 0
+    assert sorted(p.name for p in results.iterdir()) == ["weka-resume.json"]
+
+    another = str(uuid.uuid4())
+    other = results.parent / "other-results"
+    monkeypatch.setenv("OLMO_EVAL_RESUME_COPY_RESULTS", "1")
+    assert run_shared(root, another, other, _write_output(0)) == 0
+    assert (other / "metrics.json").exists()

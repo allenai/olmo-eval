@@ -23,6 +23,8 @@ BEAKER_DEFAULT_RESUME_VOLUME = "ai2/olmo-eval"
 BEAKER_DEFAULT_RESUME_RETENTION_DAYS = 7
 
 SHARED_RUN_ENV = "OLMO_EVAL_SHARED_RUN_DIR"
+RESUME_COPY_RESULTS_ENV = "OLMO_EVAL_RESUME_COPY_RESULTS"
+"""Set to 1 to also copy a resumable run's output (without progress/) into Beaker results."""
 
 BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64"
 """Default Docker image for Beaker evaluation jobs."""
