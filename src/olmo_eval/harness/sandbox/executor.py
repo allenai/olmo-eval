@@ -21,6 +21,7 @@ import aiohttp
 
 from olmo_eval.common.execution.environment import ExecutionResult
 
+from . import debug_trace
 from ._local_process import COMMAND_CLEANUP, COMMAND_SUPERVISOR
 from .config import SandboxConfig, SandboxMode
 from .diagnostics import start_internal_monitor
@@ -34,6 +35,10 @@ _TRANSPORT_RETRY_INITIAL_DELAY = 0.25
 _HEALTH_CHECK_RETRIES = 3
 _HEALTH_CHECK_RETRY_INITIAL_DELAY = 0.5
 _HEALTH_CHECK_TIMEOUT = 5.0
+# Debug (yashasbls/sandbox-trace): when set, a delivered command execution is retried on
+# any transport error, this many times, with jittered backoff from _EXEC_RETRY_BASE_ENV.
+_EXEC_RETRIES_ENV = "OLMO_EVAL_SANDBOX_EXEC_RETRIES"
+_EXEC_RETRY_BASE_ENV = "OLMO_EVAL_SANDBOX_RETRY_BASE"
 
 
 async def _read_bounded_output(stream: asyncio.StreamReader) -> bytes:
@@ -239,6 +244,7 @@ class SandboxExecutor:
             RuntimeError: If container runtime is not available.
         """
         self._log(logging.DEBUG, "Starting sandbox deployment...")
+        debug_trace.start_loop_monitor()
         prefix = f"[{self.name}] " if self.name else ""
 
         try:
@@ -623,6 +629,15 @@ class SandboxExecutor:
         """Execute an HTTP command without replaying a delivered request."""
         from swerex.runtime.abstract import Command
 
+        retry_kwargs: dict[str, Any] = {
+            "can_retry": lambda exc: isinstance(exc, aiohttp.ClientConnectorError)
+        }
+        if os.environ.get(_EXEC_RETRIES_ENV):
+            retry_kwargs = {
+                "can_retry": None,
+                "retries": int(os.environ[_EXEC_RETRIES_ENV]),
+                "initial_delay": float(os.environ.get(_EXEC_RETRY_BASE_ENV, "0.5")),
+            }
         try:
             response = await self._run_with_transport_retries(
                 lambda: asyncio.wait_for(
@@ -630,7 +645,7 @@ class SandboxExecutor:
                     timeout=effective_timeout + 1.0,
                 ),
                 operation="command execution",
-                can_retry=lambda exc: isinstance(exc, aiohttp.ClientConnectorError),
+                **retry_kwargs,
             )
         except SandboxTransportError:
             raise
@@ -1424,13 +1439,27 @@ class SandboxExecutor:
         *,
         operation: str,
         can_retry: Callable[[Exception], bool] | None = None,
+        retries: int = _TRANSPORT_RETRIES,
+        initial_delay: float = _TRANSPORT_RETRY_INITIAL_DELAY,
     ) -> _T:
         """Retry transient transport failures before considering quarantine."""
-        max_attempts = _TRANSPORT_RETRIES + 1
+        max_attempts = retries + 1
         for attempt in range(1, max_attempts + 1):
+            started, t0 = time.time(), time.monotonic()
             try:
                 result = await operation_fn()
             except Exception as exc:
+                debug_trace.record_call(
+                    ts=started,
+                    elapsed=round(time.monotonic() - t0, 3),
+                    sandbox=self.name,
+                    operation=operation,
+                    attempt=attempt,
+                    outcome="error",
+                    exc=type(exc).__name__,
+                    msg=str(exc)[:200],
+                    transport=self._is_transport_error(exc),
+                )
                 if not self._is_transport_error(exc):
                     raise
                 if attempt >= max_attempts or (can_retry is not None and not can_retry(exc)):
@@ -1439,7 +1468,7 @@ class SandboxExecutor:
                         f"{operation} failed after {attempt} transport attempt(s): {exc}"
                     ) from exc
                 delay = _exponential_backoff(
-                    _TRANSPORT_RETRY_INITIAL_DELAY,
+                    initial_delay,
                     attempt,
                 )
                 self._log(
@@ -1449,6 +1478,14 @@ class SandboxExecutor:
                 )
                 await asyncio.sleep(delay)
             else:
+                debug_trace.record_call(
+                    ts=started,
+                    elapsed=round(time.monotonic() - t0, 3),
+                    sandbox=self.name,
+                    operation=operation,
+                    attempt=attempt,
+                    outcome="ok",
+                )
                 if attempt > 1:
                     self._log(
                         logging.INFO,
