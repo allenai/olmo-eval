@@ -32,10 +32,10 @@ def artifact_home() -> Path:
     ).expanduser()
 
 
-def decrypt_string(value: str) -> str:
-    """Decode a reference dataset string using its published obfuscation key."""
+def decrypt_string(value: str, password: str = CANARY) -> str:
+    """Decode an obfuscated benchmark string with the key derived from its password."""
     encrypted = base64.b64decode(value)
-    digest = hashlib.sha256(CANARY.encode("utf-8")).digest()
+    digest = hashlib.sha256(password.encode("utf-8")).digest()
     key = digest * (len(encrypted) // len(digest)) + digest[: len(encrypted) % len(digest)]
     return bytes(a ^ b for a, b in zip(encrypted, key, strict=True)).decode("utf-8")
 

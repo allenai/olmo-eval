@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 
 from .registry import register_tool
 from .tool import Tool
@@ -21,10 +20,15 @@ async def call_retriever(tool_name: str, arguments: dict[str, str]) -> str:
     """Call a retrieval endpoint and return its JSON result."""
     import httpx
 
-    endpoint = os.environ.get("BROWSECOMP_PLUS_SEARCH_SERVER_URL", "http://127.0.0.1:8081")
+    from olmo_eval.evals.tasks.browsecomp_plus.retrieval.managed import (
+        ensure_retriever,
+        server_url,
+    )
+
+    await ensure_retriever()
     async with asyncio.timeout(180):
         async with httpx.AsyncClient(timeout=180) as client:
-            response = await client.post(f"{endpoint.rstrip('/')}/{tool_name}", json=arguments)
+            response = await client.post(f"{server_url()}/{tool_name}", json=arguments)
             response.raise_for_status()
             value = response.json()
     if tool_name == "search":

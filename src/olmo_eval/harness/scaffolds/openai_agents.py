@@ -39,6 +39,16 @@ DEFAULT_CHAT_TEMPLATE_KWARGS: dict[str, Any] = {"enable_thinking": False}
 _UNSUPPORTED: Any = object()
 
 
+def _is_context_length_error(exc: BaseException) -> bool:
+    """Whether the server rejected a request because the conversation outgrew the context."""
+    import openai
+
+    return isinstance(exc, openai.BadRequestError) and (
+        getattr(exc, "code", None) == "context_length_exceeded"
+        or "maximum context length" in str(exc).lower()
+    )
+
+
 def _resolve_chat_template_kwargs(provider: InferenceProvider) -> dict[str, Any] | None:
     """Resolve the ``chat_template_kwargs`` request field for a provider.
 
@@ -503,6 +513,19 @@ class OpenAIAgentsScaffold(Scaffold):
                     error=str(e),
                 )
             except Exception as e:
+                if _is_context_length_error(e):
+                    # The question cannot continue, but the run can: record it as an
+                    # unanswered instance with whatever trajectory was gathered.
+                    logger.warning(f"Agent run exceeded the model context length: {e}")
+                    return HarnessResult(
+                        trajectory=await self._session_trajectory(session),
+                        final_output=LMOutput(
+                            text="[Context length exceeded]",
+                            metadata={"context_length_exceeded": True},
+                        ),
+                        error=str(e),
+                    )
+
                 # Log full traceback for debugging connection issues
                 import traceback
 
@@ -667,6 +690,41 @@ class OpenAIAgentsScaffold(Scaffold):
                 )
                 turns.append(AgentTurn.tool([tool_result]))
 
+        return AgentTrajectory(turns=tuple(turns))
+
+    async def _session_trajectory(self, session: Any) -> AgentTrajectory:
+        """Recover the turns a session recorded before a run was cut short."""
+        if session is None:
+            return AgentTrajectory(turns=())
+        try:
+            items = await session.get_items()
+        except Exception:
+            logger.warning("Could not recover the partial trajectory", exc_info=True)
+            return AgentTrajectory(turns=())
+
+        turns: list[AgentTurn] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type == "function_call":
+                call = ToolCall.create(
+                    call_id=item.get("call_id", ""),
+                    name=item.get("name", ""),
+                    arguments=item.get("arguments", "{}"),
+                )
+                turns.append(AgentTurn.assistant(tool_calls=[call]))
+            elif item_type == "function_call_output":
+                output = item.get("output", "")
+                result = ToolResult(
+                    tool_call_id=item.get("call_id", ""),
+                    content=output if isinstance(output, str) else str(output),
+                )
+                turns.append(AgentTurn.tool([result]))
+            elif item.get("role") == "user" and isinstance(item.get("content"), str):
+                turns.append(AgentTurn.user(content=item["content"]))
+            elif item.get("role") == "assistant" and isinstance(item.get("content"), str):
+                turns.append(AgentTurn.assistant(content=item["content"]))
         return AgentTrajectory(turns=tuple(turns))
 
     def _convert_input_list_to_trajectory(self, input_list: list[Any]) -> AgentTrajectory:
