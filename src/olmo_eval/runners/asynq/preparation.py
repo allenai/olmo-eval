@@ -34,14 +34,20 @@ def configure_task(
     Overrides go through ``get_task`` so the task is constructed with them, and
     an explicit ``judge_model`` override takes precedence over ``$OLMO_EVAL_JUDGE``.
     """
+    overrides = dict(overrides or {})
+    nested_sampling = overrides.get("sampling_params")
+    if isinstance(nested_sampling, dict):
+        overrides.pop("sampling_params")
+    else:
+        nested_sampling = {}
     task = get_task(spec, overrides or None)
 
     # Build sampling params from overrides
     existing_params = task.config.sampling_params or SamplingParams()
 
     # Apply sampling_overrides
-    if sampling_overrides:
-        for key, value in sampling_overrides.items():
+    if nested_sampling or sampling_overrides:
+        for key, value in (nested_sampling | (sampling_overrides or {})).items():
             if hasattr(existing_params, key):
                 existing_params = replace(existing_params, **{key: value})
 

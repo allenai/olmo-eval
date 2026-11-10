@@ -164,3 +164,11 @@ This needs owner-level access to the project. Apply Terraform before the first d
 `infra/terraform/scripts/grant_db.py` once: the services run as the `olmo-eval-api` and
 `olmo-eval-dashboard` service accounts and connect to the database at startup. The Cloud SQL
 instance has deletion protection on. See `infra/terraform/README.md` for details.
+
+Task truncation rates use stored instances: an instance counts once when any of
+its samples stopped for length. The cap fraction beside a score uses generated
+outputs, counting every sample. A task with no stored predictions has no
+instance truncation rate, even when output diagnostics are available; those
+remain visible beside its score. Unknown finish reasons make the cap count a
+lower bound. Suite diagnostics sum the runner's five counter keys over distinct
+scored task members.
