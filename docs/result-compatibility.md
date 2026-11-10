@@ -16,6 +16,27 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-03: Terminal-Bench and TBLite leave harness failures out of their scores (#539)
+
+- **Affected**: the `terminal_bench_2` and `openthoughts_tblite` external evals, for
+  runs in which some trial hit a harness or infrastructure failure (image build,
+  container, verifier timeout or unreadable reward, model server). Runs without one
+  are unchanged.
+- **Change**: such a trial used to count as 0 in `pass_rate`, `pass@k`,
+  `pass_rate_std`/`pass_rate_sem` and the per-difficulty and per-category rates, and
+  the run always reported success. It now has no score: those metrics leave it out,
+  and `num_errors` counts it. `pass@k` averages only over tasks with at least `k`
+  measured trials, and `pass@k_num_tasks` counts them. `pass_rate_adjusted`, which already left such trials out
+  and now equals `pass_rate`, is removed. The run fails when more than
+  `max_error_rate` (0.05 by default) of its trials failed this way. A reply that broke
+  the tool-call protocol (`model_error`) is no longer counted as an error; it stays a
+  scored trial.
+- **Identity**: the task hash, computed from `eval_name` and the `eval_args` passed, does
+  not move, so results from before and after can only be told apart by commit or date.
+  Passing `max_error_rate` explicitly changes the hash.
+- **Comparability**: an earlier result whose `error_rate` is 0 is unchanged. For one
+  with errors, its `pass_rate_adjusted` is the new `pass_rate`.
+
 ## 2026-11-03: SWE-bench Verified leaves harness failures out of its scores (#538)
 
 - **Affected**: the `swe_bench_verified` external eval, for runs in which some instance
