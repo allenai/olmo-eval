@@ -6,7 +6,7 @@ import { AppLink, buildHref } from "@/components/AppLink";
 import { DeltaValue, MetricName, ScoreValue, SigLegend } from "@/components/cells";
 import { type Column, DataTable, parseSortList, sortRows } from "@/components/DataTable";
 import { Badge, Checkbox, EmptyState, ErrorPanel, IconButton, Kbd, Panel, SearchInput, Segmented, Select, Tip, uiStyles as ui } from "@/components/primitives";
-import { formatCount, formatDuration, formatP, formatRate, formatRuntime, formatScore, metricLabel, shortHash } from "@/lib/format";
+import { formatCount, formatDuration, formatGenerationCounts, formatP, formatRate, formatRuntime, formatScore, metricLabel, shortHash } from "@/lib/format";
 import { BASIS_HELP, BASIS_LABEL, basisMark, parseRuntimeMode, RUNTIME_MODE_HELP, RUNTIME_MODE_OPTIONS, runtimeModeParam, runtimeValue, SCORING_KIND_HELP, SCORING_KINDS, SCORING_KIND_LABEL, scoringValue, shares } from "@/lib/runtime";
 import { useHotkeys } from "@/lib/keyboard";
 import { parseList } from "@/lib/url";
@@ -98,7 +98,7 @@ export function TasksTab(ctx: RunCtx) {
         id: "score",
         header: "Score",
         title: "Score",
-        width: 190,
+        width: items.some((r) => formatGenerationCounts(r.generation_counts)) ? 190 : 104,
         align: "right",
         sortValue: (r) => r.score,
         cell: (r) => <ScoreValue score={r.score} stderr={r.stderr} format={scoreFormat(r)} generationCounts={r.generation_counts} />,
@@ -130,7 +130,7 @@ export function TasksTab(ctx: RunCtx) {
         id: "base",
         header: "Base",
         title: "Baseline score",
-        width: 190,
+        width: items.some((r) => formatGenerationCounts(r.baseline?.generation_counts)) ? 190 : 86,
         align: "right",
         sortValue: (r) => r.baseline?.score,
         cell: (r) => (r.baseline ? <ScoreValue score={r.baseline.score} format={scoreFormat(r)} showStderr={false} muted generationCounts={r.baseline.generation_counts} /> : <span className="faint">—</span>),
@@ -285,9 +285,10 @@ export function TasksTab(ctx: RunCtx) {
       },
       {
         id: "trunc",
-        header: "Trunc.",
-        title: "Truncation rate",
-        width: 70,
+        header: "Trunc. inst.",
+        title: "Instances with a truncated sample",
+        headerTitle: "Stored instances with at least one length-stopped sample / all stored instances. Cap counts beside Score use outputs, including every sample. Unavailable without stored predictions.",
+        width: 100,
         align: "right",
         sortValue: (r) => r.truncation_rate,
         cell: (r) => (
