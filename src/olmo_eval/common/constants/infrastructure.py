@@ -19,6 +19,11 @@ BEAKER_DEFAULT_BUDGET = "ai2/oe-other"
 BEAKER_DEFAULT_PRIORITY = "normal"
 """Default job priority level."""
 
+BEAKER_DEFAULT_RESUME_VOLUME = "ai2/olmo-eval"
+BEAKER_DEFAULT_RESUME_RETENTION_DAYS = 7
+
+SHARED_RUN_ENV = "OLMO_EVAL_SHARED_RUN_DIR"
+
 BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 

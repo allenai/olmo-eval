@@ -42,6 +42,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SCAFFOLD = "vanillux"
 
+#: How the issue is framed for scaffolds that wrap the task text in their own
+#: instructions: ``harbor`` gives the bare issue, ``swesmith`` the SWE-smith
+#: prompt that names the repository directory.
+TASK_FRAMES: tuple[str, ...] = ("harbor", "swesmith")
+DEFAULT_TASK_FRAME = "harbor"
+
 #: Scaffolds this eval can drive, with the tools each one gets.
 SCAFFOLD_TOOLS: dict[str, tuple[str, ...]] = {
     "vanillux": ("bash",),
@@ -105,6 +111,34 @@ HINTS_TEMPLATE = """
 </hints>
 """
 
+SWESMITH_TASK_TEMPLATE = """\
+<uploaded_files>
+{testbed}
+</uploaded_files>
+I've uploaded a python code repository in the directory {testbed}. Consider the following PR \
+description:
+
+<pr_description>
+{problem_statement}
+</pr_description>
+{hints}
+Can you help me implement the necessary changes to the repository so that the issues described \
+in the <pr_description> are fixed?
+I've already taken care of all changes to any of the test files described in the \
+<pr_description>. This means you DON'T have to modify the testing logic or any of the tests in \
+any way!
+Your task is to make the minimal changes to non-tests files in the {testbed} directory to ensure \
+the issues in <pr_description> are fixed.
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the \
+bash tool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well
+Your thinking should be thorough and so it's fine if it's very long.\
+"""
+
 # Activates the repository's environment for the agent's shell.
 SESSION_SETUP = f"source /opt/miniconda3/bin/activate && conda activate testbed && cd {TESTBED_DIR}"
 
@@ -143,6 +177,7 @@ class SWEBenchArgs:
     sandbox_mode: str = "docker"
     enable_compaction: bool = False
     scaffold: str = DEFAULT_SCAFFOLD
+    task_frame: str = DEFAULT_TASK_FRAME
     max_format_errors: int = 64
     temperature: float = 0.7
     top_p: float = 0.95
@@ -178,6 +213,7 @@ class SWEBenchArgs:
             sandbox_mode=data.get("sandbox_mode", "docker"),
             enable_compaction=as_bool(data.get("enable_compaction", False)),
             scaffold=scaffold,
+            task_frame=str(data.get("task_frame", DEFAULT_TASK_FRAME)),
             max_format_errors=int(data.get("max_format_errors", 64)),
             temperature=float(data.get("temperature", 0.7)),
             top_p=float(data.get("top_p", 0.95)),
@@ -286,12 +322,27 @@ def build_prompt(instance: SWEBenchInstance, include_hints: bool = False) -> str
     )
 
 
-def build_task_text(instance: SWEBenchInstance, include_hints: bool = False) -> str:
+def build_task_text(
+    instance: SWEBenchInstance,
+    include_hints: bool = False,
+    task_frame: str = DEFAULT_TASK_FRAME,
+) -> str:
     """Build the task text for scaffolds that wrap it in their own instructions.
 
-    The issue is given as is, the way Harbor's SWE-bench tasks state it.
+    The ``harbor`` frame gives the issue as is, the way Harbor's SWE-bench tasks
+    state it. The ``swesmith`` frame gives it the way SWE-smith trajectories do,
+    naming the repository directory and the steps to follow.
     """
-    return instance.problem_statement.strip() + _hints(instance, include_hints)
+    if task_frame == "harbor":
+        return instance.problem_statement.strip() + _hints(instance, include_hints)
+    if task_frame == "swesmith":
+        return SWESMITH_TASK_TEMPLATE.format(
+            testbed=TESTBED_DIR,
+            problem_statement=instance.problem_statement.strip(),
+            hints=_hints(instance, include_hints),
+        )
+    supported = ", ".join(TASK_FRAMES)
+    raise ValueError(f"Unknown task_frame {task_frame!r}; use one of {supported}")
 
 
 def compute_metrics(results: list[InstanceResult]) -> dict[str, float]:
@@ -376,6 +427,11 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             "sandbox_mode": ("Sandbox mode: docker, modal", "docker"),
             "enable_compaction": ("Enable context compaction (openai_agents)", False),
             "scaffold": ("Scaffold: vanillux or openai_agents", DEFAULT_SCAFFOLD),
+            "task_frame": (
+                "How the issue is framed: harbor (bare issue) or swesmith (SWE-smith prompt "
+                "naming the repository directory) (vanillux)",
+                DEFAULT_TASK_FRAME,
+            ),
             "max_format_errors": (
                 "Replies in a row without a valid tool call before stopping (vanillux)",
                 64,
@@ -410,6 +466,12 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                     f"use one of {supported}"
                 )
             validate_scaffold(swe_args.scaffold)
+            if swe_args.task_frame not in TASK_FRAMES:
+                supported = ", ".join(TASK_FRAMES)
+                raise ValueError(
+                    f"Unknown task_frame {swe_args.task_frame!r} for {self.name}; "
+                    f"use one of {supported}"
+                )
 
         instances = select_instances(
             load_instances(swe_args.dataset, swe_args.revision),
@@ -663,7 +725,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         if scaffold_name == "vanillux":
             # vanillux brings its own system and instance prompts.
             system_prompt = None
-            content = build_task_text(instance, swe_args.include_hints)
+            content = build_task_text(instance, swe_args.include_hints, swe_args.task_frame)
             scaffold_kwargs = {
                 "command_timeout": swe_args.command_timeout,
                 "max_format_errors": swe_args.max_format_errors,

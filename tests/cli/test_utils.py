@@ -321,6 +321,27 @@ class TestEndToEndOrdering:
 
         assert config.harness_config.provider.force_download is True
 
+    def test_max_tokens_null_override_reaches_sampling_params_as_none(self):
+        """``-o max_tokens=null`` should clear the cap and not send the string "null"."""
+        from olmo_eval.cli.run.config import RunConfigBuilder
+        from olmo_eval.runners.asynq.preparation import configure_task
+
+        args = ["-m", "model", "-t", "lab_bench_litqa2", "-o", "max_tokens=null"]
+        task_overrides, harness_overrides = process_ordered_args(reconstruct_ordered_args(args))
+        config = RunConfigBuilder(
+            model="model",
+            task=("lab_bench_litqa2",),
+            output_dir="/tmp/results",
+            cli_task_overrides=task_overrides,
+            cli_harness_overrides=harness_overrides,
+        ).build()
+
+        sampling_overrides = config.task_overrides["lab_bench_litqa2"]
+        assert sampling_overrides == {"max_tokens": None}
+        task = configure_task("lab_bench_litqa2", None, sampling_overrides)
+        assert task.config.sampling_params is not None
+        assert task.config.sampling_params.max_tokens is None
+
 
 class TestFormatTransformersRuntimeRows:
     """Tests for runtime summary formatting of transformers versions."""
