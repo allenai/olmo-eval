@@ -1044,9 +1044,9 @@ None has a cross-domain aggregate.
 
 They mix short tasks with 64K long-context suites, LiveCodeBench (sandboxed harness,
 as above) and LLM-judged safety and Arena-Hard tasks (see
-[local judge models](#local-judge-models)). Several task defaults suit
-non-reasoning models, so set one generation budget for every checkpoint you
-compare, e.g. `-o max_tokens=32768`.
+[local judge models](#local-judge-models)). Each task keeps its own sampling settings;
+do not override `max_tokens` for the whole run, since RULER+, HELMET and CTC run in
+completion mode with direct-answer budgets.
 
 ## Querying Results
 

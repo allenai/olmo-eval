@@ -8,9 +8,15 @@ Left out: tracker rows with no olmo-eval task yet (CritPt, FrontierCode, BrowseC
 AutomationBench, DeepSearchQA, Terminal-Bench-Science, FIRM, OpenAgentSafety, the
 decontaminated paper-MATH), externally run evals (SWE-bench Verified, Terminal-Bench,
 tau2-bench, AA-Briefcase, DeepScholar Bench), and the multimodal rows, which keep their own
-suites. Safety tasks use the thinking-model judge variants and need the judge providers
-shown in ``safety.py``. Set one generation budget per comparison with ``-o max_tokens``:
-several task defaults are sized for non-reasoning models.
+suites. Also left out until olmo-eval has a configuration that lets a reasoning model
+finish (their variants cap generation at 1,024 or 128 tokens, most with stop sequences):
+MATH-500, HumanEval+, MBPP+ and LongBench v2.
+
+Tasks run with their own sampling settings; do not override ``max_tokens`` for the whole
+run. RULER+, HELMET and CTC run in completion mode with direct-answer budgets (CTC's
+docs say a reasoning model may need a larger budget for CTC alone), and BFCL keeps its
+4,096-token budget. Safety tasks use the thinking-model judge variants and need the judge
+providers shown in ``safety.py``.
 """
 
 # Defining modules, imported so their suites exist whatever the discovery order.
@@ -34,25 +40,22 @@ _DEV_SHARED = (
     "gpqa_diamond:cot",
     "gpqa_main:cot",
     get_suite("mmlu:cot"),
-    "popqa",
+    "popqa:chat",
     OMEGA_DEV,
-    "math500",
     *_HMMT,
     "livecodebench:lite",
-    "humaneval_plus",
     get_suite("bfcl"),
     "ifeval",
     "ifeval_ood",
     get_suite("ruler_plus_all__65536"),
     get_suite("helmet_all__65536"),
-    "longbench_v2",
     get_suite("ctc:r64k"),
 )
 
 _TEST_SHARED = (
     get_suite("mmlu_pro:cot"),
     "omniscience",
-    "zebralogic",
+    "zebralogic:chat",
     *_AIME,
     "livecodebench_hidden",
     "do_anything_now:wg_judge_thinking",
@@ -65,7 +68,7 @@ _TEST_SHARED = (
 
 make_suite(
     "posttrain:tiny:dev",
-    (*_DEV_SHARED, "mbpp_plus"),
+    _DEV_SHARED,
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Tiny post-training dev set (the tracker's Track column).",
 )

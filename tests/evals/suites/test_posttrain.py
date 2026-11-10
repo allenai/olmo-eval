@@ -10,26 +10,23 @@ DEV_SHARED = (
     "gpqa_diamond:cot",
     "gpqa_main:cot",
     "mmlu:cot",
-    "popqa",
+    "popqa:chat",
     "omega:dev",
-    "math500",
     "hmmt_feb_2025:pass_at_32",
     "hmmt_nov_2025:pass_at_32",
     "hmmt_feb_2026:pass_at_32",
     "livecodebench:lite",
-    "humaneval_plus",
     "bfcl",
     "ifeval",
     "ifeval_ood",
     "ruler_plus_all__65536",
     "helmet_all__65536",
-    "longbench_v2",
     "ctc:r64k",
 )
 TEST_SHARED = (
     "mmlu_pro:cot",
     "omniscience",
-    "zebralogic",
+    "zebralogic:chat",
     "aime_2025:pass_at_32",
     "aime_2026:pass_at_32",
     "livecodebench_hidden",
@@ -41,7 +38,7 @@ TEST_SHARED = (
     "strongreject:sr_judge_thinking",
 )
 MEMBERS = {
-    "posttrain:tiny:dev": (*DEV_SHARED, "mbpp_plus"),
+    "posttrain:tiny:dev": DEV_SHARED,
     "posttrain:tiny:test": TEST_SHARED,
     "posttrain:small:dev": (
         *DEV_SHARED,
@@ -87,6 +84,24 @@ def test_gpqa_diamond_and_its_superset_stay_in_dev(size):
     dev = get_suite(f"posttrain:{size}:dev").expand()
 
     assert {"gpqa_diamond:cot", "gpqa_main:cot"} <= set(dev)
+
+
+# Exempt by design: long-context retrieval runs in completion mode with direct-answer
+# budgets, and BFCL keeps the 4,096-token budget that existing post-training reads use.
+OWN_BUDGET_SUITES = ("ruler_plus_all__65536", "helmet_all__65536", "ctc:r64k", "bfcl")
+MIN_GENERATION_BUDGET = 32768
+
+
+@pytest.mark.parametrize("name", MEMBERS)
+def test_no_task_cuts_off_a_reasoning_trace(name):
+    exempt = {task for suite in OWN_BUDGET_SUITES for task in get_suite(suite).expand()}
+    for task in get_suite(name).expand():
+        if task in exempt:
+            continue
+        params = get_task(task).config.sampling_params
+        assert params is not None, task
+        assert not params.stop_sequences, task
+        assert params.max_tokens is None or params.max_tokens >= MIN_GENERATION_BUDGET, task
 
 
 @pytest.mark.parametrize("name", MEMBERS)
