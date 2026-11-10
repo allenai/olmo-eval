@@ -1034,6 +1034,20 @@ uv run olmo-eval run -m <checkpoint> -t hillclimb:dev \
 LiveCodeBench requires the sandboxed harness; see [missing-sandbox tracking (#423)](https://github.com/allenai/olmo-eval/issues/423). Set the same model context limit
 for every checkpoint you compare; OMEGA has a 32,768-token generation cap.
 
+## Post-Training Dev and Test Suites
+
+`posttrain:tiny:dev`, `posttrain:tiny:test`, `posttrain:small:dev` and
+`posttrain:small:test` follow the Olmo eval tracker: its Track column is dev, its
+Publish column is test. Use dev suites for hill-climbing and checkpoint selection;
+read test suites only for release reports. No task is in both suites of one size.
+None has a cross-domain aggregate.
+
+They mix short tasks with 64K long-context suites, LiveCodeBench (sandboxed harness,
+as above) and LLM-judged safety and Arena-Hard tasks (see
+[local judge models](#local-judge-models)). Several task defaults suit
+non-reasoning models, so set one generation budget for every checkpoint you
+compare, e.g. `-o max_tokens=32768`.
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.
