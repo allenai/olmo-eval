@@ -219,20 +219,56 @@ async def test_one_operation_cannot_consume_the_pool_restart_budget(replacements
 
 
 @pytest.mark.anyio
-async def test_successful_replacements_have_a_bounded_budget(replacements) -> None:
-    from olmo_eval.harness.sandbox.errors import SandboxInfrastructureError
-
+async def test_successful_work_resets_the_restart_budget(replacements) -> None:
     manager = make_manager(RecoverableExecutor("broken"))
     environment = manager.for_capabilities(Capability.DEFAULT)
     try:
-        for _ in range(2):
+        for _ in range(5):
             manager._executors[0].running = False
             assert (await environment.execute_code("pass")).success
-        manager._executors[0].running = False
-        with pytest.raises(SandboxInfrastructureError):
-            await environment.execute_code("pass")
-        assert len(replacements) == 2
+        assert len(replacements) == 5
+        assert len({executor.name for executor in replacements}) == 5
+        assert not manager._restart_counts
+    finally:
+        await manager.stop()
+
+
+@pytest.mark.anyio
+async def test_consecutive_failures_exhaust_the_restart_budget(monkeypatch) -> None:
+    from olmo_eval.harness.sandbox.errors import SandboxInfrastructureError
+
+    created = []
+
+    class FailingReplacement(RecoverableExecutor):
+        def __init__(self, config, name, modal_app_name):
+            super().__init__(name, capabilities=config.capabilities, fail_and_quarantine=True)
+            self.running = False
+            created.append(self)
+
+    monkeypatch.setattr("olmo_eval.harness.sandbox.manager.SandboxExecutor", FailingReplacement)
+    manager = make_manager(RecoverableExecutor("broken", fail_and_quarantine=True))
+    environment = manager.for_capabilities(Capability.DEFAULT)
+    try:
+        for _ in range(4):
+            with pytest.raises(SandboxInfrastructureError):
+                await asyncio.wait_for(environment.execute_code("poison"), 2)
+        assert len(created) == 2
         assert not environment.is_running
+    finally:
+        await manager.stop()
+
+
+@pytest.mark.anyio
+async def test_released_healthy_binding_resets_the_restart_budget(replacements) -> None:
+    manager = make_manager(RecoverableExecutor("broken"))
+    manager._executors[0].running = False
+    environment = manager.for_capabilities(Capability.DEFAULT)
+    try:
+        assert (await environment.execute_code("pass")).success
+        manager._restart_counts[0] = 1
+        binding = await manager.acquire_binding(Capability.DEFAULT)
+        await binding.release()
+        assert not manager._restart_counts
     finally:
         await manager.stop()
 

@@ -419,6 +419,16 @@ class SandboxManager:
             and self._restart_counts.get(idx, 0) < _MAX_SANDBOX_RESTARTS
         )
 
+    def _record_success(self, idx: int, executor: SandboxExecutor) -> None:
+        """Reset a slot's restart budget once its current sandbox finished work healthy.
+
+        The budget bounds consecutive restarts: a sandbox that keeps failing, or a
+        replacement that never starts, still exhausts it.
+        """
+        if executor.is_running and self._executors[idx] is executor:
+            self._restart_counts.pop(idx, None)
+            self._exhausted_slots.discard(idx)
+
     def _schedule_recovery(self, idx: int, executor: SandboxExecutor) -> None:
         """Schedule one replacement for an idle, unbound unhealthy slot."""
         if executor.is_running or idx in self._recoveries:
@@ -560,13 +570,17 @@ class SandboxManager:
 
                 await self._capacity_condition.wait()
 
+        succeeded = False
         try:
             yield selected
+            succeeded = True
         finally:
             async with self._capacity_condition:
                 executor_id = id(selected)
                 active = self._active_operations.get(executor_id, 0)
                 self._active_operations[executor_id] = max(0, active - 1)
+                if succeeded:
+                    self._record_success(selected_idx, selected)
                 self._schedule_recovery(selected_idx, selected)
                 self._capacity_condition.notify_all()
 
@@ -804,6 +818,7 @@ class SandboxManager:
             for idx, e in enumerate(self._executors):
                 if e is binding.executor:
                     self._bound_executors.discard(idx)
+                    self._record_success(idx, e)
                     self._schedule_recovery(idx, e)
                     break
             del self._bindings[binding.id]
