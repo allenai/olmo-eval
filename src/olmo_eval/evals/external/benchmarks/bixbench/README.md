@@ -43,8 +43,13 @@ The episode follows upstream's v1.5 open-answer runs
   the notebook and reruns all of it with `jupyter nbconvert --execute --allow-errors`.
   `list_workdir()` returns the directory tree as JSON. `submit_answer(answer)` ends the
   episode. The schemas are what fhaviary builds from upstream's functions.
-  Every request sets `tool_choice="required"`, as upstream's does, which vLLM enforces
-  by constraining decoding to tool calls.
+  Only the first tool call of a reply runs, as upstream's `parallel_tool_calls: false`
+  makes the model send one; later calls are left out of the conversation and counted as
+  `ignored_tool_calls`.
+  Every request sets `tool_choice="required"`, as upstream's does. vLLM enforces it by
+  constraining decoding to a JSON array of calls, which skips the model's own
+  tool-call format and the server's `--tool-call-parser`, and drops a reply cut off
+  by `max_tokens` as one without a call. `-A tool_choice=auto` sends `auto` instead.
 - **Message order.** The question comes first, then the first notebook render, then the
   system prompt, as upstream's environment sends them. Olmo 3, Qwen3 and gpt-oss chat
   templates accept this. Templates that require the system message first, such as
@@ -89,7 +94,10 @@ reports:
   attempts;
 - accuracy for each verifier type;
 - how episodes ended: `submitted_rate`, `max_steps_rate`, `exec_timeout_rate`,
-  `context_overflow_rate`, and `mean_steps`.
+  `context_overflow_rate`, and `mean_steps`;
+- how steps were spent: `length_truncated_reply_rate`, `no_tool_call_step_rate` and
+  `ignored_tool_call_rate`, each over all steps;
+- `substring_match_rate`, the share of episodes graded correct by the partial match.
 
 A run fails rather than reporting a score when an episode's sandbox or model server
 fails, or an answer cannot be graded; the partial metrics are still saved. Each
@@ -103,7 +111,11 @@ kept under `bixbench_verified/<question>-<attempt>/` in the output directory.
   numbered placeholders. The prompt already tells the agent to avoid plots.
 - **Ungradable judge replies.** A judge reply without a `<grade>` tag is asked again and,
   if none ever has one, the answer is left ungraded. Upstream counts it incorrect.
-- **Directory listings are sorted**, where upstream takes the file system's order.
+- **Directory listings are sorted**, where upstream takes the file system's order, and
+  list a symlink as a file instead of following it.
+- **The notebook file is not followed through a symlink.** If the agent's code replaces
+  `notebook.ipynb` with a link, reading it fails as a tool exception and the next save
+  replaces the link. Upstream follows it.
 - **Image architecture.** BixBench's harness defaults to `futurehouse/bixbench:aviary-notebook-env`,
   published for linux/arm64 only. The image here is built for linux/amd64 from the recipe
   whose pinned packages match that image's layer history: `packages/notebook/docker/` of

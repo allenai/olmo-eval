@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import zipfile
 from pathlib import Path
@@ -47,7 +48,7 @@ from olmo_eval.evals.external.registry import get_external_eval
 from olmo_eval.evals.external.result import ExternalEvalResult
 from olmo_eval.harness.sandbox import DetachedRun
 from olmo_eval.inference.base import InferenceProvider
-from olmo_eval.inference.errors import REQUEST_ERROR_KEY
+from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
 
 if TYPE_CHECKING:
     from olmo_eval.harness.sandbox import SandboxExecutor
@@ -213,6 +214,37 @@ class TestNotebook:
             "sub": {"files": ["c.txt"]},
         }
 
+    def test_listing_does_not_follow_symlinks(self, tmp_path: Path) -> None:
+        (tmp_path / "a").symlink_to(".")
+        (tmp_path / "b").symlink_to(".")
+        (tmp_path / "etc").symlink_to("/etc")
+        assert nb.list_dir(tmp_path) == {"files": ["a", "b", "etc"]}
+
+    def test_notebook_io_does_not_follow_a_planted_symlink(self, tmp_path: Path) -> None:
+        secret = tmp_path / "secret"
+        secret.write_text("private")
+        secret.chmod(0o600)
+        path = tmp_path / "work" / nb.NOTEBOOK_NAME
+        path.parent.mkdir()
+        path.symlink_to(secret)
+        with pytest.raises(ValueError, match=r"^Could not open notebook.ipynb: ") as error:
+            nb.read_notebook(path)
+        assert str(tmp_path) not in str(error.value)
+
+        nb.write_notebook(nb.new_notebook(), path)
+        assert not path.is_symlink()
+        assert nb.read_notebook(path) == nb.new_notebook()
+        assert path.stat().st_mode & 0o777 == 0o666
+        assert secret.read_text() == "private"
+        assert secret.stat().st_mode & 0o777 == 0o600
+        assert [p.name for p in path.parent.iterdir()] == [nb.NOTEBOOK_NAME]
+
+    def test_a_notebook_that_is_not_a_regular_file_is_refused(self, tmp_path: Path) -> None:
+        path = tmp_path / nb.NOTEBOOK_NAME
+        os.mkfifo(path)
+        with pytest.raises(ValueError, match="is not a regular file"):
+            nb.read_notebook(path)
+
 
 class FakeJudge:
     def __init__(self, replies: list[str]) -> None:
@@ -325,6 +357,10 @@ class FakeNotebookExecutor:
         if outcome == "crash":
             return DetachedRun(run_dir, 1)
         path = self.workdir / nb.NOTEBOOK_NAME
+        if outcome == "symlink":
+            path.unlink()
+            path.symlink_to(self.workdir / "data.csv")
+            return DetachedRun(run_dir, 0)
         notebook = json.loads(path.read_text())
         for cell in notebook["cells"]:
             cell["outputs"] = [
@@ -368,6 +404,10 @@ class TestEpisode:
     def test_every_request_requires_a_tool_call(self, tmp_path: Path) -> None:
         _, provider, _ = run_episode(tmp_path, [reply(call("list_workdir", {}))], max_steps=2)
         assert [r.tool_choice for r in provider.requests] == ["required", "required"]
+
+    def test_tool_choice_can_be_auto(self, tmp_path: Path) -> None:
+        _, provider, _ = run_episode(tmp_path, [], max_steps=1, tool_choice="auto")
+        assert [r.tool_choice for r in provider.requests] == ["auto"]
 
     def test_edit_runs_the_notebook_and_submit_ends_the_episode(self, tmp_path: Path) -> None:
         result, provider, executor = run_episode(
@@ -433,15 +473,13 @@ class TestEpisode:
         _, provider, _ = run_episode(
             tmp_path,
             [
-                reply(
-                    call("run_shell", {"cmd": "ls"}, "c1"),
-                    call("edit_cell", {"idx": 0}, "c2"),
-                    call("edit_cell", "{not json", "c3"),
-                )
+                reply(call("run_shell", {"cmd": "ls"}, "c1")),
+                reply(call("edit_cell", {"idx": 0}, "c2")),
+                reply(call("edit_cell", "{not json", "c3")),
             ],
-            max_steps=2,
+            max_steps=4,
         )
-        tools = [contents(m) for m in provider.requests[1].messages if m["role"] == "tool"]
+        tools = [contents(m) for m in provider.requests[3].messages if m["role"] == "tool"]
         assert tools[0] == "Invalid tool call: run_shell"
         assert re.match(
             r"Encountered exception during tool call: .*missing 1 required positional "
@@ -478,21 +516,83 @@ class TestEpisode:
         assert result.completion_reason == "exec_timeout"
         assert result.answer is None and result.steps == 1
 
-    def test_calls_after_a_notebook_timeout_are_not_run(self, tmp_path: Path) -> None:
+    def test_only_the_first_call_of_a_reply_runs(self, tmp_path: Path) -> None:
+        result, provider, executor = run_episode(
+            tmp_path,
+            [
+                reply(
+                    call("edit_cell", {"contents": "x"}, "c1"),
+                    call("submit_answer", {"answer": "CD14"}, "c2"),
+                )
+            ],
+            max_steps=2,
+        )
+        assert result.completion_reason == "max_steps"
+        assert result.answer is None
+        assert len(executor.scripts) == 1
+        assert result.counts["ignored_tool_calls"] == 1
+        history = provider.requests[1].messages
+        (assistant,) = [m for m in history if m["role"] == "assistant"]
+        assert [c["id"] for c in assistant["tool_calls"]] == ["c1"]
+        assert [m["tool_call_id"] for m in history if m["role"] == "tool"] == ["c1"]
+
+    def test_a_submission_first_ends_the_episode_before_later_calls(self, tmp_path: Path) -> None:
         result, _, executor = run_episode(
             tmp_path,
             [
                 reply(
-                    call("edit_cell", {"contents": "slow"}, "c1"),
+                    call("submit_answer", {"answer": "CD14"}, "c1"),
                     call("edit_cell", {"contents": "x"}, "c2"),
-                    call("submit_answer", {"answer": "CD14"}, "c3"),
                 )
             ],
-            ["timeout"],
         )
-        assert result.completion_reason == "exec_timeout"
-        assert len(executor.scripts) == 1
-        assert result.answer is None
+        assert result.completion_reason == "submitted"
+        assert result.answer == "CD14"
+        assert executor.scripts == []
+
+    def test_a_notebook_replaced_by_a_symlink_is_not_followed(self, tmp_path: Path) -> None:
+        result, provider, _ = run_episode(
+            tmp_path,
+            [
+                reply(call("edit_cell", {"contents": "plant"}, "c1")),
+                reply(call("edit_cell", {"contents": "x"}, "c2")),
+            ],
+            ["symlink"],
+            max_steps=3,
+        )
+        tools = [contents(m) for m in provider.requests[2].messages if m["role"] == "tool"]
+        assert tools[0] == (
+            "Encountered exception during tool call: "
+            "Could not open notebook.ipynb: Too many levels of symbolic links"
+        )
+        assert result.error is None and result.counts["tool_exceptions"] == 1
+        # The link's target is untouched and the next edit replaces the link.
+        assert (tmp_path / "data.csv").read_text() == "x\n1\n"
+        assert not (tmp_path / nb.NOTEBOOK_NAME).is_symlink()
+        assert tools[1] == "Appended new cell (#1)."
+
+    def test_a_listing_error_is_a_tool_exception(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(path: Path) -> None:
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr(nb, "list_dir", refuse)
+        result, provider, _ = run_episode(tmp_path, [reply(call("list_workdir", {}))], max_steps=2)
+        tool = next(m for m in provider.requests[1].messages if m["role"] == "tool")
+        assert contents(tool) == (
+            "Encountered exception during tool call: [Errno 13] Permission denied"
+        )
+        assert result.error is None and result.counts["tool_exceptions"] == 1
+
+    def test_context_overflow_ends_the_episode(self, tmp_path: Path) -> None:
+        overflow = LMOutput(text="", metadata={CONTEXT_OVERFLOW_KEY: True})
+        result, _, _ = run_episode(
+            tmp_path, [reply(call("list_workdir", {})), overflow], max_steps=5
+        )
+        assert result.completion_reason == "context_overflow"
+        assert result.error is None
+        assert result.steps == 1 and result.answer is None
 
     def test_provider_failure_is_an_error_not_a_score(self, tmp_path: Path) -> None:
         failed = LMOutput(text="", metadata={REQUEST_ERROR_KEY: "server down"})
@@ -515,8 +615,12 @@ class TestMetrics:
             trial(1, True),
             trial(1, True, eval_mode="str_verifier"),
         ]
+        trials[0].steps, trials[0].counts = 3, {"length_truncated_replies": 1}
+        trials[1].steps, trials[1].counts = 5, {"no_tool_call_steps": 2, "ignored_tool_calls": 4}
+        trials[3].grade = Grade(correct=True, method="substring")
         failed = trial(1, None)
         failed.error = "sandbox_error: boom"
+        failed.steps, failed.counts = 10, {"length_truncated_replies": 10}
         metrics = compute_metrics([*trials, failed])
         assert metrics["accuracy"] == 0.75
         assert metrics["accuracy_attempt_0"] == 0.5
@@ -526,6 +630,10 @@ class TestMetrics:
         assert "accuracy_range_verifier" not in metrics
         assert metrics["max_steps_rate"] == 0.25
         assert metrics["num_failed_trials"] == 1.0
+        assert metrics["length_truncated_reply_rate"] == 1 / 8
+        assert metrics["no_tool_call_step_rate"] == 2 / 8
+        assert metrics["ignored_tool_call_rate"] == 4 / 8
+        assert metrics["substring_match_rate"] == 0.25
 
     def test_args_defaults_and_registration(self) -> None:
         args = BixBenchArgs.from_dict({"question_ids": "bix-1-q1,bix-2-q2", "n_attempts": "5"})
@@ -534,6 +642,10 @@ class TestMetrics:
         assert args.judge_model == "gpt-6-luna"
         assert args.system_first is False
         assert BixBenchArgs.from_dict({"system_first": "true"}).system_first is True
+        assert args.tool_choice == "required"
+        assert BixBenchArgs.from_dict({"tool_choice": "auto"}).tool_choice == "auto"
+        with pytest.raises(ValueError, match="tool_choice must be one of"):
+            BixBenchArgs.from_dict({"tool_choice": "none"})
         assert get_external_eval("bixbench_verified").name == "bixbench_verified"
 
 
@@ -651,17 +763,30 @@ class TestExecute:
     def test_a_notebook_that_cannot_be_kept_does_not_fail_the_run(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from olmo_eval.evals.external.benchmarks.bixbench import eval as eval_module
-
-        def refuse(*_: Any) -> None:
-            raise OSError("disk full")
-
-        monkeypatch.setattr(eval_module.shutil, "copy", refuse)
+        # A file where the trial's artifact directory should go.
+        (tmp_path / "out" / "bixbench_verified").mkdir(parents=True)
+        (tmp_path / "out" / "bixbench_verified" / "bix-1-q1-0").write_text("")
         result = self.run(
             tmp_path, monkeypatch, replies=[reply(call("edit_cell", {"contents": "x = 1"}))]
         )
         assert result.success, result.error
         assert result.metrics["accuracy"] == 1.0
+
+    def test_a_notebook_left_as_a_symlink_is_not_kept(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original_init = FakeNotebookExecutor.__init__
+
+        def planting_init(self: FakeNotebookExecutor, workdir: Path, outcomes: Any = None) -> None:
+            original_init(self, workdir, ["symlink"])
+
+        monkeypatch.setattr(FakeNotebookExecutor, "__init__", planting_init)
+        result = self.run(
+            tmp_path, monkeypatch, replies=[reply(call("edit_cell", {"contents": "x = 1"}))]
+        )
+        assert result.success, result.error
+        artifacts = tmp_path / "out" / "bixbench_verified" / "bix-1-q1-0"
+        assert not (artifacts / nb.NOTEBOOK_NAME).exists()
 
     def test_a_provider_without_tool_support_is_refused(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

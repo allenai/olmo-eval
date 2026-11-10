@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import statistics
@@ -25,7 +26,9 @@ from .agent import (
     CONTAINER_WORKDIR,
     DEFAULT_EXEC_TIMEOUT,
     DEFAULT_MAX_STEPS,
+    TOOL_CHOICES,
     NotebookEpisode,
+    ToolChoice,
 )
 from .grader import (
     DEFAULT_JUDGE_MAX_TOKENS,
@@ -66,6 +69,12 @@ SANDBOX_START_BACKOFF = 10.0
 EPISODE_GRACE = 1800.0
 
 COMPLETION_REASONS = ("submitted", "max_steps", "exec_timeout", "context_overflow")
+#: Per-step counts reported as a rate over all steps of the scored trials.
+STEP_RATES = {
+    "length_truncated_reply_rate": "length_truncated_replies",
+    "no_tool_call_step_rate": "no_tool_call_steps",
+    "ignored_tool_call_rate": "ignored_tool_calls",
+}
 
 
 @dataclass
@@ -88,6 +97,13 @@ class BixBenchArgs:
     image: str = SANDBOX_IMAGE
     image_timeout: float = 3600.0
     system_first: bool = False
+    tool_choice: ToolChoice = "required"
+
+    def __post_init__(self) -> None:
+        if self.tool_choice not in TOOL_CHOICES:
+            raise ValueError(
+                f"tool_choice must be one of {', '.join(TOOL_CHOICES)}, not {self.tool_choice!r}"
+            )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BixBenchArgs:
@@ -109,6 +125,7 @@ class BixBenchArgs:
             image=str(data.get("image", defaults.image)),
             image_timeout=float(data.get("image_timeout", defaults.image_timeout)),
             system_first=as_bool(data.get("system_first", defaults.system_first)),
+            tool_choice=cast(ToolChoice, str(data.get("tool_choice", defaults.tool_choice))),
         )
 
     @property
@@ -157,7 +174,8 @@ def compute_metrics(trials: list[TrialResult]) -> dict[str, float]:
 
     An episode that never submitted, ran out of steps or context, or timed out in
     the notebook counts as incorrect. ``accuracy_std`` is the standard deviation of
-    the per-attempt accuracies.
+    the per-attempt accuracies. ``substring_match_rate`` is the share of trials
+    graded correct by upstream's lenient substring rule.
     """
     scored = [t for t in trials if t.error is None]
     metrics: dict[str, float] = {"accuracy": _accuracy(scored)}
@@ -179,6 +197,11 @@ def compute_metrics(trials: list[TrialResult]) -> dict[str, float]:
         count = sum(t.completion_reason == reason for t in scored)
         metrics[f"{reason}_rate"] = count / n if n else 0.0
     metrics["mean_steps"] = statistics.fmean(t.steps for t in scored) if scored else 0.0
+    steps = sum(t.steps for t in scored)
+    for metric, count in STEP_RATES.items():
+        metrics[metric] = sum(t.counts.get(count, 0) for t in scored) / steps if steps else 0.0
+    substring = sum(t.grade is not None and t.grade.method == "substring" for t in scored)
+    metrics["substring_match_rate"] = substring / n if n else 0.0
     metrics["num_trials"] = float(len(trials))
     metrics["num_scored_trials"] = float(n)
     metrics["num_failed_trials"] = float(len(trials) - n)
@@ -242,6 +265,10 @@ class BixBenchVerifiedExternalEval(ExternalEval):
                 "Send the system prompt first instead of after the problem and the "
                 "first notebook render, for chat templates that require it",
                 defaults.system_first,
+            ),
+            "tool_choice": (
+                "tool_choice sent with every request: required (upstream's) or auto",
+                defaults.tool_choice,
             ),
         }
 
@@ -426,6 +453,7 @@ class BixBenchVerifiedExternalEval(ExternalEval):
                     exec_timeout=bb_args.exec_timeout,
                     label=trial.native_id,
                     system_first=bb_args.system_first,
+                    tool_choice=bb_args.tool_choice,
                 )
                 budget = bb_args.max_steps * bb_args.exec_timeout + EPISODE_GRACE
                 try:
@@ -455,15 +483,19 @@ class BixBenchVerifiedExternalEval(ExternalEval):
     @staticmethod
     def _keep_notebook(workdir: Path, artifacts: Path) -> None:
         """Save the episode's notebook and its markdown render beside the results."""
-        source = workdir / nb.NOTEBOOK_NAME
-        if not source.is_file():
-            return
         # The notebook is a diagnostic: failing to keep it must not cost the run
         # its other trials, which an exception escaping the trial would.
         try:
+            text = nb.read_notebook_text(workdir / nb.NOTEBOOK_NAME)
+        except FileNotFoundError:
+            return
+        except ValueError as e:
+            logger.warning(f"Could not keep the notebook of {workdir.name}: {e}")
+            return
+        try:
             artifacts.mkdir(parents=True, exist_ok=True)
-            shutil.copy(source, artifacts / nb.NOTEBOOK_NAME)
-            markdown, _ = nb.view_notebook(nb.read_notebook(source))
+            (artifacts / nb.NOTEBOOK_NAME).write_text(text)
+            markdown, _ = nb.view_notebook(json.loads(text))
             (artifacts / "notebook.md").write_text(markdown)
         except (OSError, ValueError, TypeError, KeyError) as e:
             logger.warning(f"Could not keep the notebook of {workdir.name}: {e!r}")

@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import stat
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -50,15 +53,50 @@ def new_code_cell(source: str, index: int) -> dict[str, Any]:
     }
 
 
+# The agent's code can replace anything in its working directory, which is a
+# directory on this host, so the notebook is read without following a symlink and
+# written by renaming a new file over whatever is at its path.
+
+
+def read_notebook_text(path: Path) -> str:
+    """The notebook file's text, if it is a regular file and not a symlink.
+
+    Raises:
+        FileNotFoundError: If there is nothing at ``path``.
+        ValueError: If ``path`` is a symlink or not a regular file, or the file is
+            not UTF-8. The message names only the file, not where it is on this host.
+    """
+    try:
+        # O_NONBLOCK keeps a FIFO planted at the path from blocking the open.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        raise
+    except OSError as e:
+        raise ValueError(f"Could not open {path.name}: {e.strerror}") from e
+    with os.fdopen(fd, "rb") as file:
+        if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
+            raise ValueError(f"{path.name} is not a regular file")
+        return file.read().decode()
+
+
 def read_notebook(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
+    """The notebook at ``path``, read as :func:`read_notebook_text` reads it."""
+    return json.loads(read_notebook_text(path))
 
 
 def write_notebook(notebook: dict[str, Any], path: Path) -> None:
-    path.write_text(json.dumps(notebook, indent=1))
-    # nbconvert rewrites the notebook from inside the sandbox, whose root can be an
-    # unprivileged user here (Podman's user namespaces).
-    path.chmod(0o666)
+    """Write the notebook to a new file and rename it over whatever is at ``path``."""
+    fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=".notebook-", suffix=".tmp")
+    try:
+        # nbconvert rewrites the notebook from inside the sandbox, whose root can be an
+        # unprivileged user here (Podman's user namespaces).
+        os.fchmod(fd, 0o666)
+        with os.fdopen(fd, "w") as file:
+            file.write(json.dumps(notebook, indent=1))
+        os.replace(temp_name, path)
+    except BaseException:
+        Path(temp_name).unlink(missing_ok=True)
+        raise
 
 
 def edit_cell(notebook: dict[str, Any], contents: str, idx: Any = None) -> str:
@@ -151,10 +189,13 @@ def list_dir(path: Path) -> dict[str, Any]:
     Upstream adds an empty ``directories`` key and lists each subdirectory under
     its own name beside it; the shape is kept as it is. Entries are sorted, where
     upstream takes the file system's order, so a listing is the same on every host.
+    A symlink is listed as a file and not followed, where upstream follows one: the
+    agent's links would otherwise resolve on this host, and links that loop would
+    make the walk explode.
     """
     index: dict[str, Any] = {}
     for item in sorted(path.iterdir()):
-        if item.is_dir():
+        if item.is_dir() and not item.is_symlink():
             index.setdefault("directories", {})
             index[item.name] = list_dir(item)
         else:

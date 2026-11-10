@@ -13,34 +13,38 @@ Each step is one model call and the environment's reply to it:
   render is shown; older ones are replaced by a placeholder. A model whose chat
   template requires the system message first runs with ``system_first``, which moves
   the system prompt to the front and departs from upstream's order.
-- The calls of a reply run one after another. ``edit_cell`` appends or replaces a
-  code cell, saves the notebook and reruns all of it with ``jupyter nbconvert
-  --execute --allow-errors``, so cell errors land in outputs. ``list_workdir``
-  returns the working directory as nested JSON. ``submit_answer`` records the
-  answer and ends the episode after the reply's calls have run.
+- Only the first call of a reply runs, as upstream's ``parallel_tool_calls: false``
+  makes the model send one. Later calls are dropped from the history and counted
+  as ``ignored_tool_calls``; this is what vLLM does with that flag. ``edit_cell``
+  appends or replaces a code cell, saves the notebook and reruns all of it with
+  ``jupyter nbconvert --execute --allow-errors``, so cell errors land in outputs.
+  ``list_workdir`` returns the working directory as nested JSON. ``submit_answer``
+  records the answer and ends the episode.
 - A tool that raises is answered with the exception's message, as aviary does with
   ``handle_tool_exc``; a notebook run that times out ends the episode without an
   answer.
-- Every request asks for a tool call (``tool_choice="required"``), as upstream's
-  does. A reply that still has none uses its step and gets the notebook render, as
-  an empty action would.
+- By default every request asks for a tool call (``tool_choice="required"``), as
+  upstream's does. A reply that still has none uses its step and gets the notebook
+  render, as an empty action would.
 - The episode ends after ``max_steps`` model calls.
 
 Differences from upstream:
 
 - Images in cell outputs are not sent to the model: the markdown keeps upstream's
   numbered placeholders. The prompt asks the agent to avoid plots.
+- ``list_workdir`` lists a symlink as a file instead of following it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import shlex
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.common.types.tools import Function, ToolCall, ToolResult, ToolSchema
@@ -63,6 +67,9 @@ CONTAINER_WORKDIR = "/workspace"
 DEFAULT_MAX_STEPS = 20
 #: Upstream's ``NBEnvironment.EXEC_TIMEOUT``, in seconds, for one run of the notebook.
 DEFAULT_EXEC_TIMEOUT = 1200.0
+
+ToolChoice = Literal["required", "auto"]
+TOOL_CHOICES: tuple[ToolChoice, ...] = ("required", "auto")
 
 HIDDEN_ENV_STATE = "[Previous environment state - hidden]"
 ENV_STATE_HEADER = "Markdown representation of notebook contents ({path}):\n\n"
@@ -143,6 +150,7 @@ DIAGNOSTIC_COUNTS = (
     "notebook_runs",
     "notebook_run_failures",
     "length_truncated_replies",
+    "ignored_tool_calls",
 )
 
 DEFAULT_SAMPLING_PARAMS = SamplingParams(
@@ -207,6 +215,7 @@ class NotebookEpisode:
         exec_timeout: float = DEFAULT_EXEC_TIMEOUT,
         label: str = "bixbench",
         system_first: bool = False,
+        tool_choice: ToolChoice = "required",
     ) -> None:
         self.question = question
         self.workdir = workdir
@@ -215,6 +224,7 @@ class NotebookEpisode:
         self.exec_timeout = exec_timeout
         self.label = label
         self.system_first = system_first
+        self.tool_choice = tool_choice
         self.nb_path = workdir / nb.NOTEBOOK_NAME
         self.notebook = nb.new_notebook()
         self.messages: list[dict[str, Any]] = []
@@ -310,7 +320,7 @@ class NotebookEpisode:
                     request_type=RequestType.CHAT,
                     messages=tuple(self.messages),
                     tools=TOOL_SCHEMAS,
-                    tool_choice="required",
+                    tool_choice=self.tool_choice,
                 )
             ],
             params,
@@ -327,27 +337,22 @@ class NotebookEpisode:
             self.result.counts["length_truncated_replies"] += 1
 
     async def _step(self, output: LMOutput) -> None:
-        """Record a reply, run its tool calls in order, and show the notebook again."""
+        """Record a reply, run its first tool call, and show the notebook again."""
         text = output.text or ""
         calls = list(output.tool_calls or ())
+        self.result.counts["ignored_tool_calls"] += max(0, len(calls) - 1)
+        calls = calls[:1]
         self.turns.append(AgentTurn.assistant(content=text, tool_calls=calls))
         message: dict[str, Any] = {"role": "assistant", "content": text}
         if calls:
-            message["tool_calls"] = [_replayable(call).to_openai() for call in calls]
+            message["tool_calls"] = [_replayable(calls[0]).to_openai()]
         self.messages.append(message)
-        if not calls:
-            self.result.counts["no_tool_call_steps"] += 1
-
-        results: list[ToolResult] = []
-        for call in calls:
-            # A notebook timeout ends the episode; later calls would only rerun it.
-            if self.result.completion_reason == "exec_timeout":
-                break
-            results.append(await self._call_tool(call))
-        for tool_result in results:
+        if calls:
+            tool_result = await self._call_tool(calls[0])
             self.messages.append(tool_result.to_openai())
-        if results:
-            self.turns.append(AgentTurn.tool(results))
+            self.turns.append(AgentTurn.tool([tool_result]))
+        else:
+            self.result.counts["no_tool_call_steps"] += 1
         self._add_env_state()
 
     async def _call_tool(self, call: ToolCall) -> ToolResult:
@@ -364,7 +369,8 @@ class NotebookEpisode:
                 content = await self._edit_cell(contents, idx)
             elif name == LIST_WORKDIR:
                 _list_workdir_args(**arguments)
-                content = json.dumps(nb.list_dir(self.workdir), indent=2)
+                listing = await asyncio.to_thread(nb.list_dir, self.workdir)
+                content = json.dumps(listing, indent=2)
             else:
                 content = self._submit_answer(_submit_answer_args(**arguments))
         except NotebookTimeoutError as e:
@@ -376,6 +382,11 @@ class NotebookEpisode:
         except (TypeError, ValueError, IndexError) as e:
             self.result.counts["tool_exceptions"] += 1
             return _exception_result(call, e)
+        # The agent's code can remove or replace files the tools touch on this host.
+        except OSError as e:
+            self.result.counts["tool_exceptions"] += 1
+            # Without the file name, which is a path on this host.
+            return _exception_result(call, OSError(e.errno, e.strerror))
         return ToolResult(tool_call_id=call.id, content=content)
 
     async def _edit_cell(self, contents: str, idx: Any) -> str:
