@@ -320,17 +320,33 @@ class TestMetrics:
             make_result("a", 0.0, attempt=1, error="verifier_timeout"),
             make_result("b", 0.0, attempt=0, error="no container"),
             make_result("b", 0.0, attempt=1, error="no container"),
+            make_result("c", 0.0, attempt=0),
+            make_result("c", 0.0, attempt=1),
         ]
 
         metrics = tb_eval.compute_metrics(results, n_attempts=2)
 
-        # Only task a's first attempt was measured.
-        assert metrics["pass_rate"] == 1.0
+        assert metrics["pass_rate"] == pytest.approx(1 / 3)
+        assert metrics["pass@1"] == pytest.approx(0.5)
+        assert metrics["pass@1_num_tasks"] == 2
+        # Task a has one measured trial, too few for pass@2: only task c counts.
+        assert metrics["pass@2"] == 0.0
+        assert metrics["pass@2_num_tasks"] == 1
+        assert metrics["num_tasks"] == 3
+        assert metrics["num_measured"] == 3
+        assert metrics["error_rate"] == pytest.approx(0.5)
+
+    def test_pass_at_k_is_omitted_when_no_task_has_k_measured_trials(self) -> None:
+        results = [
+            make_result("a", 1.0, attempt=0),
+            make_result("a", 0.0, attempt=1, error="verifier_timeout"),
+        ]
+
+        metrics = tb_eval.compute_metrics(results, n_attempts=2)
+
         assert metrics["pass@1"] == 1.0
-        assert metrics["pass@2"] == 1.0
-        assert metrics["num_tasks"] == 2
-        assert metrics["num_measured"] == 1
-        assert metrics["error_rate"] == pytest.approx(0.75)
+        assert "pass@2" not in metrics
+        assert metrics["pass@2_num_tasks"] == 0
         assert "pass_rate_std" not in metrics
 
     def test_no_results(self) -> None:

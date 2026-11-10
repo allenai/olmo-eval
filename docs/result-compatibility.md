@@ -25,13 +25,15 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Change**: such a trial used to count as 0 in `pass_rate`, `pass@k`,
   `pass_rate_std`/`pass_rate_sem` and the per-difficulty and per-category rates, and
   the run always reported success. It now has no score: those metrics leave it out,
-  and `num_errors` counts it. `pass_rate_adjusted`, which already left such trials out
+  and `num_errors` counts it. `pass@k` averages only over tasks with at least `k`
+  measured trials, and `pass@k_num_tasks` counts them. `pass_rate_adjusted`, which already left such trials out
   and now equals `pass_rate`, is removed. The run fails when more than
   `max_error_rate` (0.05 by default) of its trials failed this way. A reply that broke
   the tool-call protocol (`model_error`) is no longer counted as an error; it stays a
   scored trial.
-- **Identity**: external evals have no task hash; results from before and after can
-  only be told apart by commit or date.
+- **Identity**: the task hash, computed from `eval_name` and the `eval_args` passed, does
+  not move, so results from before and after can only be told apart by commit or date.
+  Passing `max_error_rate` explicitly changes the hash.
 - **Comparability**: an earlier result whose `error_rate` is 0 is unchanged. For one
   with errors, its `pass_rate_adjusted` is the new `pass_rate`.
 

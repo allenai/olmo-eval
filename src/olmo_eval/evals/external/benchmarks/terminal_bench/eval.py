@@ -210,7 +210,8 @@ def compute_metrics(results: list[TaskResult], n_attempts: int) -> dict[str, flo
     model, so every rate but ``error_rate`` leaves them out; ``num_errors``
     counts them. ``pass_rate`` is the mean reward over the other trials. With
     several attempts per task, ``pass@k`` is the unbiased estimate averaged over
-    tasks, and the spread of the per-attempt pass rates gives ``pass_rate_std``
+    the tasks with at least ``k`` measured trials, ``pass@k_num_tasks`` counts
+    those tasks, and the spread of the per-attempt pass rates gives ``pass_rate_std``
     and ``pass_rate_sem``.
     """
     num_trials = len(results)
@@ -234,11 +235,16 @@ def compute_metrics(results: list[TaskResult], n_attempts: int) -> dict[str, flo
 
     if n_attempts > 1 and by_task:
         for k in sorted({1, n_attempts}):
+            # A task that lost trials to harness failures can be left with fewer
+            # than k, where pass_at_k would quietly estimate a smaller k.
             estimates = [
                 pass_at_k(len(task_rewards), sum(1 for v in task_rewards if v >= 1.0), k)
                 for task_rewards in by_task.values()
+                if len(task_rewards) >= k
             ]
-            metrics[f"pass@{k}"] = sum(estimates) / len(estimates)
+            if estimates:
+                metrics[f"pass@{k}"] = sum(estimates) / len(estimates)
+            metrics[f"pass@{k}_num_tasks"] = float(len(estimates))
 
         by_attempt: dict[int, list[float]] = {}
         for r in measured:
