@@ -545,7 +545,9 @@ class TestExecuteOracle(unittest.TestCase):
         )
         self.assertEqual(result.metrics["error_rate"], 1.0)
 
-    def _execute_with_one_provider_failure(self, args: dict[str, Any]) -> Any:
+    def _execute_with_one_provider_failure(
+        self, args: dict[str, Any], output_dir: str | None = None
+    ) -> Any:
         """Run an agent on four instances, one of which loses its model server."""
         instances = [_instance(instance_id=f"owner__repo-{i}") for i in range(4)]
         manager = mock.MagicMock()
@@ -574,12 +576,14 @@ class TestExecuteOracle(unittest.TestCase):
         ):
             return asyncio.run(
                 swe_eval.SWEBenchVerifiedExternalEval().execute(
-                    mock.MagicMock(model_name="test-model"), args
+                    mock.MagicMock(model_name="test-model"), args, output_dir=output_dir
                 )
             )
 
     def test_harness_failure_above_the_budget_fails_the_run(self) -> None:
-        result = self._execute_with_one_provider_failure({})
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._execute_with_one_provider_failure({}, output_dir=tmp)
+            details = json.loads((Path(tmp) / "swe_bench_verified_instances.json").read_text())
         self.assertFalse(result.success)
         self.assertIn("1 of 4 instances (25.0%)", result.error or "")
         self.assertIn("agent_error: connection refused", result.error or "")
@@ -588,6 +592,10 @@ class TestExecuteOracle(unittest.TestCase):
         self.assertEqual(result.metrics["num_errors"], 1.0)
         failed = next(p for p in result.predictions if p["native_id"] == "owner__repo-3")
         self.assertIsNone(failed["instance_metrics"]["resolved"]["external"])
+        saved = next(d for d in details if d["instance_id"] == "owner__repo-3")
+        self.assertIsNone(saved["resolved"])
+        self.assertIsNone(saved["patch_applied"])
+        self.assertTrue(next(d for d in details if d["instance_id"] == "owner__repo-0")["resolved"])
 
     def test_harness_failure_within_the_budget_is_a_success(self) -> None:
         result = self._execute_with_one_provider_failure({"max_error_rate": "0.25"})

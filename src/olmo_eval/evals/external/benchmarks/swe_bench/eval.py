@@ -839,8 +839,9 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 "instance_id": r.instance_id,
                 "repo": r.repo,
                 "difficulty": r.difficulty,
-                "resolved": r.resolved,
-                "patch_applied": r.grade.patch_applied,
+                # A harness-failed instance measured nothing, as in its predictions.
+                "resolved": None if r.harness_failed else r.resolved,
+                "patch_applied": None if r.harness_failed else r.grade.patch_applied,
                 "tests_ran": r.grade.tests_ran,
                 "empty_patch": r.grade.empty_patch,
                 "completion_reason": r.completion_reason,
