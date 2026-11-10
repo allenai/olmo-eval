@@ -99,3 +99,16 @@ the retrieval environment's Python must live there too (run `install.sh` with
 Java 21 must be reachable through `JAVA_HOME` or `PATH`. The Qwen3-Embedding-8B server
 loads its model on the GPU, so leave it room by lowering the model server's share, for
 example `-o provider.kwargs.gpu_memory_utilization=0.7`.
+
+## BrowseComp on the live web
+
+The original [BrowseComp](https://openai.com/index/browsecomp/) benchmark (1,266 questions)
+is available as the `browsecomp` task with the same grader. It needs no retrieval server:
+the agent searches and reads the open web through Serper, so set `SERPER_API_KEY` as well as
+`OPENAI_API_KEY`. The test set is downloaded on first use to `BROWSECOMP_HOME`
+(default `~/.cache/olmo-eval/browsecomp`).
+
+```bash
+uv run olmo-eval run -m /absolute/path/to/checkpoint \
+    --harness browsecomp -t browsecomp
+```
