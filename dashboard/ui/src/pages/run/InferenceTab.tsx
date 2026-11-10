@@ -108,7 +108,7 @@ export function InferenceTab(ctx: RunCtx) {
     { id: "pt", header: "Prompt tok", title: "Prompt tokens", width: 104, align: "right", sortValue: (r) => r.prompt_tokens, cell: (r) => <span className="mono">{formatCompact(r.prompt_tokens)}</span>, csv: (r) => r.prompt_tokens },
     { id: "ct", header: "Compl. tok", title: "Completion tokens", width: 104, align: "right", sortValue: (r) => r.completion_tokens, cell: (r) => <span className="mono">{formatCompact(r.completion_tokens)}</span>, csv: (r) => r.completion_tokens },
     { id: "mean", header: "Mean len", title: "Mean completion tokens", width: 86, align: "right", sortValue: (r) => r.mean_completion_tokens, cell: (r) => <span className="mono">{r.mean_completion_tokens != null ? Math.round(r.mean_completion_tokens) : "—"}</span>, csv: (r) => r.mean_completion_tokens },
-    { id: "trunc", header: "Trunc.", title: "Truncation", width: 72, align: "right", sortValue: (r) => r.truncation_rate, cell: (r) => <span className="mono">{formatRate(r.truncation_rate)}</span>, csv: (r) => r.truncation_rate },
+    { id: "trunc", header: "Trunc. inst.", title: "Stored instances with a length-stopped sample / all stored instances", width: 100, align: "right", sortValue: (r) => r.truncation_rate, cell: (r) => <span className="mono">{formatRate(r.truncation_rate)}</span>, csv: (r) => r.truncation_rate },
     { id: "wall", header: "Wall clock", title: "Wall clock", width: 96, align: "right", sortValue: (r) => r.duration_seconds, cell: (r) => <span className="mono">{formatDuration(r.duration_seconds)}</span>, csv: (r) => r.duration_seconds },
     {
       id: "tps",

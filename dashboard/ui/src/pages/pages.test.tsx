@@ -159,6 +159,32 @@ describe("pages", () => {
     if (tab === "tasks") expect(diagnostics[0].closest('[role="row"]')).toHaveStyle({ height: "72px" });
   });
 
+  it("Tasks distinguish instance truncation from output cap hits", async () => {
+    const result = runTaskResults(runId, new URLSearchParams());
+    const task = result.items[0];
+    server.use(http.get(`/api/runs/${runId}/task-results`, () => HttpResponse.json({
+      ...result, items: [{ ...task, truncation_rate: 0.2, generation_counts: { generations: 1000, cap_hit: 20 }, baseline: null }],
+    })));
+    renderAt(`/runs/${runId}?tab=tasks`);
+    expect(await screen.findByText("cap 20/1000 · empty 0")).toBeInTheDocument();
+    const header = screen.getByRole("columnheader", { name: /Trunc. inst./ });
+    expect(header).toHaveAttribute("title", expect.stringContaining("Stored instances"));
+    expect(screen.getByText("20%")).toBeInTheDocument();
+  });
+
+  it("Tasks keep Score and Base compact without generation diagnostics", async () => {
+    const result = runTaskResults(runId, new URLSearchParams());
+    server.use(http.get(`/api/runs/${runId}/task-results`, () => HttpResponse.json({
+      ...result, items: result.items.map((row) => ({ ...row, generation_counts: null, baseline: row.baseline ? { ...row.baseline, generation_counts: null } : null })),
+    })));
+    renderAt(`/runs/${runId}?tab=tasks`);
+    const score = await screen.findByRole("columnheader", { name: /^Score/ });
+    const headers = Array.from(score.parentElement!.children);
+    const widths = score.parentElement!.style.gridTemplateColumns.split(" ");
+    expect(widths[headers.indexOf(score)]).toBe("104px");
+    expect(widths[headers.indexOf(screen.getByRole("columnheader", { name: /^Base/ }))]).toBe("86px");
+  });
+
   it("Unknown runs show a not-found state", async () => {
     renderAt("/runs/zzzzzzzzzzzz");
     expect(await screen.findByText(/not found/i, {}, { timeout: 5000 })).toBeInTheDocument();
