@@ -16,7 +16,8 @@ Tasks run with their own sampling settings; do not override ``max_tokens`` for t
 run. Dev reads RULER+ at 64K, 128K and 256K, and HELMET and CTC at 64K. All three run
 in completion mode with direct-answer budgets (CTC's docs say a reasoning model may need
 a larger budget for CTC alone), and BFCL keeps its 4,096-token budget. Safety tasks use
-the thinking-model judge variants and need the judge providers shown in ``safety.py``.
+the thinking-model judge variants and need the judge providers shown in ``safety.py``;
+Omniscience is graded by its default judge, gpt-4o-mini, through the OpenAI API.
 """
 
 # Defining modules, imported so their suites exist whatever the discovery order.
@@ -56,7 +57,7 @@ _DEV_SHARED = (
 
 _TEST_SHARED = (
     get_suite("mmlu_pro:cot"),
-    "omniscience",
+    "omniscience:judge",
     "zebralogic:chat",
     *_AIME,
     "livecodebench_hidden",

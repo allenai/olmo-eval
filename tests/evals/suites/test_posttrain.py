@@ -2,7 +2,7 @@
 
 import pytest
 
-from olmo_eval.common.configs import expand_tasks
+from olmo_eval.common.configs import expand_tasks, validate_task_metrics, validate_tasks
 from olmo_eval.evals.suites import AggregationStrategy, Suite, get_suite
 from olmo_eval.evals.tasks.common import get_task
 
@@ -27,7 +27,7 @@ DEV_SHARED = (
 )
 TEST_SHARED = (
     "mmlu_pro:cot",
-    "omniscience",
+    "omniscience:judge",
     "zebralogic:chat",
     "aime_2025:pass_at_32",
     "aime_2026:pass_at_32",
@@ -114,6 +114,10 @@ def test_no_task_cuts_off_a_reasoning_trace(name):
 
 
 @pytest.mark.parametrize("name", MEMBERS)
-def test_every_task_resolves(name):
-    for task in get_suite(name).expand():
-        assert get_task(task).config is not None
+def test_every_task_resolves_and_has_metrics(name):
+    # The checks `olmo-eval beaker launch` runs before it builds a spec.
+    _valid, invalid = validate_tasks(list(get_suite(name).expand()))
+    _with_metrics, without_metrics = validate_task_metrics(list(get_suite(name).expand()))
+
+    assert not invalid
+    assert not without_metrics
