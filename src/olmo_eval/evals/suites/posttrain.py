@@ -13,10 +13,10 @@ finish (their variants cap generation at 1,024 or 128 tokens, most with stop seq
 MATH-500, HumanEval+, MBPP+ and LongBench v2.
 
 Tasks run with their own sampling settings; do not override ``max_tokens`` for the whole
-run. RULER+, HELMET and CTC run in completion mode with direct-answer budgets (CTC's
-docs say a reasoning model may need a larger budget for CTC alone), and BFCL keeps its
-4,096-token budget. Safety tasks use the thinking-model judge variants and need the judge
-providers shown in ``safety.py``.
+run. Dev reads RULER+ at 64K, 128K and 256K, and HELMET and CTC at 64K. All three run
+in completion mode with direct-answer budgets (CTC's docs say a reasoning model may need
+a larger budget for CTC alone), and BFCL keeps its 4,096-token budget. Safety tasks use
+the thinking-model judge variants and need the judge providers shown in ``safety.py``.
 """
 
 # Defining modules, imported so their suites exist whatever the discovery order.
@@ -48,6 +48,8 @@ _DEV_SHARED = (
     "ifeval",
     "ifeval_ood",
     get_suite("ruler_plus_all__65536"),
+    get_suite("ruler_plus_all__131072"),
+    get_suite("ruler_plus_all__262144"),
     get_suite("helmet_all__65536"),
     get_suite("ctc:r64k"),
 )

@@ -20,6 +20,8 @@ DEV_SHARED = (
     "ifeval",
     "ifeval_ood",
     "ruler_plus_all__65536",
+    "ruler_plus_all__131072",
+    "ruler_plus_all__262144",
     "helmet_all__65536",
     "ctc:r64k",
 )
@@ -88,7 +90,14 @@ def test_gpqa_diamond_and_its_superset_stay_in_dev(size):
 
 # Exempt by design: long-context retrieval runs in completion mode with direct-answer
 # budgets, and BFCL keeps the 4,096-token budget that existing post-training reads use.
-OWN_BUDGET_SUITES = ("ruler_plus_all__65536", "helmet_all__65536", "ctc:r64k", "bfcl")
+OWN_BUDGET_SUITES = (
+    "ruler_plus_all__65536",
+    "ruler_plus_all__131072",
+    "ruler_plus_all__262144",
+    "helmet_all__65536",
+    "ctc:r64k",
+    "bfcl",
+)
 MIN_GENERATION_BUDGET = 32768
 
 
