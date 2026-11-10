@@ -1050,6 +1050,11 @@ through `_t10` variants that keep each task's budget and sample count. RULER+, H
 direct-answer budgets, and BFCL keeps its own settings. Do not override sampling or
 `max_tokens` for the whole run.
 
+The suites name no provider, but the engine is part of what a score measures: compare
+scores only between runs on the same provider, and record it with each run. BFCL needs
+`provider.kind=vllm_server`, the only provider with tool calls, so run it as its own job
+when the rest of a suite runs on SGLang.
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.
