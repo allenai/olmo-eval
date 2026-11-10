@@ -31,10 +31,12 @@ from olmo_eval.runners.asynq.progress import (
     Restored,
     discard_progress,
     has_progress,
-    is_shared_output,
+    is_shared_run,
     model_lock,
     open_run_progress,
     remove_empty_progress_dirs,
+    restore_shared_identity,
+    save_shared_identity,
 )
 from olmo_eval.runners.asynq.results import (
     aggregate_results,
@@ -654,9 +656,15 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         # Generate experiment ID early so metrics can include it. A resumed run keeps
         # the ID of the run it continues.
+        if self.resume:
+            restore_shared_identity(self.output_dir)
         previous_run_id, self._resume_record = self._previous_run()
         experiment_id = previous_run_id or generate_experiment_id()
         self._start_run_record(experiment_id)
+        if self.resume:
+            # A replacement job keeps this run ID even if this one stops before it
+            # records any progress.
+            save_shared_identity(self.output_dir)
 
         # Prepare tasks
         expanded_tasks, trackers, items = self._prepare_tasks()
@@ -1352,7 +1360,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
-        if progress is not None and not keep_progress and not is_shared_output(self.output_dir):
+        if progress is not None and not keep_progress and not is_shared_run():
             progress.discard()
         elif progress is None and has_progress(self.output_dir):
             runner_logger.warning(
@@ -1417,9 +1425,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         job_ids = [job_id] if job_id else []
         fresh = {"resumed_count": 0, "beaker_job_ids": job_ids}
         # Progress that was discarded (a completed run, or --fresh) has nothing to continue.
-        if not self.resume or (
-            not is_shared_output(self.output_dir) and not has_progress(self.output_dir)
-        ):
+        if not self.resume or (not is_shared_run() and not has_progress(self.output_dir)):
             return None, fresh
         manifest = read_manifest(self.output_dir)
         if manifest is None:
@@ -1430,7 +1436,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             run.get("status")
             not in (
                 *RESUMABLE_STATUSES,
-                *(("complete",) if is_shared_output(self.output_dir) else ()),
+                # Under the supervisor, a finished run can be continued too: a failed
+                # upload's retry, or a rerun of a completed job that lacks its results.
+                *(("complete", "partial") if is_shared_run() else ()),
             )
             or list(run.get("task_specs") or []) != list(self.task_specs)
             or (manifest.get("model") or {}).get("path") != self.model_name

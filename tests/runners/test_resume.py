@@ -1554,6 +1554,14 @@ class TestFailedTasks:
         progress.close()
 
 
+def _supervised(tmp_path: Path) -> Path:
+    """A WEKA recovery directory as the resume supervisor prepares it for its child."""
+    weka = tmp_path / "weka"
+    weka.mkdir()
+    (weka / "session.json").write_text(json.dumps({"uuid": "u", "command": []}))
+    return weka
+
+
 def _run_id(out: Path) -> str:
     manifest = read_manifest(out)
     assert manifest is not None
@@ -1566,52 +1574,154 @@ class TestRunIdentity:
     ) -> None:
         from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
 
-        out = tmp_path / "shared" / "output"
+        weka = _supervised(tmp_path)
         identities = []
         with monkeypatch.context() as patch:
             patch.setattr(AsyncEvalRunner, "_prepare_tasks", Mock(side_effect=Terminated()))
             for job in ("job-1", "job-2"):
+                # Each Beaker job starts with empty results; identity comes from WEKA.
+                out = tmp_path / job
                 with pytest.raises(Terminated):
                     run_eval(
-                        out,
-                        {"gsm8k": 4},
-                        env={
-                            SHARED_RUN_ENV: str(out.parent),
-                            "BEAKER_JOB_ID": job,
-                        },
+                        out, {"gsm8k": 4}, env={SHARED_RUN_ENV: str(weka), "BEAKER_JOB_ID": job}
                     )
-                assert not has_progress(out)
+                assert not (weka / "progress").exists() or not any(
+                    (weka / "progress").rglob("*.jsonl")
+                )
                 identities.append(_run_id(out))
-        run_eval(
-            out,
-            {"gsm8k": 4},
-            env={
-                SHARED_RUN_ENV: str(out.parent),
-                "BEAKER_JOB_ID": "job-3",
-            },
-        )
+        out = tmp_path / "job-3"
+        run_eval(out, {"gsm8k": 4}, env={SHARED_RUN_ENV: str(weka), "BEAKER_JOB_ID": "job-3"})
         assert identities == [_run_id(out), _run_id(out)]
         assert read_manifest(out)["resume"]["beaker_job_ids"] == ["job-1", "job-2", "job-3"]
+        assert not (out / PROGRESS_DIR).exists()
 
-    def test_shared_run_keeps_records_and_identity_until_supervisor_publishes_completion(
+    def test_shared_run_writes_the_same_output_files_as_a_run_without_resume(
         self, tmp_path
     ) -> None:
         from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
 
-        out = tmp_path / "shared" / "output"
-        env = {SHARED_RUN_ENV: str(out.parent)}
-        run_eval(out, {"gsm8k": 4}, env=env)
-        first_id = _run_id(out)
+        weka = _supervised(tmp_path)
+        plain, shared = tmp_path / "plain", tmp_path / "shared"
+        run_eval(plain, TASK_LIMITS, resume=False)
+        run_eval(shared, TASK_LIMITS, env={SHARED_RUN_ENV: str(weka)})
+
+        def files(out: Path) -> list[str]:
+            return sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file())
+
+        assert files(shared) == files(plain)
+        for kind in ("predictions", "requests"):
+            for path in (plain / kind).rglob("*.jsonl"):
+                assert (shared / path.relative_to(plain)).read_bytes() == path.read_bytes()
+
+    def test_a_carried_over_prediction_that_differs_is_rebuilt_from_the_records(
+        self, tmp_path
+    ) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        weka = _supervised(tmp_path)
+        env = {SHARED_RUN_ENV: str(weka)}
+        first, second = tmp_path / "job-1", tmp_path / "job-2"
+        run_eval(first, {"gsm8k": 4}, env=env)
+        expected = {p.name: p.read_bytes() for p in (first / "predictions").rglob("*.jsonl")}
+        shutil.copytree(first, second)
+        stale = next((second / "predictions").rglob("*.jsonl"))
+        stale.write_bytes(stale.read_bytes()[:10])
+
+        resumed = run_eval(second, {"gsm8k": 4}, env=env)
+
+        assert resumed.finalized == set()
+        assert resumed.queued == 0
+        assert expected == {
+            p.name: p.read_bytes() for p in (second / "predictions").rglob("*.jsonl")
+        }
+
+    def test_saved_identity_replaces_an_older_carried_over_manifest(self, tmp_path) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        weka = _supervised(tmp_path)
+        jobs = [tmp_path / f"job-{n}" for n in (1, 2, 3)]
+        limits = {"gsm8k": 4}
+        with pytest.raises(Terminated):
+            run_eval(
+                jobs[0],
+                limits,
+                env={SHARED_RUN_ENV: str(weka), "BEAKER_JOB_ID": "job-1", DEBUG_EXIT_AT_ENV: "0.5"},
+            )
+        stale_snapshot = tmp_path / "snapshot"
+        shutil.copytree(jobs[0], stale_snapshot)
+        with pytest.raises(Terminated):
+            run_eval(
+                jobs[1],
+                limits,
+                env={SHARED_RUN_ENV: str(weka), "BEAKER_JOB_ID": "job-2", DEBUG_EXIT_AT_ENV: "0.9"},
+            )
+        # Beaker carried over job 1's older snapshot into job 3.
+        shutil.copytree(stale_snapshot, jobs[2])
+        run_eval(jobs[2], limits, env={SHARED_RUN_ENV: str(weka), "BEAKER_JOB_ID": "job-3"})
+        manifest = read_manifest(jobs[2])
+        assert manifest["run"]["run_id"] == _run_id(jobs[0])
+        assert manifest["resume"]["beaker_job_ids"] == ["job-1", "job-2", "job-3"]
+
+    def test_an_inherited_variable_without_a_supervisor_session_changes_nothing(
+        self, tmp_path
+    ) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        stray = tmp_path / "not-a-session"
+        stray.mkdir()
+        out = tmp_path / "out"
+        with pytest.raises(Terminated):
+            run_eval(out, {"gsm8k": 4}, env={SHARED_RUN_ENV: str(stray), DEBUG_EXIT_AT_ENV: "0.5"})
         assert has_progress(out)
-        predictions = {p.name: p.read_bytes() for p in (out / "predictions").rglob("*.jsonl")}
+        assert not any(stray.iterdir())
+
+    @pytest.mark.parametrize("status", ["complete", "partial"])
+    def test_rerun_of_a_finished_shared_run_keeps_its_id(self, tmp_path, status) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        weka = _supervised(tmp_path)
+        env = {SHARED_RUN_ENV: str(weka)}
+        first = tmp_path / "job-1"
+        run_eval(first, {"gsm8k": 4}, env=env)
+        # What the supervisor saves when the attempt exits; a run with an errored task
+        # still exits 0 with status partial.
+        manifest = json.loads((first / "manifest.json").read_text())
+        manifest["run"]["status"] = status
+        (weka / "identity").mkdir(exist_ok=True)
+        (weka / "identity" / "manifest.json").write_text(json.dumps(manifest))
+        second = tmp_path / "job-2"
+        run_eval(second, {"gsm8k": 4}, env=env)
+        assert _run_id(second) == _run_id(first)
+
+    @pytest.mark.parametrize("carried_over", [False, True])
+    def test_shared_run_keeps_records_and_identity_until_supervisor_publishes_completion(
+        self, tmp_path, carried_over
+    ) -> None:
+        from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+
+        weka = _supervised(tmp_path)
+        env = {SHARED_RUN_ENV: str(weka)}
+        first = tmp_path / "job-1"
+        run_eval(first, {"gsm8k": 4}, env=env)
+        first_id = _run_id(first)
+        # Outputs are in the job's results; only the records are on WEKA.
+        assert not (first / PROGRESS_DIR).exists()
+        assert any((weka / "progress").rglob("*.jsonl"))
+        predictions = {p.name: p.read_bytes() for p in (first / "predictions").rglob("*.jsonl")}
 
         # A kill after upload but before the supervisor's completion marker leaves
-        # the completed manifest and records. Re-entry must keep the dashboard ID.
-        resumed = run_eval(out, {"gsm8k": 4}, env=env)
-        assert _run_id(out) == first_id
-        assert resumed.finalized == {"gsm8k"}
+        # the completed manifest and records. Re-entry must keep the dashboard ID,
+        # whether or not Beaker carried the earlier results over.
+        second = tmp_path / "job-2"
+        if carried_over:
+            shutil.copytree(first, second)
+        resumed = run_eval(second, {"gsm8k": 4}, env=env)
+        assert _run_id(second) == first_id
+        # Without the earlier outputs, the records rebuild the finalized task.
+        assert resumed.finalized == ({"gsm8k"} if carried_over else set())
+        assert resumed.queued == 0
         assert predictions == {
-            p.name: p.read_bytes() for p in (out / "predictions").rglob("*.jsonl")
+            p.name: p.read_bytes() for p in (second / "predictions").rglob("*.jsonl")
         }
 
     # The CLI rewrites a stopped run's manifest as interrupted (SIGTERM under --resume) or
@@ -1743,16 +1853,17 @@ class TestProgressLifetime:
     def test_shared_run_retries_a_failed_upload_with_the_same_run_id(self, tmp_path) -> None:
         from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
 
-        out = tmp_path / "shared" / "output"
-        env = {SHARED_RUN_ENV: str(out.parent)}
+        weka = _supervised(tmp_path)
+        env = {SHARED_RUN_ENV: str(weka)}
+        first, retry = tmp_path / "job-1", tmp_path / "job-2"
         with pytest.raises(RuntimeError, match="upload unavailable"):
-            self._upload_run(out, RuntimeError("upload unavailable"), env=env)
-        run_id = _run_id(out)
-        assert has_progress(out)
-        assert self._upload_run(out, env=env) == [True]
-        assert _run_id(out) == run_id
+            self._upload_run(first, RuntimeError("upload unavailable"), env=env)
+        run_id = _run_id(first)
+        assert any((weka / "progress").rglob("*.jsonl"))
+        assert self._upload_run(retry, env=env) == [True]
+        assert _run_id(retry) == run_id
         # The supervisor publishes completion before deleting these records.
-        assert has_progress(out)
+        assert any((weka / "progress").rglob("*.jsonl"))
 
     def test_a_completed_run_deletes_only_its_own_records(self, interrupted_run, tmp_path) -> None:
         out = _resume_copy(interrupted_run, tmp_path)

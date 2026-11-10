@@ -1,5 +1,9 @@
 """Own a shared WEKA run directory across Beaker replacement jobs.
 
+The eval writes its outputs to Beaker results (``/results``), as it does without resume.
+The WEKA directory holds only what a replacement job needs to continue: progress records
+(``progress/``) and the run's identity (``identity/``, its manifest and upload secret).
+
 The outer advisory lock covers the whole run, including its manifest and upload. The
 child inherits its descriptor so killing only this supervisor cannot let another writer
 start while the child is alive. Lock files are never unlinked while running.
@@ -10,7 +14,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
-import hashlib
 import json
 import os
 import shutil
@@ -26,10 +29,13 @@ from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 from olmo_eval.common.constants.infrastructure import (
     BEAKER_DEFAULT_RESUME_RETENTION_DAYS,
     SHARED_RUN_ENV,
+    SHARED_RUN_IDENTITY_DIR,
+    SHARED_RUN_IDENTITY_FILES,
+    SHARED_RUN_PROGRESS_DIR,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterator, Sequence
 
 RETENTION_SECONDS = BEAKER_DEFAULT_RESUME_RETENTION_DAYS * 24 * 3600
 REFRESH_SECONDS = 3600
@@ -38,7 +44,6 @@ REFRESH_SECONDS = 3600
 class SharedRunSession(TypedDict):
     uuid: str
     command: list[str]
-    output_initialized: NotRequired[bool]
     progress_streams: NotRequired[list[str]]
     completed: NotRequired[bool]
 
@@ -87,38 +92,30 @@ def refresh_files(directory: Path) -> None:
             os.utime(path, follow_symlinks=False)
 
 
-def _checksum(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+def _manifest_run(results: Path) -> dict[str, Any]:
+    try:
+        return json.loads((results / "manifest.json").read_text()).get("run") or {}
+    except (OSError, ValueError):
+        return {}
 
 
-def _artifacts(output: Path) -> list[Path]:
-    """Return the run's result files, leaving out recovery progress."""
-    return [
-        path.relative_to(output)
-        for path in _files(output)
-        if "progress" not in path.relative_to(output).parts
-    ]
+def _has_complete_results(results: Path, run_id: str | None) -> bool:
+    """Whether ``results`` holds the final outputs of the completed run ``run_id``."""
+    run = _manifest_run(results)
+    return (
+        run.get("run_id") == run_id
+        and run.get("status") in ("complete", "partial")
+        and (results / "metrics.json").is_file()
+    )
 
 
-def copy_results(output: Path, results: Path, artifacts: Iterable[Path]) -> None:
-    """Copy result files from WEKA into Beaker ``/results`` with the usual layout.
-
-    WEKA recovery files are pruned after the retention window, so Beaker results keep
-    the durable copy of predictions, metrics, and logs, as they did before resume.
-    Each file is written to a temporary name and renamed, so a periodic Beaker upload
-    never sees a partial file under its final name.
-    """
-    for relative in artifacts:
-        target = results / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(f".{target.name}.copying")
-        try:
-            shutil.copy2(output / relative, tmp)
-            tmp.replace(target)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
+def _save_identity(results: Path, saved: Path) -> None:
+    for name in SHARED_RUN_IDENTITY_FILES:
+        if (results / name).is_file():
+            saved.mkdir(mode=0o700, exist_ok=True)
+            tmp = saved / f".{name}.tmp"
+            shutil.copy2(results / name, tmp)
+            os.replace(tmp, saved / name)
 
 
 def run_shared(
@@ -143,9 +140,8 @@ def run_shared(
     directory = root / run_uuid
     directory.mkdir(mode=0o700, exist_ok=True)
     results.mkdir(parents=True, exist_ok=True)
-    receipt_path = results / "weka-resume.json"
     session = directory / "session.json"
-    output = directory / "output"
+    progress = directory / SHARED_RUN_PROGRESS_DIR
     session_data: SharedRunSession
     with (directory / "run.lock").open("a+") as lock:
         try:
@@ -158,37 +154,32 @@ def run_shared(
             session_data = json.loads(session.read_text())
             if session_data["command"] != list(command):
                 raise RuntimeError("WEKA run command changed; submit a new evaluation")
-        elif receipt_path.exists() or output.exists():
+        elif any(
+            (directory / name).exists()
+            for name in (SHARED_RUN_PROGRESS_DIR, SHARED_RUN_IDENTITY_DIR, "complete.json")
+        ):
             raise RuntimeError("WEKA recovery session is missing; submit a new evaluation")
         else:
-            session_data = {"uuid": run_uuid, "command": list(command), "output_initialized": False}
+            session_data = {"uuid": run_uuid, "command": list(command)}
             write_atomic(session, session_data)
-        if session_data.get("output_initialized", True) and not output.is_dir():
-            raise RuntimeError("WEKA recovery output is missing; submit a new evaluation")
-        output.mkdir(mode=0o700, exist_ok=True)
-        if not session_data.get("output_initialized", True):
-            session_data["output_initialized"] = True
-            write_atomic(session, session_data)
-        receipt = {
-            "uuid": run_uuid,
-            "output_dir": str(output),
-            "status": "running",
-            "volume": volume,
-            "retention_days": retention_days,
-        }
         complete = directory / "complete.json"
         if complete.exists():
-            saved = json.loads(complete.read_text())
-            for name, digest in saved["artifacts"].items():
-                path = output / name
-                if not path.is_file() or _checksum(path) != digest:
-                    raise RuntimeError(f"Completed WEKA run is missing or changed: {path}")
-            copy_results(output, results, map(Path, saved["artifacts"]))
-            write_atomic(
-                receipt_path,
-                {**receipt, "status": "complete", "run_id": saved.get("run_id"), "exit_code": 0},
+            run_id = json.loads(complete.read_text()).get("run_id")
+            if _has_complete_results(results, run_id):
+                # Beaker reran a job whose eval finished, and its results came along.
+                print(f"WEKA run {run_uuid} already completed as run {run_id}", flush=True)
+                return 0
+            # This job's results lack the completed run's outputs (Beaker carried over an
+            # earlier snapshot, or none). Run the eval again, as a job without resume
+            # would; the saved identity keeps the run ID. Its progress is gone.
+            print(
+                f"WEKA run {run_uuid} completed as run {run_id}, but this job's results do "
+                "not hold its outputs; running it again",
+                flush=True,
             )
-            return 0
+            session_data = {"uuid": run_uuid, "command": list(command)}
+            write_atomic(session, session_data)
+            complete.unlink()
         if session_data.get("completed"):
             raise RuntimeError("WEKA completion record is missing; submit a new evaluation")
         for relative in session_data.get("progress_streams", []):
@@ -201,15 +192,16 @@ def run_shared(
                 raise RuntimeError(f"WEKA recovery stream is missing: {stream}")
         # This directory belongs to one submission. The outer lock proves the old
         # writer is gone, including on another node, so its PID lock can be reclaimed.
-        for stale in (output / "progress").glob("*/.lock"):
+        for stale in progress.glob("*/.lock"):
             stale.unlink()
         refresh_files(directory)
-        write_atomic(receipt_path, receipt)
-        print(f"WEKA run {run_uuid}: {output}", flush=True)
+        print(f"WEKA run {run_uuid}: recovery state in {directory}", flush=True)
         stopped = threading.Event()
         errors: list[OSError] = []
+        # The eval writes its outputs to Beaker results, as it does without resume. Only
+        # its progress records and run identity go to the volume (SHARED_RUN_ENV).
         child = subprocess.Popen(
-            [*command, "-O", str(output)],
+            [*command, "-O", str(results)],
             pass_fds=(lock.fileno(),),
             start_new_session=True,
             env={**os.environ, SHARED_RUN_ENV: str(directory)},
@@ -241,38 +233,17 @@ def run_shared(
         if errors:
             raise RuntimeError(f"WEKA retention refresh failed: {errors[0]}")
         code = 128 - code if code < 0 else code
-        manifest_path = output / "manifest.json"
-        if manifest_path.exists():
-            receipt["run_id"] = json.loads(manifest_path.read_text()).get("run", {}).get("run_id")
+        # Keep the newest identity, including an upload secret created after the run
+        # started (by the final upload, or when marking the run interrupted).
+        _save_identity(results, directory / SHARED_RUN_IDENTITY_DIR)
         if code == 0:
-            artifacts = {str(path): _checksum(output / path) for path in _artifacts(output)}
-            write_atomic(complete, {"artifacts": artifacts, "run_id": receipt.get("run_id")})
+            write_atomic(complete, {"run_id": _manifest_run(results).get("run_id")})
             write_atomic(session, {**json.loads(session.read_text()), "completed": True})
-            if (output / "progress").exists():
-                shutil.rmtree(output / "progress")
-            copy_results(output, results, map(Path, artifacts))
-        elif code not in (130, 143):
-            # Keep a failed attempt's logs and partial predictions for debugging. An
-            # interrupted attempt skips the copy to shut down quickly; its replacement
-            # copies the final results.
-            try:
-                copy_results(output, results, _artifacts(output))
-            except OSError as e:
-                # Report the eval's own failure, not the copy's.
-                print(f"Could not copy failed run's output to {results}: {e}", flush=True)
+            # The identity stays (it is small) so a rerun of this completed job keeps
+            # the run ID; retention prunes it.
+            if progress.exists():
+                shutil.rmtree(progress)
         refresh_files(directory)
-        write_atomic(
-            receipt_path,
-            {
-                **receipt,
-                "status": "complete"
-                if code == 0
-                else "interrupted"
-                if code in (130, 143)
-                else "failed",
-                "exit_code": code,
-            },
-        )
         return code
 
 
