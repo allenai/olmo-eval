@@ -27,8 +27,10 @@ have a claim. Never create claims implicitly during launch.
 3. Wrap the task command in a shared-run lifecycle. Allocate a unique directory per
    submission, stable across replacement jobs, and put the complete output directory
    there. Take an advisory lock before touching manifests or progress. Reclaim the
-   predecessor's progress locks only while holding this outer lock. Leave only a
-   small receipt in Beaker `/results`, with no symlink to the volume.
+   predecessor's progress locks only while holding this outer lock. Write a small
+   receipt to Beaker `/results`, with no symlink to the volume. When the run
+   finishes, copy its output, without recovery progress, into `/results` (see
+   "Final results in Beaker" below).
 4. Refresh recovery files during active runs. Use one `tmp-<days>d` ancestor (default `tmp-7d`), never nested
    `tmp-*` directories. Refresh every file's mtime, not just a heartbeat: prune uses
    per-file mtime and reading files does not extend their lifetime. Preserve completed
@@ -52,7 +54,7 @@ have a claim. Never create claims implicitly during launch.
   where allocated, bounded timeout. First qualify storage. Then run the actual
   wrapper with a local-fixture deterministic eval and real preemption/retry. Verify
   run ID, completed-instance reuse, failure counts, exactly one final row per instance,
-  intact finalized tasks, and small Beaker receipts.
+  intact finalized tasks, and a receipt plus the final output in Beaker results.
 - Scale: compare 1 GB and 10 GB WEKA state across replacements, checksum it, and
   separate scheduler/finalization delay, Gantry setup, and restore time. Cap all
   scratch data well below the volume's 500 GB capacity.
@@ -116,8 +118,8 @@ submitted experiment is not a verified result.
 
 The fixture moved from Ceres 442 to Ceres 441. Both attempts verified the same 10 GiB
 payload SHA-256, `e4c296c41d3a9605f0348961e41ed835b5f42c220751ed2269a726951546c935`.
-The replacement retained dashboard run ID `b441a482b60f`. Its Beaker output held a
-219-byte receipt plus small Gantry setup logs. The bulk payload, progress, requests,
+The replacement retained dashboard run ID `b441a482b60f`. In this first version, its
+Beaker output held a 219-byte receipt plus small Gantry setup logs. The bulk payload, progress, requests,
 predictions, metrics, and provider logs remained on WEKA.
 
 The real-model run used model revision
@@ -293,3 +295,26 @@ passed**. The focused launcher/lifecycle run passed 192 tests.
 
 No volume failures occurred in this validation. Live dashboard-upload validation and
 production-workspace claims remain deployment checks.
+
+
+## Final results in Beaker
+
+The first version of this change left only the receipt in Beaker `/results`. That broke
+the long-standing behavior that a Beaker eval's predictions, metrics, and logs can be
+downloaded from its result dataset. WEKA files under `tmp-<days>d` are pruned after
+the retention window, so those outputs were lost for runs launched with `--no-upload`
+and for anyone who downloaded predictions from Beaker.
+
+The supervisor now copies the output into `/results` with the same layout as a run
+without resume:
+
+- **Completed run.** After the completion record is written and progress is removed,
+  every checksummed artifact is copied. A replacement job that finds the run already
+  complete verifies the checksums and copies them into its own `/results`.
+- **Failed attempt.** The partial output, without `progress/`, is copied for debugging.
+- **Preempted attempt** (exit 130 or 143). Nothing is copied, so shutdown stays fast.
+  The replacement copies the final output.
+
+Each file is copied to a temporary name and renamed, so a periodic Beaker upload never
+sees a partial file under its final name. A copy failure exits nonzero; a retry finds
+the completion record and copies again without rerunning the eval.

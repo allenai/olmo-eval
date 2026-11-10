@@ -1177,10 +1177,13 @@ UUID directory under `/eval-cache/tmp-7d/` by default. Set
 `--resume-retention-days 14` (YAML: `resume_retention_days: 14`) to use `tmp-14d`
 and retain inactive recovery files for fourteen days. Any positive whole number of
 days is accepted. Replacement jobs reuse their original UUID and retention path and take
-an exclusive run lock. The full output lives on WEKA. Beaker results contain a small
-`weka-resume.json` receipt plus Gantry setup diagnostics. The receipt names the volume,
-UUID, output path, and dashboard run ID.
-Retrieve full artifacts from the dashboard or a job/session mounting the same volume.
+an exclusive run lock. While the run is active, its output lives on WEKA. When the run
+finishes, the final predictions, requests, metrics, manifest, and logs are copied into
+Beaker results with the same layout as a run without resume, so they stay downloadable
+after WEKA prunes the recovery files. Recovery progress is not copied. A failed attempt
+also copies its partial output for debugging; a preempted attempt does not, because its
+replacement copies the final output. Beaker results also contain a `weka-resume.json`
+receipt naming the volume, UUID, WEKA output path, and dashboard run ID.
 Grant read-write claims only to workspaces whose submitters are mutually trusted.
 Progress records can contain serialized Python objects; checksums detect corruption
 and do not authenticate writers.
@@ -1188,7 +1191,7 @@ and do not authenticate writers.
 Active runs refresh every recovery file's modification time hourly. After the selected
 retention period of inactivity (seven days by default), files are eligible for WEKA
 prune deletion. Actual deletion depends on the volume's prune schedule. Final results
-still upload to the dashboard normally; `--no-upload` leaves only temporary WEKA artifacts. Expired,
+still upload to the dashboard normally and are kept in Beaker results. Expired,
 missing, or corrupt committed progress stops recovery with an error. Shared-storage
 progress flushes every five seconds and on graceful shutdown. A completion marker
 prevents a replacement from repeating a successfully finished run. External evals do

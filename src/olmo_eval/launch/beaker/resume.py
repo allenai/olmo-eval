@@ -29,7 +29,7 @@ from olmo_eval.common.constants.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
 RETENTION_SECONDS = BEAKER_DEFAULT_RESUME_RETENTION_DAYS * 24 * 3600
 REFRESH_SECONDS = 3600
@@ -90,6 +90,35 @@ def refresh_files(directory: Path) -> None:
 def _checksum(path: Path) -> str:
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def _artifacts(output: Path) -> list[Path]:
+    """Return the run's result files, leaving out recovery progress."""
+    return [
+        path.relative_to(output)
+        for path in _files(output)
+        if "progress" not in path.relative_to(output).parts
+    ]
+
+
+def copy_results(output: Path, results: Path, artifacts: Iterable[Path]) -> None:
+    """Copy result files from WEKA into Beaker ``/results`` with the usual layout.
+
+    WEKA recovery files are pruned after the retention window, so Beaker results keep
+    the durable copy of predictions, metrics, and logs, as they did before resume.
+    Each file is written to a temporary name and renamed, so a periodic Beaker upload
+    never sees a partial file under its final name.
+    """
+    for relative in artifacts:
+        target = results / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(f".{target.name}.copying")
+        try:
+            shutil.copy2(output / relative, tmp)
+            tmp.replace(target)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
 
 def run_shared(
@@ -154,6 +183,7 @@ def run_shared(
                 path = output / name
                 if not path.is_file() or _checksum(path) != digest:
                     raise RuntimeError(f"Completed WEKA run is missing or changed: {path}")
+            copy_results(output, results, map(Path, saved["artifacts"]))
             write_atomic(
                 receipt_path,
                 {**receipt, "status": "complete", "run_id": saved.get("run_id"), "exit_code": 0},
@@ -215,15 +245,21 @@ def run_shared(
         if manifest_path.exists():
             receipt["run_id"] = json.loads(manifest_path.read_text()).get("run", {}).get("run_id")
         if code == 0:
-            artifacts = {
-                str(path.relative_to(output)): _checksum(path)
-                for path in _files(output)
-                if "progress" not in path.relative_to(output).parts
-            }
+            artifacts = {str(path): _checksum(output / path) for path in _artifacts(output)}
             write_atomic(complete, {"artifacts": artifacts, "run_id": receipt.get("run_id")})
             write_atomic(session, {**json.loads(session.read_text()), "completed": True})
             if (output / "progress").exists():
                 shutil.rmtree(output / "progress")
+            copy_results(output, results, map(Path, artifacts))
+        elif code not in (130, 143):
+            # Keep a failed attempt's logs and partial predictions for debugging. An
+            # interrupted attempt skips the copy to shut down quickly; its replacement
+            # copies the final results.
+            try:
+                copy_results(output, results, _artifacts(output))
+            except OSError as e:
+                # Report the eval's own failure, not the copy's.
+                print(f"Could not copy failed run's output to {results}: {e}", flush=True)
         refresh_files(directory)
         write_atomic(
             receipt_path,

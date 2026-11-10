@@ -334,8 +334,8 @@ def test_independent_uuids_do_not_overwrite_and_completed_run_is_not_repeated(sh
     another = str(uuid.uuid4())
     assert run_shared(root, another, results.parent / "other-results", command) == 0
     assert (root / "tmp-7d" / another / "output/count").read_text() == "1"
-    assert sorted(p.name for p in results.iterdir()) == ["weka-resume.json"]
-    assert not (results / "weka-resume.json").is_symlink()
+    assert sorted(p.name for p in results.iterdir()) == ["count", "weka-resume.json"]
+    assert not any(p.is_symlink() for p in results.iterdir())
 
 
 def test_a_live_writer_cannot_be_overwritten(shared):
@@ -718,3 +718,95 @@ def test_invalid_yaml_retention_rejected_before_launch(tmp_path, value):
     )
     with pytest.raises((SystemExit, ValueError)):
         LaunchConfigLoader(str(path), {}).load()
+
+
+WRITE_OUTPUTS = (
+    "(out/'predictions').mkdir(exist_ok=True); "
+    "(out/'predictions/gsm8k.jsonl').write_text('{\"id\": 0}\\n'); "
+    "(out/'metrics.json').write_text('{\"score\": 1}'); "
+    "(out/'progress/model').mkdir(parents=True, exist_ok=True); "
+    "(out/'progress/model/segment').write_text('saved'); "
+)
+
+
+def result_files(results):
+    return sorted(
+        str(p.relative_to(results))
+        for p in results.rglob("*")
+        if p.is_file() and p.name != "weka-resume.json"
+    )
+
+
+def test_completed_run_copies_final_results_to_beaker_results(shared):
+    root, run_uuid, results, directory = shared
+    assert run_shared(root, run_uuid, results, child(WRITE_OUTPUTS)) == 0
+    assert result_files(results) == ["metrics.json", "predictions/gsm8k.jsonl"]
+    for name in result_files(results):
+        assert (results / name).read_bytes() == (directory / "output" / name).read_bytes()
+    receipt = json.loads((results / "weka-resume.json").read_text())
+    assert receipt["status"] == "complete"
+
+
+def test_replacement_of_a_completed_run_copies_results_into_its_own_results(shared):
+    root, run_uuid, results, directory = shared
+    command = child(WRITE_OUTPUTS)
+    assert run_shared(root, run_uuid, results, command) == 0
+    fresh = results.parent / "replacement-results"
+    assert run_shared(root, run_uuid, fresh, command) == 0
+    assert result_files(fresh) == ["metrics.json", "predictions/gsm8k.jsonl"]
+    assert json.loads((fresh / "weka-resume.json").read_text())["status"] == "complete"
+
+
+def test_interrupted_attempt_skips_copy_and_its_replacement_copies_results(shared):
+    root, run_uuid, results, directory = shared
+    command = child(
+        WRITE_OUTPUTS + "p=out/'attempt'; prior=p.exists(); p.write_text('1'); "
+        "sys.exit(0 if prior else 143)"
+    )
+    assert run_shared(root, run_uuid, results, command) == 143
+    assert result_files(results) == []
+    assert run_shared(root, run_uuid, results, command) == 0
+    assert result_files(results) == ["attempt", "metrics.json", "predictions/gsm8k.jsonl"]
+
+
+def test_failed_attempt_copies_partial_results_without_progress(shared):
+    root, run_uuid, results, directory = shared
+    assert run_shared(root, run_uuid, results, child(WRITE_OUTPUTS + "sys.exit(1)")) == 1
+    assert result_files(results) == ["metrics.json", "predictions/gsm8k.jsonl"]
+    assert (directory / "output/progress/model/segment").read_text() == "saved"
+    assert json.loads((results / "weka-resume.json").read_text())["status"] == "failed"
+
+
+def test_copy_failure_after_a_failed_eval_keeps_the_eval_exit_code(shared, monkeypatch):
+    root, run_uuid, results, directory = shared
+
+    def no_space(src, dst, **kwargs):
+        Path(dst).write_text("partial")
+        raise OSError(errno.ENOSPC, "no space left on device")
+
+    monkeypatch.setattr(shutil, "copy2", no_space)
+    assert run_shared(root, run_uuid, results, child(WRITE_OUTPUTS + "sys.exit(1)")) == 1
+    assert result_files(results) == []
+    assert not list(results.rglob("*.copying"))
+    assert json.loads((results / "weka-resume.json").read_text())["status"] == "failed"
+
+
+def test_copy_failure_after_completion_is_retried_without_rerunning(shared, monkeypatch):
+    root, run_uuid, results, directory = shared
+    command = child(
+        WRITE_OUTPUTS
+        + "p=out/'runs'; p.write_text(str(int(p.read_text())+1) if p.exists() else '1')"
+    )
+    copy2 = shutil.copy2
+
+    def no_space(src, dst, **kwargs):
+        raise OSError(errno.ENOSPC, "no space left on device")
+
+    monkeypatch.setattr(shutil, "copy2", no_space)
+    with pytest.raises(OSError, match="no space"):
+        run_shared(root, run_uuid, results, command)
+    monkeypatch.setattr(shutil, "copy2", copy2)
+    retry = results.parent / "retry-results"
+    assert run_shared(root, run_uuid, retry, command) == 0
+    assert (retry / "runs").read_text() == "1"
+    assert result_files(retry) == ["metrics.json", "predictions/gsm8k.jsonl", "runs"]
