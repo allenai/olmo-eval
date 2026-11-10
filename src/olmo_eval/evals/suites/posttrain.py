@@ -15,10 +15,13 @@ suites. Also left out until olmo-eval has a configuration that lets a reasoning 
 finish (their variants cap generation at 1,024 or 128 tokens, most with stop sequences):
 MATH-500, HumanEval+, MBPP+ and LongBench v2.
 
-Tasks run with their own sampling settings; do not override ``max_tokens`` for the whole
-run. Dev reads RULER+ at 64K (full), 128K and 256K, and HELMET and CTC at 64K. All three run
-in completion mode with direct-answer budgets (CTC's docs say a reasoning model may need
-a larger budget for CTC alone), and BFCL keeps its 4,096-token budget. Safety tasks use
+Sampled entries run at the Olmo 3.5 models' suggested sampling, temperature 1.0 and top_p
+0.95 (the ledger's setting), through ``:..._t10`` variants that keep each task's budget and
+sample count; olmo-eval's own default for most of them is 0.6. Do not override sampling or
+``max_tokens`` for the whole run. Dev reads RULER+ at 64K (full), 128K and 256K, and HELMET
+and CTC at 64K. All three run greedy in completion mode with direct-answer budgets (CTC's
+docs say a reasoning model may need a larger budget for CTC alone), and BFCL keeps its own
+settings (temperature 0.001, 4,096 tokens), as the ledger's BFCL reads do. Safety tasks use
 the thinking-model judge variants and need the judge providers shown in ``safety.py``;
 Omniscience is graded by its default judge, gpt-4o-mini, through the OpenAI API.
 
@@ -40,7 +43,59 @@ from olmo_eval.evals.suites import (  # noqa: F401
     science,
 )
 from olmo_eval.evals.suites.math import OMEGA_DEV
-from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, make_suite
+from olmo_eval.evals.suites.registry import (
+    AggregationStrategy,
+    Suite,
+    get_suite,
+    make_suite,
+    suite_exists,
+)
+from olmo_eval.evals.tasks.common import register_sampling_variant
+
+# The Olmo 3.5 models' suggested sampling; each task keeps its budget and sample count.
+MODEL_SAMPLING = {"temperature": 1.0, "top_p": 0.95}
+# Entries that keep their own sampling: greedy direct-answer long context, and BFCL.
+OWN_SAMPLING = frozenset(
+    {
+        "ruler_plus_all__65536",
+        "ruler_plus_all__131072:hillclimb",
+        "ruler_plus_all__262144:hillclimb",
+        "helmet_all__65536",
+        "helmet_nojudge__65536",
+        "ctc:r64k",
+        "bfcl",
+    }
+)
+
+
+# Each ``_t10`` spec in these suites, mapped to the spec it was made from.
+SAMPLED_FROM: dict[str, str] = {}
+
+
+def _at_model_sampling(entry: str | Suite) -> str | Suite:
+    """The entry at ``MODEL_SAMPLING`` (``:..._t10``), unless it keeps its own sampling."""
+    if isinstance(entry, Suite):
+        if entry.name in OWN_SAMPLING:
+            return entry
+        name = f"{entry.name}:t10"
+        if suite_exists(name):
+            return get_suite(name)
+        return make_suite(
+            name,
+            tuple(_at_model_sampling(task) for task in entry.tasks),
+            aggregation=entry.aggregation,
+            description=f"{entry.description} At temperature 1.0 and top_p 0.95.".strip(),
+        )
+    if entry in OWN_SAMPLING:
+        return entry
+    spec = register_sampling_variant(entry, "t10", **MODEL_SAMPLING)
+    SAMPLED_FROM[spec] = entry
+    return spec
+
+
+def _sampled(entries: tuple) -> tuple:
+    return tuple(_at_model_sampling(entry) for entry in entries)
+
 
 _HMMT = ("hmmt_feb_2025:pass_at_8", "hmmt_nov_2025:pass_at_8", "hmmt_feb_2026:pass_at_8")
 _AIME = ("aime_2025:pass_at_32", "aime_2026:pass_at_32")
@@ -82,27 +137,29 @@ _TEST_SHARED = (
 
 make_suite(
     "posttrain:tiny:dev",
-    _dev_shared("helmet_nojudge__65536"),
+    _sampled(_dev_shared("helmet_nojudge__65536")),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Tiny post-training dev set (the tracker's Track column).",
 )
 
 make_suite(
     "posttrain:tiny:test",
-    _TEST_SHARED,
+    _sampled(_TEST_SHARED),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Tiny post-training test set (the tracker's Publish column).",
 )
 
 make_suite(
     "posttrain:small:dev",
-    (
-        *_dev_shared("helmet_all__65536"),
-        "mt_bench",
-        "multi_if",
-        "multichallenge",
-        "harmbench:wg_judge_thinking",
-        "xstest:wg_judge_thinking",
+    _sampled(
+        (
+            *_dev_shared("helmet_all__65536"),
+            "mt_bench",
+            "multi_if",
+            "multichallenge",
+            "harmbench:wg_judge_thinking",
+            "xstest:wg_judge_thinking",
+        )
     ),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Small post-training dev set (the tracker's Track column).",
@@ -110,11 +167,13 @@ make_suite(
 
 make_suite(
     "posttrain:small:test",
-    (
-        *_TEST_SHARED,
-        "hle:text:verified",
-        get_suite("arena_hard_v2"),
-        get_suite("frontierscience"),
+    _sampled(
+        (
+            *_TEST_SHARED,
+            "hle:text:verified",
+            get_suite("arena_hard_v2"),
+            get_suite("frontierscience"),
+        )
     ),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Small post-training test set (the tracker's Publish column).",

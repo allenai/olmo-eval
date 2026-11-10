@@ -6,23 +6,24 @@ import pytest
 
 from olmo_eval.common.configs import expand_tasks, validate_task_metrics, validate_tasks
 from olmo_eval.evals.suites import AggregationStrategy, Suite, get_suite
+from olmo_eval.evals.suites.posttrain import MODEL_SAMPLING, OWN_SAMPLING, SAMPLED_FROM
 from olmo_eval.evals.tasks.common import get_task
 
 
 def dev_shared(helmet: str) -> tuple[str, ...]:
     return (
-        "gpqa_diamond:cot",
-        "gpqa_main:cot",
-        "mmlu:cot:hillclimb",
-        "popqa:chat:hillclimb",
-        "omega:dev",
-        "hmmt_feb_2025:pass_at_8",
-        "hmmt_nov_2025:pass_at_8",
-        "hmmt_feb_2026:pass_at_8",
-        "livecodebench:lite",
+        "gpqa_diamond:cot:t10",
+        "gpqa_main:cot:t10",
+        "mmlu:cot:hillclimb:t10",
+        "popqa:chat_hillclimb_t10",
+        "omega:dev:t10",
+        "hmmt_feb_2025:pass_at_8_t10",
+        "hmmt_nov_2025:pass_at_8_t10",
+        "hmmt_feb_2026:pass_at_8_t10",
+        "livecodebench:lite_t10",
         "bfcl",
-        "ifeval",
-        "ifeval_ood",
+        "ifeval:t10",
+        "ifeval_ood:t10",
         "ruler_plus_all__65536",
         "ruler_plus_all__131072:hillclimb",
         "ruler_plus_all__262144:hillclimb",
@@ -32,37 +33,40 @@ def dev_shared(helmet: str) -> tuple[str, ...]:
 
 
 TEST_SHARED = (
-    "mmlu_pro:cot",
-    "omniscience:judge",
-    "zebralogic:chat",
-    "aime_2025:pass_at_32",
-    "aime_2026:pass_at_32",
-    "livecodebench_hidden",
-    "do_anything_now:wg_judge_thinking",
-    "wildguardtest:wg_judge_thinking",
-    "wildjailbreak:wg_judge_thinking",
-    "wmdp:mcq",
-    "bbq:mcq",
-    "strongreject:sr_judge_thinking",
+    "mmlu_pro:cot:t10",
+    "omniscience:judge_t10",
+    "zebralogic:chat_t10",
+    "aime_2025:pass_at_32_t10",
+    "aime_2026:pass_at_32_t10",
+    "livecodebench_hidden:t10",
+    "do_anything_now:wg_judge_thinking_t10",
+    "wildguardtest:wg_judge_thinking_t10",
+    "wildjailbreak:wg_judge_thinking_t10",
+    "wmdp:mcq_t10",
+    "bbq:mcq_t10",
+    "strongreject:sr_judge_thinking_t10",
 )
 MEMBERS = {
     "posttrain:tiny:dev": dev_shared("helmet_nojudge__65536"),
     "posttrain:tiny:test": TEST_SHARED,
     "posttrain:small:dev": (
         *dev_shared("helmet_all__65536"),
-        "mt_bench",
-        "multi_if",
-        "multichallenge",
-        "harmbench:wg_judge_thinking",
-        "xstest:wg_judge_thinking",
+        "mt_bench:t10",
+        "multi_if:t10",
+        "multichallenge:t10",
+        "harmbench:wg_judge_thinking_t10",
+        "xstest:wg_judge_thinking_t10",
     ),
     "posttrain:small:test": (
         *TEST_SHARED,
-        "hle:text:verified",
-        "arena_hard_v2",
-        "frontierscience",
+        "hle:text:verified:t10",
+        "arena_hard_v2:t10",
+        "frontierscience:t10",
     ),
 }
+# Long-context retrieval runs greedy in completion mode with direct-answer budgets, and BFCL
+# keeps the settings that existing post-training reads use.
+OWN_SAMPLING_TASKS = frozenset(task for suite in OWN_SAMPLING for task in get_suite(suite).expand())
 
 
 def _names(suite: Suite) -> tuple[str, ...]:
@@ -91,32 +95,33 @@ def test_gpqa_diamond_and_its_superset_stay_in_dev(size):
     # Diamond's questions are a subset of main's, so splitting them leaks test items.
     dev = get_suite(f"posttrain:{size}:dev").expand()
 
-    assert {"gpqa_diamond:cot", "gpqa_main:cot"} <= set(dev)
+    assert {"gpqa_diamond:cot:t10", "gpqa_main:cot:t10"} <= set(dev)
 
 
-# Exempt by design: long-context retrieval runs in completion mode with direct-answer
-# budgets, and BFCL keeps the 4,096-token budget that existing post-training reads use.
-OWN_BUDGET_SUITES = (
-    "ruler_plus_all__65536",
-    "ruler_plus_all__131072:hillclimb",
-    "ruler_plus_all__262144:hillclimb",
-    "helmet_all__65536",
-    "ctc:r64k",
-    "bfcl",
-)
 MIN_GENERATION_BUDGET = 32768
 
 
 @pytest.mark.parametrize("name", MEMBERS)
 def test_no_task_cuts_off_a_reasoning_trace(name):
-    exempt = {task for suite in OWN_BUDGET_SUITES for task in get_suite(suite).expand()}
     for task in get_suite(name).expand():
-        if task in exempt:
+        if task in OWN_SAMPLING_TASKS:
             continue
         params = get_task(task).config.sampling_params
         assert params is not None, task
         assert not params.stop_sequences, task
         assert params.max_tokens is None or params.max_tokens >= MIN_GENERATION_BUDGET, task
+
+
+@pytest.mark.parametrize("name", MEMBERS)
+def test_sampled_tasks_run_at_the_models_suggested_sampling(name):
+    # Olmo 3.5's suggested sampling, not olmo-eval's default of 0.6; nothing else changes.
+    for task in get_suite(name).expand():
+        if task in OWN_SAMPLING_TASKS:
+            continue
+        config = get_task(task).config
+        source = get_task(SAMPLED_FROM[task]).config
+        assert config.sampling_params == replace(source.sampling_params, **MODEL_SAMPLING), task
+        assert replace(config, sampling_params=source.sampling_params) == source, task
 
 
 @pytest.mark.parametrize("name", MEMBERS)
