@@ -11,8 +11,8 @@ def dev_shared(helmet: str) -> tuple[str, ...]:
     return (
         "gpqa_diamond:cot",
         "gpqa_main:cot",
-        "mmlu:cot",
-        "popqa:chat",
+        "mmlu:cot:hillclimb",
+        "popqa:chat:hillclimb",
         "omega:dev",
         "hmmt_feb_2025:pass_at_32",
         "hmmt_nov_2025:pass_at_32",
@@ -136,3 +136,15 @@ def test_tiny_dev_needs_no_secret():
     }
 
     assert not needs
+
+
+def test_dev_reads_fixed_samples_of_popqa_and_mmlu():
+    # Dev has to run fast: about 14,000 items each, at ~11k reasoning tokens per item, is too slow.
+    popqa = get_task("popqa:chat:hillclimb").config
+    mmlu = [get_task(task).config for task in get_suite("mmlu:cot:hillclimb").expand()]
+
+    assert popqa.limit == 1000
+    assert popqa.sampling_params == get_task("popqa:chat").config.sampling_params
+    assert len(mmlu) == 57
+    assert {config.limit for config in mmlu} == {18}
+    assert get_suite("mmlu:cot:hillclimb").aggregation == get_suite("mmlu:cot").aggregation

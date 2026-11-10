@@ -2,7 +2,9 @@
 
 Membership follows the Olmo eval tracker's Eval list: Track is dev, Publish is test.
 Dev suites are for hill-climbing and checkpoint selection; test suites are read only
-for release reports. No task is in both suites of one size.
+for release reports. No task is in both suites of one size. Dev has to run fast, so it
+reads fixed seeded samples of the two largest sets: popqa (1,000 of about 14,000 items)
+and MMLU:cot (18 items per subject, 1,026 in all).
 
 Left out: tracker rows with no olmo-eval task yet (CritPt, FrontierCode, BrowseComp-Plus,
 AutomationBench, DeepSearchQA, Terminal-Bench-Science, FIRM, OpenAgentSafety, the
@@ -47,8 +49,8 @@ def _dev_shared(helmet_suite: str) -> tuple:
     return (
         "gpqa_diamond:cot",
         "gpqa_main:cot",
-        get_suite("mmlu:cot"),
-        "popqa:chat",
+        get_suite("mmlu:cot:hillclimb"),
+        "popqa:chat:hillclimb",
         OMEGA_DEV,
         *_HMMT,
         "livecodebench:lite",
