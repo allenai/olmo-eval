@@ -1,3 +1,4 @@
+import olmo_eval.evals.suites.code  # noqa: F401 – register olmobase:code:v3
 import olmo_eval.evals.suites.mmlu  # noqa: F401 – register MMLU suites
 from olmo_eval.evals.suites.registry import (
     AggregationStrategy,
@@ -89,6 +90,18 @@ make_suite(
 make_suite(
     name="minerva_math:olmo3base",
     tasks=tuple(f"minerva_math_{subtask}:olmo3base" for subtask in MATH_SUBSETS),
+)
+make_suite(
+    name="gsm_symb:olmo3base_multiparagraph",
+    tasks=(
+        "gsm_symbolic:olmo3base_multiparagraph",
+        "gsm_symbolic:p1:olmo3base_multiparagraph",
+        "gsm_symbolic:p2:olmo3base_multiparagraph",
+    ),
+)
+make_suite(
+    name="minerva_math:olmo3base_multiparagraph",
+    tasks=tuple(f"minerva_math_{subtask}:olmo3base_multiparagraph" for subtask in MATH_SUBSETS),
 )
 make_suite(
     name="minerva_math:bpb:olmo3base",
@@ -261,6 +274,59 @@ make_suite(
         "gsm8k:olmo3base",
         get_suite("gsm_symb:olmo3base"),
         get_suite("minerva_math:olmo3base"),
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+# olmobase:math with the blank-line stop removed from every member. See
+# gsm8k:olmo3base_multiparagraph for why.
+make_suite(
+    name="olmobase:math:v2",
+    tasks=(
+        "gsm8k:olmo3base_multiparagraph",
+        get_suite("gsm_symb:olmo3base_multiparagraph"),
+        get_suite("minerva_math:olmo3base_multiparagraph"),
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+# =============================================================================
+# OlmoBaseEval v3: every cluster with the fixes so far, and the clusters together.
+# =============================================================================
+
+make_suite(
+    name="olmobase:mcqa_stem:v3",
+    tasks=get_suite("olmobase:mcqa_stem").tasks,
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+# drop:mc v3 takes its few-shot examples from the multiple-choice DROP set.
+make_suite(
+    name="olmobase:mcqa_non_stem:v3",
+    tasks=tuple(
+        "drop:mc:olmo3base:v3" if task == "drop:mc:olmo3base" else task
+        for task in get_suite("olmobase:mcqa_non_stem").tasks
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+make_suite(
+    name="olmobase:gen:v3",
+    tasks=get_suite("olmobase:gen").tasks,
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+make_suite(
+    name="olmobase:math:v3",
+    tasks=get_suite("olmobase:math:v2").tasks,
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+make_suite(
+    name="olmobase:v3",
+    tasks=tuple(
+        get_suite(f"olmobase:{cluster}:v3")
+        for cluster in ("mcqa_stem", "mcqa_non_stem", "gen", "math", "code")
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
 )
