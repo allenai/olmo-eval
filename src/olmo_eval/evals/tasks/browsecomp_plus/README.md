@@ -99,16 +99,3 @@ the retrieval environment's Python must live there too (run `install.sh` with
 Java 21 must be reachable through `JAVA_HOME` or `PATH`. The Qwen3-Embedding-8B server
 loads its model on the GPU, so leave it room by lowering the model server's share, for
 example `-o provider.kwargs.gpu_memory_utilization=0.7`.
-
-### Inference without grading
-
-Add the `nojudge` variant to record trajectories and the measurements that do not need
-the judge (retrieval recall, tool-call counts, citations, completion rate, tool errors)
-without calling GPT-4.1 or requiring `OPENAI_API_KEY`:
-
-```bash
-BROWSECOMP_PLUS_RETRIEVER=bm25 uv run olmo-eval run -m /absolute/path/to/checkpoint \
-    --harness browsecomp_plus -t browsecomp_plus:nojudge
-```
-
-Variants compose, for example `browsecomp_plus:get_document:nojudge`.

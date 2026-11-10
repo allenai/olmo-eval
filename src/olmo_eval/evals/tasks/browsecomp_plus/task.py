@@ -10,7 +10,6 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Iterator, Sequence
-from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -134,7 +133,6 @@ MEAN_METRICS = tuple(
         "tool_errors",
     )
 )
-JUDGED_METRICS = frozenset({"accuracy", "calibration_error_official"})
 
 
 def trajectory_statistics(response: Response) -> tuple[set[str], dict[str, int]]:
@@ -229,11 +227,7 @@ async def grade_with_judge(
 
 @register("browsecomp_plus")
 class BrowseCompPlus(Task):
-    """Fixed-corpus research questions scored by the official GPT-4.1 evaluator.
-
-    The judge runs only when a judged metric is configured, so a variant without
-    those metrics records trajectories and retrieval measurements alone.
-    """
+    """Fixed-corpus research questions scored by the official GPT-4.1 evaluator."""
 
     data_source = DataSource(path=DATASET_REPO, split="test")
     formatter = ChatFormatter(
@@ -303,9 +297,7 @@ class BrowseCompPlus(Task):
 
         if self.config.sampling_params and self.config.sampling_params.num_samples != 1:
             raise ValueError("BrowseComp-Plus evaluates one agent trajectory per question")
-        judged = any(metric.name in JUDGED_METRICS for metric in self.config.metrics)
-        async with AsyncExitStack() as stack:
-            client = await stack.enter_async_context(openai.AsyncOpenAI()) if judged else None
+        async with openai.AsyncOpenAI() as client:
             for response in responses:
                 if len(response.outputs) > 1:
                     raise ValueError("BrowseComp-Plus evaluates one agent trajectory per question")
@@ -314,11 +306,7 @@ class BrowseCompPlus(Task):
                 output = response.outputs[0] if response.outputs else None
                 text = output.text if output is not None else ""
                 completed = run_completed(response, output)
-                scores = {
-                    metric.name: 0.0
-                    for metric in MEAN_METRICS
-                    if judged or metric.name != "accuracy"
-                }
+                scores = {metric.name: 0.0 for metric in MEAN_METRICS}
                 scores.update(
                     retrieval_recall=len(retrieved.intersection(gold_docids)) / len(gold_docids),
                     search_calls=float(counts.get("search", 0)),
@@ -340,12 +328,10 @@ class BrowseCompPlus(Task):
                 response.scores.update(scores)
                 verdict: dict[str, Any] = {
                     "parse_error": True,
-                    "error": "Response incomplete or cannot be parsed"
-                    if judged
-                    else "Judge not run",
+                    "error": "Response incomplete or cannot be parsed",
                 }
                 raw = None
-                if completed and client is not None:
+                if completed:
                     verdict, raw = await grade_with_judge(
                         client,
                         question=response.instance.question,
@@ -361,7 +347,7 @@ class BrowseCompPlus(Task):
                     output.metadata["judge_result"] = {
                         **verdict,
                         "raw_response": raw,
-                        "judge_model": self.config.judge_model if judged else None,
+                        "judge_model": self.config.judge_model,
                         "is_completed": completed,
                         "retrieved_docids": sorted(retrieved),
                         "tool_call_counts": counts,
@@ -377,11 +363,3 @@ register_variant(
     formatter=ChatFormatter(user_template=QUERY_TEMPLATE.replace("{Question}", "{question}")),
 )
 register_variant("browsecomp_plus", "mini", limit=10)
-_UNJUDGED_METRICS = tuple(metric for metric in MEAN_METRICS if metric.name not in JUDGED_METRICS)
-register_variant(
-    "browsecomp_plus",
-    "nojudge",
-    metrics=_UNJUDGED_METRICS,
-    primary_metric=next(metric for metric in _UNJUDGED_METRICS if metric.name == "completed"),
-    required_secrets=(),
-)
