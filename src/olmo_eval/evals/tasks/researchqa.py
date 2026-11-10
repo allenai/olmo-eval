@@ -31,6 +31,7 @@ from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.llm_judge import JUDGE_ATTEMPTS, Judge, JudgeParseError, JudgeSettings
 from olmo_eval.common.types import (
+    SCORING_TEXT_EMPTY_KEY,
     Instance,
     LMOutput,
     LMRequest,
@@ -326,6 +327,7 @@ class ResearchQA(Task):
         think_end = text.find("</think>")
         if think_end >= 0:
             text = text[think_end + len("</think>") :]
+        output.metadata[SCORING_TEXT_EMPTY_KEY] = not text.strip()
         return text.strip()
 
     @cached_property
