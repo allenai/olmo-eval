@@ -952,6 +952,24 @@ then inference, then one `overall` for the task.
 
 ### Providers
 
+**`sglang_server`** sends requests to an SGLang server, or an `sglang_router` in front of
+several, that something else started and owns, such as a training stack. It speaks the same
+OpenAI-compatible API as `vllm_server` and never starts a server, so `provider.base_url` is
+required. It counts prompt tokens with the model's own tokenizer and chat template, because
+`sglang_router` does not forward `/tokenize`. It refuses `truncate_prompt_tokens` and
+`truncation_side`, which SGLang would ignore. Log-likelihood tasks are not supported yet.
+For a server started with `--api-key`, name the environment variable that holds the key with
+`provider.api_key_env` (`vllm_server` takes it too). Passing the key itself would put it in
+the saved config:
+
+```bash
+uv run olmo-eval run -m Qwen/Qwen3-0.6B \
+    --harness default -o provider.kind=sglang_server \
+    -o provider.base_url=http://127.0.0.1:30000/v1 -o provider.api_key_env=SGLANG_API_KEY \
+    -o provider.max_model_len=32768 \
+    -t gsm8k -o limit=20 --no-upload
+```
+
 **`huggingface`** handles image-text-to-text models via `AutoProcessor` and
 `AutoModelForImageTextToText`. Pass `multimodal=True` in the provider kwargs (the
 `molmo2-4b` preset does this for you).

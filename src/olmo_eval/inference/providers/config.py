@@ -23,10 +23,11 @@ class ProviderConfig:
     a provider via the create_provider factory function.
 
     Attributes:
-        kind: Provider type (sglang, vllm, vllm_server, hf, olmo_core, litellm, mock).
+        kind: Provider type (sglang, sglang_server, vllm, vllm_server, hf, olmo_core, litellm,
+            mock).
         model: Model name or path (HuggingFace ID, API model name, or local path).
         alias: Short display name for the model (used in DB and S3 paths).
-        base_url: Base URL for API-based providers (vllm_server, litellm).
+        base_url: Base URL for API-based providers (vllm_server, sglang_server, litellm).
         tokenizer: Tokenizer path/identifier (defaults to model if None).
         revision: Model revision/commit hash for HuggingFace models.
         force_download: Force re-download of HuggingFace model/tokenizer files and refresh
@@ -125,6 +126,15 @@ class ProviderConfig:
             "force_download",
             "trust_remote_code",
             "dtype",
+            "max_concurrency",
+            "max_model_len",
+        ),
+        "sglang_server": (
+            "base_url",
+            "tokenizer",
+            "revision",
+            "force_download",
+            "trust_remote_code",
             "max_concurrency",
             "max_model_len",
         ),

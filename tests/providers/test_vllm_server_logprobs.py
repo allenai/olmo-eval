@@ -94,7 +94,7 @@ class TestVLLMServerProviderLogprobs:
             assert provider.max_length is None
             assert provider.max_length is None
 
-        client_cls.assert_called_once_with(timeout=30.0)
+        client_cls.assert_called_once_with(timeout=30.0, headers={})
         client.get.assert_called_once_with(f"{provider.base_url}/models")
         client.close.assert_called_once()
         assert provider._max_length is None
@@ -128,7 +128,7 @@ class TestVLLMServerProviderLogprobs:
             assert provider.max_length == 65536
             assert provider.max_length == 65536
 
-        client_cls.assert_called_once_with(timeout=30.0)
+        client_cls.assert_called_once_with(timeout=30.0, headers={})
         assert provider._max_length_source == "server"
 
     def _make_vllm_response(self, prompt_logprobs):

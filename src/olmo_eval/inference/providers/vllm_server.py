@@ -45,16 +45,20 @@ class RemoteTokenizer:
     This is useful when the vLLM server runs in an isolated environment.
     """
 
-    def __init__(self, base_url: str, model_name: str) -> None:
+    def __init__(
+        self, base_url: str, model_name: str, headers: dict[str, str] | None = None
+    ) -> None:
         """Initialize the remote tokenizer.
 
         Args:
             base_url: Base URL of the vLLM server (e.g., "http://localhost:8000/v1").
             model_name: Model name for tokenization requests.
+            headers: Headers sent with every request, such as the server's Authorization.
         """
         # Strip /v1 suffix if present for tokenize endpoints
         self._base_url = base_url.rstrip("/").removesuffix("/v1")
         self._model_name = model_name
+        self._headers = headers or {}
         self._client: httpx.Client | None = None
         self._all_special_ids: set[int] | None = None
         # BOS/EOS token IDs - not available via API, set to None
@@ -64,7 +68,7 @@ class RemoteTokenizer:
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
-            self._client = httpx.Client(timeout=30.0)
+            self._client = httpx.Client(timeout=30.0, headers=self._headers)
         return self._client
 
     def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
@@ -271,6 +275,9 @@ class VLLMServerProvider(InferenceProvider):
 
     supports_tools = True
 
+    #: The key a server started with ``--api-key`` requires, sent as a Bearer token.
+    _api_key: str | None = None
+
     def __init__(
         self,
         model_name: str,
@@ -295,6 +302,7 @@ class VLLMServerProvider(InferenceProvider):
         completion_sentencepiece_cleanup: bool | None = None,
         enable_lora: bool = False,
         lora_modules: list[str] | None = None,
+        api_key_env: str | None = None,
         **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -333,9 +341,16 @@ class VLLMServerProvider(InferenceProvider):
             lora_modules: List of LoRA module paths to load (format: "module_name=/path/to/lora").
                 Only used if enable_lora is True (server mode). Raises an error if more than one
                 is passed.
+            api_key_env: Environment variable holding the key an existing server requires
+                (its ``--api-key``). Named rather than given, so the key stays out of
+                command lines and saved configs.
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
+        if api_key_env is not None:
+            self._api_key = os.environ.get(api_key_env)
+            if not self._api_key:
+                raise ValueError(f"provider.api_key_env names {api_key_env}, which is not set")
         self._beaker_reporter = BeakerStatusReporter()
         self.timeout = timeout
         self.max_concurrency = max_concurrency
@@ -443,7 +458,7 @@ class VLLMServerProvider(InferenceProvider):
             return self._max_length
 
         self._max_length_discovery_attempted = True
-        client = httpx.Client(timeout=30.0)
+        client = httpx.Client(timeout=30.0, headers=self._auth_headers)
         try:
             resp = client.get(f"{self.base_url}/models")
             resp.raise_for_status()
@@ -526,7 +541,7 @@ class VLLMServerProvider(InferenceProvider):
 
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
-                api_key="EMPTY",
+                api_key=self._api_key or "EMPTY",
                 timeout=self.timeout,
                 max_retries=effective_retries,
                 http_client=self._http_client,
@@ -552,8 +567,14 @@ class VLLMServerProvider(InferenceProvider):
         token ID data that the OpenAI SDK converts to string keys.
         """
         if self._raw_http_client is None:
-            self._raw_http_client = httpx.AsyncClient(timeout=self.timeout)
+            self._raw_http_client = httpx.AsyncClient(
+                timeout=self.timeout, headers=self._auth_headers
+            )
         return self._raw_http_client
+
+    @property
+    def _auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
 
     def get_openai_client(self) -> AsyncOpenAI:
         """Get the AsyncOpenAI client for this provider."""
@@ -596,7 +617,9 @@ class VLLMServerProvider(InferenceProvider):
 
         # Use remote tokenizer by default (no transformers dependency)
         if self._tokenizer is None:
-            self._tokenizer = RemoteTokenizer(self.base_url, self._request_model_name)
+            self._tokenizer = RemoteTokenizer(
+                self.base_url, self._request_model_name, self._auth_headers
+            )
         return self._tokenizer
 
     def get_tokenizer(self) -> Any:
@@ -702,7 +725,7 @@ class VLLMServerProvider(InferenceProvider):
             return None
 
         if request.request_type == RequestType.LOGLIKELIHOOD:
-            trace["provider"] = "VLLMServerProvider"
+            trace["provider"] = type(self).__name__
             trace["endpoint"] = "/completions"
             trace["generation_kwargs"] = {
                 "max_gen_toks": 1,
@@ -721,7 +744,7 @@ class VLLMServerProvider(InferenceProvider):
             and request.prompt
         )
         if use_completions:
-            trace["provider"] = "VLLMServerProvider"
+            trace["provider"] = type(self).__name__
             trace["endpoint"] = "/completions"
             trace["generation_kwargs"] = {
                 "max_gen_toks": params.max_tokens,
@@ -746,7 +769,7 @@ class VLLMServerProvider(InferenceProvider):
             )
             return trace
 
-        trace["provider"] = "VLLMServerProvider"
+        trace["provider"] = type(self).__name__
         trace["endpoint"] = "/chat/completions"
         generation_kwargs: dict[str, Any] = {
             "max_gen_toks": params.max_tokens,
@@ -1024,7 +1047,7 @@ class VLLMServerProvider(InferenceProvider):
         """Return the token count the server's /tokenize endpoint gives a payload."""
         base_url = self.base_url.rstrip("/").removesuffix("/v1")
         try:
-            async with httpx.AsyncClient(timeout=30.0) as http_client:
+            async with httpx.AsyncClient(timeout=30.0, headers=self._auth_headers) as http_client:
                 response = await http_client.post(f"{base_url}/tokenize", json=payload)
                 response.raise_for_status()
                 data = response.json()

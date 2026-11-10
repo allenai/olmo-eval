@@ -134,6 +134,10 @@ def create_provider(
                 force_download=force_download,
             )
             return VLLMServerProvider(model_name, **kwargs)
+        case "sglang_server":
+            from .providers.sglang_server import SGLangServerProvider
+
+            return SGLangServerProvider(model_name, **kwargs)
         case "olmo_core":
             from .providers.olmo_core_vlm import is_multimodal_checkpoint
 
