@@ -131,6 +131,10 @@ def test_sandbox_harness_image_follows_provider(provider_kind, image, sglang_san
     with (
         patch("olmo_eval.cli.beaker.job_assembler.cluster_has_weka", return_value=False),
         patch(
+            "olmo_eval.launch.beaker.mirror.get_registry_mirror_url",
+            return_value="mirror.test",
+        ),
+        patch(
             "olmo_eval.cli.beaker.job_assembler.BEAKER_SGLANG_SANDBOX_IMAGE",
             sglang_sandbox_image,
         ),
