@@ -39,6 +39,7 @@ from olmo_eval.common.constants.infrastructure import (
     NEW_CLUSTER_ALIASES,
 )
 from olmo_eval.common.repr import hide_unset
+from olmo_eval.launch.beaker.volume import GantryLaunchKwargs
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -138,7 +139,11 @@ def print_experiment_config(
 
         min_runtime_ns = context.get("minRuntime")
         if min_runtime_ns is not None:
-            min_runtime = _format_duration(min_runtime_ns // 1_000_000_000)
+            min_runtime = (
+                min_runtime_ns
+                if isinstance(min_runtime_ns, str)
+                else _format_duration(min_runtime_ns // 1_000_000_000)
+            )
             header_lines.append(f"[bold blue]Min runtime:[/] {min_runtime}")
         else:
             preemptible = context.get("preemptible", True)
@@ -401,6 +406,8 @@ class BeakerJobConfig:
 
     # Storage - defaults include common eval buckets
     weka_buckets: list[BeakerWekaBucket] = field(default_factory=weka_buckets_with)
+    # Native volume for active task-run state; None keeps Beaker dataset carry-over.
+    resume_volume: str | None = None
     nfs: bool = False
 
     # Environment - defaults include HuggingFace cache on Weka
@@ -458,6 +465,10 @@ class BeakerJobConfig:
     setup_modal_gcp_secret: bool = False
 
     def __post_init__(self) -> None:
+        if self.resume_volume is not None:
+            from olmo_eval.launch.beaker.volume import validate_volume
+
+            validate_volume(self.resume_volume)
         if self.min_runtime is not None:
             if self.preemptible is False:
                 raise ValueError(
@@ -1191,7 +1202,7 @@ class BeakerLauncher:
             self._print_dry_run_config(config, clusters)
 
         # Launch the experiment (or show spec if dry_run)
-        workload = launch_experiment(
+        launch_kwargs: GantryLaunchKwargs = dict(
             args=config.command,
             name=config.name,
             description=config.description,
@@ -1222,6 +1233,22 @@ class BeakerLauncher:
             ),  # only way to follow the experiment without canceling
             yes=True,  # Skip confirmation prompts
         )
+
+        if config.resume_volume is not None:
+            from olmo_eval.launch.beaker.volume import launch_with_volume
+
+            experiment_id = launch_with_volume(
+                launch_experiment, launch_kwargs, config.resume_volume, dry_run=dry_run
+            )
+            if experiment_id is None:
+                return None
+            experiment = self.beaker.workload.get(experiment_id).experiment
+            log.info(f"Experiment submitted: {self.experiment_url(experiment)}")
+            if config.follow:
+                self.follow_experiment(experiment_id)
+            return experiment
+
+        workload = launch_experiment(**launch_kwargs)
 
         if dry_run:
             return None

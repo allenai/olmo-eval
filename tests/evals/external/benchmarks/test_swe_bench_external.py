@@ -229,6 +229,32 @@ class TestArgsAndPrompt(unittest.TestCase):
         self.assertNotIn("submit()", text)
         self.assertEqual("Look at mod.py." in text, include_hints)
 
+    @parameterized.expand([(True,), (False,)])
+    def test_build_task_text_swesmith_frame(self, include_hints: bool) -> None:
+        text = swe_eval.build_task_text(
+            _instance(), include_hints=include_hints, task_frame="swesmith"
+        )
+        self.assertTrue(text.startswith("<uploaded_files>\n/testbed\n</uploaded_files>\n"))
+        self.assertIn("<pr_description>\nFix the bug in mod.\n</pr_description>", text)
+        self.assertTrue(text.endswith("it's fine if it's very long."))
+        self.assertNotIn("submit()", text)
+        self.assertEqual("Look at mod.py." in text, include_hints)
+        if include_hints:
+            self.assertIn(
+                "</pr_description>\n\n<hints>\nLook at mod.py.\n</hints>\n\nCan you", text
+            )
+        else:
+            self.assertIn("</pr_description>\n\nCan you help me", text)
+
+    def test_build_task_text_rejects_unknown_frame(self) -> None:
+        with self.assertRaises(ValueError):
+            swe_eval.build_task_text(_instance(), task_frame="other")
+
+    def test_task_frame_arg(self) -> None:
+        self.assertEqual(swe_eval.SWEBenchArgs.from_dict({}).task_frame, "harbor")
+        args = swe_eval.SWEBenchArgs.from_dict({"task_frame": "swesmith"})
+        self.assertEqual(args.task_frame, "swesmith")
+
 
 class TestMetrics(unittest.TestCase):
     def test_compute_metrics(self) -> None:

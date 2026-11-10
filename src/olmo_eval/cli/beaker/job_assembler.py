@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.constants.infrastructure import (
@@ -703,6 +704,7 @@ class JobConfigAssembler:
             vllm_isolated_venv=vllm_isolated_venv,
             setup_modal_gcp_secret=setup_modal_gcp_secret,
             weka_buckets=weka_buckets_with(self.config.weka_buckets),
+            resume_volume=self.config.resume_volume if self.config.resume else None,
         )
 
     def _upload_settings(
@@ -748,10 +750,11 @@ class JobConfigAssembler:
         """Build the olmo-eval run command."""
         command: list[str] = ["olmo-eval", "run"]
 
-        command.extend(["-O", BEAKER_RESULT_DIR])
-        # Every Beaker job of a task runs this command, so a requeued or retried job
-        # continues from the progress the previous job left in its results.
-        command.append("--resume")
+        if not self.config.resume or self.config.resume_volume is None:
+            command.extend(["-O", BEAKER_RESULT_DIR])
+        # Every replacement runs this command; recovery is enabled unless explicitly disabled.
+        if self.config.resume:
+            command.append("--resume")
 
         command.extend(["-m", exp.model_spec])
 
@@ -809,4 +812,24 @@ class JobConfigAssembler:
         for override in self.config.harness_overrides:
             command.extend(["-o", override])
 
+        if self.config.resume and self.config.resume_volume is not None:
+            from olmo_eval.launch.beaker.volume import VOLUME_MOUNT
+
+            command = [
+                "python",
+                "-m",
+                "olmo_eval.launch.beaker.resume",
+                "--root",
+                VOLUME_MOUNT,
+                "--run-uuid",
+                str(uuid.uuid4()),
+                "--volume",
+                self.config.resume_volume,
+                "--retention-days",
+                str(self.config.resume_retention_days),
+                "--results",
+                BEAKER_RESULT_DIR,
+                "--",
+                *command,
+            ]
         return command
