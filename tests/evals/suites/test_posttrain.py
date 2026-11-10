@@ -114,7 +114,7 @@ def test_no_task_cuts_off_a_reasoning_trace(name):
 
 @pytest.mark.parametrize("name", MEMBERS)
 def test_sampled_tasks_run_at_the_models_suggested_sampling(name):
-    # Olmo 3.5's suggested sampling, not olmo-eval's default of 0.6; nothing else changes.
+    # Olmo 3.5 Tiny's suggested sampling, not olmo-eval's default of 0.6; nothing else changes.
     for task in get_suite(name).expand():
         if task in OWN_SAMPLING_TASKS:
             continue

@@ -1044,9 +1044,9 @@ None has a cross-domain aggregate.
 
 They mix short tasks with 64K long-context suites, LiveCodeBench (sandboxed harness,
 as above) and LLM-judged safety and Arena-Hard tasks (see
-[local judge models](#local-judge-models)). Sampled tasks run at the Olmo 3.5 models'
-suggested sampling, temperature 1.0 and top_p 0.95, through `_t10` variants that keep each
-task's budget and sample count. RULER+, HELMET and CTC run greedy in completion mode with
+[local judge models](#local-judge-models)). Sampled tasks run at Olmo 3.5 Tiny's
+suggested sampling, temperature 1.0 and top_p 0.95 (Small uses it too, assumed from Tiny),
+through `_t10` variants that keep each task's budget and sample count. RULER+, HELMET and CTC run greedy in completion mode with
 direct-answer budgets, and BFCL keeps its own settings. Do not override sampling or
 `max_tokens` for the whole run.
 

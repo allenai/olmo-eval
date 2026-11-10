@@ -15,9 +15,10 @@ suites. Also left out until olmo-eval has a configuration that lets a reasoning 
 finish (their variants cap generation at 1,024 or 128 tokens, most with stop sequences):
 MATH-500, HumanEval+, MBPP+ and LongBench v2.
 
-Sampled entries run at the Olmo 3.5 models' suggested sampling, temperature 1.0 and top_p
-0.95 (the ledger's setting), through ``:..._t10`` variants that keep each task's budget and
-sample count; olmo-eval's own default for most of them is 0.6. Do not override sampling or
+Sampled entries run at Olmo 3.5 Tiny's suggested sampling, temperature 1.0 and top_p 0.95
+(the ledger's setting; Small uses it too, assumed from Tiny, not measured), through
+``:..._t10`` variants that keep each task's budget and sample count; olmo-eval's own
+default for most of them is 0.6. Do not override sampling or
 ``max_tokens`` for the whole run. Dev reads RULER+ at 64K (full), 128K and 256K, and HELMET
 and CTC at 64K. All three run greedy in completion mode with direct-answer budgets (CTC's
 docs say a reasoning model may need a larger budget for CTC alone), and BFCL keeps its own
@@ -52,7 +53,7 @@ from olmo_eval.evals.suites.registry import (
 )
 from olmo_eval.evals.tasks.common import register_sampling_variant
 
-# The Olmo 3.5 models' suggested sampling; each task keeps its budget and sample count.
+# Olmo 3.5 Tiny's suggested sampling, assumed for Small; each task keeps its budget and samples.
 MODEL_SAMPLING = {"temperature": 1.0, "top_p": 0.95}
 # Entries that keep their own sampling: greedy direct-answer long context, and BFCL.
 OWN_SAMPLING = frozenset(
