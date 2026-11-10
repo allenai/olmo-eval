@@ -9,9 +9,17 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider, is_debug_requests
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
+from olmo_eval.inference.providers.vllm_server import _replace_context_text
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 logger = logging.getLogger(__name__)
@@ -282,6 +290,40 @@ class VLLMProvider(InferenceProvider):
 
         return request.prompt
 
+    #: How many times to recount and cut a ContextFit text. A cut can merge or
+    #: split tokens at its edge, so one pass may leave the prompt a token over.
+    _CONTEXT_FIT_PASSES = 3
+
+    def _fit_context(self, request: LMRequest, max_tokens: int | None) -> tuple[LMRequest, int]:
+        """Cut the end of the request's ContextFit text until the prompt fits.
+
+        As ``VLLMServerProvider._fit_context`` does: the prompt is counted as sent against
+        the smaller of ``max_prompt_tokens`` and the window's room for ``max_tokens``.
+        Returns the request to send and how many tokens of the text were cut.
+        """
+        fit = request.context_fit
+        if fit is None:
+            return request, 0
+        room = self.max_length - (max_tokens or 0)
+        budget = room if fit.max_prompt_tokens is None else min(fit.max_prompt_tokens, room)
+        tokenizer = self.llm.get_tokenizer()
+        add_special_tokens = self._add_bos_token is not False
+
+        text, cut_tokens = fit.text, 0
+        for _ in range(self._CONTEXT_FIT_PASSES):
+            prompt = self._format_prompt(request)
+            prompt_tokens = len(tokenizer.encode(prompt, add_special_tokens=add_special_tokens))
+            if prompt_tokens <= budget or not text:
+                break
+            offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)[
+                "offset_mapping"
+            ]
+            overflow = min(prompt_tokens - budget, len(offsets))
+            kept = text[: offsets[-overflow][0]] if overflow < len(offsets) else ""
+            request = _replace_context_text(request, text, kept)
+            text, cut_tokens = kept, cut_tokens + overflow
+        return request, cut_tokens
+
     def generate(
         self,
         requests: list[LMRequest],
@@ -295,7 +337,8 @@ class VLLMProvider(InferenceProvider):
             )
         vllm_params = self._build_sampling_params(params)
 
-        prompt_strs = [self._format_prompt(req) for req in requests]
+        fitted = [self._fit_context(req, params.max_tokens) for req in requests]
+        prompt_strs = [self._format_prompt(req) for req, _ in fitted]
 
         if is_debug_requests():
             for i, prompt in enumerate(prompt_strs):
@@ -328,7 +371,7 @@ class VLLMProvider(InferenceProvider):
             if token.special
         )
         results: list[list[LMOutput]] = []
-        for output in outputs:
+        for output, (_, cut_tokens) in zip(outputs, fitted, strict=True):
             request_outputs: list[LMOutput] = []
             for completion in output.outputs:
                 logprobs = _convert_logprobs(completion.logprobs)
@@ -364,6 +407,8 @@ class VLLMProvider(InferenceProvider):
                         else:
                             raw_text = truncated
                     metadata["text_with_special_tokens"] = raw_text
+                if cut_tokens:
+                    metadata[CONTEXT_CUT_TOKENS_KEY] = cut_tokens
 
                 request_outputs.append(
                     LMOutput(

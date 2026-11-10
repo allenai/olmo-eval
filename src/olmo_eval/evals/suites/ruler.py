@@ -3,6 +3,7 @@
 Matches the suite structure from the old framework:
 - Per-category suites for each size: ruler_niah__4096, ruler_aggregation__8192, etc.
 - Combined suites for each size: ruler_all__4096, ruler_all__8192, etc.
+- ruler_all over the `:v2` tasks: ruler_all_v2__4096, etc.
 """
 
 from olmo_eval.data.ruler_tasks import RULER_TASKS
@@ -56,5 +57,13 @@ for size in CONTEXT_SIZES:
                 tasks=tuple(f"{t}:chat" for t in all_tasks),
                 aggregation=AggregationStrategy.AVERAGE,
                 description=f"ruler_all__{size}, every task served through the chat template",
+            )
+        )
+        register(
+            Suite(
+                name=f"ruler_all_v2__{size}",
+                tasks=tuple(f"{t}:v2" for t in all_tasks),
+                aggregation=AggregationStrategy.AVERAGE,
+                description=f"ruler_all__{size} over the :v2 tasks",
             )
         )

@@ -124,3 +124,26 @@ class DeepSeekLeetCodeOlmo3BaseV2(DeepSeekLeetCode):
         DeepSeekLeetCode.sampling_params,
         truncate_prompt_tokens=2048,
     )
+
+
+@register("deepseek_leetcode:olmo3base:v3")
+class DeepSeekLeetCodeOlmo3BaseV3(DeepSeekLeetCodeOlmo3BaseV2):
+    """v2 with the import header DeepSeek-Coder's harness puts before every program
+    (IMPORT_HELPER["python"] in Evaluation/LeetCode/human_eval/evaluation.py). 135 of
+    the 180 prompts use List or Optional without importing them."""
+
+    IMPORT_HEADER = (
+        "import math\nimport re\nimport sys\nimport copy\nimport datetime\n"
+        "import itertools\nimport collections\nimport heapq\nimport functools\n"
+        "import hashlib\nimport numpy\nimport numpy as np\nimport string\n"
+        "from typing import *\nfrom collections import *\nfrom functools import *\n"
+    )
+    # Gives v3 its own task hash
+    task_settings = {"import_header": "deepseek_coder"}
+
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        super()._extract_answers(responses)
+        for response in responses:
+            for output in response.outputs:
+                if output.extracted_answer is not None:
+                    output.extracted_answer = self.IMPORT_HEADER + output.extracted_answer

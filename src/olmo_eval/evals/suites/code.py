@@ -5,7 +5,13 @@ from olmo_eval.evals.constants.code import (
     MULTIPL_E_HUMANEVAL_TASKS,
     MULTIPL_E_MBPP_TASKS,
 )
-from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, make_suite, register
+from olmo_eval.evals.suites.registry import (
+    AggregationStrategy,
+    Suite,
+    get_suite,
+    make_suite,
+    register,
+)
 
 # =============================================================================
 # Multilingual Code Suites
@@ -249,6 +255,19 @@ register(
         ),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
         description="OLMoBase code generation evaluation suite for small models (v2)",
+    )
+)
+
+# olmobase:code:v2 with LeetCode prompts that import List/Optional (deepseek_leetcode v3).
+register(
+    Suite(
+        name="olmobase:code:v3",
+        tasks=tuple(
+            "deepseek_leetcode:olmo3base:v3" if task == "deepseek_leetcode:olmo3base:v2" else task
+            for task in get_suite("olmobase:code:v2").tasks
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        description="OLMoBase code generation evaluation suite (v3)",
     )
 )
 

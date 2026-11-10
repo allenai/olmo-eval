@@ -14,6 +14,13 @@ from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.evals.external.args import as_bool, as_list, as_optional_int
 from olmo_eval.evals.external.base import ExternalEval
+from olmo_eval.evals.external.failures import (
+    DEFAULT_MAX_ERROR_RATE,
+    add_harness_failure,
+    failure_budget_error,
+    is_harness_failure,
+    scaffold_error,
+)
 from olmo_eval.evals.external.network import get_docker_network_args
 from olmo_eval.evals.external.result import ExternalEvalResult
 from olmo_eval.harness.sandbox.config import (
@@ -41,6 +48,12 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_SCAFFOLD = "vanillux"
+
+#: How the issue is framed for scaffolds that wrap the task text in their own
+#: instructions: ``harbor`` gives the bare issue, ``swesmith`` the SWE-smith
+#: prompt that names the repository directory.
+TASK_FRAMES: tuple[str, ...] = ("harbor", "swesmith")
+DEFAULT_TASK_FRAME = "harbor"
 
 #: Scaffolds this eval can drive, with the tools each one gets.
 SCAFFOLD_TOOLS: dict[str, tuple[str, ...]] = {
@@ -105,6 +118,34 @@ HINTS_TEMPLATE = """
 </hints>
 """
 
+SWESMITH_TASK_TEMPLATE = """\
+<uploaded_files>
+{testbed}
+</uploaded_files>
+I've uploaded a python code repository in the directory {testbed}. Consider the following PR \
+description:
+
+<pr_description>
+{problem_statement}
+</pr_description>
+{hints}
+Can you help me implement the necessary changes to the repository so that the issues described \
+in the <pr_description> are fixed?
+I've already taken care of all changes to any of the test files described in the \
+<pr_description>. This means you DON'T have to modify the testing logic or any of the tests in \
+any way!
+Your task is to make the minimal changes to non-tests files in the {testbed} directory to ensure \
+the issues in <pr_description> are fixed.
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to find and read code relevant to the <pr_description>
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the \
+bash tool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well
+Your thinking should be thorough and so it's fine if it's very long.\
+"""
+
 # Activates the repository's environment for the agent's shell.
 SESSION_SETUP = f"source /opt/miniconda3/bin/activate && conda activate testbed && cd {TESTBED_DIR}"
 
@@ -136,6 +177,7 @@ class SWEBenchArgs:
     image_timeout: float = 900.0
     stop_on_submit: bool = True
     resume_from: str | None = None
+    max_error_rate: float = DEFAULT_MAX_ERROR_RATE
     image_source: str = "ghcr"
     cleanup_images: bool = True
     include_hints: bool = False
@@ -143,6 +185,7 @@ class SWEBenchArgs:
     sandbox_mode: str = "docker"
     enable_compaction: bool = False
     scaffold: str = DEFAULT_SCAFFOLD
+    task_frame: str = DEFAULT_TASK_FRAME
     max_format_errors: int = 64
     temperature: float = 0.7
     top_p: float = 0.95
@@ -171,6 +214,7 @@ class SWEBenchArgs:
             image_timeout=float(data.get("image_timeout", 900.0)),
             stop_on_submit=as_bool(data.get("stop_on_submit", True)),
             resume_from=data.get("resume_from") or None,
+            max_error_rate=float(data.get("max_error_rate", DEFAULT_MAX_ERROR_RATE)),
             image_source=str(data.get("image_source", "ghcr")),
             cleanup_images=as_bool(data.get("cleanup_images", True)),
             include_hints=as_bool(data.get("include_hints", False)),
@@ -178,6 +222,7 @@ class SWEBenchArgs:
             sandbox_mode=data.get("sandbox_mode", "docker"),
             enable_compaction=as_bool(data.get("enable_compaction", False)),
             scaffold=scaffold,
+            task_frame=str(data.get("task_frame", DEFAULT_TASK_FRAME)),
             max_format_errors=int(data.get("max_format_errors", 64)),
             temperature=float(data.get("temperature", 0.7)),
             top_p=float(data.get("top_p", 0.95)),
@@ -209,6 +254,11 @@ class InstanceResult:
     @property
     def resolved(self) -> bool:
         return self.grade.resolved
+
+    @property
+    def harness_failed(self) -> bool:
+        """Whether the harness or infrastructure, not the agent, failed this instance."""
+        return is_harness_failure(self.error)
 
     def to_record(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dict that ``from_record`` can read back."""
@@ -286,33 +336,55 @@ def build_prompt(instance: SWEBenchInstance, include_hints: bool = False) -> str
     )
 
 
-def build_task_text(instance: SWEBenchInstance, include_hints: bool = False) -> str:
+def build_task_text(
+    instance: SWEBenchInstance,
+    include_hints: bool = False,
+    task_frame: str = DEFAULT_TASK_FRAME,
+) -> str:
     """Build the task text for scaffolds that wrap it in their own instructions.
 
-    The issue is given as is, the way Harbor's SWE-bench tasks state it.
+    The ``harbor`` frame gives the issue as is, the way Harbor's SWE-bench tasks
+    state it. The ``swesmith`` frame gives it the way SWE-smith trajectories do,
+    naming the repository directory and the steps to follow.
     """
-    return instance.problem_statement.strip() + _hints(instance, include_hints)
+    if task_frame == "harbor":
+        return instance.problem_statement.strip() + _hints(instance, include_hints)
+    if task_frame == "swesmith":
+        return SWESMITH_TASK_TEMPLATE.format(
+            testbed=TESTBED_DIR,
+            problem_statement=instance.problem_statement.strip(),
+            hints=_hints(instance, include_hints),
+        )
+    supported = ", ".join(TASK_FRAMES)
+    raise ValueError(f"Unknown task_frame {task_frame!r}; use one of {supported}")
 
 
 def compute_metrics(results: list[InstanceResult]) -> dict[str, float]:
-    """Aggregate per-instance results into evaluation metrics."""
+    """Aggregate per-instance results into evaluation metrics.
+
+    Instances the harness or infrastructure failed measured nothing about the model,
+    so every rate but ``error_rate`` leaves them out; ``num_errors`` counts them.
+    """
     n = len(results)
+    measured = [r for r in results if not r.harness_failed]
 
     def rate(values: list[bool]) -> float:
         return sum(values) / len(values) if values else 0.0
 
     metrics: dict[str, float] = {
-        "resolve_rate": rate([r.resolved for r in results]),
-        "num_resolved": float(sum(r.resolved for r in results)),
+        "resolve_rate": rate([r.resolved for r in measured]),
+        "num_resolved": float(sum(r.resolved for r in measured)),
         "num_instances": float(n),
-        "patch_apply_rate": rate([r.grade.patch_applied for r in results]),
-        "tests_ran_rate": rate([r.grade.tests_ran for r in results]),
-        "empty_patch_rate": rate([r.grade.empty_patch for r in results]),
-        "error_rate": rate([r.error is not None for r in results]),
+        "num_measured": float(len(measured)),
+        "patch_apply_rate": rate([r.grade.patch_applied for r in measured]),
+        "tests_ran_rate": rate([r.grade.tests_ran for r in measured]),
+        "empty_patch_rate": rate([r.grade.empty_patch for r in measured]),
+        "num_errors": float(n - len(measured)),
+        "error_rate": rate([r.harness_failed for r in results]),
     }
 
     groups: dict[str, list[bool]] = {}
-    for r in results:
+    for r in measured:
         groups.setdefault(f"resolve_rate_difficulty_{r.difficulty}", []).append(r.resolved)
         groups.setdefault(f"resolve_rate_repo_{r.repo}", []).append(r.resolved)
     for key, values in sorted(groups.items()):
@@ -363,8 +435,14 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             "image_timeout": ("Timeout in seconds for pulling and building an image", 900.0),
             "stop_on_submit": ("End the agent's run when it calls submit() (openai_agents)", True),
             "resume_from": (
-                "Progress file from an earlier run; instances recorded there are not rerun",
+                "Progress file from an earlier run; instances recorded there without a "
+                "harness or infrastructure failure are not rerun",
                 None,
+            ),
+            "max_error_rate": (
+                "Fail the run when more than this fraction of instances hit a harness or "
+                "infrastructure failure",
+                DEFAULT_MAX_ERROR_RATE,
             ),
             "image_source": (
                 "Where to pull instance images: ghcr (no login needed) or dataset (Docker Hub)",
@@ -376,6 +454,11 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             "sandbox_mode": ("Sandbox mode: docker, modal", "docker"),
             "enable_compaction": ("Enable context compaction (openai_agents)", False),
             "scaffold": ("Scaffold: vanillux or openai_agents", DEFAULT_SCAFFOLD),
+            "task_frame": (
+                "How the issue is framed: harbor (bare issue) or swesmith (SWE-smith prompt "
+                "naming the repository directory) (vanillux)",
+                DEFAULT_TASK_FRAME,
+            ),
             "max_format_errors": (
                 "Replies in a row without a valid tool call before stopping (vanillux)",
                 64,
@@ -410,6 +493,12 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                     f"use one of {supported}"
                 )
             validate_scaffold(swe_args.scaffold)
+            if swe_args.task_frame not in TASK_FRAMES:
+                supported = ", ".join(TASK_FRAMES)
+                raise ValueError(
+                    f"Unknown task_frame {swe_args.task_frame!r} for {self.name}; "
+                    f"use one of {supported}"
+                )
 
         instances = select_instances(
             load_instances(swe_args.dataset, swe_args.revision),
@@ -427,7 +516,12 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
 
         previous: dict[str, InstanceResult] = {}
         if swe_args.resume_from:
-            previous = load_progress(swe_args.resume_from)
+            # Instances the harness failed measured nothing, so they run again.
+            previous = {
+                instance_id: result
+                for instance_id, result in load_progress(swe_args.resume_from).items()
+                if not result.harness_failed
+            }
             logger.info(f"Resuming: {len(previous)} instances already finished")
 
         progress_path = Path(output_dir) / f"{self.name}_progress.jsonl" if output_dir else None
@@ -455,12 +549,11 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         results = await asyncio.gather(*[run(inst) for inst in instances])
 
         metrics = compute_metrics(results)
-        # A run where no instance got through without an error measured nothing.
-        all_failed = all(r.error is not None for r in results)
+        budget_error = failure_budget_error([r.error for r in results], swe_args.max_error_rate)
         result = ExternalEvalResult(
             name=self.name,
-            success=not all_failed,
-            error=f"All {len(results)} instances failed" if all_failed else None,
+            success=budget_error is None,
+            error=budget_error,
             metrics=metrics,
             metadata={
                 "model_name": provider.model_name,
@@ -598,7 +691,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 result.patch = await extract_patch(manager.get_executor(frozenset()), baseline)
             except Exception as e:
                 logger.exception(f"[{instance.instance_id}] Agent sandbox failed")
-                result.error = result.error or f"sandbox_error: {e}"
+                result.error = add_harness_failure(result.error, f"sandbox_error: {e}")
             finally:
                 await manager.stop()
         result.agent_duration = time.time() - agent_start
@@ -626,7 +719,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             )
         except Exception as e:
             logger.exception(f"[{instance.instance_id}] Grading failed")
-            result.error = result.error or f"grading_error: {e}"
+            result.error = add_harness_failure(result.error, f"grading_error: {e}")
         finally:
             await grader.stop()
         result.eval_duration = time.time() - eval_start
@@ -663,7 +756,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         if scaffold_name == "vanillux":
             # vanillux brings its own system and instance prompts.
             system_prompt = None
-            content = build_task_text(instance, swe_args.include_hints)
+            content = build_task_text(instance, swe_args.include_hints, swe_args.task_frame)
             scaffold_kwargs = {
                 "command_timeout": swe_args.command_timeout,
                 "max_format_errors": swe_args.max_format_errors,
@@ -712,16 +805,18 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             result.completion_reason = "submitted"
         else:
             result.completion_reason = "complete"
-        if harness_result.error and not harness_result.max_turns_reached:
-            result.error = f"agent_error: {harness_result.error}"
+        result.error = scaffold_error(harness_result)
 
     def _build_predictions(self, results: list[InstanceResult]) -> list[dict[str, Any]]:
         return [
             {
                 "native_id": r.instance_id,
+                # An instance the harness failed has no score.
                 "instance_metrics": {
-                    "resolved": {"external": float(r.resolved)},
-                    "patch_applied": {"external": float(r.grade.patch_applied)},
+                    "resolved": {"external": None if r.harness_failed else float(r.resolved)},
+                    "patch_applied": {
+                        "external": None if r.harness_failed else float(r.grade.patch_applied)
+                    },
                 },
                 "agent_duration": r.agent_duration,
                 "repo": r.repo,
@@ -744,8 +839,9 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 "instance_id": r.instance_id,
                 "repo": r.repo,
                 "difficulty": r.difficulty,
-                "resolved": r.resolved,
-                "patch_applied": r.grade.patch_applied,
+                # A harness-failed instance measured nothing, as in its predictions.
+                "resolved": None if r.harness_failed else r.resolved,
+                "patch_applied": None if r.harness_failed else r.grade.patch_applied,
                 "tests_ran": r.grade.tests_ran,
                 "empty_patch": r.grade.empty_patch,
                 "completion_reason": r.completion_reason,
