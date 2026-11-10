@@ -6,25 +6,29 @@ from olmo_eval.common.configs import expand_tasks, validate_task_metrics, valida
 from olmo_eval.evals.suites import AggregationStrategy, Suite, get_suite
 from olmo_eval.evals.tasks.common import get_task
 
-DEV_SHARED = (
-    "gpqa_diamond:cot",
-    "gpqa_main:cot",
-    "mmlu:cot",
-    "popqa:chat",
-    "omega:dev",
-    "hmmt_feb_2025:pass_at_32",
-    "hmmt_nov_2025:pass_at_32",
-    "hmmt_feb_2026:pass_at_32",
-    "livecodebench:lite",
-    "bfcl",
-    "ifeval",
-    "ifeval_ood",
-    "ruler_plus_all__65536",
-    "ruler_plus_all__131072",
-    "ruler_plus_all__262144",
-    "helmet_all__65536",
-    "ctc:r64k",
-)
+
+def dev_shared(helmet: str) -> tuple[str, ...]:
+    return (
+        "gpqa_diamond:cot",
+        "gpqa_main:cot",
+        "mmlu:cot",
+        "popqa:chat",
+        "omega:dev",
+        "hmmt_feb_2025:pass_at_32",
+        "hmmt_nov_2025:pass_at_32",
+        "hmmt_feb_2026:pass_at_32",
+        "livecodebench:lite",
+        "bfcl",
+        "ifeval",
+        "ifeval_ood",
+        "ruler_plus_all__65536",
+        "ruler_plus_all__131072",
+        "ruler_plus_all__262144",
+        helmet,
+        "ctc:r64k",
+    )
+
+
 TEST_SHARED = (
     "mmlu_pro:cot",
     "omniscience:judge",
@@ -40,10 +44,10 @@ TEST_SHARED = (
     "strongreject:sr_judge_thinking",
 )
 MEMBERS = {
-    "posttrain:tiny:dev": DEV_SHARED,
+    "posttrain:tiny:dev": dev_shared("helmet_nojudge__65536"),
     "posttrain:tiny:test": TEST_SHARED,
     "posttrain:small:dev": (
-        *DEV_SHARED,
+        *dev_shared("helmet_all__65536"),
         "mt_bench",
         "multi_if",
         "multichallenge",
@@ -121,3 +125,14 @@ def test_every_task_resolves_and_has_metrics(name):
 
     assert not invalid
     assert not without_metrics
+
+
+def test_tiny_dev_needs_no_secret():
+    # Hill-climbing on Tiny should not need an API key: its HELMET leaves out the judged tasks.
+    needs = {
+        task: get_task(task).config.required_secrets
+        for task in get_suite("posttrain:tiny:dev").expand()
+        if get_task(task).config.required_secrets
+    }
+
+    assert not needs

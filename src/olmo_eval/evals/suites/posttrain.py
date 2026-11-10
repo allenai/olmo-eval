@@ -18,6 +18,11 @@ in completion mode with direct-answer budgets (CTC's docs say a reasoning model 
 a larger budget for CTC alone), and BFCL keeps its 4,096-token budget. Safety tasks use
 the thinking-model judge variants and need the judge providers shown in ``safety.py``;
 Omniscience is graded by its default judge, gpt-4o-mini, through the OpenAI API.
+
+Tiny dev needs no API key: it reads ``helmet_nojudge__65536``, which leaves out HELMET's
+three API-judged tasks (NarrativeQA and both summarization tasks, so the summarization
+category too). Small dev reads all of HELMET, since MT-Bench and MultiChallenge need an
+API judge anyway. Every other suite needs ``OPENAI_API_KEY`` for its API-judged tasks.
 """
 
 # Defining modules, imported so their suites exist whatever the discovery order.
@@ -37,23 +42,26 @@ from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, make
 _HMMT = ("hmmt_feb_2025:pass_at_32", "hmmt_nov_2025:pass_at_32", "hmmt_feb_2026:pass_at_32")
 _AIME = ("aime_2025:pass_at_32", "aime_2026:pass_at_32")
 
-_DEV_SHARED = (
-    "gpqa_diamond:cot",
-    "gpqa_main:cot",
-    get_suite("mmlu:cot"),
-    "popqa:chat",
-    OMEGA_DEV,
-    *_HMMT,
-    "livecodebench:lite",
-    get_suite("bfcl"),
-    "ifeval",
-    "ifeval_ood",
-    get_suite("ruler_plus_all__65536"),
-    get_suite("ruler_plus_all__131072"),
-    get_suite("ruler_plus_all__262144"),
-    get_suite("helmet_all__65536"),
-    get_suite("ctc:r64k"),
-)
+
+def _dev_shared(helmet_suite: str) -> tuple:
+    return (
+        "gpqa_diamond:cot",
+        "gpqa_main:cot",
+        get_suite("mmlu:cot"),
+        "popqa:chat",
+        OMEGA_DEV,
+        *_HMMT,
+        "livecodebench:lite",
+        get_suite("bfcl"),
+        "ifeval",
+        "ifeval_ood",
+        get_suite("ruler_plus_all__65536"),
+        get_suite("ruler_plus_all__131072"),
+        get_suite("ruler_plus_all__262144"),
+        get_suite(helmet_suite),
+        get_suite("ctc:r64k"),
+    )
+
 
 _TEST_SHARED = (
     get_suite("mmlu_pro:cot"),
@@ -71,7 +79,7 @@ _TEST_SHARED = (
 
 make_suite(
     "posttrain:tiny:dev",
-    _DEV_SHARED,
+    _dev_shared("helmet_nojudge__65536"),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Tiny post-training dev set (the tracker's Track column).",
 )
@@ -86,7 +94,7 @@ make_suite(
 make_suite(
     "posttrain:small:dev",
     (
-        *_DEV_SHARED,
+        *_dev_shared("helmet_all__65536"),
         "mt_bench",
         "multi_if",
         "multichallenge",
