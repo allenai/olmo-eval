@@ -86,6 +86,13 @@ The shared base uses the existing repository build and publication scripts:
     --source olmo-eval:cu1302-trc2130-amd64-devel --workspace YOUR_WORKSPACE
 ```
 
+Harnesses with sandboxes (code execution, such as `codex_python` for LiveCodeBench)
+also need Podman. Add `--sandbox` to the build command to build the `runtime-sandbox`
+stage, tagged `cu1302-trc2130-amd64-devel-sandbox`, and push that tag. Until
+`BEAKER_SGLANG_SANDBOX_IMAGE` names a published image, an SGLang launch with such a
+harness stops at launch time and asks for `--image`; the CUDA 12.8 sandbox image
+cannot install this SGLang pin.
+
 SGLang compiles CUDA kernels during startup, so `--cuda-devel` is required even
 when all Python packages install successfully. Select a replacement with `--image`.
 The ordinary CUDA 12.8 / PyTorch 2.10 base
