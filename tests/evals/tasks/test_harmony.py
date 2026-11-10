@@ -29,8 +29,8 @@ def test_unknown_response_parser_is_rejected() -> None:
 @pytest.mark.parametrize("parser", [None, "harmony"])
 def test_harmony_is_opt_in_and_idempotent(parser: str | None) -> None:
     task = get_task("ifeval", {"response_parser": parser})
-    text = "<|meta_sep|>analysis<|im_sep|>wrong<|im_end|>"
-    text += "<|im_start|>assistant<|meta_sep|>final<|im_sep|>\n  good <|fim_suffix|>"
+    text = "<|channel|>analysis<|message|>wrong<|end|>"
+    text += "<|start|>assistant<|channel|>final<|message|>\n  good <|return|>"
     output = LMOutput(text=text)
     response = Response(
         instance=Instance(question="Q"),

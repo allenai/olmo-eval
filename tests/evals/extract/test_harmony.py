@@ -12,14 +12,13 @@ from olmo_eval.evals.extract.reasoning import extract_harmony_answer
         ("analysis of assistantfinal in prose", "analysis of assistantfinal in prose"),
         ("", ""),
         ("<|channel|>analysis", ""),
-        ("<|meta_sep|>final", ""),
+        ("<|channel|>final", ""),
         ("<|start|>assistant", ""),
         ("<|start|>assistant<|channel|>anal", ""),
-        ("<|im_start|>assistant<|meta_sep|>final", ""),
+        ("<|start|>assistant<|channel|>final", ""),
         ("<|channel|>final to=python<|message|>tool payload", ""),
-        ("<|meta_sep|>analysis<|im_sep|>unfinished", ""),
         ("<|channel|>analysis<|message|>unfinished", ""),
-        ("<|meta_sep|>final<|im_sep|>\n\n 4 <|fim_suffix|>", "\n\n 4 "),
+        ("<|channel|>final<|message|>\n\n 4 <|return|>", "\n\n 4 "),
         ("<|channel|>final<|message|>4<|endoftext|>", "4"),
         (
             "<|channel|>analysis<|message|>wrong<|end|>"
@@ -27,27 +26,26 @@ from olmo_eval.evals.extract.reasoning import extract_harmony_answer
             "right",
         ),
         (
-            "<|meta_sep|>analysis<|im_sep|>wrong<|im_end|>"
-            "<|im_start|>assistant<|meta_sep|>final<|im_sep|>right<|fim_suffix|>",
-            "right",
-        ),
-        (
-            "<|im_start|>assistant to=python<|meta_sep|>analysis<|im_sep|>1+1<|ghissue|>",
+            "<|start|>assistant to=python<|channel|>analysis<|message|>1+1<|call|>",
             "",
         ),
         (
-            "<|meta_sep|>analysis<|im_sep|>mentions <|meta_sep|>final<|im_sep|>not a header",
+            "<|channel|>analysis<|message|>mentions <|channel|>final<|message|>not a header",
             "",
         ),
         (
-            "<|meta_sep|>final<|im_sep|>assistantfinal is literal\nanswer",
+            "<|channel|>final<|message|>assistantfinal is literal\nanswer",
             "assistantfinal is literal\nanswer",
         ),
         (
-            "<|meta_sep|>analysis<|im_sep|>wrong<|im_end|>"
-            "<|im_start|>assistant<|meta_sep|>final<|im_sep|>first<|im_end|>"
-            "<|im_start|>user<|im_sep|>another turn",
+            "<|channel|>analysis<|message|>wrong<|end|>"
+            "<|start|>assistant<|channel|>final<|message|>first<|end|>"
+            "<|start|>user<|message|>another turn",
             "first",
+        ),
+        (
+            "<|im_start|>assistant<|meta_sep|>final<|im_sep|>chatml text<|im_end|>",
+            "<|im_start|>assistant<|meta_sep|>final<|im_sep|>chatml text<|im_end|>",
         ),
     ],
 )

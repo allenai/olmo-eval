@@ -162,11 +162,7 @@ def test_generate_preserves_termination_without_logprobs(fake_provider) -> None:
 
 
 @pytest.mark.parametrize(
-    "specials",
-    [
-        ("<|channel|>", "<|message|>", "<|end|>", "<|start|>", "<|return|>"),
-        ("<|meta_sep|>", "<|im_sep|>", "<|im_end|>", "<|im_start|>", "<|fim_suffix|>"),
-    ],
+    "specials", [("<|channel|>", "<|message|>", "<|end|>", "<|start|>", "<|return|>")]
 )
 @pytest.mark.parametrize("stop_case", ["eos", "string", "delimiter_substring", "spanning_channels"])
 @pytest.mark.parametrize("special_registration", ["named", "decoder"])

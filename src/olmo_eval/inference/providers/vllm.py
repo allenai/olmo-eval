@@ -319,9 +319,7 @@ class VLLMProvider(InferenceProvider):
         tokenizer = self.llm.get_tokenizer()
         added_vocab = tokenizer.get_added_vocab() if hasattr(tokenizer, "get_added_vocab") else {}
         harmony_starts = {
-            added_vocab[token]
-            for token in ("<|channel|>", "<|meta_sep|>", "<|start|>", "<|im_start|>")
-            if token in added_vocab
+            added_vocab[token] for token in ("<|channel|>", "<|start|>") if token in added_vocab
         }
         special_tokens = set(getattr(tokenizer, "all_special_tokens", []))
         special_tokens.update(

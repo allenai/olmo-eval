@@ -43,16 +43,14 @@ def extract_think_answer_only(text: str) -> str | None:
     return _after_last_think(text)
 
 
-# OpenAI Harmony's documented token names and gpt-oss tokenizer spellings.
+# OpenAI Harmony's documented token names, as in the gpt-oss tokenizer.
 # https://github.com/openai/harmony/blob/main/docs/format.md
 _HARMONY_HEADER = re.compile(
-    r"(?P<start><\|(?:start|im_start)\|>assistant(?: to=[^\s<]+)?)?"
-    r"<\|(?:channel|meta_sep)\|>(?P<channel>\w+)(?: to=[^\s<]+)?"
-    r"<\|(?:message|im_sep)\|>"
+    r"(?P<start><\|start\|>assistant(?: to=[^\s<]+)?)?"
+    r"<\|channel\|>(?P<channel>\w+)(?: to=[^\s<]+)?"
+    r"<\|message\|>"
 )
-_HARMONY_END = re.compile(
-    r"<\|(?:end|im_end|return|fim_suffix|endoftext|call|ghissue|start|im_start)\|>"
-)
+_HARMONY_END = re.compile(r"<\|(?:end|return|endoftext|call|start)\|>")
 
 
 def extract_harmony_answer(text: str) -> str:
@@ -64,9 +62,7 @@ def extract_harmony_answer(text: str) -> str:
     """
     first = _HARMONY_HEADER.match(text)
     if first is None:
-        if text.startswith(
-            ("<|channel|>", "<|meta_sep|>", "<|start|>assistant", "<|im_start|>assistant")
-        ):
+        if text.startswith(("<|channel|>", "<|start|>assistant")):
             return ""
         return text
     for header in _HARMONY_HEADER.finditer(text):

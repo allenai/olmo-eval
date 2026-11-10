@@ -614,9 +614,8 @@ be aligned with the stopped completion, explicit parsing raises a scoring error;
 the diagnostic and raw text remain in saved predictions.
 This opt-in changes the task hash, keeps the original decoded generation in `original_text`,
 and scores an empty answer when a Harmony analysis trace has no final channel.
-It accepts the documented `<|start|>/<|channel|>/<|message|>` spellings and the
-gpt-oss `<|im_start|>/<|meta_sep|>/<|im_sep|>` spellings. Already parsed plain text
-passes through. Decoding with special tokens removed loses message boundaries:
+It accepts the documented `<|start|>/<|channel|>/<|message|>` delimiters of the gpt-oss
+tokenizer. Already parsed plain text passes through. Decoding with special tokens removed loses message boundaries:
 `analysis...assistantfinal...` cannot be parsed reliably; retain special tokens or
 use a provider's native Harmony reasoning parser before evaluating.
 
