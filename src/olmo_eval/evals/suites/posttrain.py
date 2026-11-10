@@ -3,8 +3,9 @@
 Membership follows the Olmo eval tracker's Eval list: Track is dev, Publish is test.
 Dev suites are for hill-climbing and checkpoint selection; test suites are read only
 for release reports. No task is in both suites of one size. Dev has to run fast, so it
-reads fixed seeded samples of the two largest sets: popqa (1,000 of about 14,000 items)
-and MMLU:cot (18 items per subject, 1,026 in all).
+reads fixed seeded samples of the two largest sets, popqa (1,000 of about 14,000 items)
+and MMLU:cot (18 items per subject, 1,026 in all), and of RULER+ at 128K and 256K (128
+items per task, against 512). HMMT draws 8 samples per problem, against AIME's 32 in test.
 
 Left out: tracker rows with no olmo-eval task yet (CritPt, FrontierCode, BrowseComp-Plus,
 AutomationBench, DeepSearchQA, Terminal-Bench-Science, FIRM, OpenAgentSafety, the
@@ -15,7 +16,7 @@ finish (their variants cap generation at 1,024 or 128 tokens, most with stop seq
 MATH-500, HumanEval+, MBPP+ and LongBench v2.
 
 Tasks run with their own sampling settings; do not override ``max_tokens`` for the whole
-run. Dev reads RULER+ at 64K, 128K and 256K, and HELMET and CTC at 64K. All three run
+run. Dev reads RULER+ at 64K (full), 128K and 256K, and HELMET and CTC at 64K. All three run
 in completion mode with direct-answer budgets (CTC's docs say a reasoning model may need
 a larger budget for CTC alone), and BFCL keeps its 4,096-token budget. Safety tasks use
 the thinking-model judge variants and need the judge providers shown in ``safety.py``;
@@ -41,7 +42,7 @@ from olmo_eval.evals.suites import (  # noqa: F401
 from olmo_eval.evals.suites.math import OMEGA_DEV
 from olmo_eval.evals.suites.registry import AggregationStrategy, get_suite, make_suite
 
-_HMMT = ("hmmt_feb_2025:pass_at_32", "hmmt_nov_2025:pass_at_32", "hmmt_feb_2026:pass_at_32")
+_HMMT = ("hmmt_feb_2025:pass_at_8", "hmmt_nov_2025:pass_at_8", "hmmt_feb_2026:pass_at_8")
 _AIME = ("aime_2025:pass_at_32", "aime_2026:pass_at_32")
 
 
@@ -58,8 +59,8 @@ def _dev_shared(helmet_suite: str) -> tuple:
         "ifeval",
         "ifeval_ood",
         get_suite("ruler_plus_all__65536"),
-        get_suite("ruler_plus_all__131072"),
-        get_suite("ruler_plus_all__262144"),
+        get_suite("ruler_plus_all__131072:hillclimb"),
+        get_suite("ruler_plus_all__262144:hillclimb"),
         get_suite(helmet_suite),
         get_suite("ctc:r64k"),
     )

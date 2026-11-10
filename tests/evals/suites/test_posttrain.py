@@ -1,5 +1,7 @@
 """Tests for the Olmo 3.5 post-training dev and test suites."""
 
+from dataclasses import replace
+
 import pytest
 
 from olmo_eval.common.configs import expand_tasks, validate_task_metrics, validate_tasks
@@ -14,16 +16,16 @@ def dev_shared(helmet: str) -> tuple[str, ...]:
         "mmlu:cot:hillclimb",
         "popqa:chat:hillclimb",
         "omega:dev",
-        "hmmt_feb_2025:pass_at_32",
-        "hmmt_nov_2025:pass_at_32",
-        "hmmt_feb_2026:pass_at_32",
+        "hmmt_feb_2025:pass_at_8",
+        "hmmt_nov_2025:pass_at_8",
+        "hmmt_feb_2026:pass_at_8",
         "livecodebench:lite",
         "bfcl",
         "ifeval",
         "ifeval_ood",
         "ruler_plus_all__65536",
-        "ruler_plus_all__131072",
-        "ruler_plus_all__262144",
+        "ruler_plus_all__131072:hillclimb",
+        "ruler_plus_all__262144:hillclimb",
         helmet,
         "ctc:r64k",
     )
@@ -96,8 +98,8 @@ def test_gpqa_diamond_and_its_superset_stay_in_dev(size):
 # budgets, and BFCL keeps the 4,096-token budget that existing post-training reads use.
 OWN_BUDGET_SUITES = (
     "ruler_plus_all__65536",
-    "ruler_plus_all__131072",
-    "ruler_plus_all__262144",
+    "ruler_plus_all__131072:hillclimb",
+    "ruler_plus_all__262144:hillclimb",
     "helmet_all__65536",
     "ctc:r64k",
     "bfcl",
@@ -148,3 +150,23 @@ def test_dev_reads_fixed_samples_of_popqa_and_mmlu():
     assert len(mmlu) == 57
     assert {config.limit for config in mmlu} == {18}
     assert get_suite("mmlu:cot:hillclimb").aggregation == get_suite("mmlu:cot").aggregation
+
+
+@pytest.mark.parametrize("size", [131072, 262144])
+def test_dev_reads_fixed_ruler_plus_samples_at_long_contexts(size):
+    full = get_suite(f"ruler_plus_all__{size}")
+    sample = get_suite(f"ruler_plus_all__{size}:hillclimb")
+
+    assert sample.expand() == tuple(f"{task}:hillclimb" for task in full.expand())
+    assert {get_task(task).config.limit for task in sample.expand()} == {128}
+    assert sample.aggregation == full.aggregation
+
+
+@pytest.mark.parametrize("task", ["hmmt_feb_2025", "hmmt_nov_2025", "hmmt_feb_2026"])
+def test_dev_hmmt_draws_8_samples_with_the_pass_at_32_setup(task):
+    dev = get_task(f"{task}:pass_at_8").config
+    full = get_task(f"{task}:pass_at_32").config
+
+    assert dev.sampling_params.num_samples == 8
+    assert replace(dev.sampling_params, num_samples=32) == full.sampling_params
+    assert dev.primary_metric == full.primary_metric
