@@ -32,6 +32,7 @@ _AIME = ("aime_2025:pass_at_32", "aime_2026:pass_at_32")
 
 _DEV_SHARED = (
     "gpqa_diamond:cot",
+    "gpqa_main:cot",
     get_suite("mmlu:cot"),
     "popqa",
     OMEGA_DEV,
@@ -64,7 +65,7 @@ _TEST_SHARED = (
 
 make_suite(
     "posttrain:tiny:dev",
-    (*_DEV_SHARED, "gpqa_main:cot", "mbpp_plus"),
+    (*_DEV_SHARED, "mbpp_plus"),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Tiny post-training dev set (the tracker's Track column).",
 )
@@ -94,7 +95,6 @@ make_suite(
     "posttrain:small:test",
     (
         *_TEST_SHARED,
-        "gpqa_main:cot",
         "hle:text:verified",
         get_suite("arena_hard_v2"),
         get_suite("frontierscience"),

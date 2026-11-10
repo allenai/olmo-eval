@@ -8,6 +8,7 @@ from olmo_eval.evals.tasks.common import get_task
 
 DEV_SHARED = (
     "gpqa_diamond:cot",
+    "gpqa_main:cot",
     "mmlu:cot",
     "popqa",
     "omega:dev",
@@ -40,7 +41,7 @@ TEST_SHARED = (
     "strongreject:sr_judge_thinking",
 )
 MEMBERS = {
-    "posttrain:tiny:dev": (*DEV_SHARED, "gpqa_main:cot", "mbpp_plus"),
+    "posttrain:tiny:dev": (*DEV_SHARED, "mbpp_plus"),
     "posttrain:tiny:test": TEST_SHARED,
     "posttrain:small:dev": (
         *DEV_SHARED,
@@ -52,7 +53,6 @@ MEMBERS = {
     ),
     "posttrain:small:test": (
         *TEST_SHARED,
-        "gpqa_main:cot",
         "hle:text:verified",
         "arena_hard_v2",
         "frontierscience",
@@ -79,6 +79,14 @@ def test_dev_and_test_share_no_task(size):
     test = set(get_suite(f"posttrain:{size}:test").expand())
 
     assert not dev & test
+
+
+@pytest.mark.parametrize("size", ["tiny", "small"])
+def test_gpqa_diamond_and_its_superset_stay_in_dev(size):
+    # Diamond's questions are a subset of main's, so splitting them leaks test items.
+    dev = get_suite(f"posttrain:{size}:dev").expand()
+
+    assert {"gpqa_diamond:cot", "gpqa_main:cot"} <= set(dev)
 
 
 @pytest.mark.parametrize("name", MEMBERS)
