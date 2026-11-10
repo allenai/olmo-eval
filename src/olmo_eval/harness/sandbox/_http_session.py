@@ -162,6 +162,11 @@ class ResponsiveBashSession(BashSession):
                         await self._interrupt_active(task)
                     except asyncio.CancelledError:
                         continue
+                    except Exception:
+                        # Failed cleanup leaves the terminal unusable; the
+                        # control-task handling below surfaces the error.
+                        self._closing = True
+                        break
                 except Exception:
                     break
             # A reader deadline does not stop its command. Keep ownership until

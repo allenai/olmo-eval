@@ -121,6 +121,35 @@ async def test_cancellation_settles_reader_before_next_command(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_failed_cancellation_cleanup_still_cancels_and_closes(monkeypatch, tmp_path):
+    session = ResponsiveBashSession(CreateBashSessionRequest(session="test"))
+    await session.start()
+    marker = tmp_path / "started"
+
+    async def failing_stop(task):
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(session, "_stop_active", failing_stop)
+    try:
+        task = asyncio.create_task(
+            session.run(BashAction(command=f"touch {marker}; sleep 1", timeout=5))
+        )
+        async with asyncio.timeout(3):
+            while not marker.exists():
+                await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+        assert session._active_worker is None
+        assert session._interrupt_task is None
+        with pytest.raises(RuntimeError, match="Session is closing"):
+            await session.run(BashAction(command="echo late", timeout=3))
+    finally:
+        await asyncio.sleep(1.5)
+        await session.close()
+
+
+@pytest.mark.anyio
 async def test_interrupt_can_signal_an_active_serialized_reader(tmp_path):
     session = ResponsiveBashSession(CreateBashSessionRequest(session="test"))
     await session.start()
