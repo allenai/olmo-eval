@@ -44,8 +44,13 @@ the thinking-model judge variants and need the judge providers shown in ``safety
 dev needs at least 2 GPUs and test 3. Omniscience is graded by its default judge,
 gpt-4o-mini, through the OpenAI API.
 
+Small dev is two suites, run as separate jobs. MT-Bench and Multi-IF need the
+``multi_turn_chat`` scaffold (``--harness multi_turn_chat``), which drops tool calls and has
+no sandbox, so they are ``posttrain:small:dev:multi_turn``; the rest is
+``posttrain:small:dev``.
+
 Tiny dev needs no API key. Every other suite needs ``OPENAI_API_KEY`` for its API-judged
-tasks (MT-Bench and MultiChallenge in Small dev).
+tasks (MultiChallenge in Small dev, MT-Bench in its multi-turn suite).
 """
 
 # Defining modules, imported so their suites exist whatever the discovery order.
@@ -164,16 +169,20 @@ make_suite(
 
 make_suite(
     "posttrain:small:dev",
-    _sampled(
-        (
-            *_DEV_SHARED,
-            "mt_bench",
-            "multi_if",
-            "multichallenge",
-        )
-    ),
+    _sampled((*_DEV_SHARED, "multichallenge")),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Small post-training dev set (the tracker's Track column).",
+)
+
+# The rest of Small dev, which needs the multi_turn_chat scaffold. That scaffold drops tool
+# calls and has no sandbox, so BFCL and LiveCodeBench cannot share its job.
+make_suite(
+    "posttrain:small:dev:multi_turn",
+    _sampled(("mt_bench", "multi_if")),
+    aggregation=AggregationStrategy.NONE,
+    description=(
+        "Olmo 3.5 Small post-training dev set, the tasks that run under --harness multi_turn_chat."
+    ),
 )
 
 make_suite(

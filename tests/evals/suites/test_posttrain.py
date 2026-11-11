@@ -45,12 +45,8 @@ TEST_SHARED = (
 MEMBERS = {
     "posttrain:tiny:dev": DEV_SHARED,
     "posttrain:tiny:test": TEST_SHARED,
-    "posttrain:small:dev": (
-        *DEV_SHARED,
-        "mt_bench:t10_32k",
-        "multi_if:t10_32k",
-        "multichallenge:t10_32k",
-    ),
+    "posttrain:small:dev": (*DEV_SHARED, "multichallenge:t10_32k"),
+    "posttrain:small:dev:multi_turn": ("mt_bench:t10_32k", "multi_if:t10_32k"),
     "posttrain:small:test": (
         *TEST_SHARED,
         "hle:text:verified:t10_32k",
@@ -76,18 +72,33 @@ def test_members_and_no_pass_average(name):
     assert tuple(expand_tasks([name])) == suite.expand()
 
 
+DEV_SUITES = {
+    "tiny": ("posttrain:tiny:dev",),
+    "small": ("posttrain:small:dev", "posttrain:small:dev:multi_turn"),
+}
+
+
 @pytest.mark.parametrize("size", ["tiny", "small"])
 def test_dev_and_test_share_no_task(size):
-    dev = set(get_suite(f"posttrain:{size}:dev").expand())
+    dev = {task for name in DEV_SUITES[size] for task in get_suite(name).expand()}
     test = set(get_suite(f"posttrain:{size}:test").expand())
 
     assert not dev & test
 
 
+@pytest.mark.parametrize("name", MEMBERS)
+def test_each_suite_runs_under_one_scaffold(name):
+    # The multi_turn_chat scaffold drops tool calls and has no sandbox, so its tasks need a
+    # suite and a job of their own.
+    expected = "multi_turn_chat" if name.endswith(":multi_turn") else None
+    for task in get_suite(name).expand():
+        assert get_task(task).required_scaffold == expected, task
+
+
 @pytest.mark.parametrize("size", ["tiny", "small"])
 def test_no_suite_reads_gpqa(size):
     # Main truncates at chance for a reasoning model at 32,768 tokens; Diamond is a subset of it.
-    dev = get_suite(f"posttrain:{size}:dev").expand()
+    dev = [task for name in DEV_SUITES[size] for task in get_suite(name).expand()]
     test = get_suite(f"posttrain:{size}:test").expand()
 
     assert not [task for task in dev if task.startswith("gpqa")]

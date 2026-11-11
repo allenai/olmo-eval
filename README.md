@@ -1067,13 +1067,18 @@ direct-answer budgets, and BFCL keeps its own settings. Do not override sampling
 longest prompt plus 32,768 tokens: the server refuses any request that does not fit (at
 34,816, every prompt over 2,048 tokens), and only when the request reaches it.
 
+Small dev is two suites, run as separate jobs. MT-Bench and Multi-IF need the
+`multi_turn_chat` scaffold (`--harness multi_turn_chat`), which drops tool calls and has no
+sandbox, so they are `posttrain:small:dev:multi_turn`; the rest is `posttrain:small:dev`.
+
 The suites name no provider, but the engine is part of what a score measures: compare
 scores only between runs on the same provider, and record it with each run. When the rest
-of a suite runs on SGLang, two entries need their own job. BFCL needs
-`provider.kind=vllm_server`, the only provider with tool calls. LiveCodeBench
-(`livecodebench:lite` in dev, `livecodebench_hidden` in test) needs a sandbox harness,
-whose default image is CUDA 12.8 and so cannot install SGLang ([SGLang](docs/sglang.md)).
-In Small test, Arena-Hard v2 also needs vLLM: it fits its output budget to the context,
+of a suite runs on SGLang, BFCL needs its own job with `provider.kind=vllm_server`, the
+only provider with tool calls. LiveCodeBench (`livecodebench:lite` in dev,
+`livecodebench_hidden` in test) needs a sandbox harness, whose default image is CUDA 12.8
+and so cannot install SGLang ([SGLang](docs/sglang.md)); with `--image` set to the CUDA 13
+evaluator image (Beaker `01M632ZP67Y4WMV060J74FSC3R`) it runs on SGLang, and so does the
+WildGuard judge. In Small test, Arena-Hard v2 also needs vLLM: it fits its output budget to the context,
 which SGLang refuses.
 
 Every suite has WildGuard-judged safety tasks, so a launch needs the `wg_judge` overrides
