@@ -123,6 +123,7 @@ _DEV_SHARED = (
     get_suite("ruler_plus_all__262144:hillclimb"),
     "harmbench:wg_judge_thinking",
     "xstest:wg_judge_thinking",
+    "wildguardtest:wg_judge_thinking",
 )
 
 
@@ -133,7 +134,6 @@ _TEST_SHARED = (
     *_AIME,
     "livecodebench_hidden",
     "do_anything_now:wg_judge_thinking",
-    "wildguardtest:wg_judge_thinking",
     "wildjailbreak:wg_judge_thinking",
     "wmdp:mcq",
     "bbq:mcq",

@@ -26,6 +26,7 @@ DEV_SHARED = (
     "ruler_plus_all__262144:hillclimb",
     "harmbench:wg_judge_thinking_t10_32k",
     "xstest:wg_judge_thinking_t10_32k",
+    "wildguardtest:wg_judge_thinking_t10_32k",
 )
 
 
@@ -37,7 +38,6 @@ TEST_SHARED = (
     "aime_2026:pass_at_32_t10_32k",
     "livecodebench_hidden:t10_32k",
     "do_anything_now:wg_judge_thinking_t10_32k",
-    "wildguardtest:wg_judge_thinking_t10_32k",
     "wildjailbreak:wg_judge_thinking_t10_32k",
     "wmdp:mcq_t10_32k",
     "bbq:mcq_t10_32k",
