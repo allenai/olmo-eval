@@ -9,7 +9,7 @@
 # export_multimodal_olmoddp.py). Env: TASKS (default: the first suite below), LIMIT (examples per
 # task; unset = all), GPUS (default 8, one model replica per GPU), OLMO_CORE_SHA (the OLMo-core the
 # job installs; default: allenai/OLMo-core#942's head, the multimodal SFT code), WORKSPACE,
-# CLUSTER, PRIORITY, BUDGET, TIMEOUT, GROUP, DRY_RUN=1. This checkout must be pushed and clean:
+# CLUSTER, PRIORITY, BUDGET, TIMEOUT, GROUP, OLMO35_TOKENIZER, DRY_RUN=1. This checkout must be pushed and clean:
 # the job runs its HEAD.
 set -euo pipefail
 [[ $# -ge 2 ]] || { sed -n 2,14p "$0"; exit 2; }
@@ -21,6 +21,9 @@ GPUS=${GPUS:-8}; WORKSPACE=${WORKSPACE:-ai2/olmo-instruct}; CLUSTER=${CLUSTER:-a
 PRIORITY=${PRIORITY:-urgent}; TIMEOUT=${TIMEOUT:-24h}; GROUP=${GROUP:-olmo35-mmsft-eval}
 OLMO_CORE_SHA=${OLMO_CORE_SHA:-accab373bae0f316f3e6092a0228ee298cefb5a7}
 OLMO_EVAL_PY=${OLMO_EVAL_PY:-python}
+# The olmo35 tokenizer at its pinned revision, on Weka (jobs may not reach the gated Hub repo);
+# tokenizer.json sha256 56a6699d...fb79, a copy of allenai/dolma2-tokenizer-olmo35@8b97170.
+OLMO35_TOKENIZER=${OLMO35_TOKENIZER:-/weka/oe-training-default/jasonr/mmsft-eval/tokenizers/dolma2-tokenizer-olmo35-8b97170}
 [[ -f $MODEL/model.safetensors && -f $MODEL/olmo_core_config.json ]] \
   || { echo "not an OLMo-core multimodal export: $MODEL" >&2; exit 2; }
 if [[ -n $(git -C "$ROOT" status --porcelain --untracked-files=no) ]]; then
@@ -31,12 +34,13 @@ for t in $TASKS; do
   TASK_ARGS+=(-t "$t")
   [[ -n ${LIMIT:-} ]] && TASK_ARGS+=(-o "limit=$LIMIT")
 done
+TOK=(); [[ $MODE == olmo35 ]] && TOK=(-o "provider.kwargs.tokenizer=$OLMO35_TOKENIZER")
 DRY=(--yes); [[ -n ${DRY_RUN:-} ]] && DRY=(--dry-run)
 BUD=(); [[ -n ${BUDGET:-} ]] && BUD=(-B "$BUDGET")
 (cd "$ROOT" && PYTHONPATH=$ROOT/src "$OLMO_EVAL_PY" -c "from olmo_eval.cli import main; main()" \
   beaker launch -n "mmsft-vis-$NAME-$MODE" -m "$MODEL" "${TASK_ARGS[@]}" \
   --harness default -o provider.kind=olmo_core_vlm -o provider.num_instances="$GPUS" \
-  -o "provider.kwargs.prompt_format=$MODE" \
+  -o "provider.kwargs.prompt_format=$MODE" "${TOK[@]}" \
   -o "provider.package=https://github.com/allenai/OLMo-core.git@$OLMO_CORE_SHA" \
   -o 'provider.dependencies=["flash-linear-attention==0.5.2"]' \
   -c "$CLUSTER" --gpus "$GPUS" -p "$PRIORITY" --no-preemptible -T "$TIMEOUT" \
