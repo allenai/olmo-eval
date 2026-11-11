@@ -17,11 +17,17 @@ the cap cut it. CTC's 15 tasks at 64K report heterogeneous metrics with no aggre
 its own README says a reasoning model needs more than their direct-answer budgets (64
 tokens for retrieval). Long context is read from RULER+ at 64K, 128K and 256K.
 
+Small dev also reads the tracker's agentic Track rows, which are external evals: a suite
+cannot hold them, so each runs as its own ``olmo-eval run-external`` job beside the suite.
+They are ``openthoughts_tblite`` (OpenThoughts-TBLite, 100 tasks) and ``terminal_bench_2``
+(Terminal-Bench 2.1, 89 tasks) for the Terminal-Bench row, and ``swe_bench_verified``.
+Tiny leaves them out: the tracker deprioritizes them there.
+
 Left out: tracker rows with no olmo-eval task yet (CritPt, FrontierCode, BrowseComp-Plus,
 AutomationBench, DeepSearchQA, Terminal-Bench-Science, FIRM, OpenAgentSafety, the
-decontaminated paper-MATH), externally run evals (SWE-bench Verified, Terminal-Bench,
-tau2-bench, AA-Briefcase, DeepScholar Bench), and the multimodal rows, which keep their own
-suites. Also left out until olmo-eval has a configuration that lets a reasoning model
+decontaminated paper-MATH), the test rows that are external evals (tau2-bench,
+AA-Briefcase, DeepScholar Bench), and the multimodal rows, which keep their own suites.
+Also left out until olmo-eval has a configuration that lets a reasoning model
 finish (their variants cap generation at 1,024 or 128 tokens, most with stop sequences):
 MATH-500, HumanEval+, MBPP+ and LongBench v2.
 

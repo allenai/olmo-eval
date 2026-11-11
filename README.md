@@ -1048,6 +1048,13 @@ are chat requests capped at 10 tokens, so a model that reasons first is scored o
 cap cut it. CTC's 64K tasks report heterogeneous metrics with no aggregate, and its own
 README says a reasoning model needs more than their direct-answer budgets.
 
+Small dev also reads the tracker's agentic Track rows. They are
+[external evals](#external-evals), which a suite cannot hold, so each runs as its own
+`olmo-eval run-external -e <name>` job beside the suite: `openthoughts_tblite`
+(OpenThoughts-TBLite, 100 tasks) and `terminal_bench_2` (Terminal-Bench 2.1, 89 tasks) for
+the Terminal-Bench row, and `swe_bench_verified`. Tiny leaves them out: the tracker
+deprioritizes them there.
+
 They mix short tasks with RULER+ at 64K to 256K, LiveCodeBench (sandboxed harness,
 as above) and LLM-judged safety and Arena-Hard tasks (see
 [local judge models](#local-judge-models)). Sampled tasks run at the ledger's setting:
