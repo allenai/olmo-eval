@@ -27,7 +27,11 @@ For remote evaluation, only the launcher is needed locally. Selecting SGLang
 also selects the shared CUDA 13.0.2 / PyTorch 2.13 compiler-equipped base image
 `01M5VBMKPG8BX4BVJBGVBMF64V`, owned by Ai2 in `open-instruct-dev`
 (name: `robertb/olmo-eval-cu1302-trc2130-amd64-devel`). The author namespace
-records who published it; the immutable ID selects the shared image. Gantry installs
+records who published it; the immutable ID selects the shared image. Harnesses with
+sandboxes (code execution, such as `codex_python` for LiveCodeBench) also need Podman,
+so with SGLang they select `01M765Y8PKZG005F44450HCH8R`
+(`olmo-eval-cu1302-trc2130-amd64-devel-sandbox`, same workspace), the same base with
+the Podman stage added. Gantry installs
 the extra at job startup; users do not build an image or install GPU packages on
 their laptop. The launcher selects images per model, so other providers keep
 their existing default. Explicit `--image` or YAML `beaker_image` settings win.
@@ -86,12 +90,9 @@ The shared base uses the existing repository build and publication scripts:
     --source olmo-eval:cu1302-trc2130-amd64-devel --workspace YOUR_WORKSPACE
 ```
 
-Harnesses with sandboxes (code execution, such as `codex_python` for LiveCodeBench)
-also need Podman. Add `--sandbox` to the build command to build the `runtime-sandbox`
-stage, tagged `cu1302-trc2130-amd64-devel-sandbox`, and push that tag. Until
-`BEAKER_SGLANG_SANDBOX_IMAGE` names a published image, an SGLang launch with such a
-harness stops at launch time and asks for `--image`; the CUDA 12.8 sandbox image
-cannot install this SGLang pin.
+For the sandbox variant, add `--sandbox` to the build command (the `runtime-sandbox`
+stage, tagged `cu1302-trc2130-amd64-devel-sandbox`) and push that tag. The CUDA 12.8
+sandbox image cannot install this SGLang pin.
 
 SGLang compiles CUDA kernels during startup, so `--cuda-devel` is required even
 when all Python packages install successfully. Select a replacement with `--image`.

@@ -41,9 +41,9 @@ BEAKER_SGLANG_IMAGE = "01M5VBMKPG8BX4BVJBGVBMF64V"
 BEAKER_SANDBOX_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64-sandbox"
 """Docker image for Beaker evaluation jobs with sandbox support (includes Podman)."""
 
-BEAKER_SGLANG_SANDBOX_IMAGE: str | None = None
-"""SGLang base plus Podman, for sandboxed harnesses; None until one is published
-(recipe: docs/sglang.md)."""
+BEAKER_SGLANG_SANDBOX_IMAGE = "01M765Y8PKZG005F44450HCH8R"
+"""olmo-eval-cu1302-trc2130-amd64-devel-sandbox: the SGLang base plus Podman, for
+sandboxed harnesses; recipe: docs/sglang.md."""
 
 BEAKER_RESULT_DIR = "/results"
 """Default directory for evaluation results in Beaker jobs."""

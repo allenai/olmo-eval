@@ -2,7 +2,6 @@
 
 from unittest.mock import patch
 
-import click
 import pytest
 
 from olmo_eval.cli.beaker.config_loader import LaunchConfig
@@ -12,6 +11,7 @@ from olmo_eval.common.constants.infrastructure import (
     BEAKER_DEFAULT_IMAGE,
     BEAKER_SANDBOX_IMAGE,
     BEAKER_SGLANG_IMAGE,
+    BEAKER_SGLANG_SANDBOX_IMAGE,
 )
 from olmo_eval.launch.beaker.launcher import BeakerLauncher
 
@@ -95,8 +95,7 @@ def test_job_installs_selected_provider(provider_kind, custom_package, image, li
 
 @pytest.mark.parametrize("provider_kind", ["sglang", "vllm"])
 @pytest.mark.parametrize("image", [None, "explicit-image"])
-@pytest.mark.parametrize("sglang_sandbox_image", [None, "published-sglang-sandbox"])
-def test_sandbox_harness_image_follows_provider(provider_kind, image, sglang_sandbox_image):
+def test_sandbox_harness_image_follows_provider(provider_kind, image):
     """A sandboxed harness needs Podman, and SGLang needs its CUDA 13 base, so the
     CUDA 12.8 sandbox image serves only non-SGLang providers."""
     config = LaunchConfig(
@@ -134,20 +133,7 @@ def test_sandbox_harness_image_follows_provider(provider_kind, image, sglang_san
             "olmo_eval.launch.beaker.mirror.get_registry_mirror_url",
             return_value="mirror.test",
         ),
-        patch(
-            "olmo_eval.cli.beaker.job_assembler.BEAKER_SGLANG_SANDBOX_IMAGE",
-            sglang_sandbox_image,
-        ),
     ):
-        if provider_kind == "sglang" and image is None and sglang_sandbox_image is None:
-            with pytest.raises(click.UsageError, match="--image"):
-                assembler.assemble(plan)
-            return
         job = assembler.assemble(plan)
-    if image:
-        expected = image
-    elif provider_kind == "sglang":
-        expected = sglang_sandbox_image
-    else:
-        expected = BEAKER_SANDBOX_IMAGE
-    assert job.beaker_image == expected
+    default = BEAKER_SGLANG_SANDBOX_IMAGE if provider_kind == "sglang" else BEAKER_SANDBOX_IMAGE
+    assert job.beaker_image == (image or default)

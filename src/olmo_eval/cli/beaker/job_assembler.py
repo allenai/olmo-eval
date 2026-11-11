@@ -7,8 +7,6 @@ import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
-import click
-
 from olmo_eval.common.constants.infrastructure import (
     BEAKER_DEFAULT_IMAGE,
     BEAKER_RESULT_DIR,
@@ -36,17 +34,9 @@ def default_beaker_image(provider_kind: str | None, sandbox: bool) -> str:
 
     SGLang needs its CUDA 13 / PyTorch 2.13 base; sandboxed harnesses need Podman.
     """
-    if provider_kind != "sglang":
-        return BEAKER_SANDBOX_IMAGE if sandbox else BEAKER_DEFAULT_IMAGE
-    if not sandbox:
-        return BEAKER_SGLANG_IMAGE
-    if BEAKER_SGLANG_SANDBOX_IMAGE is None:
-        raise click.UsageError(
-            "No default image has both SGLang's CUDA 13 / PyTorch 2.13 stack and the Podman "
-            "this harness's sandboxes need. Build one (docs/sglang.md, 'Rebuilding the base "
-            "image', with --sandbox) and pass it with --image."
-        )
-    return BEAKER_SGLANG_SANDBOX_IMAGE
+    if provider_kind == "sglang":
+        return BEAKER_SGLANG_SANDBOX_IMAGE if sandbox else BEAKER_SGLANG_IMAGE
+    return BEAKER_SANDBOX_IMAGE if sandbox else BEAKER_DEFAULT_IMAGE
 
 
 def get_provider_kind(model_spec: str, default_kind: str | None = None) -> str | None:
