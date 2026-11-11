@@ -10,7 +10,6 @@ from olmo_eval.evals.suites.posttrain import MODEL_SAMPLING, OWN_SAMPLING, SAMPL
 from olmo_eval.evals.tasks.common import get_task
 
 DEV_SHARED = (
-    "gpqa_main:cot:t10_32k",
     "mmlu:cot:hillclimb:t10_32k",
     "popqa:chat_hillclimb_t10_32k",
     "omega:dev:t10_32k",
@@ -86,12 +85,12 @@ def test_dev_and_test_share_no_task(size):
 
 
 @pytest.mark.parametrize("size", ["tiny", "small"])
-def test_dev_reads_gpqa_main_alone_and_test_no_gpqa(size):
-    # Diamond's questions are a subset of main's: in dev it adds nothing, in test it leaks.
+def test_no_suite_reads_gpqa(size):
+    # Main truncates at chance for a reasoning model at 32,768 tokens; Diamond is a subset of it.
     dev = get_suite(f"posttrain:{size}:dev").expand()
     test = get_suite(f"posttrain:{size}:test").expand()
 
-    assert [task for task in dev if task.startswith("gpqa")] == ["gpqa_main:cot:t10_32k"]
+    assert not [task for task in dev if task.startswith("gpqa")]
     assert not [task for task in test if task.startswith("gpqa")]
 
 

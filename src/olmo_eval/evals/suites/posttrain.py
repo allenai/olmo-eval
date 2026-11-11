@@ -7,8 +7,11 @@ reads fixed seeded samples of the two largest sets, popqa (1,000 of about 14,000
 and MMLU:cot (18 items per subject, 1,026 in all), and of RULER+ at 128K and 256K (128
 items per task, against 512). HMMT draws 8 samples per problem, against AIME's 32 in test.
 
-Dev also leaves out three tracker Track rows. GPQA Diamond's questions are a subset of GPQA
-main's, which dev reads. HELMET's recall tasks repeat RULER+, and its QA tasks are chat
+Dev also leaves out four tracker Track rows. GPQA is read in neither variant: at 32,768
+output tokens about 60% of a reasoning model's generations stop mid-thought, and those
+truncated samples score at chance, so the entry measures the cutoff more than the model
+(three Olmo 3.5 Tiny SFT checkpoints, temperature 1.0). MMLU:cot guards knowledge
+instead. HELMET's recall tasks repeat RULER+, and its QA tasks are chat
 requests capped at upstream's 10 tokens, so a model that reasons first is scored on where
 the cap cut it. CTC's 15 tasks at 64K report heterogeneous metrics with no aggregate, and
 its own README says a reasoning model needs more than their direct-answer budgets (64
@@ -109,7 +112,6 @@ _AIME = ("aime_2025:pass_at_32", "aime_2026:pass_at_32")
 
 
 _DEV_SHARED = (
-    "gpqa_main:cot",
     get_suite("mmlu:cot:hillclimb"),
     "popqa:chat:hillclimb",
     OMEGA_DEV,

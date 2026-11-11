@@ -1040,8 +1040,10 @@ for every checkpoint you compare; OMEGA has a 32,768-token generation cap.
 `posttrain:small:test` follow the Olmo eval tracker: its Track column is dev, its
 Publish column is test. Use dev suites for hill-climbing and checkpoint selection;
 read test suites only for release reports. No task is in both suites of one size.
-None has a cross-domain aggregate. Dev leaves out three Track rows. GPQA Diamond is a
-subset of GPQA main, which dev reads. HELMET's recall tasks repeat RULER+, and its QA tasks
+None has a cross-domain aggregate. Dev leaves out four Track rows. GPQA is read in neither
+variant: at 32,768 output tokens about 60% of a reasoning model's generations stop
+mid-thought and score at chance, so the entry measures the cutoff more than the model;
+MMLU:cot guards knowledge instead. HELMET's recall tasks repeat RULER+, and its QA tasks
 are chat requests capped at 10 tokens, so a model that reasons first is scored on where the
 cap cut it. CTC's 64K tasks report heterogeneous metrics with no aggregate, and its own
 README says a reasoning model needs more than their direct-answer budgets.
