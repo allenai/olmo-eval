@@ -34,7 +34,7 @@ for t in $TASKS; do
   TASK_ARGS+=(-t "$t")
   [[ -n ${LIMIT:-} ]] && TASK_ARGS+=(-o "limit=$LIMIT")
 done
-TOK=(); [[ $MODE == olmo35 ]] && TOK=(-o "provider.kwargs.tokenizer=$OLMO35_TOKENIZER")
+TOK=(); [[ $MODE == olmo35 ]] && TOK=(-o "provider.tokenizer=$OLMO35_TOKENIZER")
 DRY=(--yes); [[ -n ${DRY_RUN:-} ]] && DRY=(--dry-run)
 BUD=(); [[ -n ${BUDGET:-} ]] && BUD=(-B "$BUDGET")
 (cd "$ROOT" && PYTHONPATH=$ROOT/src "$OLMO_EVAL_PY" -c "from olmo_eval.cli import main; main()" \
