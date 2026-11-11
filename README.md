@@ -1050,7 +1050,9 @@ Tiny), with 32,768 output tokens, through `_t10_32k` variants that keep each tas
 count. Without the fixed budget, most of these tasks would generate up to whatever context
 they are served at. RULER+, HELMET and CTC run greedy in completion mode with
 direct-answer budgets, and BFCL keeps its own settings. Do not override sampling or
-`max_tokens` for the whole run.
+`max_tokens` for the whole run. Serve sampled tasks with a context of at least their
+longest prompt plus 32,768 tokens: the server refuses any request that does not fit (at
+34,816, every prompt over 2,048 tokens), and only when the request reaches it.
 
 The suites name no provider, but the engine is part of what a score measures: compare
 scores only between runs on the same provider, and record it with each run. When the rest
