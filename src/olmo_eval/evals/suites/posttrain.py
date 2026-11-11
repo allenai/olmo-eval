@@ -30,8 +30,10 @@ budget would otherwise be whatever context they are served at. Do not override s
 ``max_tokens`` for the whole run. RULER+ runs greedy in completion mode with direct-answer
 budgets, and BFCL keeps its own settings (temperature 0.001, 4,096 tokens), as the ledger's
 BFCL reads do. Safety tasks use
-the thinking-model judge variants and need the judge providers shown in ``safety.py``;
-Omniscience is graded by its default judge, gpt-4o-mini, through the OpenAI API.
+the thinking-model judge variants and need the judge providers shown in ``safety.py``
+(``wg_judge`` in every suite, ``sr_judge`` in test). Each local judge takes its own GPU, so
+dev needs at least 2 GPUs and test 3. Omniscience is graded by its default judge,
+gpt-4o-mini, through the OpenAI API.
 
 Tiny dev needs no API key. Every other suite needs ``OPENAI_API_KEY`` for its API-judged
 tasks (MT-Bench and MultiChallenge in Small dev).

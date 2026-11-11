@@ -1067,6 +1067,14 @@ whose default image is CUDA 12.8 and so cannot install SGLang ([SGLang](docs/sgl
 In Small test, Arena-Hard v2 also needs vLLM: it fits its output budget to the context,
 which SGLang refuses.
 
+Every suite has WildGuard-judged safety tasks, so a launch needs the `wg_judge` overrides
+(`-o auxiliary_providers.wg_judge.kind=vllm_server -o
+auxiliary_providers.wg_judge.model=allenai/wildguard -o
+auxiliary_providers.wg_judge.kwargs.add_bos_token=true`), and the test suites also need the
+`sr_judge` overrides for StrongREJECT; `safety.py` has both. Without them the run generates
+every item and then fails at scoring. Each local judge gets its own GPUs on top of the
+model's: at least 2 GPUs for dev and 3 for test, at tensor parallel 1.
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.
