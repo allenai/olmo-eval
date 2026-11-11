@@ -27,6 +27,22 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def tensor_parallel_for(gpu_ids: list[int] | None, kwargs: dict[str, Any] | None) -> int | None:
+    """Tensor-parallel size of a worker's engine: its GPUs divided by the pipeline stages.
+
+    The GPU planner sizes an instance as tensor_parallel_size x pipeline_parallel_size, so with
+    ``pipeline_parallel_size`` set the worker's GPUs are shared out across pipeline stages.
+    """
+    if not gpu_ids:
+        return None
+    pipeline_parallel = int((kwargs or {}).get("pipeline_parallel_size", 1))
+    if len(gpu_ids) % pipeline_parallel:
+        raise ValueError(
+            f"{len(gpu_ids)} GPU(s) cannot be split into {pipeline_parallel} pipeline stages"
+        )
+    return len(gpu_ids) // pipeline_parallel
+
+
 def inference_worker(
     worker_id: str,
     gpu_ids: list[int],
@@ -112,7 +128,7 @@ def inference_worker(
         engine_overrides: dict[str, Any] = {}
         if provider_kind in ("vllm", "vllm_server"):
             engine_overrides = dict(
-                tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+                tensor_parallel_size=tensor_parallel_for(gpu_ids, provider_config.kwargs),
                 load_format=load_format,
                 model_loader_extra_config=extra_loader_config,
                 enable_auto_tool_choice=enable_auto_tool_choice or None,

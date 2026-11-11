@@ -302,6 +302,17 @@ class TestGPUPlanner:
 
         assert [w.gpu_ids for w in planner.plan().main_workers] == [[0, 1, 2, 3], [4, 5, 6, 7]]
 
+    def test_worker_tensor_parallel_divides_gpus_by_pipeline_stages(self):
+        """A worker's engine runs TP = its GPUs / pipeline_parallel_size, not TP over every GPU."""
+        from olmo_eval.runners.asynq.workers import tensor_parallel_for
+
+        assert tensor_parallel_for([0, 1, 2, 3], {"pipeline_parallel_size": 4}) == 1
+        assert tensor_parallel_for([0, 1, 2, 3], {"pipeline_parallel_size": 2}) == 2
+        assert tensor_parallel_for([0, 1], {}) == 2
+        assert tensor_parallel_for([], {"pipeline_parallel_size": 4}) is None
+        with pytest.raises(ValueError, match="pipeline stages"):
+            tensor_parallel_for([0, 1, 2], {"pipeline_parallel_size": 2})
+
     def test_insufficient_gpus_raises(self):
         """Plan raises error when not enough GPUs."""
         planner = GPUPlanner(
