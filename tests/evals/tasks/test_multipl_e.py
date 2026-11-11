@@ -34,3 +34,43 @@ def test_legacy_olmo3base_keeps_configured_stop_sequences(benchmark: str) -> Non
 
     assert sampling_params is not None
     assert sampling_params.stop_sequences == MULTIPL_E_STOP_TOKENS["java"]
+
+
+class _FailingExecutionEnv:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def execute_command(self, command: str, timeout: float | None = None):
+        raise self.error
+
+
+@pytest.mark.anyio
+async def test_multipl_e_sandbox_failure_is_not_scored_as_wrong() -> None:
+    from olmo_eval.common.scorers.code_execution.multipl_e import MultiplEScorer
+    from olmo_eval.common.types import LMOutput
+    from olmo_eval.harness.sandbox.errors import SandboxTransportError
+
+    instance = Instance(question="Q", metadata={"test": "echo ok"})
+    output = LMOutput(text="unused")
+    output.extracted_answer = "true"
+    env = _FailingExecutionEnv(SandboxTransportError("command execution failed"))
+
+    with pytest.raises(SandboxTransportError):
+        await MultiplEScorer(language="sh").ascore(instance, output, env)
+
+
+@pytest.mark.anyio
+async def test_multipl_e_other_execution_errors_score_zero() -> None:
+    from olmo_eval.common.scorers.code_execution.multipl_e import MultiplEScorer
+    from olmo_eval.common.types import LMOutput
+
+    instance = Instance(question="Q", metadata={"test": "echo ok"})
+    output = LMOutput(text="unused")
+    output.extracted_answer = "true"
+
+    score = await MultiplEScorer(language="sh").ascore(
+        instance, output, _FailingExecutionEnv(RuntimeError("bad command"))
+    )
+
+    assert score == 0.0
+    assert output.metadata["execution_result"]["status"] == "Error"

@@ -422,6 +422,101 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestDeliveredCommandRetry(unittest.IsolatedAsyncioTestCase):
+    def _executor(self, retry_delivered: bool) -> SandboxExecutor:
+        executor = SandboxExecutor(
+            SandboxConfig(
+                image="test",
+                mode=SandboxMode.MODAL,
+                retry_delivered_commands=retry_delivered,
+            )
+        )
+        executor._deployment = mock.Mock()
+        executor._runtime = mock.Mock()
+        executor._quarantine_if_unresponsive = mock.AsyncMock()
+        return executor
+
+    def _no_backoff(self):
+        return mock.patch(
+            "olmo_eval.harness.sandbox.executor._exponential_backoff", return_value=0.0
+        )
+
+    async def test_delivered_command_is_retried_when_configured(self) -> None:
+        import aiohttp
+
+        executor = self._executor(retry_delivered=True)
+        executor._runtime.execute = mock.AsyncMock(
+            side_effect=[
+                aiohttp.ServerDisconnectedError(),
+                mock.Mock(exit_code=0, stdout="ok\n", stderr=""),
+            ]
+        )
+        with self._no_backoff():
+            result = await executor._execute_remote_command(["bash", "-c", "x"], 5.0)
+        self.assertTrue(result.success)
+        self.assertEqual(result.output, "ok\n")
+        self.assertEqual(executor._runtime.execute.await_count, 2)
+
+    async def test_delivered_command_is_not_replayed_by_default(self) -> None:
+        import aiohttp
+
+        from olmo_eval.harness.sandbox.errors import SandboxTransportError
+
+        executor = self._executor(retry_delivered=False)
+        executor._runtime.execute = mock.AsyncMock(side_effect=aiohttp.ServerDisconnectedError())
+        with self._no_backoff(), self.assertRaises(SandboxTransportError):
+            await executor._execute_remote_command(["bash", "-c", "x"], 5.0)
+        self.assertEqual(executor._runtime.execute.await_count, 1)
+
+    async def test_command_past_its_deadline_on_every_attempt_times_out(self) -> None:
+        executor = self._executor(retry_delivered=True)
+
+        async def hang(_command):
+            await asyncio.Event().wait()
+
+        executor._runtime.execute = mock.AsyncMock(side_effect=hang)
+        with (
+            self._no_backoff(),
+            mock.patch("olmo_eval.harness.sandbox.executor._TRANSPORT_RETRIES", 1),
+        ):
+            result = await executor._execute_remote_command(["bash", "-c", "x"], 0.01)
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "timeout")
+        self.assertEqual(executor._runtime.execute.await_count, 2)
+
+    async def test_deadline_on_a_quarantined_sandbox_still_raises(self) -> None:
+        from olmo_eval.harness.sandbox.errors import SandboxTransportError
+
+        executor = self._executor(retry_delivered=True)
+
+        async def quarantine(_exc):
+            executor._quarantined_reason = "unhealthy"
+
+        executor._quarantine_if_unresponsive = mock.AsyncMock(side_effect=quarantine)
+
+        async def hang(_command):
+            await asyncio.Event().wait()
+
+        executor._runtime.execute = mock.AsyncMock(side_effect=hang)
+        with (
+            self._no_backoff(),
+            mock.patch("olmo_eval.harness.sandbox.executor._TRANSPORT_RETRIES", 0),
+            self.assertRaises(SandboxTransportError),
+        ):
+            await executor._execute_remote_command(["bash", "-c", "x"], 0.01)
+
+    async def test_failure_before_the_deadline_still_raises_after_retries(self) -> None:
+        import aiohttp
+
+        from olmo_eval.harness.sandbox.errors import SandboxTransportError
+
+        executor = self._executor(retry_delivered=True)
+        executor._runtime.execute = mock.AsyncMock(side_effect=aiohttp.ServerDisconnectedError())
+        with self._no_backoff(), self.assertRaises(SandboxTransportError):
+            await executor._execute_remote_command(["bash", "-c", "x"], 5.0)
+        self.assertEqual(executor._runtime.execute.await_count, 4)
+
+
 class _CommandTimeoutError(Exception):
     """Named like swe-rex's timeout so the executor recognizes it."""
 
