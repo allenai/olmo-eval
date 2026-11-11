@@ -1093,8 +1093,21 @@ class BeakerLauncher:
 
         # Inject BEAKER_TOKEN so the running job can post status updates back to
         # the workload description via BeakerStatusReporter.
+        # Status reporting is cosmetic (the reporter disables itself without a token), so a
+        # workspace without the user's token secret launches without it instead of failing.
         if not any(name == "BEAKER_TOKEN" for name, _ in env_secrets):
-            env_secrets.append(("BEAKER_TOKEN", f"{self.beaker.user_name}_BEAKER_TOKEN"))
+            from beaker.exceptions import BeakerSecretNotFound
+
+            token_secret = f"{self.beaker.user_name}_BEAKER_TOKEN"
+            try:
+                self.beaker.secret.get(token_secret)
+                env_secrets.append(("BEAKER_TOKEN", token_secret))
+            except BeakerSecretNotFound:
+                log.warning(
+                    "No Beaker secret %s in workspace %s; the job will not post status updates",
+                    token_secret,
+                    config.workspace,
+                )
 
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:
