@@ -246,6 +246,20 @@ class OlmoCoreVLMProvider(InferenceProvider):
             tokenizer, _, _ = load_tokenizer_losslessly(tokenizer_path, revision=revision)
         else:
             tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
+        split = (
+            "tokenizer.json (olmo35 chat)"
+            if prompt_format == "olmo35"
+            else "tokenizer.json"
+            if preprocessing.dataset_tokenizer_json_split(self.checkpoint_info)
+            else "GPT-2 regex (AutoTokenizer, pre-tokenizer_json_split config)"
+        )
+        logger.info(
+            "Tokenizer %s, split %s, %s; '2024.\\n\\n' -> %s",
+            tokenizer_path,
+            split,
+            type(tokenizer).__name__,
+            tokenizer.encode("2024.\n\n", add_special_tokens=False),
+        )
         self.tokenizer: preprocessing.VLMTokenizerProtocol = cast(
             preprocessing.VLMTokenizerProtocol, tokenizer
         )
