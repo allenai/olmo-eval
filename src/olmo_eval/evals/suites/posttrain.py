@@ -119,6 +119,8 @@ _DEV_SHARED = (
     get_suite("ruler_plus_all__65536"),
     get_suite("ruler_plus_all__131072:hillclimb"),
     get_suite("ruler_plus_all__262144:hillclimb"),
+    "harmbench:wg_judge_thinking",
+    "xstest:wg_judge_thinking",
 )
 
 
@@ -158,8 +160,6 @@ make_suite(
             "mt_bench",
             "multi_if",
             "multichallenge",
-            "harmbench:wg_judge_thinking",
-            "xstest:wg_judge_thinking",
         )
     ),
     aggregation=AggregationStrategy.NONE,

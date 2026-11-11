@@ -24,6 +24,8 @@ DEV_SHARED = (
     "ruler_plus_all__65536",
     "ruler_plus_all__131072:hillclimb",
     "ruler_plus_all__262144:hillclimb",
+    "harmbench:wg_judge_thinking_t10_32k",
+    "xstest:wg_judge_thinking_t10_32k",
 )
 
 
@@ -49,8 +51,6 @@ MEMBERS = {
         "mt_bench:t10_32k",
         "multi_if:t10_32k",
         "multichallenge:t10_32k",
-        "harmbench:wg_judge_thinking_t10_32k",
-        "xstest:wg_judge_thinking_t10_32k",
     ),
     "posttrain:small:test": (
         *TEST_SHARED,
