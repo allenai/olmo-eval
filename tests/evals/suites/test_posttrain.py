@@ -9,27 +9,22 @@ from olmo_eval.evals.suites import AggregationStrategy, Suite, get_suite
 from olmo_eval.evals.suites.posttrain import MODEL_SAMPLING, OWN_SAMPLING, SAMPLED_FROM
 from olmo_eval.evals.tasks.common import get_task
 
-
-def dev_shared(helmet: str) -> tuple[str, ...]:
-    return (
-        "gpqa_diamond:cot:t10_32k",
-        "gpqa_main:cot:t10_32k",
-        "mmlu:cot:hillclimb:t10_32k",
-        "popqa:chat_hillclimb_t10_32k",
-        "omega:dev:t10_32k",
-        "hmmt_feb_2025:pass_at_8_t10_32k",
-        "hmmt_nov_2025:pass_at_8_t10_32k",
-        "hmmt_feb_2026:pass_at_8_t10_32k",
-        "livecodebench:lite_t10_32k",
-        "bfcl",
-        "ifeval:t10_32k",
-        "ifeval_ood:t10_32k",
-        "ruler_plus_all__65536",
-        "ruler_plus_all__131072:hillclimb",
-        "ruler_plus_all__262144:hillclimb",
-        helmet,
-        "ctc:r64k",
-    )
+DEV_SHARED = (
+    "gpqa_main:cot:t10_32k",
+    "mmlu:cot:hillclimb:t10_32k",
+    "popqa:chat_hillclimb_t10_32k",
+    "omega:dev:t10_32k",
+    "hmmt_feb_2025:pass_at_8_t10_32k",
+    "hmmt_nov_2025:pass_at_8_t10_32k",
+    "hmmt_feb_2026:pass_at_8_t10_32k",
+    "livecodebench:lite_t10_32k",
+    "bfcl",
+    "ifeval:t10_32k",
+    "ifeval_ood:t10_32k",
+    "ruler_plus_all__65536",
+    "ruler_plus_all__131072:hillclimb",
+    "ruler_plus_all__262144:hillclimb",
+)
 
 
 TEST_SHARED = (
@@ -47,10 +42,10 @@ TEST_SHARED = (
     "strongreject:sr_judge_thinking_t10_32k",
 )
 MEMBERS = {
-    "posttrain:tiny:dev": dev_shared("helmet_nojudge__65536"),
+    "posttrain:tiny:dev": DEV_SHARED,
     "posttrain:tiny:test": TEST_SHARED,
     "posttrain:small:dev": (
-        *dev_shared("helmet_all__65536"),
+        *DEV_SHARED,
         "mt_bench:t10_32k",
         "multi_if:t10_32k",
         "multichallenge:t10_32k",
@@ -64,7 +59,7 @@ MEMBERS = {
         "frontierscience:t10_32k",
     ),
 }
-# Long-context retrieval runs greedy in completion mode with direct-answer budgets, and BFCL
+# RULER+ runs greedy in completion mode with direct-answer budgets, and BFCL
 # keeps the settings that existing post-training reads use.
 OWN_SAMPLING_TASKS = frozenset(task for suite in OWN_SAMPLING for task in get_suite(suite).expand())
 
@@ -91,11 +86,13 @@ def test_dev_and_test_share_no_task(size):
 
 
 @pytest.mark.parametrize("size", ["tiny", "small"])
-def test_gpqa_diamond_and_its_superset_stay_in_dev(size):
-    # Diamond's questions are a subset of main's, so splitting them leaks test items.
+def test_dev_reads_gpqa_main_alone_and_test_no_gpqa(size):
+    # Diamond's questions are a subset of main's: in dev it adds nothing, in test it leaks.
     dev = get_suite(f"posttrain:{size}:dev").expand()
+    test = get_suite(f"posttrain:{size}:test").expand()
 
-    assert {"gpqa_diamond:cot:t10_32k", "gpqa_main:cot:t10_32k"} <= set(dev)
+    assert [task for task in dev if task.startswith("gpqa")] == ["gpqa_main:cot:t10_32k"]
+    assert not [task for task in test if task.startswith("gpqa")]
 
 
 MIN_GENERATION_BUDGET = 32768
@@ -135,7 +132,7 @@ def test_every_task_resolves_and_has_metrics(name):
 
 
 def test_tiny_dev_needs_no_secret():
-    # Hill-climbing on Tiny should not need an API key: its HELMET leaves out the judged tasks.
+    # Hill-climbing on Tiny should not need an API key.
     needs = {
         task: get_task(task).config.required_secrets
         for task in get_suite("posttrain:tiny:dev").expand()

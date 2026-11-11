@@ -7,6 +7,13 @@ reads fixed seeded samples of the two largest sets, popqa (1,000 of about 14,000
 and MMLU:cot (18 items per subject, 1,026 in all), and of RULER+ at 128K and 256K (128
 items per task, against 512). HMMT draws 8 samples per problem, against AIME's 32 in test.
 
+Dev also leaves out three tracker Track rows. GPQA Diamond's questions are a subset of GPQA
+main's, which dev reads. HELMET's recall tasks repeat RULER+, and its QA tasks are chat
+requests capped at upstream's 10 tokens, so a model that reasons first is scored on where
+the cap cut it. CTC's 15 tasks at 64K report heterogeneous metrics with no aggregate, and
+its own README says a reasoning model needs more than their direct-answer budgets (64
+tokens for retrieval). Long context is read from RULER+ at 64K, 128K and 256K.
+
 Left out: tracker rows with no olmo-eval task yet (CritPt, FrontierCode, BrowseComp-Plus,
 AutomationBench, DeepSearchQA, Terminal-Bench-Science, FIRM, OpenAgentSafety, the
 decontaminated paper-MATH), externally run evals (SWE-bench Verified, Terminal-Bench,
@@ -20,25 +27,20 @@ top_p 0.95 (Small uses them too, assumed from Tiny, not measured), with 32,768 o
 tokens. They are ``:..._t10_32k`` variants that keep each task's sample count. olmo-eval's
 own default temperature for most of them is 0.6, and most set no ``max_tokens``, so their
 budget would otherwise be whatever context they are served at. Do not override sampling or
-``max_tokens`` for the whole run. Dev reads RULER+ at 64K (full), 128K and 256K, and HELMET
-and CTC at 64K. All three run greedy in completion mode with direct-answer budgets (CTC's
-docs say a reasoning model may need a larger budget for CTC alone), and BFCL keeps its own
-settings (temperature 0.001, 4,096 tokens), as the ledger's BFCL reads do. Safety tasks use
+``max_tokens`` for the whole run. RULER+ runs greedy in completion mode with direct-answer
+budgets, and BFCL keeps its own settings (temperature 0.001, 4,096 tokens), as the ledger's
+BFCL reads do. Safety tasks use
 the thinking-model judge variants and need the judge providers shown in ``safety.py``;
 Omniscience is graded by its default judge, gpt-4o-mini, through the OpenAI API.
 
-Tiny dev needs no API key: it reads ``helmet_nojudge__65536``, which leaves out HELMET's
-three API-judged tasks (NarrativeQA and both summarization tasks, so the summarization
-category too). Small dev reads all of HELMET, since MT-Bench and MultiChallenge need an
-API judge anyway. Every other suite needs ``OPENAI_API_KEY`` for its API-judged tasks.
+Tiny dev needs no API key. Every other suite needs ``OPENAI_API_KEY`` for its API-judged
+tasks (MT-Bench and MultiChallenge in Small dev).
 """
 
 # Defining modules, imported so their suites exist whatever the discovery order.
 from olmo_eval.evals.suites import (  # noqa: F401
     arena_hard,
     bfcl,
-    ctc,
-    helmet,
     mmlu,
     mmlu_pro,
     ruler_plus,
@@ -58,15 +60,12 @@ from olmo_eval.evals.tasks.common import register_sampling_variant
 # and a fixed budget, so scores do not depend on the served context length.
 MODEL_SAMPLING = {"temperature": 1.0, "top_p": 0.95, "max_tokens": 32768}
 SAMPLED_VARIANT = "t10_32k"
-# Entries that keep their own sampling: greedy direct-answer long context, and BFCL.
+# Entries that keep their own sampling: greedy direct-answer RULER+, and BFCL.
 OWN_SAMPLING = frozenset(
     {
         "ruler_plus_all__65536",
         "ruler_plus_all__131072:hillclimb",
         "ruler_plus_all__262144:hillclimb",
-        "helmet_all__65536",
-        "helmet_nojudge__65536",
-        "ctc:r64k",
         "bfcl",
     }
 )
@@ -107,24 +106,20 @@ _HMMT = ("hmmt_feb_2025:pass_at_8", "hmmt_nov_2025:pass_at_8", "hmmt_feb_2026:pa
 _AIME = ("aime_2025:pass_at_32", "aime_2026:pass_at_32")
 
 
-def _dev_shared(helmet_suite: str) -> tuple:
-    return (
-        "gpqa_diamond:cot",
-        "gpqa_main:cot",
-        get_suite("mmlu:cot:hillclimb"),
-        "popqa:chat:hillclimb",
-        OMEGA_DEV,
-        *_HMMT,
-        "livecodebench:lite",
-        get_suite("bfcl"),
-        "ifeval",
-        "ifeval_ood",
-        get_suite("ruler_plus_all__65536"),
-        get_suite("ruler_plus_all__131072:hillclimb"),
-        get_suite("ruler_plus_all__262144:hillclimb"),
-        get_suite(helmet_suite),
-        get_suite("ctc:r64k"),
-    )
+_DEV_SHARED = (
+    "gpqa_main:cot",
+    get_suite("mmlu:cot:hillclimb"),
+    "popqa:chat:hillclimb",
+    OMEGA_DEV,
+    *_HMMT,
+    "livecodebench:lite",
+    get_suite("bfcl"),
+    "ifeval",
+    "ifeval_ood",
+    get_suite("ruler_plus_all__65536"),
+    get_suite("ruler_plus_all__131072:hillclimb"),
+    get_suite("ruler_plus_all__262144:hillclimb"),
+)
 
 
 _TEST_SHARED = (
@@ -143,7 +138,7 @@ _TEST_SHARED = (
 
 make_suite(
     "posttrain:tiny:dev",
-    _sampled(_dev_shared("helmet_nojudge__65536")),
+    _sampled(_DEV_SHARED),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Tiny post-training dev set (the tracker's Track column).",
 )
@@ -159,7 +154,7 @@ make_suite(
     "posttrain:small:dev",
     _sampled(
         (
-            *_dev_shared("helmet_all__65536"),
+            *_DEV_SHARED,
             "mt_bench",
             "multi_if",
             "multichallenge",

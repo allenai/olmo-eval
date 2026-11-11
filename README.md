@@ -1040,15 +1040,19 @@ for every checkpoint you compare; OMEGA has a 32,768-token generation cap.
 `posttrain:small:test` follow the Olmo eval tracker: its Track column is dev, its
 Publish column is test. Use dev suites for hill-climbing and checkpoint selection;
 read test suites only for release reports. No task is in both suites of one size.
-None has a cross-domain aggregate.
+None has a cross-domain aggregate. Dev leaves out three Track rows. GPQA Diamond is a
+subset of GPQA main, which dev reads. HELMET's recall tasks repeat RULER+, and its QA tasks
+are chat requests capped at 10 tokens, so a model that reasons first is scored on where the
+cap cut it. CTC's 64K tasks report heterogeneous metrics with no aggregate, and its own
+README says a reasoning model needs more than their direct-answer budgets.
 
-They mix short tasks with 64K long-context suites, LiveCodeBench (sandboxed harness,
+They mix short tasks with RULER+ at 64K to 256K, LiveCodeBench (sandboxed harness,
 as above) and LLM-judged safety and Arena-Hard tasks (see
 [local judge models](#local-judge-models)). Sampled tasks run at the ledger's setting:
 Olmo 3.5 Tiny's suggested temperature 1.0 and top_p 0.95 (Small uses them too, assumed from
 Tiny), with 32,768 output tokens, through `_t10_32k` variants that keep each task's sample
 count. Without the fixed budget, most of these tasks would generate up to whatever context
-they are served at. RULER+, HELMET and CTC run greedy in completion mode with
+they are served at. RULER+ runs greedy in completion mode with
 direct-answer budgets, and BFCL keeps its own settings. Do not override sampling or
 `max_tokens` for the whole run. Serve sampled tasks with a context of at least their
 longest prompt plus 32,768 tokens: the server refuses any request that does not fit (at
