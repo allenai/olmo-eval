@@ -1058,6 +1058,8 @@ of a suite runs on SGLang, two entries need their own job. BFCL needs
 `provider.kind=vllm_server`, the only provider with tool calls. LiveCodeBench
 (`livecodebench:lite` in dev, `livecodebench_hidden` in test) needs a sandbox harness,
 whose default image is CUDA 12.8 and so cannot install SGLang ([SGLang](docs/sglang.md)).
+In Small test, Arena-Hard v2 also needs vLLM: it fits its output budget to the context,
+which SGLang refuses.
 
 ## Querying Results
 
