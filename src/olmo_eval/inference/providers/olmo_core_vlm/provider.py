@@ -53,6 +53,7 @@ from olmo_eval.inference.providers.olmo_core_vlm import (
     cache,
     checkpoint,
     moe_fallback,
+    olmo35_chat,
     preprocessing,
 )
 from olmo_eval.inference.request_utils import chat_messages_for_request
@@ -63,7 +64,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Provider-foreign kwargs silently accepted for config compatibility.
-_PROMPT_FORMATS = ("chat", "document")
+_PROMPT_FORMATS = ("chat", "document", "olmo35")
 
 _IGNORED_KWARGS = frozenset(
     {
@@ -131,6 +132,8 @@ class OlmoCoreVLMProvider(InferenceProvider):
         device: str | None = None,
         bidirectional_image_attention: bool | None = None,
         prompt_format: str | None = None,
+        reserved_slot_tokens: list[str] | tuple[str, ...] | None = None,
+        thinking: str = "off",
         use_cache: bool = True,
         batch_size: int | None = 16,
         attention_backend: str | None = "torch",
@@ -166,6 +169,13 @@ class OlmoCoreVLMProvider(InferenceProvider):
                 f"got {prompt_format!r}"
             )
 
+        if thinking not in olmo35_chat.THINKING_MODES:
+            raise ValueError(
+                f"OlmoCoreVLMProvider thinking must be one of {olmo35_chat.THINKING_MODES}, "
+                f"got {thinking!r}"
+            )
+        self.thinking = thinking
+
         super().__init__(model_name)
 
         self.checkpoint_info = checkpoint.detect_checkpoint_format(model_name)
@@ -196,8 +206,13 @@ class OlmoCoreVLMProvider(InferenceProvider):
             autocast_dtype,
         )
 
-        tokenizer_path = preprocessing.resolve_tokenizer_path(self.checkpoint_info, tokenizer)
-        if revision is None and tokenizer is None:
+        if prompt_format == "olmo35":
+            # Multimodal SFT checkpoints: the Olmo 3.5 chat tokenizer with the think tags promoted
+            # (see olmo35_chat), not the mid-training dataset's tokenizer.
+            tokenizer_path = tokenizer or olmo35_chat.OLMO35_CHAT_TOKENIZER
+        else:
+            tokenizer_path = preprocessing.resolve_tokenizer_path(self.checkpoint_info, tokenizer)
+        if revision is None and tokenizer is None and prompt_format != "olmo35":
             from_dataset = preprocessing.dataset_tokenizer(self.checkpoint_info)
             if from_dataset is not None and from_dataset[0] == tokenizer_path:
                 revision = from_dataset[1]
@@ -210,7 +225,19 @@ class OlmoCoreVLMProvider(InferenceProvider):
             }.items()
             if value
         }
-        if preprocessing.dataset_tokenizer_json_split(self.checkpoint_info):
+        if prompt_format == "olmo35":
+            slots = (
+                olmo35_chat.DEFAULT_RESERVED_SLOT_TOKENS
+                if reserved_slot_tokens is None
+                else tuple(reserved_slot_tokens)
+            )
+            tokenizer = olmo35_chat.load_olmo35_chat_tokenizer(
+                tokenizer_path,
+                revision=revision,
+                reserved_slot_tokens=slots,
+                **{k: v for k, v in tokenizer_kwargs.items() if k != "revision"},
+            )
+        elif preprocessing.dataset_tokenizer_json_split(self.checkpoint_info):
             # As OLMo-core trained the checkpoint: tokenizer.json exactly as written, not the
             # class tokenizer_config.json names (GPT2Tokenizer for Dolma2 re-splits with GPT-2's
             # regex).
@@ -464,6 +491,14 @@ class OlmoCoreVLMProvider(InferenceProvider):
         if getattr(self, "prompt_format", "chat") == "document":
             image_ids = [token for image_tokens in token_sequences for token in image_tokens]
             return self._document_ids(request, image_ids), image_tensor, pooling_tensor
+        if getattr(self, "prompt_format", "chat") == "olmo35":
+            ids = olmo35_chat.prompt_ids(
+                self.tokenizer,
+                list(chat_messages_for_request(request)),
+                token_sequences,
+                thinking=self.thinking,
+            )
+            return ids, image_tensor, pooling_tensor
 
         text = self._chat_text(request, len(images))
         token_ids: list[int] = self.tokenizer.encode(text, add_special_tokens=False)
@@ -891,6 +926,8 @@ class OlmoCoreVLMProvider(InferenceProvider):
         if generated and generated[-1] in self.stop_token_ids:
             generated = generated[:-1]
         text = self.tokenizer.decode(generated, skip_special_tokens=True)
+        if getattr(self, "prompt_format", "chat") == "olmo35":
+            text = olmo35_chat.strip_thinking(text)
         text = self._text_before_stop(text, params.stop_sequences)
         return LMOutput(
             text=text.strip(),
