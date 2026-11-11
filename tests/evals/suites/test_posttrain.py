@@ -12,18 +12,18 @@ from olmo_eval.evals.tasks.common import get_task
 
 def dev_shared(helmet: str) -> tuple[str, ...]:
     return (
-        "gpqa_diamond:cot:t10",
-        "gpqa_main:cot:t10",
-        "mmlu:cot:hillclimb:t10",
-        "popqa:chat_hillclimb_t10",
-        "omega:dev:t10",
-        "hmmt_feb_2025:pass_at_8_t10",
-        "hmmt_nov_2025:pass_at_8_t10",
-        "hmmt_feb_2026:pass_at_8_t10",
-        "livecodebench:lite_t10",
+        "gpqa_diamond:cot:t10_32k",
+        "gpqa_main:cot:t10_32k",
+        "mmlu:cot:hillclimb:t10_32k",
+        "popqa:chat_hillclimb_t10_32k",
+        "omega:dev:t10_32k",
+        "hmmt_feb_2025:pass_at_8_t10_32k",
+        "hmmt_nov_2025:pass_at_8_t10_32k",
+        "hmmt_feb_2026:pass_at_8_t10_32k",
+        "livecodebench:lite_t10_32k",
         "bfcl",
-        "ifeval:t10",
-        "ifeval_ood:t10",
+        "ifeval:t10_32k",
+        "ifeval_ood:t10_32k",
         "ruler_plus_all__65536",
         "ruler_plus_all__131072:hillclimb",
         "ruler_plus_all__262144:hillclimb",
@@ -33,35 +33,35 @@ def dev_shared(helmet: str) -> tuple[str, ...]:
 
 
 TEST_SHARED = (
-    "mmlu_pro:cot:t10",
-    "omniscience:judge_t10",
-    "zebralogic:chat_t10",
-    "aime_2025:pass_at_32_t10",
-    "aime_2026:pass_at_32_t10",
-    "livecodebench_hidden:t10",
-    "do_anything_now:wg_judge_thinking_t10",
-    "wildguardtest:wg_judge_thinking_t10",
-    "wildjailbreak:wg_judge_thinking_t10",
-    "wmdp:mcq_t10",
-    "bbq:mcq_t10",
-    "strongreject:sr_judge_thinking_t10",
+    "mmlu_pro:cot:t10_32k",
+    "omniscience:judge_t10_32k",
+    "zebralogic:chat_t10_32k",
+    "aime_2025:pass_at_32_t10_32k",
+    "aime_2026:pass_at_32_t10_32k",
+    "livecodebench_hidden:t10_32k",
+    "do_anything_now:wg_judge_thinking_t10_32k",
+    "wildguardtest:wg_judge_thinking_t10_32k",
+    "wildjailbreak:wg_judge_thinking_t10_32k",
+    "wmdp:mcq_t10_32k",
+    "bbq:mcq_t10_32k",
+    "strongreject:sr_judge_thinking_t10_32k",
 )
 MEMBERS = {
     "posttrain:tiny:dev": dev_shared("helmet_nojudge__65536"),
     "posttrain:tiny:test": TEST_SHARED,
     "posttrain:small:dev": (
         *dev_shared("helmet_all__65536"),
-        "mt_bench:t10",
-        "multi_if:t10",
-        "multichallenge:t10",
-        "harmbench:wg_judge_thinking_t10",
-        "xstest:wg_judge_thinking_t10",
+        "mt_bench:t10_32k",
+        "multi_if:t10_32k",
+        "multichallenge:t10_32k",
+        "harmbench:wg_judge_thinking_t10_32k",
+        "xstest:wg_judge_thinking_t10_32k",
     ),
     "posttrain:small:test": (
         *TEST_SHARED,
-        "hle:text:verified:t10",
-        "arena_hard_v2:t10",
-        "frontierscience:t10",
+        "hle:text:verified:t10_32k",
+        "arena_hard_v2:t10_32k",
+        "frontierscience:t10_32k",
     ),
 }
 # Long-context retrieval runs greedy in completion mode with direct-answer budgets, and BFCL
@@ -95,7 +95,7 @@ def test_gpqa_diamond_and_its_superset_stay_in_dev(size):
     # Diamond's questions are a subset of main's, so splitting them leaks test items.
     dev = get_suite(f"posttrain:{size}:dev").expand()
 
-    assert {"gpqa_diamond:cot:t10", "gpqa_main:cot:t10"} <= set(dev)
+    assert {"gpqa_diamond:cot:t10_32k", "gpqa_main:cot:t10_32k"} <= set(dev)
 
 
 MIN_GENERATION_BUDGET = 32768
@@ -114,7 +114,7 @@ def test_no_task_cuts_off_a_reasoning_trace(name):
 
 @pytest.mark.parametrize("name", MEMBERS)
 def test_sampled_tasks_run_at_the_models_suggested_sampling(name):
-    # Olmo 3.5 Tiny's suggested sampling, not olmo-eval's default of 0.6; nothing else changes.
+    # The ledger's sampling, not olmo-eval's defaults (0.6, no budget); nothing else changes.
     for task in get_suite(name).expand():
         if task in OWN_SAMPLING_TASKS:
             continue

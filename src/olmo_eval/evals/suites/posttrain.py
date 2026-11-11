@@ -15,10 +15,11 @@ suites. Also left out until olmo-eval has a configuration that lets a reasoning 
 finish (their variants cap generation at 1,024 or 128 tokens, most with stop sequences):
 MATH-500, HumanEval+, MBPP+ and LongBench v2.
 
-Sampled entries run at Olmo 3.5 Tiny's suggested sampling, temperature 1.0 and top_p 0.95
-(the ledger's setting; Small uses it too, assumed from Tiny, not measured), through
-``:..._t10`` variants that keep each task's budget and sample count; olmo-eval's own
-default for most of them is 0.6. Do not override sampling or
+Sampled entries run at the ledger's setting: Olmo 3.5 Tiny's suggested temperature 1.0 and
+top_p 0.95 (Small uses them too, assumed from Tiny, not measured), with 32,768 output
+tokens. They are ``:..._t10_32k`` variants that keep each task's sample count. olmo-eval's
+own default temperature for most of them is 0.6, and most set no ``max_tokens``, so their
+budget would otherwise be whatever context they are served at. Do not override sampling or
 ``max_tokens`` for the whole run. Dev reads RULER+ at 64K (full), 128K and 256K, and HELMET
 and CTC at 64K. All three run greedy in completion mode with direct-answer budgets (CTC's
 docs say a reasoning model may need a larger budget for CTC alone), and BFCL keeps its own
@@ -53,8 +54,10 @@ from olmo_eval.evals.suites.registry import (
 )
 from olmo_eval.evals.tasks.common import register_sampling_variant
 
-# Olmo 3.5 Tiny's suggested sampling, assumed for Small; each task keeps its budget and samples.
-MODEL_SAMPLING = {"temperature": 1.0, "top_p": 0.95}
+# The ledger's sampling: Olmo 3.5 Tiny's suggested temperature and top_p (assumed for Small),
+# and a fixed budget, so scores do not depend on the served context length.
+MODEL_SAMPLING = {"temperature": 1.0, "top_p": 0.95, "max_tokens": 32768}
+SAMPLED_VARIANT = "t10_32k"
 # Entries that keep their own sampling: greedy direct-answer long context, and BFCL.
 OWN_SAMPLING = frozenset(
     {
@@ -69,27 +72,29 @@ OWN_SAMPLING = frozenset(
 )
 
 
-# Each ``_t10`` spec in these suites, mapped to the spec it was made from.
+# Each ``_t10_32k`` spec in these suites, mapped to the spec it was made from.
 SAMPLED_FROM: dict[str, str] = {}
 
 
 def _at_model_sampling(entry: str | Suite) -> str | Suite:
-    """The entry at ``MODEL_SAMPLING`` (``:..._t10``), unless it keeps its own sampling."""
+    """The entry at ``MODEL_SAMPLING`` (``:..._t10_32k``), unless it keeps its own sampling."""
     if isinstance(entry, Suite):
         if entry.name in OWN_SAMPLING:
             return entry
-        name = f"{entry.name}:t10"
+        name = f"{entry.name}:{SAMPLED_VARIANT}"
         if suite_exists(name):
             return get_suite(name)
         return make_suite(
             name,
             tuple(_at_model_sampling(task) for task in entry.tasks),
             aggregation=entry.aggregation,
-            description=f"{entry.description} At temperature 1.0 and top_p 0.95.".strip(),
+            description=(
+                f"{entry.description} At temperature 1.0, top_p 0.95 and 32,768 tokens."
+            ).strip(),
         )
     if entry in OWN_SAMPLING:
         return entry
-    spec = register_sampling_variant(entry, "t10", **MODEL_SAMPLING)
+    spec = register_sampling_variant(entry, SAMPLED_VARIANT, **MODEL_SAMPLING)
     SAMPLED_FROM[spec] = entry
     return spec
 
