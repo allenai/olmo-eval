@@ -18,6 +18,7 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
+from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
 from olmo_eval.launch.beaker.resume import RETENTION_SECONDS, refresh_files, run_shared
 from olmo_eval.launch.beaker.volume import launch_with_volume
 from olmo_eval.runners.asynq.progress import ProgressMismatchError, ProgressStore
@@ -187,9 +188,13 @@ def test_shared_discard_updates_inventory_and_keeps_empty_stream_initialized(tmp
     from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
     from olmo_eval.runners.asynq.progress import discard_progress, stream_dir
 
-    out = tmp_path / "output"
-    monkeypatch.setenv(SHARED_RUN_ENV, str(tmp_path))
+    out = tmp_path / "results"
+    weka = tmp_path / "weka"
+    weka.mkdir()
+    (weka / "session.json").write_text(json.dumps({"uuid": "u", "command": []}))
+    monkeypatch.setenv(SHARED_RUN_ENV, str(weka))
     store = ProgressStore(stream_dir(out, "mock"), verify_integrity=True)
+    assert store.path == weka / "progress/mock/run.segments"
     for spec in ("a", "b"):
         store.append({"t": spec, "header": {"spec": spec}})
     store.close()
@@ -212,45 +217,133 @@ def shared(tmp_path):
 
 
 def child(code):
-    # The wrapper appends the normal runner's output option.
-    return [sys.executable, "-c", "import pathlib,sys; out=pathlib.Path(sys.argv[-1]); " + code]
+    # The wrapper appends the normal runner's output option (Beaker results) and points
+    # SHARED_RUN_ENV at the WEKA recovery directory.
+    return [
+        sys.executable,
+        "-c",
+        "import os,pathlib,sys; out=pathlib.Path(sys.argv[-1]); "
+        f"weka=pathlib.Path(os.environ['{SHARED_RUN_ENV}']); " + code,
+    ]
 
 
-@pytest.mark.parametrize("missing", ["output", "progress", "stream"])
-def test_retry_refuses_disappearance_of_initialized_recovery_directories(shared, missing):
+RECORD = (
+    "from olmo_eval.runners.asynq.progress import ProgressStore; "
+    "store=ProgressStore(weka/'progress/model/run.segments',verify_integrity=True); "
+    "store.append({'score':1}); store.close(); "
+)
+
+
+def test_outputs_go_to_beaker_results_and_only_recovery_state_to_weka(shared):
     root, run_uuid, results, directory = shared
     command = child(
-        "from olmo_eval.runners.asynq.progress import ProgressStore; "
-        "store=ProgressStore(out/'progress/model/run.segments',verify_integrity=True); "
-        "store.append({'score':1}); store.close(); sys.exit(143)"
+        "(out/'predictions').mkdir(); (out/'predictions/gsm8k.jsonl').write_text('{}'); "
+        "(out/'metrics.json').write_text('{}'); (out/'seen').write_text(str(weka)); "
+        + RECORD
+        + "sys.exit(143)"
     )
     assert run_shared(root, run_uuid, results, command) == 143
-    session = json.loads((directory / "session.json").read_text())
-    assert session["progress_streams"] == ["output/progress/model/run.segments"]
+    assert (results / "seen").read_text() == str(directory)
+    assert sorted(str(p.relative_to(results)) for p in results.rglob("*") if p.is_file()) == [
+        "metrics.json",
+        "predictions/gsm8k.jsonl",
+        "seen",
+    ]
+    assert sorted(p.name for p in directory.iterdir()) == ["progress", "run.lock", "session.json"]
+    assert json.loads((directory / "session.json").read_text())["progress_streams"] == [
+        "progress/model/run.segments"
+    ]
+
+
+def test_completion_removes_recovery_state_and_keeps_beaker_results(shared):
+    root, run_uuid, results, directory = shared
+    command = child(
+        "(out/'metrics.json').write_text('{}'); "
+        "(weka/'identity').mkdir(); (weka/'identity/manifest.json').write_text('{}'); " + RECORD
+    )
+    assert run_shared(root, run_uuid, results, command) == 0
+    assert (results / "metrics.json").read_text() == "{}"
+    assert sorted(p.name for p in directory.iterdir()) == [
+        "complete.json",
+        "identity",
+        "run.lock",
+        "session.json",
+    ]
+
+
+def test_identity_names_match_the_upload_module():
+    from olmo_eval.common.constants.infrastructure import SHARED_RUN_IDENTITY_FILES
+    from olmo_eval.upload.manifest import MANIFEST_NAME, RUN_SECRET_NAME
+
+    assert SHARED_RUN_IDENTITY_FILES == (MANIFEST_NAME, RUN_SECRET_NAME)
+
+
+@pytest.mark.parametrize("code", [0, 1, 143])
+def test_identity_created_late_is_saved_when_the_attempt_exits(shared, code):
+    root, run_uuid, results, directory = shared
+    command = child(
+        '(out/\'manifest.json\').write_text(\'{"run": {"run_id": "r1"}}\'); '
+        f"(out/'.upload-secret').write_text('s3cret'); sys.exit({code})"
+    )
+    assert run_shared(root, run_uuid, results, command) == code
+    assert (directory / "identity/.upload-secret").read_text() == "s3cret"
+    assert json.loads((directory / "identity/manifest.json").read_text())["run"]["run_id"] == "r1"
+
+
+FINISH = (
+    "import json; p=pathlib.Path(os.environ['RUNS']); "
+    "p.write_text(str(int(p.read_text())+1) if p.exists() else '1'); "
+    "(out/'metrics.json').write_text('{}'); "
+    "(out/'manifest.json').write_text(json.dumps({'run': {'run_id': 'r1', 'status': 'complete'}}))"
+)
+
+
+@pytest.mark.parametrize("carried_over", [True, False])
+def test_rerun_of_a_completed_job_runs_again_only_without_its_results(
+    shared, tmp_path, monkeypatch, carried_over
+):
+    root, run_uuid, results, directory = shared
+    runs = tmp_path / "runs"
+    monkeypatch.setenv("RUNS", str(runs))
+    command = child(FINISH)
+    assert run_shared(root, run_uuid, results, command) == 0
+    rerun = tmp_path / "rerun-results"
+    if carried_over:
+        shutil.copytree(results, rerun)
+    assert run_shared(root, run_uuid, rerun, command) == 0
+    assert runs.read_text() == ("1" if carried_over else "2")
+    assert (rerun / "metrics.json").is_file()
+    assert (directory / "complete.json").is_file()
+    assert (directory / "identity/manifest.json").is_file()
+
+
+def test_rerun_of_a_completed_job_ignores_a_stale_failed_snapshot(shared, tmp_path, monkeypatch):
+    root, run_uuid, results, directory = shared
+    runs = tmp_path / "runs"
+    monkeypatch.setenv("RUNS", str(runs))
+    command = child(FINISH)
+    assert run_shared(root, run_uuid, results, command) == 0
+    # Beaker carried over a snapshot from an earlier attempt that tripped the budget.
+    stale = tmp_path / "stale-results"
+    stale.mkdir()
+    (stale / "metrics.json").write_text("{}")
+    (stale / "manifest.json").write_text(json.dumps({"run": {"run_id": "r1", "status": "failed"}}))
+    assert run_shared(root, run_uuid, stale, command) == 0
+    assert runs.read_text() == "2"
+
+
+@pytest.mark.parametrize("missing", ["progress", "stream"])
+def test_retry_refuses_disappearance_of_initialized_recovery_directories(shared, missing):
+    root, run_uuid, results, directory = shared
+    command = child(RECORD + "sys.exit(143)")
+    assert run_shared(root, run_uuid, results, command) == 143
     paths = {
-        "output": directory / "output",
-        "progress": directory / "output/progress",
-        "stream": directory / "output/progress/model/run.segments",
+        "progress": directory / "progress",
+        "stream": directory / "progress/model/run.segments",
     }
     shutil.rmtree(paths[missing])
     with pytest.raises(RuntimeError, match="recovery .*missing"):
         run_shared(root, run_uuid, results, command)
-
-
-def test_retry_can_finish_output_initialization_before_any_child_started(shared):
-    root, run_uuid, results, directory = shared
-    directory.mkdir(parents=True)
-    command = child("(out/'prediction').write_text('result')")
-    (directory / "session.json").write_text(
-        json.dumps(
-            {
-                "uuid": run_uuid,
-                "command": command,
-                "output_initialized": False,
-            }
-        )
-    )
-    assert run_shared(root, run_uuid, results, command) == 0
 
 
 def test_retention_refresh_raises_when_a_subtree_cannot_be_scanned(tmp_path, monkeypatch):
@@ -288,34 +381,13 @@ def test_retention_refresh_tolerates_atomic_publication_after_enumeration(tmp_pa
     assert published.read_text() == "inventory"
 
 
-def test_unreadable_artifact_subtree_prevents_completion_and_progress_cleanup(shared, monkeypatch):
-    root, run_uuid, results, directory = shared
-    output = directory / "output"
-    command = child(
-        "(out/'predictions').mkdir(); (out/'predictions/result').write_text('answer'); "
-        "(out/'progress').mkdir(); (out/'progress/checkpoint').write_text('saved')"
-    )
-    scandir = os.scandir
-
-    def fail(path):
-        if Path(path) == output / "predictions":
-            raise OSError(errno.EIO, "predictions directory unavailable")
-        return scandir(path)
-
-    monkeypatch.setattr(os, "scandir", fail)
-    with pytest.raises(OSError, match="predictions directory unavailable"):
-        run_shared(root, run_uuid, results, command)
-    assert not (directory / "complete.json").exists()
-    assert (output / "progress/checkpoint").read_text() == "saved"
-
-
 def test_retention_traversal_failure_stops_the_live_child(shared, monkeypatch):
     root, run_uuid, results, directory = shared
-    command = child("(out/'predictions').mkdir(); import time; time.sleep(0.5)")
+    command = child("(weka/'progress/model').mkdir(parents=True); import time; time.sleep(0.5)")
     scandir = os.scandir
 
     def fail(path):
-        if Path(path) == directory / "output/predictions":
+        if Path(path) == directory / "progress/model":
             raise OSError(errno.EIO, "volume directory unavailable")
         return scandir(path)
 
@@ -327,15 +399,21 @@ def test_retention_traversal_failure_stops_the_live_child(shared, monkeypatch):
 
 def test_independent_uuids_do_not_overwrite_and_completed_run_is_not_repeated(shared):
     root, run_uuid, results, directory = shared
-    command = child("p=out/'count'; p.write_text(str(int(p.read_text())+1) if p.exists() else '1')")
+    command = child(
+        "import json; p=weka/'count'; "
+        "p.write_text(str(int(p.read_text())+1) if p.exists() else '1'); "
+        "(out/'metrics.json').write_text('{}'); "
+        "run={'run_id': 'r', 'status': 'complete'}; "
+        "(out/'manifest.json').write_text(json.dumps({'run': run}))"
+    )
     assert run_shared(root, run_uuid, results, command) == 0
-    assert run_shared(root, run_uuid, results, command) == 0
-    assert (directory / "output/count").read_text() == "1"
+    replacement = results.parent / "replacement-results"
+    shutil.copytree(results, replacement)
+    assert run_shared(root, run_uuid, replacement, command) == 0
+    assert (directory / "count").read_text() == "1"
     another = str(uuid.uuid4())
     assert run_shared(root, another, results.parent / "other-results", command) == 0
-    assert (root / "tmp-7d" / another / "output/count").read_text() == "1"
-    assert sorted(p.name for p in results.iterdir()) == ["weka-resume.json"]
-    assert not (results / "weka-resume.json").is_symlink()
+    assert (root / "tmp-7d" / another / "count").read_text() == "1"
 
 
 def test_a_live_writer_cannot_be_overwritten(shared):
@@ -346,25 +424,23 @@ def test_a_live_writer_cannot_be_overwritten(shared):
         with pytest.raises(RuntimeError, match="Another attempt owns"):
             run_shared(root, run_uuid, results, child("raise AssertionError('must not run')"))
     assert not (directory / "session.json").exists()
-    assert not (results / "weka-resume.json").exists()
+    assert not results.exists() or not any(results.iterdir())
 
 
 def test_failed_child_retains_files_and_resumes_after_stale_progress_lock(shared):
     root, run_uuid, results, directory = shared
     command = child(
-        "p=out/'attempt'; prior=p.exists(); p.write_text('saved'); "
-        "lock=out/'progress/model/.lock'; lock.parent.mkdir(parents=True, exist_ok=True); "
+        "p=weka/'attempt'; prior=p.exists(); p.write_text('saved'); "
+        "lock=weka/'progress/model/.lock'; lock.parent.mkdir(parents=True, exist_ok=True); "
         "assert not lock.exists(); lock.write_text('old-node'); sys.exit(0 if prior else 143)"
     )
     assert run_shared(root, run_uuid, results, command) == 143
     assert not (directory / "complete.json").exists()
     assert run_shared(root, run_uuid, results, command) == 0
-    assert not (directory / "output/progress").exists()
+    assert not (directory / "progress").exists()
 
 
-@pytest.mark.parametrize(
-    "damage", ["expired", "session", "artifact", "command", "changed", "completion"]
-)
+@pytest.mark.parametrize("damage", ["expired", "session", "command", "completion"])
 def test_expired_missing_or_changed_state_is_refused(shared, damage):
     root, run_uuid, results, directory = shared
     command = child("(out/'prediction').write_text('result')")
@@ -374,15 +450,20 @@ def test_expired_missing_or_changed_state_is_refused(shared, damage):
         os.utime(directory / "session.json", (old, old))
     elif damage == "session":
         (directory / "session.json").unlink()
-    elif damage == "artifact":
-        (directory / "output/prediction").unlink()
-    elif damage == "changed":
-        (directory / "output/prediction").write_text("RESULT")
     elif damage == "completion":
         (directory / "complete.json").unlink()
     else:
         command = child("raise AssertionError('changed')")
     with pytest.raises(RuntimeError):
+        run_shared(root, run_uuid, results, command)
+
+
+def test_an_interrupted_run_whose_session_was_lost_is_refused(shared):
+    root, run_uuid, results, directory = shared
+    command = child(RECORD + "sys.exit(143)")
+    assert run_shared(root, run_uuid, results, command) == 143
+    (directory / "session.json").unlink()
+    with pytest.raises(RuntimeError, match="session is missing"):
         run_shared(root, run_uuid, results, command)
 
 
@@ -515,7 +596,7 @@ def test_sigterm_is_forwarded_and_releases_ownership(shared):
     )
     try:
         deadline = time.monotonic() + 15
-        while not (directory / "output/ready").exists():
+        while not (results / "ready").exists():
             assert supervisor.poll() is None
             assert time.monotonic() < deadline
             time.sleep(0.02)
@@ -551,11 +632,11 @@ def test_killing_supervisor_does_not_release_a_live_childs_lock(shared):
     child_pid = None
     try:
         deadline = time.monotonic() + 15
-        while not (directory / "output/pid").exists():
+        while not (results / "pid").exists():
             assert supervisor.poll() is None
             assert time.monotonic() < deadline
             time.sleep(0.02)
-        child_pid = int((directory / "output/pid").read_text())
+        child_pid = int((results / "pid").read_text())
         supervisor.kill()
         supervisor.wait(timeout=10)
         with pytest.raises(RuntimeError, match="Another attempt owns"):
@@ -626,10 +707,9 @@ def test_custom_retention_selects_directory_and_expiry(shared, days):
     command = child("(out/'prediction').write_text('result')")
     assert run_shared(root, run_uuid, results, command, retention_days=days) == 0
     directory = root / f"tmp-{days}d" / run_uuid
-    receipt = json.loads((results / "weka-resume.json").read_text())
-    assert receipt["retention_days"] == days
-    assert receipt["output_dir"] == str(directory / "output")
-    # A completed replacement reuses and verifies the original output.
+    assert (directory / "complete.json").is_file()
+    assert (results / "prediction").read_text() == "result"
+    # A replacement of the completed run does not run the eval again.
     assert run_shared(root, run_uuid, results, command, retention_days=days) == 0
     old = time.time() - days * 86400 - 1
     os.utime(directory / "session.json", (old, old))

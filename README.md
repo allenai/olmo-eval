@@ -1211,9 +1211,14 @@ Beaker task launches default to `--resume` and use `--resume-volume ai2/olmo-eva
 by default. Replacement jobs mount the same WEKA directory directly. Use
 `--resume-volume <org>/<name>` to select a different native volume.
 
+Beaker results are the same with or without resume. The eval writes predictions,
+requests, metrics, the manifest and logs to `/results` as it runs, in the same layout
+and at the same moments. Only the progress records and the run's identity (its manifest
+and upload secret) go to the volume, and a completed run deletes them.
+
 To run without progress recovery, pass `--no-resume` (YAML: `resume: false`). This
-needs no resume-volume claim, records no recovery progress, and saves full results
-in Beaker. Preempted or retried attempts start over. `--resume` explicitly enables
+needs no resume-volume claim and records no recovery progress. Preempted or retried
+attempts start over. `--resume` explicitly enables
 recovery and overrides `resume: false` from YAML.
 
 Before the first resumable launch in a workspace, grant it read-write access to the volume:
@@ -1232,24 +1237,23 @@ UUID directory under `/eval-cache/tmp-7d/` by default. Set
 `--resume-retention-days 14` (YAML: `resume_retention_days: 14`) to use `tmp-14d`
 and retain inactive recovery files for fourteen days. Any positive whole number of
 days is accepted. Replacement jobs reuse their original UUID and retention path and take
-an exclusive run lock. The full output lives on WEKA. Beaker results contain a small
-`weka-resume.json` receipt plus Gantry setup diagnostics. The receipt names the volume,
-UUID, output path, and dashboard run ID.
-Retrieve full artifacts from the dashboard or a job/session mounting the same volume.
+an exclusive run lock. The job log names the run's WEKA recovery directory.
 Grant read-write claims only to workspaces whose submitters are mutually trusted.
 Progress records can contain serialized Python objects; checksums detect corruption
 and do not authenticate writers.
 
 Active runs refresh every recovery file's modification time hourly. After the selected
 retention period of inactivity (seven days by default), files are eligible for WEKA
-prune deletion. Actual deletion depends on the volume's prune schedule. Final results
-still upload to the dashboard normally; `--no-upload` leaves only temporary WEKA artifacts. Expired,
+prune deletion. Actual deletion depends on the volume's prune schedule. Results are
+unaffected: they are in Beaker results and upload to the dashboard normally. Expired,
 missing, or corrupt committed progress stops recovery with an error. Shared-storage
 progress flushes every five seconds and on graceful shutdown. A completion marker
-prevents a replacement from repeating a successfully finished run. External evals do
+prevents a replacement from repeating a successfully finished run when its results
+came along; a rerun whose results lack them runs the eval again under the same run ID. External evals do
 not support `--resume-volume`. See the [implementation and validation plan](docs/weka-resume.md).
 
-- **What is recorded.** `progress/<model>/run.segments/` holds one stream for the run: a
+- **What is recorded.** `progress/<model>/run.segments/` (on the volume under the Beaker
+  resume supervisor) holds one stream for the run: a
   header per task, then one entry per finished instance with its outputs, scores and a
   hash of its prepared request. Prompts are rebuilt from the task, not stored. A
   generation's per-token logprobs are left out unless one of the task's metrics scores
