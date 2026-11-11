@@ -2,8 +2,8 @@
 
 Questions come from OpenAI's BrowseComp test set, which is downloaded and
 decrypted on first use. The answering prompt and grader follow the simple-evals
-implementation, and the agent searches the open web through the harness's
-Serper tools.
+implementation. The agent searches the open web with Serper and reads pages with
+Jina Reader through the harness's tools.
 
 Usage:
     olmo-eval run -m /path/to/checkpoint --harness browsecomp -t browsecomp
@@ -40,7 +40,7 @@ DATASET_URL = "https://openaipublic.blob.core.windows.net/simple-evals/browse_co
 DATASET_FILENAME = "browse_comp_test_set.csv"
 EXPECTED_QUESTIONS = 1266
 SEARCH_TOOL = "serper_google_webpage_search"
-FETCH_TOOL = "serper_fetch_webpage_content"
+FETCH_TOOL = "jina_fetch_webpage_content"
 
 # Answering prompt from openai/simple-evals browsecomp_eval.py.
 QUERY_TEMPLATE = (

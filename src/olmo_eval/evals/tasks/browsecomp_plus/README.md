@@ -104,8 +104,9 @@ example `-o provider.kwargs.gpu_memory_utilization=0.7`.
 
 The original [BrowseComp](https://openai.com/index/browsecomp/) benchmark (1,266 questions)
 is available as the `browsecomp` task with the same grader. It needs no retrieval server:
-the agent searches and reads the open web through Serper, so set `SERPER_API_KEY` as well as
-`OPENAI_API_KEY`. The test set is downloaded on first use to `BROWSECOMP_HOME`
+the agent searches with Serper and reads pages with Jina Reader, so set `SERPER_API_KEY` and
+`JINA_API_KEY` as well as `OPENAI_API_KEY`. The web tools never return or open pages on
+`huggingface.co` or `hf.co`. The test set is downloaded on first use to `BROWSECOMP_HOME`
 (default `~/.cache/olmo-eval/browsecomp`).
 
 ```bash

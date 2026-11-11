@@ -13,6 +13,7 @@ Import the tool objects and use .name for HarnessConfig.tool_names.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import random
@@ -42,6 +43,11 @@ _BASE_BACKOFF_S = 1.0
 _MAX_BACKOFF_S = 16.0
 _WEBPAGE_CONTENT_LIMIT = 4000
 _WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
+_JINA_READER_URL = "https://r.jina.ai"
+_JINA_TIMEOUT_S = 60.0
+_JINA_CONTENT_LIMIT = 20000
+# The line that ends Jina Reader's header; an empty page may end right after it.
+_JINA_CONTENT_MARKER = re.compile(r"^Markdown Content:\n?", re.MULTILINE)
 
 # Web tools never return or open pages on these domains. Benchmark questions and
 # answers are widely mirrored on the Hugging Face Hub, so reaching it leaks test data.
@@ -119,15 +125,11 @@ def blocked_domain(url: str) -> str | None:
     )
 
 
-def _truncate_webpage_content(text: str) -> str:
+def _truncate_webpage_content(text: str, limit: int = _WEBPAGE_CONTENT_LIMIT) -> str:
     limit_value = os.environ.get("OLMO_WEBPAGE_CONTENT_LIMIT")
-    if limit_value is None:
-        limit = _WEBPAGE_CONTENT_LIMIT
-    else:
-        try:
+    if limit_value is not None:
+        with contextlib.suppress(ValueError):
             limit = int(limit_value)
-        except ValueError:
-            limit = _WEBPAGE_CONTENT_LIMIT
 
     if limit <= 0:
         return text
@@ -475,6 +477,69 @@ async def serper_fetch_page(url: str) -> str:
     text = _truncate_webpage_content(text)
 
     return text
+
+
+@registered_tool(
+    name="jina_fetch_webpage_content",
+    description="Fetch and extract the main content of a webpage URL.",
+)
+async def jina_fetch_page(url: str) -> str:
+    """Fetch and extract a webpage's main content via Jina Reader.
+
+    Args:
+        url: The URL of the webpage to fetch.
+
+    Returns:
+        The page title and extracted text content.
+    """
+    api_key = os.getenv("JINA_API_KEY")
+    if not api_key:
+        return "Error: JINA_API_KEY not configured."
+
+    if not url or not url.strip():
+        return "Error: Empty URL."
+
+    sanitized_url = url.strip()
+    blocked = blocked_domain(sanitized_url)
+    if blocked:
+        return f"Error: Pages on {blocked} are not available."
+
+    client = _get_http_client()
+    try:
+        resp = await client.get(
+            f"{_JINA_READER_URL}/{sanitized_url}",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=_JINA_TIMEOUT_S,
+        )
+    except httpx.RequestError as e:
+        logger.error(f"Jina Reader request error: {e}, url={sanitized_url!r}")
+        return f"Error fetching webpage: {e}"
+    if resp.status_code != 200:
+        logger.error(
+            f"Jina Reader error: status={resp.status_code}, "
+            f"url={sanitized_url!r}, response={resp.text[:500]}"
+        )
+        return f"Error fetching webpage: HTTP {resp.status_code}"
+
+    body = resp.text
+    title = ""
+    marker = _JINA_CONTENT_MARKER.search(body) if body.startswith("Title: ") else None
+    if marker:
+        header, body = body[: marker.start()], body[marker.end() :]
+        for line in header.split("\n"):
+            if line.startswith("Title: "):
+                title = line[len("Title: ") :].strip()
+            elif line.startswith("URL Source: "):
+                # A redirect can land on a blocked site even when the requested URL is not.
+                blocked = blocked_domain(line[len("URL Source: ") :])
+                if blocked:
+                    return f"Error: Pages on {blocked} are not available."
+
+    if not body.strip():
+        return "No content extracted from webpage."
+
+    text = _truncate_webpage_content(body, _JINA_CONTENT_LIMIT)
+    return f"Title: {title}\n\n{text}" if title else text
 
 
 @registered_tool(
