@@ -43,6 +43,11 @@ _MAX_BACKOFF_S = 16.0
 _WEBPAGE_CONTENT_LIMIT = 4000
 _WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
 
+# Web tools never return or open pages on these domains. Benchmark questions and
+# answers are widely mirrored on the Hugging Face Hub, so reaching it leaks test data.
+DEFAULT_BLOCKED_DOMAINS = ("huggingface.co", "hf.co")
+BLOCKED_DOMAINS_ENV = "OLMO_SEARCH_BLOCKED_DOMAINS"
+
 # Semantic Scholar's introductory plan allows ~1 request/second cumulative across
 # all endpoints, which several concurrent agents exhaust immediately. All S2
 # requests pass through a process-global minimum interval (proactive throttle);
@@ -85,6 +90,32 @@ def _parse_cutoff(raw: str | None) -> tuple[int, str, str] | None:
         int(year_text),
         f"{month_text}/{day_text}/{year_text}",
         f"{year_text}-{month_text}-{day_text}",
+    )
+
+
+def blocked_domains() -> tuple[str, ...]:
+    """Return the blocked domains, taken from the environment when it sets them.
+
+    The environment variable holds a comma-separated list; an empty value blocks nothing.
+    """
+    configured = os.environ.get(BLOCKED_DOMAINS_ENV)
+    if configured is None:
+        return DEFAULT_BLOCKED_DOMAINS
+    return tuple(domain.strip().lower() for domain in configured.split(",") if domain.strip())
+
+
+def blocked_domain(url: str) -> str | None:
+    """Return the blocked domain a URL belongs to, counting subdomains, if any."""
+    candidate = url.strip()
+    if "://" not in candidate:
+        candidate = f"//{candidate}"
+    try:
+        host = (urlsplit(candidate).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return None
+    return next(
+        (domain for domain in blocked_domains() if host == domain or host.endswith(f".{domain}")),
+        None,
     )
 
 
@@ -356,7 +387,7 @@ async def serper_web_search(query: str) -> str:
     results = []
 
     # Process organic results
-    organic = data.get("organic", [])
+    organic = [item for item in data.get("organic", []) if not blocked_domain(item.get("link", ""))]
     for item in organic[:5]:
         title = item.get("title", "")
         snippet = item.get("snippet", "")
@@ -366,7 +397,7 @@ async def serper_web_search(query: str) -> str:
 
     # Include knowledge graph if available
     kg = data.get("knowledgeGraph")
-    if kg:
+    if kg and not any(blocked_domain(kg.get(key) or "") for key in ("descriptionLink", "website")):
         kg_title = kg.get("title", "")
         kg_desc = kg.get("description", "")
         if kg_title and kg_desc:
@@ -374,7 +405,7 @@ async def serper_web_search(query: str) -> str:
 
     # Include answer box if available
     answer_box = data.get("answerBox")
-    if answer_box:
+    if answer_box and not blocked_domain(answer_box.get("link") or ""):
         answer = answer_box.get("answer") or answer_box.get("snippet", "")
         if answer:
             results.insert(0, f"**Direct Answer:**\n{answer}")
@@ -404,6 +435,10 @@ async def serper_fetch_page(url: str) -> str:
 
     if not url or not url.strip():
         return "Error: Empty URL."
+
+    blocked = blocked_domain(url)
+    if blocked:
+        return f"Error: Pages on {blocked} are not available."
 
     client = _get_http_client()
     try:
@@ -461,6 +496,10 @@ async def crawl4ai_browse(url: str) -> str:
     sanitized_url = url.strip()
     if urlsplit(sanitized_url).scheme.lower() not in {"http", "https"}:
         return "Error: Only http(s) URLs are supported."
+
+    blocked = blocked_domain(sanitized_url)
+    if blocked:
+        return f"Error: Pages on {blocked} are not available."
 
     try:
         from crawl4ai import AsyncWebCrawler

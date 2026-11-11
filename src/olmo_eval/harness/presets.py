@@ -79,7 +79,7 @@ def _browsecomp_provider() -> ProviderConfig:
     """Self-hosted provider for deep-research runs, with model thinking enabled."""
     return ProviderConfig(
         kind=ProviderKind.VLLM_SERVER,
-        kwargs={"timeout": 120, "chat_template_kwargs": {"enable_thinking": True}},
+        kwargs={"timeout": 1800, "chat_template_kwargs": {"enable_thinking": True}},
     )
 
 
