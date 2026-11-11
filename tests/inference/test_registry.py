@@ -265,6 +265,43 @@ class TestGPUPlanner:
 
         assert plan.total_gpus_used == 6
 
+    def test_pipeline_parallel_workers_span_tp_times_pp_gpus(self):
+        """A pipeline-parallel instance needs TP x PP GPUs, for main and auxiliary providers."""
+        planner = GPUPlanner(
+            total_gpus=8,
+            num_main_workers=2,
+            main_tensor_parallel=1,
+            main_pipeline_parallel=2,
+            auxiliary_configs={
+                "judge": ProviderConfig(
+                    kind=ProviderKind.VLLM_SERVER,
+                    model="judge",
+                    num_instances=1,
+                    kwargs={"tensor_parallel_size": 2, "pipeline_parallel_size": 2},
+                )
+            },
+        )
+
+        plan = planner.plan()
+
+        assert plan.main_workers[0].gpu_ids == [0, 1]
+        assert plan.main_workers[1].gpu_ids == [2, 3]
+        assert plan.auxiliary["judge"].gpu_ids == [4, 5, 6, 7]
+
+    def test_from_harness_config_reads_pipeline_parallel(self):
+        """The main provider's pipeline_parallel_size sizes each main worker."""
+        from types import SimpleNamespace
+
+        provider = ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="m",
+            num_instances=2,
+            kwargs={"pipeline_parallel_size": 4},
+        )
+        planner = GPUPlanner.from_harness_config(SimpleNamespace(provider=provider), total_gpus=8)
+
+        assert [w.gpu_ids for w in planner.plan().main_workers] == [[0, 1, 2, 3], [4, 5, 6, 7]]
+
     def test_insufficient_gpus_raises(self):
         """Plan raises error when not enough GPUs."""
         planner = GPUPlanner(

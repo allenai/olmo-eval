@@ -40,6 +40,12 @@ def resolve_visible_devices(gpu_ids: list[int]) -> str:
     return ",".join(resolved)
 
 
+def gpus_per_instance(kwargs) -> int:
+    """GPUs one vLLM instance spans: ``tensor_parallel_size`` x ``pipeline_parallel_size``."""
+    kwargs = kwargs or {}
+    return int(kwargs.get("tensor_parallel_size", 1)) * int(kwargs.get("pipeline_parallel_size", 1))
+
+
 @dataclass(frozen=True)
 class GPUAllocation:
     """GPU allocation for a single component."""
@@ -86,11 +92,12 @@ class GPUPlanner:
     total_gpus: int
     num_main_workers: int
     main_tensor_parallel: int = 1
+    main_pipeline_parallel: int = 1
     auxiliary_configs: dict[str, ProviderConfig] = field(default_factory=dict)
 
     def plan(self) -> GPUPlan:
         """Compute GPU allocation. Main workers first, then auxiliary."""
-        main_gpus_per_worker = self.main_tensor_parallel
+        main_gpus_per_worker = self.main_tensor_parallel * self.main_pipeline_parallel
         main_total_gpus = self.num_main_workers * main_gpus_per_worker
 
         # Calculate auxiliary requirements
@@ -103,7 +110,7 @@ class GPUPlanner:
                 continue
             num_instances = config.num_instances
             tensor_parallel = config.kwargs.get("tensor_parallel_size", 1)
-            gpus_needed = num_instances * tensor_parallel
+            gpus_needed = num_instances * gpus_per_instance(config.kwargs)
             aux_requirements[name] = (num_instances, tensor_parallel)
             aux_total_gpus += gpus_needed
 
@@ -113,7 +120,7 @@ class GPUPlanner:
             raise RuntimeError(
                 f"Not enough GPUs. Need {total_needed} "
                 f"({main_total_gpus} for {self.num_main_workers} main worker(s) × "
-                f"{main_gpus_per_worker} TP, {aux_total_gpus} for auxiliary), "
+                f"{main_gpus_per_worker} GPU(s) (TP x PP), {aux_total_gpus} for auxiliary), "
                 f"but only {self.total_gpus} available."
             )
 
@@ -136,7 +143,7 @@ class GPUPlanner:
         aux_allocations: dict[str, GPUAllocation] = {}
 
         for name, (num_instances, tensor_parallel) in aux_requirements.items():
-            gpus_needed = num_instances * tensor_parallel
+            gpus_needed = num_instances * gpus_per_instance(self.auxiliary_configs[name].kwargs)
             provider_gpus = [gpu_pool.pop(0) for _ in range(gpus_needed)]
             aux_allocations[name] = GPUAllocation(
                 name=name,
@@ -153,6 +160,7 @@ class GPUPlanner:
 
         # Calculate main provider GPU requirements based on num_instances
         main_tp = 1
+        main_pp = 1
         main_instances = 0
         if provider:
             requires_local = getattr(provider, "requires_local_gpu", True)
@@ -160,6 +168,7 @@ class GPUPlanner:
                 main_instances = getattr(provider, "num_instances", 1)
                 if hasattr(provider, "kwargs"):
                     main_tp = provider.kwargs.get("tensor_parallel_size", 1)
+                    main_pp = provider.kwargs.get("pipeline_parallel_size", 1)
 
         aux_configs = dict(getattr(harness_config, "auxiliary_providers", {}) or {})
 
@@ -167,6 +176,7 @@ class GPUPlanner:
             total_gpus=total_gpus,
             num_main_workers=main_instances,
             main_tensor_parallel=main_tp,
+            main_pipeline_parallel=main_pp,
             auxiliary_configs=aux_configs,
         )
 
