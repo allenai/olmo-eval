@@ -19,7 +19,7 @@ HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd)
 TASKS=${TASKS:-"chart_qa vqa2 doc_qa text_vqa ai2d countbench_qa real_world_qa"}
 GPUS=${GPUS:-8}; WORKSPACE=${WORKSPACE:-ai2/olmo-instruct}; CLUSTER=${CLUSTER:-ai2/holmes}
 PRIORITY=${PRIORITY:-urgent}; TIMEOUT=${TIMEOUT:-24h}; GROUP=${GROUP:-olmo35-mmsft-eval}
-OLMO_CORE_SHA=${OLMO_CORE_SHA:-accab373be3b8e5bad3b1a4ae8dad1d3b5d63a58}
+OLMO_CORE_SHA=${OLMO_CORE_SHA:-accab373bae0f316f3e6092a0228ee298cefb5a7}
 OLMO_EVAL_PY=${OLMO_EVAL_PY:-python}
 [[ -f $MODEL/model.safetensors && -f $MODEL/olmo_core_config.json ]] \
   || { echo "not an OLMo-core multimodal export: $MODEL" >&2; exit 2; }
