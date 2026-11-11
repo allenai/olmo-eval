@@ -133,7 +133,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
         bidirectional_image_attention: bool | None = None,
         prompt_format: str | None = None,
         reserved_slot_tokens: list[str] | tuple[str, ...] | None = None,
-        thinking: str = "off",
+        thinking: str = "generate",
         use_cache: bool = True,
         batch_size: int | None = 16,
         attention_backend: str | None = "torch",

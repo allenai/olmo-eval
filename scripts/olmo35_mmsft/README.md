@@ -29,12 +29,15 @@ equal the training tokens of OLMo-core's olmo35 layout up to the answer:
   exactly as open-instruct's `--reserved_slot_tokens` does;
 - the `tokenizer.json` pre-tokenizer (not GPT-2's regex);
 - image blocks at the start of the first user turn, `Image {i}` before each when there are several;
-- thinking off by default: the prompt ends `<|im_start|>assistant\n<think></think>`, as a
-  thinking-off training turn does. `-o provider.kwargs.thinking=on` leaves the block open and
-  strips the reasoning from the output.
+- the prompt ends at `<think>` (`thinking=generate`, the default): in training `<think>` closes the
+  context and `</think>`, the answer and EOS are labels, so the model generates `</think>` and the
+  answer, and the output keeps what follows the last `</think>`. `-o provider.kwargs.thinking=forced`
+  puts `</think>` in the prompt instead.
 
-`tests/providers/test_olmo35_chat.py` checks the prompt equals the training prefix for text-only,
-one-image, two-image and multi-turn conversations (run it with OLMo-core #942 on `PYTHONPATH`).
+`tests/providers/test_olmo35_chat.py` checks the prompt equals the training prefix of the multimodal SFT
+data branch's olmo35 layout (`jasonr/olmo35-mmsft-data`; put it on `PYTHONPATH`) for text-only,
+one-image, two-image and multi-turn counting conversations, and that the count parser reads
+the training count forms.
 
 Mid-training checkpoints keep their plain-document prompts (`prompt_format=document`, the default for
 them).

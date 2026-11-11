@@ -7,10 +7,11 @@ start of the first user turn (``Image {i+1}`` before each block when there are s
 module builds the generation prompt of a request so its tokens are exactly the training tokens up
 to the point where the model's answer starts:
 
-* the template's generation prompt ends ``<|im_start|>assistant\\n<think>``;
-* ``thinking="off"`` (the default) appends ``</think>``, so the prompt ends where a thinking-off
-  training turn's answer begins (``<think></think>Answer<|endoftext|>``); ``thinking="on"`` stops
-  after ``<think>`` and the reasoning is stripped from the output;
+* the template's generation prompt ends ``<|im_start|>assistant\\n<think>``. In training
+  (``olmo35_layout.branch_segments``) ``<think>`` closes the context and ``</think>``, the answer
+  and EOS are labels, so ``thinking="generate"`` (the default) stops the prompt at ``<think>`` and
+  the model generates ``</think>`` and the answer; anything up to the last ``</think>`` is
+  stripped from the output. ``thinking="forced"`` appends ``</think>`` to the prompt instead;
 * ``<think>`` and ``</think>`` are single tokens, promoted into unused reserved slots exactly as
   open-instruct's ``promote_tokens_into_reserved_slots`` (allenai/open-instruct#1911) does for the
   text SFT recipe (``--reserved_slot_tokens '<think>' '</think>'``);
@@ -35,7 +36,7 @@ Olmo 3.5 chat template."""
 
 DEFAULT_RESERVED_SLOT_TOKENS: tuple[str, ...] = ("<think>", "</think>")
 THINK_OPEN, THINK_CLOSE = "<think>", "</think>"
-THINKING_MODES = ("off", "on")
+THINKING_MODES = ("generate", "forced")
 USER_HEADER = "<|im_start|>user\n"
 
 _RESERVED_SLOT_RE = re.compile(r"<\|extra_id_\d+\|>")
@@ -142,14 +143,15 @@ def prompt_ids(
     messages: Sequence[dict[str, Any]],
     image_token_sequences: Sequence[Sequence[int]] = (),
     *,
-    thinking: str = "off",
+    thinking: str = "generate",
 ) -> list[int]:
     """Token ids of the generation prompt for ``messages``, with image blocks.
 
     :param tokenizer: From :func:`load_olmo35_chat_tokenizer` (plus the Molmo2 image tokens).
     :param messages: ``role``/``content`` turns ending with a user turn; content is text.
     :param image_token_sequences: Expanded image token ids, one sequence per image, in order.
-    :param thinking: ``"off"`` closes the empty think block; ``"on"`` leaves it open.
+    :param thinking: ``"generate"`` ends the prompt at ``<think>`` (as training's context does);
+        ``"forced"`` also closes the empty think block.
 
     :raises ValueError: If the text around the image blocks would tokenize differently from the
         whole prompt (the training layout refuses such a conversation too).
@@ -160,7 +162,7 @@ def prompt_ids(
     rendered = _render(tokenizer, messages, add_generation_prompt=True)
     if not rendered.endswith(THINK_OPEN):
         raise ValueError("the Olmo 3.5 generation prompt should end with <think>")
-    if thinking == "off":
+    if thinking == "forced":
         rendered += THINK_CLOSE
     whole = tokenizer(rendered, add_special_tokens=False)["input_ids"]
     if not image_token_sequences:
@@ -187,7 +189,7 @@ def prompt_ids(
 
 
 def strip_thinking(text: str) -> str:
-    """The answer after the last ``</think>`` (a thinking-on generation), else ``text``."""
+    """The answer after the last ``</think>`` the model generated, else ``text``."""
     if THINK_CLOSE in text:
         text = text.rsplit(THINK_CLOSE, 1)[1]
     return text.strip()
