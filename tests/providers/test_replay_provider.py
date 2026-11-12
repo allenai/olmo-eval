@@ -192,3 +192,12 @@ def test_context_cut_tokens_survive_replay(tmp_path: Path) -> None:
     replayed = ReplayProvider(predictions=str(tmp_path)).generate([_completion("Q")])[0][0]
 
     assert replayed.metadata[CONTEXT_CUT_TOKENS_KEY] == 512
+
+
+def test_an_empty_original_generation_replays_empty(tmp_path: Path) -> None:
+    # HELMET's summarization :base variants save an empty original and score "Summary:".
+    _save(tmp_path, "task", [("Q", [{"text": "Summary:", "original_text": ""}])])
+
+    replayed = ReplayProvider(predictions=str(tmp_path)).generate([_completion("Q")])[0][0]
+
+    assert replayed.text == ""

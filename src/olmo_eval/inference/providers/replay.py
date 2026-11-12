@@ -49,7 +49,9 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def _replayed_output(saved: dict[str, Any]) -> LMOutput:
     # The raw generation, so the task strips reasoning and extracts answers again.
-    text = saved.get("original_text") or saved.get("text") or ""
+    # An empty original is still the generation; only a missing one falls back to text.
+    original = saved.get("original_text")
+    text = original if original is not None else saved.get("text") or ""
     metadata = {key: saved[key] for key in _METADATA_FIELDS if key in saved}
     return LMOutput(text=text, metadata=metadata)
 
