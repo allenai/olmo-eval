@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import sys
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -38,7 +39,21 @@ def setup_engine(monkeypatch):
     tokenizer.apply_chat_template.return_value = "<user>question<assistant><think>"
     tokenizer.encode.return_value = [10, 20]
     tokenizer.decode.side_effect = lambda ids: f"token{ids[0]}"
-    engine = Mock(tokenizer_manager=SimpleNamespace(tokenizer=tokenizer))
+    engine = Mock(
+        tokenizer_manager=SimpleNamespace(
+            tokenizer=tokenizer,
+            server_args=SimpleNamespace(dp_size=1),
+            get_internal_state=AsyncMock(return_value=None),
+        ),
+        loop=asyncio.new_event_loop(),
+    )
+
+    async def async_generate(**kwargs):
+        # The provider calls the engine's native async API. It records through the sync
+        # mock, so each test reads one mock for what the engine received.
+        return engine.generate(**kwargs)
+
+    engine.async_generate = async_generate
 
     def generate(**kwargs):
         return [
@@ -58,7 +73,18 @@ def setup_engine(monkeypatch):
     engine.generate.side_effect = generate
     constructor = Mock(return_value=engine)
     monkeypatch.setitem(sys.modules, "sglang", SimpleNamespace(Engine=constructor))
-    return engine, constructor, tokenizer
+    yield engine, constructor, tokenizer
+    _stop_engine_loop(engine.loop)
+
+
+def _stop_engine_loop(loop):
+    """Stop a provider's engine-loop thread that a test left running, then close the loop."""
+    if loop.is_running():
+        loop.call_soon_threadsafe(loop.stop)
+    for thread in threading.enumerate():
+        if thread.name == "sglang-engine-loop":
+            thread.join(timeout=5)
+    loop.close()
 
 
 def test_provider_factory_and_config(setup_engine, monkeypatch):
@@ -310,6 +336,85 @@ def test_bos_policy_multiple_samples_and_async(setup_engine):
     ]
     assert engine.generate.call_args.kwargs["input_ids"] == [[10, 20]] * 4
     tokenizer.encode.assert_called_with("abc", add_special_tokens=False)
+
+
+class LoopBoundEngine:
+    """An engine with SGLang's event-loop contract.
+
+    Like ``sglang.Engine``, ``generate`` drives ``self.loop`` with ``run_until_complete``,
+    so two threads calling it at once fail with "this event loop is already running".
+    ``async_generate`` must run on ``self.loop`` and returns only once ``expected``
+    requests are in flight together, so a path that serializes the calls times out.
+    """
+
+    def __init__(self, tokenizer, expected):
+        self.loop = asyncio.new_event_loop()
+        self.tokenizer_manager = SimpleNamespace(tokenizer=tokenizer)
+        self.expected = expected
+        self.in_flight = 0
+        self.peak = 0
+        self.all_in_flight = asyncio.Event()
+        self.shutdown = Mock()
+
+    def generate(self, **kwargs):
+        return self.loop.run_until_complete(self.async_generate(**kwargs))
+
+    async def async_generate(self, *, prompt, sampling_params, return_logprob, top_logprobs_num):
+        assert asyncio.get_running_loop() is self.loop
+        assert return_logprob and top_logprobs_num == 1
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        if self.in_flight >= self.expected:
+            self.all_in_flight.set()
+        try:
+            await asyncio.wait_for(self.all_in_flight.wait(), timeout=10)
+        finally:
+            self.in_flight -= 1
+        return [
+            {
+                "text": f"answer to {text}",
+                "meta_info": {
+                    "output_token_logprobs": [[-0.5, 17, None]],
+                    "output_top_logprobs": [[[-0.5, 17, None]]],
+                    "completion_tokens": 1,
+                    "prompt_tokens": 3,
+                    "finish_reason": {"type": "stop", "matched": 17},
+                },
+            }
+            for text in prompt
+        ]
+
+
+def test_concurrent_agenerate_calls_are_batched_on_one_engine_loop(setup_engine):
+    _, constructor, tokenizer = setup_engine
+    engine = LoopBoundEngine(tokenizer, expected=8)
+    constructor.return_value = engine
+    provider = SGLangProvider("model")
+    prompts = [f"question {index}" for index in range(8)]
+
+    async def conversations():
+        return await asyncio.gather(
+            *(
+                provider.agenerate([LMRequest(RequestType.COMPLETION, prompt=prompt)])
+                for prompt in prompts
+            )
+        )
+
+    outputs = asyncio.run(conversations())
+    assert [group[0][0].text for group in outputs] == [f"answer to {p}" for p in prompts]
+    assert engine.peak == 8
+    assert all(group[0][0].metadata["finish_reason"] == "stop" for group in outputs)
+
+    # The sync path shares the running loop rather than driving it a second time.
+    engine.expected = 1
+    assert provider.generate([LMRequest(RequestType.COMPLETION, prompt="sync")])[0][0].text == (
+        "answer to sync"
+    )
+    provider.close()
+    engine.shutdown.assert_called_once_with()
+    assert not engine.loop.is_running()
+    assert not any(t.name == "sglang-engine-loop" for t in threading.enumerate())
+    engine.loop.close()
 
 
 def test_greedy_uncapped_and_empty(setup_engine):
@@ -620,21 +725,28 @@ def capacity_info(capacity=512, tokens=1000000):
     }
 
 
+def serve_capacity(engine, info):
+    """Answer the capacity hint's engine queries with ``info``, a get_server_info result."""
+    info = info if isinstance(info, dict) else {}
+    engine.tokenizer_manager.server_args.dp_size = info.get("dp_size", 1)
+    engine.tokenizer_manager.get_internal_state.return_value = info.get("internal_states")
+
+
 def test_concurrency_hint_once_without_changing_generation(setup_engine, caplog):
     engine, _, _ = setup_engine
-    engine.get_server_info.return_value = capacity_info()
+    serve_capacity(engine, capacity_info())
     provider = SGLangProvider("model")
     requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
     params = SamplingParams(max_tokens=100)
     first = provider.generate(requests, params)
     assert "Consider increasing concurrency" not in caplog.text
-    engine.get_server_info.assert_not_called()
+    engine.tokenizer_manager.get_internal_state.assert_not_called()
     assert provider.generate(requests, params) == first
     assert provider.generate(requests, params) == first
     assert caplog.text.count("Consider increasing concurrency") == 1
     assert "effective engine limit is 512" in caplog.text
     assert "-o batching.chunk_size=128" in caplog.text
-    engine.get_server_info.assert_called_once_with()
+    engine.tokenizer_manager.get_internal_state.assert_awaited_once_with()
     assert all(call == engine.generate.call_args_list[0] for call in engine.generate.call_args_list)
 
 
@@ -653,7 +765,7 @@ def test_concurrency_hint_once_without_changing_generation(setup_engine, caplog)
 )
 def test_concurrency_hint_requires_resolved_capacity(setup_engine, caplog, info):
     engine, _, _ = setup_engine
-    engine.get_server_info.return_value = info
+    serve_capacity(engine, info)
     provider = SGLangProvider("model")
     requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
     for _ in range(2):
@@ -663,13 +775,13 @@ def test_concurrency_hint_requires_resolved_capacity(setup_engine, caplog, info)
 
 def test_concurrency_hint_counts_samples_and_ignores_small_or_unequal_batches(setup_engine, caplog):
     engine, _, _ = setup_engine
-    engine.get_server_info.return_value = capacity_info()
+    serve_capacity(engine, capacity_info())
     provider = SGLangProvider("model")
     request = LMRequest(RequestType.COMPLETION, prompt="test")
     params = SamplingParams(max_tokens=100, num_samples=4)
     for count in (2, 2, 16, 32):
         provider.generate([request] * count, params)
-    engine.get_server_info.assert_not_called()
+    engine.tokenizer_manager.get_internal_state.assert_not_called()
     provider.generate([request] * 32, params)
     assert "supplied 128 sequences" in caplog.text
     assert "-o batching.chunk_size=64" in caplog.text
@@ -678,7 +790,7 @@ def test_concurrency_hint_counts_samples_and_ignores_small_or_unequal_batches(se
 
 def test_concurrency_diagnostic_failure_preserves_outputs(setup_engine, caplog):
     engine, _, _ = setup_engine
-    engine.get_server_info.side_effect = RuntimeError("telemetry unavailable")
+    engine.tokenizer_manager.get_internal_state.side_effect = RuntimeError("telemetry unavailable")
     provider = SGLangProvider("model")
     requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
     first = provider.generate(requests, SamplingParams(max_tokens=100))
@@ -696,12 +808,12 @@ def test_concurrency_hint_suppressed_after_retractions(setup_engine, caplog):
         return outputs
 
     engine.generate.side_effect = retracted
-    engine.get_server_info.return_value = capacity_info()
+    serve_capacity(engine, capacity_info())
     provider = SGLangProvider("model")
     requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
     for _ in range(2):
         provider.generate(requests, SamplingParams(max_tokens=100))
-    engine.get_server_info.assert_not_called()
+    engine.tokenizer_manager.get_internal_state.assert_not_called()
     assert "Consider increasing concurrency" not in caplog.text
 
 
@@ -716,7 +828,7 @@ def test_concurrency_hint_uses_longest_prompt_across_both_calls(setup_engine, ca
         return outputs
 
     engine.generate.side_effect = with_prompt_length
-    engine.get_server_info.return_value = capacity_info(tokens=1000000)
+    serve_capacity(engine, capacity_info(tokens=1000000))
     provider = SGLangProvider("model")
     requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
     provider.generate(requests, SamplingParams(max_tokens=100))
@@ -727,18 +839,18 @@ def test_concurrency_hint_uses_longest_prompt_across_both_calls(setup_engine, ca
 
 def test_small_batch_breaks_consecutive_capacity_observations(setup_engine, caplog):
     engine, _, _ = setup_engine
-    engine.get_server_info.return_value = capacity_info()
+    serve_capacity(engine, capacity_info())
     provider = SGLangProvider("model")
     request = LMRequest(RequestType.COMPLETION, prompt="test")
     for count in (64, 1, 64):
         provider.generate([request] * count, SamplingParams(max_tokens=100))
-    engine.get_server_info.assert_not_called()
+    engine.tokenizer_manager.get_internal_state.assert_not_called()
     assert "Consider increasing concurrency" not in caplog.text
 
 
 def test_uncapped_generation_abstains_from_capacity_estimate(setup_engine, caplog):
     engine, _, _ = setup_engine
-    engine.get_server_info.return_value = capacity_info()
+    serve_capacity(engine, capacity_info())
     provider = SGLangProvider("model")
     requests = [LMRequest(RequestType.COMPLETION, prompt="test")] * 64
     # Include a bounded call first to ensure an uncapped call resets history.
@@ -748,7 +860,7 @@ def test_uncapped_generation_abstains_from_capacity_estimate(setup_engine, caplo
         assert len(outputs) == 64
         assert engine.generate.call_args.kwargs["sampling_params"]["max_new_tokens"] is None
     provider.generate(requests, SamplingParams(max_tokens=100))
-    engine.get_server_info.assert_not_called()
+    engine.tokenizer_manager.get_internal_state.assert_not_called()
     assert "Consider increasing concurrency" not in caplog.text
 
 
