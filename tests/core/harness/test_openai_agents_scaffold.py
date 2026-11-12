@@ -75,7 +75,7 @@ def _patch_scaffold_agent(monkeypatch, agent):
     monkeypatch.setattr(
         OpenAIAgentsScaffold,
         "_get_or_create_agent",
-        lambda self, provider, config, sandbox_manager=None: agent,
+        lambda self, provider, config, sandbox_manager=None, model_options=None: agent,
     )
     monkeypatch.setattr(agents, "trace", lambda *args, **kwargs: contextlib.nullcontext())
 

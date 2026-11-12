@@ -143,7 +143,7 @@ class OpenAIAgentsScaffold(Scaffold):
         self._cached_config: HarnessConfig | None = None
         self._cached_provider_id: int | None = None
         self._cached_has_sandbox: bool = False
-        self._cached_extra_body: dict[str, Any] = {}
+        self._cached_model_options: dict[str, Any] = {}
         self._sandbox_manager: SandboxManager | None = None
 
     def clear_cache(self) -> None:
@@ -152,7 +152,7 @@ class OpenAIAgentsScaffold(Scaffold):
         self._cached_config = None
         self._cached_provider_id = None
         self._cached_has_sandbox = False
-        self._cached_extra_body = {}
+        self._cached_model_options = {}
 
     async def initialize(self, config: HarnessConfig) -> None:
         """Initialize sandbox manager if needed.
@@ -251,7 +251,7 @@ class OpenAIAgentsScaffold(Scaffold):
         provider: InferenceProvider,
         config: HarnessConfig,
         sandbox_manager: SandboxManager | None = None,
-        extra_body: dict[str, Any] | None = None,
+        model_options: dict[str, Any] | None = None,
     ) -> Any:
         """Create a new agent with the given configuration.
 
@@ -259,7 +259,8 @@ class OpenAIAgentsScaffold(Scaffold):
             provider: The inference provider for model calls.
             config: Harness configuration.
             sandbox_manager: Optional sandbox manager for sandboxed tools.
-            extra_body: Extra fields merged into every chat-completions request body.
+            model_options: Request-shaping options (see ``run``): ``extra_body``,
+                ``model_settings`` and ``use_responses_api``.
 
         Returns:
             An Agent instance from the agents SDK.
@@ -268,6 +269,7 @@ class OpenAIAgentsScaffold(Scaffold):
             Agent,
             ModelSettings,
             OpenAIChatCompletionsModel,
+            OpenAIResponsesModel,
             function_tool,
             set_tracing_disabled,
         )
@@ -287,10 +289,20 @@ class OpenAIAgentsScaffold(Scaffold):
             f"model={provider.model_name}"
         )
 
-        model = OpenAIChatCompletionsModel(
-            openai_client=client,
-            model=provider.model_name,
-        )
+        options = dict(model_options or {})
+        use_responses_api = bool(options.get("use_responses_api", False))
+        if use_responses_api:
+            # Harmony-native path for models like gpt-oss: the server parses reasoning
+            # and tool calls itself instead of a chat-completions tool-call parser.
+            model = OpenAIResponsesModel(
+                openai_client=client,
+                model=provider.model_name,
+            )
+        else:
+            model = OpenAIChatCompletionsModel(
+                openai_client=client,
+                model=provider.model_name,
+            )
 
         agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
 
@@ -298,12 +310,24 @@ class OpenAIAgentsScaffold(Scaffold):
         # generate path, so the request body built here is the only place a
         # chat_template_kwargs setting can actually reach the server.
         agent_kwargs: dict[str, Any] = {}
-        body: dict[str, Any] = dict(extra_body or {})
-        chat_template_kwargs = _resolve_chat_template_kwargs(provider)
+        body: dict[str, Any] = dict(options.get("extra_body") or {})
+        # The Responses endpoint renders no chat template, so the field is only
+        # meaningful (and only accepted) on chat completions.
+        chat_template_kwargs = (
+            None if use_responses_api else _resolve_chat_template_kwargs(provider)
+        )
         if chat_template_kwargs is not None:
             body["chat_template_kwargs"] = chat_template_kwargs
+        settings: dict[str, Any] = dict(options.get("model_settings") or {})
+        reasoning = settings.get("reasoning")
+        if isinstance(reasoning, dict):
+            from openai.types.shared import Reasoning  # type: ignore[ty:unresolved-import]
+
+            settings["reasoning"] = Reasoning(**reasoning)
         if body:
-            agent_kwargs["model_settings"] = ModelSettings(extra_body=body)
+            settings["extra_body"] = body
+        if settings:
+            agent_kwargs["model_settings"] = ModelSettings(**settings)
 
         agent = Agent(
             name=self.name,
@@ -320,32 +344,32 @@ class OpenAIAgentsScaffold(Scaffold):
         provider: InferenceProvider,
         config: HarnessConfig,
         sandbox_manager: SandboxManager | None = None,
-        extra_body: dict[str, Any] | None = None,
+        model_options: dict[str, Any] | None = None,
     ) -> Any:
         """Get cached agent or create a new one if config/provider changed.
 
         Agents are cached based on config, provider, whether sandbox is used, and
-        the extra request body. The sandbox manager is stable across runs, so
+        the model options. The sandbox manager is stable across runs, so
         caching works.
         """
         has_sandbox = sandbox_manager is not None
-        extra_body = dict(extra_body or {})
+        model_options = dict(model_options or {})
         if (
             self._cached_agent is not None
             and self._cached_config == config
             and self._cached_provider_id == id(provider)
             and self._cached_has_sandbox == has_sandbox
-            and self._cached_extra_body == extra_body
+            and self._cached_model_options == model_options
         ):
             return self._cached_agent
 
-        agent = self._create_agent(provider, config, sandbox_manager, extra_body)
+        agent = self._create_agent(provider, config, sandbox_manager, model_options)
 
         self._cached_agent = agent
         self._cached_config = config
         self._cached_provider_id = id(provider)
         self._cached_has_sandbox = has_sandbox
-        self._cached_extra_body = extra_body
+        self._cached_model_options = model_options
 
         return agent
 
@@ -368,12 +392,23 @@ class OpenAIAgentsScaffold(Scaffold):
             trace_metadata: Optional metadata for tracing (e.g., instance_id, task_id).
             **kwargs: Scaffold-specific options:
                 - enable_compaction: Enable context compaction (default: True).
+                - extra_body: Extra fields merged into every request body (for
+                  example ``{"reasoning_effort": "high"}`` on chat completions).
+                - model_settings: Fields of the agents SDK ``ModelSettings`` (for
+                  example ``{"reasoning": {"effort": "high"}, "max_tokens": 10000}``).
+                - use_responses_api: Drive the server through ``/v1/responses`` instead
+                  of chat completions (default: False). Use for harmony-format models
+                  such as gpt-oss, whose tool calls vLLM parses natively there.
 
         Returns:
             HarnessResult with trajectory from SDK execution.
         """
         enable_compaction = kwargs.get("enable_compaction", True)
-        extra_body = dict(kwargs.get("extra_body") or {})
+        model_options: dict[str, Any] = {
+            "extra_body": dict(kwargs.get("extra_body") or {}),
+            "model_settings": dict(kwargs.get("model_settings") or {}),
+            "use_responses_api": bool(kwargs.get("use_responses_api", False)),
+        }
         try:
             from agents import RunConfig, Runner, trace  # type: ignore[ty:unresolved-import]
             from agents.exceptions import (  # type: ignore[ty:unresolved-import]
@@ -419,7 +454,7 @@ class OpenAIAgentsScaffold(Scaffold):
             )
 
         # Use cached agent (tools read from ContextVar at execution time)
-        agent = self._get_or_create_agent(provider, config, self._sandbox_manager, extra_body)
+        agent = self._get_or_create_agent(provider, config, self._sandbox_manager, model_options)
 
         # Acquire binding if session tools are used
         has_session_tools = any(t.session for t in config.resolved_tools if t.sandbox)
