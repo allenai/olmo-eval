@@ -46,6 +46,15 @@ MATH_SUBSETS = [
     "precalculus",
 ]
 
+#: Overrides for the ``final_answer`` variant: score a thinking model's answer only from the
+#: text after its last ``</think>``. A response without ``</think>`` (a trace that ran to the
+#: token cap, or no trace at all) is scored as no answer, so use it only for thinking models.
+FINAL_ANSWER_OVERRIDES: dict[str, Any] = {
+    "strip_thinking": True,
+    "strip_unclosed_thinking": True,
+    "thinking_prefilled": True,
+}
+
 
 class MinervaMathTask(Task):
     fewshot_split: str = "train"
@@ -329,6 +338,10 @@ for _subset in MATH_SUBSETS:
         "olmes",
         fewshot_source="minerva_math_fixed",
     )
+
+    register_variant(_task_name, "final_answer", **FINAL_ANSWER_OVERRIDES)
+
+register_variant("math500", "final_answer", **FINAL_ANSWER_OVERRIDES)
 
 register_variant(
     "math500",
