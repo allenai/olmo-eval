@@ -46,6 +46,22 @@ def gpus_per_instance(kwargs) -> int:
     return int(kwargs.get("tensor_parallel_size", 1)) * int(kwargs.get("pipeline_parallel_size", 1))
 
 
+def tensor_parallel_for(gpu_ids: list[int] | None, kwargs: dict | None) -> int | None:
+    """Tensor-parallel size of a vLLM engine on ``gpu_ids``: its GPUs over the pipeline stages.
+
+    The GPU planner sizes an instance as tensor_parallel_size x pipeline_parallel_size, so with
+    ``pipeline_parallel_size`` set the instance's GPUs are shared out across pipeline stages.
+    """
+    if not gpu_ids:
+        return None
+    pipeline_parallel = int((kwargs or {}).get("pipeline_parallel_size", 1))
+    if len(gpu_ids) % pipeline_parallel:
+        raise ValueError(
+            f"{len(gpu_ids)} GPU(s) cannot be split into {pipeline_parallel} pipeline stages"
+        )
+    return len(gpu_ids) // pipeline_parallel
+
+
 @dataclass(frozen=True)
 class GPUAllocation:
     """GPU allocation for a single component."""

@@ -304,7 +304,7 @@ class TestGPUPlanner:
 
     def test_worker_tensor_parallel_divides_gpus_by_pipeline_stages(self):
         """A worker's engine runs TP = its GPUs / pipeline_parallel_size, not TP over every GPU."""
-        from olmo_eval.runners.asynq.workers import tensor_parallel_for
+        from olmo_eval.inference.gpu_planner import tensor_parallel_for
 
         assert tensor_parallel_for([0, 1, 2, 3], {"pipeline_parallel_size": 4}) == 1
         assert tensor_parallel_for([0, 1, 2, 3], {"pipeline_parallel_size": 2}) == 2
@@ -622,3 +622,51 @@ class TestInProcessAuxiliaryProviders:
 
         with pytest.raises(RuntimeError, match="Not enough GPUs"):
             InferenceManager(configs={"nli": config}, available_gpu_ids=[]).start()
+
+
+class TestPipelineParallelAuxiliaryServers:
+    """An auxiliary vLLM server instance starts on TP x PP GPUs and keeps its TP."""
+
+    def test_each_instance_spans_tp_times_pp_gpus(self, monkeypatch):
+        from olmo_eval.inference.manager import InferenceManager
+        from olmo_eval.inference.providers.vllm_server_utils import (
+            VLLMServerProcess,
+            _build_server_command,
+        )
+
+        monkeypatch.setattr(
+            VLLMServerProcess, "start", lambda self: f"http://localhost:{self.port}/v1"
+        )
+        config = ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="judge",
+            num_instances=2,
+            kwargs={"tensor_parallel_size": 2, "pipeline_parallel_size": 2},
+        )
+        manager = InferenceManager(configs={"judge": config}, available_gpu_ids=list(range(8)))
+
+        manager.start()
+        servers = manager._servers["judge"].servers
+
+        assert [s.gpu_ids for s in servers] == [[0, 1, 2, 3], [4, 5, 6, 7]]
+        assert [s.tensor_parallel_size for s in servers] == [2, 2]
+        cmd = _build_server_command(
+            model_name="judge",
+            port=servers[0].port,
+            tensor_parallel_size=servers[0].tensor_parallel_size,
+            **servers[0].server_kwargs,
+        )
+        assert cmd[cmd.index("--tensor-parallel-size") + 1] == "2"
+        assert cmd[cmd.index("--pipeline-parallel-size") + 1] == "2"
+
+    def test_too_few_gpus_for_tp_times_pp_are_refused(self):
+        from olmo_eval.inference.manager import InferenceManager
+
+        config = ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="judge",
+            kwargs={"tensor_parallel_size": 2, "pipeline_parallel_size": 2},
+        )
+
+        with pytest.raises(RuntimeError, match="Not enough GPUs"):
+            InferenceManager(configs={"judge": config}, available_gpu_ids=[0, 1]).start()

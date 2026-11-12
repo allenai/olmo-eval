@@ -8,6 +8,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.inference.gpu_planner import gpus_per_instance
 from olmo_eval.inference.providers.vllm_server_utils import VLLMServerProcess
 
 if TYPE_CHECKING:
@@ -101,13 +102,15 @@ class InferenceManager:
 
                 elif config.kind in LOCAL_SERVER_KINDS:
                     num_instances = config.num_instances
-                    tensor_parallel = config.kwargs.get("tensor_parallel_size", 1)
-                    gpus_needed = num_instances * tensor_parallel
+                    # an instance spans tensor_parallel_size x pipeline_parallel_size GPUs
+                    instance_gpus_needed = gpus_per_instance(config.kwargs)
+                    gpus_needed = num_instances * instance_gpus_needed
 
                     if len(gpu_pool) < gpus_needed:
                         raise RuntimeError(
                             f"Not enough GPUs for {name!r}. "
-                            f"Needs {gpus_needed} ({num_instances} × {tensor_parallel} TP), "
+                            f"Needs {gpus_needed} "
+                            f"({num_instances} × {instance_gpus_needed} TP x PP), "
                             f"available: {len(gpu_pool)}"
                         )
 
@@ -116,7 +119,7 @@ class InferenceManager:
                     safe_model = config.model.replace("/", "_").replace("\\", "_")
 
                     for i in range(num_instances):
-                        instance_gpus = [gpu_pool.pop(0) for _ in range(tensor_parallel)]
+                        instance_gpus = [gpu_pool.pop(0) for _ in range(instance_gpus_needed)]
                         # Per-instance log dir: logs/vllm_server_{model}_{idx}/
                         instance_log_dir = None
                         if self.log_dir:

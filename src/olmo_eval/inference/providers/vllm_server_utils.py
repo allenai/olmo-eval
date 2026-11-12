@@ -21,7 +21,7 @@ from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider
-from olmo_eval.inference.gpu_planner import resolve_visible_devices
+from olmo_eval.inference.gpu_planner import resolve_visible_devices, tensor_parallel_for
 
 if TYPE_CHECKING:
     pass
@@ -416,8 +416,8 @@ class VLLMServerProcess:
         Args:
             model_name: HuggingFace model ID or local path
             port: Port to serve on (auto-assigned if None)
-            tensor_parallel_size: Number of GPUs for tensor parallelism.
-                If gpu_ids is provided, this is inferred from len(gpu_ids).
+            tensor_parallel_size: Number of GPUs for tensor parallelism. If gpu_ids is
+                provided, this is len(gpu_ids) divided by kwargs' pipeline_parallel_size.
             gpu_ids: Specific GPU IDs to use. Sets CUDA_VISIBLE_DEVICES.
             startup_timeout: Maximum time to wait for server startup
             log_dir: Directory to write server logs to (if set, logs are persisted)
@@ -429,8 +429,8 @@ class VLLMServerProcess:
         self.model_name = model_name
         self.port = port or _find_free_port()
         self.gpu_ids = gpu_ids
-        # Infer tensor_parallel_size from gpu_ids if provided
-        self.tensor_parallel_size = len(gpu_ids) if gpu_ids else tensor_parallel_size
+        # With gpu_ids, the instance's GPUs are shared out across its pipeline stages
+        self.tensor_parallel_size = tensor_parallel_for(gpu_ids, kwargs) or tensor_parallel_size
         self.startup_timeout = startup_timeout
         self.log_dir = log_dir
         self.owner = owner or get_current_worker_id()
