@@ -24,10 +24,17 @@ CHAT = ({"role": "user", "content": "What is 6 x 7?"},)
 
 
 def _save(
-    output_dir: Path, spec: str, saved: list[tuple[object, list[dict]]], model: str = "model"
+    output_dir: Path,
+    spec: str,
+    saved: list[tuple[object, list[dict]]],
+    model: str = "model",
+    request_type: str = "generate_until",
 ) -> None:
     """Write a run's files for (context, model_output) pairs, as the runner does."""
-    requests = [{"doc_id": i, "request": {"context": c}} for i, (c, _) in enumerate(saved)]
+    requests = [
+        {"doc_id": i, "request_type": request_type, "request": {"context": c}}
+        for i, (c, _) in enumerate(saved)
+    ]
     predictions = [{"doc_id": i, "model_output": out} for i, (_, out) in enumerate(saved)]
     write_requests_jsonl(str(output_dir), spec, requests, model)
     write_predictions_jsonl(str(output_dir), spec, predictions, model)
@@ -104,6 +111,35 @@ def test_a_repeated_prompt_with_different_generations_fails(tmp_path: Path) -> N
     outputs = provider.generate([_completion("Q"), _completion("Q")])
 
     assert all("different generations" in str(request_error(o)) for o in outputs)
+
+
+def test_a_repeated_prompt_scored_differently_still_replays(tmp_path: Path) -> None:
+    # Instances with different gold answers score the same generation differently.
+    _save(
+        tmp_path,
+        "task",
+        [
+            ("Q", [{"text": "same", "sample_metrics": {"acc": 1.0}}]),
+            ("Q", [{"text": "same", "sample_metrics": {"acc": 0.0}}]),
+        ],
+    )
+    provider = ReplayProvider(predictions=str(tmp_path))
+
+    outputs = provider.generate([_completion("Q"), _completion("Q")])
+
+    assert [o[0].text for o in outputs] == ["same", "same"]
+
+
+def test_a_loglikelihood_run_is_not_replayed_as_generations(tmp_path: Path) -> None:
+    # Its saved text is the gold continuation it scored.
+    _save(tmp_path, "bpb", [("Q", [{"text": "gold"}])], request_type="loglikelihood")
+    _save(tmp_path, "gen", [("P", [{"text": "generated"}])])
+    provider = ReplayProvider(predictions=str(tmp_path))
+
+    gold, generated = provider.generate([_completion("Q"), _completion("P")])
+
+    assert "no saved generation" in str(request_error(gold))
+    assert generated[0].text == "generated"
 
 
 def test_provider_config_passes_the_predictions_path(tmp_path: Path) -> None:

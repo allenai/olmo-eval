@@ -66,6 +66,12 @@ def _replayed_output(saved: dict[str, Any]) -> LMOutput:
     return LMOutput(text=text, metadata=metadata)
 
 
+def _generation_key(save: list[dict[str, Any]]) -> str:
+    """What replay serves for a saved prediction, leaving out the fields it scored."""
+    outputs = [_replayed_output(saved) for saved in save]
+    return json.dumps([[o.text, o.metadata] for o in outputs], sort_keys=True, default=str)
+
+
 class ReplayProvider(InferenceProvider):
     """Answers each request with the generations a previous run saved for the same prompt.
 
@@ -73,7 +79,8 @@ class ReplayProvider(InferenceProvider):
     them; each file is paired with the requests file written beside it, which holds the
     prompts. A request whose prompt was not saved, or was saved with a different number
     of samples, fails like a generation error, so the task's failure budget catches a
-    replay against the wrong run. A request does not say which instance it is, so a
+    replay against the wrong run. Loglikelihood runs are skipped: their saved text is the
+    scored continuation, not a generation. A request does not say which instance it is, so a
     prompt saved for several instances replays only when every save holds the same
     generations; a prompt saved by two files (two configurations of a task) is rejected.
     Requests with images or tools fail too: the saved files keep neither image
@@ -100,7 +107,11 @@ class ReplayProvider(InferenceProvider):
         for path in files:
             requests = {r["doc_id"]: r for r in _read_jsonl(_requests_path(path))}
             for prediction in _read_jsonl(path):
-                request = requests[prediction["doc_id"]]["request"]
+                saved_request = requests[prediction["doc_id"]]
+                # A loglikelihood run's output text is the continuation it scored, not a generation.
+                if saved_request.get("request_type") == "loglikelihood":
+                    continue
+                request = saved_request["request"]
                 key = _prompt_key(request.get("context"), request.get("system_prompt"))
                 if sources.setdefault(key, path) != path:
                     raise ValueError(
@@ -111,7 +122,7 @@ class ReplayProvider(InferenceProvider):
         self._ambiguous = {
             key
             for key, saves in self._saved.items()
-            if len({json.dumps(save, sort_keys=True, default=str) for save in saves}) > 1
+            if len({_generation_key(save) for save in saves}) > 1
         }
 
     def _replay(self, request: LMRequest, num_samples: int) -> list[LMOutput]:
