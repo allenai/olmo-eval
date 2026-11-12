@@ -6,8 +6,12 @@ import asyncio
 import math
 import os
 import sys
+import threading
+from collections.abc import Coroutine
+from concurrent.futures import Future
+from dataclasses import dataclass
 from importlib import import_module
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from jinja2 import TemplateError
 
@@ -21,6 +25,8 @@ from olmo_eval.inference.providers.sglang_profiles import prepare_profile
 from olmo_eval.inference.request_utils import chat_messages_for_request
 
 logger = get_logger(__name__)
+
+_T = TypeVar("_T")
 
 # Keep this allowlist aligned with the pinned olmo-sglang arithmetic options.
 # Record exact startup values (None means unset), rather than duplicating the
@@ -61,6 +67,17 @@ def _require_original_logprobs() -> None:
                 "Restart the worker with SGLANG_RETURN_ORIGINAL_LOGPROB=1; "
                 "changing the environment after import cannot repair its cached convention."
             )
+
+
+@dataclass
+class _PreparedBatch:
+    """A generate call's requests, prepared for one engine call."""
+
+    params: SamplingParams
+    grouped: list[list[LMOutput]]
+    prepared: list[tuple[dict[str, Any], dict[str, Any]]]
+    positions: list[int]
+    engine_kwargs: dict[str, Any]
 
 
 class SGLangProvider(InferenceProvider):
@@ -216,6 +233,37 @@ class SGLangProvider(InferenceProvider):
         self._closed = False
         self._capacity_checked = False
         self._previous_batch: tuple[int, int, int, int] | None = None
+        self._loop_lock = threading.Lock()
+        self._loop_thread: threading.Thread | None = None
+
+    def _on_engine_loop(self, coroutine: Coroutine[Any, Any, _T]) -> Future[_T]:
+        """Run a coroutine on the engine's event loop, from any thread but that loop's.
+
+        SGLang binds its tokenizer manager to ``engine.loop``, and ``Engine.generate`` drives
+        that loop with ``run_until_complete``, so two threads calling it at once fail with
+        "this event loop is already running". One daemon thread instead runs the loop for the
+        provider's lifetime and every later engine call is submitted to it, so concurrent
+        calls reach the scheduler together and are batched there. Startup calls that ran
+        before this thread existed (``get_server_info``) used the same loop.
+        """
+        with self._loop_lock:
+            if self._loop_thread is None:
+                thread = threading.Thread(
+                    target=self.engine.loop.run_forever, name="sglang-engine-loop", daemon=True
+                )
+                thread.start()
+                self._loop_thread = thread
+        return asyncio.run_coroutine_threadsafe(coroutine, self.engine.loop)
+
+    def _server_info(self) -> dict[str, Any]:
+        """The fields of ``Engine.get_server_info()`` that the capacity hint reads.
+
+        ``Engine.get_server_info`` drives ``engine.loop`` itself, which fails while the
+        provider's thread runs that loop, so ask the tokenizer manager on the loop instead.
+        """
+        manager = self.engine.tokenizer_manager
+        states = self._on_engine_loop(manager.get_internal_state()).result()
+        return {"dp_size": getattr(manager.server_args, "dp_size", 1), "internal_states": states}
 
     def get_tokenizer(self) -> Any:
         """Return the engine's tokenizer."""
@@ -340,7 +388,7 @@ class SGLangProvider(InferenceProvider):
         # Telemetry is optional across SGLang versions. A failed diagnostic must
         # never discard successful generations or turn into an inference retry.
         try:
-            info = self.engine.get_server_info()
+            info = self._server_info()
         except Exception:
             logger.debug("SGLang capacity diagnostic unavailable", exc_info=True)
             return
@@ -387,13 +435,23 @@ class SGLangProvider(InferenceProvider):
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         """Generate completions and retain sampled-token probabilities and engine metadata."""
+        batch = self._prepare_batch(requests, sampling_params)
+        if batch is None:
+            return []
+        outputs = self._on_engine_loop(self.engine.async_generate(**batch.engine_kwargs)).result()
+        return self._finish_batch(batch, outputs)
+
+    def _prepare_batch(
+        self, requests: list[LMRequest], sampling_params: SamplingParams | None
+    ) -> _PreparedBatch | None:
+        """Validate and render the requests; None when there is nothing to send."""
         params = self._default_sampling_params(sampling_params)
         if self._closed:
             raise RuntimeError("SGLangProvider is closed")
         sampling = self._build_sampling_params(params)
         _require_original_logprobs()
         if not requests:
-            return []
+            return None
         grouped: list[list[LMOutput]] = [[] for _ in requests]
         prepared = []
         positions = []
@@ -419,12 +477,22 @@ class SGLangProvider(InferenceProvider):
         }
         if "image_data" in inputs and not any(inputs["image_data"]):
             del inputs["image_data"]
-        outputs = self.engine.generate(
-            **inputs,
-            sampling_params=sampling,
-            return_logprob=True,
-            top_logprobs_num=params.logprobs if params.logprobs is not None else 1,
+        return _PreparedBatch(
+            params=params,
+            grouped=grouped,
+            prepared=prepared,
+            positions=positions,
+            engine_kwargs={
+                **inputs,
+                "sampling_params": sampling,
+                "return_logprob": True,
+                "top_logprobs_num": params.logprobs if params.logprobs is not None else 1,
+            },
         )
+
+    def _finish_batch(self, batch: _PreparedBatch, outputs: Any) -> list[list[LMOutput]]:
+        """Convert the engine's completions and place them back in request order."""
+        params, grouped, prepared = batch.params, batch.grouped, batch.prepared
         if not isinstance(outputs, list) or len(outputs) != len(prepared) * params.num_samples:
             raise RuntimeError("SGLang returned an unexpected number of completions")
         converted = [self._convert_output(output) for output in outputs]
@@ -432,7 +500,7 @@ class SGLangProvider(InferenceProvider):
             raise RuntimeError(
                 f"SGLang aborted every generation: {converted[0].metadata[REQUEST_ERROR_KEY]}"
             )
-        for offset, position in enumerate(positions):
+        for offset, position in enumerate(batch.positions):
             samples = converted[offset * params.num_samples : (offset + 1) * params.num_samples]
             failures = [
                 o.metadata[REQUEST_ERROR_KEY] for o in samples if REQUEST_ERROR_KEY in o.metadata
@@ -562,13 +630,29 @@ class SGLangProvider(InferenceProvider):
     async def agenerate(
         self, requests: list[LMRequest], sampling_params: SamplingParams | None = None
     ) -> list[list[LMOutput]]:
-        """Run sequential engine calls without blocking the harness event loop."""
-        return await asyncio.to_thread(self.generate, requests, sampling_params)
+        """Generate without blocking the harness loop; concurrent calls share engine batches.
+
+        Each call awaits its own engine request instead of holding a thread, so a scaffold's
+        concurrent conversations are all in the engine at once. Rendering and conversion run
+        in worker threads, as ``generate`` did here before.
+        """
+        batch = await asyncio.to_thread(self._prepare_batch, requests, sampling_params)
+        if batch is None:
+            return []
+        outputs = await asyncio.wrap_future(
+            self._on_engine_loop(self.engine.async_generate(**batch.engine_kwargs))
+        )
+        return await asyncio.to_thread(self._finish_batch, batch, outputs)
 
     def close(self) -> None:
         """Release engine processes when the evaluation worker finishes."""
         if not self._closed:
             self.engine.shutdown()
+            with self._loop_lock:
+                thread, self._loop_thread = self._loop_thread, None
+            if thread is not None:
+                self.engine.loop.call_soon_threadsafe(self.engine.loop.stop)
+                thread.join(timeout=30)
             self._closed = True
 
     def shutdown(self) -> None:
