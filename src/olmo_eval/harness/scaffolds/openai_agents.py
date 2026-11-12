@@ -49,8 +49,35 @@ def _is_context_length_error(exc: BaseException) -> bool:
     )
 
 
+_HARMONY_HEADER_WORDS = ("commentary", "analysis", "final", "json")
+
+
+def _sanitize_tool_name(name: str, known: frozenset[str]) -> str:
+    """Map a tool name mangled by vLLM's harmony parser back to the registered tool.
+
+    gpt-oss sometimes orders the harmony header as ``to=functions.search<|channel|>commentary
+    <|constrain|>json`` and vLLM (0.19.1) then reports the tool name as
+    ``search<|channel|>commentary`` or, with the special tokens dropped,
+    ``searchcommentaryjson`` (vllm-project/vllm#58825). The arguments are intact, so
+    recover the intended tool: cut at the first special token, then peel trailing
+    channel/format words while the remainder is not a registered name. Unknown names
+    that do not resolve are returned unchanged so the SDK reports them as before.
+    """
+    if name in known or not known:
+        return name
+    head = name.split("<|", 1)[0]
+    while head and head not in known:
+        for word in _HARMONY_HEADER_WORDS:
+            if head.endswith(word) and len(head) > len(word):
+                head = head[: -len(word)]
+                break
+        else:
+            break
+    return head if head in known else name
+
+
 def _make_vllm_responses_model(base: type) -> type:
-    """Subclass the SDK's Responses model with a workaround for vLLM's harmony parser.
+    """Subclass the SDK's Responses model with workarounds for vLLM's harmony parser.
 
     vLLM (0.19.1) only turns a harmony tool call into a ``function_call`` item when
     the model placed it on the ``commentary`` channel; a call to ``functions.<name>``
@@ -58,6 +85,8 @@ def _make_vllm_responses_model(base: type) -> type:
     SDK then echoes as input and vLLM rejects with ``Unknown input type: mcp_call``
     (vllm-project/vllm#35907 is the pending upstream fix). Until that lands, rewrite
     such items into function calls so the SDK runs the tool as the model intended.
+    Tool names that carry leaked channel tokens are mapped back to the registered
+    tool by :func:`_sanitize_tool_name`.
     """
 
     class VLLMResponsesModel(base):  # type: ignore[misc,valid-type]
@@ -70,26 +99,46 @@ def _make_vllm_responses_model(base: type) -> type:
                 ResponseFunctionToolCall,
             )
 
+            tools = (
+                kwargs.get("tools") if "tools" in kwargs else (args[3] if len(args) > 3 else None)
+            )
+            known = frozenset(
+                t.name for t in (tools or []) if isinstance(getattr(t, "name", None), str)
+            )
+
             rewritten = 0
+            renamed = 0
             new_output = []
             for item in output:
-                if getattr(item, "type", None) == "mcp_call" and getattr(item, "name", None):
+                item_type = getattr(item, "type", None)
+                if item_type == "mcp_call" and getattr(item, "name", None):
                     item_id = getattr(item, "id", None) or f"mcp_{rewritten}"
+                    name = _sanitize_tool_name(item.name, known)
+                    renamed += name != item.name
                     new_output.append(
                         ResponseFunctionToolCall(
                             type="function_call",
                             id=item_id,
                             call_id=f"call_{item_id}",
-                            name=item.name,
+                            name=name,
                             arguments=item.arguments or "{}",
                             status="completed",
                         )
                     )
                     rewritten += 1
+                elif item_type == "function_call" and getattr(item, "name", None):
+                    name = _sanitize_tool_name(item.name, known)
+                    if name != item.name:
+                        renamed += 1
+                        item = item.model_copy(update={"name": name})
+                    new_output.append(item)
                 else:
                     new_output.append(item)
-            if rewritten:
-                logger.debug(f"Rewrote {rewritten} vLLM mcp_call item(s) into function calls")
+            if rewritten or renamed:
+                logger.debug(
+                    f"vLLM harmony workaround: {rewritten} mcp_call item(s) rewritten, "
+                    f"{renamed} tool name(s) sanitized"
+                )
                 response.output = new_output
             return response
 

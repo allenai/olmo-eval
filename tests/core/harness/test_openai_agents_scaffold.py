@@ -571,3 +571,19 @@ class TestModelRefusal:
 
         assert "I cannot help with that." in result.final_output.text
         assert result.error is not None
+
+
+def test_sanitize_tool_name_recovers_harmony_mangled_names():
+    from olmo_eval.harness.scaffolds.openai_agents import _sanitize_tool_name
+
+    known = frozenset({"search", "get_document"})
+    assert _sanitize_tool_name("search", known) == "search"
+    assert _sanitize_tool_name("search<|channel|>commentary", known) == "search"
+    assert _sanitize_tool_name("search<|channel|>commentaryjson", known) == "search"
+    assert _sanitize_tool_name("searchcommentaryjson", known) == "search"
+    assert _sanitize_tool_name("searchjson", known) == "search"
+    assert _sanitize_tool_name("get_document<|channel|>commentary", known) == "get_document"
+    # Unknown names that do not resolve are left for the SDK to reject as before.
+    assert _sanitize_tool_name("open", known) == "open"
+    assert _sanitize_tool_name("searchx", known) == "searchx"
+    assert _sanitize_tool_name("search", frozenset()) == "search"
