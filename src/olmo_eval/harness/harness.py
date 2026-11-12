@@ -384,6 +384,7 @@ def apply_harness_config(config: HarnessConfig, request: LMRequest) -> LMRequest
         continuations=request.continuations,
         continuation_prompts=request.continuation_prompts,
         tools=config.tool_schemas if config.has_tools else request.tools,
+        tool_choice=request.tool_choice,
         system_prompt=config.system_prompt or request.system_prompt,
         max_length=request.max_length,
         images=request.images,
