@@ -104,6 +104,10 @@ def create_provider(
             from .providers.mock import MockProvider
 
             return MockProvider(model_name)
+        case "replay":
+            from .providers.replay import ReplayProvider
+
+            return ReplayProvider(model_name, predictions=kwargs.get("predictions", ""))
         case "hf":
             from .providers.huggingface import HuggingFaceProvider
 
