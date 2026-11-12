@@ -10,15 +10,21 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import queue
+import re
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from functools import cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib import request
 
 from olmo_eval.common.debug import is_debug_provider
 from olmo_eval.inference.gpu_planner import resolve_visible_devices, tensor_parallel_for
@@ -29,7 +35,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default timeout for server startup
-DEFAULT_STARTUP_TIMEOUT = 300  # 5 minutes for large models
+DEFAULT_STARTUP_TIMEOUT = 1200  # Cold loading and compilation can exceed five minutes
 DEFAULT_HEALTH_CHECK_INTERVAL = 2  # seconds
 _VLLM_INTERNAL_PORT_RANGE = (20000, 32767)
 
@@ -88,95 +94,136 @@ def _chat_template_has_function_tag(
         return None
 
 
+class _StartupLog:
+    """Track observed startup phases without guessing from elapsed time."""
+
+    def __init__(self, path: Path | None) -> None:
+        self.path = path
+        self.offset = 0
+        self.partial = ""
+        self.phase = "waiting for readiness (no phase reported)"
+
+    def update(self) -> str:
+        if self.path is None:
+            return self.phase
+        try:
+            with self.path.open("rb") as stream:
+                # Bound each read even if a child produces unusually verbose logs.
+                stream.seek(0, os.SEEK_END)
+                end = stream.tell()
+                stream.seek(max(self.offset, end - 65536))
+                text = stream.read(65536).decode("utf-8", errors="replace")
+                self.offset = stream.tell()
+        except OSError:
+            return self.phase
+        lines = re.split(r"[\r\n]", self.partial + text.lower())
+        self.partial = lines[-1][-4096:]
+        for line in lines:
+            if re.search(r"downloading\s|fetching \d+ files", line):
+                self.phase = "downloading"
+            if re.search(
+                r"starting to load model|loading .*checkpoint shards|loading weights", line
+            ):
+                self.phase = "loading weights"
+            if re.search(
+                r"compiling|compilation (?:took|takes)|torch\.compile takes|"
+                r"autotun|capturing cuda graph",
+                line,
+            ):
+                self.phase = "compiling / autotuning / CUDA graphs"
+            if re.search(
+                r"model loading took|graph capturing finished|application startup complete", line
+            ):
+                self.phase = "waiting for readiness"
+        return self.phase
+
+
 def _wait_for_server(
     url: str,
     timeout: float = DEFAULT_STARTUP_TIMEOUT,
     interval: float = DEFAULT_HEALTH_CHECK_INTERVAL,
     process: subprocess.Popen | None = None,
     progress_callback: ProgressCallback | None = None,
+    log_path: Path | None = None,
 ) -> tuple[bool, Exception | None, str | None]:
-    """Wait for vLLM server to be ready.
+    """Wait with a bounded deadline and process checks independent of HTTP probes.
 
-    Args:
-        url: Base URL of the server (e.g., "http://localhost:8000/v1")
-        timeout: Maximum time to wait in seconds
-        interval: Time between health checks in seconds
-        process: Optional subprocess to monitor for early exit
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        Tuple of (success, last_error, process_output):
-        - success: True if server is ready, False if timeout exceeded or process died
-        - last_error: The last error encountered, or None
-        - process_output: Captured output if process died early, or None
+    Progress identifies the last phase *observed in logs*, not an inferred diagnosis.
+    A single daemon probe thread may outlive this call by at most its current HTTP
+    request timeout (five seconds); it never delays reporting a dead child.
     """
-    import urllib.error
-    import urllib.request
-
-    health_url = url.rstrip("/").replace("/v1", "") + "/health"
-    models_url = url.rstrip("/") + "/models"
-
-    start_time = time.time()
+    start = time.monotonic()
+    deadline = start + timeout
+    stopped = threading.Event()
+    outcomes: queue.SimpleQueue[Exception | None] = queue.SimpleQueue()
+    phases = _StartupLog(log_path)
     last_error: Exception | None = None
-    last_progress_time = 0.0
-    progress_interval = 10.0  # Log progress every 10 seconds
+    previous_phase = None
+    next_progress = start
 
-    if progress_callback:
-        progress_callback(f"Waiting for vLLM server (0/{int(timeout)}s)...")
+    def report(message: str) -> None:
+        message = f"[vllm-startup] {url}: {message}"
+        logger.info(message)
+        if progress_callback:
+            progress_callback(message)
 
-    while time.time() - start_time < timeout:
-        elapsed = time.time() - start_time
-
-        # Log progress periodically
-        if progress_callback and elapsed - last_progress_time >= progress_interval:
-            progress_callback(f"Waiting for vLLM server ({int(elapsed)}/{int(timeout)}s)...")
-            last_progress_time = elapsed
-
-        # Check if the subprocess has died
-        if process is not None:
-            exit_code = process.poll()
-            if exit_code is not None:
-                # Process exited - use communicate() to get all output
-                output = None
+    def probe() -> None:
+        endpoints = (url.rstrip("/").removesuffix("/v1") + "/health", url.rstrip("/") + "/models")
+        while not stopped.is_set():
+            for endpoint in endpoints:
+                remaining = deadline - time.monotonic()
+                if stopped.is_set() or remaining <= 0:
+                    return
                 try:
-                    stdout, _ = process.communicate(timeout=5)
-                    if stdout:
-                        output = stdout.decode("utf-8", errors="replace")
-                except Exception as e:
-                    logger.warning(f"Failed to read process output: {e}")
-                logger.error(f"vLLM server process exited with code {exit_code}")
-                if output:
-                    logger.error(f"vLLM server output:\n{output}")
-                return False, RuntimeError(f"Process exited with code {exit_code}"), output
+                    with request.urlopen(endpoint, timeout=min(5.0, remaining)) as response:
+                        if response.status == 200:
+                            outcomes.put(None)
+                            return
+                except Exception as error:
+                    outcomes.put(error)
+            if stopped.wait(max(0.1, interval)):
+                return
 
-        try:
-            # Try health endpoint first
-            with urllib.request.urlopen(health_url, timeout=5) as response:
-                if response.status == 200:
-                    if progress_callback:
-                        progress_callback(f"vLLM server ready at {url}")
+    worker = threading.Thread(target=probe, name="vllm-startup-probe", daemon=True)
+    try:
+        while True:
+            now = time.monotonic()
+            phase = phases.update()
+            elapsed = now - start
+            details = (
+                f"{elapsed:.1f}/{timeout:g}s; last observed phase: {phase}; "
+                f"log: {log_path or 'unavailable'}"
+            )
+            # Check before probing and before accepting readiness: a dead process
+            # must never consume the remaining startup allowance.
+            if process is not None and (exit_code := process.poll()) is not None:
+                error = RuntimeError(f"Process exited with code {exit_code} after {details}")
+                report(str(error))
+                return False, error, None
+            if now >= next_progress or phase != previous_phase:
+                report(details)
+                previous_phase = phase
+                next_progress = now + 30
+            if now >= deadline:
+                error = TimeoutError(
+                    f"Startup deadline exceeded after {details}. Last readiness error: {last_error}"
+                )
+                report(str(error))
+                return False, error, None
+            if worker.ident is None:
+                worker.start()
+            while not outcomes.empty():
+                result = outcomes.get_nowait()
+                if result is None:
+                    if process is not None and process.poll() is not None:
+                        break
+                    report(f"ready after {details}")
                     return True, None, None
-        except urllib.error.URLError as e:
-            last_error = e
-        except Exception as e:
-            last_error = e
-
-        try:
-            # Fallback to models endpoint
-            with urllib.request.urlopen(models_url, timeout=5) as response:
-                if response.status == 200:
-                    if progress_callback:
-                        progress_callback(f"vLLM server ready at {url}")
-                    return True, None, None
-        except urllib.error.URLError as e:
-            last_error = e
-        except Exception as e:
-            last_error = e
-
-        time.sleep(interval)
-
-    logger.error(f"vLLM server failed to start within {timeout}s. Last error: {last_error}")
-    return False, last_error, None
+                last_error = result
+            # At most 100 ms between exit/deadline checks, even when HTTP hangs.
+            stopped.wait(min(0.1, deadline - now))
+    finally:
+        stopped.set()
 
 
 def _infer_tool_call_parser(
@@ -248,9 +295,6 @@ def _apply_olmo3_tool_parser_patch() -> None:
 
     See: https://github.com/vllm-project/vllm/issues/32534
     """
-    import os
-    from pathlib import Path
-
     from olmo_eval.inference.patches.olmo3_tool_parser_patch import (
         find_olmo3_parser,
         patch_parser,
@@ -454,31 +498,13 @@ class VLLMServerProcess:
             logger.log(level, msg)
 
     def _read_log_output(self) -> str | None:
-        """Read server logs, preferring the current server's log file."""
-        if not self.log_dir:
+        """Read a bounded tail from this process only; keep the full log on disk."""
+        if self._log_path is None:
             return None
-
-        import pathlib
-
-        candidate_paths: list[pathlib.Path] = []
-        if self._log_path is not None:
-            candidate_paths.append(self._log_path)
-
-        log_dir = pathlib.Path(self.log_dir)
-        if log_dir.exists():
-            for path in sorted(
-                log_dir.glob("vllm_server*.log"),
-                key=lambda log_path: log_path.stat().st_mtime,
-                reverse=True,
-            ):
-                if path not in candidate_paths:
-                    candidate_paths.append(path)
-
-        for log_path in candidate_paths:
-            if log_path.exists():
-                return log_path.read_text(errors="replace")
-
-        return None
+        with self._log_path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 20000))
+            return stream.read().decode("utf-8", errors="replace")
 
     def start(self, progress_callback: ProgressCallback | None = None) -> str:
         """Start the vLLM server.
@@ -540,61 +566,51 @@ class VLLMServerProcess:
         if self.server_kwargs.get("max_model_len"):
             env["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] = "1"
 
-        # Enable verbose vLLM logging when debugging
-        if is_debug_provider():
-            env["VLLM_LOGGING_LEVEL"] = "DEBUG"
-            self._log(logging.INFO, "vLLM debug logging enabled (OLMO_EVAL_DEBUG_PROVIDER=1)")
+        # The parent suppresses vLLM INFO logs globally. Managed children write
+        # their own files and need INFO to expose loading/compilation phases.
+        env["VLLM_LOGGING_LEVEL"] = "DEBUG" if is_debug_provider() else "INFO"
+        env["PYTHONUNBUFFERED"] = "1"
 
-        # Determine output handling:
-        # 1. If log_dir is set, write to file for persistence
-        # 2. If debugging, stream to stderr
-        # 3. Otherwise capture for error reporting
+        # Always persist output. An unread PIPE can fill and stall initialization;
+        # a file also preserves the full evidence after an early exit or timeout.
         if self.log_dir:
-            import pathlib
-
-            self._log_path = pathlib.Path(self.log_dir) / f"vllm_server_{self.port}.log"
+            self._log_path = Path(self.log_dir) / f"vllm_server_{self.port}.log"
             self._log_path.parent.mkdir(parents=True, exist_ok=True)
             self._log_file = open(self._log_path, "w")  # noqa: SIM115
-            self._process = subprocess.Popen(
-                cmd,
-                stdout=self._log_file,
-                stderr=subprocess.STDOUT,
-                env=env,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
-            )
-        elif is_debug_provider():
-            self._process = subprocess.Popen(
-                cmd,
-                stdout=None,  # Inherit stdout
-                stderr=None,  # Inherit stderr
-                env=env,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
-            )
         else:
-            self._process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=env,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            self._log_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
+                mode="w", prefix=f"vllm_server_{self.port}_", suffix=".log", delete=False
             )
+            self._log_path = Path(self._log_file.name)
+        self._log(logging.INFO, f"vLLM server log: {self._log_path}")
+        self._process = subprocess.Popen(
+            cmd,
+            stdout=self._log_file,
+            stderr=subprocess.STDOUT,
+            env=env,
+            start_new_session=True,
+        )
 
         # Register cleanup on exit
         atexit.register(self.stop)
 
         # Wait for server to be ready
+        started_at = time.monotonic()
         success, last_error, process_output = _wait_for_server(
             self.base_url,
             timeout=self.startup_timeout,
             process=self._process,
             progress_callback=progress_callback,
+            log_path=self._log_path,
         )
         if not success:
+            elapsed = time.monotonic() - started_at
+            exit_code = self._process.poll()
             # Stop the process first to avoid blocking on stdout.read()
             self.stop()
 
             # If log_dir is set, output went to file - read it from there
-            if process_output is None and self.log_dir:
+            if process_output is None:
                 with suppress(Exception):
                     process_output = self._read_log_output()
 
@@ -605,7 +621,8 @@ class VLLMServerProcess:
             # Build a detailed error message
             error_msg = (
                 f"vLLM server failed to start for model {self.model_name} "
-                f"within {self.startup_timeout}s"
+                f"after {elapsed:.1f}s (startup limit {self.startup_timeout:g}s; "
+                f"exit code {exit_code}; log: {self._log_path})"
             )
             if last_error:
                 error_msg += f". Error: {last_error}"
