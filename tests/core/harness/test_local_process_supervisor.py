@@ -31,13 +31,16 @@ def _wait_for(path: Path) -> None:
 def test_supervisor_reaps_escaped_descendants(tmp_path, interrupt, missing_children):
     record = tmp_path / "supervisor"
     child_file = tmp_path / "child"
+    partial = tmp_path / "child.partial"
+    # Publish the pid by rename: the test polls for the file and must never read it empty.
     code = (
         "import os,signal,time\n"
         "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
         "if os.fork() == 0:\n"
         "    os.setsid()\n"
         "    if os.fork(): os._exit(0)\n"
-        f"    open({str(child_file)!r},'w').write(str(os.getpid()))\n"
+        f"    with open({str(partial)!r},'w') as f: f.write(str(os.getpid()))\n"
+        f"    os.replace({str(partial)!r},{str(child_file)!r})\n"
         "time.sleep(60)\n"
     )
     process = subprocess.Popen(
