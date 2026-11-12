@@ -105,3 +105,27 @@ register_variant(
         num_samples=8,
     ),
 )
+
+# olmo3base without the "\n\n" stop sequence, matching gsm8k:olmo3base_multiparagraph.
+# The olmo3base variant above stops at the first blank line, which cuts off models that
+# reason over several paragraphs before giving the final answer. This variant keeps every
+# other olmo3base setting so that the two differ only in where generation stops.
+register_variant(
+    "gsm_symbolic",
+    "olmo3base_multiparagraph",
+    metrics=(
+        AccuracyMetric(scorer=ExactMatchScorer),
+        PassAtKMetric(k=1, scorer=ExactMatchScorer),
+        PassAtKMetric(k=2, scorer=ExactMatchScorer),
+        PassAtKMetric(k=4, scorer=ExactMatchScorer),
+        PassAtKMetric(k=8, scorer=ExactMatchScorer),
+    ),
+    primary_metric=PassAtKMetric(k=1, scorer=ExactMatchScorer),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.6,
+        top_p=0.6,
+        stop_sequences=("Question:", "</s>", "<|im_end|>"),
+        num_samples=8,
+    ),
+)

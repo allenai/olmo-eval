@@ -16,6 +16,130 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-03: Terminal-Bench and TBLite leave harness failures out of their scores (#539)
+
+- **Affected**: the `terminal_bench_2` and `openthoughts_tblite` external evals, for
+  runs in which some trial hit a harness or infrastructure failure (image build,
+  container, verifier timeout or unreadable reward, model server). Runs without one
+  are unchanged.
+- **Change**: such a trial used to count as 0 in `pass_rate`, `pass@k`,
+  `pass_rate_std`/`pass_rate_sem` and the per-difficulty and per-category rates, and
+  the run always reported success. It now has no score: those metrics leave it out,
+  and `num_errors` counts it. `pass@k` averages only over tasks with at least `k`
+  measured trials, and `pass@k_num_tasks` counts them. `pass_rate_adjusted`, which already left such trials out
+  and now equals `pass_rate`, is removed. The run fails when more than
+  `max_error_rate` (0.05 by default) of its trials failed this way. A reply that broke
+  the tool-call protocol (`model_error`) is no longer counted as an error; it stays a
+  scored trial.
+- **Identity**: the task hash, computed from `eval_name` and the `eval_args` passed, does
+  not move, so results from before and after can only be told apart by commit or date.
+  Passing `max_error_rate` explicitly changes the hash.
+- **Comparability**: an earlier result whose `error_rate` is 0 is unchanged. For one
+  with errors, its `pass_rate_adjusted` is the new `pass_rate`.
+
+## 2026-11-03: SWE-bench Verified leaves harness failures out of its scores (#538)
+
+- **Affected**: the `swe_bench_verified` external eval, for runs in which some instance
+  hit a harness or infrastructure failure (`image_error`, `image_timeout`,
+  `sandbox_error`, `agent_error`, `grading_error`). Runs without one are unchanged.
+- **Change**: such an instance used to count as unresolved in `resolve_rate` and the
+  other rates, and the run reported success unless every instance failed. It now has
+  no score: the rates and per-repo and per-difficulty breakdowns leave it out, and
+  `num_errors` counts it. The run fails when more than `max_error_rate` (0.05 by
+  default) of its instances failed this way. `error_rate` no longer counts a reply that
+  broke the tool-call protocol (`model_error`), which stays a scored instance.
+  `resume_from` reruns harness failures instead of keeping them.
+- **Identity**: the task hash, computed from `eval_name` and the `eval_args` passed, does
+  not move, so results from before and after can only be told apart by commit or date.
+  Passing `max_error_rate` explicitly changes the hash.
+- **Comparability**: an earlier result whose `error_rate` is 0 is unchanged. One with
+  errors understated `resolve_rate` by roughly that rate times the true resolve rate;
+  dividing `num_resolved` by the number of instances without an error gives the new
+  value, except where an errored instance's partial patch resolved and was counted.
+
+## 2026-11-03: Auditable IFEval per-question exports
+
+- **Affected**: predictions produced with the four IFEval metrics, including `ifeval`,
+  `ifeval_ood` (IFBench), and all `ifeval_mt_*` specs and their variants. Consumers of
+  those predictions, including uploaded per-instance metrics, inherit the old error.
+  Multi-IF uses separate metrics and is not changed.
+- **Change**: all four exact metric keys previously inherited the `ifeval` scorer's
+  prompt-level loose scalar. They now use their own strict/loose instruction outcomes.
+  Predictions retain the boolean lists and any verifier construction errors in
+  `model_output[i].scorer_results.ifeval`. List order follows the request's
+  `doc.instruction_id_list`. Like the aggregate metrics, per-question metrics use
+  output zero. No verifier, extraction, or aggregate calculation changes.
+- **Identity**: task hashes are unchanged. Identify fixed exports by evaluator revision
+  and the retained instruction evidence, not by the presence of an exact metric key:
+  old exports already contained incorrectly labeled exact keys.
+- **Aggregation**: prompt accuracy is the fraction of questions with a nonempty list
+  whose entries all pass. Instruction accuracy is the total number of passing entries
+  divided by the total number of entries. Do not average per-question instruction
+  accuracies without weighting by list length: scores of 1/2 and 1/1 pool to 2/3,
+  not 3/4. An explicitly empty list contributes zero instructions and a failed prompt;
+  an all-empty instruction population scores zero, matching the aggregate metric.
+- **Missing evidence**: fresh responses without the relevant list omit that metric;
+  only prompt-level loose may use the scorer scalar. Missing or malformed lists are
+  unavailable, not zero. Calling `augment_prediction_instance_metrics` on an older
+  prediction recomputes IF values from retained lists if present; otherwise it removes
+  unsupported strict/instruction keys, including old exact-looking keys. A scalar-only
+  exact key cannot distinguish a valid value from the historical alias. The valid loose
+  prompt value remains usable. This helper changes the supplied object only: it does
+  not migrate existing files or database rows, and uploading an old file does not repair it.
+- **Comparability and recovery**: valid saved aggregate scores remain comparable.
+  Historical strict per-question gains, regressions, and paired uncertainty calculated
+  from the aliased values are invalid. Original scored `Response` metadata or retained
+  per-instruction verdicts can reconstruct all four metrics exactly without verification.
+  Scorer scalars alone cannot recover strict outcomes or partial instruction success.
+  Keep original artifacts immutable and write any repaired export separately.
+
+Rechecking saved answers is a new measurement unless the original verifier state can be
+reproduced. In the mixing baseline (`01M6C80EK9Y2BT5RM131DCFWF1`), the completed attempt
+for `ifeval_mt_ood_wildchat_unused_withRewrite` has 1,387 rows: every exported IF metric
+averages 0.33813987022350395, while aggregate strict is 0.2581110310021629. All 28 checked
+IF task/snapshot artifacts (28,014 rows) contain the alias and lack instruction verdicts.
+Their saved loose prompt values reconcile; the existing answer reconstructions fully
+reconcile in only 15 of 28 cases. Even full aggregate reconciliation does not prove each
+historical strict label: opposite row errors can cancel.
+
+CPU probes in the original evaluator image reproduce two sources of uncertainty:
+IFBench `b281f8d4` randomly fills unspecified parameters (the multi-turn letter-frequency
+rows omit `let_relation`), and its unseeded `langdetect` checks can vary even on the same
+verifier and answer. Both explicit language instructions and English-capitalization
+checks use that detector. Pinning the image and Python's random seed alone is insufficient;
+runtime-downloaded NLTK resources are another environment dependency to record. These
+probes establish replay variability, not a complete attribution of every historical
+mismatch or a recovery of the original random choices. Prefer original scored metadata;
+otherwise retain the reconciled loose analysis and keep reconstructed strict labels
+separate and provisional. Do not choose seeds or parameters to fit aggregate totals.
+
+## 2026-10-31: Empty scoring-text diagnostics
+
+- **Affected**: `expertqa`, `researchqa`, their variants, and `geneturing_*` tasks.
+- **Change**: `generation_counts.empty` uses the text remaining after each task's
+  internal thinking removal. The `scoring_text_empty` flag is saved with predictions.
+  Earlier empty counts may undercount reasoning-only outputs.
+- **Identity**: task hashes and scores do not change; only diagnostics change.
+- **Comparability**: quality scores remain comparable. Historical diagnostic counts
+  are not automatically recomputed.
+
+## 2026-10-31: Opt-in Harmony response parsing (#398)
+
+- **Affected:** only runs explicitly setting `response_parser=harmony`; existing
+  specs, suites and default parsing are unchanged.
+- **Change:** structured Harmony transcripts score only the final-channel body;
+  a recognized analysis trace without a final channel scores an empty answer.
+  Inline vLLM retains reserved token delimiters for the opt-in parser; its default
+  output is unchanged. Saved predictions keep the original decoded text as
+  `original_text` and the delimited text as `text_with_special_tokens`.
+  Already saved token-stripped `analysis...assistantfinal...` transcripts are not
+  recoverable unambiguously.
+- **Identity:** the parser setting is serialized and changes the task hash; absent
+  settings preserve every existing hash.
+- **Comparability:** parsed results are a different measurement from older runs
+  that scored reasoning and answer together. Compare only runs with the same
+  parser and decoding settings. This adds no numerical parity claim.
+
 ## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
 
 - **Affected**:

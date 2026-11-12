@@ -9,8 +9,9 @@ conversation turn, from the lists :class:`MultiIFScorer` records per turn.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any, ClassVar
 
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers import IFEvalScorer, MultiIFScorer, Scorer
@@ -45,45 +46,83 @@ def _instruction_level(results: list[list[bool]]) -> float:
     return correct / total
 
 
+class IFEvalMetric(Metric):
+    """Per-question IF accuracy backed by recorded instruction outcomes.
+
+    Instruction accuracies must be weighted by instruction count when pooled.
+    A missing outcome list is unavailable; an explicitly empty list scores zero.
+    """
+
+    result_key: ClassVar[str]
+    instruction_level: ClassVar[bool] = False
+
+    def compute_from_result(self, result: Any) -> float | None:
+        if not isinstance(result, Mapping):
+            return None
+        outcomes = result.get(self.result_key)
+        if not isinstance(outcomes, list) or any(type(v) is not bool for v in outcomes):
+            return None
+        if self.instruction_level:
+            return _instruction_level([outcomes])
+        return _prompt_level([outcomes])
+
+    def compute_instance(self, response: Response) -> float | None:
+        if not response.outputs:
+            return None
+        return self.compute_from_result((response.outputs[0].metadata or {}).get("ifeval"))
+
+    def supports_scorer_fallback(self) -> bool:
+        return False
+
+
 @dataclass(frozen=True, slots=True)
-class IFEvalPromptStrictAccuracy(Metric):
+class IFEvalPromptStrictAccuracy(IFEvalMetric):
     """Fraction of prompts where every instruction passes under strict scoring."""
 
     name: str = "prompt_level_strict_acc"
     scorer: type[Scorer] = IFEvalScorer
+    result_key: ClassVar[str] = "strict"
 
     def compute(self, responses: Sequence[Response]) -> float:
         return _prompt_level(_iter_results(responses, "strict"))
 
 
 @dataclass(frozen=True, slots=True)
-class IFEvalPromptLooseAccuracy(Metric):
+class IFEvalPromptLooseAccuracy(IFEvalMetric):
     """Fraction of prompts where every instruction passes under loose scoring."""
 
     name: str = "prompt_level_loose_acc"
     scorer: type[Scorer] = IFEvalScorer
+    result_key: ClassVar[str] = "loose"
 
     def compute(self, responses: Sequence[Response]) -> float:
         return _prompt_level(_iter_results(responses, "loose"))
 
+    def supports_scorer_fallback(self) -> bool:
+        return True
+
 
 @dataclass(frozen=True, slots=True)
-class IFEvalInstStrictAccuracy(Metric):
+class IFEvalInstStrictAccuracy(IFEvalMetric):
     """Fraction of individual instructions passing under strict scoring."""
 
     name: str = "inst_level_strict_acc"
     scorer: type[Scorer] = IFEvalScorer
+    result_key: ClassVar[str] = "strict"
+    instruction_level: ClassVar[bool] = True
 
     def compute(self, responses: Sequence[Response]) -> float:
         return _instruction_level(_iter_results(responses, "strict"))
 
 
 @dataclass(frozen=True, slots=True)
-class IFEvalInstLooseAccuracy(Metric):
+class IFEvalInstLooseAccuracy(IFEvalMetric):
     """Fraction of individual instructions passing under loose scoring."""
 
     name: str = "inst_level_loose_acc"
     scorer: type[Scorer] = IFEvalScorer
+    result_key: ClassVar[str] = "loose"
+    instruction_level: ClassVar[bool] = True
 
     def compute(self, responses: Sequence[Response]) -> float:
         return _instruction_level(_iter_results(responses, "loose"))

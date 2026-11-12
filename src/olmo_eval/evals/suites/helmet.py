@@ -1,12 +1,13 @@
 """HELMET-plus task suites organized by category and context size.
 
 Mirrors the suite structure in `suites/ruler.py`:
-- Per-category suites for each size: helmet_recall__4096, helmet_icl__4096, etc.
+- Per-category suites for each size: helmet_recall__262144, helmet_icl__4096, etc.
 - Combined suites for each size: helmet_all__4096, etc.
 - A judge-free execution split: helmet_nojudge__4096, etc.
 
 Each suite also has a `:base` twin (helmet_all__4096:base, ...) made of every
-task's `:base` variant, for models without instruction tuning.
+task's `:base` variant, for models without instruction tuning, and `:v2` and
+`:base_v2` twins made of the tasks' fixed variants (see `tasks.helmet.HelmetTask`).
 
 Three deliberate differences from `suites/ruler.py`:
 
@@ -16,10 +17,14 @@ Three deliberate differences from `suites/ruler.py`:
    five tasks and re-ranking one, so re-ranking would be worth a fifth of ICL.
 
 2. `helmet_all__*` is only registered where more than one category exists at
-   that length. Where a single category outruns the others, a combined suite
-   would be a rename of that category's suite whose composition silently
-   differs from the same suite at shorter lengths -- exactly the thing that
-   turns a length sweep into a misleading trend line.
+   that length. Above 128k only `json_kv` extends, so a combined suite there
+   would be a rename of `helmet_recall__*` whose composition silently differs
+   from the same suite at shorter lengths -- exactly the thing that turns a
+   length sweep into a misleading trend line. Use `helmet_recall__*` for the
+   extended tiers, bearing in mind that it changes composition too: through
+   128k it averages `json_kv` with three RULER needle-in-a-haystack tasks, as
+   HELMET does, and above 128k it is `json_kv` alone, since the RULER data
+   stops at 128k. Compare recall across that boundary with `json_kv` itself.
 
 3. Some HELMET tasks are graded by an LLM judge (`narrativeqa` and both
    summarization tasks), so running them needs a judge configured. Following
@@ -55,9 +60,15 @@ def _register_suites(size: int, suffix: str) -> None:
     """Register every HELMET suite at one size for one prompting regime.
 
     `suffix` is appended to every task and suite name: "" for the tasks as
-    configured, ":base" for their variants without a chat template.
+    configured, ":base" for their variants without a chat template, and ":v2"
+    and ":base_v2" for the fixed variants of each.
     """
-    regime = " without a chat template" if suffix else ""
+    regime = {
+        "": "",
+        ":base": " without a chat template",
+        ":v2": " with the v2 fixes",
+        ":base_v2": " without a chat template, with the v2 fixes",
+    }[suffix]
     category_suites: list[Suite] = []
     nojudge_suites: list[Suite] = []
     extra_suites: list[Suite] = []
@@ -128,5 +139,5 @@ def _register_suites(size: int, suffix: str) -> None:
 
 
 for size in CONTEXT_SIZES:
-    for suffix in ("", ":base"):
+    for suffix in ("", ":base", ":v2", ":base_v2"):
         _register_suites(size, suffix)

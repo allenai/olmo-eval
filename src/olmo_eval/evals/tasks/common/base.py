@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib.resources import files
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple
 
 from olmo_eval.common.formatters import Formatter
 from olmo_eval.common.metrics import Metric
@@ -155,6 +155,9 @@ class TaskConfig:
     #: Drop ``<think>...</think>`` traces before scoring; see :meth:`Task.strip_thinking_traces`.
     strip_thinking: bool = False
 
+    #: Parse a structured response before task extraction and scoring.
+    response_parser: Literal["harmony"] | None = None
+
     #: Treat an unterminated ``<think>`` trace as no answer: the output text is
     #: emptied before scoring. Off by default so scoring matches the reference
     #: harness, which scores the raw trace.
@@ -198,7 +201,9 @@ class TaskConfig:
     task_settings: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        """Validate scheduler-only sandbox allocation hints."""
+        """Validate configuration values."""
+        if self.response_parser not in (None, "harmony"):
+            raise ValueError(f"Unsupported response_parser: {self.response_parser!r}")
         if isinstance(self.output_score_aggregation, str):
             try:
                 self.output_score_aggregation = OutputScoreAggregation(
@@ -333,6 +338,8 @@ class TaskConfig:
             serialized["system_prompt_style"] = self.system_prompt_style
         if self.strip_thinking:
             serialized["strip_thinking"] = True
+        if self.response_parser is not None:
+            serialized["response_parser"] = self.response_parser
         if self.task_settings is not None:
             serialized["task_settings"] = self.task_settings
         if self.strip_unclosed_thinking:
@@ -676,11 +683,12 @@ class Task(ABC):
         return self._has_async_cache
 
     def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
-        """Drop ``<think>...</think>`` traces so scorers see only the final answer.
+        """Apply configured response parsing and thinking removal before scoring.
 
-        No-op unless ``config.strip_thinking`` or ``config.strip_unclosed_thinking``
-        is set. Runners call this before ``score_responses`` (which tasks may
-        override). Repeated calls leave already processed outputs unchanged.
+        No-op unless ``config.strip_thinking``, ``config.strip_unclosed_thinking``
+        or ``config.response_parser`` is set. A response parser runs first.
+        Runners call this before ``score_responses`` (which tasks may override).
+        Repeated calls leave already processed outputs unchanged.
 
         With ``strip_thinking``, this mirrors the reference harness's ``r1_style``
         processing: everything through the *last* ``</think>`` goes, the text
@@ -704,7 +712,7 @@ class Task(ABC):
         """
         strip_closed = self.config.strip_thinking
         strip_unclosed = self.config.strip_unclosed_thinking
-        if not (strip_closed or strip_unclosed):
+        if not (strip_closed or strip_unclosed or self.config.response_parser):
             return
         prefilled = self.config.thinking_prefilled
         from olmo_eval.evals.extract import extract_think_answer
@@ -714,6 +722,20 @@ class Task(ABC):
                 if prefilled and output.metadata.get("thinking_processed"):
                     continue
                 text = output.text or ""
+                if self.config.response_parser and not output.metadata.get("response_parsed"):
+                    if output.metadata.get("response_parser_error"):
+                        raise ValueError(output.metadata["response_parser_error"])
+                    from olmo_eval.evals.extract.reasoning import extract_harmony_answer
+
+                    raw_text = output.metadata.get("text_with_special_tokens", text)
+                    parsed = extract_harmony_answer(raw_text)
+                    found = parsed != raw_text
+                    output.metadata["response_parser_found"] = found
+                    if found:
+                        output.metadata.setdefault("original_text", text)
+                        output.text = parsed
+                        text = parsed
+                    output.metadata["response_parsed"] = True
                 closed = "</think>" in text
                 suffix = text.rpartition("</think>")[2] if closed else text
                 unclosed = "<think>" in suffix or (prefilled and not closed)

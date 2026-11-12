@@ -159,3 +159,7 @@ register_variant(
         top_p=0.95,
     ),
 )
+
+# Hill-climbing subset: a fixed 1,000-item sample, drawn with the task's seed
+# (``popqa:chat:hillclimb``). The full set has about 14,000 items.
+register_variant("popqa", "hillclimb", limit=1000)

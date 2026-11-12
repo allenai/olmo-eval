@@ -9,6 +9,7 @@ scripts/eval_gpt4_*.py) -- where a case is labeled "HELMET gives X", it was
 checked against upstream code.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -22,7 +23,7 @@ from olmo_eval.common.scorers import (
 )
 from olmo_eval.common.scorers.alce import AlceQampariRecTop5Scorer, AlceStrEmScorer
 from olmo_eval.common.scorers.llm_judge import JUDGE_ATTEMPTS
-from olmo_eval.common.types import Instance, LMOutput, Response
+from olmo_eval.common.types import CONTEXT_CUT_TOKENS_KEY, Instance, LMOutput, Response
 from olmo_eval.data.helmet_icl_loader import _balance_labels
 from olmo_eval.data.helmet_kilt_loader import _load_jsonl, _question_key
 from olmo_eval.data.helmet_loader import sample_jsonl_by_key
@@ -390,7 +391,7 @@ def test_helmet_task_inventory():
     for config in HELMET_TASKS.values():
         by_tag[config["tag"]] = by_tag.get(config["tag"], 0) + 1
     assert by_tag == {
-        "recall": 24,
+        "recall": 28,  # 24 at 4k-128k, plus json_kv at 256k-2m
         "rag": 24,
         "rerank": 6,
         "longqa": 18,
@@ -398,7 +399,15 @@ def test_helmet_task_inventory():
         "icl": 30,
         "cite": 24,
     }
-    assert len(HELMET_TASKS) == 138
+    assert len(HELMET_TASKS) == 142
+
+
+def test_only_recall_extends_past_standard_lengths():
+    longest_standard = max(STANDARD_CONTEXT_SIZES)
+    for name, config in HELMET_TASKS.items():
+        size = int(name.rsplit("__", 1)[1])
+        if size > longest_standard:
+            assert config["tag"] == "recall", name
 
 
 def test_helmet_context_budgets_match_helmet():
@@ -462,6 +471,10 @@ def test_helmet_suite_structure():
         "helmet_infbench_sum_eng__4096",
         "helmet_multi_lexsum__4096",
     }
+    # above 128k only recall extends; a combined suite there would mislead
+    with pytest.raises(KeyError):
+        get_suite("helmet_all__2097152")
+    assert len(get_suite("helmet_recall__2097152").expanded_tasks) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1210,3 +1223,139 @@ def test_multi_lexsum_refuses_incomplete_data(tmp_path, monkeypatch):
     path.write_text("".join(json.dumps(r) + "\n" for r in hosted[1:]), encoding="utf-8")
     with pytest.raises(ValueError, match="missing from"):
         loader.load_multi_lexsum_dataset(max_context_tokens=100, shots=0)
+
+
+def test_recall_suite_is_json_kv_alone_past_standard_lengths():
+    """The RULER recall tasks stop at 128k, so recall's composition changes there."""
+    import olmo_eval.evals.suites.helmet  # noqa: F401 - triggers registration
+    from olmo_eval.evals.suites.registry import get_suite
+
+    longest = max(STANDARD_CONTEXT_SIZES)
+    assert len(get_suite(f"helmet_recall__{longest}").expanded_tasks) == 4
+    for size in (262144, 524288, 1048576, 2097152):
+        assert get_suite(f"helmet_recall__{size}").expanded_tasks == (f"helmet_json_kv__{size}",)
+
+
+@pytest.mark.parametrize(
+    ("spec", "window_cut"),
+    [
+        ("helmet_kilt_nq__8192", False),
+        ("helmet_kilt_nq__8192:v2", True),
+        ("helmet_infbench_qa_eng__8192:base", False),
+        ("helmet_infbench_qa_eng__8192:base_v2", True),
+    ],
+)
+def test_v2_cuts_the_context_only_to_the_model_window(spec, window_cut):
+    task = get_task(spec)
+    task._templates = {"user": "Read. {context}\n\nQuestion: {question}", "system": "Answer:"}
+    instance = task.process_doc({"context": "THE DOCUMENT", "question": "q", "answer": ["a"]})
+    fit = task.format_request(instance).context_fit
+
+    assert fit is not None and fit.text == "THE DOCUMENT"
+    expected = None if window_cut else 8192 - task.config.sampling_params.max_tokens
+    assert fit.max_prompt_tokens == expected
+
+
+def test_v2_variants_keep_each_mode():
+    chat, base = get_task(f"{LONGQA_SPEC}:v2"), get_task(f"{LONGQA_SPEC}:base_v2")
+
+    assert chat.settings["use_chat_template"] and not base.settings["use_chat_template"]
+    with pytest.raises(ValueError, match="overflow"):
+        get_task(LONGQA_SPEC, {"task_settings": {**chat.config.task_settings, "overflow": "cut"}})
+
+
+@pytest.mark.parametrize(
+    ("task", "stop"),
+    [
+        ("narrativeqa", ("\n\n",)),
+        ("alce_asqa", ("\n\n",)),
+        ("alce_qampari_nocite", ("\n\n",)),
+        ("multi_lexsum", None),
+        ("kilt_nq", ("\n",)),
+    ],
+)
+def test_base_v2_stops_only_chat_format_qa_at_a_blank_line(task, stop):
+    spec = f"helmet_{task}__8192"
+    base, base_v2 = get_task(f"{spec}:base"), get_task(f"{spec}:base_v2")
+
+    assert base_v2.config.sampling_params.stop_sequences == stop
+    assert get_task(f"{spec}:v2").config.sampling_params == base.config.sampling_params
+    assert base_v2.config.sampling_params.max_tokens == base.config.sampling_params.max_tokens
+
+
+def _response(spec: str, text: str, gold: list[str], cut_tokens: int) -> Response:
+    task = get_task(spec)
+    metadata = {CONTEXT_CUT_TOKENS_KEY: cut_tokens} if cut_tokens else {}
+    instance = Instance(question="q", gold_answer=gold, metadata={"all_gold_answers": gold})
+    return Response(
+        instance=instance,
+        request=task.format_request(instance),
+        outputs=[LMOutput(text=text, metadata=metadata)],
+    )
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "helmet_kilt_nq__8192:v2",
+        "helmet_json_kv__8192:base_v2",
+        "helmet_alce_asqa__8192:base_v2",
+        "helmet_narrativeqa__8192:base_v2",
+        "helmet_infbench_sum_eng__8192:base_v2",
+    ],
+)
+def test_v2_scores_an_overflowing_instance_zero_without_scoring_it(spec):
+    """Every metric reads 0 for an instance whose context was cut, and no judge or
+    AutoAIS is called (none is configured here)."""
+    task = get_task(spec)
+    response = _response(spec, "the answer", ["the answer"], cut_tokens=12)
+
+    asyncio.run(task.score_responses([response]))
+    metrics = task.compute_metrics([response])
+
+    primary = task.config.get_primary_metric()
+    assert next(iter(metrics[primary.name].values())) == 0.0
+    assert next(iter(metrics["context_truncation_rate"].values())) == 1.0
+    # Scored as 0, not left unscored: an unscored instance would drop out of the mean.
+    channels = [n for n in task._get_scorers() if n != "context_cut"]
+    channels += [k for k in (getattr(task, "judge_score_key", None),) if k]
+    assert all(response.scores.get(name) == 0.0 for name in channels), response.scores
+    assert not any("scoring_error" in key for key in response.outputs[0].metadata)
+    # The instance is recorded as cut, under the scorer's own name.
+    assert response.scores["context_cut"] == 1.0
+    assert response.outputs[0].metadata["score:context_cut"] == 1.0
+    assert not any(key.startswith("<member") for key in response.scores)
+
+
+def test_v2_counts_an_overflowing_alce_instance_in_the_citation_means():
+    """A cut ALCE instance has 0 citation recall and precision, not none: it counts."""
+    spec = "helmet_alce_asqa__8192:base_v2"
+    task = get_task(spec)
+    cut = _response(spec, "the answer", ["the answer"], cut_tokens=12)
+    asyncio.run(task.score_responses([cut]))
+    other = _response(spec, "x", ["x"], cut_tokens=0)
+    other.outputs[0].metadata["judge_result"] = {"citation_rec": 1.0, "citation_prec": 1.0}
+
+    metrics = {m.name: m for m in task.config.metrics}
+    assert metrics["citation_rec"].compute([cut, other]) == 0.5
+    assert metrics["citation_prec"].compute([cut, other]) == 0.5
+
+
+def test_v2_scores_the_instances_that_fit_as_before():
+    task = get_task("helmet_kilt_nq__8192:v2")
+    cut = _response("helmet_kilt_nq__8192:v2", "Paris", ["Paris"], cut_tokens=12)
+    fits = _response("helmet_kilt_nq__8192:v2", "Paris", ["Paris"], cut_tokens=0)
+
+    asyncio.run(task.score_responses([cut, fits]))
+
+    assert cut.scores["substring_exact_match"] == 0.0
+    assert fits.scores["substring_exact_match"] == 1.0
+
+
+def test_the_original_spec_scores_a_cut_instance():
+    task = get_task("helmet_kilt_nq__8192")
+    cut = _response("helmet_kilt_nq__8192", "Paris", ["Paris"], cut_tokens=12)
+
+    asyncio.run(task.score_responses([cut]))
+
+    assert cut.scores["substring_exact_match"] == 1.0
