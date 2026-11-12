@@ -587,3 +587,43 @@ def test_sanitize_tool_name_recovers_harmony_mangled_names():
     assert _sanitize_tool_name("open", known) == "open"
     assert _sanitize_tool_name("searchx", known) == "searchx"
     assert _sanitize_tool_name("search", frozenset()) == "search"
+
+
+def test_sanitize_tool_name_cuts_at_non_identifier_characters():
+    from olmo_eval.harness.scaffolds.openai_agents import _sanitize_tool_name
+
+    known = frozenset({"search"})
+    assert _sanitize_tool_name("search**commentary", known) == "search"
+    assert _sanitize_tool_name("search commentary", known) == "search"
+
+
+def test_context_length_error_matches_vllm_responses_phrasing():
+    import httpx
+    import openai
+
+    from olmo_eval.harness.scaffolds.openai_agents import _is_context_length_error
+
+    def make(msg: str) -> openai.BadRequestError:
+        resp = httpx.Response(400, request=httpx.Request("POST", "http://x/v1/responses"))
+        return openai.BadRequestError(msg, response=resp, body={"message": msg})
+
+    assert _is_context_length_error(
+        make(
+            "The engine prompt length 131934 exceeds the max_model_len 131072. "
+            "Please reduce prompt."
+        )
+    )
+    assert _is_context_length_error(make("This model's maximum context length is 131072 tokens."))
+    assert not _is_context_length_error(make("Unknown input type: mcp_call"))
+
+
+def test_is_reasoning_only():
+    from types import SimpleNamespace as NS
+
+    from olmo_eval.harness.scaffolds.openai_agents import _is_reasoning_only
+
+    assert _is_reasoning_only(NS(output=[NS(type="reasoning")]))
+    assert not _is_reasoning_only(NS(output=[NS(type="reasoning"), NS(type="function_call")]))
+    assert not _is_reasoning_only(NS(output=[NS(type="message"), NS(type="reasoning")]))
+    assert not _is_reasoning_only(NS(output=[]))
+    assert not _is_reasoning_only(NS(output=None))

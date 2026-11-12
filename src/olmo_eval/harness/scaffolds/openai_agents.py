@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from contextvars import ContextVar
 from dataclasses import replace
@@ -43,10 +44,14 @@ def _is_context_length_error(exc: BaseException) -> bool:
     """Whether the server rejected a request because the conversation outgrew the context."""
     import openai
 
-    return isinstance(exc, openai.BadRequestError) and (
-        getattr(exc, "code", None) == "context_length_exceeded"
-        or "maximum context length" in str(exc).lower()
-    )
+    if not isinstance(exc, openai.BadRequestError):
+        return False
+    if getattr(exc, "code", None) == "context_length_exceeded":
+        return True
+    text = str(exc).lower()
+    # Chat completions say "maximum context length"; vLLM's Responses endpoint says
+    # "prompt length N exceeds the max_model_len M. Please reduce prompt."
+    return "maximum context length" in text or "max_model_len" in text
 
 
 _HARMONY_HEADER_WORDS = ("commentary", "analysis", "final", "json")
@@ -58,14 +63,15 @@ def _sanitize_tool_name(name: str, known: frozenset[str]) -> str:
     gpt-oss sometimes orders the harmony header as ``to=functions.search<|channel|>commentary
     <|constrain|>json`` and vLLM (0.19.1) then reports the tool name as
     ``search<|channel|>commentary`` or, with the special tokens dropped,
-    ``searchcommentaryjson`` (vllm-project/vllm#58825). The arguments are intact, so
+    ``searchcommentaryjson`` or ``search**commentary`` (vllm-project/vllm#58825). The
+    arguments are intact, so
     recover the intended tool: cut at the first special token, then peel trailing
     channel/format words while the remainder is not a registered name. Unknown names
     that do not resolve are returned unchanged so the SDK reports them as before.
     """
     if name in known or not known:
         return name
-    head = name.split("<|", 1)[0]
+    head = re.split(r"[^A-Za-z0-9_.\-]", name, maxsplit=1)[0]
     while head and head not in known:
         for word in _HARMONY_HEADER_WORDS:
             if head.endswith(word) and len(head) > len(word):
@@ -74,6 +80,21 @@ def _sanitize_tool_name(name: str, known: frozenset[str]) -> str:
         else:
             break
     return head if head in known else name
+
+
+_MAX_REASONING_ONLY_RESAMPLES = 8
+
+
+def _is_reasoning_only(response: Any) -> bool:
+    """Whether a Responses API result ends in a reasoning item with no call or message after it."""
+    output = getattr(response, "output", None)
+    if not isinstance(output, list) or not output:
+        return False
+    if getattr(output[-1], "type", None) != "reasoning":
+        return False
+    return not any(
+        getattr(item, "type", None) in ("function_call", "mcp_call", "message") for item in output
+    )
 
 
 def _make_vllm_responses_model(base: type) -> type:
@@ -92,6 +113,23 @@ def _make_vllm_responses_model(base: type) -> type:
     class VLLMResponsesModel(base):  # type: ignore[misc,valid-type]
         async def _fetch_response(self, *args: Any, **kwargs: Any) -> Any:
             response = await super()._fetch_response(*args, **kwargs)
+            # gpt-oss sometimes stops after an analysis-channel message, with neither a
+            # tool call nor a final message; the SDK would end the run with an empty
+            # answer. The reference BrowseComp-Plus client discards such a response and
+            # samples again, so do the same, within a bound.
+            for attempt in range(_MAX_REASONING_ONLY_RESAMPLES):
+                if not _is_reasoning_only(response):
+                    break
+                logger.warning(
+                    "Model returned a reasoning-only response "
+                    f"(status={getattr(response, 'status', None)}); "
+                    f"resampling ({attempt + 1}/{_MAX_REASONING_ONLY_RESAMPLES})"
+                )
+                response = await super()._fetch_response(*args, **kwargs)
+            if getattr(response, "status", None) == "incomplete":
+                logger.warning(
+                    f"Model response incomplete: {getattr(response, 'incomplete_details', None)}"
+                )
             output = getattr(response, "output", None)
             if not isinstance(output, list):
                 return response
