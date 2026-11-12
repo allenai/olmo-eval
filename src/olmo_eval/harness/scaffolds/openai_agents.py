@@ -555,21 +555,25 @@ class OpenAIAgentsScaffold(Scaffold):
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
             ) from e
 
-        # Create compaction session if enabled
+        # Always keep an in-memory session so a run cut short (context overflow) can
+        # still report the turns it took; wrap it for compaction only when enabled.
         session = None
-        if enable_compaction:
+        try:
+            from agents import SQLiteSession  # type: ignore[ty:unresolved-import]
+
+            session_id = (trace_metadata or {}).get("task_id", "default")
+            session = SQLiteSession(session_id, db_path=":memory:")
+        except ImportError:
+            logger.warning("agents.SQLiteSession not available - partial trajectories are not kept")
+        if enable_compaction and session is not None:
             try:
-                from agents import SQLiteSession  # type: ignore[ty:unresolved-import]
                 from agents.memory import (  # type: ignore[ty:unresolved-import]
                     OpenAIResponsesCompactionSession,
                 )
 
-                session_id = (trace_metadata or {}).get("task_id", "default")
-                # Use an in-memory SQLite session as the underlying storage
-                underlying = SQLiteSession(session_id, db_path=":memory:")
                 session = OpenAIResponsesCompactionSession(
                     session_id=session_id,
-                    underlying_session=underlying,
+                    underlying_session=session,
                 )
             except ImportError:
                 logger.warning("Context compaction not available - agents.memory not found")
