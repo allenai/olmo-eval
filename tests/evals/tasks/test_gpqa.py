@@ -2,7 +2,7 @@
 
 import pytest
 
-from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import get_task, list_tasks
 
 
@@ -269,6 +269,26 @@ class TestExtractAnswer:
         output = LMOutput(text="ANSWER:A")
         assert task.extract_answer(output) == "A"
 
+    def test_answer_pattern_bold_label(self, task):
+        output = LMOutput(text="**Answer:** B")
+        assert task.extract_answer(output) == "B"
+
+    def test_answer_pattern_followed_by_word_falls_back(self, task):
+        output = LMOutput(text="ANSWER: the correct choice is C")
+        assert task.extract_answer(output) == "C"
+
+    def test_answer_pattern_letter_on_next_line(self, task):
+        output = LMOutput(text="ANSWER:\nC\n\nOption A was close.")
+        assert task.extract_answer(output) == "C"
+
+    def test_answer_pattern_without_colon(self, task):
+        output = LMOutput(text="Reasoning about the options.\n\n**Answer** C")
+        assert task.extract_answer(output) == "C"
+
+    def test_answer_pattern_without_colon_ignores_prose(self, task):
+        output = LMOutput(text="Let me answer a) first. So it is (B)")
+        assert task.extract_answer(output) == "B"
+
     def test_last_answer_pattern_wins(self, task):
         output = LMOutput(text="ANSWER: A\nWait, actually ANSWER: C")
         assert task.extract_answer(output) == "C"
@@ -411,3 +431,38 @@ class TestCoTVariant:
     def test_extract_answer_strips_parens(self, task):
         output = LMOutput(text="Reasoning. Therefore, the answer is (D)")
         assert task.extract_answer(output) == "D"
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("strip_closed", [False, True])
+    @pytest.mark.parametrize("prefilled", [False, True])
+    async def test_unfinished_thinking_does_not_credit_a_stray_letter(
+        self, strip_closed, prefilled
+    ):
+        task = get_task(
+            "gpqa_diamond:cot",
+            config_overrides={
+                "strip_thinking": strip_closed,
+                "strip_unclosed_thinking": True,
+                "thinking_prefilled": prefilled,
+            },
+        )
+        text = "maybe (B)" if prefilled else "<think>a</think> draft <think>maybe (B)"
+        instance = Instance(question="Q", gold_answer="B")
+        response = Response(
+            instance=instance,
+            request=LMRequest(
+                request_type=RequestType.COMPLETION,
+                prompt="Q<think>" if prefilled else "Q",
+            ),
+            outputs=[LMOutput(text=text)],
+        )
+
+        task.strip_thinking_traces([response])
+        task.strip_thinking_traces([response])
+        scored = await task.score_responses([response])
+
+        output = scored[0].outputs[0]
+        assert output.text == ""
+        assert output.metadata["original_text"] == text
+        assert output.metadata["unclosed_thinking"] is True
+        assert scored[0].scores["exact_match"] == 0.0

@@ -145,6 +145,34 @@ class HarnessPresets:
         )
 
     @lazy
+    def helmet(name: str) -> HarnessConfig:
+        """Default preset plus the NLI model HELMET's Cite tasks check citations with.
+
+        Serves ALCE's AutoAIS model, in bf16 as HELMET loads it, as the auxiliary
+        provider "autoais" on a GPU of its own.
+        """
+        from olmo_eval.common.scorers.alce import (
+            AUTOAIS_MODEL,
+            AUTOAIS_PROVIDER,
+            AUTOAIS_REVISION,
+        )
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
+            metrics=MetricsConfig(),
+            batching=BatchConfig.batched(),
+            auxiliary_providers={
+                AUTOAIS_PROVIDER: ProviderConfig(
+                    kind=ProviderKind.HF,
+                    model=AUTOAIS_MODEL,
+                    revision=AUTOAIS_REVISION,
+                    dtype="bfloat16",
+                )
+            },
+        )
+
+    @lazy
     def simple_agent(name: str) -> HarnessConfig:
         """Simple agent preset."""
         return HarnessConfig(
@@ -156,6 +184,33 @@ class HarnessPresets:
             metrics=MetricsConfig(),
             scaffold="openai_agents",
             max_concurrency=4,
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def bfcl_multi_turn(name: str) -> HarnessConfig:
+        """BFCL multi-turn preset: drives a rollout against its stateful APIs."""
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            metrics=MetricsConfig(),
+            scaffold="bfcl_multi_turn",
+            max_concurrency=8,
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def multi_turn_chat(name: str) -> HarnessConfig:
+        """Multi-turn chat preset: answers each scripted user turn in one conversation."""
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
+            metrics=MetricsConfig(),
+            scaffold="multi_turn_chat",
+            max_concurrency=256,
             batching=BatchConfig.streaming(),
         )
 

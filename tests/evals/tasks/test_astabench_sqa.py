@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from olmo_eval.common.scorers import llm_judge
 from olmo_eval.common.scorers.citation import (
     JUST_HAS_A_TITLE,
     _build_section_citations,
@@ -12,6 +13,7 @@ from olmo_eval.common.scorers.citation import (
     extract_json_from_response,
     score_citation_group,
 )
+from olmo_eval.common.scorers.llm_judge import JUDGE_ATTEMPTS, Judge, JudgeParseError
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.astabench_sqa import (
     AnswerPrecisionMetric,
@@ -468,7 +470,7 @@ class TestScoreCitationGroup:
             raise AssertionError("should not be called")
 
         result = await score_citation_group(
-            stub_judge,
+            Judge(call=stub_judge),
             "First sentence. Second sentence. Third sentence.",
             [],
         )
@@ -476,19 +478,28 @@ class TestScoreCitationGroup:
         assert result["n_extrapolatory"] == 3
 
     @pytest.mark.anyio
-    async def test_invalid_json_fallback_uses_sentence_count(self):
-        """When judge returns garbage, fallback should count sentences."""
+    async def test_a_reply_with_no_claims_raises_after_asking_again(self, monkeypatch):
+        """A judge reply with no claims JSON leaves the output unscored."""
+
+        async def no_sleep(_):
+            return None
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", no_sleep)
+        calls = []
 
         async def stub_judge(prompt, **kwargs):
+            calls.append(prompt)
             return "this is not json at all"
 
-        result = await score_citation_group(
-            stub_judge,
-            "Sentence one. Sentence two.",
-            [{"id": "[1]", "snippets": "some snippet"}],
-        )
-        assert result["n_attributable"] == 0
-        assert result["n_extrapolatory"] == 2
+        with pytest.raises(JudgeParseError) as raised:
+            await score_citation_group(
+                Judge(call=stub_judge),
+                "Sentence one. Sentence two.",
+                [{"id": "[1]", "snippets": "some snippet"}],
+            )
+
+        assert len(calls) == JUDGE_ATTEMPTS
+        assert raised.value.raw == "this is not json at all"
 
     @pytest.mark.anyio
     async def test_valid_judge_response(self):
@@ -516,7 +527,7 @@ class TestScoreCitationGroup:
             return judge_response
 
         result = await score_citation_group(
-            stub_judge,
+            Judge(call=stub_judge),
             "Claim A [1]. Claim B [1].",
             [{"id": "[1]", "snippets": "evidence text"}],
         )
@@ -545,7 +556,7 @@ class TestScoreCitationGroup:
             return judge_response
 
         result = await score_citation_group(
-            stub_judge,
+            Judge(call=stub_judge),
             "Claim A [1].",
             [{"id": "[1]", "snippets": f"{JUST_HAS_A_TITLE}Some Paper"}],
         )

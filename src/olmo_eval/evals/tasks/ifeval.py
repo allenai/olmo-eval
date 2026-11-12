@@ -55,6 +55,7 @@ class IFEval(Task):
         top_p=0.95,
     )
     answer_extractor = extract_think_answer
+    strip_thinking = True
 
     @property
     def instances(self) -> Iterator[Instance]:

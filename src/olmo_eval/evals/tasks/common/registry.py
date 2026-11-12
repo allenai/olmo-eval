@@ -15,6 +15,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, TypeVar
 
+from olmo_eval.common.scorers.llm_judge import judge_env_overrides
+
 from .base import SandboxEnv, Task, TaskConfig
 
 T = TypeVar("T", bound=type[Task])
@@ -103,6 +105,55 @@ def register_variant(task_name: str, variant: str, **overrides: Any) -> None:
     _variants.setdefault(task_name, {})[variant] = overrides
 
 
+def register_sampling_variant(spec: str, variant: str, **sampling: Any) -> str:
+    """Register ``spec`` with only some of its sampling settings changed, and return the new spec.
+
+    A variant's ``sampling_params`` replaces the whole block, so stacking one on ``spec``
+    would drop what ``spec``'s own variants set there (a pass@k sample count, say). This
+    instead folds ``spec``'s variants and the changed fields into one variant of its base
+    task: ``register_sampling_variant("hmmt_feb_2025:pass_at_8", "t10", temperature=1.0)``
+    registers and returns ``hmmt_feb_2025:pass_at_8_t10``.
+
+    Args:
+        spec: A registered task spec (``task_name[:variant...]``).
+        variant: Suffix naming the change; joined to ``spec``'s variants with ``_``.
+        **sampling: ``SamplingParams`` fields to change.
+    """
+    parts = spec.split(":")
+    for i in range(len(parts), 0, -1):
+        task_name = ":".join(parts[:i])
+        if task_name in _tasks:
+            variants = parts[i:]
+            break
+    else:
+        raise ValueError(f"Unknown task in spec {spec!r}")
+
+    config = _configs[task_name]
+    overrides: dict[str, Any] = {}
+    for name in variants:
+        if name not in _variants.get(task_name, {}):
+            raise ValueError(f"Unknown variant {name!r} in spec {spec!r}")
+        overrides.update(_variants[task_name][name])
+        config = replace(config, **_variants[task_name][name])
+    if config.sampling_params is None:
+        raise ValueError(f"{spec!r} has no sampling settings to change")
+    overrides["sampling_params"] = replace(config.sampling_params, **sampling)
+
+    name = "_".join([*variants, variant])
+    register_variant(task_name, name, **overrides)
+    return f"{task_name}:{name}"
+
+
+def _parse_bool(value_str: str, key: str) -> bool:
+    """Coerce an override value to a bool (true/false/1/0, case-insensitive)."""
+    normalized = value_str.strip().lower()
+    if normalized in {"true", "1"}:
+        return True
+    if normalized in {"false", "0"}:
+        return False
+    raise ValueError(f"Invalid boolean for {key}: {value_str!r} (expected true/false or 1/0)")
+
+
 def parse_overrides(override_str: str) -> dict[str, Any]:
     """Parse 'key=value,key=value' into dict with type coercion.
 
@@ -167,10 +218,13 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
                 "max_model_len",
                 "top_k",
                 "num_samples",
+                "truncate_prompt_tokens",
             }:
                 value = int(value_str)
-            elif key in {"temperature", "top_p"}:
+            elif key in {"temperature", "top_p", "judge_temperature"}:
                 value = float(value_str)
+            elif key in {"strip_thinking", "strip_unclosed_thinking", "thinking_prefilled"}:
+                value = _parse_bool(value_str, key)
             elif key == "dependencies":
                 # Dependencies should be parsed as JSON list
                 import json as json_module
@@ -302,9 +356,20 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
             raise _resolve_error(variant)
         config = replace(config, **_variants[task_name][variant])
 
+    # A judged task takes its judge from $OLMO_EVAL_JUDGE unless the overrides name a
+    # judge model, which then wins with its task's default effort and budget.
+    default_judge = config.judge_model
+    if _tasks[task_name].judged and "judge_model" not in (config_overrides or {}):
+        config = replace(config, **judge_env_overrides())
+
     # Apply additional config overrides (highest priority)
     if config_overrides:
         config = replace(config, **config_overrides)
+
+    # A task's judge temperature is tuned for its default judge, and reasoning judges
+    # reject one, so another judge gets none unless the overrides set it too.
+    if config.judge_model != default_judge and "judge_temperature" not in (config_overrides or {}):
+        config = replace(config, judge_temperature=None)
 
     return _tasks[task_name](config)
 

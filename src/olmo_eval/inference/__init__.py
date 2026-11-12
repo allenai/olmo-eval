@@ -1,5 +1,7 @@
 """Language model inference providers."""
 
+from importlib import import_module
+
 from olmo_eval.common.types import ProviderKind
 
 from .base import InferenceProvider
@@ -16,8 +18,10 @@ __all__ = [
     "MockProvider",
     "HuggingFaceProvider",
     "VLLMProvider",
+    "SGLangProvider",
     "VLLMServerProvider",
     "OlmoCoreProvider",
+    "OlmoCoreVLMProvider",
     "LiteLLMProvider",
     "create_provider",
     # Tokenizer utilities
@@ -94,10 +98,16 @@ def create_provider(
     force_download = bool(kwargs.get("force_download", False))
 
     match kind_str:
+        case "sglang":
+            return import_module(".providers.sglang", __name__).SGLangProvider(model_name, **kwargs)
         case "mock":
             from .providers.mock import MockProvider
 
             return MockProvider(model_name)
+        case "replay":
+            from .providers.replay import ReplayProvider
+
+            return ReplayProvider(model_name, predictions=kwargs.get("predictions", ""))
         case "hf":
             from .providers.huggingface import HuggingFaceProvider
 
@@ -129,9 +139,27 @@ def create_provider(
             )
             return VLLMServerProvider(model_name, **kwargs)
         case "olmo_core":
+            from .providers.olmo_core_vlm import is_multimodal_checkpoint
+
+            if is_multimodal_checkpoint(model_name):
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "provider.kind=olmo_core detected a multimodal checkpoint and is "
+                    "using OlmoCoreVLMProvider; pass provider.kind=olmo_core_vlm "
+                    "explicitly so remote jobs install the matching olmo_core_vlm extra."
+                )
+                from .providers.olmo_core_vlm import OlmoCoreVLMProvider
+
+                return OlmoCoreVLMProvider(model_name, **kwargs)
+
             from .providers.olmo_core import OlmoCoreProvider
 
             return OlmoCoreProvider(model_name, **kwargs)
+        case "olmo_core_vlm":
+            from .providers.olmo_core_vlm import OlmoCoreVLMProvider
+
+            return OlmoCoreVLMProvider(model_name, **kwargs)
         case "litellm":
             from .providers.litellm import LiteLLMProvider
 
@@ -142,6 +170,8 @@ def create_provider(
 
 # Lazy imports for optional dependencies
 def __getattr__(name: str):
+    if name == "SGLangProvider":
+        return import_module(".providers.sglang", __name__).SGLangProvider
     if name == "MockProvider":
         from .providers.mock import MockProvider
 
@@ -162,6 +192,10 @@ def __getattr__(name: str):
         from .providers.olmo_core import OlmoCoreProvider
 
         return OlmoCoreProvider
+    if name == "OlmoCoreVLMProvider":
+        from .providers.olmo_core_vlm import OlmoCoreVLMProvider
+
+        return OlmoCoreVLMProvider
     if name == "LiteLLMProvider":
         from .providers.litellm import LiteLLMProvider
 

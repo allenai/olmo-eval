@@ -90,6 +90,197 @@ def _make_process_tracker(
     )
 
 
+class TestRequiredScaffold:
+    """A task that needs a scaffold fails while tasks are prepared, before generation."""
+
+    def _runner(self, scaffold: str | None) -> AsyncEvalRunner:
+        harness = replace(make_harness_config(), scaffold=scaffold)
+        return AsyncEvalRunner(
+            harness_config=harness,
+            task_specs=["mt_bench"],
+            task_overrides={"mt_bench": {"limit": 2}},
+        )
+
+    def test_a_harness_without_the_scaffold_is_refused(self):
+        with pytest.raises(RuntimeError, match="mt_bench has to run under a harness with scaffold"):
+            self._runner(scaffold=None)._prepare_tasks()
+
+    def test_a_harness_with_another_scaffold_is_refused(self):
+        with pytest.raises(RuntimeError, match="harness 'test' has scaffold=openai_agents"):
+            self._runner(scaffold="openai_agents")._prepare_tasks()
+
+    def test_the_scaffold_is_checked_before_the_data_loads(self, monkeypatch):
+        def load_data(*args, **kwargs):
+            raise AssertionError("the data was loaded")
+
+        monkeypatch.setattr("olmo_eval.runners.asynq.runner.prepare_task_items", load_data)
+
+        with pytest.raises(RuntimeError, match="mt_bench has to run under a harness with scaffold"):
+            self._runner(scaffold=None)._prepare_tasks()
+
+    def test_the_required_scaffold_is_accepted(self):
+        _, trackers, items = self._runner(scaffold="multi_turn_chat")._prepare_tasks()
+
+        assert trackers["mt_bench"].error is None
+        assert len(items) == 2
+
+
+class TestJudgeProvider:
+    """A task judged by an auxiliary provider fails before its data loads on a wrong judge."""
+
+    SPEC = "harmbench:wg_judge"
+
+    @pytest.fixture
+    def loaded(self, monkeypatch) -> list[str]:
+        """Stand in for prepare_task_items, recording each spec whose data it would load."""
+        loaded: list[str] = []
+
+        def prepare(spec, model_name, overrides, sampling_overrides=None):
+            loaded.append(spec)
+            return get_task(spec, overrides), []
+
+        monkeypatch.setattr("olmo_eval.runners.asynq.runner.prepare_task_items", prepare)
+        return loaded
+
+    def _runner(self, **providers: ProviderConfig) -> AsyncEvalRunner:
+        harness = replace(make_harness_config(), auxiliary_providers=providers)
+        return AsyncEvalRunner(harness_config=harness, task_specs=[self.SPEC])
+
+    def test_the_provider_serving_the_recorded_judge_is_accepted(self, loaded):
+        runner = self._runner(wg_judge=ProviderConfig(model="allenai/wildguard"))
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+        assert loaded == [self.SPEC]
+
+    def test_a_provider_serving_another_model_is_refused(self, loaded):
+        runner = self._runner(wg_judge=ProviderConfig(model="org/other-guard"))
+
+        with pytest.raises(RuntimeError, match="serves 'org/other-guard'") as exc:
+            runner._prepare_tasks()
+
+        assert "-o judge_model=org/other-guard" in str(exc.value)
+        assert loaded == []
+
+    def test_a_missing_provider_is_refused(self, loaded):
+        with pytest.raises(RuntimeError, match="does not define"):
+            self._runner()._prepare_tasks()
+
+        assert loaded == []
+
+    def test_a_judge_model_override_names_the_judge_to_expect(self, loaded):
+        runner = self._runner(wg_judge=ProviderConfig(model="org/other-guard"))
+        runner.task_overrides = {self.SPEC: {"judge_model": "org/other-guard"}}
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+
+
+class TestAutoAisProvider(TestJudgeProvider):
+    """A Cite task fails before its data loads without a provider for its NLI model."""
+
+    SPEC = "helmet_alce_asqa__4096"
+
+    def test_the_provider_serving_the_recorded_judge_is_accepted(self, loaded):
+        from olmo_eval.harness.presets import get_harness_preset
+
+        runner = self._runner(**get_harness_preset("helmet").auxiliary_providers)
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+        assert loaded == [self.SPEC]
+
+    def test_a_provider_serving_another_model_is_refused(self, loaded):
+        runner = self._runner(autoais=ProviderConfig(model="org/other-nli"))
+
+        with pytest.raises(RuntimeError, match="serves 'org/other-nli'"):
+            runner._prepare_tasks()
+
+        assert loaded == []
+
+    def test_a_judge_model_override_names_the_judge_to_expect(self, loaded):
+        runner = self._runner(autoais=ProviderConfig(model="org/other-nli"))
+        runner.task_overrides = {self.SPEC: {"judge_model": "org/other-nli"}}
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+
+    def test_the_no_autoais_variant_runs_without_one(self, loaded):
+        runner = self._runner()
+        runner.task_specs = [f"{self.SPEC}:no_autoais"]
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[f"{self.SPEC}:no_autoais"].error is None
+
+
+class TestRequiredSandbox:
+    """A task that scores by running code fails before its data loads without a sandbox."""
+
+    SPEC = "humaneval:olmo3base"
+    SANDBOX = SandboxConfig(mode=SandboxMode.LOCAL, image="python:3.12")
+
+    @pytest.fixture
+    def loaded(self, monkeypatch) -> list[str]:
+        """Stand in for prepare_task_items, recording each spec whose data it would load."""
+        loaded: list[str] = []
+
+        def prepare(spec, model_name, overrides, sampling_overrides=None):
+            loaded.append(spec)
+            return get_task(spec, overrides), []
+
+        monkeypatch.setattr("olmo_eval.runners.asynq.runner.prepare_task_items", prepare)
+        return loaded
+
+    def _runner(self, spec: str = SPEC, **harness_fields) -> AsyncEvalRunner:
+        harness = replace(make_harness_config(), **harness_fields)
+        return AsyncEvalRunner(harness_config=harness, task_specs=[spec])
+
+    def test_a_harness_without_sandboxes_is_refused_before_the_data_loads(self, loaded):
+        with pytest.raises(RuntimeError, match=f"{self.SPEC} scores by running code") as exc:
+            self._runner()._prepare_tasks()
+
+        assert "--harness codex_universal" in str(exc.value)
+        assert "harness 'test' has none" in str(exc.value)
+        assert loaded == []
+
+    def test_only_the_task_that_runs_code_is_named(self, loaded):
+        runner = self._runner()
+        runner.task_specs = [self.SPEC, "gsm8k"]
+
+        with pytest.raises(RuntimeError, match="Failed to prepare 1 task") as exc:
+            runner._prepare_tasks()
+
+        assert self.SPEC in str(exc.value)
+        assert "gsm8k" not in str(exc.value)
+
+    def test_a_harness_with_a_sandbox_is_accepted(self, loaded):
+        _, trackers, _ = self._runner(sandboxes=(self.SANDBOX,))._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+        assert loaded == [self.SPEC]
+
+    def test_the_check_sees_the_task_overrides(self, loaded):
+        runner = self._runner()
+        runner.task_overrides = {self.SPEC: {"metrics": [AccuracyMetric()]}}
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers[self.SPEC].error is None
+        assert loaded == [self.SPEC]
+
+    def test_a_task_that_runs_no_code_needs_no_sandbox(self, loaded):
+        runner = self._runner("mt_bench", scaffold="multi_turn_chat")
+
+        _, trackers, _ = runner._prepare_tasks()
+
+        assert trackers["mt_bench"].error is None
+
+
 class TestAsyncEvalRunnerValidation:
     """Tests for AsyncEvalRunner.validate method."""
 
@@ -931,6 +1122,231 @@ class TestSuiteAggregations:
             # Clean up
             del _REGISTRY["_test_aoa"]
 
+    def test_suite_aggregation_weighted_average(self):
+        """Test WEIGHTED_AVERAGE weights each task by its instance count."""
+        from olmo_eval.evals.suites.registry import (
+            _REGISTRY,
+            AggregationStrategy,
+            Suite,
+        )
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        weighted_suite = Suite(
+            name="_test_weighted",
+            tasks=("task_small", "task_large"),
+            aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+        )
+        _REGISTRY["_test_weighted"] = weighted_suite
+
+        try:
+            task_results = {
+                "task_small": {
+                    "metrics": {"accuracy": {"exact_match": 0.9}},
+                    "primary_metric": "accuracy:exact_match",
+                    "num_instances": 100,
+                },
+                "task_large": {
+                    "metrics": {"accuracy": {"exact_match": 0.5}},
+                    "primary_metric": "accuracy:exact_match",
+                    "num_instances": 300,
+                },
+            }
+
+            result = compute_suite_aggregations(["_test_weighted"], task_results)
+
+            # (0.9 * 100 + 0.5 * 300) / 400 = 0.6, versus 0.7 unweighted.
+            assert result["_test_weighted"]["metrics"]["accuracy"]["exact_match"] == pytest.approx(
+                0.6
+            )
+            assert result["_test_weighted"]["metrics"]["primary_score"]["average"] == pytest.approx(
+                0.6
+            )
+            assert result["_test_weighted"]["aggregation"] == "weighted_average"
+        finally:
+            del _REGISTRY["_test_weighted"]
+
+    def test_suite_aggregation_weighted_average_without_counts(self):
+        """Test WEIGHTED_AVERAGE omits the aggregate when a count is missing."""
+        from olmo_eval.evals.suites.registry import (
+            _REGISTRY,
+            AggregationStrategy,
+            Suite,
+        )
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        weighted_suite = Suite(
+            name="_test_weighted_no_counts",
+            tasks=("task_small", "task_large"),
+            aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+        )
+        _REGISTRY["_test_weighted_no_counts"] = weighted_suite
+
+        try:
+            task_results = {
+                "task_small": {
+                    "metrics": {"accuracy": {"exact_match": 0.9}},
+                    "num_instances": 100,
+                },
+                "task_large": {"metrics": {"accuracy": {"exact_match": 0.5}}},
+            }
+
+            result = compute_suite_aggregations(["_test_weighted_no_counts"], task_results)
+
+            # An unweighted mean under a weighted suite's name would be a
+            # different statistic wearing the same label.
+            assert "_test_weighted_no_counts" not in result
+        finally:
+            del _REGISTRY["_test_weighted_no_counts"]
+
+    def test_weighted_child_of_average_of_averages_is_weighted(self):
+        """Test a WEIGHTED_AVERAGE child is collapsed with its own weighting."""
+        from olmo_eval.evals.suites.registry import (
+            _REGISTRY,
+            AggregationStrategy,
+            Suite,
+        )
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        child = Suite(
+            name="_test_weighted_child_runner",
+            tasks=("task_small", "task_large"),
+            aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+        )
+        parent = Suite(
+            name="_test_weighted_child_runner_parent",
+            tasks=("task_standalone", child),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        )
+        _REGISTRY["_test_weighted_child_runner_parent"] = parent
+
+        try:
+            task_results = {
+                "task_standalone": {
+                    "metrics": {"accuracy": {"exact_match": 1.0}},
+                    "num_instances": 50,
+                },
+                "task_small": {
+                    "metrics": {"accuracy": {"exact_match": 0.9}},
+                    "num_instances": 100,
+                },
+                "task_large": {
+                    "metrics": {"accuracy": {"exact_match": 0.5}},
+                    "num_instances": 300,
+                },
+            }
+
+            result = compute_suite_aggregations(
+                ["_test_weighted_child_runner_parent"], task_results
+            )
+
+            # The child collapses to its weighted mean of 0.6, then the parent
+            # weights its two children equally: (1.0 + 0.6) / 2.
+            child_metrics = result["_test_weighted_child_runner"]["metrics"]
+            assert child_metrics["accuracy"]["exact_match"] == pytest.approx(0.6)
+            parent_metrics = result["_test_weighted_child_runner_parent"]["metrics"]
+            assert parent_metrics["accuracy"]["exact_match"] == pytest.approx(0.8)
+        finally:
+            del _REGISTRY["_test_weighted_child_runner_parent"]
+
+    def test_weighted_child_without_counts_is_dropped_from_parent(self):
+        """Test a WEIGHTED_AVERAGE child missing a count is left out of its parent."""
+        from olmo_eval.evals.suites.registry import (
+            _REGISTRY,
+            AggregationStrategy,
+            Suite,
+        )
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        child = Suite(
+            name="_test_weighted_child_no_counts",
+            tasks=("task_small", "task_large"),
+            aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+        )
+        parent = Suite(
+            name="_test_weighted_child_no_counts_parent",
+            tasks=("task_standalone", child),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        )
+        _REGISTRY["_test_weighted_child_no_counts_parent"] = parent
+
+        try:
+            task_results = {
+                "task_standalone": {
+                    "metrics": {"accuracy": {"exact_match": 1.0}},
+                    "num_instances": 50,
+                },
+                "task_small": {
+                    "metrics": {"accuracy": {"exact_match": 0.9}},
+                    "num_instances": 100,
+                },
+                "task_large": {"metrics": {"accuracy": {"exact_match": 0.5}}},
+            }
+
+            result = compute_suite_aggregations(
+                ["_test_weighted_child_no_counts_parent"], task_results
+            )
+
+            # The child has no weighted mean, so the parent averages only the
+            # standalone task.
+            assert "_test_weighted_child_no_counts" not in result
+            parent_result = result["_test_weighted_child_no_counts_parent"]
+            assert parent_result["metrics"]["accuracy"]["exact_match"] == pytest.approx(1.0)
+            assert parent_result["num_children"] == 1
+            assert parent_result["nested_suites"] == []
+        finally:
+            del _REGISTRY["_test_weighted_child_no_counts_parent"]
+
+    def test_weighted_child_suite_tasks_are_collapsed_in_log_summary(self, capsys):
+        """Test a WEIGHTED_AVERAGE child collapses its tasks in log_summary."""
+        from olmo_eval.evals.suites.registry import (
+            _REGISTRY,
+            AggregationStrategy,
+            Suite,
+        )
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import log_summary
+
+        child = Suite(
+            name="_test_weighted_child_display",
+            tasks=("task_small", "task_large"),
+            aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+        )
+        parent = Suite(
+            name="_test_weighted_child_display_parent",
+            tasks=("task_standalone", child),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        )
+        _REGISTRY["_test_weighted_child_display_parent"] = parent
+
+        try:
+            task_results = {
+                "task_standalone": {
+                    "metrics": {"accuracy": {"exact_match": 1.0}},
+                    "num_instances": 50,
+                },
+                "task_small": {
+                    "metrics": {"accuracy": {"exact_match": 0.9}},
+                    "num_instances": 100,
+                },
+                "task_large": {
+                    "metrics": {"accuracy": {"exact_match": 0.5}},
+                    "num_instances": 300,
+                },
+            }
+
+            suite_aggs = compute_suite_aggregations(
+                ["_test_weighted_child_display_parent"], task_results
+            )
+            log_summary({"tasks": task_results, "suites": suite_aggs})
+            captured = capsys.readouterr().out
+
+            assert "task_standalone" in captured
+            assert "_test_weighted_child_display" in captured
+            assert "task_small" not in captured
+            assert "task_large" not in captured
+        finally:
+            del _REGISTRY["_test_weighted_child_display_parent"]
+
     def test_collapsed_tasks_in_log_summary(self, capsys):
         """Test that child suite tasks are collapsed in log_summary display.
 
@@ -1029,6 +1445,422 @@ class TestSuiteAggregations:
             assert collapsed == set()
         finally:
             del _REGISTRY["_test_aoa_no_collapse"]
+
+
+class TestGapSuiteAggregation:
+    """Tests for GAP suite aggregation."""
+
+    SUITE = "_test_gap"
+
+    @pytest.fixture(autouse=True)
+    def gap_suite(self) -> Iterator[None]:
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+        _REGISTRY[self.SUITE] = Suite(
+            name=self.SUITE,
+            tasks=("task_in", "task_out"),
+            aggregation=AggregationStrategy.GAP,
+        )
+        yield
+        del _REGISTRY[self.SUITE]
+
+    @staticmethod
+    def _task(
+        score: float, metric: str = "exact_match:exact_match", display_format: str = "percent"
+    ) -> dict:
+        name, scorer = metric.split(":")
+        return {
+            "metrics": {name: {scorer: score}, "exact_match_flex": {"exact_match_flex": 0.99}},
+            "primary_metric": metric,
+            "num_instances": 500,
+            "metric_meta": {name: {"display_format": display_format}},
+        }
+
+    def test_reports_both_scores_and_out_minus_in(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        task_results = {"task_in": self._task(0.6), "task_out": self._task(0.45)}
+
+        result = compute_suite_aggregations([self.SUITE], task_results)[self.SUITE]
+
+        scores = result["metrics"]["primary_score"]
+        assert scores["reference"] == pytest.approx(0.6)
+        assert scores["companion"] == pytest.approx(0.45)
+        assert scores["gap"] == pytest.approx(-0.15)
+        assert result["primary_metric"] == "primary_score:companion"
+        assert result["aggregation"] == "gap"
+        assert result["reference_task"] == "task_in"
+        assert result["companion_task"] == "task_out"
+        assert result["scored_metric"] == "exact_match:exact_match"
+        assert result["tasks"] == ["task_in", "task_out"]
+
+    def test_priority_suffix_propagates(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        task_results = {"task_in@high": self._task(0.5), "task_out@high": self._task(0.5)}
+
+        result = compute_suite_aggregations([f"{self.SUITE}@high"], task_results)
+
+        assert result[f"{self.SUITE}@high"]["reference_task"] == "task_in@high"
+        assert result[f"{self.SUITE}@high"]["metrics"]["primary_score"]["gap"] == 0.0
+
+    @pytest.mark.parametrize(
+        "out",
+        [None, {"metrics": {}, "error": "boom"}, {"metrics": {"acc": {"em": 0.4}}}],
+        ids=["missing", "failed", "no-primary"],
+    )
+    def test_half_a_pair_reports_no_gap(self, out):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        task_results = {"task_in": self._task(0.6)}
+        if out is not None:
+            task_results["task_out"] = out
+
+        result = compute_suite_aggregations([self.SUITE], task_results)[self.SUITE]
+        assert result["metrics"] == {} and result["primary_metric"] is None
+        from olmo_eval.upload.metadata import suite_results
+
+        payload = suite_results({self.SUITE: result}, task_results)[0]
+        assert payload["score"] is None and payload["primary_metric"] is None
+        assert payload["aggregation"] == "gap" and len(payload["children"]) == 2
+
+    def test_different_primary_metrics_report_no_gap(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        task_results = {
+            "task_in": self._task(0.6),
+            "task_out": self._task(0.45, metric="exact_match_flex:exact_match_flex"),
+        }
+
+        result = compute_suite_aggregations([self.SUITE], task_results)[self.SUITE]
+        assert result["metrics"] == {} and result["primary_metric"] is None
+        from olmo_eval.upload.metadata import suite_results
+
+        payload = suite_results({self.SUITE: result}, task_results)[0]
+        assert payload["score"] is None and payload["primary_metric"] is None
+        assert payload["aggregation"] == "gap" and len(payload["children"]) == 2
+
+    def test_incomplete_gap_summary_is_not_success(self, capsys):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import log_summary
+
+        tasks = {"task_in": self._task(0.6)}
+        suites = compute_suite_aggregations([self.SUITE], tasks)
+        log_summary({"tasks": {}, "suites": suites})
+        printed = capsys.readouterr().out
+        assert "Incomplete" in printed
+        assert "Success" not in printed
+
+    def test_log_summary_shows_the_gap_row(self, capsys):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import log_summary
+
+        task_results = {"task_in": self._task(0.6), "task_out": self._task(0.45)}
+        suites = compute_suite_aggregations([self.SUITE], task_results)
+
+        log_summary({"tasks": task_results, "suites": suites})
+        captured = capsys.readouterr().out
+
+        assert "task_in" in captured
+        assert "task_out" in captured
+        assert "companion" in captured
+        assert "-15.00" in captured
+        assert "pp)" in captured
+
+    @pytest.mark.parametrize("metadata", [True, False])
+    def test_raw_gap_is_not_scaled_as_percentage_points(self, metadata, capsys):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import log_summary
+
+        tasks = {
+            "task_in": self._task(3.0, "measurement:value", "raw"),
+            "task_out": self._task(5.0, "measurement:value", "raw"),
+        }
+        if not metadata:
+            for task in tasks.values():
+                del task["metric_meta"]
+        suites = compute_suite_aggregations([self.SUITE], tasks)
+        log_summary({"tasks": tasks, "suites": suites})
+        output = capsys.readouterr().out
+        assert "+2.0000" in output
+        assert "+200.00" not in output
+        assert " pp" not in output
+
+    @pytest.mark.parametrize("companion_metadata", [True, False])
+    def test_gap_logs_use_companion_units(self, companion_metadata, capsys):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import log_summary
+
+        tasks = {"task_in": self._task(0.6, display_format="raw"), "task_out": self._task(0.45)}
+        if not companion_metadata:
+            tasks["task_out"]["metric_meta"] = {"exact_match": {"higher_is_better": True}}
+        suites = compute_suite_aggregations([self.SUITE], tasks)
+        log_summary({"tasks": tasks, "suites": suites})
+        assert "-15.00 pp)" in capsys.readouterr().out
+
+    def test_json_keeps_reference_companion_and_gap(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import (
+            build_multi_model_metrics,
+            build_single_model_metrics,
+        )
+
+        tasks = {"task_in": self._task(0.6), "task_out": self._task(0.45)}
+        results = {"tasks": tasks, "suites": compute_suite_aggregations([self.SUITE], tasks)}
+        single = build_single_model_metrics(results).to_dict()
+        multi = build_multi_model_metrics({"models": {"m": results}}).to_dict()
+        for metrics in (
+            single["suite_metrics"][self.SUITE],
+            multi["suite_metrics"]["m"][self.SUITE],
+        ):
+            assert metrics["primary_score"] == pytest.approx(
+                {"reference": 0.6, "companion": 0.45, "gap": -0.15}
+            )
+        assert single["summary"][self.SUITE]["metric"] == "primary_score:companion"
+
+    def test_registered_omega_gap_logs_percentage_points_without_synthetic_metadata(self, capsys):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import log_summary
+
+        tasks = {"omega_500:hillclimb": self._task(0.6), "omega_500_out": self._task(0.45)}
+        for data in tasks.values():
+            data.pop("metric_meta")
+        suites = compute_suite_aggregations(["omega:dev"], tasks)
+        log_summary({"tasks": tasks, "suites": suites})
+        assert "-15.00 pp)" in capsys.readouterr().out
+
+
+class TestUnaggregatedSuiteAggregation:
+    """Tests for NONE suites, which report their nested suites but no score of their own."""
+
+    SUITE = "_test_none_parent"
+
+    @pytest.fixture(autouse=True)
+    def none_suite(self) -> Iterator[None]:
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+        gap = Suite(
+            name="_test_none_gap",
+            tasks=("task_in", "task_out"),
+            aggregation=AggregationStrategy.GAP,
+        )
+        average = Suite(name="_test_none_avg", tasks=("task_a", "task_b"))
+        _REGISTRY[self.SUITE] = Suite(
+            name=self.SUITE,
+            tasks=("task_solo", gap, average),
+            aggregation=AggregationStrategy.NONE,
+        )
+        yield
+        del _REGISTRY[self.SUITE]
+
+    @staticmethod
+    def _task(score: float) -> dict:
+        return {
+            "metrics": {"exact_match": {"exact_match": score}},
+            "primary_metric": "exact_match:exact_match",
+            "num_instances": 100,
+            "metric_meta": {"exact_match": {"display_format": "percent"}},
+        }
+
+    def _results(self, suffix: str = "") -> dict[str, dict]:
+        scores = {"task_solo": 0.9, "task_in": 0.6, "task_out": 0.45, "task_a": 0.2, "task_b": 0.4}
+        return {f"{name}{suffix}": self._task(score) for name, score in scores.items()}
+
+    def test_reports_each_nested_suite_but_no_parent_score(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        result = compute_suite_aggregations([self.SUITE], self._results())
+
+        assert set(result) == {"_test_none_gap", "_test_none_avg"}
+        gap = result["_test_none_gap"]
+        assert gap["metrics"]["primary_score"]["gap"] == pytest.approx(-0.15)
+        assert gap["container_suite"] == self.SUITE
+        average = result["_test_none_avg"]
+        assert average["metrics"]["primary_score"]["average"] == pytest.approx(0.3)
+        assert average["container_suite"] == self.SUITE
+
+    def test_priority_suffix_propagates_to_nested_suites(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        result = compute_suite_aggregations([f"{self.SUITE}@high"], self._results("@high"))
+
+        assert result["_test_none_gap@high"]["reference_task"] == "task_in@high"
+        assert result["_test_none_gap@high"]["container_suite"] == f"{self.SUITE}@high"
+
+    def test_container_is_the_innermost_unaggregated_suite(self):
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        gap = Suite(
+            name="_test_deep_gap",
+            tasks=("task_in", "task_out"),
+            aggregation=AggregationStrategy.GAP,
+        )
+        inner = Suite(name="_test_inner", tasks=(gap,), aggregation=AggregationStrategy.NONE)
+        _REGISTRY["_test_outer"] = Suite(
+            name="_test_outer", tasks=(inner,), aggregation=AggregationStrategy.NONE
+        )
+        try:
+            result = compute_suite_aggregations(["_test_outer"], self._results())
+        finally:
+            del _REGISTRY["_test_outer"]
+
+        assert result["_test_deep_gap"]["container_suite"] == "_test_inner"
+
+    @pytest.mark.parametrize("suffix", ["", "@high"])
+    @pytest.mark.parametrize("strategy", ["average", "average_of_averages"])
+    def test_reports_descendants_below_aggregating_children(self, suffix, strategy, capsys):
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import build_single_model_metrics, log_summary
+        from olmo_eval.upload.metadata import suite_results
+
+        child = Suite(name="_desc_child", tasks=("task_a", "task_b"))
+        parent = Suite(
+            name="_desc_parent",
+            tasks=(child, "task_solo"),
+            aggregation=AggregationStrategy(strategy),
+        )
+        root = Suite(name="_desc_root", tasks=(parent,), aggregation=AggregationStrategy.NONE)
+        registry = {suite.name: suite for suite in (child, parent, root)}
+        _REGISTRY.update(registry)
+        try:
+            tasks = self._results(suffix)
+            result = compute_suite_aggregations([f"{root.name}{suffix}"], tasks)
+            assert set(result) == {f"{parent.name}{suffix}", f"{child.name}{suffix}"}
+            assert result[f"{child.name}{suffix}"]["metrics"]["primary_score"][
+                "average"
+            ] == pytest.approx(0.3)
+            summary = build_single_model_metrics({"tasks": tasks, "suites": result}).to_dict()[
+                "summary"
+            ]
+            assert f"{child.name}{suffix}" in summary
+            log_summary({"tasks": tasks, "suites": result})
+            captured = capsys.readouterr().out
+            for name in ("task_a", "task_b", "task_solo"):
+                assert f"{name}{suffix}" in captured
+            uploaded = {
+                row["name"]: row for row in suite_results(result, tasks, task_specs=[root.name])
+            }
+            assert uploaded[child.name]["parent"] == parent.name
+            assert uploaded[parent.name]["parent"] == root.name
+        finally:
+            for name in registry:
+                del _REGISTRY[name]
+
+    def test_descendant_average_of_averages_retains_its_own_score(self, monkeypatch):
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        leaf = Suite("_own_leaf", ("a", "b", "c"), AggregationStrategy.AVERAGE)
+        inner = Suite("_own_inner", (leaf, "d"), AggregationStrategy.AVERAGE_OF_AVERAGES)
+        outer = Suite("_own_outer", (inner, "e"), AggregationStrategy.AVERAGE_OF_AVERAGES)
+        root = Suite("_own_root", (outer,), AggregationStrategy.NONE)
+        for suite in (leaf, inner, outer, root):
+            monkeypatch.setitem(_REGISTRY, suite.name, suite)
+        tasks = {
+            name: self._task(value)
+            for name, value in zip("abcde", (0.1, 0.2, 0.3, 0.4, 0.5), strict=True)
+        }
+        alone = compute_suite_aggregations([inner.name], tasks)[inner.name]
+        nested = compute_suite_aggregations([root.name], tasks)[inner.name]
+        assert nested["metrics"] == alone["metrics"]
+        assert nested["metrics"]["primary_score"]["average"] == pytest.approx(0.3)
+
+    @pytest.mark.parametrize("container", [False, True])
+    def test_none_child_of_average_of_averages_has_no_score(self, monkeypatch, container):
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.upload.metadata import suite_results
+
+        child = Suite("_none_child", ("a", "b"), AggregationStrategy.NONE)
+        parent = Suite("_none_parent", (child, "c"), AggregationStrategy.AVERAGE_OF_AVERAGES)
+        root = Suite("_none_container", (parent,), AggregationStrategy.NONE)
+        for suite in (child, parent, root):
+            monkeypatch.setitem(_REGISTRY, suite.name, suite)
+        tasks = {name: self._task(0.5) for name in "abc"}
+        requested = [root.name if container else parent.name]
+        results = compute_suite_aggregations(requested, tasks)
+        assert results[child.name]["metrics"] == {}
+        payload = {r["name"]: r for r in suite_results(results, tasks, task_specs=requested)}
+        assert payload[child.name]["score"] is None
+
+    @pytest.mark.parametrize("averaging_parent", [False, True])
+    def test_display_only_descendants_have_no_score(self, averaging_parent):
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import build_single_model_metrics
+        from olmo_eval.upload.metadata import suite_results
+
+        display = Suite("_display_child", ("task_a", "task_b"), AggregationStrategy.DISPLAY_ONLY)
+        child = (
+            Suite(
+                "_display_parent", (display, "task_solo"), AggregationStrategy.AVERAGE_OF_AVERAGES
+            )
+            if averaging_parent
+            else display
+        )
+        root = Suite("_display_root", (child,), AggregationStrategy.NONE)
+        registered = {suite.name: suite for suite in (display, child, root)}
+        _REGISTRY.update(registered)
+        try:
+            tasks = self._results()
+            result = compute_suite_aggregations([root.name], tasks)
+            assert result[display.name]["metrics"] == {}
+            assert "primary_metric" not in result[display.name]
+            summary = build_single_model_metrics({"tasks": tasks, "suites": result}).to_dict()[
+                "summary"
+            ]
+            assert display.name not in summary
+            rows = {
+                row["name"]: row for row in suite_results(result, tasks, task_specs=[root.name])
+            }
+            assert rows[display.name]["score"] is None
+        finally:
+            for name in registered:
+                del _REGISTRY[name]
+
+    def test_nested_gap_definition_survives_missing_results(self):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        task_results = self._results()
+        del task_results["task_out"]
+
+        result = compute_suite_aggregations([self.SUITE], task_results)
+
+        assert set(result) == {"_test_none_avg", "_test_none_gap"}
+        assert result["_test_none_gap"]["metrics"] == {}
+        assert result["_test_none_gap"]["primary_metric"] is None
+
+    def test_flat_unaggregated_suite_reports_nothing(self):
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        _REGISTRY["_test_none_flat"] = Suite(
+            name="_test_none_flat",
+            tasks=("task_a", "task_b"),
+            aggregation=AggregationStrategy.NONE,
+        )
+        try:
+            assert compute_suite_aggregations(["_test_none_flat"], self._results()) == {}
+        finally:
+            del _REGISTRY["_test_none_flat"]
+
+    def test_log_summary_keeps_every_task_row(self, capsys):
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import log_summary
+
+        task_results = self._results()
+        suites = compute_suite_aggregations([self.SUITE], task_results)
+
+        log_summary({"tasks": task_results, "suites": suites})
+        captured = capsys.readouterr().out
+
+        for name in task_results:
+            assert name in captured
+        assert "companion" in captured
+        assert "-15.00" in captured
+        assert "pp)" in captured
 
 
 class TestGetPrimaryMetric:
