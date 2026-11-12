@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.inference.gpu_planner import resolve_visible_devices
+from olmo_eval.inference.gpu_planner import resolve_visible_devices, tensor_parallel_for
 from olmo_eval.runners.asynq.runtime import resolved_worker_config
 from olmo_eval.runners.asynq.types import (
     WORKER_FATAL,
@@ -112,7 +112,7 @@ def inference_worker(
         engine_overrides: dict[str, Any] = {}
         if provider_kind in ("vllm", "vllm_server"):
             engine_overrides = dict(
-                tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+                tensor_parallel_size=tensor_parallel_for(gpu_ids, provider_config.kwargs),
                 load_format=load_format,
                 model_loader_extra_config=extra_loader_config,
                 enable_auto_tool_choice=enable_auto_tool_choice or None,
