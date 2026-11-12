@@ -143,6 +143,7 @@ class OpenAIAgentsScaffold(Scaffold):
         self._cached_config: HarnessConfig | None = None
         self._cached_provider_id: int | None = None
         self._cached_has_sandbox: bool = False
+        self._cached_extra_body: dict[str, Any] = {}
         self._sandbox_manager: SandboxManager | None = None
 
     def clear_cache(self) -> None:
@@ -151,6 +152,7 @@ class OpenAIAgentsScaffold(Scaffold):
         self._cached_config = None
         self._cached_provider_id = None
         self._cached_has_sandbox = False
+        self._cached_extra_body = {}
 
     async def initialize(self, config: HarnessConfig) -> None:
         """Initialize sandbox manager if needed.
@@ -249,6 +251,7 @@ class OpenAIAgentsScaffold(Scaffold):
         provider: InferenceProvider,
         config: HarnessConfig,
         sandbox_manager: SandboxManager | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> Any:
         """Create a new agent with the given configuration.
 
@@ -256,6 +259,7 @@ class OpenAIAgentsScaffold(Scaffold):
             provider: The inference provider for model calls.
             config: Harness configuration.
             sandbox_manager: Optional sandbox manager for sandboxed tools.
+            extra_body: Extra fields merged into every chat-completions request body.
 
         Returns:
             An Agent instance from the agents SDK.
@@ -294,11 +298,12 @@ class OpenAIAgentsScaffold(Scaffold):
         # generate path, so the request body built here is the only place a
         # chat_template_kwargs setting can actually reach the server.
         agent_kwargs: dict[str, Any] = {}
+        body: dict[str, Any] = dict(extra_body or {})
         chat_template_kwargs = _resolve_chat_template_kwargs(provider)
         if chat_template_kwargs is not None:
-            agent_kwargs["model_settings"] = ModelSettings(
-                extra_body={"chat_template_kwargs": chat_template_kwargs}
-            )
+            body["chat_template_kwargs"] = chat_template_kwargs
+        if body:
+            agent_kwargs["model_settings"] = ModelSettings(extra_body=body)
 
         agent = Agent(
             name=self.name,
@@ -315,27 +320,32 @@ class OpenAIAgentsScaffold(Scaffold):
         provider: InferenceProvider,
         config: HarnessConfig,
         sandbox_manager: SandboxManager | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> Any:
         """Get cached agent or create a new one if config/provider changed.
 
-        Agents are cached based on config, provider, and whether sandbox is used.
-        The sandbox manager is stable across runs, so caching works.
+        Agents are cached based on config, provider, whether sandbox is used, and
+        the extra request body. The sandbox manager is stable across runs, so
+        caching works.
         """
         has_sandbox = sandbox_manager is not None
+        extra_body = dict(extra_body or {})
         if (
             self._cached_agent is not None
             and self._cached_config == config
             and self._cached_provider_id == id(provider)
             and self._cached_has_sandbox == has_sandbox
+            and self._cached_extra_body == extra_body
         ):
             return self._cached_agent
 
-        agent = self._create_agent(provider, config, sandbox_manager)
+        agent = self._create_agent(provider, config, sandbox_manager, extra_body)
 
         self._cached_agent = agent
         self._cached_config = config
         self._cached_provider_id = id(provider)
         self._cached_has_sandbox = has_sandbox
+        self._cached_extra_body = extra_body
 
         return agent
 
@@ -363,6 +373,7 @@ class OpenAIAgentsScaffold(Scaffold):
             HarnessResult with trajectory from SDK execution.
         """
         enable_compaction = kwargs.get("enable_compaction", True)
+        extra_body = dict(kwargs.get("extra_body") or {})
         try:
             from agents import RunConfig, Runner, trace  # type: ignore[ty:unresolved-import]
             from agents.exceptions import (  # type: ignore[ty:unresolved-import]
@@ -408,7 +419,7 @@ class OpenAIAgentsScaffold(Scaffold):
             )
 
         # Use cached agent (tools read from ContextVar at execution time)
-        agent = self._get_or_create_agent(provider, config, self._sandbox_manager)
+        agent = self._get_or_create_agent(provider, config, self._sandbox_manager, extra_body)
 
         # Acquire binding if session tools are used
         has_session_tools = any(t.session for t in config.resolved_tools if t.sandbox)
