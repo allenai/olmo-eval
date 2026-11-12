@@ -16,6 +16,22 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-12: Sandbox HTTP commands stop waiting for background processes (#527)
+
+- **Affected**: independent `execute_command` and `execute_code` calls that go through the
+  SWE-ReX HTTP server: Modal sandboxes, and Docker/Podman sandboxes that set `exec_shell` or
+  whose image fails the process-supervision probe. Persistent bash sessions are not affected.
+- **Change**: a command that starts a background process still writing to the command's
+  output (`python server.py &` with no redirect) used to block until `command_timeout` and
+  end in a timeout error. It now returns when its shell exits, with the output written so
+  far, and the background process keeps running; its later output goes to an unlinked file
+  in the sandbox's `/tmp` until it exits. Commands that start no such process are unchanged.
+- **Identity**: no task hash moves, so results from before and after can only be told apart
+  by commit or date.
+- **Comparability**: agentic results on those sandbox paths can differ wherever the agent
+  ran such a command, because the agent now sees its output instead of a timeout. Other
+  results are unchanged.
+
 ## 2026-11-03: Terminal-Bench and TBLite leave harness failures out of their scores (#539)
 
 - **Affected**: the `terminal_bench_2` and `openthoughts_tblite` external evals, for
