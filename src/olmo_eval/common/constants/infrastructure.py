@@ -19,6 +19,19 @@ BEAKER_DEFAULT_BUDGET = "ai2/oe-other"
 BEAKER_DEFAULT_PRIORITY = "normal"
 """Default job priority level."""
 
+BEAKER_DEFAULT_RESUME_VOLUME = "ai2/olmo-eval"
+BEAKER_DEFAULT_RESUME_RETENTION_DAYS = 7
+
+SHARED_RUN_ENV = "OLMO_EVAL_SHARED_RUN_DIR"
+"""Set by the WEKA resume supervisor to the run's recovery directory on the volume."""
+SHARED_RUN_PROGRESS_DIR = "progress"
+"""Subdirectory of the recovery directory that holds progress records."""
+SHARED_RUN_IDENTITY_DIR = "identity"
+"""Subdirectory of the recovery directory that holds the run's manifest and upload secret."""
+SHARED_RUN_IDENTITY_FILES = ("manifest.json", ".upload-secret")
+"""The output files that carry a run's identity (upload.manifest's MANIFEST_NAME and
+RUN_SECRET_NAME), saved so a replacement job keeps the run ID."""
+
 BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 

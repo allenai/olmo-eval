@@ -7,7 +7,9 @@ with the shared regex cascade — matching the configuration used to report
 chain-of-thought MMLU for post-trained models.
 
 One task per subject (``mmlu_abstract_algebra:cot``, ...); the
-``mmlu:cot`` suite aggregates all 57.
+``mmlu:cot`` suite aggregates all 57. The ``hillclimb`` variant keeps a fixed
+sample of 18 items per subject (1,026 in all), drawn with the task's seed, and
+the ``mmlu:cot:hillclimb`` suite aggregates those.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from olmo_eval.evals.extract import (
     extract_answer_with_format,
     extract_think_answer,
 )
-from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 from olmo_eval.evals.tasks.mmlu import DEFAULT_MMLU_PATH, MMLU_SUBJECTS
 
 _CHOICE_LABELS = ("A", "B", "C", "D", "E")
@@ -131,6 +133,9 @@ class MMLUCoTTask(Task):
         )
 
 
+# The subset averages subjects equally, as the full suite does, so each subject gets the same count.
+HILLCLIMB_ITEMS_PER_SUBJECT = 18
+
 for _subject in MMLU_SUBJECTS:
     _name = f"MMLUCoT{_subject.title().replace('_', '')}"
     _cls = type(
@@ -145,3 +150,4 @@ for _subject in MMLU_SUBJECTS:
     )
     globals()[_name] = _cls
     register(f"mmlu_{_subject}:cot")(_cls)
+    register_variant(f"mmlu_{_subject}:cot", "hillclimb", limit=HILLCLIMB_ITEMS_PER_SUBJECT)

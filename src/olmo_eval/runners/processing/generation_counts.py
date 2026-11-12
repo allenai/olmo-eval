@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from olmo_eval.common.multi_turn import turn_replies
-from olmo_eval.common.types import RequestType, Response
+from olmo_eval.common.types import SCORING_TEXT_EMPTY_KEY, RequestType, Response
 
 GENERATION_COUNT_KEYS = (
     "generations",
@@ -28,6 +28,11 @@ def count_generations(responses: Sequence[Response]) -> dict[str, int] | None:
     """Count generation outcomes after scoring; None if there are no generations.
 
     A scripted conversation counts once, as unclosed if any of its turns is.
+    ``cap_hit`` counts known length stops, a lower bound when finish reasons are
+    unknown. ``unclosed_think`` sees emitted tags, including original text kept
+    before stripping. ``empty`` excludes tool-call outputs; tasks that transform
+    scoring text without changing ``output.text`` set ``SCORING_TEXT_EMPTY_KEY``
+    from that text, rather than from whether answer extraction succeeded.
     """
     counts = dict.fromkeys(GENERATION_COUNT_KEYS, 0)
     for response in responses:
@@ -44,7 +49,7 @@ def count_generations(responses: Sequence[Response]) -> dict[str, int] | None:
                 counts["finish_reason_unknown"] += 1
             elif finish_reason == "length":
                 counts["cap_hit"] += 1
-            empty = metadata.get("scoring_text_empty", not text.strip())
+            empty = metadata.get(SCORING_TEXT_EMPTY_KEY, not text.strip())
             if empty and not output.has_tool_calls:
                 counts["empty"] += 1
             replies = turn_replies(output) or [raw]

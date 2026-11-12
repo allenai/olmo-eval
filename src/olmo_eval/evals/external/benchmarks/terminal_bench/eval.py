@@ -14,6 +14,13 @@ from typing import TYPE_CHECKING, Any, cast
 from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.evals.external.base import ExternalEval
+from olmo_eval.evals.external.failures import (
+    DEFAULT_MAX_ERROR_RATE,
+    add_harness_failure,
+    failure_budget_error,
+    is_harness_failure,
+    scaffold_error,
+)
 from olmo_eval.evals.external.network import get_docker_network_args
 from olmo_eval.evals.external.result import ExternalEvalResult
 from olmo_eval.harness.sandbox.config import ContainerRuntime, SandboxConfig, SandboxMode
@@ -123,6 +130,7 @@ class TerminalBenchArgs:
     temperature: float = 0.7
     top_p: float = 0.95
     max_tokens: int = 16384
+    max_error_rate: float = DEFAULT_MAX_ERROR_RATE
 
     @classmethod
     def from_dict(
@@ -148,6 +156,7 @@ class TerminalBenchArgs:
             temperature=float(data.get("temperature", 0.7)),
             top_p=float(data.get("top_p", 0.95)),
             max_tokens=int(data.get("max_tokens", 16384)),
+            max_error_rate=float(data.get("max_error_rate", DEFAULT_MAX_ERROR_RATE)),
         )
 
     @property
@@ -176,8 +185,8 @@ class TaskResult:
 
     @property
     def errored(self) -> bool:
-        """Whether the trial failed for a reason other than the agent's work."""
-        return self.error is not None
+        """Whether the harness or infrastructure, not the agent, failed this trial."""
+        return is_harness_failure(self.error)
 
     @property
     def native_id(self) -> str:
@@ -197,43 +206,48 @@ def pass_at_k(n: int, c: int, k: int) -> float:
 def compute_metrics(results: list[TaskResult], n_attempts: int) -> dict[str, float]:
     """Aggregate trial results into the eval's metrics.
 
-    ``pass_rate`` is the mean reward over every trial, counting an errored
-    trial as 0. ``pass_rate_adjusted`` leaves errored trials out, so it reads
-    as what the agent scored where the harness worked. With several attempts
-    per task, ``pass@k`` is the unbiased estimate averaged over tasks, and the
-    spread of the per-attempt pass rates gives ``pass_rate_std`` and
-    ``pass_rate_sem``.
+    Trials the harness or infrastructure failed measured nothing about the
+    model, so every rate but ``error_rate`` leaves them out; ``num_errors``
+    counts them. ``pass_rate`` is the mean reward over the other trials. With
+    several attempts per task, ``pass@k`` is the unbiased estimate averaged over
+    the tasks with at least ``k`` measured trials, ``pass@k_num_tasks`` counts
+    those tasks, and the spread of the per-attempt pass rates gives ``pass_rate_std``
+    and ``pass_rate_sem``.
     """
-    rewards = [r.reward for r in results]
     num_trials = len(results)
-    num_errors = sum(1 for r in results if r.errored)
-    valid = [r.reward for r in results if not r.errored]
+    measured = [r for r in results if not r.errored]
+    num_errors = num_trials - len(measured)
 
     metrics: dict[str, float] = {
-        "pass_rate": sum(rewards) / num_trials if num_trials else 0.0,
-        "pass_rate_adjusted": sum(valid) / len(valid) if valid else 0.0,
+        "pass_rate": sum(r.reward for r in measured) / len(measured) if measured else 0.0,
         "error_rate": num_errors / num_trials if num_trials else 0.0,
         "num_tasks": float(len({r.task_id for r in results})),
         "num_trials": float(num_trials),
-        "num_passed": float(sum(1 for r in results if r.reward >= 1.0)),
+        "num_measured": float(len(measured)),
+        "num_passed": float(sum(1 for r in measured if r.reward >= 1.0)),
         "num_errors": float(num_errors),
-        "num_agent_timeouts": float(sum(1 for r in results if r.completion_reason == "timeout")),
+        "num_agent_timeouts": float(sum(1 for r in measured if r.completion_reason == "timeout")),
     }
 
     by_task: dict[str, list[float]] = {}
-    for r in results:
+    for r in measured:
         by_task.setdefault(r.task_id, []).append(r.reward)
 
     if n_attempts > 1 and by_task:
         for k in sorted({1, n_attempts}):
+            # A task that lost trials to harness failures can be left with fewer
+            # than k, where pass_at_k would quietly estimate a smaller k.
             estimates = [
                 pass_at_k(len(task_rewards), sum(1 for v in task_rewards if v >= 1.0), k)
                 for task_rewards in by_task.values()
+                if len(task_rewards) >= k
             ]
-            metrics[f"pass@{k}"] = sum(estimates) / len(estimates)
+            if estimates:
+                metrics[f"pass@{k}"] = sum(estimates) / len(estimates)
+            metrics[f"pass@{k}_num_tasks"] = float(len(estimates))
 
         by_attempt: dict[int, list[float]] = {}
-        for r in results:
+        for r in measured:
             by_attempt.setdefault(r.attempt, []).append(r.reward)
         attempt_means = [sum(v) / len(v) for v in by_attempt.values() if v]
         if len(attempt_means) > 1:
@@ -245,7 +259,7 @@ def compute_metrics(results: list[TaskResult], n_attempts: int) -> dict[str, flo
 
     by_difficulty: dict[str, list[float]] = {}
     by_category: dict[str, list[float]] = {}
-    for r in results:
+    for r in measured:
         by_difficulty.setdefault(r.difficulty, []).append(r.reward)
         by_category.setdefault(r.category, []).append(r.reward)
     for difficulty, values in by_difficulty.items():
@@ -298,6 +312,11 @@ class TerminalBenchExternalEval(ExternalEval):
             "command_timeout": ("Seconds a single command may run", 120.0),
             "max_format_errors": ("Replies without a valid tool call before stopping", 64),
             "resource_limits": ("Apply each task's CPU and memory limits", True),
+            "max_error_rate": (
+                "Fail the run when more than this fraction of trials hit a harness or "
+                "infrastructure failure",
+                DEFAULT_MAX_ERROR_RATE,
+            ),
             "temperature": ("Sampling temperature", 0.7),
             "top_p": ("Nucleus sampling threshold", 0.95),
             "max_tokens": ("Max tokens per model reply", 16384),
@@ -387,10 +406,14 @@ class TerminalBenchExternalEval(ExternalEval):
 
         metrics = compute_metrics(task_results, tb_args.n_attempts)
         predictions = self._build_predictions(task_results)
+        budget_error = failure_budget_error(
+            [r.error for r in task_results], tb_args.max_error_rate, unit="trials"
+        )
 
         result = ExternalEvalResult(
             name=self.name,
-            success=True,
+            success=budget_error is None,
+            error=budget_error,
             metrics=metrics,
             metadata={
                 "model_name": provider.model_name,
@@ -402,6 +425,7 @@ class TerminalBenchExternalEval(ExternalEval):
                 "max_turns": tb_args.max_turns,
                 "n_attempts": tb_args.n_attempts,
                 "resource_limits": tb_args.resource_limits,
+                "max_error_rate": tb_args.max_error_rate,
             },
             duration_seconds=time.time() - start_time,
             predictions=predictions,
@@ -565,7 +589,11 @@ class TerminalBenchExternalEval(ExternalEval):
                 agent_duration=agent_duration,
                 verification_output=verification.test_output,
                 verification_exit_code=verification.test_exit_code,
-                error=verification.error or agent_error,
+                error=(
+                    add_harness_failure(agent_error, verification.error)
+                    if verification.error
+                    else agent_error
+                ),
                 difficulty=task.difficulty,
                 category=task.category,
                 attempt=attempt,
@@ -622,8 +650,8 @@ class TerminalBenchExternalEval(ExternalEval):
 
         Returns:
             Tuple of (trajectory, completion_reason, steps, error). The error is
-            set when the run ended because the model could not be served, which
-            is the harness's failure rather than the agent's.
+            classified by ``scaffold_error``: a model that could not be served is
+            the harness's failure, a reply that broke the tool protocol the agent's.
         """
         from olmo_eval.harness.config import HarnessConfig
         from olmo_eval.harness.scaffolds import get_scaffold
@@ -677,9 +705,7 @@ class TerminalBenchExternalEval(ExternalEval):
         steps = harness_result.metadata.get("steps")
         if steps is None:
             steps = len(trajectory.assistant_turns)
-        # A run that used up its turns is the agent's failure; only a run that
-        # ended on an error the harness raised is reported as one.
-        error = harness_result.error if not harness_result.max_turns_reached else None
+        error = scaffold_error(harness_result)
         if error:
             logger.warning(f"Agent for task {task.task_id} failed: {error}")
         logger.info(f"Agent completed task {task.task_id}: {completion_reason}")
@@ -694,8 +720,9 @@ class TerminalBenchExternalEval(ExternalEval):
                     "native_id": r.native_id,
                     "task_id": r.task_id,
                     "attempt": r.attempt,
+                    # A trial the harness failed has no score.
                     "instance_metrics": {
-                        "reward": {"external": r.reward},
+                        "reward": {"external": None if r.errored else r.reward},
                         "agent_duration": {"external": r.agent_duration},
                         "agent_steps": {"external": float(r.agent_steps)},
                     },

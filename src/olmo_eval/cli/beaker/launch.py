@@ -113,6 +113,28 @@ def _validate_weka_buckets(
 )
 @click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
+@click.option(
+    "--resume/--no-resume",
+    default=None,
+    help=(
+        "Recover interrupted task progress (default: enabled). "
+        "--no-resume needs no resume volume; interrupted attempts start over."
+    ),
+)
+@click.option(
+    "--resume-volume",
+    default=None,
+    help=(
+        "Native Beaker volume for resumable task state (<org>/<name> or v_...). "
+        "Default: ai2/olmo-eval. Requires a read-write claim."
+    ),
+)
+@click.option(
+    "--resume-retention-days",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Days to retain inactive recovery files in tmp-<days>d (default: 7).",
+)
 @click.option("--workspace", "-w", help="Beaker workspace")
 @click.option("--budget", "-B", help="Beaker budget")
 @click.option("--image", "-I", help="Beaker image (e.g., ai2-tylerm/olmo-eval-cu1261-trc280-amd64)")
@@ -300,6 +322,9 @@ def launch(
     min_runtime: str | None,
     timeout: str | None,
     retries: int | None,
+    resume: bool | None,
+    resume_volume: str | None,
+    resume_retention_days: int | None,
     workspace: str | None,
     budget: str | None,
     image: str | None,
@@ -431,6 +456,9 @@ def launch(
         "min_runtime": min_runtime,
         "timeout": timeout,
         "retries": retries,
+        "resume": resume,
+        "resume_volume": resume_volume,
+        "resume_retention_days": resume_retention_days,
         "workspace": workspace,
         "budget": budget,
         "image": image,
@@ -459,6 +487,8 @@ def launch(
 
     # Handle external evaluations mode
     if external_evals:
+        if resume is not None or resume_volume is not None or resume_retention_days is not None:
+            raise click.UsageError("Resume volume options currently support task evaluations only")
         if task:
             console.print(
                 "[red]Error:[/red] Cannot mix --external-eval (-E) with --task (-t). "
@@ -757,38 +787,27 @@ def _get_task_configs(
     Returns:
         Dict mapping task_spec -> TaskConfig (with overrides applied).
     """
-    from copy import deepcopy
+    from dataclasses import fields
 
     from olmo_eval.cli.run.config import _apply_dotlist_overrides
-    from olmo_eval.evals.tasks.common import get_task as get_task_instance
-    from olmo_eval.evals.tasks.common import parse_task_spec
+    from olmo_eval.common.types import SamplingParams
+    from olmo_eval.evals.tasks.common import TaskConfig
+    from olmo_eval.runners.asynq.preparation import configure_task
 
     task_overrides = task_overrides or {}
     task_configs = {}
+    task_fields = {f.name for f in fields(TaskConfig)}
+    sampling_fields = {f.name for f in fields(SamplingParams)}
 
     for task_spec in valid_tasks:
-        task_name, variants, _overrides = parse_task_spec(task_spec)
+        parsed = _apply_dotlist_overrides({}, task_overrides.get(task_spec, []))
+        overrides = {key: value for key, value in parsed.items() if key in task_fields}
+        sampling = {key: value for key, value in parsed.items() if key in sampling_fields}
         try:
-            task_instance = get_task_instance(task_spec)
+            task_configs[task_spec] = configure_task(task_spec, overrides, sampling).config
         except ValueError as e:
             console.print(f"[red]Error loading task '{task_spec}':[/red] {e}")
             raise SystemExit(1) from None
-
-        # Deep copy the config so we can apply overrides directly
-        task_cfg = deepcopy(task_instance.config)
-
-        # Apply CLI overrides using dotlist format (supports nested keys and JSON)
-        cli_overrides = task_overrides.get(task_spec, [])
-        if cli_overrides:
-            # Convert config to dict, apply overrides, convert back
-            task_dict = task_cfg.to_dict() if hasattr(task_cfg, "to_dict") else vars(task_cfg)
-            task_dict = _apply_dotlist_overrides(task_dict, cli_overrides)
-            # Update config attributes from dict
-            for key, value in task_dict.items():
-                if hasattr(task_cfg, key):
-                    setattr(task_cfg, key, value)
-
-        task_configs[task_spec] = task_cfg
 
     return task_configs
 
@@ -1062,10 +1081,15 @@ def _launch_jobs(
     Returns:
         List of launched experiment IDs.
     """
+    from olmo_eval.launch.beaker.volume import VolumeClaimError
+
     launched_experiments: list[str] = []
     for job_config in job_configs:
         if not dry_run:
-            experiment = launcher.launch(job_config)
+            try:
+                experiment = launcher.launch(job_config)
+            except VolumeClaimError as e:
+                raise click.ClickException(str(e)) from None
             if experiment:
                 console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
                 launched_experiments.append(experiment.id)
