@@ -73,8 +73,9 @@ class ReplayProvider(InferenceProvider):
     them; each file is paired with the requests file written beside it, which holds the
     prompts. A request whose prompt was not saved, or was saved with a different number
     of samples, fails like a generation error, so the task's failure budget catches a
-    replay against the wrong run. Prompts saved more than once by one file are served
-    in order; a prompt saved by two files (two configurations of a task) is rejected.
+    replay against the wrong run. A request does not say which instance it is, so a
+    prompt saved for several instances replays only when every save holds the same
+    generations; a prompt saved by two files (two configurations of a task) is rejected.
     Requests with images or tools fail too: the saved files keep neither image
     identities nor native tool calls.
     """
@@ -107,13 +108,24 @@ class ReplayProvider(InferenceProvider):
                         "point provider.predictions at the predictions file to replay"
                     )
                 self._saved[key].append(prediction["model_output"])
+        self._ambiguous = {
+            key
+            for key, saves in self._saved.items()
+            if len({json.dumps(save, sort_keys=True, default=str) for save in saves}) > 1
+        }
 
     def _replay(self, request: LMRequest, num_samples: int) -> list[LMOutput]:
-        queue = self._saved.get(_request_key(request))
+        key = _request_key(request)
+        queue = self._saved.get(key)
         if request.images or request.tools:
             error = "requests with images or tools cannot be replayed"
         elif not queue:
             error = "no saved generation matches this prompt"
+        elif key in self._ambiguous:
+            error = (
+                f"{len(queue)} instances saved this prompt with different generations, "
+                "and a request does not say which instance it is"
+            )
         elif len(queue[0]) != num_samples:
             error = (
                 f"saved {len(queue[0])} samples for this prompt, the task asks for {num_samples}"

@@ -86,14 +86,24 @@ def test_unsaved_prompt_and_sample_count_mismatch_fail_the_request(tmp_path: Pat
     assert [o.text for o in two[0]] == ["1", "2"]
 
 
-def test_repeated_prompts_are_served_in_order(tmp_path: Path) -> None:
-    _save(tmp_path, "task", [("Q", [{"text": "first"}]), ("Q", [{"text": "second"}])])
+def test_a_repeated_prompt_with_one_generation_is_served_once_per_save(tmp_path: Path) -> None:
+    _save(tmp_path, "task", [("Q", [{"text": "same"}]), ("Q", [{"text": "same"}])])
     provider = ReplayProvider(predictions=str(tmp_path))
 
     outputs = provider.generate([_completion("Q"), _completion("Q"), _completion("Q")])
 
-    assert [o[0].text for o in outputs[:2]] == ["first", "second"]
+    assert [o[0].text for o in outputs[:2]] == ["same", "same"]
     assert request_error(outputs[2]) is not None
+
+
+def test_a_repeated_prompt_with_different_generations_fails(tmp_path: Path) -> None:
+    # The runner shuffles requests, so arrival order would hand instances each other's output.
+    _save(tmp_path, "task", [("Q", [{"text": "first"}]), ("Q", [{"text": "second"}])])
+    provider = ReplayProvider(predictions=str(tmp_path))
+
+    outputs = provider.generate([_completion("Q"), _completion("Q")])
+
+    assert all("different generations" in str(request_error(o)) for o in outputs)
 
 
 def test_provider_config_passes_the_predictions_path(tmp_path: Path) -> None:
