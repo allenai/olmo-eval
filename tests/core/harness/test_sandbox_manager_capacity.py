@@ -234,6 +234,21 @@ async def test_successful_work_resets_the_restart_budget(replacements) -> None:
 
 
 @pytest.mark.anyio
+async def test_replacement_names_stay_bounded_across_budget_resets(replacements) -> None:
+    manager = make_manager(RecoverableExecutor("broken"))
+    environment = manager.for_capabilities(Capability.DEFAULT)
+    try:
+        for _ in range(12):
+            manager._executors[0].running = False
+            assert (await environment.execute_code("pass")).success
+        assert [executor.name for executor in replacements] == [
+            f"broken-r{n}" for n in range(1, 13)
+        ]
+    finally:
+        await manager.stop()
+
+
+@pytest.mark.anyio
 async def test_consecutive_failures_exhaust_the_restart_budget(monkeypatch) -> None:
     from olmo_eval.harness.sandbox.errors import SandboxInfrastructureError
 

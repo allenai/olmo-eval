@@ -164,6 +164,10 @@ class SandboxManager:
         self._capacity_condition = asyncio.Condition()
         self._recoveries: dict[int, asyncio.Task[None]] = {}
         self._restart_counts: dict[int, int] = {}
+        # Per-slot original name and replacement generation, which never resets, so
+        # replacement names stay `<base>-r<n>` and unique while the budget resets.
+        self._slot_base_names: dict[int, str | None] = {}
+        self._replacement_generations: dict[int, int] = {}
         self._exhausted_slots: set[int] = set()
         self._stopping = False
         self._bindings: dict[str, ExecutorBinding] = {}
@@ -327,6 +331,8 @@ class SandboxManager:
         await self._stop_executors(self._executors)
         self._executors.clear()
         self._restart_counts.clear()
+        self._slot_base_names.clear()
+        self._replacement_generations.clear()
         self._exhausted_slots.clear()
         self._round_robin_indices.clear()
         self._active_operations.clear()
@@ -453,9 +459,12 @@ class SandboxManager:
 
     async def _replace_executor(self, idx: int, executor: SandboxExecutor) -> None:
         """Replace an idle unhealthy executor without blocking the scoring loop."""
+        base_name = self._slot_base_names.setdefault(idx, executor.name)
+        generation = self._replacement_generations.get(idx, 0) + 1
+        self._replacement_generations[idx] = generation
         replacement = SandboxExecutor(
             executor.config,
-            name=f"{executor.name}-r{self._restart_counts[idx]}",
+            name=f"{base_name}-r{generation}",
             modal_app_name=self._modal_app_name,
         )
 
