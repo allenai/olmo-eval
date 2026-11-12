@@ -7,14 +7,23 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
-from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import CONTEXT_CUT_TOKENS_KEY, LMOutput, LMRequest, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import REQUEST_ERROR_KEY
 from olmo_eval.runners.common.types import PREDICTIONS_SUFFIX, REQUESTS_SUFFIX
 from olmo_eval.runners.io.writers import _lazy_loader_placeholder
 
-#: Saved per-output fields the replayed output's metadata carries over.
-_METADATA_FIELDS = ("finish_reason", "completion_tokens", "prompt_tokens")
+#: Saved per-output fields the replayed output's metadata carries over: the raw Harmony
+#: decode and its alignment error, so response parsing reproduces, and the context-cut
+#: marker, so overflow instances still score zero.
+_METADATA_FIELDS = (
+    "finish_reason",
+    "completion_tokens",
+    "prompt_tokens",
+    "text_with_special_tokens",
+    "response_parser_error",
+    CONTEXT_CUT_TOKENS_KEY,
+)
 
 
 def _prompt_key(context: Any, system_prompt: str | None) -> str:

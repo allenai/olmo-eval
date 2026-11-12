@@ -4,10 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+    SamplingParams,
+)
+from olmo_eval.evals.tasks.common import get_task
 from olmo_eval.inference.errors import request_error
 from olmo_eval.inference.providers import ProviderConfig
 from olmo_eval.inference.providers.replay import ReplayProvider
+from olmo_eval.runners.io.builders import build_predictions
 from olmo_eval.runners.io.writers import write_predictions_jsonl, write_requests_jsonl
 
 CHAT = ({"role": "user", "content": "What is 6 x 7?"},)
@@ -136,3 +146,49 @@ def test_rejects_a_prompt_saved_by_two_task_configurations(tmp_path: Path) -> No
         [_completion("Q")], SamplingParams(num_samples=2)
     )
     assert [o.text for o in outputs[0]] == ["B", "C"]
+
+
+def _harmony_parse(output: LMOutput) -> Response:
+    task = get_task("ifeval", {"response_parser": "harmony"})
+    instance = Instance(question="Q")
+    response = Response(instance=instance, request=task.format_request(instance), outputs=[output])
+    task.strip_thinking_traces([response])
+    return response
+
+
+def test_harmony_parsed_output_replays_to_the_same_answer(tmp_path: Path) -> None:
+    # vLLM's default decode drops the Harmony delimiters; the raw decode keeps them.
+    raw = (
+        "<|channel|>analysis<|message|>wrong<|end|>"
+        "<|start|>assistant<|channel|>final<|message|>good<|return|>"
+    )
+    live = LMOutput(
+        text="analysiswrongassistantfinalgood", metadata={"text_with_special_tokens": raw}
+    )
+    saved = build_predictions([_harmony_parse(live)])
+    assert live.text == "good"
+    _save(tmp_path, "task", [("Q", saved[0]["model_output"])])
+
+    replayed = ReplayProvider(predictions=str(tmp_path)).generate([_completion("Q")])[0][0]
+    _harmony_parse(replayed)
+
+    assert replayed.text == "good"
+
+
+def test_response_parser_error_carries_over(tmp_path: Path) -> None:
+    error = "Cannot align Harmony token decode with returned completion text"
+    _save(tmp_path, "task", [("Q", [{"text": "A", "response_parser_error": error}])])
+
+    replayed = ReplayProvider(predictions=str(tmp_path)).generate([_completion("Q")])[0][0]
+
+    assert replayed.metadata["response_parser_error"] == error
+    with pytest.raises(ValueError, match="Cannot align"):
+        _harmony_parse(replayed)
+
+
+def test_context_cut_tokens_survive_replay(tmp_path: Path) -> None:
+    _save(tmp_path, "task", [("Q", [{"text": "A", CONTEXT_CUT_TOKENS_KEY: 512}])])
+
+    replayed = ReplayProvider(predictions=str(tmp_path)).generate([_completion("Q")])[0][0]
+
+    assert replayed.metadata[CONTEXT_CUT_TOKENS_KEY] == 512
