@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 _TRANSPORT_RETRIES = 3
 _TRANSPORT_RETRY_INITIAL_DELAY = 0.25
+_DELIVERED_COMMAND_RETRY_INITIAL_DELAY = 0.5
 _HEALTH_CHECK_RETRIES = 3
 _HEALTH_CHECK_RETRY_INITIAL_DELAY = 0.5
 _HEALTH_CHECK_TIMEOUT = 5.0
@@ -620,19 +621,41 @@ class SandboxExecutor:
     async def _execute_remote_command(
         self, argv: Sequence[str], effective_timeout: float
     ) -> ExecutionResult:
-        """Execute an HTTP command without replaying a delivered request."""
+        """Execute an HTTP command, replaying a delivered request only when configured."""
         from swerex.runtime.abstract import Command
+
+        retry_delivered = self.config.retry_delivered_commands
+        deadline_expired = False
+
+        async def execute_once() -> Any:
+            nonlocal deadline_expired
+            deadline = asyncio.timeout(effective_timeout + 1.0)
+            try:
+                async with deadline:
+                    return await self._runtime.execute(
+                        Command(command=list(argv), timeout=effective_timeout)
+                    )
+            finally:
+                deadline_expired = deadline.expired()
 
         try:
             response = await self._run_with_transport_retries(
-                lambda: asyncio.wait_for(
-                    self._runtime.execute(Command(command=list(argv), timeout=effective_timeout)),
-                    timeout=effective_timeout + 1.0,
-                ),
+                execute_once,
                 operation="command execution",
-                can_retry=lambda exc: isinstance(exc, aiohttp.ClientConnectorError),
+                can_retry=None
+                if retry_delivered
+                else lambda exc: isinstance(exc, aiohttp.ClientConnectorError),
+                initial_delay=_DELIVERED_COMMAND_RETRY_INITIAL_DELAY
+                if retry_delivered
+                else _TRANSPORT_RETRY_INITIAL_DELAY,
             )
         except SandboxTransportError:
+            # A command that ran past its deadline on every attempt hangs on its own; a
+            # sandbox that failed its health checks is quarantined and still raises.
+            if retry_delivered and deadline_expired and self._quarantined_reason is None:
+                return ExecutionResult(
+                    False, f"Command timed out after {effective_timeout}s", -1, "timeout"
+                )
             raise
         except Exception as exc:
             if _is_command_timeout(exc):
@@ -1424,6 +1447,7 @@ class SandboxExecutor:
         *,
         operation: str,
         can_retry: Callable[[Exception], bool] | None = None,
+        initial_delay: float = _TRANSPORT_RETRY_INITIAL_DELAY,
     ) -> _T:
         """Retry transient transport failures before considering quarantine."""
         max_attempts = _TRANSPORT_RETRIES + 1
@@ -1439,7 +1463,7 @@ class SandboxExecutor:
                         f"{operation} failed after {attempt} transport attempt(s): {exc}"
                     ) from exc
                 delay = _exponential_backoff(
-                    _TRANSPORT_RETRY_INITIAL_DELAY,
+                    initial_delay,
                     attempt,
                 )
                 self._log(
