@@ -1071,6 +1071,14 @@ Small dev is two suites, run as separate jobs. MT-Bench and Multi-IF need the
 `multi_turn_chat` scaffold (`--harness multi_turn_chat`), which drops tool calls and has no
 sandbox, so they are `posttrain:small:dev:multi_turn`; the rest is `posttrain:small:dev`.
 
+Each dev suite also has a chat RULER+ suite, `posttrain:{tiny,small}:dev:chat_ruler`:
+RULER+ at 64K on the 128-item sample, sent as one chat turn, greedy, with 512 output tokens.
+Completion RULER+ understates what post-training costs in the format the model is served
+in: on the original RULER at 64K, Olmo 3.5 SFT checkpoints scored 4 to 12 points lower in
+chat than in completion on the same items. Run it as its own job with thinking off, by
+serving a think-off chat template (`-o provider.tokenizer=<dir>`). With thinking on, 512
+tokens cut the reasoning off, and even at 8,192 tokens 70% of answers hit the cap.
+
 The suites name no provider, but the engine is part of what a score measures: compare
 scores only between runs on the same provider, and record it with each run. When the rest
 of a suite runs on SGLang, BFCL needs its own job with `provider.kind=vllm_server`, the
@@ -1081,7 +1089,8 @@ evaluator image (Beaker `01M632ZP67Y4WMV060J74FSC3R`) it runs on SGLang, and so 
 WildGuard judge. In Small test, Arena-Hard v2 also needs vLLM: it fits its output budget to the context,
 which SGLang refuses.
 
-Every suite has WildGuard-judged safety tasks, so a launch needs the `wg_judge` overrides
+Every suite except the multi-turn and chat RULER+ ones has WildGuard-judged safety tasks,
+so a launch needs the `wg_judge` overrides
 (`-o auxiliary_providers.wg_judge.kind=vllm_server -o
 auxiliary_providers.wg_judge.model=allenai/wildguard -o
 auxiliary_providers.wg_judge.kwargs.add_bos_token=true`), and the test suites also need the

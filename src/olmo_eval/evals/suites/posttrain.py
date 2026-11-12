@@ -40,7 +40,8 @@ budget would otherwise be whatever context they are served at. Do not override s
 budgets, and BFCL keeps its own settings (temperature 0.001, 4,096 tokens), as the ledger's
 BFCL reads do. Safety tasks use
 the thinking-model judge variants and need the judge providers shown in ``safety.py``
-(``wg_judge`` in every suite, ``sr_judge`` in test). Each local judge takes its own GPU, so
+(``wg_judge`` in every suite but the multi-turn and chat RULER+ ones, ``sr_judge`` in
+test). Each local judge takes its own GPU, so
 dev needs at least 2 GPUs and test 3. Omniscience is graded by its default judge,
 gpt-4o-mini, through the OpenAI API.
 
@@ -48,6 +49,14 @@ Small dev is two suites, run as separate jobs. MT-Bench and Multi-IF need the
 ``multi_turn_chat`` scaffold (``--harness multi_turn_chat``), which drops tool calls and has
 no sandbox, so they are ``posttrain:small:dev:multi_turn``; the rest is
 ``posttrain:small:dev``.
+
+Each dev suite also has a chat RULER+ suite, ``posttrain:{tiny,small}:dev:chat_ruler``:
+RULER+ at 64K on the 128-item sample, sent as one chat turn, greedy, with 512 output tokens.
+Completion RULER+ understates what post-training costs in the format the model is served
+in: on the original RULER at 64K, Olmo 3.5 SFT checkpoints scored 4 to 12 points lower in
+chat than in completion on the same items. Run it as its own job with thinking off, by
+serving a think-off chat template (``-o provider.tokenizer=<dir>``). With thinking on, 512
+tokens cut the reasoning off, and even at 8,192 tokens 70% of answers hit the cap.
 
 Tiny dev needs no API key. Every other suite needs ``OPENAI_API_KEY`` for its API-judged
 tasks (MultiChallenge in Small dev, MT-Bench in its multi-turn suite).
@@ -83,6 +92,7 @@ OWN_SAMPLING = frozenset(
         "ruler_plus_all__131072:hillclimb",
         "ruler_plus_all__262144:hillclimb",
         "bfcl",
+        "ruler_plus_all__65536:hillclimb:chat_mt512",
     }
 )
 
@@ -184,6 +194,18 @@ make_suite(
         "Olmo 3.5 Small post-training dev set, the tasks that run under --harness multi_turn_chat."
     ),
 )
+
+# Chat RULER+, run as its own job with thinking off (see the module docstring).
+for _size in ("tiny", "small"):
+    make_suite(
+        f"posttrain:{_size}:dev:chat_ruler",
+        _sampled((get_suite("ruler_plus_all__65536:hillclimb:chat_mt512"),)),
+        aggregation=AggregationStrategy.NONE,
+        description=(
+            f"Olmo 3.5 {_size.capitalize()} post-training dev set, RULER+ 64K in chat format; "
+            "serve with thinking off."
+        ),
+    )
 
 make_suite(
     "posttrain:small:test",

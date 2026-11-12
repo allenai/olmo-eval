@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from olmo_eval.common.configs import expand_tasks, validate_task_metrics, validate_tasks
+from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.evals.suites import AggregationStrategy, Suite, get_suite
 from olmo_eval.evals.suites.posttrain import MODEL_SAMPLING, OWN_SAMPLING, SAMPLED_FROM
 from olmo_eval.evals.tasks.common import get_task
@@ -42,11 +43,14 @@ TEST_SHARED = (
     "bbq:mcq_t10_32k",
     "strongreject:sr_judge_thinking_t10_32k",
 )
+CHAT_RULER = ("ruler_plus_all__65536:hillclimb:chat_mt512",)
 MEMBERS = {
     "posttrain:tiny:dev": DEV_SHARED,
+    "posttrain:tiny:dev:chat_ruler": CHAT_RULER,
     "posttrain:tiny:test": TEST_SHARED,
     "posttrain:small:dev": (*DEV_SHARED, "multichallenge:t10_32k"),
     "posttrain:small:dev:multi_turn": ("mt_bench:t10_32k", "multi_if:t10_32k"),
+    "posttrain:small:dev:chat_ruler": CHAT_RULER,
     "posttrain:small:test": (
         *TEST_SHARED,
         "hle:text:verified:t10_32k",
@@ -54,7 +58,7 @@ MEMBERS = {
         "frontierscience:t10_32k",
     ),
 }
-# RULER+ runs greedy in completion mode with direct-answer budgets, and BFCL
+# RULER+ runs greedy with direct-answer budgets (512 tokens in chat), and BFCL
 # keeps the settings that existing post-training reads use.
 OWN_SAMPLING_TASKS = frozenset(task for suite in OWN_SAMPLING for task in get_suite(suite).expand())
 
@@ -73,8 +77,12 @@ def test_members_and_no_pass_average(name):
 
 
 DEV_SUITES = {
-    "tiny": ("posttrain:tiny:dev",),
-    "small": ("posttrain:small:dev", "posttrain:small:dev:multi_turn"),
+    "tiny": ("posttrain:tiny:dev", "posttrain:tiny:dev:chat_ruler"),
+    "small": (
+        "posttrain:small:dev",
+        "posttrain:small:dev:multi_turn",
+        "posttrain:small:dev:chat_ruler",
+    ),
 }
 
 
@@ -145,7 +153,8 @@ def test_tiny_dev_needs_no_secret():
     # Hill-climbing on Tiny should not need an API key.
     needs = {
         task: get_task(task).config.required_secrets
-        for task in get_suite("posttrain:tiny:dev").expand()
+        for name in DEV_SUITES["tiny"]
+        for task in get_suite(name).expand()
         if get_task(task).config.required_secrets
     }
 
@@ -182,3 +191,22 @@ def test_dev_hmmt_draws_8_samples_with_the_pass_at_32_setup(task):
     assert dev.sampling_params.num_samples == 8
     assert replace(dev.sampling_params, num_samples=32) == full.sampling_params
     assert dev.primary_metric == full.primary_metric
+
+
+def test_chat_ruler_pairs_with_the_completion_cell():
+    # Only the format and the budget change, so a chat cell pairs item-for-item with the
+    # completion cell on the same checkpoint.
+    chat_suite = get_suite("ruler_plus_all__65536:hillclimb:chat_mt512")
+    completion_suite = get_suite("ruler_plus_all__65536:hillclimb")
+
+    assert chat_suite.expand() == tuple(f"{t}:chat_mt512" for t in completion_suite.expand())
+    assert chat_suite.aggregation == completion_suite.aggregation
+    for task in chat_suite.expand():
+        chat = get_task(task).config
+        completion = get_task(task.removesuffix(":chat_mt512")).config
+        assert isinstance(chat.formatter, ChatFormatter), task
+        assert chat.sampling_params == replace(completion.sampling_params, max_tokens=512), task
+        unchanged = replace(
+            chat, formatter=completion.formatter, sampling_params=completion.sampling_params
+        )
+        assert unchanged == completion, task

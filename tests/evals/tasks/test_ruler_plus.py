@@ -8,6 +8,7 @@ import httpx
 import pytest
 from huggingface_hub.errors import RepositoryNotFoundError
 
+from olmo_eval.common.types import Instance, RequestType
 from olmo_eval.data import ruler_plus_loader
 from olmo_eval.data.ruler_plus_loader import (
     ROW_FIELD,
@@ -170,3 +171,16 @@ def test_every_task_and_suite_is_registered():
     }
     for size in CONTEXT_SIZES:
         assert len(get_suite(f"ruler_plus_all__{size}").tasks) == 13
+
+
+def test_chat_variant_sends_the_completion_prompt_as_one_user_turn():
+    completion = get_task("ruler_plus_niah_s_1__65536")
+    chat = get_task("ruler_plus_niah_s_1__65536:chat_mt512")
+    instance = Instance(question="haystack ... The special magic number is:", gold_answer=["42"])
+    plain = completion.format_request(instance)
+    request = chat.format_request(instance)
+
+    assert plain.request_type == RequestType.COMPLETION
+    assert request.request_type == RequestType.CHAT
+    assert request.messages == ({"role": "user", "content": plain.prompt},)
+    assert chat.config.sampling_params.max_tokens == 512
