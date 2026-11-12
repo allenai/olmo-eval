@@ -34,6 +34,7 @@ from olmo_eval.runners.processing.generation_counts import count_generations
 @pytest.fixture
 def setup_engine(monkeypatch):
     monkeypatch.setenv("SGLANG_RETURN_ORIGINAL_LOGPROB", "1")
+    monkeypatch.setattr("torch.cuda.is_available", lambda: True)
     tokenizer = Mock(bos_token_id=99, eos_token_id=98)
     tokenizer.apply_chat_template.return_value = "<user>question<assistant><think>"
     tokenizer.encode.return_value = [10, 20]
@@ -1130,3 +1131,14 @@ def test_each_request_length_cap_is_kept_on_its_own(setup_engine):
     provider = SGLangProvider("model")
     assert provider.profile_report["max_total_num_tokens"] == 4096
     assert "max_req_input_len" not in provider.profile_report
+
+
+def test_missing_cuda_rejected_before_model_registration(setup_engine, monkeypatch):
+    _, constructor, _ = setup_engine
+    monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+    register = Mock()
+    monkeypatch.setitem(sys.modules, "plugin", SimpleNamespace(register=register))
+    with pytest.raises(RuntimeError, match="requires a usable CUDA device"):
+        SGLangProvider("model", model_registration="plugin:register")
+    register.assert_not_called()
+    constructor.assert_not_called()
