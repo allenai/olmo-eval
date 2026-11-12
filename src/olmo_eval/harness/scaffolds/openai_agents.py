@@ -49,6 +49,53 @@ def _is_context_length_error(exc: BaseException) -> bool:
     )
 
 
+def _make_vllm_responses_model(base: type) -> type:
+    """Subclass the SDK's Responses model with a workaround for vLLM's harmony parser.
+
+    vLLM (0.19.1) only turns a harmony tool call into a ``function_call`` item when
+    the model placed it on the ``commentary`` channel; a call to ``functions.<name>``
+    on the ``analysis`` channel comes back as an ``mcp_call`` item instead, which the
+    SDK then echoes as input and vLLM rejects with ``Unknown input type: mcp_call``
+    (vllm-project/vllm#35907 is the pending upstream fix). Until that lands, rewrite
+    such items into function calls so the SDK runs the tool as the model intended.
+    """
+
+    class VLLMResponsesModel(base):  # type: ignore[misc,valid-type]
+        async def _fetch_response(self, *args: Any, **kwargs: Any) -> Any:
+            response = await super()._fetch_response(*args, **kwargs)
+            output = getattr(response, "output", None)
+            if not isinstance(output, list):
+                return response
+            from openai.types.responses import (  # type: ignore[ty:unresolved-import]
+                ResponseFunctionToolCall,
+            )
+
+            rewritten = 0
+            new_output = []
+            for item in output:
+                if getattr(item, "type", None) == "mcp_call" and getattr(item, "name", None):
+                    item_id = getattr(item, "id", None) or f"mcp_{rewritten}"
+                    new_output.append(
+                        ResponseFunctionToolCall(
+                            type="function_call",
+                            id=item_id,
+                            call_id=f"call_{item_id}",
+                            name=item.name,
+                            arguments=item.arguments or "{}",
+                            status="completed",
+                        )
+                    )
+                    rewritten += 1
+                else:
+                    new_output.append(item)
+            if rewritten:
+                logger.debug(f"Rewrote {rewritten} vLLM mcp_call item(s) into function calls")
+                response.output = new_output
+            return response
+
+    return VLLMResponsesModel
+
+
 def _resolve_chat_template_kwargs(provider: InferenceProvider) -> dict[str, Any] | None:
     """Resolve the ``chat_template_kwargs`` request field for a provider.
 
@@ -294,7 +341,7 @@ class OpenAIAgentsScaffold(Scaffold):
         if use_responses_api:
             # Harmony-native path for models like gpt-oss: the server parses reasoning
             # and tool calls itself instead of a chat-completions tool-call parser.
-            model = OpenAIResponsesModel(
+            model = _make_vllm_responses_model(OpenAIResponsesModel)(
                 openai_client=client,
                 model=provider.model_name,
             )
