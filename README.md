@@ -1052,10 +1052,23 @@ Small dev also reads the tracker's agentic Track rows. They are
 [external evals](#external-evals), which a suite cannot hold, so each runs as its own
 `olmo-eval run-external -e <name>` job beside the suite: `openthoughts_tblite`
 (OpenThoughts-TBLite, 100 tasks) and `terminal_bench_2` (Terminal-Bench 2.1, 89 tasks) for
-the Terminal-Bench row, and `swe_bench_verified`. Tiny leaves them out: the tracker
-deprioritizes them there.
+the Terminal-Bench row, and `swe_bench_verified`.
 
-They mix short tasks with RULER+ at 64K to 256K, LiveCodeBench (sandboxed harness,
+The tracker deprioritizes those rows for Tiny, but without an agentic read Tiny dev cannot
+show whether a change helps or hurts agentic skill, so it reads two on which Tiny scores
+above zero. BFCL multi-turn is `posttrain:tiny:dev:bfcl_multi_turn`, a suite of its own
+because it needs the `bfcl_multi_turn` scaffold (`--harness bfcl_multi_turn`), at
+temperature 1.0, top_p 0.95 and 16,384 tokens per turn. SWE-bench Verified reads only the
+194 of its 500 instances annotated as under 15 minutes to fix, which hold most of what a
+Tiny checkpoint resolves (17 of 26 for one Tiny SFT checkpoint):
+
+```bash
+olmo-eval run-external -m <checkpoint> -e swe_bench_verified -a 'difficulties=<15 min fix' \
+  -a task_frame=swesmith -a temperature=1.0 -a top_p=0.95 -a max_tokens=16384 \
+  -K max_model_len=65536
+```
+
+The suites mix short tasks with RULER+ at 64K to 256K, LiveCodeBench (sandboxed harness,
 as above) and LLM-judged safety and Arena-Hard tasks (see
 [local judge models](#local-judge-models)). Sampled tasks run at the ledger's setting:
 Olmo 3.5 Tiny's suggested temperature 1.0 and top_p 0.95 (Small uses them too, assumed from
@@ -1067,7 +1080,8 @@ direct-answer budgets, and BFCL keeps its own settings. Do not override sampling
 longest prompt plus 32,768 tokens: the server refuses any request that does not fit (at
 34,816, every prompt over 2,048 tokens), and only when the request reaches it.
 
-Small dev is two suites, run as separate jobs. MT-Bench and Multi-IF need the
+Tiny dev is two suites, run as separate jobs: `posttrain:tiny:dev` and
+`posttrain:tiny:dev:bfcl_multi_turn`. So is Small dev. MT-Bench and Multi-IF need the
 `multi_turn_chat` scaffold (`--harness multi_turn_chat`), which drops tool calls and has no
 sandbox, so they are `posttrain:small:dev:multi_turn`; the rest is `posttrain:small:dev`.
 
@@ -1566,6 +1580,14 @@ result = await manager.execute_code("print('hello')", capabilities=Capability.PY
 await manager.stop()
 ```
 
+Independent `execute_command` and `execute_code` calls preserve the sandbox server's
+initialized environment. Docker/Podman uses container execution when process
+supervision is available; other container and Modal paths use asynchronous HTTP
+commands so a long command does not block health checks or file requests.
+Command deadlines terminate the command process group. Commands that finish
+normally can leave background processes running. Persistent bash sessions retain
+shell state between calls and currently use SWE-ReX's session execution path.
+
 ### Sandbox Modes
 
 | Mode | Description |
@@ -1575,6 +1597,9 @@ await manager.stop()
 | `MODAL` | Run on Modal cloud platform |
 
 ## Launching on Beaker
+
+For BF16 Olmo MoE failures during B300 profiling, see the
+[B300 vLLM compatibility checks](docs/b300-vllm.md).
 
 olmo-eval includes built-in support for launching evaluation jobs on [Beaker](https://beaker.org).
 

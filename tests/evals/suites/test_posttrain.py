@@ -7,7 +7,12 @@ import pytest
 from olmo_eval.common.configs import expand_tasks, validate_task_metrics, validate_tasks
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.evals.suites import AggregationStrategy, Suite, get_suite
-from olmo_eval.evals.suites.posttrain import MODEL_SAMPLING, OWN_SAMPLING, SAMPLED_FROM
+from olmo_eval.evals.suites.posttrain import (
+    BFCL_MULTI_TURN_SAMPLING,
+    MODEL_SAMPLING,
+    OWN_SAMPLING,
+    SAMPLED_FROM,
+)
 from olmo_eval.evals.tasks.common import get_task
 
 DEV_SHARED = (
@@ -47,6 +52,7 @@ CHAT_RULER = ("ruler_plus_all__65536:hillclimb:chat_mt512",)
 MEMBERS = {
     "posttrain:tiny:dev": DEV_SHARED,
     "posttrain:tiny:dev:chat_ruler": CHAT_RULER,
+    "posttrain:tiny:dev:bfcl_multi_turn": ("bfcl:multi_turn:t10_16k",),
     "posttrain:tiny:test": TEST_SHARED,
     "posttrain:small:dev": (*DEV_SHARED, "multichallenge:t10_32k"),
     "posttrain:small:dev:multi_turn": ("mt_bench:t10_32k", "multi_if:t10_32k"),
@@ -61,6 +67,8 @@ MEMBERS = {
 # RULER+ runs greedy with direct-answer budgets (512 tokens in chat), and BFCL
 # keeps the settings that existing post-training reads use.
 OWN_SAMPLING_TASKS = frozenset(task for suite in OWN_SAMPLING for task in get_suite(suite).expand())
+# BFCL multi-turn runs at the ledger's setting for it: 16,384 tokens per model turn.
+BFCL_MULTI_TURN_TASKS = frozenset(get_suite("posttrain:tiny:dev:bfcl_multi_turn").expand())
 
 
 def _names(suite: Suite) -> tuple[str, ...]:
@@ -77,7 +85,11 @@ def test_members_and_no_pass_average(name):
 
 
 DEV_SUITES = {
-    "tiny": ("posttrain:tiny:dev", "posttrain:tiny:dev:chat_ruler"),
+    "tiny": (
+        "posttrain:tiny:dev",
+        "posttrain:tiny:dev:bfcl_multi_turn",
+        "posttrain:tiny:dev:chat_ruler",
+    ),
     "small": (
         "posttrain:small:dev",
         "posttrain:small:dev:multi_turn",
@@ -103,6 +115,17 @@ def test_each_suite_runs_under_one_scaffold(name):
         assert get_task(task).required_scaffold == expected, task
 
 
+@pytest.mark.parametrize("name", MEMBERS)
+def test_bfcl_multi_turn_has_a_suite_of_its_own(name):
+    # Its tasks declare no scaffold but score only under --harness bfcl_multi_turn.
+    tasks = get_suite(name).expand()
+    multi_turn = [task for task in tasks if task.startswith("bfcl_multi_turn")]
+    if name.endswith(":bfcl_multi_turn"):
+        assert multi_turn == list(tasks)
+    else:
+        assert not multi_turn
+
+
 @pytest.mark.parametrize("size", ["tiny", "small"])
 def test_no_suite_reads_gpqa(size):
     # Main truncates at chance for a reasoning model at 32,768 tokens; Diamond is a subset of it.
@@ -119,7 +142,7 @@ MIN_GENERATION_BUDGET = 32768
 @pytest.mark.parametrize("name", MEMBERS)
 def test_no_task_cuts_off_a_reasoning_trace(name):
     for task in get_suite(name).expand():
-        if task in OWN_SAMPLING_TASKS:
+        if task in OWN_SAMPLING_TASKS | BFCL_MULTI_TURN_TASKS:
             continue
         params = get_task(task).config.sampling_params
         assert params is not None, task
@@ -131,7 +154,7 @@ def test_no_task_cuts_off_a_reasoning_trace(name):
 def test_sampled_tasks_run_at_the_models_suggested_sampling(name):
     # The ledger's sampling, not olmo-eval's defaults (0.6, no budget); nothing else changes.
     for task in get_suite(name).expand():
-        if task in OWN_SAMPLING_TASKS:
+        if task in OWN_SAMPLING_TASKS | BFCL_MULTI_TURN_TASKS:
             continue
         config = get_task(task).config
         source = get_task(SAMPLED_FROM[task]).config
@@ -147,6 +170,22 @@ def test_every_task_resolves_and_has_metrics(name):
 
     assert not invalid
     assert not without_metrics
+
+
+def test_bfcl_multi_turn_runs_at_the_ledgers_setting():
+    # The ledger's BFCL multi-turn reads: temperature 1.0, top_p 0.95, 16,384 tokens per turn.
+    suite = get_suite("posttrain:tiny:dev:bfcl_multi_turn")
+    (summary,) = suite.tasks
+    assert isinstance(summary, Suite)
+    assert summary.aggregation == get_suite("bfcl:multi_turn").aggregation
+
+    for task, source in zip(summary.tasks, get_suite("bfcl:multi_turn").tasks, strict=True):
+        config = get_task(task).config
+        source_config = get_task(source).config
+        assert config.sampling_params == replace(
+            source_config.sampling_params, **BFCL_MULTI_TURN_SAMPLING
+        ), task
+        assert replace(config, sampling_params=source_config.sampling_params) == source_config
 
 
 def test_tiny_dev_needs_no_secret():

@@ -104,6 +104,17 @@ class OwnedDockerDeployment(DockerDeployment):
         self._captures: list[_CapturedPipe] = []
         self._shutdown_task: asyncio.Task[None] | None = None
 
+    def _get_swerex_start_cmd(self, token: str, port: int) -> list[str]:
+        from .server_command import server_command
+
+        executable = "swerex-remote"
+        if self._config.python_standalone_dir:
+            executable = f"{self._config.python_standalone_dir}/python3.11/bin/swerex-remote"
+        return [
+            *self._config.exec_shell,
+            server_command(executable, token, port, install_pipx=True),
+        ]
+
     async def start(self) -> None:
         if self._shutdown_task is not None:
             if not self._shutdown_task.done():

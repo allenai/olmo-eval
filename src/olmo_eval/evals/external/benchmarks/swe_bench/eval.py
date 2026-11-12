@@ -165,6 +165,7 @@ class SWEBenchArgs:
 
     instance_ids: list[str] | None = None
     repos: list[str] | None = None
+    difficulties: list[str] | None = None
     limit: int | None = None
     dataset: str = DATASET_PATH
     revision: str | None = DATASET_REVISION
@@ -197,6 +198,7 @@ class SWEBenchArgs:
         return cls(
             instance_ids=as_list(data.get("instance_ids")),
             repos=as_list(data.get("repos")),
+            difficulties=as_list(data.get("difficulties")),
             limit=as_optional_int(data.get("limit")),
             dataset=data.get("dataset", DATASET_PATH),
             # The pinned revision belongs to the default dataset only.
@@ -417,6 +419,10 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         return {
             "instance_ids": ("Comma-separated instance IDs to run (default: all)", None),
             "repos": ("Comma-separated repositories to run, e.g. django/django", None),
+            "difficulties": (
+                "Comma-separated difficulty buckets to run, e.g. '<15 min fix' (194 instances)",
+                None,
+            ),
             "limit": ("Run only the first N selected instances", None),
             "dataset": ("HuggingFace dataset path", DATASET_PATH),
             "revision": ("Dataset revision", DATASET_REVISION),
@@ -505,6 +511,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
             instance_ids=swe_args.instance_ids,
             repos=swe_args.repos,
             limit=swe_args.limit,
+            difficulties=swe_args.difficulties,
         )
         if not instances:
             return self._error_result("No instances selected", start_time)
