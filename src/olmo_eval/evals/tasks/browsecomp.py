@@ -22,7 +22,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.types import Instance, LMRequest, Response
-from olmo_eval.data import DataSource
+from olmo_eval.data import DataSource, SourceType
 from olmo_eval.evals.tasks.browsecomp_common import (
     BrowseCompCalibration,
     BrowseCompMetric,
@@ -32,7 +32,7 @@ from olmo_eval.evals.tasks.browsecomp_common import (
     run_completed,
     trajectory_statistics,
 )
-from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 logger = logging.getLogger(__name__)
 
@@ -103,20 +103,22 @@ class BrowseComp(Task):
     strip_thinking = True
     required_secrets = ("OPENAI_API_KEY",)
 
-    def __init__(self, config: TaskConfig) -> None:
-        source = config.data_source
-        if isinstance(source, DataSource) and source.path == DATASET_URL:
-            config = replace(
-                config, data_source=replace(source, path=str(dataset_path()), source_type=None)
-            )
-        super().__init__(config)
+    def _load_instances(self, split: str | None = None) -> Iterator[Instance]:
+        """Load the cached local copy of the test set, downloading it on first use."""
+        from olmo_eval.data import DataLoader
+
+        source = self.config.get_data_source(split=split)
+        if source.path == DATASET_URL:
+            cached = dataset_path()
+            if not cached.is_file():
+                logger.info("Downloading the BrowseComp test set to %s", cached)
+                download_dataset(cached)
+            source = replace(source, path=str(cached), source_type=SourceType.LOCAL)
+        for index, doc in enumerate(DataLoader().load(source)):
+            yield self.process_doc(doc, index)
 
     @property
     def instances(self) -> Iterator[Instance]:
-        path = Path(self.config.get_data_source().path)
-        if path == dataset_path() and not path.is_file():
-            logger.info("Downloading the BrowseComp test set to %s", path)
-            download_dataset(path)
         yield from self._load_instances_cached()
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:

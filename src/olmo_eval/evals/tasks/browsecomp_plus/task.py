@@ -14,7 +14,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.types import Instance, LMRequest, Response
-from olmo_eval.data import DataSource
+from olmo_eval.data import DataSource, SourceType
 from olmo_eval.evals.tasks.browsecomp_common import (
     BrowseCompCalibration,
     BrowseCompMetric,
@@ -34,7 +34,7 @@ from olmo_eval.evals.tasks.browsecomp_plus.reference import (
     compute_citation_metrics,
     extract_citations_from_response,
 )
-from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 logger = logging.getLogger(__name__)
 
@@ -91,29 +91,25 @@ class BrowseCompPlus(Task):
     required_secrets = ("OPENAI_API_KEY",)
     dependencies = ["httpx~=0.28.1"]
 
-    def __init__(self, config: TaskConfig) -> None:
-        source = config.data_source
-        if isinstance(source, DataSource) and source.path == DATASET_REPO:
-            config = replace(
-                config,
-                data_source=replace(
-                    source, path=str(artifact_home() / DATASET_FILENAME), source_type=None
-                ),
-            )
-        super().__init__(config)
+    def _load_instances(self, split: str | None = None) -> Iterator[Instance]:
+        """Load the prepared local copy of the dataset the task is configured with."""
+        from olmo_eval.data import DataLoader
+
+        source = self.config.get_data_source(split=split)
+        if source.path == DATASET_REPO:
+            prepared = (artifact_home() / DATASET_FILENAME).resolve()
+            if not prepared.is_file():
+                raise FileNotFoundError(
+                    "BrowseComp-Plus data is not prepared. Run "
+                    "uv run python -m olmo_eval.evals.tasks.browsecomp_plus.prepare "
+                    "and set BROWSECOMP_PLUS_HOME to its output directory."
+                )
+            source = replace(source, path=str(prepared), source_type=SourceType.LOCAL)
+        for index, doc in enumerate(DataLoader().load(source)):
+            yield self.process_doc(doc, index)
 
     @property
     def instances(self) -> Iterator[Instance]:
-        source = self.config.get_data_source()
-        if (
-            source.path == str(artifact_home() / DATASET_FILENAME)
-            and not (artifact_home() / DATASET_FILENAME).is_file()
-        ):
-            raise FileNotFoundError(
-                "BrowseComp-Plus data is not prepared. Run "
-                "uv run python -m olmo_eval.evals.tasks.browsecomp_plus.prepare "
-                "and set BROWSECOMP_PLUS_HOME to its output directory."
-            )
         yield from self._load_instances_cached()
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
