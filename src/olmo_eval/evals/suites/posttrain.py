@@ -21,7 +21,17 @@ Small dev also reads the tracker's agentic Track rows, which are external evals:
 cannot hold them, so each runs as its own ``olmo-eval run-external`` job beside the suite.
 They are ``openthoughts_tblite`` (OpenThoughts-TBLite, 100 tasks) and ``terminal_bench_2``
 (Terminal-Bench 2.1, 89 tasks) for the Terminal-Bench row, and ``swe_bench_verified``.
-Tiny leaves them out: the tracker deprioritizes them there.
+
+The tracker deprioritizes those rows for Tiny, but without an agentic read Tiny dev cannot
+show whether a change helps or hurts agentic skill, so it reads two on which Tiny scores
+above zero. BFCL multi-turn is ``posttrain:tiny:dev:bfcl_multi_turn``, a suite of its own
+because it needs the ``bfcl_multi_turn`` scaffold (``--harness bfcl_multi_turn``), at the
+ledger's setting for it: temperature 1.0, top_p 0.95 and 16,384 tokens per turn. SWE-bench
+Verified reads only the 194 of its 500 instances annotated as under 15 minutes to fix
+(``-a difficulties='<15 min fix'``), which hold most of what a Tiny checkpoint resolves (17
+of 26 for one Tiny SFT checkpoint). It runs as its own job at the ledger's setting:
+``-a task_frame=swesmith -a temperature=1.0 -a top_p=0.95 -a max_tokens=16384`` and
+``-K max_model_len=65536``, with the vanillux scaffold's 64 turns.
 
 Left out: tracker rows with no olmo-eval task yet (CritPt, FrontierCode, BrowseComp-Plus,
 AutomationBench, DeepSearchQA, Terminal-Bench-Science, FIRM, OpenAgentSafety, the
@@ -44,7 +54,8 @@ the thinking-model judge variants and need the judge providers shown in ``safety
 dev needs at least 2 GPUs and test 3. Omniscience is graded by its default judge,
 gpt-4o-mini, through the OpenAI API.
 
-Small dev is two suites, run as separate jobs. MT-Bench and Multi-IF need the
+Small dev is two suites, run as separate jobs, and so is Tiny dev (``posttrain:tiny:dev`` and
+``posttrain:tiny:dev:bfcl_multi_turn``). MT-Bench and Multi-IF need the
 ``multi_turn_chat`` scaffold (``--harness multi_turn_chat``), which drops tool calls and has
 no sandbox, so they are ``posttrain:small:dev:multi_turn``; the rest is
 ``posttrain:small:dev``.
@@ -172,6 +183,35 @@ make_suite(
     _sampled((*_DEV_SHARED, "multichallenge")),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Small post-training dev set (the tracker's Track column).",
+)
+
+# BFCL multi-turn, Tiny dev's agentic read: it needs the bfcl_multi_turn scaffold, so it is
+# a suite of its own. It runs at the ledger's setting for these tasks (temperature 1.0, top_p
+# 0.95, 16,384 tokens per model turn). At the tasks' own 4,096 tokens, nearly half of a Tiny
+# SFT checkpoint's rollouts hit the cap.
+BFCL_MULTI_TURN_SAMPLING = {"temperature": 1.0, "top_p": 0.95, "max_tokens": 16384}
+BFCL_MULTI_TURN_VARIANT = "t10_16k"
+_bfcl_multi_turn = get_suite("bfcl:multi_turn")
+make_suite(
+    "posttrain:tiny:dev:bfcl_multi_turn",
+    (
+        make_suite(
+            f"bfcl:multi_turn:{BFCL_MULTI_TURN_VARIANT}",
+            tuple(
+                register_sampling_variant(task, BFCL_MULTI_TURN_VARIANT, **BFCL_MULTI_TURN_SAMPLING)
+                for task in _bfcl_multi_turn.expand()
+            ),
+            aggregation=_bfcl_multi_turn.aggregation,
+            description=(
+                f"{_bfcl_multi_turn.description} At temperature 1.0, top_p 0.95 and "
+                "16,384 tokens per turn."
+            ),
+        ),
+    ),
+    aggregation=AggregationStrategy.NONE,
+    description=(
+        "Olmo 3.5 Tiny post-training dev set, BFCL multi-turn under --harness bfcl_multi_turn."
+    ),
 )
 
 # The rest of Small dev, which needs the multi_turn_chat scaffold. That scaffold drops tool

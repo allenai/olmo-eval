@@ -19,12 +19,23 @@ def select_instances(
     instance_ids: list[str] | None = None,
     repos: list[str] | None = None,
     limit: int | None = None,
+    difficulties: list[str] | None = None,
 ) -> list[SWEBenchInstance]:
-    """Filter instances by ID and repository, then keep the first ``limit``.
+    """Filter instances by ID, repository and difficulty, then keep the first ``limit``.
 
     Raises:
-        ValueError: If any requested instance ID is not in the dataset.
+        ValueError: If any requested instance ID, or any requested difficulty, is not in
+            the dataset.
     """
+    if difficulties:
+        # Checked against the whole dataset, so a typo is not mistaken for an empty bucket.
+        known_difficulties = {inst.difficulty for inst in instances}
+        missing = [d for d in difficulties if d not in known_difficulties]
+        if missing:
+            raise ValueError(
+                f"Unknown SWE-bench difficulties: {', '.join(missing)}; "
+                f"known: {', '.join(sorted(known_difficulties))}"
+            )
     if instance_ids:
         known = {inst.instance_id for inst in instances}
         missing = [i for i in instance_ids if i not in known]
@@ -35,6 +46,9 @@ def select_instances(
     if repos:
         wanted_repos = set(repos)
         instances = [inst for inst in instances if inst.repo in wanted_repos]
+    if difficulties:
+        wanted_difficulties = set(difficulties)
+        instances = [inst for inst in instances if inst.difficulty in wanted_difficulties]
     if limit is not None:
         instances = instances[:limit]
     return instances
