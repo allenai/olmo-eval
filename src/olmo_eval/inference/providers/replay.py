@@ -7,7 +7,13 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
-from olmo_eval.common.types import CONTEXT_CUT_TOKENS_KEY, LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import REQUEST_ERROR_KEY
 from olmo_eval.runners.common.types import PREDICTIONS_SUFFIX, REQUESTS_SUFFIX
@@ -32,7 +38,11 @@ def _prompt_key(context: Any, system_prompt: str | None) -> str:
 
 
 def _request_key(request: LMRequest) -> str:
-    context = list(request.messages) if request.messages else request.prompt
+    # The context the requests writer saves for this request type.
+    if request.request_type == RequestType.CHAT:
+        context: Any = list(request.messages or ())
+    else:
+        context = request.prompt
     return _prompt_key(context, request.system_prompt)
 
 

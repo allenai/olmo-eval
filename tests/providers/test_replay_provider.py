@@ -201,3 +201,18 @@ def test_an_empty_original_generation_replays_empty(tmp_path: Path) -> None:
     replayed = ReplayProvider(predictions=str(tmp_path)).generate([_completion("Q")])[0][0]
 
     assert replayed.text == ""
+
+
+def test_a_completion_request_is_keyed_by_its_prompt_even_with_messages(tmp_path: Path) -> None:
+    # A harness-level system prompt fills request.messages on a completion request, but the
+    # requests file saves its prompt.
+    _save(tmp_path, "task", [("Q", [{"text": "A"}])])
+    request = LMRequest(
+        request_type=RequestType.COMPLETION,
+        prompt="Q",
+        messages=({"role": "system", "content": "Be brief."},),
+    )
+
+    replayed = ReplayProvider(predictions=str(tmp_path)).generate([request])[0][0]
+
+    assert replayed.text == "A"
