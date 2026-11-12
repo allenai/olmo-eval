@@ -973,8 +973,8 @@ class BeakerLauncher:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_artifact_registry"
             steps.append(f"source {script}")
 
-        # Optional shell snippet run after every package install (e.g. to re-pin a dependency that a later
-        # per-package install changed).  Not exported: it is a command, not a variable.
+        # Optional shell snippet run after every package install (e.g. to re-pin a dependency
+        # that a later per-package install changed).  Not exported: it is a command, not a variable.
         env_exports = dict(env_exports or {})
         post_install_cmd = env_exports.pop("OLMO_EVAL_RUNTIME_POST_INSTALL_CMD", None)
         # Export additional environment variables (e.g., UV_CACHE_DIR)
@@ -1015,8 +1015,14 @@ class BeakerLauncher:
             # Companion packages that must change build together with torch (torchvision/torchaudio
             # carry the CUDA variant too); otherwise the image's builds end up in the constraints
             # and conflict with the provider's pins.  Space-separated specs, same index as torch.
-            for extra_spec in ((env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_EXTRA_PACKAGES") or "").split():
-                spec = f"{extra_spec} --index-url {runtime_torch_index_url}" if runtime_torch_index_url else extra_spec
+            for extra_spec in (
+                (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_EXTRA_PACKAGES") or ""
+            ).split():
+                spec = (
+                    f"{extra_spec} --index-url {runtime_torch_index_url}"
+                    if runtime_torch_index_url
+                    else extra_spec
+                )
                 steps.append(build_install_command(spec, force_reinstall=True))
 
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them.
