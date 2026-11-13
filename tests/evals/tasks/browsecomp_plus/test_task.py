@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -48,7 +49,8 @@ def judge(monkeypatch):
         )
     )
     client.__aenter__.return_value = client
-    monkeypatch.setattr("openai.AsyncOpenAI", lambda: client)
+    # The OpenAI SDK is an optional extra, so stand in for the module itself.
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(AsyncOpenAI=lambda: client))
     return client.responses.create
 
 
