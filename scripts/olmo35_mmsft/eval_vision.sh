@@ -21,7 +21,7 @@ HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd)
 TASKS=${TASKS:-"chart_qa vqa2 doc_qa text_vqa ai2d countbench_qa real_world_qa"}
 GPUS=${GPUS:-8}; WORKSPACE=${WORKSPACE:-ai2/olmo-instruct}; CLUSTER=${CLUSTER:-ai2/holmes}
 PRIORITY=${PRIORITY:-urgent}; TIMEOUT=${TIMEOUT:-24h}; GROUP=${GROUP:-olmo35-mmsft-eval}
-OLMO_CORE_SHA=${OLMO_CORE_SHA:-accab373bae0f316f3e6092a0228ee298cefb5a7}
+OLMO_CORE_SHA=${OLMO_CORE_SHA:-9923dd071e7dd55cef4fef892fd8d77a77f804bc}
 OLMO_EVAL_PY=${OLMO_EVAL_PY:-python}
 # The olmo35 tokenizer at its pinned revision, on Weka (jobs may not reach the gated Hub repo);
 # tokenizer.json sha256 56a6699d...fb79, a copy of allenai/dolma2-tokenizer-olmo35@8b97170.
