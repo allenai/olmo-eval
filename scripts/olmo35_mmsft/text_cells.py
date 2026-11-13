@@ -30,7 +30,7 @@ SOURCE_PREFIX = "h182-b1-c12r-gpu-s34521-"
 SELECTION_CELLS = ("gpqa", "ifeval", "ifbench", "ruler64k", "rp-niah-smk", "rp-mvmqvt", "rp-aggqa")
 
 
-def build(spec_path: str, model: str, name: str, user: str, cluster: str) -> dict:
+def build(spec_path: str, model: str, name: str, user: str, cluster: str, priority: str = "urgent") -> dict:
     spec = copy.deepcopy(json.load(open(spec_path)))
     task = spec["tasks"][0]
     args = task["arguments"]
@@ -49,8 +49,8 @@ def build(spec_path: str, model: str, name: str, user: str, cluster: str) -> dic
             entry = {**entry, "secret": re.sub(r"^[a-z0-9]+_", f"{user}_", secret)}
         env.append(entry)
     task["envVars"] = env
-    task["constraints"] = {"cluster": [cluster]}
-    task["context"] = {"priority": "urgent", "preemptible": False}
+    task["constraints"] = {"cluster": cluster.split(",")}
+    task["context"] = {"priority": priority, "preemptible": False}
     spec["description"] = f"multimodal SFT text cell {name} (copied from {os.path.basename(spec_path)})"
     return spec
 
@@ -63,7 +63,9 @@ def main() -> None:
     ap.add_argument("--cells", nargs="*", default=list(SELECTION_CELLS))
     ap.add_argument("--user", default="jasonr")
     ap.add_argument("--workspace", default="ai2/olmo-instruct")
-    ap.add_argument("--cluster", default="ai2/holmes")
+    ap.add_argument("--cluster", default="ai2/holmes", help="comma-separated clusters")
+    ap.add_argument("--priority", default="urgent")
+    ap.add_argument("--suffix", default="", help="appended to each job name (e.g. -alt)")
     ap.add_argument("--out", default=None, help="where to write the specs (default: <model>/eval-specs)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -75,11 +77,14 @@ def main() -> None:
     for cell in args.cells:
         holmes = os.path.join(base, "holmes-cu130", "specs", f"{SOURCE_PREFIX}{cell}.json")
         plain = os.path.join(base, "specs", f"{SOURCE_PREFIX}{cell}.json")
-        src = holmes if os.path.exists(holmes) else plain
+        # The holmes copies install the B300 cu130 runtime; other clusters take the recorded
+        # (jupiter, cu128) spec.
+        on_holmes = "ai2/holmes" in args.cluster.split(",")
+        src = holmes if on_holmes and os.path.exists(holmes) else plain
         if not os.path.exists(src):
             sys.exit(f"no recorded spec for cell {cell!r}")
-        name = f"mmsft-{args.short_name}-{cell}"
-        spec = build(src, os.path.abspath(args.model), name, args.user, args.cluster)
+        name = f"mmsft-{args.short_name}-{cell}{args.suffix}"
+        spec = build(src, os.path.abspath(args.model), name, args.user, args.cluster, args.priority)
         path = os.path.join(out, f"{name}.json")
         json.dump(spec, open(path, "w"), indent=1)
         if args.dry_run:
