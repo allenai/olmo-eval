@@ -384,7 +384,8 @@ class DenseCaptionJudgeScorer(ContextScorer):
 # --------------------------------------------------------------------------------------
 
 
-CHARXIV_JUDGE_MODEL = "gpt-4o-2024-05-13"
+# ``CHARXIV_JUDGE_MODEL`` overrides the judge (``gpt-4o-2024-05-13`` was retired 2026-10-23).
+CHARXIV_JUDGE_MODEL = os.environ.get("CHARXIV_JUDGE_MODEL", "gpt-4o-2024-05-13")
 _RETRY_BASE_DELAY = 1.0
 _RETRY_MAX_DELAY = 30.0
 

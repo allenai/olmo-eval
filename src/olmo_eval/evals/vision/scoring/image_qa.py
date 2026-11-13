@@ -235,7 +235,8 @@ class MathVistaGptScorer(ContextScorer):
 
     name: str = "score"
 
-    model: str = "gpt-4-0613"
+    # ``MATHVISTA_JUDGE_MODEL`` overrides the extraction model (``gpt-4-0613`` may be retired).
+    model: str = field(default_factory=lambda: os.environ.get("MATHVISTA_JUDGE_MODEL", "gpt-4-0613"))
     cache_dir: str | None = field(default_factory=_default_gpt_cache_dir)
     cache_only: bool = False
     recompute: bool = False
