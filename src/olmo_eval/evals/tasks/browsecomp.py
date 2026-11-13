@@ -23,11 +23,11 @@ from typing import Any
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.types import Instance, LMRequest, Response
 from olmo_eval.data import DataSource, SourceType
-from olmo_eval.evals.tasks.browsecomp_common import (
+from olmo_eval.evals.tasks.browsecomp_plus.data import decrypt_string
+from olmo_eval.evals.tasks.browsecomp_plus.task import (
     BrowseCompCalibration,
     BrowseCompMetric,
     BrowseCompScorer,
-    decrypt_with_password,
     grade_with_judge,
     run_completed,
     trajectory_statistics,
@@ -123,8 +123,8 @@ class BrowseComp(Task):
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         canary = doc["canary"]
-        question = decrypt_with_password(doc["problem"], canary)
-        answer = decrypt_with_password(doc["answer"], canary)
+        question = decrypt_string(doc["problem"], canary)
+        answer = decrypt_string(doc["answer"], canary)
         if not question or not answer:
             raise ValueError(f"Incomplete BrowseComp record at row {index}")
         return Instance(
@@ -156,10 +156,9 @@ class BrowseComp(Task):
                     search_calls=float(counts.get(SEARCH_TOOL, 0)),
                     fetch_calls=float(counts.get(FETCH_TOOL, 0)),
                 )
-                response.scores.update(scores)
                 output = response.outputs[0] if response.outputs else None
                 text = output.text if output is not None else ""
-                completed = run_completed(response, output)
+                completed = run_completed(output)
                 verdict: dict[str, Any] = {
                     "parse_error": True,
                     "error": "Response incomplete or cannot be parsed",

@@ -84,22 +84,6 @@ uv run olmo-eval run -m /absolute/path/to/checkpoint \
     --harness browsecomp_plus -t browsecomp_plus
 ```
 
-### Run the retriever inside the evaluation job
-
-Instead of starting the server yourself, set `BROWSECOMP_PLUS_RETRIEVER` to `bm25` or
-`qwen3-embedding-8b`. The evaluation process then starts the server from
-`$BROWSECOMP_PLUS_HOME/retrieval-venv` on the first tool call and stops it on exit, which
-lets a single cluster job serve both the model and the retriever. A server already
-answering at the configured URL is reused. The server log is written to the results
-directory.
-
-For this to work on a cluster, `BROWSECOMP_PLUS_HOME` must be on storage the job mounts,
-the retrieval environment's Python must live there too (run `install.sh` with
-`UV_PYTHON_PREFERENCE=only-managed` when uv's Python directory is on shared storage), and
-Java 21 must be reachable through `JAVA_HOME` or `PATH`. The Qwen3-Embedding-8B server
-loads its model on the GPU, so leave it room by lowering the model server's share, for
-example `-o provider.kwargs.gpu_memory_utilization=0.7`.
-
 ## BrowseComp on the live web
 
 The original [BrowseComp](https://openai.com/index/browsecomp/) benchmark (1,266 questions)
