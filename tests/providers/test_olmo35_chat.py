@@ -101,6 +101,7 @@ CASES = [
     ("text only", [("What is 2 + 2?", "4")], 0),
     ("one image", [("chart_qa: What is the highest value?", "15.3")], 1),
     ("two images", [("Which image shows a dog?\n\nA. 1\nB. 2", "B")], 2),
+    ("leading newline", [("\nWhat is wrong in this caption?", "Nothing.")], 1),
     (
         "multi-turn counting",
         [

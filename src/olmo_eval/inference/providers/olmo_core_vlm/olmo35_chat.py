@@ -159,6 +159,14 @@ def prompt_ids(
     if thinking not in THINKING_MODES:
         raise ValueError(f"thinking must be one of {THINKING_MODES}, got {thinking!r}")
     messages = [{"role": m.get("role", "user"), "content": m.get("content") or ""} for m in messages]
+    if image_token_sequences:
+        # As the training layout (OLMo-core #942 9923dd071): the image blocks go at the start of
+        # the first user turn, and leading whitespace there would merge with the user header into
+        # one token, so it is dropped.
+        for m in messages:
+            if m["role"] == "user":
+                m["content"] = m["content"].lstrip()
+                break
     rendered = _render(tokenizer, messages, add_generation_prompt=True)
     if not rendered.endswith(THINK_OPEN):
         raise ValueError("the Olmo 3.5 generation prompt should end with <think>")
