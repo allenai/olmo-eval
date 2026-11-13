@@ -69,24 +69,23 @@ The examples below use BM25 output paths. When the Qwen3-Embedding-8B server is
 running, replace `results/bm25` with `results/qwen3-embedding-8b` in those paths.
 The running server determines the retriever; the directory name labels the saved results.
 
-With the search server running (either BM25 or Qwen3-Embedding-8B), you can run the evaluation by running:
+There are two official eval settings in BrowseComp-Plus: a minimal setting with just a search tool, and another setting with search + a visit tool (called get_document). With the search server running (either BM25 or Qwen3-Embedding-8B), you can run the evaluation by:
 
-```bash
-uv run olmo-eval run -m /absolute/path/to/checkpoint \
-    --harness browsecomp_plus_get_document -t browsecomp_plus:get_document
-```
-
-Note that the local search server above exposes `search`, which returns 5 snippets for a query, and
-`get_document`, which opens a full document. The official evaluation also evals a simpler setting without the `get_document` tool by default, which can be run by running:
-
+Search only:
 ```bash
 uv run olmo-eval run -m /absolute/path/to/checkpoint \
     --harness browsecomp_plus -t browsecomp_plus
 ```
 
+Search + get_document:
+```bash
+uv run olmo-eval run -m /absolute/path/to/checkpoint \
+    --harness browsecomp_plus_get_document -t browsecomp_plus:get_document
+```
+
 ## BrowseComp on the live web
 
-The original [BrowseComp](https://openai.com/index/browsecomp/) benchmark (1,266 questions)
+The [BrowseComp](https://openai.com/index/browsecomp/) benchmark (1,266 questions) on the web
 is available as the `browsecomp` task with the same grader. It needs no retrieval server:
 the agent searches with Serper and reads pages with Jina Reader, so set `SERPER_API_KEY` and
 `JINA_API_KEY` as well as `OPENAI_API_KEY`. The web tools never return or open pages on

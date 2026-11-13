@@ -1,8 +1,6 @@
 """BrowseComp-Plus reference prompts and scoring helpers.
 
-Source: https://github.com/texttron/BrowseComp-Plus, commit
-046949032b0328319cc9a02663a759ec601d9402 (MIT license; see
-UPSTREAM_LICENSE in this package).
+Source: https://github.com/texttron/BrowseComp-Plus
 """
 
 from __future__ import annotations

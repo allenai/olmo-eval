@@ -63,22 +63,6 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             model="Qwen/Qwen3-Coder-30B-A3B-Instruct",
             kwargs={"enable_expert_parallel": True, "tool_call_parser": "qwen3_coder"},
         ),
-        "qwen3.5-4b": ProviderConfig(
-            kind=ProviderKind.VLLM_SERVER,
-            model="Qwen/Qwen3.5-4B",
-            # Text-only serving with the model card's thinking-mode sampling, which
-            # applies to requests that set none of their own.
-            kwargs={
-                "language_model_only": True,
-                "override_generation_config": {
-                    "temperature": 1.0,
-                    "top_p": 0.95,
-                    "top_k": 20,
-                    "min_p": 0.0,
-                    "max_new_tokens": 32768,
-                },
-            },
-        ),
         # TODO(undfined): Leaving this here as reference. DeepGEMM is more involved
         # and we can add it to base image and toggle it on when needed.
         # "qwen3-coder-30b-fp8": ProviderConfig(

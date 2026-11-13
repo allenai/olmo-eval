@@ -101,31 +101,6 @@ class HarnessPresets:
     """Harness presets. Access as HarnessPresets.name or get_harness_preset("name")."""
 
     @lazy
-    def browsecomp_plus(name: str) -> HarnessConfig:
-        """BrowseComp-Plus with search snippets."""
-        return _browsecomp_plus_harness(name, get_document=False)
-
-    @lazy
-    def browsecomp_plus_get_document(name: str) -> HarnessConfig:
-        """BrowseComp-Plus with search and full documents."""
-        return _browsecomp_plus_harness(name, get_document=True)
-
-    @lazy
-    def browsecomp(name: str) -> HarnessConfig:
-        """BrowseComp with live web search and page fetching."""
-        return HarnessConfig(
-            name=name,
-            provider=_browsecomp_provider(),
-            tools=("serper_google_webpage_search", "jina_fetch_webpage_content"),
-            max_turns=150,
-            max_concurrency=4,
-            scaffold="openai_agents",
-            required_secrets=("SERPER_API_KEY", "JINA_API_KEY"),
-            max_hard_failure_rate=0.0,
-            batching=BatchConfig.streaming(),
-        )
-
-    @lazy
     def default(name: str) -> HarnessConfig:
         """Default preset with vllm_server and batched processing."""
 
@@ -337,6 +312,31 @@ Always strive to give factually correct answers.""",
             max_concurrency=4,
             scaffold="openai_agents",
             required_secrets=("SERPER_API_KEY",),
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def browsecomp_plus(name: str) -> HarnessConfig:
+        """BrowseComp-Plus with search snippets."""
+        return _browsecomp_plus_harness(name, get_document=False)
+
+    @lazy
+    def browsecomp_plus_get_document(name: str) -> HarnessConfig:
+        """BrowseComp-Plus with search and full documents."""
+        return _browsecomp_plus_harness(name, get_document=True)
+
+    @lazy
+    def browsecomp(name: str) -> HarnessConfig:
+        """BrowseComp with live web search and page fetching."""
+        return HarnessConfig(
+            name=name,
+            provider=_browsecomp_provider(),
+            tools=("serper_google_webpage_search", "jina_fetch_webpage_content"),
+            max_turns=150,
+            max_concurrency=4,
+            scaffold="openai_agents",
+            required_secrets=("SERPER_API_KEY", "JINA_API_KEY"),
+            max_hard_failure_rate=0.0,
             batching=BatchConfig.streaming(),
         )
 
