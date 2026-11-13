@@ -18,6 +18,7 @@ Example:
 
 from __future__ import annotations
 
+import os
 import json
 import logging
 import re
@@ -392,6 +393,13 @@ class BeakerJobConfig:
             BeakerWekaBucket("oe-training-default"),
             BeakerWekaBucket("oe-eval-default"),
             BeakerWekaBucket("oe-adapt-default"),
+            # Extra buckets, comma-separated, e.g. OLMO_EVAL_EXTRA_WEKA_BUCKETS=olmo-3p5-post-checkpoints
+            # (main's --weka-bucket, allenai/olmo-eval#462, is not on this branch).
+            *(
+                BeakerWekaBucket(name.strip())
+                for name in os.environ.get("OLMO_EVAL_EXTRA_WEKA_BUCKETS", "").split(",")
+                if name.strip()
+            ),
         ]
     )
     nfs: bool = False

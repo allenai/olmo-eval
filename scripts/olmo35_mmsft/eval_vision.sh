@@ -26,8 +26,13 @@ OLMO_EVAL_PY=${OLMO_EVAL_PY:-python}
 # The olmo35 tokenizer at its pinned revision, on Weka (jobs may not reach the gated Hub repo);
 # tokenizer.json sha256 56a6699d...fb79, a copy of allenai/dolma2-tokenizer-olmo35@8b97170.
 OLMO35_TOKENIZER=${OLMO35_TOKENIZER:-/weka/oe-training-default/jasonr/mmsft-eval/tokenizers/dolma2-tokenizer-olmo35-8b97170}
-[[ (-f $MODEL/model.safetensors && -f $MODEL/olmo_core_config.json) || -f $MODEL/config.yaml || -f $MODEL/config.json ]] \
-  || { echo "not a multimodal checkpoint (OLMo-core export, trainer save, or mm_olmo): $MODEL" >&2; exit 2; }
+# The extra Weka buckets the job mounts (comma-separated); olmo-3p5-post-checkpoints holds the SFT exports.
+export OLMO_EVAL_EXTRA_WEKA_BUCKETS=${OLMO_EVAL_EXTRA_WEKA_BUCKETS:-olmo-3p5-post-checkpoints}
+# A model on a bucket this machine does not mount cannot be checked here (SKIP_LOCAL_CHECK=1).
+if [[ -z ${SKIP_LOCAL_CHECK:-} ]]; then
+  [[ (-f $MODEL/model.safetensors && -f $MODEL/olmo_core_config.json) || -f $MODEL/config.yaml || -f $MODEL/config.json ]] \
+    || { echo "not a multimodal checkpoint (OLMo-core export, trainer save, or mm_olmo): $MODEL" >&2; exit 2; }
+fi
 if [[ -n $(git -C "$ROOT" status --porcelain --untracked-files=no) ]]; then
   echo "commit and push $ROOT first (the job runs its HEAD)" >&2; exit 2
 fi

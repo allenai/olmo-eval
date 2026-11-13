@@ -49,6 +49,10 @@ def build(spec_path: str, model: str, name: str, user: str, cluster: str, priori
             entry = {**entry, "secret": re.sub(r"^[a-z0-9]+_", f"{user}_", secret)}
         env.append(entry)
     task["envVars"] = env
+    mounts = {d.get("mountPath") for d in task.get("datasets", [])}
+    for bucket in ("olmo-3p5-post-checkpoints", "oe-training-default"):
+        if f"/weka/{bucket}" not in mounts:
+            task.setdefault("datasets", []).append({"mountPath": f"/weka/{bucket}", "source": {"weka": bucket}})
     task["constraints"] = {"cluster": cluster.split(",")}
     task["context"] = {"priority": priority, "preemptible": False}
     spec["description"] = f"multimodal SFT text cell {name} (copied from {os.path.basename(spec_path)})"
@@ -68,11 +72,12 @@ def main() -> None:
     ap.add_argument("--suffix", default="", help="appended to each job name (e.g. -alt)")
     ap.add_argument("--out", default=None, help="where to write the specs (default: <model>/eval-specs)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--skip-local-check", action="store_true", help="model on a bucket this machine does not mount")
     args = ap.parse_args()
-    if not os.path.exists(os.path.join(args.model, "config.json")):
+    if not args.skip_local_check and not os.path.exists(os.path.join(args.model, "config.json")):
         sys.exit(f"not an HF model dir: {args.model}")
     base = os.path.join(args.ledger, "experiments", "h182", "eval")
-    out = args.out or os.path.join(args.model, "eval-specs")
+    out = args.out or ("/root/mmsft-eval/text-specs/" + args.short_name if args.skip_local_check else os.path.join(args.model, "eval-specs"))
     os.makedirs(out, exist_ok=True)
     for cell in args.cells:
         holmes = os.path.join(base, "holmes-cu130", "specs", f"{SOURCE_PREFIX}{cell}.json")
