@@ -10,7 +10,8 @@
 # export_multimodal_olmoddp.py). Env: TASKS (default: the first suite below), LIMIT (examples per
 # task; unset = all), GPUS (default 8, one model replica per GPU), OLMO_CORE_SHA (the OLMo-core the
 # job installs; default: allenai/OLMo-core#942's head, the multimodal SFT code), WORKSPACE,
-# CLUSTER, PRIORITY, BUDGET, TIMEOUT, GROUP, OLMO35_TOKENIZER, THINKING (generate|forced), DRY_RUN=1. This checkout must be pushed and clean:
+# CLUSTER, PRIORITY, BUDGET, TIMEOUT, GROUP, OLMO35_TOKENIZER, THINKING (generate|forced), TASK_OPTS (per-task -o options, e.g. the stage-1 prompt family
+# 'prompt_templates=none system_prompt_style=style_and_length_v2'), PROVIDER_KWARGS, DRY_RUN=1. This checkout must be pushed and clean:
 # the job runs its HEAD.
 set -euo pipefail
 [[ $# -ge 2 ]] || { sed -n 2,14p "$0"; exit 2; }
@@ -33,6 +34,7 @@ fi
 TASK_ARGS=()
 for t in $TASKS; do
   TASK_ARGS+=(-t "$t")
+  for o in ${TASK_OPTS:-}; do TASK_ARGS+=(-o "$o"); done
   [[ -n ${LIMIT:-} ]] && TASK_ARGS+=(-o "limit=$LIMIT")
 done
 EXTRA_PROVIDER=(); for kv in ${PROVIDER_KWARGS:-}; do EXTRA_PROVIDER+=(-o "provider.kwargs.$kv"); done
@@ -40,7 +42,7 @@ TOK=(); [[ $MODE == olmo35 ]] && TOK=(-o "provider.tokenizer=$OLMO35_TOKENIZER" 
 DRY=(--yes); [[ -n ${DRY_RUN:-} ]] && DRY=(--dry-run)
 BUD=(); [[ -n ${BUDGET:-} ]] && BUD=(-B "$BUDGET")
 (cd "$ROOT" && PYTHONPATH=$ROOT/src "$OLMO_EVAL_PY" -c "from olmo_eval.cli import main; main()" \
-  beaker launch -n "mmsft-vis-$NAME-$MODE${THINKING:+-$THINKING}" -m "$MODEL" "${TASK_ARGS[@]}" \
+  beaker launch -n "mmsft-vis-$NAME-$MODE${THINKING:+-$THINKING}${TAG:+-$TAG}" -m "$MODEL" "${TASK_ARGS[@]}" \
   --harness default -o provider.kind=olmo_core_vlm -o provider.num_instances="$GPUS" \
   -o "provider.kwargs.prompt_format=$MODE" "${TOK[@]}" "${EXTRA_PROVIDER[@]}" \
   -o "provider.package=https://github.com/allenai/OLMo-core.git@$OLMO_CORE_SHA" \
