@@ -43,14 +43,13 @@ SEARCH_TOOL = "serper_google_webpage_search"
 FETCH_TOOL = "jina_fetch_webpage_content"
 
 # Answering prompt from openai/simple-evals browsecomp_eval.py.
-QUERY_TEMPLATE = (
-    "{Question}\n"
-    "\n"
-    "Your response should be in the following format:\n"
-    "Explanation: {{your explanation for your final answer}}\n"
-    "Exact Answer: {{your succinct, final answer}}\n"
-    "Confidence: {{your confidence score between 0% and 100% for your answer}}"
-)
+QUERY_TEMPLATE = """\
+{Question}
+
+Your response should be in the following format:
+Explanation: {{your explanation for your final answer}}
+Exact Answer: {{your succinct, final answer}}
+Confidence: {{your confidence score between 0% and 100% for your answer}}"""
 
 
 def artifact_home() -> Path:

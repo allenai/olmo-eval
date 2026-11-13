@@ -9,11 +9,8 @@ import os
 from .registry import register_tool
 from .tool import Tool
 
-SEARCH_DESCRIPTION = (
-    "Perform a search on a knowledge source. Returns top-5 hits with docid, score, "
-    "and snippet. The snippet contains the document's contents "
-    "(may be truncated based on token limits)."
-)
+SEARCH_DESCRIPTION = "Perform a search on a knowledge source. Returns top-5 hits with docid, score, and snippet. The snippet contains the document's contents (may be truncated based on token limits)."  # noqa: E501
+
 DOCUMENT_DESCRIPTION = "Retrieve a full document by its docid."
 
 
