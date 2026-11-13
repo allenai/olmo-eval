@@ -5,6 +5,7 @@
 #   olmo35    (default) the SFT chat layout: Olmo 3.5 chat template, think tags promoted,
 #             thinking off (see src/olmo_eval/inference/providers/olmo_core_vlm/olmo35_chat.py)
 #   document  the mid-training plain-document layout (base checkpoints)
+#   chat      the Molmo2 chat template (released Molmo2 / mm_olmo checkpoints, the reference)
 # The export dir holds model.safetensors + olmo_core_config.json (OLMo-core's
 # export_multimodal_olmoddp.py). Env: TASKS (default: the first suite below), LIMIT (examples per
 # task; unset = all), GPUS (default 8, one model replica per GPU), OLMO_CORE_SHA (the OLMo-core the
@@ -14,7 +15,7 @@
 set -euo pipefail
 [[ $# -ge 2 ]] || { sed -n 2,14p "$0"; exit 2; }
 NAME=$1; MODEL=${2%/}; MODE=${3:-olmo35}
-case $MODE in olmo35 | document) ;; *) echo "mode must be olmo35 or document" >&2; exit 2 ;; esac
+case $MODE in olmo35 | document | chat) ;; *) echo "mode must be olmo35, document or chat" >&2; exit 2 ;; esac
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd)
 TASKS=${TASKS:-"chart_qa vqa2 doc_qa text_vqa ai2d countbench_qa real_world_qa"}
 GPUS=${GPUS:-8}; WORKSPACE=${WORKSPACE:-ai2/olmo-instruct}; CLUSTER=${CLUSTER:-ai2/holmes}
@@ -24,8 +25,8 @@ OLMO_EVAL_PY=${OLMO_EVAL_PY:-python}
 # The olmo35 tokenizer at its pinned revision, on Weka (jobs may not reach the gated Hub repo);
 # tokenizer.json sha256 56a6699d...fb79, a copy of allenai/dolma2-tokenizer-olmo35@8b97170.
 OLMO35_TOKENIZER=${OLMO35_TOKENIZER:-/weka/oe-training-default/jasonr/mmsft-eval/tokenizers/dolma2-tokenizer-olmo35-8b97170}
-[[ -f $MODEL/model.safetensors && -f $MODEL/olmo_core_config.json ]] \
-  || { echo "not an OLMo-core multimodal export: $MODEL" >&2; exit 2; }
+[[ (-f $MODEL/model.safetensors && -f $MODEL/olmo_core_config.json) || -f $MODEL/config.yaml || -f $MODEL/config.json ]] \
+  || { echo "not a multimodal checkpoint (OLMo-core export, trainer save, or mm_olmo): $MODEL" >&2; exit 2; }
 if [[ -n $(git -C "$ROOT" status --porcelain --untracked-files=no) ]]; then
   echo "commit and push $ROOT first (the job runs its HEAD)" >&2; exit 2
 fi
@@ -34,13 +35,14 @@ for t in $TASKS; do
   TASK_ARGS+=(-t "$t")
   [[ -n ${LIMIT:-} ]] && TASK_ARGS+=(-o "limit=$LIMIT")
 done
+EXTRA_PROVIDER=(); for kv in ${PROVIDER_KWARGS:-}; do EXTRA_PROVIDER+=(-o "provider.kwargs.$kv"); done
 TOK=(); [[ $MODE == olmo35 ]] && TOK=(-o "provider.tokenizer=$OLMO35_TOKENIZER" -o "provider.kwargs.thinking=${THINKING:-generate}")
 DRY=(--yes); [[ -n ${DRY_RUN:-} ]] && DRY=(--dry-run)
 BUD=(); [[ -n ${BUDGET:-} ]] && BUD=(-B "$BUDGET")
 (cd "$ROOT" && PYTHONPATH=$ROOT/src "$OLMO_EVAL_PY" -c "from olmo_eval.cli import main; main()" \
   beaker launch -n "mmsft-vis-$NAME-$MODE${THINKING:+-$THINKING}" -m "$MODEL" "${TASK_ARGS[@]}" \
   --harness default -o provider.kind=olmo_core_vlm -o provider.num_instances="$GPUS" \
-  -o "provider.kwargs.prompt_format=$MODE" "${TOK[@]}" \
+  -o "provider.kwargs.prompt_format=$MODE" "${TOK[@]}" "${EXTRA_PROVIDER[@]}" \
   -o "provider.package=https://github.com/allenai/OLMo-core.git@$OLMO_CORE_SHA" \
   -o 'provider.dependencies=["flash-linear-attention==0.5.2"]' \
   -c "$CLUSTER" --gpus "$GPUS" -p "$PRIORITY" --no-preemptible -T "$TIMEOUT" \
