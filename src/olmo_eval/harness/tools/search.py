@@ -4,7 +4,11 @@ This module provides search tools that can be used with the Harness:
 - semantic_scholar_search: Search academic papers via Semantic Scholar API
 - serper_web_search: Search the web via Serper/Google API
 - serper_fetch_page: Fetch and extract webpage content
+- jina_fetch_page: Fetch and extract webpage content via Jina Reader
 - crawl4ai_browse: Fetch and extract webpage content via crawl4ai
+- browsecomp_search / browsecomp_visit: the BrowseComp pair, exposed to the model
+  as ``search(query)`` and ``visit(url, goal)``: 10 Serper results with a
+  ``Date published:`` line, and Jina Reader with the goal accepted and ignored.
 
 These tools are pre-registered in the global registry.
 Import the tool objects and use .name for HarnessConfig.tool_names.
@@ -27,7 +31,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .registry import registered_tool
+from .registry import register_tool, registered_tool
+from .tool import Tool
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +51,8 @@ _WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
 _JINA_READER_URL = "https://r.jina.ai"
 _JINA_TIMEOUT_S = 60.0
 _JINA_CONTENT_LIMIT = 20000
+_SERPER_RESULTS = 5
+_BROWSECOMP_SERPER_RESULTS = 10
 # The line that ends Jina Reader's header; an empty page may end right after it.
 _JINA_CONTENT_MARKER = re.compile(r"^Markdown Content:\n?", re.MULTILINE)
 
@@ -344,6 +351,15 @@ async def serper_web_search(query: str) -> str:
     Returns:
         Formatted search results with titles, snippets, and URLs.
     """
+    return await _serper_search(query, num=_SERPER_RESULTS, date_line=False)
+
+
+async def _serper_search(query: str, *, num: int, date_line: bool) -> str:
+    """Run a Serper search and format the top ``num`` organic results.
+
+    With ``date_line`` the ``date`` Serper reports for a result is written on its
+    own line after the title, as ``Date published: <date>``.
+    """
     api_key = os.getenv("SERPER_API_KEY")
     if not api_key:
         return "Error: SERPER_API_KEY not configured."
@@ -354,7 +370,7 @@ async def serper_web_search(query: str) -> str:
         return "Error: Empty search query."
 
     cutoff = _parse_cutoff(_search_date_cutoff.get())
-    request_body = {"q": sanitized_query, "num": 5}
+    request_body = {"q": sanitized_query, "num": num}
     if cutoff is not None:
         _, cutoff_google, _ = cutoff
         request_body["tbs"] = f"cdr:1,cd_min:01/01/1000,cd_max:{cutoff_google}"
@@ -390,11 +406,15 @@ async def serper_web_search(query: str) -> str:
 
     # Process organic results
     organic = [item for item in data.get("organic", []) if not blocked_domain(item.get("link", ""))]
-    for item in organic[:5]:
+    for item in organic[:num]:
         title = item.get("title", "")
         snippet = item.get("snippet", "")
         link = item.get("link", "")
-        result = f"**{title}**\n{snippet}\nURL: {link}"
+        published = item.get("date") if date_line else None
+        if published:
+            result = f"**{title}**\nDate published: {published}\n{snippet}\nURL: {link}"
+        else:
+            result = f"**{title}**\n{snippet}\nURL: {link}"
         results.append(result)
 
     # Include knowledge graph if available
@@ -595,3 +615,64 @@ async def crawl4ai_browse(url: str) -> str:
     text = _truncate_webpage_content(text)
 
     return text
+
+
+# ── BrowseComp pair ─────────────────────────────────────────────────────────
+# Registered under the keys ``browsecomp_search`` and ``browsecomp_visit`` because
+# BrowseComp-Plus already owns the registry name ``search``; the model sees them as
+# ``search`` and ``visit``. The schemas (names, descriptions, parameters) are the
+# ones search-agent SFT data is converted toward (allenai/redsearcher-sft-10k-
+# browsecomp-tools), so training and eval expose one interface.
+
+BROWSECOMP_SEARCH_TOOL = "browsecomp_search"
+BROWSECOMP_VISIT_TOOL = "browsecomp_visit"
+
+
+async def browsecomp_search(query: str) -> str:
+    """Search the web via Serper: the top 10 results, each with its date when known."""
+    return await _serper_search(query, num=_BROWSECOMP_SERPER_RESULTS, date_line=True)
+
+
+async def browsecomp_visit(url: str, goal: str = "") -> str:
+    """Fetch a page via Jina Reader. ``goal`` is accepted for the interface and ignored."""
+    del goal
+    return await jina_fetch_page(url=url)  # a registered Tool: keyword arguments only
+
+
+register_tool(
+    Tool(
+        name="search",
+        description="Search the web for information using Google via Serper.",
+        execute=browsecomp_search,
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to find relevant web pages.",
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    key=BROWSECOMP_SEARCH_TOOL,
+)
+register_tool(
+    Tool(
+        name="visit",
+        description="Fetch and extract the main content of a webpage URL.",
+        execute=browsecomp_visit,
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL of the webpage to fetch."},
+                "goal": {
+                    "type": "string",
+                    "description": "The specific information you want from the page.",
+                },
+            },
+            "required": ["url", "goal"],
+        },
+    ),
+    key=BROWSECOMP_VISIT_TOOL,
+)

@@ -17,31 +17,34 @@ if TYPE_CHECKING:
 TOOL_REGISTRY: dict[str, Tool] = {}
 
 
-def register_tool(tool: Tool) -> Tool:
+def register_tool(tool: Tool, *, key: str | None = None) -> Tool:
     """Register a tool globally for cross-process lookup.
 
     Args:
         tool: The Tool instance to register.
+        key: The registry name harness configs use to look the tool up. It defaults
+            to ``tool.name``, the name the model sees, and differs only when one
+            model-facing name must serve several harnesses: BrowseComp's web
+            ``search`` is registered as ``browsecomp_search`` beside
+            BrowseComp-Plus's corpus ``search``.
 
     Returns:
         The same Tool instance (for chaining).
-
-    Raises:
-        ValueError: If a tool with the same name is already registered.
     """
-    if tool.name in TOOL_REGISTRY:
+    key = key or tool.name
+    if key in TOOL_REGISTRY:
         # Allow re-registration of the same tool (idempotent)
-        if TOOL_REGISTRY[tool.name] is tool:
+        if TOOL_REGISTRY[key] is tool:
             return tool
         # Otherwise, warn but allow override (useful for testing)
         import warnings
 
         warnings.warn(
-            f"Tool '{tool.name}' is being re-registered. This may cause unexpected behavior.",
+            f"Tool '{key}' is being re-registered. This may cause unexpected behavior.",
             stacklevel=2,
         )
 
-    TOOL_REGISTRY[tool.name] = tool
+    TOOL_REGISTRY[key] = tool
     return tool
 
 
@@ -80,7 +83,8 @@ def get_tool(name: str) -> Tool:
     """Get a registered tool by name. Auto-loads built-in tools if needed.
 
     Args:
-        name: The name of the tool to retrieve.
+        name: The registry name of the tool to retrieve (its ``key`` at registration,
+            which is the model-facing name unless one was given).
 
     Returns:
         The registered Tool instance.

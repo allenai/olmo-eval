@@ -55,6 +55,17 @@ class TestHarnessPresets:
         assert config.system_prompt is not None
         assert config.scaffold == "openai_agents"
 
+    def test_get_browsecomp_preset(self):
+        """BrowseComp exposes search(query) and visit(url, goal) to the model."""
+        config = get_harness_preset("browsecomp")
+
+        assert config.tool_names == ("browsecomp_search", "browsecomp_visit")
+        assert [tool.name for tool in config.resolved_tools] == ["search", "visit"]
+        assert config.required_secrets == ("SERPER_API_KEY", "JINA_API_KEY")
+        assert config.system_prompt is not None
+        assert "searching the web with\nsearch" in config.system_prompt
+        assert "serper_google_webpage_search" not in config.system_prompt
+
     def test_get_unknown_preset(self):
         """Test getting an unknown preset raises error."""
         with pytest.raises(ValueError, match="Unknown harness preset"):

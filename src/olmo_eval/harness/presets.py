@@ -33,12 +33,13 @@ Search first with serper_google_webpage_search, then fetch promising pages with
 serper_fetch_webpage_content before answering. Quote only text copied from
 fetched page content, and do not invent citations."""
 
+# Byte-identical to the system prompt of allenai/redsearcher-sft-10k-browsecomp-tools,
+# so a model trained on it is evaluated under the prompt it saw.
 BROWSECOMP_SYSTEM_PROMPT = """\
 You are a deep research agent. Answer the question by searching the web with
-serper_google_webpage_search and reading promising pages with
-jina_fetch_webpage_content. Reason and use the tools step by step, in an
-interleaved manner, as many times as needed before giving your final answer in
-the requested format."""
+search and reading promising pages with visit. Reason and use the tools step by
+step, in an interleaved manner, as many times as needed before giving your final
+answer in the requested format."""
 
 
 # TODO(undfined): Remove reference to beaker
@@ -119,11 +120,15 @@ class HarnessPresets:
 
     @lazy
     def browsecomp(name: str) -> HarnessConfig:
-        """BrowseComp with live web search and page fetching."""
+        """BrowseComp with live web search and page fetching.
+
+        The model sees ``search(query)`` (10 Serper results, dated) and
+        ``visit(url, goal)`` (Jina Reader; the goal is ignored).
+        """
         return HarnessConfig(
             name=name,
             provider=_browsecomp_provider(),
-            tools=("serper_google_webpage_search", "jina_fetch_webpage_content"),
+            tools=("browsecomp_search", "browsecomp_visit"),
             system_prompt=BROWSECOMP_SYSTEM_PROMPT,
             max_turns=150,
             max_concurrency=4,
