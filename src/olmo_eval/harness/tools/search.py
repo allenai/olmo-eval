@@ -46,8 +46,6 @@ _WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
 _JINA_READER_URL = "https://r.jina.ai"
 _JINA_TIMEOUT_S = 60.0
 _JINA_CONTENT_LIMIT = 20000
-# The line that ends Jina Reader's header; an empty page may end right after it.
-_JINA_CONTENT_MARKER = re.compile(r"^Markdown Content:\n?", re.MULTILINE)
 
 # Web tools never return or open pages on these domains. Benchmark questions and
 # answers are widely mirrored on the Hugging Face Hub, so reaching it leaks test data.
@@ -508,7 +506,7 @@ async def jina_fetch_page(url: str) -> str:
     try:
         resp = await client.get(
             f"{_JINA_READER_URL}/{sanitized_url}",
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
             timeout=_JINA_TIMEOUT_S,
         )
     except httpx.RequestError as e:
@@ -521,24 +519,27 @@ async def jina_fetch_page(url: str) -> str:
         )
         return f"Error fetching webpage: HTTP {resp.status_code}"
 
-    body = resp.text
-    title = ""
-    marker = _JINA_CONTENT_MARKER.search(body) if body.startswith("Title: ") else None
-    if marker:
-        header, body = body[: marker.start()], body[marker.end() :]
-        for line in header.split("\n"):
-            if line.startswith("Title: "):
-                title = line[len("Title: ") :].strip()
-            elif line.startswith("URL Source: "):
-                # A redirect can land on a blocked site even when the requested URL is not.
-                blocked = blocked_domain(line[len("URL Source: ") :])
-                if blocked:
-                    return f"Error: Pages on {blocked} are not available."
-
-    if not body.strip():
+    try:
+        payload = resp.json()
+    except ValueError:
+        logger.error(f"Jina Reader returned a non-JSON body: url={sanitized_url!r}")
+        return "Error fetching webpage: unreadable response"
+    page = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(page, dict):
         return "No content extracted from webpage."
 
-    text = _truncate_webpage_content(body, _JINA_CONTENT_LIMIT)
+    # A redirect can land on a blocked site even when the requested URL is not.
+    for key in ("url", "finalUrl"):
+        blocked = blocked_domain(str(page.get(key) or ""))
+        if blocked:
+            return f"Error: Pages on {blocked} are not available."
+
+    content = str(page.get("content") or "")
+    if not content.strip():
+        return "No content extracted from webpage."
+
+    title = str(page.get("title") or "").strip()
+    text = _truncate_webpage_content(content, _JINA_CONTENT_LIMIT)
     return f"Title: {title}\n\n{text}" if title else text
 
 
