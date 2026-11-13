@@ -68,6 +68,30 @@ def lazy(fn: Callable[[str], HarnessConfig]) -> Lazy:
     return Lazy(fn)
 
 
+def _browsecomp_provider() -> ProviderConfig:
+    """Self-hosted provider for deep-research runs, with model thinking enabled."""
+    return ProviderConfig(
+        kind=ProviderKind.VLLM_SERVER,
+        kwargs={"timeout": 1800, "chat_template_kwargs": {"enable_thinking": True}},
+    )
+
+
+def _browsecomp_plus_harness(name: str, *, get_document: bool) -> HarnessConfig:
+    tools = ["search"]
+    if get_document:
+        tools.append("get_document")
+    return HarnessConfig(
+        name=name,
+        provider=_browsecomp_provider(),
+        tools=tuple(tools),
+        max_turns=150,
+        max_concurrency=4,
+        scaffold="openai_agents",
+        max_hard_failure_rate=0.0,
+        batching=BatchConfig.streaming(),
+    )
+
+
 # ─────────────────────────────────────────────────────────
 # Preset Harness Configurations
 # ─────────────────────────────────────────────────────────
@@ -288,6 +312,31 @@ Always strive to give factually correct answers.""",
             max_concurrency=4,
             scaffold="openai_agents",
             required_secrets=("SERPER_API_KEY",),
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def browsecomp_plus(name: str) -> HarnessConfig:
+        """BrowseComp-Plus with search snippets."""
+        return _browsecomp_plus_harness(name, get_document=False)
+
+    @lazy
+    def browsecomp_plus_get_document(name: str) -> HarnessConfig:
+        """BrowseComp-Plus with search and full documents."""
+        return _browsecomp_plus_harness(name, get_document=True)
+
+    @lazy
+    def browsecomp(name: str) -> HarnessConfig:
+        """BrowseComp with live web search and page fetching."""
+        return HarnessConfig(
+            name=name,
+            provider=_browsecomp_provider(),
+            tools=("serper_google_webpage_search", "jina_fetch_webpage_content"),
+            max_turns=150,
+            max_concurrency=4,
+            scaffold="openai_agents",
+            required_secrets=("SERPER_API_KEY", "JINA_API_KEY"),
+            max_hard_failure_rate=0.0,
             batching=BatchConfig.streaming(),
         )
 

@@ -13,6 +13,7 @@ Import the tool objects and use .name for HarnessConfig.tool_names.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import random
@@ -42,6 +43,14 @@ _BASE_BACKOFF_S = 1.0
 _MAX_BACKOFF_S = 16.0
 _WEBPAGE_CONTENT_LIMIT = 4000
 _WEBPAGE_TRUNCATION_NOTICE = "\n\n[Content truncated...]"
+_JINA_READER_URL = "https://r.jina.ai"
+_JINA_TIMEOUT_S = 60.0
+_JINA_CONTENT_LIMIT = 20000
+
+# Web tools never return or open pages on these domains. Benchmark questions and
+# answers are widely mirrored on the Hugging Face Hub, so reaching it leaks test data.
+DEFAULT_BLOCKED_DOMAINS = ("huggingface.co", "hf.co")
+BLOCKED_DOMAINS_ENV = "OLMO_SEARCH_BLOCKED_DOMAINS"
 
 # Semantic Scholar's introductory plan allows ~1 request/second cumulative across
 # all endpoints, which several concurrent agents exhaust immediately. All S2
@@ -88,15 +97,37 @@ def _parse_cutoff(raw: str | None) -> tuple[int, str, str] | None:
     )
 
 
-def _truncate_webpage_content(text: str) -> str:
+def blocked_domains() -> tuple[str, ...]:
+    """Return the blocked domains, taken from the environment when it sets them.
+
+    The environment variable holds a comma-separated list; an empty value blocks nothing.
+    """
+    configured = os.environ.get(BLOCKED_DOMAINS_ENV)
+    if configured is None:
+        return DEFAULT_BLOCKED_DOMAINS
+    return tuple(domain.strip().lower() for domain in configured.split(",") if domain.strip())
+
+
+def blocked_domain(url: str) -> str | None:
+    """Return the blocked domain a URL belongs to, counting subdomains, if any."""
+    candidate = url.strip()
+    if "://" not in candidate:
+        candidate = f"//{candidate}"
+    try:
+        host = (urlsplit(candidate).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return None
+    return next(
+        (domain for domain in blocked_domains() if host == domain or host.endswith(f".{domain}")),
+        None,
+    )
+
+
+def _truncate_webpage_content(text: str, limit: int = _WEBPAGE_CONTENT_LIMIT) -> str:
     limit_value = os.environ.get("OLMO_WEBPAGE_CONTENT_LIMIT")
-    if limit_value is None:
-        limit = _WEBPAGE_CONTENT_LIMIT
-    else:
-        try:
+    if limit_value is not None:
+        with contextlib.suppress(ValueError):
             limit = int(limit_value)
-        except ValueError:
-            limit = _WEBPAGE_CONTENT_LIMIT
 
     if limit <= 0:
         return text
@@ -356,7 +387,7 @@ async def serper_web_search(query: str) -> str:
     results = []
 
     # Process organic results
-    organic = data.get("organic", [])
+    organic = [item for item in data.get("organic", []) if not blocked_domain(item.get("link", ""))]
     for item in organic[:5]:
         title = item.get("title", "")
         snippet = item.get("snippet", "")
@@ -366,7 +397,7 @@ async def serper_web_search(query: str) -> str:
 
     # Include knowledge graph if available
     kg = data.get("knowledgeGraph")
-    if kg:
+    if kg and not any(blocked_domain(kg.get(key) or "") for key in ("descriptionLink", "website")):
         kg_title = kg.get("title", "")
         kg_desc = kg.get("description", "")
         if kg_title and kg_desc:
@@ -374,7 +405,7 @@ async def serper_web_search(query: str) -> str:
 
     # Include answer box if available
     answer_box = data.get("answerBox")
-    if answer_box:
+    if answer_box and not blocked_domain(answer_box.get("link") or ""):
         answer = answer_box.get("answer") or answer_box.get("snippet", "")
         if answer:
             results.insert(0, f"**Direct Answer:**\n{answer}")
@@ -404,6 +435,10 @@ async def serper_fetch_page(url: str) -> str:
 
     if not url or not url.strip():
         return "Error: Empty URL."
+
+    blocked = blocked_domain(url)
+    if blocked:
+        return f"Error: Pages on {blocked} are not available."
 
     client = _get_http_client()
     try:
@@ -443,6 +478,72 @@ async def serper_fetch_page(url: str) -> str:
 
 
 @registered_tool(
+    name="jina_fetch_webpage_content",
+    description="Fetch and extract the main content of a webpage URL.",
+)
+async def jina_fetch_page(url: str) -> str:
+    """Fetch and extract a webpage's main content via Jina Reader.
+
+    Args:
+        url: The URL of the webpage to fetch.
+
+    Returns:
+        The page title and extracted text content.
+    """
+    api_key = os.getenv("JINA_API_KEY")
+    if not api_key:
+        return "Error: JINA_API_KEY not configured."
+
+    if not url or not url.strip():
+        return "Error: Empty URL."
+
+    sanitized_url = url.strip()
+    blocked = blocked_domain(sanitized_url)
+    if blocked:
+        return f"Error: Pages on {blocked} are not available."
+
+    client = _get_http_client()
+    try:
+        resp = await client.get(
+            f"{_JINA_READER_URL}/{sanitized_url}",
+            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+            timeout=_JINA_TIMEOUT_S,
+        )
+    except httpx.RequestError as e:
+        logger.error(f"Jina Reader request error: {e}, url={sanitized_url!r}")
+        return f"Error fetching webpage: {e}"
+    if resp.status_code != 200:
+        logger.error(
+            f"Jina Reader error: status={resp.status_code}, "
+            f"url={sanitized_url!r}, response={resp.text[:500]}"
+        )
+        return f"Error fetching webpage: HTTP {resp.status_code}"
+
+    try:
+        payload = resp.json()
+    except ValueError:
+        logger.error(f"Jina Reader returned a non-JSON body: url={sanitized_url!r}")
+        return "Error fetching webpage: unreadable response"
+    page = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(page, dict):
+        return "No content extracted from webpage."
+
+    # A redirect can land on a blocked site even when the requested URL is not.
+    for key in ("url", "finalUrl"):
+        blocked = blocked_domain(str(page.get(key) or ""))
+        if blocked:
+            return f"Error: Pages on {blocked} are not available."
+
+    content = str(page.get("content") or "")
+    if not content.strip():
+        return "No content extracted from webpage."
+
+    title = str(page.get("title") or "").strip()
+    text = _truncate_webpage_content(content, _JINA_CONTENT_LIMIT)
+    return f"Title: {title}\n\n{text}" if title else text
+
+
+@registered_tool(
     name="browse_webpage",
     description="Fetch and extract a webpage's content as clean markdown (via crawl4ai).",
 )
@@ -461,6 +562,10 @@ async def crawl4ai_browse(url: str) -> str:
     sanitized_url = url.strip()
     if urlsplit(sanitized_url).scheme.lower() not in {"http", "https"}:
         return "Error: Only http(s) URLs are supported."
+
+    blocked = blocked_domain(sanitized_url)
+    if blocked:
+        return f"Error: Pages on {blocked} are not available."
 
     try:
         from crawl4ai import AsyncWebCrawler
