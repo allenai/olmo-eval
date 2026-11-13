@@ -232,6 +232,9 @@ class LMRequest:
     system_prompt: str | None = None
     max_length: int | None = None
     images: tuple[Any, ...] | None = None
+    #: Text written before each image, one entry per image (for example the page numbers of
+    #: a document's pages), for providers whose prompt layout labels images in text.
+    image_labels: tuple[str, ...] | None = None
 
 
 @hide_unset()

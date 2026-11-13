@@ -462,8 +462,10 @@ class OlmoCoreVLMProvider(InferenceProvider):
             image_tensor, pooling_tensor, token_sequences = self._preprocess_images(images)
 
         if getattr(self, "prompt_format", "chat") == "document":
-            image_ids = [token for image_tokens in token_sequences for token in image_tokens]
+            image_ids = self._image_block_ids(request, token_sequences)
             return self._document_ids(request, image_ids), image_tensor, pooling_tensor
+        if request.image_labels is not None:
+            raise ValueError("Image labels need the document prompt format")
 
         text = self._chat_text(request, len(images))
         token_ids: list[int] = self.tokenizer.encode(text, add_special_tokens=False)
@@ -480,6 +482,23 @@ class OlmoCoreVLMProvider(InferenceProvider):
         if bos is not None and (not token_ids or token_ids[0] != bos):
             token_ids = [bos, *token_ids]
         return token_ids, image_tensor, pooling_tensor
+
+    def _image_block_ids(self, request: LMRequest, token_sequences: list[list[int]]) -> list[int]:
+        """The request's expanded image blocks in order, each after its label if it has one.
+
+        Mirrors OLMo-core's ``encode_sft_example(image_labels=...)``: a label is plain text,
+        tokenized on its own and written directly before its image's tokens.
+        """
+        labels = request.image_labels
+        if labels is None:
+            return [token for image_tokens in token_sequences for token in image_tokens]
+        if len(labels) != len(token_sequences):
+            raise ValueError(f"{len(labels)} image labels for {len(token_sequences)} images")
+        image_ids: list[int] = []
+        for label, image_tokens in zip(labels, token_sequences, strict=True):
+            image_ids += self.tokenizer.encode(label, add_special_tokens=False)
+            image_ids += image_tokens
+        return image_ids
 
     def _document_ids(self, request: LMRequest, image_ids: list[int]) -> list[int]:
         """Encode a request in OLMo-core's plain-document layout.

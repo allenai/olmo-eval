@@ -1089,6 +1089,32 @@ class TestDocumentPrompt:
         assert token_ids == [2, 10, 11]
         assert images is None and pooling is None
 
+    def test_each_label_precedes_its_image(self) -> None:
+        provider = self._provider()
+        request = LMRequest(
+            request_type=RequestType.CHAT, prompt="Prompt", image_labels=("Other", "!")
+        )
+        image_ids = provider._image_block_ids(request, [[90], [91, 92]])
+        assert image_ids == [12, 90, 6, 91, 92]
+        # The prompt is still the first text turn: no separating space after the images.
+        assert provider._document_ids(request, image_ids) == [2, 12, 90, 6, 91, 92, 10, 11]
+
+    def test_unlabelled_images_are_written_back_to_back(self) -> None:
+        request = LMRequest(request_type=RequestType.CHAT, prompt="Prompt")
+        assert self._provider()._image_block_ids(request, [[90], [91, 92]]) == [90, 91, 92]
+
+    def test_label_count_must_match_the_images(self) -> None:
+        request = LMRequest(request_type=RequestType.CHAT, prompt="Prompt", image_labels=("!",))
+        with pytest.raises(ValueError, match="1 image labels for 2 images"):
+            self._provider()._image_block_ids(request, [[90], [91]])
+
+    def test_labels_need_the_document_layout(self) -> None:
+        provider = self._provider()
+        provider.prompt_format = "chat"
+        request = LMRequest(request_type=RequestType.CHAT, prompt="Prompt", image_labels=("!",))
+        with pytest.raises(ValueError, match="document prompt format"):
+            provider._encode_request(request)
+
 
 class _CausalSumLm:
     """Causal fake LM: the next token is (sum of the row's tokens so far) % vocab.

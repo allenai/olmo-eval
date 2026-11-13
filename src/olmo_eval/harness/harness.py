@@ -358,6 +358,7 @@ class Harness:
             system_prompt=self.config.system_prompt or request.system_prompt,
             max_length=request.max_length,
             images=request.images,
+            image_labels=request.image_labels,
         )
 
     def _inject_system_prompt(

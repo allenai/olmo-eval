@@ -132,6 +132,20 @@ class TestHarness:
 
         assert transformed.images == ("fake-image",)
 
+    def test_harness_apply_config_preserves_image_labels(self, mock_provider_config):
+        """_apply_config must carry LMRequest.image_labels through to the provider."""
+        config = HarnessConfig(name="with_labels", provider=mock_provider_config)
+        harness = Harness(config)
+
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": "Which page?"},),
+            images=("page-1", "page-2"),
+            image_labels=("Page 1:", "Page 2:"),
+        )
+
+        assert harness._apply_config(request).image_labels == ("Page 1:", "Page 2:")
+
     def test_harness_apply_config_images_default_none(self, mock_provider_config):
         """Text requests (no images) stay images=None through _apply_config."""
         config = HarnessConfig(name="no_images", provider=mock_provider_config)
