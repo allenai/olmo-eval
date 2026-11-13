@@ -140,12 +140,10 @@ def trajectory_statistics(response: Response) -> tuple[set[str], dict[str, int]]
 def run_completed(response: Response, output: LMOutput | None) -> bool:
     """Whether the agent run ended with a model-authored final answer.
 
-    Runs cut off at the turn limit or the context limit, and runs the scaffold
-    abandoned with a placeholder message and an empty trajectory, are not graded.
+    Runs cut off at the turn limit, and runs the scaffold abandoned with a
+    placeholder message and an empty trajectory, are not graded.
     """
     if output is None or not output.text.strip() or output.metadata.get("max_turns_reached"):
-        return False
-    if output.metadata.get("context_length_exceeded"):
         return False
     if output.metadata.get("num_turns") == 0:
         return False
