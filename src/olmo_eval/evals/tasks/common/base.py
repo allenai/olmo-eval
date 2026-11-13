@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, NamedTuple
+from importlib.resources import files
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple
 
 from olmo_eval.common.formatters import Formatter
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.repr import hide_unset
-from olmo_eval.common.scorers import Scorer, ScoringIncompleteError
+from olmo_eval.common.scorers import Scorer
+from olmo_eval.common.scorers.execution import format_scoring_error
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -34,39 +37,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
-    """Build a JSON-serializable scoring error payload."""
-    error = {
-        "phase": phase,
-        "type": type(exc).__qualname__,
-    }
-    message = str(exc).strip()
-    if message:
-        error["message"] = message
-    if isinstance(exc, ScoringIncompleteError):
-        error["infrastructure"] = "true"
-    else:
-        try:
-            from olmo_eval.harness.sandbox import SandboxInfrastructureError
-
-            if isinstance(exc, SandboxInfrastructureError):
-                error["infrastructure"] = "true"
-        except ImportError:
-            pass
-    return error
-
-
 def _store_output_score(
     output: LMOutput,
     *,
     scorer_name: str,
-    score: float,
+    score: float | None,
     scoring_error: dict[str, str] | None = None,
 ) -> None:
-    """Store a per-output scorer result on output metadata."""
+    """Store a per-output scorer result on output metadata.
+
+    An output whose scoring failed gets its ``scoring_error`` and no score: a score it
+    never received is not a zero.
+    """
     if output.metadata is None:
         output.metadata = {}
-    output.metadata[f"score:{scorer_name}"] = score
+    if score is not None:
+        output.metadata[f"score:{scorer_name}"] = score
     if scoring_error is not None:
         existing = output.metadata.get("scoring_errors")
         if not isinstance(existing, dict):
@@ -76,12 +62,15 @@ def _store_output_score(
 
 
 class OutputScore(NamedTuple):
-    """Scoring result for a single output (execution / context scorers)."""
+    """Scoring result for a single output (execution / context scorers).
+
+    ``score`` is None when scoring failed; ``scoring_error`` then says why.
+    """
 
     resp_idx: int
     scorer_name: str
     out_idx: int
-    score: float
+    score: float | None
     scoring_error: dict[str, str] | None
 
 
@@ -90,7 +79,7 @@ class ResponseScore(NamedTuple):
 
     resp_idx: int
     scorer_name: str
-    output_scores: dict[int, float]
+    output_scores: dict[int, float | None]
     output_errors: dict[int, dict[str, str]]
 
 
@@ -166,6 +155,19 @@ class TaskConfig:
     #: Drop ``<think>...</think>`` traces before scoring; see :meth:`Task.strip_thinking_traces`.
     strip_thinking: bool = False
 
+    #: Parse a structured response before task extraction and scoring.
+    response_parser: Literal["harmony"] | None = None
+
+    #: Treat an unterminated ``<think>`` trace as no answer: the output text is
+    #: emptied before scoring. Off by default so scoring matches the reference
+    #: harness, which scores the raw trace.
+    strip_unclosed_thinking: bool = False
+
+    #: The generation prompt already opens a ``<think>`` trace. With
+    #: ``strip_unclosed_thinking``, an output with no ``</think>`` is treated as
+    #: an unterminated trace and emptied. Off by default.
+    thinking_prefilled: bool = False
+
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
     dependencies: list[str] | None = None
 
@@ -184,9 +186,24 @@ class TaskConfig:
     judge_model: str | None = None
     judge_reasoning_effort: str | None = None
     judge_max_tokens: int | None = None
+    #: Sampling temperature for the judge; unset means the shared judge's 0.
+    judge_temperature: float | None = None
+
+    #: How a task that builds its prompt from a bare label should render it. The
+    #: vision tasks read these; they follow the checkpoint, since instruction-tuned
+    #: and pretrain models were trained on different prompt forms.
+    prompt_templates: str | None = None
+    system_prompt_style: str | None = None
+
+    #: Task-specific settings that shape the data or prompts but have no field of
+    #: their own, such as shot counts, token budgets or source revisions. Set them
+    #: here so that changing one changes the task hash.
+    task_settings: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        """Validate scheduler-only sandbox allocation hints."""
+        """Validate configuration values."""
+        if self.response_parser not in (None, "harmony"):
+            raise ValueError(f"Unsupported response_parser: {self.response_parser!r}")
         if isinstance(self.output_score_aggregation, str):
             try:
                 self.output_score_aggregation = OutputScoreAggregation(
@@ -253,13 +270,30 @@ class TaskConfig:
         except ValueError:
             return None
 
+    #: Sampling fields added after task hashes were first stored. Each is emitted
+    #: only when it differs from its default, so that tasks which do not use it
+    #: keep the hash they had before the field existed.
+    _SAMPLING_FIELDS_EMITTED_WHEN_SET: ClassVar[dict[str, Any]] = {
+        "fit_max_tokens_to_context": False,
+    }
+
+    def _serialize_sampling_params(self) -> dict[str, Any] | None:
+        from dataclasses import asdict
+
+        if not self.sampling_params:
+            return None
+        serialized = asdict(self.sampling_params)
+        for name, default in self._SAMPLING_FIELDS_EMITTED_WHEN_SET.items():
+            if serialized.get(name) == default:
+                serialized.pop(name, None)
+        return serialized
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize config to a dictionary for hashing and storage.
 
         Returns:
             Dictionary with all config values serialized.
         """
-        from dataclasses import asdict
 
         def serialize_data_source(ds: Any) -> Any:
             if ds is None:
@@ -291,7 +325,7 @@ class TaskConfig:
             "seed": self.seed,
             "split": self.split.value,
             "primary_metric": serialize_primary_metric(self.get_primary_metric()),
-            "sampling_params": asdict(self.sampling_params) if self.sampling_params else None,
+            "sampling_params": self._serialize_sampling_params(),
             "output_score_aggregation": self.output_score_aggregation.value,
             "max_length": self.max_length,
             "answer_extractor": getattr(self.answer_extractor, "__name__", None),
@@ -299,8 +333,19 @@ class TaskConfig:
         }
         # Emitted only when set so that task hashes of runs without it are
         # unchanged from before the field existed.
+        if self.prompt_templates is not None or self.system_prompt_style is not None:
+            serialized["prompt_templates"] = self.prompt_templates
+            serialized["system_prompt_style"] = self.system_prompt_style
         if self.strip_thinking:
             serialized["strip_thinking"] = True
+        if self.response_parser is not None:
+            serialized["response_parser"] = self.response_parser
+        if self.task_settings is not None:
+            serialized["task_settings"] = self.task_settings
+        if self.strip_unclosed_thinking:
+            serialized["strip_unclosed_thinking"] = True
+        if self.thinking_prefilled:
+            serialized["thinking_prefilled"] = True
         if any(
             value is not None
             for value in (
@@ -316,6 +361,10 @@ class TaskConfig:
                     "judge_max_tokens": self.judge_max_tokens,
                 }
             )
+        # Emitted on its own, only when set, so hashes of judges at the default
+        # temperature are unchanged from before the field existed.
+        if self.judge_temperature is not None:
+            serialized["judge_temperature"] = self.judge_temperature
         return serialized
 
     def get_primary_metric(self) -> Metric | None:
@@ -363,6 +412,13 @@ class Task(ABC):
         ...     def instances(self) -> Iterator[Instance]:
         ...         yield from self._load_instances()
     """
+
+    #: Scaffold the task's requests need, such as ``"multi_turn_chat"``. The runner
+    #: refuses to start the task under a harness with a different scaffold.
+    required_scaffold: str | None = None
+    #: Whether a model judge scores the task, so ``get_task`` applies
+    #: ``$OLMO_EVAL_JUDGE`` to its judge fields.
+    judged: bool = False
 
     def __init__(self, config: TaskConfig) -> None:
         self.config = config
@@ -475,10 +531,31 @@ class Task(ABC):
             self._instances_cache = list(self._load_instances(split=split))
         yield from self._instances_cache
 
+    def _load_packaged_instances(self, package: str | None, filename: str) -> Iterator[Instance]:
+        """Load and process instances from a JSONL file shipped inside ``package``.
+
+        For data that is checked in with the task rather than downloaded. ``package``
+        is the task module's ``__package__``; blank lines are skipped.
+        """
+        if package is None:
+            raise ValueError(f"{type(self).__name__} has no package to load {filename} from")
+        resource = files(package).joinpath(filename)
+        with resource.open(encoding="utf-8") as handle:
+            for index, line in enumerate(handle):
+                if not line.strip():
+                    continue
+                instance = self.process_doc(json.loads(line), index)
+                if instance is not None:
+                    yield instance
+
     def get_fewshot(self) -> list[Instance]:
-        """Get few-shot examples (cached after first call)."""
+        """Get few-shot examples (cached after first call).
+
+        Returns no examples when ``num_fewshot`` is 0, whatever pool the task
+        would otherwise draw from.
+        """
         if self._fewshot_cache is None:
-            self._fewshot_cache = self._build_fewshot()
+            self._fewshot_cache = self._build_fewshot() if self.config.num_fewshot else []
         return self._fewshot_cache
 
     # Class attributes for fewshot configuration (can be overridden by subclasses)
@@ -606,31 +683,73 @@ class Task(ABC):
         return self._has_async_cache
 
     def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
-        """Drop ``<think>...</think>`` traces so scorers see only the final answer.
+        """Apply configured response parsing and thinking removal before scoring.
 
-        No-op unless ``config.strip_thinking`` is set. Runners call this before
-        ``score_responses`` (which tasks may override). Idempotent: a stripped
-        output has no ``</think>`` left, so a second pass leaves it alone.
+        No-op unless ``config.strip_thinking``, ``config.strip_unclosed_thinking``
+        or ``config.response_parser`` is set. A response parser runs first.
+        Runners call this before ``score_responses`` (which tasks may override).
+        Repeated calls leave already processed outputs unchanged.
 
-        Mirrors the reference harness's ``r1_style`` processing: everything
-        through the *last* ``</think>`` goes, the text after it is kept
-        byte-for-byte, and an unterminated trace is left as-is. Whitespace
-        matters — the IFEval loose variants drop the response's first line, and
-        paragraph checks index on blank-line splits — so nothing is trimmed.
+        With ``strip_thinking``, this mirrors the reference harness's ``r1_style``
+        processing: everything through the *last* ``</think>`` goes, the text
+        after it is kept byte-for-byte, and an unterminated trace is left as-is.
+        Whitespace matters (the IFEval loose variants drop the response's first
+        line, and paragraph checks index on blank-line splits), so nothing is
+        trimmed.
+
+        With ``strip_unclosed_thinking``, an unterminated trace (``<think>`` after
+        the last ``</think>``, or with no closing tag) is treated as no answer:
+        the text becomes empty and ``metadata["unclosed_thinking"]`` is set. This
+        stops answer extractors from crediting stray matches inside a trace that
+        ran to the token cap.
+
+        With ``thinking_prefilled`` (the prompt itself ends in ``<think>``), outputs
+        start inside the trace, so the unterminated case is "no ``</think>``" rather
+        than "``<think>`` with no ``</think>``".
+
         Only ``outputs[*].text`` is touched; trajectories and request traces
-        keep the trace.
+        keep the trace. The raw text is kept in ``metadata["original_text"]``.
         """
-        if not self.config.strip_thinking:
+        strip_closed = self.config.strip_thinking
+        strip_unclosed = self.config.strip_unclosed_thinking
+        if not (strip_closed or strip_unclosed or self.config.response_parser):
             return
+        prefilled = self.config.thinking_prefilled
         from olmo_eval.evals.extract import extract_think_answer
 
         for response in responses:
             for output in response.outputs:
-                text = output.text or ""
-                if "</think>" not in text:
+                if prefilled and output.metadata.get("thinking_processed"):
                     continue
-                output.metadata.setdefault("original_text", text)
-                output.text = extract_think_answer(text) or ""
+                text = output.text or ""
+                if self.config.response_parser and not output.metadata.get("response_parsed"):
+                    if output.metadata.get("response_parser_error"):
+                        raise ValueError(output.metadata["response_parser_error"])
+                    from olmo_eval.evals.extract.reasoning import extract_harmony_answer
+
+                    raw_text = output.metadata.get("text_with_special_tokens", text)
+                    parsed = extract_harmony_answer(raw_text)
+                    found = parsed != raw_text
+                    output.metadata["response_parser_found"] = found
+                    if found:
+                        output.metadata.setdefault("original_text", text)
+                        output.text = parsed
+                        text = parsed
+                    output.metadata["response_parsed"] = True
+                closed = "</think>" in text
+                suffix = text.rpartition("</think>")[2] if closed else text
+                unclosed = "<think>" in suffix or (prefilled and not closed)
+                if strip_unclosed and unclosed:
+                    output.metadata.setdefault("original_text", text)
+                    output.metadata["unclosed_thinking"] = True
+                    output.text = ""
+                elif strip_closed and closed:
+                    output.metadata.setdefault("original_text", text)
+                    output.text = extract_think_answer(text) or ""
+                else:
+                    continue
+                if prefilled:
+                    output.metadata["thinking_processed"] = True
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Extract answers from outputs. Override for complex multi-output logic."""
@@ -671,13 +790,17 @@ class Task(ABC):
             context: Scoring context with execution environment and concurrency settings.
 
         Raises:
-            SandboxRequiredError: If an ExecutionScorer is used without a valid
-                execution environment in the context.
+            SandboxRequiredError: If an ExecutionScorer is used and no sandbox is
+                configured.
+            SandboxInfrastructureError: If sandboxes are configured but none that
+                serves the task's capability is running. A pool that runs out during
+                scoring fails each output with this error instead.
         """
         from olmo_eval.common.scorers.base import ProcessScorer
         from olmo_eval.common.scorers.execution import (
             ContextScorer,
             ExecutionScorer,
+            SandboxInfrastructureError,
             SandboxRequiredError,
         )
 
@@ -689,6 +812,7 @@ class Task(ABC):
 
         # Route to task-specific sandbox if sandbox_env is configured
         sandbox_cap = self.config.sandbox_env.capability if self.config.sandbox_env else None
+        capability = sandbox_cap or "default"
         if execution_env is not None and hasattr(execution_env, "for_capabilities"):
             from olmo_eval.harness.sandbox.config import Capability
 
@@ -707,7 +831,14 @@ class Task(ABC):
         sync_scorers: dict[str, Scorer] = {}
         for name, scorer in scorers_by_name.items():
             if isinstance(scorer, ExecutionScorer):
-                if task_executor is None:
+                if task_executor is None or not task_executor.is_running:
+                    # Sandboxes were configured but none serving this task is running:
+                    # they failed, or none was configured with this capability.
+                    if context.execution_env is not None:
+                        raise SandboxInfrastructureError(
+                            f"No running sandbox has capability {capability!r} for "
+                            f"{scorer.__class__.__name__}"
+                        )
                     raise SandboxRequiredError(
                         f"{scorer.__class__.__name__} requires a sandbox. "
                         "Configure sandboxes in HarnessConfig."
@@ -771,7 +902,7 @@ class Task(ABC):
                         assert task_executor is not None
                         score = await scorer.ascore(response.instance, output, task_executor)
                 except Exception as exc:
-                    error = _format_scoring_error(exc, phase="execution")
+                    error = format_scoring_error(exc, phase="execution")
                     instance_id = response.instance.metadata.get("id", str(resp_idx))
                     logger.warning(
                         "Async scoring failed for instance %s output %s with scorer %s: %s",
@@ -780,7 +911,7 @@ class Task(ABC):
                         scorer.name,
                         error.get("message", error["type"]),
                     )
-                    return OutputScore(resp_idx, scorer.name, out_idx, 0.0, error)
+                    return OutputScore(resp_idx, scorer.name, out_idx, None, error)
                 return OutputScore(resp_idx, scorer.name, out_idx, score, None)
 
             async def score_context(
@@ -792,7 +923,7 @@ class Task(ABC):
                     async with ctx_semaphore:
                         score = await scorer.ascore_with_context(response.instance, output, context)
                 except Exception as exc:
-                    error = _format_scoring_error(exc, phase="context")
+                    error = format_scoring_error(exc, phase="context")
                     instance_id = response.instance.metadata.get("id", str(resp_idx))
                     logger.warning(
                         "Context scoring failed for instance %s output %s with scorer %s: %s",
@@ -801,7 +932,7 @@ class Task(ABC):
                         scorer.name,
                         error.get("message", error["type"]),
                     )
-                    return OutputScore(resp_idx, scorer.name, out_idx, 0.0, error)
+                    return OutputScore(resp_idx, scorer.name, out_idx, None, error)
                 return OutputScore(resp_idx, scorer.name, out_idx, score, None)
 
             async def score_process(
@@ -815,7 +946,10 @@ class Task(ABC):
                     response.instance,
                     list(response.outputs),
                 )
-                output_scores = {out_idx: result.score for out_idx, result in enumerate(results)}
+                output_scores = {
+                    out_idx: None if result.error is not None else result.score
+                    for out_idx, result in enumerate(results)
+                }
                 output_errors = {
                     out_idx: result.error
                     for out_idx, result in enumerate(results)
@@ -842,7 +976,7 @@ class Task(ABC):
 
             # Store individual scores in output metadata for pass@k expansion
             # Structure: {resp_idx: {scorer_name: {out_idx: score}}}
-            scores_by_response: dict[int, dict[str, dict[int, float]]] = {}
+            scores_by_response: dict[int, dict[str, dict[int, float | None]]] = {}
             scoring_errors_by_response: dict[int, dict[int, dict[str, dict[str, str]]]] = {}
             for result in results:
                 if isinstance(result, OutputScore):
@@ -895,7 +1029,11 @@ class Task(ABC):
                             score=score,
                             scoring_error=scoring_error,
                         )
-                    response.scores[scorer_name] = self._aggregate_output_scores(output_scores)
+                    # Aggregate over the outputs that were scored. With none, the
+                    # response has no score for this scorer rather than a zero.
+                    scored = {i: s for i, s in output_scores.items() if s is not None}
+                    if scored:
+                        response.scores[scorer_name] = self._aggregate_output_scores(scored)
 
     def _aggregate_output_scores(self, scores: dict[int, float]) -> float:
         """Collapse per-output scorer values into one response-level score."""
@@ -955,23 +1093,22 @@ class Task(ABC):
         while preserving which scorer produced which value.
         """
         from olmo_eval.common.metrics import PassAtKMetric, PassPowKMetric
+        from olmo_eval.common.scoring_failures import measurable_responses
 
-        # Expand multi-output responses for pass@k/pass^k metrics only
-        expanded_responses: Sequence[Response] | None = None
-
+        scorers = tuple(self._get_scorers())
         result: dict[str, dict[str, float]] = {}
         for metric in self.config.metrics:
-            scorer_name = (
-                metric.scorer().name if hasattr(metric, "scorer") and metric.scorer else "default"
-            )
+            has_scorer = hasattr(metric, "scorer") and metric.scorer
+            scorer_name = metric.scorer().name if has_scorer else "default"
             if metric.name not in result:
                 result[metric.name] = {}
 
+            # An instance this metric's scorer could not score is left out of the metric.
+            measured = (
+                measurable_responses(responses, scorer_name, scorers) if has_scorer else responses
+            )
             # Use expanded responses for pass metrics, original for others
             if isinstance(metric, (PassAtKMetric, PassPowKMetric)):
-                if expanded_responses is None:
-                    expanded_responses = self._expand_multi_output_responses(responses)
-                result[metric.name][scorer_name] = metric.compute(expanded_responses)
-            else:
-                result[metric.name][scorer_name] = metric.compute(responses)
+                measured = self._expand_multi_output_responses(measured)
+            result[metric.name][scorer_name] = metric.compute(measured)
         return result

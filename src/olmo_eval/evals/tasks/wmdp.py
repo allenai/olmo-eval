@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceLogprobFormatter
-from olmo_eval.common.metrics import AccuracyMetric, Metric
+from olmo_eval.common.metrics import AccuracyMetric, Metric, SafetyErrorMetric, SubsetAccuracyMetric
 from olmo_eval.common.scorers.base import LogprobScorer, Scorer
 from olmo_eval.common.types import (
     Instance,
@@ -53,7 +53,6 @@ from olmo_eval.evals.tasks.safety_base import (
     SafetyBase,
     judge_sampling,
     make_mcq_prompt,
-    safety_metrics,
 )
 
 logger = logging.getLogger(__name__)
@@ -147,7 +146,7 @@ class WMDPLogprobMCAccuracyMetric(Metric):
         logprob_sums = [scorer.score(response.instance, o) for o in response.outputs]
         return 0.0 if logprob_sums.index(max(logprob_sums)) == gold_idx else 1.0
 
-    def supports_pairwise_scorer_fallback(self) -> bool:
+    def supports_scorer_fallback(self) -> bool:
         return False
 
 
@@ -219,8 +218,7 @@ class WMDP(SafetyBase):
             sample=self.fewshot_sample,
             fallback_splits=[],
         )
-        k = self.config.num_fewshot
-        return all_fewshot[:k] if k else all_fewshot
+        return all_fewshot[: self.config.num_fewshot]
 
 
 _WMDP_SUBSET_METRICS = (
@@ -247,7 +245,13 @@ _WMDP_SCORER = WMDPScorer()
 register_variant(
     "wmdp",
     "mcq",
-    metrics=safety_metrics(_WMDP_SCORER, _WMDP_SUBSET_METRICS),
+    # The MCQ extractor records unparseable answers without raising, so this
+    # variant keeps the parse-error count the judged safety variants dropped.
+    metrics=(
+        AccuracyMetric(scorer=_WMDP_SCORER),
+        SafetyErrorMetric(scorer=_WMDP_SCORER),
+        *(SubsetAccuracyMetric(name=name, scorer=_WMDP_SCORER) for name in _WMDP_SUBSET_METRICS),
+    ),
     primary_metric=AccuracyMetric(scorer=_WMDP_SCORER),
     sampling_params=judge_sampling,
     formatter=MCQAChatFormatter(),

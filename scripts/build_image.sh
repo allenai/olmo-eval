@@ -24,6 +24,7 @@ source "${SCRIPT_DIR}/build_config.sh"
 IMAGE_NAME="olmo-eval"
 TAG=""
 CUDA_VERSION="${DEFAULT_CUDA_VERSION}"
+CUDA_IMAGE_FLAVOR="runtime"
 TORCH_VERSION="${DEFAULT_TORCH_VERSION}"
 PYTHON_VERSION="3.12"
 PLATFORM=""
@@ -49,6 +50,10 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
+        --cuda-devel)
+            CUDA_IMAGE_FLAVOR="devel"
+            shift
+            ;;
         --torch-version)
             TORCH_VERSION="$2"
             shift 2
@@ -73,6 +78,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --tag TAG             Image tag (default: auto-generated)"
             echo "  --cuda-version VER    CUDA version (default: ${DEFAULT_CUDA_VERSION})"
             echo "                        Supported: ${SUPPORTED_CUDA_VERSIONS[*]}"
+            echo "  --cuda-devel          Include nvcc and CUDA headers for runtime kernel JIT"
             echo "  --torch-version VER   PyTorch version (default: ${TORCH_VERSION})"
             echo "  --python-version VER  Python version (default: ${PYTHON_VERSION})"
             echo "  --platform PLATFORM   Target platform (default: auto-detect)"
@@ -115,12 +121,15 @@ PLATFORM_ARCH=$(echo "$PLATFORM" | cut -d'/' -f2)
 
 # Auto-generate tag if not specified
 if [[ -z "$TAG" ]]; then
-    # Format: cu{version}-trc{version}-{arch}[-sandbox]
+    # Format: cu{version}-trc{version}-{arch}[-devel][-sandbox]
     # Example: cu1281-trc2100-amd64 (for CUDA 12.8.1, PyTorch 2.10.0)
     # Example: cu1281-trc2100-amd64-sandbox (with Podman support)
     CUDA_SHORT=$(cuda_short "$CUDA_VERSION")
     TORCH_SHORT=$(echo "${TORCH_VERSION}" | sed 's/\.//g')
     TAG="cu${CUDA_SHORT}-trc${TORCH_SHORT}-${PLATFORM_ARCH}"
+    if [[ "$CUDA_IMAGE_FLAVOR" == "devel" ]]; then
+        TAG="${TAG}-devel"
+    fi
     if [[ -n "$BUILD_SANDBOX" ]]; then
         TAG="${TAG}-sandbox"
     fi
@@ -133,7 +142,7 @@ GIT_BRANCH="$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || e
 echo "Building Docker image..."
 echo "  Image:          ${IMAGE_NAME}:${TAG}"
 echo "  Target:         ${TARGET}"
-echo "  CUDA version:   ${CUDA_VERSION}"
+echo "  CUDA version:   ${CUDA_VERSION} (${CUDA_IMAGE_FLAVOR})"
 echo "  Python version: ${PYTHON_VERSION}"
 echo "  Torch version:  ${TORCH_VERSION}"
 echo "  Platform:       ${PLATFORM}"
@@ -146,6 +155,7 @@ docker build \
     --target "${TARGET}" \
     ${NO_CACHE} \
     --build-arg CUDA_VERSION="${CUDA_VERSION}" \
+    --build-arg CUDA_IMAGE_FLAVOR="${CUDA_IMAGE_FLAVOR}" \
     --build-arg TORCH_VERSION="${TORCH_VERSION}" \
     --build-arg PYTHON_VERSION="${PYTHON_VERSION}" \
     --build-arg GIT_COMMIT="${GIT_COMMIT}" \

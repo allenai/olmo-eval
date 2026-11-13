@@ -9,12 +9,16 @@ This project provides a unified workbench for evaluating language models through
 Features:
 
 - Registry of benchmark tasks and composable suites, with named variants for few-shot settings, formatting, and scoring (e.g. humaneval:3shot:bpb).
-- Support for inference via vLLM, LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
+- Support for inference via vLLM, [SGLang](docs/sglang.md), LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
 - Harness abstraction that separates execution policy from task definition, so any task can be run baseline or tool-augmented without modification.
 - Multi-turn agentic evaluation with tool calling, scaffolds, and sandboxed environments via Docker, Podman, or Modal.
 - LLM-as-judge scoring with auxiliary providers, including locally served judge models.
 - Aggregate and instance-level prediction storage.
 - Inspection tooling for viewing instances, formatted prompts, token arrays, and model responses.
+
+To contribute, start with [CONTRIBUTING.md](CONTRIBUTING.md). The reasoning behind the
+design is in [docs/design.md](docs/design.md), and [AGENTS.md](AGENTS.md) holds the
+instructions for coding agents.
 
 ## Quick Start
 
@@ -129,9 +133,11 @@ Suites support different strategies for combining task results:
 | Strategy | Description |
 |----------|-------------|
 | `AVERAGE` | Simple average of all task scores (default) |
+| `WEIGHTED_AVERAGE` | Average of all task scores, each weighted by the task's instance count |
 | `AVERAGE_OF_AVERAGES` | Average over child suite averages (equal weight per child) |
 | `DISPLAY_ONLY` | Display child results without computing suite average |
-| `NONE` | No aggregation - just collect individual task results |
+| `GAP` | Two tasks, reference then companion: both primary scores and the companion minus the reference |
+| `NONE` | No suite score: tasks report individually, and each nested suite reports its own aggregate |
 
 **Average of Averages Example:**
 
@@ -163,7 +169,42 @@ register(Suite(
 # vs AVERAGE:          (0.80 + 0.40 + 0.50 + 0.60) / 4 = 0.575
 ```
 
-Note: Currently `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains. Custom weighting may be supported in the future.
+Note: `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains.
+
+**Weighted Average Example:**
+
+```python
+register(Suite(
+    name="mmlu_pro",
+    tasks=("mmlu_pro_math", "mmlu_pro_history"),  # 1351 and 381 questions
+    aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+))
+
+# With scores of 0.30 (math) and 0.45 (history):
+# WEIGHTED_AVERAGE: (0.30 * 1351 + 0.45 * 381) / 1732 = 0.333
+# vs AVERAGE:       (0.30 + 0.45) / 2 = 0.375
+```
+
+`WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored.
+
+A weighted suite reports its weighted mean or no score at all. If a contributing task has no instance count, the suite aggregate is omitted and the runner logs which tasks were missing, rather than publishing an unweighted mean under the same suite name. Instance counts are required when a result is stored, so this only affects results written before that check existed.
+
+**Gap Example:**
+
+```python
+register(Suite(
+    name="omega:dev",
+    tasks=("omega_500:hillclimb", "omega_500_out"),  # in-distribution, then held-out
+    aggregation=AggregationStrategy.GAP,
+))
+
+# With scores of 0.60 (in) and 0.45 (out):
+# primary_score: reference 0.60, companion 0.45 (the suite's primary), gap -0.15
+```
+
+A gap suite retains its definition in `suite_metrics`, but is omitted from `summary` unless both tasks scored on the same primary metric. It can be nested only in a `NONE` suite, which reports it under its own name: a gap is not a score to average.
+
+The held-out companion score is the value to rank and optimize. The gap is a diagnostic guard, shown in percentage points in the log summary; reducing the reference score never improves the suite's primary score. In `metrics.json`, `suite_metrics["omega:dev"]["primary_score"]` retains `reference`, `companion`, and `gap`; `summary` selects the companion.
 
 ### Formatters
 
@@ -286,7 +327,7 @@ config = HarnessConfig(
 | `scaffold_kwargs` | `dict[str, Any]` | `{}` | Scaffold-specific options (e.g., `enable_compaction`) |
 | `metrics` | `MetricsConfig \| None` | `None` | Inference metrics collection config |
 | `batching` | `BatchConfig \| None` | `None` | Batching strategy configuration |
-| `max_hard_failure_rate` | `float \| None` | `None` | Fraction of a task's instances allowed to hard-fail before the task is marked failed and the run exits non-zero (default `0.05`). `1.0` never fails a run on partial instance failures; a task that saves zero instances still fails |
+| `max_hard_failure_rate` | `float \| None` | `None` | The failure budget: fraction of a task's instances allowed to produce no output or have no scored output before the task is marked failed, its metrics are withheld and the run exits non-zero (default `0.05`). `1.0` never fails a run on partial failures; a task with nothing scored still fails |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
 
 #### Scaffolds
@@ -324,7 +365,7 @@ outputs = harness.generate(requests)  # No scaffold needed
 
 #### Inference Metrics
 
-Harness configurations can include `MetricsConfig` to collect inference performance metrics during evaluation:
+Harness configurations can include `MetricsConfig` to collect inference performance metrics during evaluation. A run without `--harness` or `--harness-config` collects them with the default `MetricsConfig()`, writing `metrics/<provider>_<model>-inference.jsonl` in the output directory, as the built-in presets do:
 
 ```python
 from olmo_eval.harness import HarnessConfig, ProviderConfig
@@ -470,87 +511,124 @@ This section explains how to create new evaluation tasks.
 
 ### Quick Start: Minimal Task Example
 
+A multiple-choice task scored by the log-likelihood of each answer choice:
+
 ```python
-"""Example: Minimal task implementation."""
+"""Example: a minimal multiple-choice task scored by log-likelihood."""
+
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
-from olmo_eval.data import DataLoader, DataSource
+from olmo_eval.common.formatters import MultipleChoiceFormatter
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.types import Instance, LMRequest
+from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register
 
 
 @register("my_task")
 class MyTask(Task):
-    """My task implementation."""
+    """MMLU abstract algebra, scored by the highest-likelihood answer choice."""
 
-    # DataSource arguments:
-    #   path: HuggingFace dataset path (e.g., "cais/mmlu")
-    #   subset: Dataset subset/config (e.g., "abstract_algebra")
-    #   split: Dataset split (e.g., "test", "validation")
-    data_source = DataSource(path="cais/mmlu", subset="abstract_algebra", split="test")
+    # Pin the revision so the task's data cannot change underneath stored results.
+    data_source = DataSource(
+        path="cais/mmlu",
+        subset="abstract_algebra",
+        split="test",
+        revision="c30699e8356da336a370243923dbaf21066bb9fe",
+    )
+    formatter = MultipleChoiceFormatter(
+        template="Question: {question}",
+        choice_template=" {choice}",
+        prompt_suffix="\nAnswer:",
+    )
+    metrics = (LogprobMCAccuracyMetric(),)
 
     @property
     def instances(self) -> Iterator[Instance]:
-        """Load and yield instances from the dataset."""
-        if self._instances_cache is None:
-            self._instances_cache = []
-            loader = DataLoader()
-            source = self.config.get_data_source()
-            for doc in loader.load(source):
-                self._instances_cache.append(self.process_doc(doc))
-        yield from self._instances_cache
+        # Loads the configured data source, calls process_doc, and caches the result.
+        yield from self._load_instances_cached()
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
-        """Convert a dataset document to an Instance."""
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         return Instance(
             question=doc["question"],
-            gold_answer=doc["answer"],
-            choices=tuple(doc["choices"]),  # For MC tasks
-            metadata={"id": doc["id"]},
+            choices=tuple(doc["choices"]),
+            gold_answer=doc["choices"][doc["answer"]],
+            metadata={"id": f"my_task_{index}", "gold_idx": doc["answer"]},
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
-        """Format instance for the language model."""
-        if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
-        # Fallback formatting
-        return LMRequest(request_type=RequestType.COMPLETION, prompt=instance.question)
-
-    def extract_answer(self, output: LMOutput) -> str | None:
-        """Extract the answer from model output."""
-        return output.text.strip()
+        assert self.config.formatter is not None
+        return self.config.formatter.format(instance, self.get_fewshot())
 ```
+
+Class attributes that match `TaskConfig` fields (`data_source`, `formatter`, `metrics`,
+and so on) become the task's default configuration. Put the module in
+`src/olmo_eval/evals/tasks/` and it is registered on import. Check it with
+`uv run olmo-eval task inspect my_task --request -n 1` and
+`uv run olmo-eval run -m mock -t my_task -o limit=5`. Generation tasks use a chat or
+completion formatter instead, extract an answer in `extract_answer`, and score it with a
+metric such as `AccuracyMetric(scorer=ExactMatchScorer)`.
 
 ### Task Class Overview
 
 | Method | Required | Purpose |
 |--------|----------|---------|
-| `instances` | Yes | Property that yields `Instance` objects from the dataset |
-| `process_doc(doc)` | Yes | Converts a raw document dict into an `Instance` |
+| `instances` | Yes | Property that yields `Instance` objects; usually `yield from self._load_instances_cached()` |
 | `format_request(instance)` | Yes | Converts an `Instance` into an `LMRequest` for the model |
-| `extract_answer(output)` | Yes | Extracts the answer string from `LMOutput` |
+| `process_doc(doc, index)` | When using `_load_instances*` | Converts a raw document into an `Instance`, or `None` to skip it |
+| `extract_answer(output)` | No | Extracts the answer from `LMOutput`; defaults to `config.answer_extractor` or the raw text |
 | `_build_fewshot()` | No | Override to customize few-shot example loading |
 | `score_responses(...)` | No | Override to customize scoring logic |
 | `compute_metrics(...)` | No | Override to customize metric computation |
 
 ### TaskConfig Reference
 
+Commonly used fields. `TaskConfig` in `src/olmo_eval/evals/tasks/common/base.py`
+documents the rest.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | `str` | Required | Task identifier used in CLI |
-| `data_source` | `DataSource \| str` | `None` | Dataset source (HuggingFace, S3, GCS, local, or URI string) |
-| `fewshot_source` | `DataSource \| str` | `None` | Optional separate source for few-shot examples |
-| `formatter` | `Formatter` | `None` | Request formatter |
+| `data_source` | `DataSource \| str \| None` | `None` | Dataset source (HuggingFace, S3, GCS, local, or URI string) |
+| `formatter` | `Formatter \| None` | `None` | Request formatter |
 | `metrics` | `tuple[Metric, ...]` | `()` | Evaluation metrics (scorers are inferred from metrics) |
 | `num_fewshot` | `int` | `0` | Number of few-shot examples |
-| `fewshot_seed` | `int` | `42` | Random seed for few-shot selection |
-| `seed` | `int` | `42` | General random seed for task |
 | `limit` | `int \| None` | `None` | Max instances to evaluate |
 | `split` | `Split` | `Split.TEST` | Dataset split to use |
 | `primary_metric` | `MetricName \| Metric \| None` | `None` | Primary metric for ranking (defaults to single metric if only one) |
 | `sampling_params` | `SamplingParams \| None` | `None` | Default sampling parameters for this task |
+| `answer_extractor` | `Callable[[str], str] \| None` | `None` | Function applied to output text by the default `extract_answer` |
+| `response_parser` | `str` | unset | Set `harmony` to score only structured Harmony final-channel text |
+| `strip_thinking` | `bool` | `False` | Drop `<think>...</think>` traces before scoring |
 | `dependencies` | `list[str] \| None` | `None` | Runtime packages to install (e.g., `["pkg==1.0"]`) |
+| `judge_model` | `str \| None` | `None` | Judge model for LLM-as-judge scoring |
+
+For inline vLLM, or a provider that returns raw Harmony delimiters, use
+`-o response_parser=harmony`. Inline vLLM preserves the generated Harmony token
+boundaries before its default decoder removes special tokens, saving them in
+`text_with_special_tokens` for auditing or re-scoring. Saved predictions also
+record `response_parser_found`: false means no delimited transcript was found
+(including an already parsed plain answer). If a known structured decode cannot
+be aligned with the stopped completion, explicit parsing raises a scoring error;
+the diagnostic and raw text remain in saved predictions.
+This opt-in changes the task hash, keeps the original decoded generation in `original_text`,
+and scores an empty answer when a Harmony analysis trace has no final channel.
+It accepts the documented `<|start|>/<|channel|>/<|message|>` delimiters of the gpt-oss
+tokenizer. Already parsed plain text passes through. Decoding with special tokens removed loses message boundaries:
+`analysis...assistantfinal...` cannot be parsed reliably; retain special tokens or
+use a provider's native Harmony reasoning parser before evaluating.
+
+### Generation diagnostics
+
+Generation diagnostics count outputs, including each sample of an instance.
+`cap_hit` counts known `length` finish reasons and is a lower bound when
+`finish_reason_unknown` is nonzero. `unclosed_think` detects emitted `<think>`
+tags without a closing tag in the original generation. `empty` counts empty
+scoring text and excludes tool calls. Tasks that strip or transform text inside
+extraction, without changing `LMOutput.text`, set
+`output.metadata[SCORING_TEXT_EMPTY_KEY]` from that scoring text before parsing;
+a nonempty answer that fails parsing is still nonempty.
 
 ### Data Sources
 
@@ -588,7 +666,8 @@ DataSource(path="gs://my-bucket/datasets/data.parquet")
 | `path` | `str` | Required | Dataset path (HuggingFace repo, S3/GCS URI, or local path) |
 | `subset` | `str \| None` | `None` | Dataset subset/config name |
 | `split` | `str` | `"test"` | Dataset split |
-| `data_files` | `str \| None` | `None` | Specific data files to load |
+| `source_type` | `SourceType \| None` | `None` | Backend type; inferred from `path` when unset |
+| `data_files` | `str \| tuple[str, ...] \| None` | `None` | Specific data files to load |
 | `revision` | `str \| None` | `None` | Dataset revision/version |
 
 ### Common Patterns
@@ -659,6 +738,370 @@ See the [Harness](#harness) section above for full documentation on:
 - Creating custom harness configurations
 - Defining tools with the `@tool` decorator
 - Programmatic usage
+
+## Function Calling (BFCL)
+
+The Berkeley Function Calling Leaderboard v3 single-turn categories are
+registered as `bfcl_*` tasks, reformulated as a completion so a pretrained
+model with no chat template can be measured on them. See
+[`src/olmo_eval/evals/tasks/bfcl/README.md`](src/olmo_eval/evals/tasks/bfcl/README.md)
+for the task list, suites, exemplar settings, and what is not implemented.
+
+```bash
+uv run olmo-eval run -m my-base-model -t bfcl
+```
+
+## Multimodal Evaluation
+
+olmo-eval evaluates vision-language models on image benchmarks. Tasks attach images
+to `LMRequest.images` and the provider decides how to render them, so the task
+definition is the same regardless of which multimodal provider runs it.
+
+Five families of image tasks are built in:
+
+| Family | Suite | Tasks |
+| --- | --- | --- |
+| Image-QA | `molmo2_imageqa` | `chart_qa`, `vqa2`, `doc_qa`, `info_qa`, `text_vqa`, `real_world_qa`, `mmmu`, `mmmu_pro`, `math_vista`, `countbench_qa`, `pixmo_count`, `ai2d`, `charxiv_descriptive`, `charxiv_reasoning` |
+| Dense caption | `molmo2_imageqa_caption` | the image-QA tasks plus `dense_caption` |
+| Pointing | `molmo2_pointing` | `pixmo_points_eval`, `sa_co_gold_subset` |
+| Pointing (model prompts) | `molmo2_pointing_mp` | `pixmo_points_eval_mp`, `sa_co_gold_subset_mp`, `sa_co_gold_point_4k_mp` |
+| Multi-image | `molmo2_multiimage` | `muir_bench`, `mmiu`, `blink` |
+| Document OCR, English (default for Molmo2) | `ocr_en` | `olmocr_bench`, `cc_ocr_multi_scene_en`, `omnidocbench_en` |
+| Document OCR, every language | `ocr` | `olmocr_bench`, `cc_ocr_multi_scene`, `omnidocbench` |
+
+Image-QA primary metrics are all 0-1, so `molmo2_imageqa` averages them.
+`dense_caption` reports on a 0-100 scale, so `molmo2_imageqa_caption` is display-only
+and computes no cross-task average. Pointing tasks score point-in-mask
+precision/recall/f1 by maximum bipartite matching rather than VQA-style answers,
+which is why they are a separate suite. Multi-image tasks attach a *list* of images
+per instance (capped at 20, matching the mm_olmo eval config) and score multiple
+choice answers by MMMU-style option-letter parsing; besides the primary `all`
+accuracy each task reports per-category breakdowns (MuirBench's 12 task types,
+BLINK's 14 subtasks, MMIU's 7 relationship types plus image-count buckets).
+
+Document-OCR tasks hand the model one page image and grade the markdown (or JSON)
+it writes back, each with its benchmark's official scoring:
+
+- `olmocr_bench` — [olmOCR-bench](https://huggingface.co/datasets/allenai/olmOCR-bench):
+  1,403 PDF pages and 7,019 unit tests (text presence/absence, reading order, table
+  cells, rendered math). Tests run through the official `olmocr` scorer; `overall` is
+  the mean of the eight category pass rates (0-1). Math tests render with KaTeX in a
+  headless Chromium, which is installed on first use.
+- `cc_ocr_multi_scene` — the multi-scene OCR track of
+  [CC-OCR](https://huggingface.co/datasets/wulipc/CC-OCR): 2,750 scene-text, document and
+  web images in English and Chinese. The primary `macro_f1` is the official track score
+  (0-1): per-image F1 of the word (Chinese: character) multiset, averaged within and then
+  across the 13 sub-datasets.
+- `omnidocbench` — [OmniDocBench](https://github.com/opendatalab/OmniDocBench) v1.6:
+  1,651 pages scored by the pinned official evaluator, which runs in a virtualenv of its
+  own (needs `git` and `uv`). `overall` is the leaderboard's 0-100 number, which is why
+  the `ocr` suite is display-only. Its formula metric (CDM) renders LaTeX; the task sets
+  up the toolchain itself at job start, so it runs in one step anywhere (see
+  [OmniDocBench formula scoring](#omnidocbench-formula-scoring-cdm)). `omnidocbench_v15`
+  is the 1,355-page v1.5 release with its own evaluator; the two leaderboards are not
+  comparable.
+
+English-only variants keep the benchmarks' official scoring on a subset:
+`cc_ocr_multi_scene_en` runs the 8 English sub-datasets (2,000 images) and averages over
+those, and each OmniDocBench version has an `_en` variant (`omnidocbench_en`,
+`omnidocbench_v15_en`) that runs and scores only the pages annotated `english` (755 of
+v1.6's pages, 628 of v1.5's). Molmo2 models read English only, so the `_en` variants (suite
+`ocr_en`) are the default setting for evaluating them. The plain names run every language,
+as the leaderboards do, for multilingual models; `olmocr_bench` is English throughout and
+has no variant.
+
+By default each OCR task sends its benchmark's own instruction, for instruction-tuned
+checkpoints. A stage-1 checkpoint (`-o prompt_templates=none -o
+system_prompt_style=style_and_length_v2`) gets the OCR style tag it was trained on, alone:
+`olmocr:` for `olmocr_bench` and OmniDocBench, `textocr:` for CC-OCR.
+
+The OCR datasets are downloaded from the Hugging Face Hub at pinned revisions rather
+than read from `$MOLMO_DATA_DIR`.
+
+### Setup
+
+The multimodal providers live behind the `hf` and `olmo_core_vlm` extras, and the
+benchmarks' own scoring dependencies (`pycocotools`, `scipy`) behind `vision`, which
+every provider needs:
+
+```bash
+# HuggingFace multimodal path
+uv sync --extra hf --extra vision
+
+# Also evaluate OLMo-core MultimodalLM checkpoints
+uv sync --extra hf --extra olmo_core_vlm --extra vision
+```
+
+Beaker jobs install each task's scoring dependencies automatically.
+
+Image data is read from a **read-only** tree — loaders raise rather than build
+caches, so the data must already be staged:
+
+```bash
+export MOLMO_DATA_DIR=/weka/oe-training-default/mm-olmo  # this is the default
+```
+
+A missing data root fails at task setup with the variable named, rather than
+reading a nonexistent path (the Ai2 defaults are tracked for removal in #381).
+
+Images live under `$MOLMO_DATA_DIR/torch_datasets/`. Manifests that recorded
+absolute paths on another machine are re-anchored under the current root
+automatically.
+
+Four tasks call the OpenAI API and need `OPENAI_API_KEY` or `OPENROUTER_API_KEY`
+(see [OpenAI models through OpenRouter](#openai-models-through-openrouter)), so the
+`molmo2_imageqa` suite needs one of them as a whole:
+
+- `math_vista` defaults to the official `gpt-4-0613` answer extraction. Use the
+  `math_vista:offline` variant for an API-free heuristic instead.
+- `charxiv_descriptive` and `charxiv_reasoning` run the official `gpt-4o` grader.
+- `dense_caption` runs a `gpt-4o` recall+consistency judge. Judge responses are
+  cached, so the key is only needed on a cache miss.
+
+The launcher resolves the key as the user-scoped beaker secret
+`{beaker-username}_OPENAI_API_KEY`, or `{beaker-username}_OPENROUTER_API_KEY` when
+that is missing. If neither exists, the launch fails up front and prints the
+`beaker secret write` command to run.
+
+### Running
+
+```bash
+# Released HuggingFace checkpoint, full image-QA suite
+uv run olmo-eval run -m molmo2-4b -t molmo2_imageqa
+
+# A single benchmark
+uv run olmo-eval run -m molmo2-4b -t mmmu_pro
+
+# Pointing benchmarks
+uv run olmo-eval run -m molmo2-4b -t molmo2_pointing
+
+# Multi-image benchmarks
+uv run olmo-eval run -m molmo2-4b -t molmo2_multiimage
+
+# Inspect the suite without loading a model
+uv run olmo-eval suite inspect molmo2_imageqa
+```
+
+The `molmo2-4b` preset runs `allenai/Molmo2-4B` with `dtype=float32`,
+`autocast_dtype=bfloat16` and `max_crops=24` (8 per image in multi-image prompts),
+matching the reference evaluation numerics.
+
+### OmniDocBench formula scoring (CDM)
+
+`omnidocbench`, `omnidocbench_v15` and their `_en` variants score formulas with CDM,
+which renders every formula through LaTeX and ImageMagick. Before inference each task
+installs whatever part of that toolchain is missing or at another version, then renders
+a test formula through its version's own CDM template. The whole evaluation, CDM
+included, finishes in the same job; no separate rescoring step is needed. Setup takes
+about 5-9 minutes on a fresh machine.
+
+The versions are the ones each release documents, because CDM follows the renderer
+(Ghostscript 10.02 instead of 9.55 moves a formula score by about 0.2 points):
+
+| | v1.6 (`omnidocbench`) | v1.5 (`omnidocbench_v15`) |
+| --- | --- | --- |
+| LaTeX | TeX Live 2025, `pdflatex` + `CJK` | TeX Live 2025, `xelatex` + `xeCJK` |
+| Font | `gkai` (TeX Live `arphic`) | Source Han Sans SC |
+| ImageMagick | 7.1.1-47 | 7.1.1-47 |
+| Ghostscript | 9.55.0 | 9.55.0 |
+| Other | | Node.js 16.13.1 (KaTeX tokenizer) |
+
+What the setup needs:
+
+- **Network access**: TeX Live 2025 comes from the frozen `tlnet-final` repository in the
+  TeX historic archive, ImageMagick and Ghostscript from their GitHub releases, the font
+  from Adobe's release, and Node.js from nodejs.org. Each download is checked against its
+  pinned SHA-256, and a mismatch stops the task.
+- **Linux x86_64**, where the installed binaries run. Elsewhere, put the toolchain on
+  `PATH` yourself.
+- **apt** (root, as in Beaker jobs), for the system libraries the ImageMagick AppImage
+  links against and for `fontconfig`.
+- TeX Live, ImageMagick and Ghostscript already on `PATH` at exactly these versions are
+  used as they are, as is any `node`; anything else is installed alongside, first on
+  `PATH` for the evaluation.
+
+If a download fails or the test formula does not render, the task stops before inference
+with the error, rather than scoring every formula zero. On a machine without network
+access or root, put the pinned versions on `PATH` first (the task then uses them as they
+are) or point `OMNIDOCBENCH_CDM_DIR` at a toolchain installed elsewhere.
+
+Environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OMNIDOCBENCH_CDM_DIR` | `~/.cache/olmo_eval/omnidocbench/cdm` | Where the toolchain is installed; point several runs at one shared install to reuse it |
+| `OMNIDOCBENCH_EVAL_DIR` | `~/.cache/olmo_eval/omnidocbench` | Where each version's evaluator checkout and virtualenv are provisioned |
+| `OMNIDOCBENCH_EVAL_WORKERS` | `min(16, cpus / 4)` | Evaluator worker threads (matching, TEDS, CDM); 48 suits a Beaker GPU node |
+| `OMNIDOCBENCH_EVAL_TIMEOUT_S` | `43200` (12 h) | Wall-clock cap on evaluation; past it, as on any evaluator failure, the task reports no metrics and an error, and keeps the predictions for rescoring |
+| `OMNIDOCBENCH_DIR` / `OMNIDOCBENCH_V15_DIR` | Hub download | Local copy of the dataset (`OmniDocBench.json` + `images/`) |
+
+For example, on Beaker:
+
+```bash
+olmo-eval beaker launch -n molmo2-4b-omnidocbench \
+  -m /weka/oe-training-default/mm-olmo/released-models-molmo2-1225/Molmo2-4B/step2000 \
+  -t omnidocbench_en \
+  --harness default -o provider.kind=olmo_core_vlm -o provider.max_crops=24 \
+  -o provider.num_instances=2 \
+  --gpus 2 --env OMNIDOCBENCH_EVAL_WORKERS=48 \
+  -c ai2/holmes -p urgent --min-runtime 8h -w <workspace> -B <budget>
+```
+
+The job log shows the toolchain setup (`Running: ...install-tl...`, `tlmgr install ...`),
+then inference, then one `overall` for the task.
+
+### Providers
+
+**`huggingface`** handles image-text-to-text models via `AutoProcessor` and
+`AutoModelForImageTextToText`. Pass `multimodal=True` in the provider kwargs (the
+`molmo2-4b` preset does this for you).
+
+**`olmo_core_vlm`** runs OLMo-core `MultimodalLM` checkpoints in three on-disk
+formats: raw trainer saves (`config.json` + `model_and_optim/`), consolidated
+safetensors exports, and mm_olmo trainer checkpoints, which are config-translated
+and key-remapped at load time. It drives its own decode loop because OLMo-core's
+vision branch has no multimodal generation module.
+
+Prefer `provider.kind=olmo_core_vlm` explicitly — remote jobs then install the
+matching `olmo_core_vlm` extra. `provider.kind=olmo_core` also detects
+multimodal checkpoints and reroutes (with a warning), but on Beaker that route
+installs the text extra and fails at worker init:
+
+```bash
+uv run olmo-eval run \
+    --harness default -o provider.kind=olmo_core \
+    -m /weka/path/to/multimodal-checkpoint \
+    -t molmo2_imageqa
+```
+
+`-o` must follow `--harness` or `-t`, so the provider override needs an explicit
+`--harness default` ahead of it.
+
+A single image is cropped to the checkpoint's training `max_crops`
+(`-o provider.max_crops=N`), and each image of a multi-image prompt to its
+`max_multi_image_crops` (8 when the checkpoint names none;
+`-o provider.max_multi_image_crops=N`), as mm_olmo does. The context window is
+64,000 tokens, the length mm_olmo's `eval_molmo2.py` evaluates at, or the
+checkpoint's training window if that is longer (`-o provider.max_model_len=N`); a
+prompt longer than the window fails its instance rather than being truncated.
+mm_olmo evaluates the released Molmo2 models at 24 crops per single image, so pass
+`-o provider.max_crops=24` to compare against their published numbers; document QA
+is the most crop-sensitive.
+
+No released `ai2-olmo-core` ships the multimodal classes (`olmo_core.nn.vision`,
+`MultimodalLM`) yet, so the `olmo_core_vlm` extra pins OLMo-core's vision branch
+by commit. It is declared conflicting with the text `olmo_core` extra — the two
+cannot be installed together — and beaker jobs install it automatically for
+`provider.kind=olmo_core_vlm`, so no package override is needed:
+
+```bash
+uv run olmo-eval beaker launch \
+    --harness default -o provider.kind=olmo_core_vlm \
+    -m /weka/path/to/multimodal-checkpoint \
+    -t molmo2_imageqa
+```
+
+Once a release includes the multimodal classes, the extras collapse into one and
+the pin goes away.
+
+### Adding a multimodal task
+
+Image-QA tasks subclass `ImageQATask` (`evals/vision/tasks/image_qa.py`),
+which resolves images from `instance.metadata["image_path"]` or
+`instance.metadata["image"]` (a PIL image or a zero-arg callable returning one —
+use `load_instance_image` from `evals/vision/data/images.py` for either form) and anchors data reads under
+`$MOLMO_DATA_DIR`. Pointing tasks subclass `PointingTask`
+(`evals/vision/tasks/pointing.py`). Multi-image tasks subclass
+`MultiImageQATask` (`evals/vision/tasks/multi_image.py`), which resolves
+`instance.metadata["images"]` — a callable returning the image list, or a sequence
+of PIL images / zero-arg callables / file paths — and sends them all on one
+request. Registration and variants work exactly as described in
+[Adding New Tasks](#adding-new-tasks).
+
+## Hill-Climb Dev Suite
+
+`hillclimb:dev` runs LiveCodeBench lite, the OMEGA in/out pair, IFEval, IFBench
+and GPQA main together. It has no cross-domain aggregate; each task reports
+its score and `omega:dev` reports its held-out score and gap.
+
+```bash
+uv run olmo-eval run -m <checkpoint> -t hillclimb:dev \
+    --harness codex_python \
+    -o provider.kind=vllm -o provider.max_model_len=36864 \
+    -o sandboxes.0.inject_swerex=true
+```
+
+LiveCodeBench requires the sandboxed harness; see [missing-sandbox tracking (#423)](https://github.com/allenai/olmo-eval/issues/423). Set the same model context limit
+for every checkpoint you compare; OMEGA has a 32,768-token generation cap.
+
+## Post-Training Dev and Test Suites
+
+`posttrain:tiny:dev`, `posttrain:tiny:test`, `posttrain:small:dev` and
+`posttrain:small:test` follow the Olmo eval tracker: its Track column is dev, its
+Publish column is test. Use dev suites for hill-climbing and checkpoint selection;
+read test suites only for release reports. No task is in both suites of one size.
+None has a cross-domain aggregate. Dev leaves out four Track rows. GPQA is read in neither
+variant: at 32,768 output tokens about 60% of a reasoning model's generations stop
+mid-thought and score at chance, so the entry measures the cutoff more than the model;
+MMLU:cot guards knowledge instead. HELMET's recall tasks repeat RULER+, and its QA tasks
+are chat requests capped at 10 tokens, so a model that reasons first is scored on where the
+cap cut it. CTC's 64K tasks report heterogeneous metrics with no aggregate, and its own
+README says a reasoning model needs more than their direct-answer budgets.
+
+Small dev also reads the tracker's agentic Track rows. They are
+[external evals](#external-evals), which a suite cannot hold, so each runs as its own
+`olmo-eval run-external -e <name>` job beside the suite: `openthoughts_tblite`
+(OpenThoughts-TBLite, 100 tasks) and `terminal_bench_2` (Terminal-Bench 2.1, 89 tasks) for
+the Terminal-Bench row, and `swe_bench_verified`.
+
+The tracker deprioritizes those rows for Tiny, but without an agentic read Tiny dev cannot
+show whether a change helps or hurts agentic skill, so it reads two on which Tiny scores
+above zero. BFCL multi-turn is `posttrain:tiny:dev:bfcl_multi_turn`, a suite of its own
+because it needs the `bfcl_multi_turn` scaffold (`--harness bfcl_multi_turn`), at
+temperature 1.0, top_p 0.95 and 16,384 tokens per turn. SWE-bench Verified reads only the
+194 of its 500 instances annotated as under 15 minutes to fix, which hold most of what a
+Tiny checkpoint resolves (17 of 26 for one Tiny SFT checkpoint):
+
+```bash
+olmo-eval run-external -m <checkpoint> -e swe_bench_verified -a 'difficulties=<15 min fix' \
+  -a task_frame=swesmith -a temperature=1.0 -a top_p=0.95 -a max_tokens=16384 \
+  -K max_model_len=65536
+```
+
+The suites mix short tasks with RULER+ at 64K to 256K, LiveCodeBench (sandboxed harness,
+as above) and LLM-judged safety and Arena-Hard tasks (see
+[local judge models](#local-judge-models)). Sampled tasks run at the ledger's setting:
+Olmo 3.5 Tiny's suggested temperature 1.0 and top_p 0.95 (Small uses them too, assumed from
+Tiny), with 32,768 output tokens, through `_t10_32k` variants that keep each task's sample
+count. Without the fixed budget, most of these tasks would generate up to whatever context
+they are served at. RULER+ runs greedy in completion mode with
+direct-answer budgets, and BFCL keeps its own settings. Do not override sampling or
+`max_tokens` for the whole run. Serve sampled tasks with a context of at least their
+longest prompt plus 32,768 tokens: the server refuses any request that does not fit (at
+34,816, every prompt over 2,048 tokens), and only when the request reaches it.
+
+Tiny dev is two suites, run as separate jobs: `posttrain:tiny:dev` and
+`posttrain:tiny:dev:bfcl_multi_turn`. So is Small dev. MT-Bench and Multi-IF need the
+`multi_turn_chat` scaffold (`--harness multi_turn_chat`), which drops tool calls and has no
+sandbox, so they are `posttrain:small:dev:multi_turn`; the rest is `posttrain:small:dev`.
+
+The suites name no provider, but the engine is part of what a score measures: compare
+scores only between runs on the same provider, and record it with each run. When the rest
+of a suite runs on SGLang, BFCL needs its own job with `provider.kind=vllm_server`, the
+only provider with tool calls. LiveCodeBench (`livecodebench:lite` in dev,
+`livecodebench_hidden` in test) needs a sandbox harness, whose default image is CUDA 12.8
+and so cannot install SGLang ([SGLang](docs/sglang.md)); with `--image` set to the CUDA 13
+evaluator image (Beaker `01M632ZP67Y4WMV060J74FSC3R`) it runs on SGLang, and so does the
+WildGuard judge. In Small test, Arena-Hard v2 also needs vLLM: it fits its output budget to the context,
+which SGLang refuses.
+
+Every suite has WildGuard-judged safety tasks, so a launch needs the `wg_judge` overrides
+(`-o auxiliary_providers.wg_judge.kind=vllm_server -o
+auxiliary_providers.wg_judge.model=allenai/wildguard -o
+auxiliary_providers.wg_judge.kwargs.add_bos_token=true`), and the test suites also need the
+`sr_judge` overrides for StrongREJECT; `safety.py` has both. Without them the run generates
+every item and then fails at scoring. Each local judge gets its own GPUs on top of the
+model's: at least 2 GPUs for dev and 3 for test, at tensor parallel 1.
 
 ## Querying Results
 
@@ -760,6 +1203,140 @@ uv run olmo-eval run -m allenai/OLMo-2-1124-7B -t mmlu --force-download-model
 uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 ```
 
+### Rescoring Saved Generations
+
+The `replay` provider answers each request with the generation an earlier run saved
+for the same prompt, so scorer and metric changes can be measured without a model or
+GPU. Point it at a predictions file or a results directory holding one model's
+predictions (each file is read with the requests file saved beside it; a prompt saved by
+two task configurations needs the file), and repeat the original run's model and task
+options so the prompts match:
+
+```bash
+uv run olmo-eval run -m mock -t gsm8k -o limit=100 \
+    -H default -o provider.kind=replay -o provider.predictions=/tmp/results/ \
+    -O /tmp/rescored/
+```
+
+A prompt with no saved generation, or saved with a different number of samples, fails
+like a generation error and counts against the task's failure budget. Only text
+generations are replayed: logprob tasks, image or tool requests and multi-turn
+rollouts are not.
+
+### Resuming Interrupted Runs
+
+With `--resume`, a run records each instance as it finishes. Restarted on the same
+output directory, it skips the instances an earlier attempt finished and writes the same
+predictions and metrics as an uninterrupted run.
+
+```bash
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --resume   # interrupted
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --resume   # continues
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --fresh    # discards progress
+```
+
+| Flag | Description |
+|------|-------------|
+| `--resume` | Record progress under `<output_dir>/progress/` and continue from any already there |
+| `--fresh` | Delete the recorded progress of this run's tasks and model before the run; cannot be combined with `--resume` |
+
+Without either flag, a run records nothing and ignores progress it finds, with a warning.
+Beaker task launches default to `--resume` and use `--resume-volume ai2/olmo-eval`
+by default. Replacement jobs mount the same WEKA directory directly. Use
+`--resume-volume <org>/<name>` to select a different native volume.
+
+Beaker results are the same with or without resume. The eval writes predictions,
+requests, metrics, the manifest and logs to `/results` as it runs, in the same layout
+and at the same moments. Only the progress records and the run's identity (its manifest
+and upload secret) go to the volume, and a completed run deletes them.
+
+To run without progress recovery, pass `--no-resume` (YAML: `resume: false`). This
+needs no resume-volume claim and records no recovery progress. Preempted or retried
+attempts start over. `--resume` explicitly enables
+recovery and overrides `resume: false` from YAML.
+
+Before the first resumable launch in a workspace, grant it read-write access to the volume:
+
+```bash
+beaker volume claim create --workspace <workspace> --volume ai2/olmo-eval --mode readwrite
+uv run olmo-eval beaker launch -m <model> -t <task> -c <cluster> -w <workspace> \
+    --min-runtime 30m --timeout 2h
+```
+
+This requires a volume-capable Beaker CLI (v1.5.346 is qualified). Claims are managed
+once per workspace; the launcher never changes access. If a claim is missing or
+read-only, submission stops with the workspace-specific grant command, permission
+requirements, and the `--no-resume` alternative. Every resumable submission gets its own
+UUID directory under `/eval-cache/tmp-7d/` by default. Set
+`--resume-retention-days 14` (YAML: `resume_retention_days: 14`) to use `tmp-14d`
+and retain inactive recovery files for fourteen days. Any positive whole number of
+days is accepted. Replacement jobs reuse their original UUID and retention path and take
+an exclusive run lock. The job log names the run's WEKA recovery directory.
+Grant read-write claims only to workspaces whose submitters are mutually trusted.
+Progress records can contain serialized Python objects; checksums detect corruption
+and do not authenticate writers.
+
+Active runs refresh every recovery file's modification time hourly. After the selected
+retention period of inactivity (seven days by default), files are eligible for WEKA
+prune deletion. Actual deletion depends on the volume's prune schedule. Results are
+unaffected: they are in Beaker results and upload to the dashboard normally. Expired,
+missing, or corrupt committed progress stops recovery with an error. Shared-storage
+progress flushes every five seconds and on graceful shutdown. A completion marker
+prevents a replacement from repeating a successfully finished run when its results
+came along; a rerun whose results lack them runs the eval again under the same run ID. External evals do
+not support `--resume-volume`. See the [implementation and validation plan](docs/weka-resume.md).
+
+- **What is recorded.** `progress/<model>/run.segments/` (on the volume under the Beaker
+  resume supervisor) holds one stream for the run: a
+  header per task, then one entry per finished instance with its outputs, scores and a
+  hash of its prepared request. Prompts are rebuilt from the task, not stored. A
+  generation's per-token logprobs are left out unless one of the task's metrics scores
+  from them (`Scorer.reads_logprobs`); its `sum_logits` and `num_tokens` are kept. Each
+  finished task also gets a `<task>_<hash>.final.json`. Entries reach the disk every two
+  minutes. The `progress/` directory is never uploaded. A run that completes deletes
+  the records of its own tasks only.
+- **What must match.** The record format, task spec and hash, model hash and revision,
+  the harness settings that affect outputs, the inference engine version (such as
+  `vllm==0.11.2`), the git commit, the uncommitted changes to tracked files (a hash of
+  `git diff HEAD`; untracked files are not covered) and, for SGLang, the resolved runtime.
+  Editing code after an interruption therefore stops a resume; revert the edits, pass
+  `--fresh`, or use another output directory. A run that starts from a dirty tree warns
+  that resuming will need the same changes. Without git (an installed package), the
+  commit and changes are not compared. New untracked files, such as a new scorer module,
+  are not covered either; `git add -N <file>` includes one. A difference
+  stops the run with an error naming the setting; pass `--fresh` or use another output
+  directory. Where the run executes (GPU count, cluster, tensor parallelism, concurrency)
+  may differ and only logs a warning. An instance whose prepared request, gold
+  answer or metadata changed is run again.
+- **Sharing an output directory.** Runs of different tasks may share one. Each run
+  keeps the others' records when it completes and logs which tasks it is keeping. Only one
+  run at a time may record for a model: `progress/<model>/.lock` names the holder (host,
+  PID, start time, Beaker job). A second run fails with an error naming it. A lock whose
+  process is gone from this host is taken over; on Beaker, a job takes over any lock in its
+  own `/results` (the predecessor's, copied there) and any lock left by an earlier attempt of
+  the same job. In a shared directory (`-O /weka/...`), another job's lock is treated as any
+  lock from another host. For a lock from another host outside Beaker,
+  delete the file once that run is gone.
+- **Failures.** An instance is recorded only when an uninterrupted run would keep its
+  outcome: a scored response, or a failure the request itself caused, such as a context
+  overflow. Connection and server errors, judge or sandbox outages, and results that
+  arrive after SIGTERM are not recorded, so the resumed run tries them again. A task that
+  fails or exceeds its failure budget is computed again from its recorded instances.
+- **Results return per request.** While recording, providers that send requests one at
+  a time (`vllm_server`, `litellm`) return each result when it finishes, not when its
+  batch does. In-process engines (`vllm`, `sglang`, `hf`, `olmo_core`, `olmo_core_vlm`) return a batch at once; to
+  record them more often, lower the batch size with
+  `--harness default -o batching.chunk_size=16`.
+- **Dashboard status.** A `--resume` run stopped by SIGTERM, as a preemption or a canceled
+  Beaker job stops it, shows as `interrupted` instead of `failed`. The resumed run keeps
+  the run ID and shows as running again, then finishes with its final status. A run that
+  nobody resumes shows as stale, like a stale running run, after the same delay; `olmo-eval results upload` on its directory uploads
+  it as finished, with the status its saved results support. Other crashes, Ctrl-C, and
+  runs without `--resume` are still reported as `failed`.
+- **Testing.** `OLMO_EVAL_DEBUG_EXIT_AT=0.5` makes a `--resume` run send itself SIGTERM
+  once half of its instances are recorded, which ends it as a preemption does (exit code
+  143).
+
 ## Debugging and Inspection
 
 olmo-eval provides tools for inspecting tasks, requests, and responses at various stages of evaluation.
@@ -855,48 +1432,68 @@ against an external repo or runner.
 
 ### Defining an External Eval
 
+`SandboxedExternalEval` runs a benchmark inside one container. This sketch runs a
+benchmark's own CLI against the model under evaluation and reads its score file:
+
 ```python
+import json
+import time
 from typing import Any
 
-from olmo_eval.evals.external import SandboxedExternalEval, ExternalEvalResult, register_external_eval
+from olmo_eval.evals.external import (
+    ExternalEvalResult,
+    SandboxedExternalEval,
+    register_external_eval,
+)
+from olmo_eval.harness.sandbox import SandboxExecutor
+
 
 class MyBenchmarkExternalEval(SandboxedExternalEval):
     """My benchmark evaluation."""
 
     name = "my_benchmark"
-    description = "Evaluates model on my benchmark"
-    timeout_seconds = 3600
+    description = "Evaluates a model on my benchmark"
+    timeout_seconds = 3600.0
     required_secrets = ("MY_API_KEY",)
-
-    @property
-    def sandbox_image(self) -> str:
-        return "my-benchmark:latest"
-
-    @property
-    def working_dir(self) -> str:
-        return "/workspace"
-
-    @property
-    def setup_command(self) -> tuple[str, ...]:
-        return ("pip install -r requirements.txt",)
+    sandbox_image = "my-benchmark:latest"
+    working_dir = "/workspace"
+    setup_command = ("pip install -r requirements.txt",)
 
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
-        # Returns dict of arg_name -> (description, default_value)
+        # arg_name -> (description, default_value)
         return {"subset": ("Which subset to evaluate", "default")}
 
-    async def execute(self, provider, args, output_dir, container_runtime):
-        # Run benchmark in sandbox
-        result = await self.run_in_sandbox(provider, args, output_dir)
+    async def execute(self, provider, args, output_dir=None, container_runtime="podman"):
+        start_time = time.time()
+        output: list[str] = []
+        config = self._create_sandbox_config(container_runtime, output_dir)
+        async with SandboxExecutor(config, name=self.name) as executor:
+            if error := await self._run_setup(executor, output, start_time):
+                return error
+            run = await executor.execute_command(
+                f"my-benchmark --model {provider.model_name} --subset {args['subset']} "
+                f"--out {self.results_dir}/score.json",
+                timeout=self.timeout_seconds,
+            )
+            output.append(run.output)
+            if not run.success:
+                return self._error_result("Benchmark run failed", start_time, "\n".join(output))
+            scores = await executor.execute_command(f"cat {self.results_dir}/score.json")
         return ExternalEvalResult(
             name=self.name,
-            metrics={"accuracy": result.score},
-            success=True,
+            metrics={"accuracy": json.loads(scores.output)["accuracy"]},
+            raw_output="\n".join(output),
+            duration_seconds=time.time() - start_time,
         )
 
-# Register the eval
+
 register_external_eval(MyBenchmarkExternalEval())
 ```
+
+Benchmark modules under `src/olmo_eval/evals/external/benchmarks/` are registered
+automatically. See `benchmarks/tau2/eval.py` for a complete implementation, including how
+a sandboxed benchmark reaches a locally served model.
 
 ### Running External Evals
 
@@ -919,9 +1516,9 @@ External evals return structured results:
 | `metadata` | `dict` | Additional metadata |
 | `success` | `bool` | Whether the eval completed successfully |
 | `error` | `str \| None` | Error message if failed |
-| `duration_seconds` | `float` | Execution time |
+| `duration_seconds` | `float \| None` | Execution time |
 | `raw_output` | `str \| None` | Raw stdout/stderr from the evaluation |
-| `predictions` | `list` | Instance-level predictions |
+| `predictions` | `list[dict] \| None` | Instance-level predictions |
 
 ## Sandboxes
 
@@ -947,30 +1544,30 @@ config = SandboxConfig(
 
 ### SandboxConfig Fields
 
+Commonly used fields. `SandboxConfig` in `src/olmo_eval/harness/sandbox/config.py`
+documents the rest, including Modal and SWE-ReX options.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `image` | `str` | Required | Container image |
-| `mode` | `SandboxMode` | `DOCKER` | `LOCAL`, `DOCKER`, or `MODAL` |
+| `mode` | `SandboxMode` | Required | `LOCAL`, `DOCKER`, or `MODAL` |
+| `capabilities` | `frozenset[str]` | `Capability.DEFAULT` | Capabilities this sandbox provides, such as `Capability.BASH` or `Capability.PYTHON` |
+| `instances` | `int \| None` | `None` | Executors to create; `None` lets the caller allocate capacity, otherwise one executor |
 | `container_runtime` | `str` | `"podman"` | `"docker"` or `"podman"` |
-| `command_timeout` | `float` | `30.0` | Timeout per command (seconds) |
-| `startup_timeout` | `float` | `60.0` | Container startup timeout |
-| `instances` | `int` | `1` | Number of parallel executors |
-| `working_dir` | `str` | `"/workspace"` | Working directory in container |
-| `environment` | `tuple` | `()` | Environment variables |
-| `volumes` | `tuple` | `()` | Volume mounts (host, container) |
-| `capabilities` | `frozenset[str]` | `Capability.DEFAULT` | Capabilities like `Capability.BASH`, `Capability.PYTHON` |
-| `remove_container` | `bool` | `True` | Remove container after use |
-| `docker_args` | `tuple[str, ...]` | `()` | Additional Docker/Podman arguments |
-| `log_dir` | `str \| None` | `None` | Directory for container logs |
-| `exec_shell` | `tuple[str, ...] \| None` | `None` | Custom shell for command execution |
-| `enable_diagnostics` | `bool` | `True` | Run background diagnostics monitor |
+| `command_timeout` | `float` | `30.0` | Default timeout per command (seconds) |
+| `working_dir` | `str` | `"/workspace"` | Working directory in the container |
+| `environment` | `tuple[tuple[str, str], ...]` | `()` | Environment variables as `(name, value)` pairs |
+| `volumes` | `tuple[tuple[str, str], ...]` | `()` | Volume mounts as `(host_path, container_path)` pairs |
 
 ### Using SandboxManager
 
-The `SandboxManager` manages multiple executors with capability-based routing:
+The `SandboxManager` manages multiple executors and routes each command to an executor
+with the required capabilities:
 
 ```python
-from olmo_eval.harness.sandbox import SandboxConfig, SandboxManager, SandboxMode, Capability
+import asyncio
+
+from olmo_eval.harness.sandbox import Capability, SandboxConfig, SandboxManager, SandboxMode
 
 configs = [
     SandboxConfig(image="python:3.12", mode=SandboxMode.DOCKER, capabilities=Capability.PYTHON, instances=2),
@@ -980,20 +1577,27 @@ configs = [
 manager = SandboxManager(configs, owner="my-scorer")
 await manager.start()
 
-# Execute with specific capability - routes to matching executor
-result = await manager.execute_with_capabilities(
-    "print('hello')",
-    Capability.PYTHON
-)
+# Run on an executor that provides the python capability
+output = await manager.execute("python -c 'print(1)'", capabilities=Capability.PYTHON)
 
-# Round-robin across matching executors
-results = await asyncio.gather(*[
-    manager.execute_with_capabilities(cmd, Capability.PYTHON)
-    for cmd in commands
+# Commands that need the same capability are spread across matching executors
+outputs = await asyncio.gather(*[
+    manager.execute(command, capabilities=Capability.PYTHON) for command in commands
 ])
+
+# execute_command and execute_code return an ExecutionResult with exit code and output
+result = await manager.execute_code("print('hello')", capabilities=Capability.PYTHON)
 
 await manager.stop()
 ```
+
+Independent `execute_command` and `execute_code` calls preserve the sandbox server's
+initialized environment. Docker/Podman uses container execution when process
+supervision is available; other container and Modal paths use asynchronous HTTP
+commands so a long command does not block health checks or file requests.
+Command deadlines terminate the command process group. Commands that finish
+normally can leave background processes running. Persistent bash sessions retain
+shell state between calls and currently use SWE-ReX's session execution path.
 
 ### Sandbox Modes
 
@@ -1004,6 +1608,9 @@ await manager.stop()
 | `MODAL` | Run on Modal cloud platform |
 
 ## Launching on Beaker
+
+For BF16 Olmo MoE failures during B300 profiling, see the
+[B300 vLLM compatibility checks](docs/b300-vllm.md).
 
 olmo-eval includes built-in support for launching evaluation jobs on [Beaker](https://beaker.org).
 
@@ -1026,7 +1633,7 @@ Launch an evaluation job:
 uv run olmo-eval beaker launch -n "eval-llama3-mmlu" -m llama3.1-8b -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Multiple tasks
 uv run olmo-eval beaker launch -n "eval-llama3-suite" \
@@ -1034,7 +1641,7 @@ uv run olmo-eval beaker launch -n "eval-llama3-suite" \
     -t mmlu -t gsm8k -t hellaswag \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Large model with multiple GPUs
 uv run olmo-eval beaker launch \
@@ -1043,7 +1650,7 @@ uv run olmo-eval beaker launch \
     --task mmlu --task gsm8k --task arc_easy \
     --cluster h100 \
     --workspace "ai2/olmo-eval-debug" \
-    --budget "ai2/oe-base" \
+    --budget "ai2/oe-other" \
     --gpus 4 \
     --timeout 48h
 
@@ -1051,7 +1658,7 @@ uv run olmo-eval beaker launch \
 uv run olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base" \
+    -B "ai2/oe-other" \
     --dry-run
 
 # With a harness preset for tool-augmented evaluation
@@ -1061,7 +1668,7 @@ uv run olmo-eval beaker launch -n "eval-with-tools" \
     --harness dr_tulu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # With inspection flags for debugging
 uv run olmo-eval beaker launch -n "debug-eval" \
@@ -1071,7 +1678,7 @@ uv run olmo-eval beaker launch -n "debug-eval" \
     --inspect-response \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Run external evaluations
 uv run olmo-eval beaker launch -n "external-eval" \
@@ -1081,7 +1688,7 @@ uv run olmo-eval beaker launch -n "external-eval" \
     -A num_tasks=1 \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 ### Advanced Usage
@@ -1106,7 +1713,7 @@ uv run olmo-eval beaker launch \
     -t "simpleqa:judge@urgent" \
     -o limit=10 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base" \
+    -B "ai2/oe-other" \
     --cluster h100 \
     --inspect \
     --group olmo-eval-local-judge-2 -y
@@ -1125,7 +1732,7 @@ uv run olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
     -t "arc_easy@low" \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Creates 3 experiments:
 #   eval-suite-high:   runs mmlu at high priority
@@ -1136,7 +1743,7 @@ uv run olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
 uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "arc_easy:mc@high" \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Tasks without @priority use the config file priority (default: normal)
 ```
@@ -1152,7 +1759,7 @@ uv run olmo-eval beaker launch -n "benchmark-v1" --group "benchmark-2024" \
     -t mmlu -t gsm8k -t hellaswag \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Creates experiment and adds it to "benchmark-2024" group
 
@@ -1194,7 +1801,7 @@ tasks:
   - mmlu
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 ```
 
 ### CLI Options
@@ -1211,7 +1818,8 @@ budget: ai2/oe-base
 | `--gpus` | `-G` | auto | Number of GPUs (defaults to 1 for GPU providers, 0 otherwise) |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
 | `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
-| `--preemptible` | | `true` | Allow preemption |
+| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`); `--no-preemptible` means `--min-runtime 8h` |
+| `--min-runtime` | | none | Minimum runtime before Beaker may preempt the job (e.g., `2h`) |
 | `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | `-r` | none | Number of retries on failure |
 | `--workspace` | `-w` | required | Beaker workspace |
@@ -1223,6 +1831,10 @@ budget: ai2/oe-base
 | `--provider-kwarg` | `-K` | none | Provider kwargs for external evals (`key=value`) |
 | `--force-download-model` | | `false` | Refresh Hugging Face model/tokenizer cache before loading |
 | `--uv-cache-dir` | | default | UV cache directory for package downloads |
+| `--weka-bucket` | | none | Extra Weka bucket to mount at `/weka/<bucket>`, on top of `oe-training-default`, `oe-eval-default` and `oe-adapt-default` (can specify multiple) |
+| `--resume / --no-resume` | | enabled | Recover interrupted task progress; opt out to run without a resume-volume claim |
+| `--resume-volume` | | `ai2/olmo-eval` | Native Beaker volume for resumable task state; requires a read-write workspace claim |
+| `--resume-retention-days` | | 7 | Positive whole number of days to retain inactive recovery files |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--yes` | `-y` | `false` | Skip confirmation prompt |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
@@ -1230,6 +1842,35 @@ budget: ai2/oe-base
 | `--aws-credentials` | | auto | Inject AWS credentials (auto-detected from s3:// paths) |
 | `--gcp-credentials` | | auto | Inject GCP credentials (auto-detected from gs:// model paths) |
 | `--store` | | `false` | Persist results to configured database |
+
+### Preemption
+
+By default, Beaker can preempt a job at any time and requeues it afterward. The requeued
+job continues from the instances the preempted one recorded (see
+[Resuming Interrupted Runs](#resuming-interrupted-runs)). Use `--min-runtime` (or
+`min_runtime:` in a config file) to protect a job from preemption:
+
+```bash
+uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
+```
+
+- How long the protection lasts depends on the cluster's scheduling policy. Where the
+  policy makes jobs interruptible after their min runtime, the job is protected for that
+  long, then can be preempted and is requeued. On other clusters, any min runtime
+  protects the job for its whole run.
+- Beaker accepts 5m to 8h, and no more than the cluster's maximum task timeout.
+- Clusters that require an allocation for protected work reject a min runtime unless
+  your workspace has an allocation there.
+- `min_runtime` cannot be combined with `preemptible` in the CLI or in a config file.
+  When the CLI sets `--min-runtime` or `--preemptible/--no-preemptible`, it replaces
+  both config file fields.
+- External evals (`-E`) take `--min-runtime` from the CLI only; they do not read the
+  config file.
+- `--no-preemptible` (and `preemptible: false`) is the same as `--min-runtime 8h`. The
+  launcher sends the min runtime and leaves `preemptible` unset, so Beaker keeps
+  auto-resume on. Sending `preemptible=False` to Beaker would also turn auto-resume off,
+  and on clusters that make jobs interruptible after the min runtime, a preemption after
+  8h would end the experiment with no replacement job.
 
 ### Per-Task Overrides
 
@@ -1243,24 +1884,64 @@ uv run olmo-eval beaker launch -n "eval" \
     -t gsm8k -o limit=50 \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
-The `-o` flag uses OmegaConf dotlist syntax, supporting:
+Task overrides accept `TaskConfig` fields and `SamplingParams` fields (sampling shortcuts
+such as `temperature` or `max_tokens`). Any other key after `-t` is rejected; harness keys
+belong after `--harness`.
 
-| Type | Syntax | Example |
-|------|--------|---------|
-| String | `key=value` | `-o formatter.template="Q: {q}"` |
-| Number | `key=123` | `-o limit=100` |
-| Boolean | `key=true` | `-o preemptible=false` |
-| Nested | `a.b.c=val` | `-o scorer.normalize=true` |
-| List | `key=[a,b]` | `-o 'dependencies=[pkg1, pkg2]'` |
+| Kind | Example |
+|------|---------|
+| Number | `-o limit=100`, `-o num_fewshot=5` |
+| Sampling shortcut | `-o temperature=0.6`, `-o max_tokens=512` |
+| Boolean | `-o strip_thinking=true` |
+| List (JSON) | `-o 'dependencies=["pkg1==1.0", "pkg2"]'` |
+| Harness, nested | `--harness default -o provider.max_model_len=16384` |
 
-**Note:** Quote complex values to prevent shell interpretation:
+Quote values that contain brackets, braces, or spaces so the shell passes them through
+unchanged.
+
+### OpenAI models through OpenRouter
+
+Anything that needs `OPENAI_API_KEY` also accepts an
+[OpenRouter](https://openrouter.ai) key in `OPENROUTER_API_KEY` (or
+`OPEN_ROUTER_KEY`). This covers LLM
+judges, the OpenAI models in the model registry (`gpt-4o`, `gpt-4o-mini`, ...),
+and the OpenAI models that external evals such as tau2 and DeepScholar call.
+When both keys are set, the OpenAI key is used.
+
+With only an OpenRouter key, requests go to OpenRouter's OpenAI-compatible
+endpoint, and OpenAI model names are sent as OpenRouter slugs (`gpt-4o` becomes
+`openai/gpt-4o`). Judge response caches are still keyed by the OpenAI model name,
+so existing caches keep working.
+
+Locally, export the key:
+
 ```bash
-# Good - single quotes protect the value
--o 'extra_config={key: value, nested: {a: 1}}'
+export OPENROUTER_API_KEY=sk-or-...
 ```
+
+On Beaker, store it as a user-scoped secret. A task that requires
+`OPENAI_API_KEY` uses `{beaker-username}_OPENROUTER_API_KEY` when
+`{beaker-username}_OPENAI_API_KEY` does not exist:
+
+```bash
+beaker secret write --workspace <workspace> {beaker-username}_OPENROUTER_API_KEY sk-or-...
+```
+
+External evals run third-party code in a sandbox. There, the OpenRouter key is
+exported as both `OPENROUTER_API_KEY` and `OPENAI_API_KEY`, and `OPENAI_BASE_URL`
+points the OpenAI SDK at OpenRouter. olmo-eval rewrites the model names it passes
+to tau2, DeepScholar and AstaBench, but it cannot rewrite names hardcoded inside a benchmark,
+such as AstaBench's scorer models. OpenRouter resolves most bare OpenAI names
+(`gpt-4o-mini`, `o3-mini-2025-01-31`), but rejects dated snapshots it does not list,
+such as `gpt-4-0613`.
+
+The `openai_agents` harness compacts long agent histories through OpenAI's
+`responses.compact` endpoint. OpenRouter does not serve that endpoint, so with
+only an OpenRouter key the harness skips compaction, logs a warning and keeps
+the full history.
 
 ### Secret Environment Overrides
 
@@ -1273,7 +1954,7 @@ uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t mmlu \
     --secret-env team-openai-key:OPENAI_API_KEY \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Multiple secret overrides
 uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa:judge \
@@ -1283,7 +1964,7 @@ uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa:judge \
     --secret-env shared-s2-key:S2_API_KEY \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 Format: `BEAKER_SECRET_NAME:ENV_VAR_NAME`
@@ -1312,7 +1993,7 @@ tasks:
 
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 1
 priority: normal
 timeout: 24h
@@ -1327,7 +2008,7 @@ uv run olmo-eval beaker launch -f eval_config.yaml --dry-run
 # Override specific values
 uv run olmo-eval beaker launch -f eval_config.yaml --gpus 4
 
-# Add additional models via CLI
+# Replace the config's model list from the CLI
 uv run olmo-eval beaker launch -f eval_config.yaml -m olmo-2-7b
 ```
 
@@ -1345,11 +2026,11 @@ tasks:
   - hellaswag
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 1
 ```
 
-**Per-task priorities in config** (`examples/configs/prioritized_tasks.yaml`):
+**Per-task priorities in config** (`examples/beaker/configs/prioritized_tasks.yaml`):
 
 Use `@priority` suffix on tasks to run different tasks at different priority levels.
 Tasks with different priorities create separate Beaker experiments:
@@ -1371,7 +2052,7 @@ tasks:
   - arc_easy@low
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 1
 timeout: 24h
 ```
@@ -1396,42 +2077,50 @@ tasks:
   - hellaswag
 cluster: h100
 workspace: ai2/olmo-eval-debug
-budget: ai2/oe-base
+budget: ai2/oe-other
 gpus: 4
 priority: high
-preemptible: false
+min_runtime: 8h
 timeout: 48h
 retries: 2
-description: "Full evaluation suite for Llama 70B"
 ```
 
 **Config file fields**:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Experiment name |
-| `models` | list | yes | List of model names or presets |
-| `tasks` | list | yes | List of task specs (with optional `@priority`) |
+| `name` | string | no | Experiment name (generated from models and tasks if omitted) |
+| `models` | list of strings | yes | Model names or presets |
+| `tasks` | list | yes | Task specs (with optional `@priority`) |
 | `cluster` | string | yes | Cluster alias or full name |
-| `gpus` | int | no | Default GPUs per model instance (auto-detected based on provider) |
+| `workspace` | string | yes | Beaker workspace |
+| `budget` | string | when the workspace has no bound budget | Beaker budget |
+| `gpus` | int | no | GPUs per model instance (auto-detected from the provider if omitted) |
 | `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
-| `preemptible` | bool | no | Allow preemption (default: `true`) |
+| `min_runtime` | string | no | Minimum runtime before preemption (e.g., `2h`); see [Preemption](#preemption) |
+| `preemptible` | bool | no | Deprecated by Beaker; `false` means `min_runtime: 8h`; cannot be combined with `min_runtime` |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
-| `workspace` | string | yes | Beaker workspace |
-| `budget` | string | yes | Beaker budget |
+| `resume` | bool | no | Recover interrupted task progress (default: `true`); `false` needs no resume-volume claim |
+| `resume_volume` | string | no | Native Beaker volume for resumable task state (default: `ai2/olmo-eval`) |
+| `resume_retention_days` | int | no | Days to retain inactive recovery files (default: 7; must be positive) |
 | `beaker_image` | string | no | Container image to use (config-only) |
-| `description` | string | no | Optional Beaker description |
 | `groups` | list | no | Beaker groups to add experiments to |
+
+CLI options override config values. `-m` and `-t` replace the config's lists rather than
+adding to them.
 
 See `examples/beaker/configs/` for more configuration examples.
 
 ### Cluster Aliases
 
 ```bash
-# List available cluster aliases
+# List clusters with utilization
 uv run olmo-eval beaker clusters
+
+# Only show cluster aliases
+uv run olmo-eval beaker clusters --aliases
 ```
 
 ### Programmatic API
@@ -1443,6 +2132,8 @@ config = BeakerJobConfig(
     name="eval-llama3-mmlu",
     command=["uv", "run", "olmo-eval", "run", "-m", "llama3.1-8b", "-t", "mmlu"],
     cluster="h100",
+    workspace="<workspace>",
+    budget="<budget>",  # optional when the workspace has a bound budget
     num_gpus=1,
 )
 
@@ -1479,7 +2170,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/build_image.sh --help
 ```
 
-**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1
+**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1, 13.0.2
 **PyTorch version**: Configurable via `--torch-version`
 **Configuration**: See `scripts/build_config.sh`
 
@@ -1500,13 +2191,19 @@ The script auto-detects the image name from the tag (e.g., `olmo-eval-cu1281-trc
 The image contains:
 - Python 3.12 (via uv)
 - PyTorch with CUDA support
+- Base Python dependencies from `uv.lock`
 - System dependencies (git, uv, ca-certificates)
 
 The image does NOT contain:
 - olmo-eval source code (provided by gantry at runtime)
-- olmo-eval dependencies like click, datasets, rich, etc. (installed at job startup)
 - Storage backends like boto3, psycopg (installed at job startup if needed)
 - Inference providers like vllm, transformers, litellm (installed at job startup)
+
+For the SGLang provider, `provider.kind=sglang` selects a compatible shared
+CUDA 13 / PyTorch 2.13 base and installs the pinned `sglang` extra (including the
+Olmo model plugin) at startup. Explicit image overrides take precedence. See the
+[SGLang setup guide](docs/sglang.md) for local installation, checkpoint registration
+and a small validation command.
 
 ### Installing Inference Providers at Runtime
 
@@ -1528,7 +2225,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]
@@ -1547,7 +2244,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Override ai2-olmo-core from a GitHub branch
 uv run olmo-eval beaker launch -n "eval" \
@@ -1558,7 +2255,7 @@ uv run olmo-eval beaker launch -n "eval" \
     -t mmlu \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 The OLMo-core source URL is normalized to install the
@@ -1578,7 +2275,7 @@ uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
     -t humaneval:3shot:bpb -o 'dependencies=["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"]' \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 
 # Dependencies from multiple tasks are merged
 uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
@@ -1586,33 +2283,9 @@ uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
     -t mbpp:3shot:bpb -o 'dependencies=["pkg2"]' \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
-    -B "ai2/oe-base"
+    -B "ai2/oe-other"
 ```
 
 ## Development
 
-This repo uses `uv` with a checked-in `uv.lock` for reproducible installs.
-The default dependency groups (`dev` + `vllm`) are installed automatically,
-which covers storage, beaker, hf, and the vLLM inference provider.
-
-```bash
-# Install dependencies from the lockfile
-uv sync --frozen
-
-# Install pre-commit hooks
-make setup
-
-# Run linter / formatter
-make lint
-make fix    # auto-fix
-
-# Run tests (and type checks)
-make test
-make verify
-
-# Update the lockfile after editing pyproject.toml
-uv lock
-```
-
-CI runs `uv sync --frozen` and `uv run --frozen ...`, so any change to
-`pyproject.toml` must be accompanied by a refreshed `uv.lock`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and PR expectations.

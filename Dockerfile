@@ -12,6 +12,7 @@
 # Example: cu1281-trc2100-amd64
 
 ARG CUDA_VERSION=12.8.1
+ARG CUDA_IMAGE_FLAVOR=runtime
 ARG TORCH_VERSION=2.10.0
 ARG PYTHON_VERSION=3.12
 ARG INSTALL_CHANNEL=whl
@@ -55,7 +56,11 @@ RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) \
 # ============================================================================
 # Stage 2: Runtime — minimal image with venv + lockfile
 # ============================================================================
-FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu24.04 AS runtime
+# SGLang JIT kernels require nvcc and CUDA headers; --cuda-devel selects the
+# compiler-equipped base without baking any inference provider into the image.
+FROM nvidia/cuda:${CUDA_VERSION}-${CUDA_IMAGE_FLAVOR}-ubuntu24.04 AS runtime
+
+ARG CUDA_IMAGE_FLAVOR
 
 ARG CUDA_VERSION
 ARG TORCH_VERSION
@@ -66,6 +71,7 @@ ARG GIT_BRANCH
 LABEL org.opencontainers.image.source="https://github.com/allenai/olmo-eval"
 LABEL org.opencontainers.image.description="OLMo evaluation framework"
 LABEL cuda_version="${CUDA_VERSION}"
+LABEL cuda_image_flavor="${CUDA_IMAGE_FLAVOR}"
 LABEL torch_version="${TORCH_VERSION}"
 LABEL python_version="${PYTHON_VERSION}"
 LABEL git_commit="${GIT_COMMIT}"

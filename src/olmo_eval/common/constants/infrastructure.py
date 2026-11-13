@@ -13,17 +13,37 @@ from enum import StrEnum
 BEAKER_DEFAULT_WORKSPACE = "ai2/oe-data"
 """Default Beaker workspace for evaluation jobs."""
 
-BEAKER_DEFAULT_BUDGET = "ai2/oe-base"
+BEAKER_DEFAULT_BUDGET = "ai2/oe-other"
 """Default budget allocation for Beaker jobs."""
 
 BEAKER_DEFAULT_PRIORITY = "normal"
 """Default job priority level."""
 
+BEAKER_DEFAULT_RESUME_VOLUME = "ai2/olmo-eval"
+BEAKER_DEFAULT_RESUME_RETENTION_DAYS = 7
+
+SHARED_RUN_ENV = "OLMO_EVAL_SHARED_RUN_DIR"
+"""Set by the WEKA resume supervisor to the run's recovery directory on the volume."""
+SHARED_RUN_PROGRESS_DIR = "progress"
+"""Subdirectory of the recovery directory that holds progress records."""
+SHARED_RUN_IDENTITY_DIR = "identity"
+"""Subdirectory of the recovery directory that holds the run's manifest and upload secret."""
+SHARED_RUN_IDENTITY_FILES = ("manifest.json", ".upload-secret")
+"""The output files that carry a run's identity (upload.manifest's MANIFEST_NAME and
+RUN_SECRET_NAME), saved so a replacement job keeps the run ID."""
+
 BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 
+BEAKER_SGLANG_IMAGE = "01M5VBMKPG8BX4BVJBGVBMF64V"
+"""Ai2-owned olmo-eval-cu1302-trc2130-amd64-devel; recipe: docs/sglang.md."""
+
 BEAKER_SANDBOX_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64-sandbox"
 """Docker image for Beaker evaluation jobs with sandbox support (includes Podman)."""
+
+BEAKER_SGLANG_SANDBOX_IMAGE = "01M765Y8PKZG005F44450HCH8R"
+"""olmo-eval-cu1302-trc2130-amd64-devel-sandbox: the SGLang base plus Podman, for
+sandboxed harnesses; recipe: docs/sglang.md."""
 
 BEAKER_RESULT_DIR = "/results"
 """Default directory for evaluation results in Beaker jobs."""
@@ -126,6 +146,7 @@ WEKA_CLUSTERS: set[str] = {
     "ai2/ceres",
     "ai2/neptune",
     "ai2/titan",
+    "ai2/holmes",
 }
 """Clusters with Weka storage available.
 
@@ -150,6 +171,14 @@ WEKA_MOUNTS: tuple[str, ...] = (
     "skylight-default",
 )
 """Available Weka storage mount points for Beaker jobs."""
+
+
+DEFAULT_WEKA_BUCKETS: tuple[str, ...] = (
+    "oe-training-default",
+    "oe-eval-default",
+    "oe-adapt-default",
+)
+"""Weka buckets mounted on every eval job; ``--weka-bucket`` adds to these."""
 
 
 def cluster_has_weka(cluster: str) -> bool:
@@ -189,12 +218,15 @@ OE_EVAL_LAUNCH_COMMAND = "oe_eval/launch.py"
 # =============================================================================
 
 BACKEND_OPTIONAL_GROUPS: dict[str, str | None] = {
+    "sglang": "sglang",
     "vllm": "vllm",
     "vllm_server": "vllm",
     "hf": "hf",
     "olmo_core": "olmo_core",
+    "olmo_core_vlm": "olmo_core_vlm",
     "litellm": "litellm",
     "mock": None,
+    "replay": None,
 }
 """Mapping of backend types to their pyproject.toml optional dependency group names.
 

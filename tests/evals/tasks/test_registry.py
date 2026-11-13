@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import (
     Task,
@@ -16,6 +16,7 @@ from olmo_eval.evals.tasks.common import (
     list_variants,
     parse_overrides,
     register,
+    register_sampling_variant,
     register_variant,
 )
 from olmo_eval.evals.tasks.common.registry import _configs, _tasks, _variants
@@ -126,6 +127,46 @@ class TestRegisterVariant:
 
         variants = list_variants("multi_variant")
         assert set(variants["multi_variant"]) == {"fast", "full", "fewshot"}
+
+
+class TestRegisterSamplingVariant:
+    """Tests for register_sampling_variant."""
+
+    @pytest.fixture
+    def sampled_task(self):
+        @register("sampled")
+        class SampledTask(DummyTask):
+            data_source = DataSource(path="test/dataset")
+            sampling_params = SamplingParams(max_tokens=100, temperature=0.6, top_p=0.95)
+
+        register_variant(
+            "sampled",
+            "many",
+            limit=10,
+            sampling_params=SamplingParams(max_tokens=200, temperature=0.6, num_samples=8),
+        )
+
+    def test_keeps_the_variants_and_changes_only_the_named_fields(self, sampled_task):
+        spec = register_sampling_variant("sampled:many", "hot", temperature=1.0)
+        config = get_task(spec).config
+
+        assert spec == "sampled:many_hot"
+        assert config.limit == 10
+        assert config.sampling_params == SamplingParams(
+            max_tokens=200, temperature=1.0, num_samples=8
+        )
+
+    def test_a_bare_task_gets_a_variant_of_its_own(self, sampled_task):
+        spec = register_sampling_variant("sampled", "hot", temperature=1.0)
+
+        assert spec == "sampled:hot"
+        assert get_task(spec).config.sampling_params == SamplingParams(
+            max_tokens=100, temperature=1.0, top_p=0.95
+        )
+
+    def test_unknown_variant_raises(self, sampled_task):
+        with pytest.raises(ValueError, match="Unknown variant"):
+            register_sampling_variant("sampled:missing", "hot", temperature=1.0)
 
 
 class TestGetTask:
@@ -453,3 +494,47 @@ class TestParseOverridesDependencies:
         """Test parsing dependencies with git URLs."""
         result = parse_overrides('dependencies=["git+https://github.com/user/repo@v1.0"]')
         assert result == {"dependencies": ["git+https://github.com/user/repo@v1.0"]}
+
+
+class TestParseOverridesBoolFields:
+    """Tests for parse_overrides coercion of boolean TaskConfig fields."""
+
+    def test_strip_unclosed_thinking_true_is_bool(self):
+        result = parse_overrides("strip_unclosed_thinking=true")
+        assert result == {"strip_unclosed_thinking": True}
+        assert result["strip_unclosed_thinking"] is True
+
+    def test_strip_thinking_true_is_bool(self):
+        result = parse_overrides("strip_thinking=true")
+        assert result["strip_thinking"] is True
+
+    def test_thinking_prefilled_is_bool(self):
+        assert parse_overrides("thinking_prefilled=true") == {"thinking_prefilled": True}
+        assert parse_overrides("thinking_prefilled=0") == {"thinking_prefilled": False}
+
+    def test_bool_false_and_numeric_forms(self):
+        assert parse_overrides("strip_thinking=False") == {"strip_thinking": False}
+        assert parse_overrides("strip_unclosed_thinking=TRUE") == {"strip_unclosed_thinking": True}
+        assert parse_overrides("strip_unclosed_thinking=1") == {"strip_unclosed_thinking": True}
+        assert parse_overrides("strip_unclosed_thinking=0") == {"strip_unclosed_thinking": False}
+
+    def test_bool_with_other_overrides(self):
+        result = parse_overrides("num_fewshot=5,strip_unclosed_thinking=true")
+        assert result == {"num_fewshot": 5, "strip_unclosed_thinking": True}
+
+    def test_invalid_bool_raises(self):
+        with pytest.raises(ValueError, match="strip_unclosed_thinking"):
+            parse_overrides("strip_unclosed_thinking=yes")
+
+
+class TestParseOverridesSamplingParams:
+    """Tests for parse_overrides coercion of SamplingParams fields."""
+
+    def test_parse_truncate_prompt_tokens_is_int(self):
+        """truncate_prompt_tokens reaches the provider as an int, not a string."""
+        result = parse_overrides("truncate_prompt_tokens=32768")
+        assert result == {"truncate_prompt_tokens": 32768}
+
+    def test_parse_truncate_prompt_tokens_sentinel(self):
+        """The -1 sentinel meaning 'the model's max input length' survives parsing."""
+        assert parse_overrides("truncate_prompt_tokens=-1") == {"truncate_prompt_tokens": -1}

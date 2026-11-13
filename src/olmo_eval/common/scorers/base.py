@@ -9,6 +9,23 @@ from typing import Any, ClassVar
 
 from olmo_eval.common.types import Instance, LMOutput
 
+#: ``LMOutput.metadata`` key holding the per-instance results scorers keep (for example each
+#: unit test's outcome), keyed by scorer name. Unlike other metadata, it is always saved with the
+#: predictions, so a new scorer needs no change to the predictions builder.
+SCORER_RESULTS_KEY = "scorer_results"
+
+
+def set_scorer_result(output: LMOutput, scorer_name: str, result: dict[str, Any]) -> None:
+    """Record ``scorer_name``'s JSON-serializable per-instance ``result`` on ``output``."""
+    if output.metadata is None:
+        output.metadata = {}
+    output.metadata.setdefault(SCORER_RESULTS_KEY, {})[scorer_name] = result
+
+
+def get_scorer_result(output: LMOutput, scorer_name: str) -> dict[str, Any] | None:
+    """The per-instance result ``scorer_name`` recorded on ``output``, if any."""
+    return ((output.metadata or {}).get(SCORER_RESULTS_KEY) or {}).get(scorer_name)
+
 
 @dataclass(frozen=True)
 class Scorer(ABC):
@@ -25,6 +42,9 @@ class Scorer(ABC):
 
     name: str = ""
     requires_async: ClassVar[bool] = False
+    #: Scores from an output's per-token logprobs. Metrics with such a scorer read them
+    #: when they are computed, so resumable runs keep them in their progress records.
+    reads_logprobs: ClassVar[bool] = False
 
     def __call__(self) -> Scorer:
         """Allow scorer instances to be used where classes are expected.
@@ -61,6 +81,9 @@ class ProcessScorer(Scorer):
     def process_score(self, instance: Instance, output: LMOutput) -> float:
         """Score a single output in a subprocess."""
         ...
+
+    def warmup(self) -> None:
+        """Load what ``process_score`` needs, once per worker before any output is timed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +240,7 @@ class BitsPerByteScorer(Scorer):
     """
 
     name: str = "bits_per_byte"
+    reads_logprobs: ClassVar[bool] = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.logprobs is None:
@@ -246,6 +270,7 @@ class PerplexityScorer(Scorer):
     """
 
     name: str = "perplexity"
+    reads_logprobs: ClassVar[bool] = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.logprobs is None:
@@ -271,6 +296,7 @@ class LogprobScorer(Scorer):
     """
 
     name: str = "logprob"
+    reads_logprobs: ClassVar[bool] = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.logprobs is None:
@@ -344,6 +370,11 @@ class MinervaMathScorer(ProcessScorer):
     """
 
     name: str = "minerva_math_flex"
+
+    def warmup(self) -> None:
+        from olmo_eval.evals.extract.math import is_equiv
+
+        is_equiv("1/2", "0.5")  # imports and first-call setup in sympy
 
     def process_score(self, instance: Instance, output: LMOutput) -> float:
         from olmo_eval.evals.extract.math import is_equiv

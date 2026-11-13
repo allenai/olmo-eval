@@ -20,6 +20,8 @@ from olmo_eval.common.metrics.base import (
     PassAtKMetric,
     PassPowKMetric,
 )
+from olmo_eval.common.metrics.ifeval import IFEvalMetric
+from olmo_eval.common.scorers.base import SCORER_RESULTS_KEY
 from olmo_eval.common.types import Response
 from olmo_eval.common.utils import compute_pass_at_k, compute_pass_pow_k
 
@@ -263,7 +265,7 @@ def _compute_metric_value_from_prediction(
         instance_metrics,
         metric_name=metric.name,
         scorer_name=scorer_name,
-        allow_scorer_fallback=metric.supports_pairwise_scorer_fallback(),
+        allow_scorer_fallback=metric.supports_scorer_fallback(),
     )
 
 
@@ -276,15 +278,36 @@ def augment_prediction_instance_metrics(
     """Populate exact ``metric:scorer``-style instance keys in a prediction payload.
 
     ``build_predictions()`` can supply the original ``Response`` for the most faithful
-    computation. DB ingestion can call the same helper later with just the prediction
-    payload, which still covers logprob-MC and other metrics derivable from the stored
-    output summary.
+    computation. Without it, the helper works from the prediction payload alone, which
+    still covers logprob-MC and other metrics derivable from the stored output summary.
     """
     instance_metrics = normalize_prediction_instance_metrics(prediction)
 
     for metric in metrics:
         scorer_name = _metric_scorer_name(metric)
         if scorer_name is None:
+            continue
+
+        if isinstance(metric, IFEvalMetric):
+            # Older exports mislabeled the loose scalar even under exact IF keys.
+            # Only instruction outcomes can establish strict/instruction values.
+            if response is not None:
+                exact_value = metric.compute_instance(response)
+            else:
+                outputs = _prediction_outputs(prediction)
+                results = outputs[0].get(SCORER_RESULTS_KEY) if outputs else None
+                result = results.get("ifeval") if isinstance(results, Mapping) else None
+                exact_value = metric.compute_from_result(result)
+            if exact_value is None and metric.supports_scorer_fallback():
+                exact_value = _default_metric_value(
+                    instance_metrics,
+                    metric_name=metric.name,
+                    scorer_name=scorer_name,
+                    allow_scorer_fallback=True,
+                )
+            instance_metrics.pop(metric.name, None)
+            if exact_value is not None:
+                instance_metrics[metric.name] = {scorer_name: float(exact_value)}
             continue
 
         exact_value: float | None = None

@@ -26,7 +26,11 @@ from typing import Any
 
 from omegaconf import MISSING, OmegaConf
 
-from olmo_eval.common.constants.infrastructure import DEFAULT_MAX_GPUS_PER_NODE
+from olmo_eval.common.constants.infrastructure import (
+    BEAKER_DEFAULT_RESUME_RETENTION_DAYS,
+    BEAKER_DEFAULT_RESUME_VOLUME,
+    DEFAULT_MAX_GPUS_PER_NODE,
+)
 
 
 def get_model_short_name(model_name: str, alias: str | None = None) -> str:
@@ -131,9 +135,13 @@ class EvalConfig:
     max_gpus_per_node: int = DEFAULT_MAX_GPUS_PER_NODE
 
     priority: str = "normal"
-    preemptible: bool = True
+    preemptible: bool | None = None
+    min_runtime: str | None = None
     timeout: str = "24h"
     retries: int | None = None
+    resume: bool = True
+    resume_volume: str | None = BEAKER_DEFAULT_RESUME_VOLUME
+    resume_retention_days: int = BEAKER_DEFAULT_RESUME_RETENTION_DAYS
 
     gpus: int = 1
 

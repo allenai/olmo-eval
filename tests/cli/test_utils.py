@@ -321,6 +321,27 @@ class TestEndToEndOrdering:
 
         assert config.harness_config.provider.force_download is True
 
+    def test_max_tokens_null_override_reaches_sampling_params_as_none(self):
+        """``-o max_tokens=null`` should clear the cap and not send the string "null"."""
+        from olmo_eval.cli.run.config import RunConfigBuilder
+        from olmo_eval.runners.asynq.preparation import configure_task
+
+        args = ["-m", "model", "-t", "lab_bench_litqa2", "-o", "max_tokens=null"]
+        task_overrides, harness_overrides = process_ordered_args(reconstruct_ordered_args(args))
+        config = RunConfigBuilder(
+            model="model",
+            task=("lab_bench_litqa2",),
+            output_dir="/tmp/results",
+            cli_task_overrides=task_overrides,
+            cli_harness_overrides=harness_overrides,
+        ).build()
+
+        sampling_overrides = config.task_overrides["lab_bench_litqa2"]
+        assert sampling_overrides == {"max_tokens": None}
+        task = configure_task("lab_bench_litqa2", None, sampling_overrides)
+        assert task.config.sampling_params is not None
+        assert task.config.sampling_params.max_tokens is None
+
 
 class TestFormatTransformersRuntimeRows:
     """Tests for runtime summary formatting of transformers versions."""
@@ -356,3 +377,69 @@ class TestFormatTransformersRuntimeRows:
             ("Transformers (main)", "[dim]NOT INSTALLED[/dim]"),
             ("Transformers (vLLM)", "5.0.0.dev0"),
         ]
+
+
+def test_task_override_accepts_every_representable_task_config_field() -> None:
+    """The accepted-override list is derived from TaskConfig, so it cannot go stale."""
+    import dataclasses
+
+    import click
+    import pytest
+
+    from olmo_eval.cli.utils import _NON_CLI_TASK_FIELDS, FlaggedArg, process_ordered_args
+    from olmo_eval.evals.tasks.common.base import TaskConfig
+
+    for field in dataclasses.fields(TaskConfig):
+        ordered = [FlaggedArg("t", "mmlu"), FlaggedArg("o", f"{field.name}=x")]
+        if field.name in _NON_CLI_TASK_FIELDS:
+            with pytest.raises(click.UsageError):
+                process_ordered_args(ordered)
+            continue
+        task_overrides, _ = process_ordered_args(ordered)
+        assert task_overrides["mmlu"] == [f"{field.name}=x"], field.name
+    assert {"answer_extractor", "sandbox_env"} == _NON_CLI_TASK_FIELDS
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_sampling_override_reaches_runtime_and_beaker_preview(nested, tmp_path):
+    from olmo_eval.cli.beaker.launch import _get_task_configs
+    from olmo_eval.cli.run.config import RunConfigBuilder
+    from olmo_eval.common.types import SamplingParams
+    from olmo_eval.evals.tasks.common import get_task
+    from olmo_eval.runners.asynq.preparation import configure_task
+    from olmo_eval.runners.asynq.runner import AsyncEvalRunner
+
+    spec = "ifeval"
+    original = get_task(spec).config.to_dict()
+    key = "sampling_params.max_tokens" if nested else "max_tokens"
+    args = ["-t", spec, "-o", f"{key}=32768"]
+    cli_overrides, _ = process_ordered_args(reconstruct_ordered_args(args))
+    config = RunConfigBuilder(
+        model="mock", task=(spec,), output_dir=str(tmp_path), cli_task_overrides=cli_overrides
+    ).build()
+    runner = AsyncEvalRunner(
+        task_specs=[spec], task_overrides=config.task_overrides, output_dir=str(tmp_path)
+    )
+    task_overrides, sampling_overrides = runner._build_task_overrides(spec)
+    runtime = configure_task(spec, task_overrides, sampling_overrides).config
+    preview = _get_task_configs([spec], cli_overrides)[spec]
+
+    assert isinstance(runtime.sampling_params, SamplingParams)
+    assert runtime.sampling_params.max_tokens == 32768
+    assert runtime.sampling_params.temperature == get_task(spec).config.sampling_params.temperature
+    assert hash(runtime.sampling_params)
+    assert runtime.to_dict() == preview.to_dict()
+    assert runtime.to_dict() != get_task(spec).config.to_dict()
+    assert get_task(spec).config.to_dict() == original
+
+
+def test_flat_sampling_override_takes_precedence_over_nested():
+    from olmo_eval.runners.asynq.preparation import configure_task
+
+    task = configure_task(
+        "ifeval",
+        {"sampling_params": {"max_tokens": 32768, "temperature": 0.7}},
+        {"max_tokens": 1024},
+    )
+    assert task.config.sampling_params.max_tokens == 1024
+    assert task.config.sampling_params.temperature == 0.7

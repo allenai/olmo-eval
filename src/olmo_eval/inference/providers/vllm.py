@@ -5,12 +5,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider, is_debug_requests
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
+from olmo_eval.inference.providers.vllm_server import _replace_context_text
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 logger = logging.getLogger(__name__)
@@ -95,6 +104,29 @@ def _convert_logprobs(
         )
 
     return result
+
+
+def _raw_visible_prefix(raw: str, visible: str, special_tokens: list[str]) -> str | None:
+    """Keep a raw token decode through the visible prefix actually returned."""
+    if not special_tokens:
+        return None
+    pattern = re.compile(
+        "|".join(
+            re.escape(token)
+            for token in sorted(special_tokens, key=lambda token: len(token), reverse=True)
+        )
+    )
+    if not pattern.sub("", raw).startswith(visible):
+        return None
+    remaining = len(visible)
+    position = 0
+    for marker in pattern.finditer(raw):
+        size = marker.start() - position
+        if remaining <= size:
+            return raw[: position + remaining]
+        remaining -= size
+        position = marker.end()
+    return raw[: position + remaining]
 
 
 class VLLMProvider(InferenceProvider):
@@ -258,6 +290,40 @@ class VLLMProvider(InferenceProvider):
 
         return request.prompt
 
+    #: How many times to recount and cut a ContextFit text. A cut can merge or
+    #: split tokens at its edge, so one pass may leave the prompt a token over.
+    _CONTEXT_FIT_PASSES = 3
+
+    def _fit_context(self, request: LMRequest, max_tokens: int | None) -> tuple[LMRequest, int]:
+        """Cut the end of the request's ContextFit text until the prompt fits.
+
+        As ``VLLMServerProvider._fit_context`` does: the prompt is counted as sent against
+        the smaller of ``max_prompt_tokens`` and the window's room for ``max_tokens``.
+        Returns the request to send and how many tokens of the text were cut.
+        """
+        fit = request.context_fit
+        if fit is None:
+            return request, 0
+        room = self.max_length - (max_tokens or 0)
+        budget = room if fit.max_prompt_tokens is None else min(fit.max_prompt_tokens, room)
+        tokenizer = self.llm.get_tokenizer()
+        add_special_tokens = self._add_bos_token is not False
+
+        text, cut_tokens = fit.text, 0
+        for _ in range(self._CONTEXT_FIT_PASSES):
+            prompt = self._format_prompt(request)
+            prompt_tokens = len(tokenizer.encode(prompt, add_special_tokens=add_special_tokens))
+            if prompt_tokens <= budget or not text:
+                break
+            offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)[
+                "offset_mapping"
+            ]
+            overflow = min(prompt_tokens - budget, len(offsets))
+            kept = text[: offsets[-overflow][0]] if overflow < len(offsets) else ""
+            request = _replace_context_text(request, text, kept)
+            text, cut_tokens = kept, cut_tokens + overflow
+        return request, cut_tokens
+
     def generate(
         self,
         requests: list[LMRequest],
@@ -271,7 +337,8 @@ class VLLMProvider(InferenceProvider):
             )
         vllm_params = self._build_sampling_params(params)
 
-        prompt_strs = [self._format_prompt(req) for req in requests]
+        fitted = [self._fit_context(req, params.max_tokens) for req in requests]
+        prompt_strs = [self._format_prompt(req) for req, _ in fitted]
 
         if is_debug_requests():
             for i, prompt in enumerate(prompt_strs):
@@ -292,8 +359,19 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
 
+        tokenizer = self.llm.get_tokenizer()
+        added_vocab = tokenizer.get_added_vocab() if hasattr(tokenizer, "get_added_vocab") else {}
+        harmony_starts = {
+            added_vocab[token] for token in ("<|channel|>", "<|start|>") if token in added_vocab
+        }
+        special_tokens = set(getattr(tokenizer, "all_special_tokens", []))
+        special_tokens.update(
+            str(token)
+            for token in getattr(tokenizer, "added_tokens_decoder", {}).values()
+            if token.special
+        )
         results: list[list[LMOutput]] = []
-        for output in outputs:
+        for output, (_, cut_tokens) in zip(outputs, fitted, strict=True):
             request_outputs: list[LMOutput] = []
             for completion in output.outputs:
                 logprobs = _convert_logprobs(completion.logprobs)
@@ -308,6 +386,29 @@ class VLLMProvider(InferenceProvider):
                         "num_tokens": num_tokens,
                         "num_tokens_all": num_tokens,
                     }
+
+                metadata["finish_reason"] = completion.finish_reason
+                metadata["completion_tokens"] = len(completion.token_ids)
+                if completion.token_ids and completion.token_ids[0] in harmony_starts:
+                    # vLLM's default decoder drops Harmony's reserved delimiters.
+                    # Keep them for opt-in parsing; baseline text stays unchanged.
+                    raw_text = tokenizer.decode(completion.token_ids, skip_special_tokens=False)
+                    stop_reason = getattr(completion, "stop_reason", None)
+                    if completion.finish_reason == "stop" and isinstance(stop_reason, str):
+                        # Stop strings match the visible decode, and can also occur
+                        # inside raw delimiter spellings or span removed delimiters.
+                        truncated = _raw_visible_prefix(
+                            raw_text, completion.text, list(special_tokens)
+                        )
+                        if truncated is None:
+                            metadata["response_parser_error"] = (
+                                "Cannot align Harmony token decode with returned completion text"
+                            )
+                        else:
+                            raw_text = truncated
+                    metadata["text_with_special_tokens"] = raw_text
+                if cut_tokens:
+                    metadata[CONTEXT_CUT_TOKENS_KEY] = cut_tokens
 
                 request_outputs.append(
                     LMOutput(
@@ -489,6 +590,7 @@ class VLLMProvider(InferenceProvider):
                             "num_tokens": num_tokens,
                             "num_tokens_all": num_tokens_all,
                             "is_greedy": is_greedy,
+                            "prompt_truncated_tokens": max(0, overflow),
                         },
                     )
                 )
