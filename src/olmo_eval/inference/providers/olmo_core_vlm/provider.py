@@ -134,6 +134,7 @@ class OlmoCoreVLMProvider(InferenceProvider):
         prompt_format: str | None = None,
         reserved_slot_tokens: list[str] | tuple[str, ...] | None = None,
         thinking: str = "generate",
+        tokenizer_json_split: bool | None = None,
         use_cache: bool = True,
         batch_size: int | None = 16,
         attention_backend: str | None = "torch",
@@ -237,7 +238,11 @@ class OlmoCoreVLMProvider(InferenceProvider):
                 reserved_slot_tokens=slots,
                 **{k: v for k, v in tokenizer_kwargs.items() if k != "revision"},
             )
-        elif preprocessing.dataset_tokenizer_json_split(self.checkpoint_info):
+        elif (
+            preprocessing.dataset_tokenizer_json_split(self.checkpoint_info)
+            if tokenizer_json_split is None
+            else tokenizer_json_split
+        ):
             # As OLMo-core trained the checkpoint: tokenizer.json exactly as written, not the
             # class tokenizer_config.json names (GPT2Tokenizer for Dolma2 re-splits with GPT-2's
             # regex).
@@ -250,13 +255,18 @@ class OlmoCoreVLMProvider(InferenceProvider):
             "tokenizer.json (olmo35 chat)"
             if prompt_format == "olmo35"
             else "tokenizer.json"
-            if preprocessing.dataset_tokenizer_json_split(self.checkpoint_info)
+            if (
+                preprocessing.dataset_tokenizer_json_split(self.checkpoint_info)
+                if tokenizer_json_split is None
+                else tokenizer_json_split
+            )
             else "GPT-2 regex (AutoTokenizer, pre-tokenizer_json_split config)"
         )
         logger.info(
-            "Tokenizer %s, split %s, %s; '2024.\\n\\n' -> %s",
+            "Tokenizer %s, split %s%s, %s; '2024.\\n\\n' -> %s",
             tokenizer_path,
             split,
+            "" if tokenizer_json_split is None else " (forced by tokenizer_json_split)",
             type(tokenizer).__name__,
             tokenizer.encode("2024.\n\n", add_special_tokens=False),
         )
