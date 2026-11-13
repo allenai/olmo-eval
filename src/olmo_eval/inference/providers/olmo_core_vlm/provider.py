@@ -135,6 +135,8 @@ class OlmoCoreVLMProvider(InferenceProvider):
         reserved_slot_tokens: list[str] | tuple[str, ...] | None = None,
         thinking: str = "generate",
         tokenizer_json_split: bool | None = None,
+        emo_config_from: str | None = None,
+        emo_eval_pool: int | None = None,
         use_cache: bool = True,
         batch_size: int | None = 16,
         attention_backend: str | None = "torch",
@@ -185,6 +187,10 @@ class OlmoCoreVLMProvider(InferenceProvider):
             self.checkpoint_info.format,
             model_name,
         )
+        if emo_config_from is not None or emo_eval_pool is not None:
+            checkpoint.apply_emo_routing(
+                self.checkpoint_info, emo_config_from=emo_config_from, eval_pool=emo_eval_pool
+            )
 
         # Checkpoints trained on the plain-document layout get its prompt and its causal
         # image attention; OLMoDDP checkpoints ran in bfloat16 without autocast.

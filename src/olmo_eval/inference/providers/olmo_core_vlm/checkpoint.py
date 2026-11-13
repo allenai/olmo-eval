@@ -169,6 +169,77 @@ def _rewrite_legacy_class_names(config: Any) -> Any:
     return config
 
 
+def apply_emo_routing(
+    info: MultimodalCheckpointInfo,
+    *,
+    emo_config_from: str | None = None,
+    eval_pool: int | None = None,
+) -> None:
+    """Route the language model's experts with EMo document pools at inference.
+
+    Exports drop the EMo router config (``emo: null``): with its usual eval pool of all experts
+    the routing is the standard top-k. ``emo_config_from`` (a training ``config.json``, or the
+    step dir holding it) copies each routed-expert router's ``emo`` block from that config into
+    this checkpoint's model config, so the model routes as it trained (causal document pools);
+    ``eval_pool`` then overrides ``eval_document_expert_pool``, the pool size used in eval mode.
+    Documents are the EOS-delimited segments of each row (OLMo-core derives them when no segment
+    ids are passed), so a prompt and its generated answer are one document.
+
+    :raises ValueError: If no router has an ``emo`` block after the copy.
+    """
+    import copy
+    import json
+
+    lm = info.model_config.get("lm") if isinstance(info.model_config, dict) else None
+    if not isinstance(lm, dict):
+        raise ValueError("EMo routing needs an OLMo-core model config with an `lm` section")
+    if emo_config_from is not None:
+        path = Path(emo_config_from)
+        if path.is_dir():
+            path = path / "config.json"
+        with open(path) as f:
+            source = json.load(f)
+        source_lm = source.get("model", {}).get("lm", {})
+
+        def routers(lm_cfg: dict):
+            block = lm_cfg.get("block") or {}
+            if isinstance(block.get("routed_experts_router"), dict):
+                yield "block", block["routed_experts_router"]
+            for key, override in (lm_cfg.get("block_overrides") or {}).items():
+                if isinstance(override, dict) and isinstance(override.get("routed_experts_router"), dict):
+                    yield key, override["routed_experts_router"]
+
+        source_emo = {key: r.get("emo") for key, r in routers(source_lm)}
+        for key, router in routers(lm):
+            if source_emo.get(key) is not None:
+                router["emo"] = copy.deepcopy(source_emo[key])
+    found = 0
+
+    def visit(node: Any) -> None:
+        nonlocal found
+        if isinstance(node, dict):
+            emo = node.get("emo")
+            if isinstance(emo, dict):
+                found += 1
+                if eval_pool is not None:
+                    emo["eval_document_expert_pool"] = int(eval_pool)
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    visit(lm)
+    if not found:
+        raise ValueError("No EMo router config to apply (pass emo_config_from)")
+    logger.info(
+        "EMo routing on %d router configs (eval pool %s, causal %s)",
+        found,
+        eval_pool if eval_pool is not None else "from config",
+        (lm.get("block") or {}).get("routed_experts_router", {}).get("emo", {}).get("causal_pool"),
+    )
+
+
 def build_model_config(
     info: MultimodalCheckpointInfo,
     *,
