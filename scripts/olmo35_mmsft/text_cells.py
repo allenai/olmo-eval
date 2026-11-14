@@ -34,12 +34,19 @@ def build(spec_path: str, model: str, name: str, user: str, cluster: str, priori
     spec = copy.deepcopy(json.load(open(spec_path)))
     task = spec["tasks"][0]
     args = task["arguments"]
-    if args.count(SOURCE_MODEL) != 1:
-        raise SystemExit(f"{spec_path}: expected the source model path once")
-    args[args.index(SOURCE_MODEL)] = model
+    if args.count(SOURCE_MODEL) == 1:
+        args[args.index(SOURCE_MODEL)] = model
+    else:
+        # The pinned BFCL cells run one generated bash script whose olmo-eval command names the model.
+        hits = sum(a.count(SOURCE_MODEL) for a in args)
+        if hits != 1:
+            raise SystemExit(f"{spec_path}: expected the source model path once, found {hits}")
+        args[:] = [a.replace(SOURCE_MODEL, model) for a in args]
     for flag, value in (("--experiment-group", f"{name}-group"), ("--experiment-name", name)):
         if flag in args:
             args[args.index(flag) + 1] = value
+        else:  # inside a generated script
+            args[:] = [re.sub(rf"{flag} \\S+", f"{flag} {value}", a) for a in args]
     env = []
     for entry in task["envVars"]:
         secret = entry.get("secret")
