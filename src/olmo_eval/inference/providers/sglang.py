@@ -15,7 +15,11 @@ from olmo_eval.common.images import resolve_images
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
-from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
+from olmo_eval.inference.errors import (
+    CONTEXT_OVERFLOW_KEY,
+    REQUEST_ERROR_KEY,
+    is_context_overflow_message,
+)
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.providers.sglang_profiles import prepare_profile
 from olmo_eval.inference.request_utils import chat_messages_for_request
@@ -301,8 +305,6 @@ class SGLangProvider(InferenceProvider):
     def _build_sampling_params(self, params: SamplingParams) -> dict[str, Any]:
         if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
             raise NotImplementedError("SGLangProvider does not support prompt truncation")
-        if params.fit_max_tokens_to_context:
-            raise NotImplementedError("SGLangProvider does not support fitting tokens to context")
         if params.num_samples < 1:
             raise ValueError("num_samples must be positive")
         if params.logprobs is not None and params.logprobs < 0:
@@ -315,6 +317,57 @@ class SGLangProvider(InferenceProvider):
             "stop": list(params.stop_sequences or ()),
             "n": 1,
         }
+
+    def _fit_request_to_context(
+        self,
+        item: tuple[dict[str, Any], dict[str, Any]],
+        sampling: dict[str, Any],
+    ) -> tuple[tuple[dict[str, Any], dict[str, Any]], dict[str, Any]]:
+        """Fit text generation to the engine's resolved context without trimming its prompt."""
+        inputs, metadata = item
+        if "image_data" in inputs:
+            raise NotImplementedError(
+                "SGLang context fitting does not support expanded multimodal prompts"
+            )
+        manager = self.engine.tokenizer_manager
+        context = getattr(manager, "context_len", None)
+        reserved = getattr(manager, "num_reserved_tokens", None)
+        if type(context) is not int or context <= 0:
+            raise ValueError("SGLang context fitting requires the engine's resolved context_len")
+        if type(reserved) is not int or reserved < 0:
+            raise ValueError("SGLang context fitting requires a valid engine reserved-token count")
+        # Passing these same IDs to the engine makes counting exact, including BOS.
+        # The ordinary engine text path also uses the tokenizer's default special tokens.
+        ids = inputs.get("input_ids")
+        if ids is None:
+            ids = self.get_tokenizer().encode(inputs["prompt"])
+        if not isinstance(ids, list) or any(type(token) is not int for token in ids):
+            raise ValueError("SGLang context fitting could not obtain prompt token IDs")
+        remaining = context - len(ids) - reserved - 2
+        if remaining <= 0:
+            raise ValueError(
+                f"Prompt of {len(ids)} tokens leaves no generation room within the maximum "
+                f"context length of {context} tokens ({reserved} reserved, 2-token margin)"
+            )
+        requested = sampling["max_new_tokens"]
+        effective = remaining if requested is None else min(requested, remaining)
+        return (
+            (
+                {"input_ids": ids},
+                metadata
+                | {
+                    "context_fitting": {
+                        "context_length": context,
+                        "prompt_tokens": len(ids),
+                        "reserved_tokens": reserved,
+                        "margin_tokens": 2,
+                        "requested_max_tokens": requested,
+                        "effective_max_tokens": effective,
+                    }
+                },
+            ),
+            sampling | {"max_new_tokens": effective},
+        )
 
     def _consider_larger_batches(self, outputs: list[LMOutput], params: SamplingParams) -> None:
         """Offer one conservative hint using resolved pools, never raw free VRAM."""
@@ -396,19 +449,34 @@ class SGLangProvider(InferenceProvider):
             return []
         grouped: list[list[LMOutput]] = [[] for _ in requests]
         prepared = []
+        fitted_sampling = []
         positions = []
         first_error: Exception | None = None
         for index, request in enumerate(requests):
             try:
                 item = self._prepare_request(request)
+                request_sampling = sampling
+                if params.fit_max_tokens_to_context:
+                    item, request_sampling = self._fit_request_to_context(item, sampling)
             except (ValueError, TypeError, OSError, TemplateError, NotImplementedError) as error:
                 first_error = first_error or error
                 grouped[index] = [
-                    LMOutput(text="", metadata={REQUEST_ERROR_KEY: str(error)})
+                    LMOutput(
+                        text="",
+                        metadata={
+                            REQUEST_ERROR_KEY: str(error),
+                            **(
+                                {CONTEXT_OVERFLOW_KEY: True}
+                                if is_context_overflow_message(str(error))
+                                else {}
+                            ),
+                        },
+                    )
                     for _ in range(params.num_samples)
                 ]
             else:
                 prepared.append(item)
+                fitted_sampling.extend([request_sampling] * params.num_samples)
                 positions.append(index)
         if not prepared:
             assert first_error is not None
@@ -421,7 +489,7 @@ class SGLangProvider(InferenceProvider):
             del inputs["image_data"]
         outputs = self.engine.generate(
             **inputs,
-            sampling_params=sampling,
+            sampling_params=fitted_sampling if params.fit_max_tokens_to_context else sampling,
             return_logprob=True,
             top_logprobs_num=params.logprobs if params.logprobs is not None else 1,
         )
@@ -524,12 +592,19 @@ class SGLangProvider(InferenceProvider):
         params = self._default_sampling_params(sampling_params)
         self._validate_request(request)
         sampling = self._build_sampling_params(params)
+        fitting_metadata: dict[str, Any] = {}
+        if params.fit_max_tokens_to_context:
+            item, sampling = self._fit_request_to_context(self._prepare_request(request), sampling)
+            fitting_metadata = item[1]
         return {
             "provider": type(self).__name__,
             "mode": "generate",
             "endpoint": "engine.generate",
+            **fitting_metadata,
             "input_mode": "input_ids"
-            if self.supports_images or self._add_bos_token is False
+            if params.fit_max_tokens_to_context
+            or self.supports_images
+            or self._add_bos_token is False
             else "text",
             **(
                 {"prompt_format": self.prompt_format, "images_attached": bool(request.images)}
