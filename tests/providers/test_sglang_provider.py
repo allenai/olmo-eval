@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from jinja2 import TemplateError
+from tokenizers import Tokenizer, models, pre_tokenizers, processors
+from transformers import PreTrainedTokenizerFast
 
 from olmo_eval.common.types import (
     Instance,
@@ -434,7 +436,6 @@ def test_unsupported_request_fails_before_engine(setup_engine, lm_request):
 @pytest.mark.parametrize(
     "params",
     [
-        SamplingParams(fit_max_tokens_to_context=True),
         SamplingParams(truncation_side="left"),
         SamplingParams(num_samples=0),
         SamplingParams(logprobs=-1),
@@ -1130,3 +1131,165 @@ def test_each_request_length_cap_is_kept_on_its_own(setup_engine):
     provider = SGLangProvider("model")
     assert provider.profile_report["max_total_num_tokens"] == 4096
     assert "max_req_input_len" not in provider.profile_report
+
+
+@pytest.fixture
+def context_engine(setup_engine):
+    engine, _, _ = setup_engine
+    backend = Tokenizer(models.WordLevel({"[UNK]": 0, "[BOS]": 1, "word": 2}, unk_token="[UNK]"))
+    backend.pre_tokenizer = pre_tokenizers.Whitespace()
+    backend.post_processor = processors.TemplateProcessing(
+        single="[BOS] $A", special_tokens=[("[BOS]", 1)]
+    )
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=backend, unk_token="[UNK]", bos_token="[BOS]"
+    )
+    tokenizer.chat_template = (
+        "{% for message in messages %}{{ message['role'] }} {{ message['content'] }} "
+        "{% endfor %}{% if add_generation_prompt %}assistant think{% endif %}"
+    )
+    engine.tokenizer_manager = SimpleNamespace(
+        tokenizer=tokenizer, context_len=34816, num_reserved_tokens=0
+    )
+    return engine, tokenizer
+
+
+def test_context_fitting_batches_exact_token_ids_and_sample_order(context_engine):
+    engine, tokenizer = context_engine
+    provider = SGLangProvider("model")
+    requests = [
+        LMRequest(RequestType.COMPLETION, prompt="word " * count) for count in (99, 2275, 8999)
+    ]
+    params = SamplingParams(
+        max_tokens=32768,
+        num_samples=2,
+        fit_max_tokens_to_context=True,
+        temperature=1.0,
+        top_p=1.0,
+    )
+    results = provider.generate(requests, params)
+    call = engine.generate.call_args.kwargs
+    assert "prompt" not in call
+    assert call["input_ids"] == [
+        tokenizer.encode(request.prompt) for request in requests for _ in range(2)
+    ]
+    assert [s["max_new_tokens"] for s in call["sampling_params"]] == [
+        32768,
+        32768,
+        32538,
+        32538,
+        25814,
+        25814,
+    ]
+    assert [[s.text for s in group] for group in results] == [
+        ["response0", "response1"],
+        ["response2", "response3"],
+        ["response4", "response5"],
+    ]
+    assert results[1][0].metadata["context_fitting"]["prompt_tokens"] == 2276
+    trace = provider.describe_request(requests[1], params)
+    assert trace["input_mode"] == "input_ids"
+    assert trace["generation_kwargs"]["max_gen_toks"] == 32538
+    assert trace["context_fitting"] == results[1][0].metadata["context_fitting"]
+
+
+@pytest.mark.parametrize("add_bos", [True, False])
+def test_context_fitting_tokenizes_growing_chat_each_turn(context_engine, add_bos):
+    engine, tokenizer = context_engine
+    engine.tokenizer_manager.context_len = 100
+    engine.tokenizer_manager.num_reserved_tokens = 3
+    provider = SGLangProvider("model", add_bos_token=add_bos)
+    params = SamplingParams(max_tokens=90, fit_max_tokens_to_context=True)
+    messages = [{"role": "user", "content": "word " * 10}]
+    budgets = []
+    for _ in range(3):
+        request = LMRequest(RequestType.CHAT, messages=tuple(messages))
+        outputs = provider.generate([request], params)
+        rendered = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        ids = tokenizer.encode(rendered, add_special_tokens=add_bos)
+        call = engine.generate.call_args.kwargs
+        assert call["input_ids"] == [ids]
+        expected = min(90, 100 - len(ids) - 3 - 2)
+        assert call["sampling_params"][0]["max_new_tokens"] == expected
+        assert outputs[0][0].metadata["context_fitting"]["effective_max_tokens"] == expected
+        budgets.append(expected)
+        messages.extend(
+            [
+                {"role": "assistant", "content": "word " * 8},
+                {"role": "user", "content": "word " * 3},
+            ]
+        )
+    assert budgets[0] > budgets[1] > budgets[2]
+
+
+@pytest.mark.parametrize("context,reserved", [(None, 0), (0, 0), (34816, None), (34816, -1)])
+def test_context_fitting_unknown_context_fails_closed(context_engine, context, reserved):
+    engine, _ = context_engine
+    engine.tokenizer_manager.context_len = context
+    engine.tokenizer_manager.num_reserved_tokens = reserved
+    provider = SGLangProvider("model")
+    with pytest.raises(ValueError, match="context fitting requires"):
+        provider.generate(
+            [LMRequest(RequestType.COMPLETION, prompt="word")],
+            SamplingParams(max_tokens=32768, fit_max_tokens_to_context=True),
+        )
+    engine.generate.assert_not_called()
+
+
+def test_context_fitting_no_room_preserves_other_requests_and_sample_budget(context_engine):
+    engine, _ = context_engine
+    engine.tokenizer_manager.context_len = 10
+    provider = SGLangProvider("model")
+    params = SamplingParams(max_tokens=32, num_samples=2, fit_max_tokens_to_context=True)
+    good = LMRequest(RequestType.COMPLETION, prompt="word")
+    bad = LMRequest(RequestType.COMPLETION, prompt="word " * 8)
+    groups = provider.generate([bad, good], params)
+    assert is_context_overflow_output(groups[0])
+    assert request_error(groups[0]) is not None
+    assert len(groups[0]) == len(groups[1]) == 2
+    assert request_error(groups[1]) is None
+    assert len(engine.generate.call_args.kwargs["input_ids"]) == 2
+    engine.generate.reset_mock()
+    with pytest.raises(ValueError, match="no generation room"):
+        provider.generate([bad], params)
+    engine.generate.assert_not_called()
+
+
+def test_context_fitting_default_false_retains_original_engine_contract(context_engine):
+    engine, _ = context_engine
+    provider = SGLangProvider("model")
+    request = LMRequest(RequestType.COMPLETION, prompt="word " * 3000)
+    output = provider.generate([request], SamplingParams(max_tokens=32768))[0][0]
+    call = engine.generate.call_args.kwargs
+    assert call["prompt"] == [request.prompt]
+    assert call["sampling_params"]["max_new_tokens"] == 32768
+    assert "context_fitting" not in output.metadata
+
+
+def test_context_fitting_refuses_expanded_multimodal_inputs(context_engine, monkeypatch):
+    engine, _ = context_engine
+    provider = SGLangProvider("model")
+    monkeypatch.setattr(
+        provider, "_prepare_request", lambda request: ({"input_ids": [1], "image_data": []}, {})
+    )
+    with pytest.raises(NotImplementedError, match="multimodal"):
+        provider.generate(
+            [LMRequest(RequestType.COMPLETION, prompt="word")],
+            SamplingParams(max_tokens=32768, fit_max_tokens_to_context=True),
+        )
+    engine.generate.assert_not_called()
+
+
+@pytest.mark.parametrize("token_ids", [None, "unknown", [True], ["1"]])
+def test_context_fitting_invalid_count_fails_closed(context_engine, monkeypatch, token_ids):
+    engine, tokenizer = context_engine
+    provider = SGLangProvider("model")
+    monkeypatch.setattr(tokenizer, "encode", lambda *args, **kwargs: token_ids)
+    with pytest.raises(ValueError, match="could not obtain prompt token IDs"):
+        provider.generate(
+            [LMRequest(RequestType.COMPLETION, prompt="word")],
+            SamplingParams(max_tokens=32768, fit_max_tokens_to_context=True),
+        )
+    engine.generate.assert_not_called()
