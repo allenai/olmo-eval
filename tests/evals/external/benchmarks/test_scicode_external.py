@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
 from parameterized import parameterized
 
+from olmo_eval.cli.utils import parse_key_value_args
 from olmo_eval.common.types import LMOutput, SamplingParams
 from olmo_eval.evals.external.benchmarks.scicode import eval as scicode_eval
 from olmo_eval.evals.external.benchmarks.scicode import loader as scicode_loader
 from olmo_eval.evals.external.benchmarks.scicode import prompts as scicode_prompts
 from olmo_eval.evals.external.benchmarks.scicode import verifier as scicode_verifier
+from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
 
 
 def _make_sub_step(
@@ -264,3 +270,82 @@ class TestRunProblemContextOverflow(unittest.IsolatedAsyncioTestCase):
                 sc_args=sc_args,
                 container_runtime="podman",
             )
+
+
+class TestSampling(unittest.IsolatedAsyncioTestCase):
+    @parameterized.expand([(None,), (0.95,), (1.0,)])
+    async def test_cli_sampling_reaches_every_openai_request_and_result_metadata(
+        self, top_p: float | None
+    ) -> None:
+        args = parse_key_value_args(
+            ["temperature=1.0", "max_tokens=2048", "h5py_host_path=/tmp/test.h5"]
+            + ([] if top_p is None else [f"top_p={top_p}"])
+        )
+        provider = VLLMServerProvider("test-model", base_url="http://unused.invalid/v1")
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="```python\ndef foo(x):\n    return x\n```", tool_calls=None
+                    ),
+                    logprobs=None,
+                    finish_reason="stop",
+                )
+            ],
+            usage=None,
+        )
+        create = mock.AsyncMock(return_value=response)
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        requests = []
+
+        async def generate(batch, sampling_params):
+            requests.extend((request, sampling_params) for request in batch)
+            return [
+                await provider._generate_chat(client, request, sampling_params) for request in batch
+            ]
+
+        evaluator = scicode_eval.SciCodeExternalEval()
+        with (
+            mock.patch.object(provider, "agenerate", side_effect=generate),
+            mock.patch.object(
+                scicode_loader, "load_problems", return_value=[_make_problem(num_steps=2)]
+            ),
+            mock.patch.object(evaluator, "_verify", new=mock.AsyncMock(return_value=[True, True])),
+            tempfile.TemporaryDirectory() as output_dir,
+        ):
+            result = await evaluator.execute(provider, args, output_dir=output_dir)
+            saved = json.loads((Path(output_dir) / "scicode_results.json").read_text())
+            self.assertEqual(saved["metadata"]["top_p"], top_p)
+
+        self.assertEqual(result.metrics["num_sub_steps"], 2)
+        self.assertEqual(result.metadata["top_p"], top_p)
+        self.assertEqual(create.await_count, 2)
+        for call in create.await_args_list:
+            if top_p is None:
+                self.assertNotIn("top_p", call.kwargs)
+            else:
+                self.assertEqual(call.kwargs["top_p"], top_p)
+            self.assertEqual(call.kwargs["temperature"], 1.0)
+            self.assertEqual(call.kwargs["max_tokens"], 2048)
+        if top_p is None:
+            previous_kwargs = create.await_args_list[0].kwargs
+            await provider._generate_chat(
+                client, requests[0][0], SamplingParams(max_tokens=2048, temperature=1.0)
+            )
+            self.assertEqual(
+                json.dumps(previous_kwargs, sort_keys=True),
+                json.dumps(create.await_args.kwargs, sort_keys=True),
+            )
+        for request, params in requests:
+            trace = provider.describe_request(request, params)
+            assert trace is not None
+            if top_p is None:
+                self.assertNotIn("top_p", trace["generation_kwargs"])
+            else:
+                self.assertEqual(trace["generation_kwargs"]["top_p"], top_p)
+
+    def test_invalid_top_p_is_rejected_before_any_inference(self) -> None:
+        invalid_values: list[Any] = [0, -0.1, 1.1, float("nan"), float("inf"), True, "0.95"]
+        for top_p in invalid_values:
+            with self.subTest(top_p=top_p), self.assertRaisesRegex(ValueError, "SciCode top_p"):
+                scicode_eval.SciCodeConfig(top_p=top_p)

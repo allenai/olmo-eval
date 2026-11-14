@@ -58,12 +58,21 @@ class SciCodeConfig:
     enable_thinking: bool = False
     max_tokens: int = 16384
     temperature: float = 0.6
+    top_p: float | None = None
     max_concurrency: int = 4
     command_timeout: float = 600.0
     startup_timeout: float = 300.0
     h5py_host_path: str = DEFAULT_H5PY_HOST_PATH
     h5py_container_path: str = DEFAULT_H5PY_CONTAINER_PATH
     sandbox_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
+
+    def __post_init__(self) -> None:
+        if self.top_p is not None and (
+            isinstance(self.top_p, bool)
+            or not isinstance(self.top_p, (int, float))
+            or not 0 < self.top_p <= 1
+        ):
+            raise ValueError("SciCode top_p must be greater than 0 and at most 1 when set")
 
 
 class SciCodeExternalEval(ExternalEval):
@@ -125,7 +134,9 @@ class SciCodeExternalEval(ExternalEval):
         )
 
         sampling_params = SamplingParams(
-            max_tokens=sc_args.max_tokens, temperature=sc_args.temperature
+            max_tokens=sc_args.max_tokens,
+            temperature=sc_args.temperature,
+            top_p=sc_args.top_p,
         )
 
         semaphore = asyncio.Semaphore(sc_args.max_concurrency)
@@ -192,6 +203,7 @@ class SciCodeExternalEval(ExternalEval):
                 "with_background": sc_args.with_background,
                 "max_tokens": sc_args.max_tokens,
                 "temperature": sc_args.temperature,
+                "top_p": sc_args.top_p,
             },
             duration_seconds=time.time() - start_time,
             predictions=problem_results,
