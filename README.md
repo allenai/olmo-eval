@@ -1286,6 +1286,23 @@ prevents a replacement from repeating a successfully finished run when its resul
 came along; a rerun whose results lack them runs the eval again under the same run ID. External evals do
 not support `--resume-volume`. See the [implementation and validation plan](docs/weka-resume.md).
 
+For integrations that must preserve shared recovery history, the native supervisor has
+an opt-in `--retain-shared-history` flag (`run_shared(..., retain_shared_history=True)`
+in Python). This is a supervisor option, not a task or scoring override. It retains
+completed progress and finalized-task/checksum records, and moves retired inner locks,
+completion markers, discarded streams and compaction leftovers into unique `history/`
+entries under that same run directory. A compaction also preserves its old inventory.
+No periodic progress snapshots are copied and no history is pruned by this option.
+The directory remains subject to the volume's existing inactivity retention above;
+this is not a permanent archive. Shared history can contain evaluation outputs.
+
+The outer ownership lock, inherited child descriptor, command/session identity checks,
+five-second commits and checksum validation are unchanged. An existing ordinary session
+can opt in explicitly; once retained, a retry omitting the flag is refused rather than
+silently reverting to deletion. Ordinary output cleanup is unaffected, and the default
+shared lifecycle is unchanged. This does not permit a standalone runner to reclaim a
+foreign-host progress lock; only the existing outer supervisor ownership does that.
+
 - **What is recorded.** `progress/<model>/run.segments/` (on the volume under the Beaker
   resume supervisor) holds one stream for the run: a
   header per task, then one entry per finished instance with its outputs, scores and a

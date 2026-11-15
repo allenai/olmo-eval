@@ -19,9 +19,18 @@ import pytest
 import yaml
 
 from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
+from olmo_eval.common.shared_history import RETAIN_SHARED_HISTORY_ENV
+from olmo_eval.launch.beaker import resume as resume_module
 from olmo_eval.launch.beaker.resume import RETENTION_SECONDS, refresh_files, run_shared
 from olmo_eval.launch.beaker.volume import launch_with_volume
-from olmo_eval.runners.asynq.progress import ProgressMismatchError, ProgressStore
+from olmo_eval.runners.asynq.progress import (
+    ProgressLock,
+    ProgressLockedError,
+    ProgressMismatchError,
+    ProgressStore,
+    discard_progress,
+    stream_dir,
+)
 
 
 @pytest.mark.parametrize("prior", [False, True])
@@ -798,3 +807,166 @@ def test_invalid_yaml_retention_rejected_before_launch(tmp_path, value):
     )
     with pytest.raises((SystemExit, ValueError)):
         LaunchConfigLoader(str(path), {}).load()
+
+
+def test_retained_history_resumes_without_shared_unlink_or_rmtree(shared, monkeypatch):
+    root, run_uuid, results, directory = shared
+    command = child(
+        "from olmo_eval.runners.asynq.progress import ProgressStore; "
+        "store=ProgressStore(weka/'progress/model/run.segments',verify_integrity=True); "
+        "prior=list(store.read()); "
+        "assert prior in ([],[{'score':1}]); "
+        "store.append({'score':len(prior)+1}); store.close(); "
+        "lock=weka/'progress/model/.lock'; assert not lock.exists(); "
+        "lock.write_text('foreign-node'); "
+        "sys.exit(0 if prior else 143)"
+    )
+    real_unlink, real_rmtree = Path.unlink, shutil.rmtree
+
+    def unlink(path, *args, **kwargs):
+        assert not path.is_relative_to(directory), f"shared unlink: {path}"
+        return real_unlink(path, *args, **kwargs)
+
+    def rmtree(path, *args, **kwargs):
+        assert not Path(path).is_relative_to(directory), f"shared rmtree: {path}"
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(shutil, "rmtree", rmtree)
+    assert run_shared(root, run_uuid, results, command, retain_shared_history=True) == 143
+    assert run_shared(root, run_uuid, results, command, retain_shared_history=True) == 0
+    stream = directory / "progress/model/run.segments"
+    assert list(ProgressStore(stream, verify_integrity=True).read()) == [{"score": 1}, {"score": 2}]
+    assert any(p.read_text() == "foreign-node" for p in (directory / "history").rglob(".lock"))
+    assert json.loads((directory / "session.json").read_text())["completed"]
+
+
+def test_retained_completion_reconstructs_outputs_and_archives_marker(
+    shared, monkeypatch, tmp_path
+):
+    root, run_uuid, results, directory = shared
+    monkeypatch.setenv("RUNS", str(tmp_path / "runs"))
+    command = child(FINISH)
+    assert run_shared(root, run_uuid, results, command, retain_shared_history=True) == 0
+    complete = (directory / "complete.json").read_bytes()
+    assert (
+        run_shared(
+            root, run_uuid, results.parent / "replacement", command, retain_shared_history=True
+        )
+        == 0
+    )
+    archived = list((directory / "history").rglob("complete.json"))
+    assert len(archived) == 1 and archived[0].read_bytes() == complete
+    with pytest.raises(RuntimeError, match="history retention changed"):
+        run_shared(root, run_uuid, results, command)
+
+
+def test_retained_policy_does_not_bypass_ownership_or_command_identity(shared):
+    root, run_uuid, results, directory = shared
+    command = child("sys.exit(143)")
+    assert run_shared(root, run_uuid, results, command, retain_shared_history=True) == 143
+    with pytest.raises(RuntimeError, match="command changed"):
+        run_shared(root, run_uuid, results, child("pass"), retain_shared_history=True)
+    with (directory / "run.lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        with pytest.raises(RuntimeError, match="Another attempt owns"):
+            run_shared(root, run_uuid, results, command, retain_shared_history=True)
+    session = json.loads((directory / "session.json").read_text())
+    session["uuid"] = str(uuid.uuid4())
+    (directory / "session.json").write_text(json.dumps(session))
+    with pytest.raises(RuntimeError, match="identity changed"):
+        run_shared(root, run_uuid, results, command, retain_shared_history=True)
+
+
+def test_retained_cleanup_archives_unpublished_and_compacted_records(tmp_path, monkeypatch):
+
+    directory = tmp_path / str(uuid.uuid4())
+    directory.mkdir()
+    (directory / "session.json").write_text(
+        json.dumps({"uuid": directory.name, "retain_shared_history": True})
+    )
+    monkeypatch.setenv(SHARED_RUN_ENV, str(directory))
+    monkeypatch.setenv(RETAIN_SHARED_HISTORY_ENV, "1")
+    out = tmp_path / "results"
+    store = ProgressStore(stream_dir(out, "mock"), verify_integrity=True)
+    for spec in ["a", "b"]:
+        store.append({"t": spec, "header": {"spec": spec}})
+    store.close()
+    original = (store.path / "000000.jsonl").read_bytes()
+    real_unlink, real_rmtree = Path.unlink, shutil.rmtree
+
+    def unlink(path, *args, **kwargs):
+        assert not path.is_relative_to(directory), f"shared unlink: {path}"
+        return real_unlink(path, *args, **kwargs)
+
+    def rmtree(path, *args, **kwargs):
+        assert not Path(path).is_relative_to(directory), f"shared rmtree: {path}"
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(shutil, "rmtree", rmtree)
+    (store.path / "abandoned.tmp").write_text("partly written")
+    (store.path / "000001.jsonl").write_text("unpublished")
+    discard_progress(out, "mock", ["a"])
+    assert list(ProgressStore(store.path, verify_integrity=True).read()) == [
+        {"t": "b", "header": {"spec": "b"}}
+    ]
+    archived = directory / "history"
+    assert any(p.read_bytes() == original for p in archived.rglob("000000.jsonl"))
+    assert any(p.read_text() == "partly written" for p in archived.rglob("abandoned.tmp"))
+    assert any(p.read_text() == "unpublished" for p in archived.rglob("000001.jsonl"))
+    assert list(archived.rglob("index.json"))
+    discard_progress(out, "mock", ["b"])
+    assert (store.path / "index.json").is_file()
+    assert list(ProgressStore(store.path, verify_integrity=True).read()) == []
+    store.reset()
+    assert not store.path.exists()
+    assert list(archived.rglob("run.segments/index.json"))
+
+
+def test_retained_progress_still_checks_integrity_and_foreign_lock(tmp_path, monkeypatch):
+
+    directory = tmp_path / str(uuid.uuid4())
+    directory.mkdir()
+    (directory / "session.json").write_text(
+        json.dumps({"uuid": directory.name, "retain_shared_history": True})
+    )
+    monkeypatch.setenv(SHARED_RUN_ENV, str(directory))
+    monkeypatch.setenv(RETAIN_SHARED_HISTORY_ENV, "1")
+    stream = directory / "progress/model/run.segments"
+    store = ProgressStore(stream, verify_integrity=True)
+    store.append({"score": 1})
+    store.close()
+    (stream / "000000.jsonl").write_text('{"score":0}\n')
+    with pytest.raises(ProgressMismatchError, match="missing or changed"):
+        list(ProgressStore(stream, verify_integrity=True).read())
+    lock = ProgressLock(stream.parent)
+    lock.path.write_text(json.dumps({"host": "foreign-node", "pid": 1}))
+    with pytest.raises(ProgressLockedError):
+        lock.acquire()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_retained_history_cli_is_opt_in(tmp_path, monkeypatch, enabled):
+
+    called = Mock(return_value=0)
+    monkeypatch.setattr(resume_module, "run_shared", called)
+    monkeypatch.setattr(resume_module.os.path, "ismount", lambda path: True)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "resume",
+            "--root",
+            str(tmp_path),
+            "--run-uuid",
+            str(uuid.uuid4()),
+            *(["--retain-shared-history"] if enabled else []),
+            "--",
+            "eval",
+        ],
+    )
+    with pytest.raises(SystemExit) as result:
+        resume_module.main()
+    assert result.value.code == 0
+    assert called.call_args.kwargs["retain_shared_history"] is enabled
