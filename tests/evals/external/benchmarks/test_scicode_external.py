@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -229,6 +230,77 @@ class TestRunProblemCascade(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ALPHA_MARKER", third_prompt)
         self.assertIn("BETA_MARKER", third_prompt)
         self.assertIn("def step_two()", third_prompt)
+
+
+class TestVerificationPrefix(unittest.IsolatedAsyncioTestCase):
+    async def run_codes(
+        self,
+        codes: list[str],
+        *,
+        problem: scicode_loader.SciCodeProblem | None = None,
+        hardcoded: dict[int, str] | None = None,
+    ) -> dict[str, Any]:
+        problem = problem or _make_problem(required_dependencies="")
+        provider = FakeProvider([f"```python\n{code}\n```" for code in codes])
+
+        async def execute_code(script: str, language: str, **_kwargs: Any) -> Any:
+            if language == "bash":
+                return SimpleNamespace(success=True)
+            try:
+                exec(compile(script, "<scicode-test>", "exec"), {})
+            except Exception:
+                return SimpleNamespace(success=False)
+            return SimpleNamespace(success=True)
+
+        sandbox = SimpleNamespace(
+            start=mock.AsyncMock(),
+            stop=mock.AsyncMock(),
+            execute_code=mock.AsyncMock(side_effect=execute_code),
+        )
+        # Numeric data loading is irrelevant to these generated-code assertions.
+        h5_helper = "def process_hdf5_to_tuple(*args):\n    return [None]"
+        with (
+            mock.patch.object(scicode_eval, "SandboxManager", return_value=sandbox),
+            mock.patch.object(scicode_verifier, "_H5_HELPER", h5_helper),
+            mock.patch.dict(
+                scicode_prompts.HARDCODED_SNIPPETS, {problem.problem_id: hardcoded or {}}
+            ),
+        ):
+            return await scicode_eval.SciCodeExternalEval()._run_problem(
+                problem=problem,
+                provider=provider,
+                sampling_params=SamplingParams(max_tokens=16),
+                sc_args=scicode_eval.SciCodeConfig(),
+                container_runtime="podman",
+            )
+
+    @parameterized.expand(
+        [
+            ("syntax_error", "def broken(:"),
+            ("runtime_error", "raise RuntimeError('later step')"),
+            ("redefinition", "def foo(x):\n    return x + 1"),
+        ]
+    )
+    async def test_later_code_cannot_break_earlier_step(self, _name: str, later_code: str) -> None:
+        result = await self.run_codes(["def foo(x):\n    return x", later_code])
+        self.assertEqual(result["step_results"], [True, False])
+
+    async def test_later_helper_cannot_repair_earlier_step(self) -> None:
+        result = await self.run_codes(
+            ["def foo(x):\n    return helper(x)", "def helper(x):\n    return x"]
+        )
+        self.assertEqual(result["step_results"], [False, True])
+
+    async def test_hardcoded_steps_keep_their_position(self) -> None:
+        problem = _make_problem(num_steps=3, required_dependencies="")
+        problem.sub_steps[0]["test_cases"] = ("assert earlier(1) == 1",)
+        result = await self.run_codes(
+            ["def earlier(x):\n    return x", "def foo(x):\n    return ANCHOR * x"],
+            problem=problem,
+            hardcoded={1: "ANCHOR = earlier(1)"},
+        )
+        self.assertEqual(result["step_results"], [True, True])
+        self.assertEqual(result["total"], 2)
 
 
 if __name__ == "__main__":

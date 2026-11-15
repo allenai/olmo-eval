@@ -99,7 +99,7 @@ def build_step_script(
 
     The script imports required dependencies, pulls numeric targets from the
     reference h5py file, and executes the step's test assertions against
-    ``full_code`` (the concatenation of all generated sub-step code).
+    ``full_code`` (the generated code prefix through the current sub-step).
     """
     step_id = step["step_number"]
     test_cases = list(step["test_cases"])
