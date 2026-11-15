@@ -769,7 +769,7 @@ class Task(ABC):
                 if getattr(scorer, "requires_async", False):
                     raise
                 error = format_scoring_error(exc, phase="sync")
-                instance_id = response.instance.metadata.get("id", str(resp_idx))
+                instance_id = (response.instance.metadata or {}).get("id", str(resp_idx))
                 logger.warning(
                     "Sync scoring failed for instance %s output %s with scorer %s: %s",
                     instance_id,

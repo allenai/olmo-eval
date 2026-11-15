@@ -1334,6 +1334,94 @@ class TestSyncScoringFailures:
         with pytest.raises(SandboxRequiredError):
             await task.score_responses([response])
 
+    async def test_sync_scorer_failure_does_not_affect_sibling_sync_scorer(self):
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(
+                AccuracyMetric(scorer=ExactMatchScorer),
+                AccuracyMetric(scorer=FailingSyncScorer),
+            ),
+        )
+        task = ConcreteTask(config)
+
+        responses = _make_responses(n_responses=2, n_outputs=1)
+        responses[0].outputs[0].text = "ok"
+        responses[1] = Response(
+            instance=Instance(question="What is 3+3?", gold_answer="boom"),
+            request=LMRequest(request_type=RequestType.COMPLETION, prompt="What is 3+3?"),
+            outputs=[LMOutput(text="boom")],
+        )
+
+        scored = await task.score_responses(responses)
+
+        assert scored[0].scores == {"exact_match": 0.0, "failing_sync": 1.0}
+        assert scored[1].scores == {"exact_match": 1.0}
+        assert scored[1].outputs[0].metadata["score:exact_match"] == 1.0
+        assert "score:failing_sync" not in scored[1].outputs[0].metadata
+        assert scored[1].outputs[0].metadata["scoring_errors"]["failing_sync"]["phase"] == "sync"
+        assert task.compute_metrics(scored) == {
+            "accuracy": {"exact_match": 0.5, "failing_sync": 1.0}
+        }
+
+    async def test_sync_scorer_failure_flows_through_compute_task_metrics(self):
+        from olmo_eval.runners.asynq.preparation import compute_task_metrics
+
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(AccuracyMetric(scorer=FailingSyncScorer),),
+        )
+        task = ConcreteTask(config)
+
+        def make_responses() -> list[Response]:
+            responses = _make_responses(n_responses=2, n_outputs=1)
+            responses[0].outputs[0].text = "ok"
+            responses[1].outputs[0].text = "boom"
+            return responses
+
+        over_budget = compute_task_metrics(
+            "test",
+            task,
+            list(await task.score_responses(make_responses())),
+            {},
+            2,
+            0.0,
+            max_hard_failure_rate=0.05,
+        )
+        assert over_budget.failure_budget_exceeded is True
+        assert over_budget.error is not None
+
+        within_budget = compute_task_metrics(
+            "test",
+            task,
+            list(await task.score_responses(make_responses())),
+            {},
+            2,
+            0.0,
+            max_hard_failure_rate=0.5,
+        )
+        assert within_budget.failure_budget_exceeded is False
+        assert within_budget.error is None
+        assert within_budget.metrics == {"accuracy": {"failing_sync": 1.0}}
+        assert within_budget.scoring_failures == {
+            "instances_unscored": 1,
+            "instances_partially_scored": 0,
+            "outputs_unscored": 1,
+            "infrastructure": 0,
+            "by_type": {"ValueError": 1},
+            "first_error": "ValueError: intentional sync scorer failure",
+        }
+        assert within_budget.predictions is not None
+        assert "sample_metrics" not in within_budget.predictions[1]["model_output"][0]
+        assert within_budget.predictions[1]["model_output"][0]["scoring_errors"] == {
+            "failing_sync": {
+                "phase": "sync",
+                "type": "ValueError",
+                "message": "intentional sync scorer failure",
+            }
+        }
+
 
 @pytest.mark.anyio
 class TestMixedWorkloadScoring:
