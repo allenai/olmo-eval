@@ -69,6 +69,7 @@ from olmo_eval.common.constants.infrastructure import (
 )
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.scoring_failures import output_scoring_errors
+from olmo_eval.common.shared_history import archive_shared_path, retained_shared_root
 from olmo_eval.common.shutdown import shutdown_requested
 from olmo_eval.common.types import LMOutput, Response
 from olmo_eval.runners.common.types import TaskResult
@@ -313,6 +314,16 @@ def _dump(entry: Mapping[str, Any]) -> str:
     return json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
 
 
+def _remove_progress_file(path: Path, *, missing_ok: bool = False) -> None:
+    if not archive_shared_path(path, reason="retired-progress-file"):
+        path.unlink(missing_ok=missing_ok)
+
+
+def _remove_progress_tree(path: Path, *, ignore_errors: bool = False) -> None:
+    if not archive_shared_path(path, reason="reset-progress-stream"):
+        shutil.rmtree(path, ignore_errors=ignore_errors)
+
+
 class ProgressStore:
     """A run's progress stream: tagged entries in a directory of numbered JSONL segments.
 
@@ -350,7 +361,7 @@ class ProgressStore:
             names = [entry.name for entry in entries]
         for name in names:
             if name.endswith(".tmp"):
-                (self.path / name).unlink()
+                _remove_progress_file(self.path / name)
         segments = sorted(
             self.path / name for name in names if re.fullmatch(r"[0-9]+\.jsonl", name)
         )
@@ -378,7 +389,7 @@ class ProgressStore:
                     ) from e
             for segment in segments:
                 if segment.name not in self._published:
-                    segment.unlink()
+                    _remove_progress_file(segment)
             segments = [self.path / name for name in sorted(self._published)]
         self._loaded = True
         return segments
@@ -419,7 +430,7 @@ class ProgressStore:
         with self._lock:
             self._buffer, self._buffered_bytes = [], 0
             if self.path.exists():
-                shutil.rmtree(self.path)
+                _remove_progress_tree(self.path)
             self._next_segment = 0
             self._published = {}
             self._loaded = False
@@ -442,7 +453,7 @@ class ProgressStore:
         if not segments:
             return
         for leftover in self.path.glob("*.tmp"):
-            leftover.unlink()
+            _remove_progress_file(leftover)
         dropped = set(keys)
         final = self.path / f"{self._next_segment:06d}.jsonl"
         tmp = final.with_suffix(".tmp")
@@ -462,24 +473,28 @@ class ProgressStore:
             f.flush()
             os.fsync(f.fileno())
         if not removed_any:
-            tmp.unlink()
+            _remove_progress_file(tmp)
             return
         if kept_tasks:
             os.replace(tmp, final)
             self._next_segment += 1
         else:
-            tmp.unlink()
+            _remove_progress_file(tmp)
         if self.verify_integrity:
             published = {final.name: self._digest(final)} if kept_tasks else {}
+            archive_shared_path(
+                self.path / "index.json", reason="compacted-inventory", snapshot=True
+            )
             _write_json_atomic(self.path / "index.json", published)
             self._published = published
         for segment in reversed(segments):
-            segment.unlink()
+            _remove_progress_file(segment)
         self._next_segment = int(final.stem) + 1 if kept_tasks else 0
         if not kept_tasks and not self.verify_integrity:
-            (self.path / "index.json").unlink(missing_ok=True)
-            with contextlib.suppress(OSError):
-                self.path.rmdir()
+            _remove_progress_file(self.path / "index.json", missing_ok=True)
+            if retained_shared_root(self.path) is None:
+                with contextlib.suppress(OSError):
+                    self.path.rmdir()
 
     def append(self, entry: Mapping[str, Any]) -> None:
         """Add one entry after those already read or written."""
@@ -584,6 +599,8 @@ def remove_empty_progress_dirs(output_dir: str | Path, model_name: str) -> None:
 
 def _remove_empty_dirs(*directories: Path) -> None:
     for directory in directories:
+        if retained_shared_root(directory) is not None:
+            continue
         try:
             directory.rmdir()
         except OSError:
@@ -609,11 +626,12 @@ def discard_progress(
         try:
             store.drop(specs=specs)
         except ProgressMismatchError as e:
-            logger.warning(f"{e} Deleting the whole stream {store.path}.")
-            shutil.rmtree(store.path, ignore_errors=True)
+            action = "Archiving" if retained_shared_root(store.path) is not None else "Deleting"
+            logger.warning(f"{e} {action} the whole stream {store.path}.")
+            _remove_progress_tree(store.path, ignore_errors=True)
         for path in model_dir.glob(f"*{FINAL_SUFFIX}"):
             if _final_spec(path, specs) is not None:
-                path.unlink()
+                _remove_progress_file(path)
     _remove_empty_dirs(model_dir, progress_root(output_dir))
 
 
@@ -774,7 +792,7 @@ class ProgressLock:
                         "gone, delete the lock file."
                     ) from None
                 logger.warning(f"Taking over {self.path} ({self._describe(holder)}): {reason}")
-                self.path.unlink(missing_ok=True)
+                _remove_progress_file(self.path, missing_ok=True)
                 continue
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(mine, f)
@@ -803,7 +821,7 @@ class ProgressLock:
             return
         holder = self._read()
         if holder is not None and holder.get("token") == token:
-            self.path.unlink(missing_ok=True)
+            _remove_progress_file(self.path, missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1697,13 +1715,17 @@ class RunProgress:
         progress in the same output directory are left alone, and directories this
         empties are removed. A failure leaves the records as they were (see
         :meth:`ProgressStore.drop`), so a rerun resumes from them.
+        An opted-in shared session instead retains completed records for recovery.
         """
         self._flush()
+        if self._store is not None and retained_shared_root(self._store.path) is not None:
+            self.close()
+            return
         if self._store is not None:
             try:
                 self._store.drop(keys=self._run_keys)
                 for path in self._final_paths:
-                    path.unlink(missing_ok=True)
+                    _remove_progress_file(path, missing_ok=True)
             except OSError as e:
                 logger.warning(f"Could not delete the progress records in {self._store.path}: {e}")
                 self.close()

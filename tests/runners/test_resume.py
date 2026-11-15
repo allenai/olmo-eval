@@ -31,9 +31,11 @@ import resume_fakes
 
 import olmo_eval.evals.tasks  # noqa: F401  (registers the tasks)
 from olmo_eval.cli.run import _sigterm_raises
+from olmo_eval.common.constants.infrastructure import SHARED_RUN_ENV
 from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.llm_judge import Judge
+from olmo_eval.common.shared_history import RETAIN_SHARED_HISTORY_ENV
 from olmo_eval.common.shutdown import (
     Terminated,
     clear_shutdown,
@@ -3234,3 +3236,29 @@ def test_restoring_names_a_task_that_only_has_a_final_result(tmp_path, caplog) -
     progress.close()
 
     assert "keeping progress for gsm8k from another run" in caplog.text
+
+
+def test_retained_shared_success_keeps_completed_keys_and_output_checksums(tmp_path, monkeypatch):
+
+    shared = tmp_path / "session"
+    shared.mkdir()
+    (shared / "session.json").write_text(
+        json.dumps({"uuid": shared.name, "retain_shared_history": True})
+    )
+    monkeypatch.setenv(SHARED_RUN_ENV, str(shared))
+    monkeypatch.setenv(RETAIN_SHARED_HISTORY_ENV, "1")
+    output = tmp_path / "output"
+    first = run_eval(output, A_LIMITS)
+    assert first.queued and first.queued > 0
+    finals = list((shared / "progress").glob(f"*/*{FINAL_SUFFIX}"))
+    assert finals and all(json.loads(p.read_text())["checksums"] for p in finals)
+    before = _artifacts(output)
+    again = run_eval(output, A_LIMITS)
+    assert again.queued in (None, 0)
+    assert again.finalized == set(A_LIMITS)
+    assert _artifacts(output) == before
+    # A carried-over output changed by another copy is not accepted as a completed key.
+    prediction = next((output / "predictions").rglob("*.jsonl"))
+    prediction.write_text("corrupt\n")
+    run_eval(output, A_LIMITS)
+    assert _artifacts(output) == before

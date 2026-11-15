@@ -33,6 +33,7 @@ from olmo_eval.common.constants.infrastructure import (
     SHARED_RUN_IDENTITY_FILES,
     SHARED_RUN_PROGRESS_DIR,
 )
+from olmo_eval.common.shared_history import RETAIN_SHARED_HISTORY_ENV, archive_shared_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -46,6 +47,7 @@ class SharedRunSession(TypedDict):
     command: list[str]
     progress_streams: NotRequired[list[str]]
     completed: NotRequired[bool]
+    retain_shared_history: NotRequired[bool]
 
 
 def write_atomic(path: Path, value: Any) -> None:
@@ -127,14 +129,22 @@ def run_shared(
     refresh_seconds: float = REFRESH_SECONDS,
     volume: str | None = None,
     retention_days: int = BEAKER_DEFAULT_RESUME_RETENTION_DAYS,
+    retain_shared_history: bool = False,
 ) -> int:
-    """Run once or resume under exclusive ownership; return the child's exit status."""
+    """Run once or resume under exclusive ownership; return the child's exit status.
+
+    ``retain_shared_history`` preserves completed progress and archives artifacts that
+    shared recovery would otherwise remove. It never prunes that history. Local result
+    handling and the default shared cleanup policy are unchanged.
+    """
     if str(uuid.UUID(run_uuid)) != run_uuid:
         raise ValueError("run UUID must be a canonical UUID")
     if not root.is_dir() or root.is_symlink():
         raise RuntimeError(f"Resume root {root} is not mounted; refusing local fallback")
     if type(retention_days) is not int or retention_days < 1:
         raise ValueError("retention_days must be a positive integer")
+    if type(retain_shared_history) is not bool:
+        raise ValueError("retain_shared_history must be a bool")
     root = root / f"tmp-{retention_days}d"
     root.mkdir(mode=0o755, exist_ok=True)
     directory = root / run_uuid
@@ -162,6 +172,13 @@ def run_shared(
         else:
             session_data = {"uuid": run_uuid, "command": list(command)}
             write_atomic(session, session_data)
+        if retain_shared_history and session_data.get("uuid") != run_uuid:
+            raise RuntimeError("WEKA recovery session identity changed")
+        if session_data.get("retain_shared_history") and not retain_shared_history:
+            raise RuntimeError("WEKA history retention changed; submit a new evaluation")
+        if retain_shared_history and not session_data.get("retain_shared_history"):
+            session_data["retain_shared_history"] = True
+            write_atomic(session, session_data)
         complete = directory / "complete.json"
         if complete.exists():
             run_id = json.loads(complete.read_text()).get("run_id")
@@ -171,15 +188,23 @@ def run_shared(
                 return 0
             # This job's results lack the completed run's outputs (Beaker carried over an
             # earlier snapshot, or none). Run the eval again, as a job without resume
-            # would; the saved identity keeps the run ID. Its progress is gone.
+            # would; the saved identity keeps the run ID. Retained progress, if opted
+            # in, rebuilds missing outputs without regenerating committed instances.
             print(
                 f"WEKA run {run_uuid} completed as run {run_id}, but this job's results do "
                 "not hold its outputs; running it again",
                 flush=True,
             )
-            session_data = {"uuid": run_uuid, "command": list(command)}
+            session_data = (
+                {**session_data, "completed": False}
+                if retain_shared_history
+                else {"uuid": run_uuid, "command": list(command)}
+            )
             write_atomic(session, session_data)
-            complete.unlink()
+            if not archive_shared_path(
+                complete, reason="completed-results-not-carried", root=directory
+            ):
+                complete.unlink()
         if session_data.get("completed"):
             raise RuntimeError("WEKA completion record is missing; submit a new evaluation")
         for relative in session_data.get("progress_streams", []):
@@ -193,7 +218,8 @@ def run_shared(
         # This directory belongs to one submission. The outer lock proves the old
         # writer is gone, including on another node, so its PID lock can be reclaimed.
         for stale in progress.glob("*/.lock"):
-            stale.unlink()
+            if not archive_shared_path(stale, reason="outer-owner-reclaims-lock", root=directory):
+                stale.unlink()
         refresh_files(directory)
         print(f"WEKA run {run_uuid}: recovery state in {directory}", flush=True)
         stopped = threading.Event()
@@ -204,7 +230,11 @@ def run_shared(
             [*command, "-O", str(results)],
             pass_fds=(lock.fileno(),),
             start_new_session=True,
-            env={**os.environ, SHARED_RUN_ENV: str(directory)},
+            env={
+                **os.environ,
+                SHARED_RUN_ENV: str(directory),
+                RETAIN_SHARED_HISTORY_ENV: "1" if retain_shared_history else "0",
+            },
         )
 
         def forward(signum: int, _frame: Any) -> None:
@@ -241,7 +271,7 @@ def run_shared(
             write_atomic(session, {**json.loads(session.read_text()), "completed": True})
             # The identity stays (it is small) so a rerun of this completed job keeps
             # the run ID; retention prunes it.
-            if progress.exists():
+            if progress.exists() and not retain_shared_history:
                 shutil.rmtree(progress)
         refresh_files(directory)
         return code
@@ -253,6 +283,11 @@ def main() -> None:
     parser.add_argument("--run-uuid", required=True)
     parser.add_argument("--volume")
     parser.add_argument("--retention-days", type=int, default=BEAKER_DEFAULT_RESUME_RETENTION_DAYS)
+    parser.add_argument(
+        "--retain-shared-history",
+        action="store_true",
+        help="Retain shared completed progress and archive retired recovery artifacts",
+    )
     parser.add_argument("--results", type=Path, default=Path("/results"))
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -269,6 +304,7 @@ def main() -> None:
             command,
             volume=args.volume,
             retention_days=args.retention_days,
+            retain_shared_history=args.retain_shared_history,
         )
     )
 
