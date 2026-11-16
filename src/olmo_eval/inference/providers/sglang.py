@@ -80,6 +80,19 @@ class _PreparedBatch:
     engine_kwargs: dict[str, Any]
 
 
+def _require_cuda() -> None:
+    """Fail before plugin registration when the worker has no usable CUDA device."""
+    import torch
+
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "SGLangProvider requires a usable CUDA device, but torch.cuda.is_available() "
+            "is False. SGLang rolls back to CPU, after which model registration fails on "
+            "missing fused kernels and reports an AttributeError that hides this cause. "
+            "Run the worker in a CUDA runtime with the GPU driver visible."
+        )
+
+
 class SGLangProvider(InferenceProvider):
     """Run generation with a locally installed SGLang engine.
 
@@ -136,6 +149,7 @@ class SGLangProvider(InferenceProvider):
                     force_download=True,
                 )
         _require_original_logprobs()
+        _require_cuda()
         if model_registration:
             module, name = model_registration.split(":", 1)
             getattr(import_module(module), name)()
