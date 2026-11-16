@@ -123,3 +123,41 @@ def test_v2_leaves_an_unchanged_output_without_original_text():
     task.strip_thinking_traces([response])
 
     assert "original_text" not in response.outputs[0].metadata
+
+
+def _vt_doc(context: str = "HAYSTACK VAR AAAAA = 1") -> dict:
+    return {
+        **_ruler_doc(context),
+        "example": "Track VAR QPE = 5. Answer: they are: QPE\n\n",
+        "outputs": ["AAAAA"],
+    }
+
+
+def test_vt_v3_puts_the_worked_example_before_the_input():
+    task = get_task("ruler_vt__4096:v3")
+    doc = _vt_doc()
+
+    instance = task.process_doc(doc)
+
+    assert instance.question == "Track VAR QPE = 5. Answer: they are: QPE\n\n" + doc["input"]
+    request = task.format_request(instance)
+    assert request.prompt == instance.question
+    assert request.context_fit == ContextFit(text=doc["context"])
+
+
+@pytest.mark.parametrize("spec", ["ruler_vt__4096", "ruler_vt__4096:v2"])
+def test_earlier_vt_specs_keep_the_input_without_the_example(spec):
+    doc = _vt_doc()
+
+    assert get_task(spec).process_doc(doc).question == doc["input"]
+
+
+def test_v3_is_v2_plus_the_example_and_exists_only_for_vt():
+    v2, v3 = get_task("ruler_vt__4096:v2").config, get_task("ruler_vt__4096:v3").config
+
+    assert v3.task_settings == {**v2.task_settings, "prepend_example": True}
+    assert v3.sampling_params == v2.sampling_params
+    assert _scored_text("ruler_vt__4096:v3", " A.\nQuestion: B") == " A.\n"
+    assert _scored_text("ruler_vt__4096:v3", "VAR A", cut_tokens=3) == ""
+    with pytest.raises(Exception):
+        get_task("ruler_niah_s_1__4096:v3")

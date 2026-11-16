@@ -190,6 +190,10 @@ class RulerTask(Task):
             # Add system template as prepend text for non-chat format
             if not self.ruler_config.get("use_chat_template", False):
                 prepend_text = self._templates["system"].format(**context_fields)
+        elif self.prepends_example and (example := str(doc.get("example") or "").strip()):
+            # The preformatted input leaves out the worked example the data row carries
+            # (VT's one-shot demonstration); the template path above already includes it.
+            question = example + "\n\n" + question
 
         # Get answer (handle both "answer" and "outputs" fields)
         answer = doc.get("answer") or doc.get("outputs")
@@ -225,6 +229,15 @@ class RulerTask(Task):
         without failing its batch, and an output whose haystack was cut is emptied.
         """
         return (self.config.task_settings or {}).get("overflow") == "score_zero"
+
+    @property
+    def prepends_example(self) -> bool:
+        """Whether the data row's worked ``example`` precedes the preformatted input (VT's ``:v3``).
+
+        RULER's released ``input`` for VT omits the one-shot example, so models below ~1B
+        often answer in the wrong format (numbers, prose) instead of naming variables.
+        """
+        return bool((self.config.task_settings or {}).get("prepend_example"))
 
     @property
     def cuts_answer(self) -> bool:
@@ -394,6 +407,9 @@ RULER_V2_MAX_GEN_TOKS = {"vt": 100}
 #: Task types whose `:v2` outputs are scored only up to their first `Question:`.
 RULER_V2_ANSWER_CUT = ("vt",)
 
+#: Task types with a `:v3`: `:v2` plus the data row's worked example before the input.
+RULER_V3_PREPEND_EXAMPLE = ("vt",)
+
 # Dynamically register all RULER tasks
 for _task_name, _task_config in RULER_TASKS.items():
     _cls = make_ruler_task_class(_task_name, _task_config)
@@ -410,16 +426,21 @@ for _task_name, _task_config in RULER_TASKS.items():
     # `:v2`: see RULER_V2_TASK_SETTINGS, RULER_V2_MAX_GEN_TOKS and RULER_V2_ANSWER_CUT.
     _v2_type = _task_name.rsplit("__", 1)[0]
     _v2_budget = RULER_V2_MAX_GEN_TOKS.get(_v2_type)
-    register_variant(
-        f"ruler_{_task_name}",
-        "v2",
-        task_settings={
-            **RULER_V2_TASK_SETTINGS,
-            **({"answer_cut": "before_question"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
-        },
-        **(
-            {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
-            if _v2_budget is not None
-            else {}
-        ),
+    _v2_settings = {
+        **RULER_V2_TASK_SETTINGS,
+        **({"answer_cut": "before_question"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
+    }
+    _v2_sampling = (
+        {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
+        if _v2_budget is not None
+        else {}
     )
+    register_variant(f"ruler_{_task_name}", "v2", task_settings=_v2_settings, **_v2_sampling)
+    # `:v3` (VT only): `:v2` with the worked example restored, see RULER_V3_PREPEND_EXAMPLE.
+    if _v2_type in RULER_V3_PREPEND_EXAMPLE:
+        register_variant(
+            f"ruler_{_task_name}",
+            "v3",
+            task_settings={**_v2_settings, "prepend_example": True},
+            **_v2_sampling,
+        )
