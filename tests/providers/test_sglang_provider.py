@@ -34,7 +34,10 @@ from olmo_eval.runners.processing.generation_counts import count_generations
 @pytest.fixture
 def setup_engine(monkeypatch):
     monkeypatch.setenv("SGLANG_RETURN_ORIGINAL_LOGPROB", "1")
-    monkeypatch.setattr("torch.cuda.is_available", lambda: True)
+    # Contract tests need only the CUDA availability API, even without optional torch.
+    monkeypatch.setitem(
+        sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True))
+    )
     tokenizer = Mock(bos_token_id=99, eos_token_id=98)
     tokenizer.apply_chat_template.return_value = "<user>question<assistant><think>"
     tokenizer.encode.return_value = [10, 20]
