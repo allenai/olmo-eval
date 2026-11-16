@@ -16,6 +16,20 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-24: RULER VT `:v3` restores the worked example
+
+- **Affected**: new specs only, `ruler_vt__{4096,...,131072}:v3` and `:v3_fixed`. Every
+  existing spec, including VT `:v1` and `:v2`, is unchanged.
+- **Change**: RULER's preformatted VT `input` leaves out the one-shot example that its
+  template path includes through `{example}`. Without it, many models below about 1B answer
+  in the wrong format (numbers or prose instead of variable names). `:v3` is `:v2` with a
+  worked example before the input, re-drawn per instance from the instance index as
+  upstream RULER does (`randomize_icl`), never equal to the instance's own answers or
+  value. `:v3_fixed` uses the data row's one fixed example instead, for an ablation.
+- **Identity**: new task hashes.
+- **Comparability**: `:v3` and `:v3_fixed` scores are not comparable with `:v2` or with
+  each other.
+
 ## 2026-11-12: Namespaced Hugging Face dataset ids for six tasks (#558)
 
 - **Affected**: every spec of `gsm8k` (except `gsm8k:platinum`, which has its own
