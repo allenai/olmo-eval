@@ -42,6 +42,9 @@ class Scorer(ABC):
 
     name: str = ""
     requires_async: ClassVar[bool] = False
+    #: Scores from an output's per-token logprobs. Metrics with such a scorer read them
+    #: when they are computed, so resumable runs keep them in their progress records.
+    reads_logprobs: ClassVar[bool] = False
 
     def __call__(self) -> Scorer:
         """Allow scorer instances to be used where classes are expected.
@@ -237,6 +240,7 @@ class BitsPerByteScorer(Scorer):
     """
 
     name: str = "bits_per_byte"
+    reads_logprobs: ClassVar[bool] = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.logprobs is None:
@@ -266,6 +270,7 @@ class PerplexityScorer(Scorer):
     """
 
     name: str = "perplexity"
+    reads_logprobs: ClassVar[bool] = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.logprobs is None:
@@ -291,6 +296,7 @@ class LogprobScorer(Scorer):
     """
 
     name: str = "logprob"
+    reads_logprobs: ClassVar[bool] = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.logprobs is None:

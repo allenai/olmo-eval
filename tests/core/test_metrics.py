@@ -10,8 +10,10 @@ from olmo_eval.common.metrics import (
     BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
+    MacroSubsetAccuracyMetric,
     NGramCopyingBPBMetricByteAvg,
     SafetyErrorMetric,
+    SubsetAccuracyMetric,
 )
 from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
@@ -632,3 +634,33 @@ class TestNGramCopyingBPBMetric:
         # averaging the two per-document values unweighted -- doc B's larger masked
         # span (3 bytes vs. 1) pulls the pooled result further toward its own bpb.
         assert metric.compute([doc_a, doc_b]) == pytest.approx(5.0 / (4 * math.log(2)))
+
+
+class TestSubsetAccuracyMetrics:
+    """Subset metrics average the scored responses of each subset."""
+
+    @staticmethod
+    def _response(category: str, score: float | None) -> Response:
+        return Response(
+            instance=Instance(question="Q", metadata={"category": category}),
+            request=LMRequest(request_type=RequestType.CHAT, prompt="Q"),
+            outputs=[LMOutput(text="A")],
+            scores={} if score is None else {"safety_judge": score},
+        )
+
+    def test_a_response_without_a_score_is_left_out(self):
+        responses = [self._response("a", 1.0), self._response("a", None), self._response("b", 0.0)]
+
+        assert SubsetAccuracyMetric(name="category__a").compute(responses) == 1.0
+        assert SubsetAccuracyMetric(name="any__any").compute(responses) == 0.5
+
+    def test_an_empty_subset_reports_zero(self):
+        responses = [self._response("a", 1.0)]
+
+        assert SubsetAccuracyMetric(name="category__b").compute(responses) == 0.0
+
+    def test_the_macro_average_leaves_out_unscored_responses(self):
+        responses = [self._response("a", 1.0), self._response("a", None), self._response("b", 0.0)]
+        metric = MacroSubsetAccuracyMetric(subsets=("category__a", "category__b"))
+
+        assert metric.compute(responses) == 0.5

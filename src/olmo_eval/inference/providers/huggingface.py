@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.images import resolve_images
@@ -302,6 +303,7 @@ class HuggingFaceProvider(InferenceProvider):
         max_crops: int = 24,
         max_multi_image_crops: int = 8,
         autocast_dtype: str | None = None,
+        device: str | None = None,
         **model_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -318,6 +320,9 @@ class HuggingFaceProvider(InferenceProvider):
                 ``torch.autocast`` with this dtype. Pair with fp32 weights (``dtype="float32"``)
                 to match mm_olmo's ``amp_bf16`` eval numerics (fp32 master weights + bf16
                 autocast); the model keeps attention in fp32 via its own ``float32_attention``.
+            device: Torch device to load the model on, such as ``"cuda:1"``. Defaults to
+                the best available device; an auxiliary provider gets the GPU the run
+                set aside for it.
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
         # Strip kwargs meant for other providers (e.g., vLLM)
@@ -331,7 +336,15 @@ class HuggingFaceProvider(InferenceProvider):
         self.max_multi_image_crops = int(max_multi_image_crops)
         self.autocast_dtype = autocast_dtype
         self.processor = None
-        self.device = _get_device()
+        self.is_encoder_decoder: bool = False
+        # generate() is not thread-safe, and the async methods run it in threads
+        self._model_lock = threading.Lock()
+        if device is None:
+            self.device = _get_device()
+        else:
+            import torch
+
+            self.device = torch.device(device)
         if self.is_multimodal:
             self._init_multimodal(model_name, model_kwargs)
         else:
@@ -344,7 +357,12 @@ class HuggingFaceProvider(InferenceProvider):
     ) -> None:
         """Load a text-only causal LM (tokenizer + AutoModelForCausalLM)."""
         try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import (
+                AutoConfig,
+                AutoModelForCausalLM,
+                AutoModelForSeq2SeqLM,
+                AutoTokenizer,
+            )
         except ImportError as e:
             raise ImportError(
                 "transformers is required for HuggingFaceProvider. "
@@ -355,8 +373,21 @@ class HuggingFaceProvider(InferenceProvider):
         tokenizer_kwargs = {
             key: value for key, value in model_kwargs.items() if key in self._TOKENIZER_KWARGS
         }
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        self.tokenizer: Any = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
+
+        # Encoder-decoder models (T5, BART, ...) need a different auto-class and
+        # have different generate() semantics, so detect them from the config
+        # rather than requiring callers to declare it.
+        config = AutoConfig.from_pretrained(model_name, **tokenizer_kwargs)
+        self.is_encoder_decoder = bool(getattr(config, "is_encoder_decoder", False))
+        auto_class = AutoModelForSeq2SeqLM if self.is_encoder_decoder else AutoModelForCausalLM
+        logger.info(
+            "Loading %s with %s (is_encoder_decoder=%s)",
+            model_name,
+            getattr(auto_class, "__name__", auto_class),
+            self.is_encoder_decoder,
+        )
+        self.model: Any = auto_class.from_pretrained(model_name, **model_kwargs)
 
     def _init_multimodal(self, model_name: str, model_kwargs: dict[str, Any]) -> None:
         """Load an image-text-to-text model (AutoProcessor + AutoModelForImageTextToText).
@@ -565,13 +596,19 @@ class HuggingFaceProvider(InferenceProvider):
                 with torch.no_grad():
                     output_ids = self.model.generate(**encoded, **gen_kwargs)[0]
 
-                gen_ids = output_ids[prompt_len:]
+                # A causal LM returns the prompt followed by the continuation, so
+                # the prompt has to be sliced off. An encoder-decoder returns only
+                # decoder tokens, and slicing would eat the answer.
+                gen_ids = output_ids if self.is_encoder_decoder else output_ids[prompt_len:]
                 gen_ids, text = self._truncate_at_stop(gen_ids, params.stop_sequences)
 
                 # Always compute logprobs for metrics
                 logprob_entries = None
                 metadata: dict[str, Any] = {}
-                if len(gen_ids) > 0:
+                # the scoring below reads logits at prompt-relative positions of a
+                # single concatenated sequence, which only holds for a causal LM;
+                # encoder-decoder logprobs would need a decoder-side forward pass
+                if len(gen_ids) > 0 and not self.is_encoder_decoder:
                     seq = torch.cat([encoded["input_ids"][0], gen_ids]).unsqueeze(0)
                     with torch.no_grad():
                         logits = self.model(seq).logits
@@ -703,7 +740,8 @@ class HuggingFaceProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         """Async generate completions.
 
-        Runs the synchronous HuggingFace generate in a thread pool to avoid blocking.
+        Runs the synchronous HuggingFace generate in a thread pool to avoid blocking,
+        one call at a time, so concurrent scorers can share an auxiliary provider.
 
         Args:
             requests: Batch of requests to process.
@@ -712,7 +750,7 @@ class HuggingFaceProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
-        return await asyncio.to_thread(self.generate, requests, sampling_params)
+        return await asyncio.to_thread(self._locked, self.generate, requests, sampling_params)
 
     async def alogprobs(
         self,
@@ -729,4 +767,9 @@ class HuggingFaceProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return await asyncio.to_thread(self.logprobs, requests, sampling_params)
+        return await asyncio.to_thread(self._locked, self.logprobs, requests, sampling_params)
+
+    def _locked(self, method: Any, *args: Any) -> Any:
+        """Call a model method while holding the model lock."""
+        with self._model_lock:
+            return method(*args)

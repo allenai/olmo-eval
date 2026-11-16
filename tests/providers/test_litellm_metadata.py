@@ -8,7 +8,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from olmo_eval.common.types import Instance, LMRequest, RequestType, Response, SamplingParams
+from olmo_eval.common.types import (
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+    SamplingParams,
+)
 from olmo_eval.inference.providers.litellm import LiteLLMProvider
 from olmo_eval.runners.processing.generation_counts import count_generations
 
@@ -41,3 +48,30 @@ def test_finish_reason_survives_logprob_metadata(finish_reason, with_logprobs) -
     assert counts is not None
     assert counts["cap_hit"] == int(finish_reason == "length")
     assert counts["finish_reason_unknown"] == int(finish_reason is None)
+
+
+@pytest.mark.parametrize(("count", "expected_level"), [(1, "debug"), (3, "info")])
+def test_only_multi_request_calls_log_at_info(count, expected_level, monkeypatch) -> None:
+    from olmo_eval.inference.providers import litellm as litellm_module
+
+    logged: list[tuple[str, str]] = []
+
+    class Recorder:
+        def __getattr__(self, level: str):
+            return lambda message, *args, **kwargs: logged.append((level, message))
+
+    monkeypatch.setattr(litellm_module, "logger", Recorder())
+    provider = LiteLLMProvider.__new__(LiteLLMProvider)
+    provider.model_name = "mock"
+    provider.max_concurrency = 4
+    provider.max_retries = 0
+    provider._default_sampling_params = lambda params: SamplingParams()  # type: ignore[method-assign]
+    provider._generate_single_async = AsyncMock(  # type: ignore[method-assign]
+        return_value=[LMOutput(text="x")]
+    )
+    requests = [LMRequest(request_type=RequestType.CHAT, prompt="q")] * count
+
+    asyncio.run(provider.agenerate(requests))
+
+    assert {level for level, message in logged if "Sending" in message} == {expected_level}
+    assert any("Generating" in message for _, message in logged) == (count > 1)

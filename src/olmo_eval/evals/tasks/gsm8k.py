@@ -55,7 +55,7 @@ def _clean_short_answer(text: str) -> str:
 
 @register("gsm8k")
 class GSM8K(Task):
-    data_source = DataSource(path="gsm8k", subset="main")
+    data_source = DataSource(path="openai/gsm8k", subset="main")
     metrics = (AccuracyMetric(scorer=ExactMatchScorer),)
     num_fewshot = 8
     sampling_params = SamplingParams(
@@ -167,6 +167,32 @@ register_variant(
         temperature=0.6,
         top_p=0.6,
         stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
+        num_samples=8,
+    ),
+    output_score_aggregation=OutputScoreAggregation.FIRST,
+)
+
+# olmo3base without the "\n\n" stop sequence. The parity variant above stops at
+# the first blank line, which cuts off models that reason over several
+# paragraphs before giving the final answer, so they are scored on a partial
+# solution. This variant keeps every other olmo3base setting so that the two
+# differ only in where generation stops.
+register_variant(
+    "gsm8k",
+    "olmo3base_multiparagraph",
+    metrics=(
+        AccuracyMetric(scorer=ExactMatchScorer),
+        PassAtKMetric(k=1, scorer=ExactMatchScorer),
+        PassAtKMetric(k=2, scorer=ExactMatchScorer),
+        PassAtKMetric(k=4, scorer=ExactMatchScorer),
+        PassAtKMetric(k=8, scorer=ExactMatchScorer),
+    ),
+    primary_metric=PassAtKMetric(k=1, scorer=ExactMatchScorer),
+    sampling_params=SamplingParams(
+        max_tokens=512,
+        temperature=0.6,
+        top_p=0.6,
+        stop_sequences=("Question:", "</s>", "<|im_end|>"),
         num_samples=8,
     ),
     output_score_aggregation=OutputScoreAggregation.FIRST,

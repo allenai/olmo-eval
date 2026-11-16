@@ -68,6 +68,14 @@ class BatchConfig:
                 f"Use vllm_server for streaming."
             )
 
+    @classmethod
+    def dispatches_per_request(cls, provider_kind: str) -> bool:
+        """Whether the provider already sends a batch's requests one at a time.
+
+        In-process engines batch inside the engine, so splitting a batch would cost throughput.
+        """
+        return provider_kind not in cls._SEQUENTIAL_ONLY
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         data: dict[str, Any] = {

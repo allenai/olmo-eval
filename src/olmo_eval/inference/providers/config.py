@@ -23,7 +23,7 @@ class ProviderConfig:
     a provider via the create_provider factory function.
 
     Attributes:
-        kind: Provider type (sglang, vllm, vllm_server, hf, olmo_core, litellm, mock).
+        kind: Provider type (sglang, vllm, vllm_server, hf, olmo_core, litellm, mock, replay).
         model: Model name or path (HuggingFace ID, API model name, or local path).
         alias: Short display name for the model (used in DB and S3 paths).
         base_url: Base URL for API-based providers (vllm_server, litellm).
@@ -67,6 +67,15 @@ class ProviderConfig:
     _GPU_PROVIDERS: ClassVar[frozenset[str]] = frozenset(
         {"sglang", "vllm", "vllm_server", "hf", "olmo_core", "olmo_core_vlm"}
     )
+
+    @property
+    def served_model(self) -> str:
+        """The model requests reach: the LoRA adapter's path when one is loaded, else ``model``."""
+        modules = self.kwargs.get("lora_modules") if self.kwargs.get("enable_lora") else None
+        if modules:
+            name, separator, path = str(modules[0]).partition("=")
+            return path if separator else name
+        return self.model
 
     @property
     def requires_gpu(self) -> bool:
@@ -138,6 +147,7 @@ class ProviderConfig:
             "max_model_len",
         ),
         "mock": (),
+        "replay": (),
     }
 
     def create_provider(self) -> InferenceProvider:

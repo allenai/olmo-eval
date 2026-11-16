@@ -9,6 +9,7 @@ from olmo_eval.upload.config import UploadConfig, resolve_upload_config
 from olmo_eval.upload.uploader import (
     UploadResult,
     mark_run_failed,
+    mark_run_interrupted,
     register_run_start,
     upload_results_dir,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "UploadConfig",
     "UploadResult",
     "mark_run_failed",
+    "mark_run_interrupted",
     "register_run_start",
     "resolve_upload_config",
     "upload_results_dir",

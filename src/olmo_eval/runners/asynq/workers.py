@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.inference.gpu_planner import resolve_visible_devices
+from olmo_eval.inference.gpu_planner import resolve_visible_devices, tensor_parallel_for
 from olmo_eval.runners.asynq.runtime import resolved_worker_config
 from olmo_eval.runners.asynq.types import (
     WORKER_FATAL,
@@ -38,6 +38,7 @@ def inference_worker(
     output_dir: str | None = None,
     num_workers: int = 1,
     start_event: Any | None = None,
+    per_request: bool = False,
 ) -> None:
     """Worker process that initializes a harness and processes items.
 
@@ -56,6 +57,8 @@ def inference_worker(
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
         num_workers: Number of parallel workers sharing the work.
         start_event: Optional event used to hold all ready workers at a start gate.
+        per_request: Return each request's result as it finishes where the provider
+            allows it, instead of when its batch ends.
     """
     import sys
 
@@ -109,7 +112,7 @@ def inference_worker(
         engine_overrides: dict[str, Any] = {}
         if provider_kind in ("vllm", "vllm_server"):
             engine_overrides = dict(
-                tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+                tensor_parallel_size=tensor_parallel_for(gpu_ids, provider_config.kwargs),
                 load_format=load_format,
                 model_loader_extra_config=extra_loader_config,
                 enable_auto_tool_choice=enable_auto_tool_choice or None,
@@ -178,7 +181,11 @@ def inference_worker(
                     chunk_size=max_batch_sequences or batch_config.resolved_chunk_size,
                     max_batch_sequences=max_batch_sequences,
                 )
-            strategy = get_strategy(batch_config, max_batch_sequences=max_batch_sequences)
+            strategy = get_strategy(
+                batch_config,
+                max_batch_sequences=max_batch_sequences,
+                per_request=per_request and batch_config.dispatches_per_request(provider_kind),
+            )
             profile = (
                 cast("SGLangProvider", harness.provider).profile_report
                 if provider_kind == "sglang"

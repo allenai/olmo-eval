@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
-from olmo_eval.common.types import LMRequest, ProviderKind, RequestType
+from olmo_eval.common.types import ContextFit, LMRequest, ProviderKind, RequestType
 from olmo_eval.harness import clear_registry, register_tool
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
-from olmo_eval.harness.harness import Harness, create_harness
+from olmo_eval.harness.harness import Harness, apply_harness_config, create_harness
 from olmo_eval.harness.tools import tool
 
 
@@ -35,6 +37,47 @@ def sample_tool():
 
     register_tool(test_search)
     return test_search
+
+
+def _injected(config, messages):
+    """The messages a harness with ``config`` sends for a chat request."""
+    request = LMRequest(request_type=RequestType.CHAT, messages=messages)
+    return apply_harness_config(config, request).messages
+
+
+class TestApplyHarnessConfig:
+    # Fields the harness may change; every other request field must pass through as is.
+    CHANGED = {"messages", "tools", "system_prompt"}
+
+    def test_every_other_request_field_passes_through(self):
+        # A new LMRequest field must be handled in apply_harness_config, or a resumed
+        # run, which rebuilds requests through it, would silently drop that field.
+        assert {f.name for f in dataclasses.fields(LMRequest)} == self.CHANGED | {
+            "request_type",
+            "prompt",
+            "continuations",
+            "continuation_prompts",
+            "max_length",
+            "images",
+            "metadata",
+            "context_fit",
+        }
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": "q"},),
+            prompt="p",
+            continuations=("a", "b"),
+            continuation_prompts=("pa", "pb"),
+            max_length=123,
+            images=("image",),
+            metadata={"k": "v"},
+            context_fit=ContextFit(text="document", max_prompt_tokens=4096),
+        )
+        config = HarnessConfig(name="h", provider=ProviderConfig(kind=ProviderKind.MOCK))
+        applied = apply_harness_config(config, request)
+        for field in dataclasses.fields(LMRequest):
+            if field.name not in self.CHANGED:
+                assert getattr(applied, field.name) == getattr(request, field.name), field.name
 
 
 class TestHarness:
@@ -153,10 +196,8 @@ class TestHarness:
             provider=mock_provider_config,
             system_prompt="System message",
         )
-        harness = Harness(config)
-
         messages = ({"role": "user", "content": "Hello"},)
-        injected = harness._inject_system_prompt(messages)
+        injected = _injected(config, messages)
 
         assert len(injected) == 2
         assert injected[0]["role"] == "system"
@@ -170,13 +211,11 @@ class TestHarness:
             provider=mock_provider_config,
             system_prompt="New system",
         )
-        harness = Harness(config)
-
         messages = (
             {"role": "system", "content": "Existing system"},
             {"role": "user", "content": "Hello"},
         )
-        injected = harness._inject_system_prompt(messages)
+        injected = _injected(config, messages)
 
         assert len(injected) == 2  # No new system message added
         assert injected[0]["content"] == "Existing system"
@@ -184,10 +223,8 @@ class TestHarness:
     def test_harness_no_inject_if_no_prompt(self, mock_provider_config):
         """Test that nothing is injected if no system prompt configured."""
         config = HarnessConfig(name="no_prompt", provider=mock_provider_config)
-        harness = Harness(config)
-
         messages = ({"role": "user", "content": "Hello"},)
-        injected = harness._inject_system_prompt(messages)
+        injected = _injected(config, messages)
 
         assert injected == messages
 

@@ -136,7 +136,8 @@ Suites support different strategies for combining task results:
 | `WEIGHTED_AVERAGE` | Average of all task scores, each weighted by the task's instance count |
 | `AVERAGE_OF_AVERAGES` | Average over child suite averages (equal weight per child) |
 | `DISPLAY_ONLY` | Display child results without computing suite average |
-| `NONE` | No aggregation - just collect individual task results |
+| `GAP` | Two tasks, reference then companion: both primary scores and the companion minus the reference |
+| `NONE` | No suite score: tasks report individually, and each nested suite reports its own aggregate |
 
 **Average of Averages Example:**
 
@@ -187,6 +188,23 @@ register(Suite(
 `WEIGHTED_AVERAGE` matches the instance-weighted "micro" average that oe-eval reports for some suites. It weights each task by the number of instances that task scored.
 
 A weighted suite reports its weighted mean or no score at all. If a contributing task has no instance count, the suite aggregate is omitted and the runner logs which tasks were missing, rather than publishing an unweighted mean under the same suite name. Instance counts are required when a result is stored, so this only affects results written before that check existed.
+
+**Gap Example:**
+
+```python
+register(Suite(
+    name="omega:dev",
+    tasks=("omega_500:hillclimb", "omega_500_out"),  # in-distribution, then held-out
+    aggregation=AggregationStrategy.GAP,
+))
+
+# With scores of 0.60 (in) and 0.45 (out):
+# primary_score: reference 0.60, companion 0.45 (the suite's primary), gap -0.15
+```
+
+A gap suite retains its definition in `suite_metrics`, but is omitted from `summary` unless both tasks scored on the same primary metric. It can be nested only in a `NONE` suite, which reports it under its own name: a gap is not a score to average.
+
+The held-out companion score is the value to rank and optimize. The gap is a diagnostic guard, shown in percentage points in the log summary; reducing the reference score never improves the suite's primary score. In `metrics.json`, `suite_metrics["omega:dev"]["primary_score"]` retains `reference`, `companion`, and `gap`; `summary` selects the companion.
 
 ### Formatters
 
@@ -581,9 +599,36 @@ documents the rest.
 | `primary_metric` | `MetricName \| Metric \| None` | `None` | Primary metric for ranking (defaults to single metric if only one) |
 | `sampling_params` | `SamplingParams \| None` | `None` | Default sampling parameters for this task |
 | `answer_extractor` | `Callable[[str], str] \| None` | `None` | Function applied to output text by the default `extract_answer` |
+| `response_parser` | `str` | unset | Set `harmony` to score only structured Harmony final-channel text |
 | `strip_thinking` | `bool` | `False` | Drop `<think>...</think>` traces before scoring |
 | `dependencies` | `list[str] \| None` | `None` | Runtime packages to install (e.g., `["pkg==1.0"]`) |
 | `judge_model` | `str \| None` | `None` | Judge model for LLM-as-judge scoring |
+
+For inline vLLM, or a provider that returns raw Harmony delimiters, use
+`-o response_parser=harmony`. Inline vLLM preserves the generated Harmony token
+boundaries before its default decoder removes special tokens, saving them in
+`text_with_special_tokens` for auditing or re-scoring. Saved predictions also
+record `response_parser_found`: false means no delimited transcript was found
+(including an already parsed plain answer). If a known structured decode cannot
+be aligned with the stopped completion, explicit parsing raises a scoring error;
+the diagnostic and raw text remain in saved predictions.
+This opt-in changes the task hash, keeps the original decoded generation in `original_text`,
+and scores an empty answer when a Harmony analysis trace has no final channel.
+It accepts the documented `<|start|>/<|channel|>/<|message|>` delimiters of the gpt-oss
+tokenizer. Already parsed plain text passes through. Decoding with special tokens removed loses message boundaries:
+`analysis...assistantfinal...` cannot be parsed reliably; retain special tokens or
+use a provider's native Harmony reasoning parser before evaluating.
+
+### Generation diagnostics
+
+Generation diagnostics count outputs, including each sample of an instance.
+`cap_hit` counts known `length` finish reasons and is a lower bound when
+`finish_reason_unknown` is nonzero. `unclosed_think` detects emitted `<think>`
+tags without a closing tag in the original generation. `empty` counts empty
+scoring text and excludes tool calls. Tasks that strip or transform text inside
+extraction, without changing `LMOutput.text`, set
+`output.metadata[SCORING_TEXT_EMPTY_KEY]` from that scoring text before parsing;
+a nonempty answer that fails parsing is still nonempty.
 
 ### Data Sources
 
@@ -973,6 +1018,91 @@ of PIL images / zero-arg callables / file paths — and sends them all on one
 request. Registration and variants work exactly as described in
 [Adding New Tasks](#adding-new-tasks).
 
+## Hill-Climb Dev Suite
+
+`hillclimb:dev` runs LiveCodeBench lite, the OMEGA in/out pair, IFEval, IFBench
+and GPQA main together. It has no cross-domain aggregate; each task reports
+its score and `omega:dev` reports its held-out score and gap.
+
+```bash
+uv run olmo-eval run -m <checkpoint> -t hillclimb:dev \
+    --harness codex_python \
+    -o provider.kind=vllm -o provider.max_model_len=36864 \
+    -o sandboxes.0.inject_swerex=true
+```
+
+LiveCodeBench requires the sandboxed harness; see [missing-sandbox tracking (#423)](https://github.com/allenai/olmo-eval/issues/423). Set the same model context limit
+for every checkpoint you compare; OMEGA has a 32,768-token generation cap.
+
+## Post-Training Dev and Test Suites
+
+`posttrain:tiny:dev`, `posttrain:tiny:test`, `posttrain:small:dev` and
+`posttrain:small:test` follow the Olmo eval tracker: its Track column is dev, its
+Publish column is test. Use dev suites for hill-climbing and checkpoint selection;
+read test suites only for release reports. No task is in both suites of one size.
+None has a cross-domain aggregate. Dev leaves out four Track rows. GPQA is read in neither
+variant: at 32,768 output tokens about 60% of a reasoning model's generations stop
+mid-thought and score at chance, so the entry measures the cutoff more than the model;
+MMLU:cot guards knowledge instead. HELMET's recall tasks repeat RULER+, and its QA tasks
+are chat requests capped at 10 tokens, so a model that reasons first is scored on where the
+cap cut it. CTC's 64K tasks report heterogeneous metrics with no aggregate, and its own
+README says a reasoning model needs more than their direct-answer budgets.
+
+Small dev also reads the tracker's agentic Track rows. They are
+[external evals](#external-evals), which a suite cannot hold, so each runs as its own
+`olmo-eval run-external -e <name>` job beside the suite: `openthoughts_tblite`
+(OpenThoughts-TBLite, 100 tasks) and `terminal_bench_2` (Terminal-Bench 2.1, 89 tasks) for
+the Terminal-Bench row, and `swe_bench_verified`.
+
+The tracker deprioritizes those rows for Tiny, but without an agentic read Tiny dev cannot
+show whether a change helps or hurts agentic skill, so it reads two on which Tiny scores
+above zero. BFCL multi-turn is `posttrain:tiny:dev:bfcl_multi_turn`, a suite of its own
+because it needs the `bfcl_multi_turn` scaffold (`--harness bfcl_multi_turn`), at
+temperature 1.0, top_p 0.95 and 16,384 tokens per turn. SWE-bench Verified reads only the
+194 of its 500 instances annotated as under 15 minutes to fix, which hold most of what a
+Tiny checkpoint resolves (17 of 26 for one Tiny SFT checkpoint):
+
+```bash
+olmo-eval run-external -m <checkpoint> -e swe_bench_verified -a 'difficulties=<15 min fix' \
+  -a task_frame=swesmith -a temperature=1.0 -a top_p=0.95 -a max_tokens=16384 \
+  -K max_model_len=65536
+```
+
+The suites mix short tasks with RULER+ at 64K to 256K, LiveCodeBench (sandboxed harness,
+as above) and LLM-judged safety and Arena-Hard tasks (see
+[local judge models](#local-judge-models)). Sampled tasks run at the ledger's setting:
+Olmo 3.5 Tiny's suggested temperature 1.0 and top_p 0.95 (Small uses them too, assumed from
+Tiny), with 32,768 output tokens, through `_t10_32k` variants that keep each task's sample
+count. Without the fixed budget, most of these tasks would generate up to whatever context
+they are served at. RULER+ runs greedy in completion mode with
+direct-answer budgets, and BFCL keeps its own settings. Do not override sampling or
+`max_tokens` for the whole run. Serve sampled tasks with a context of at least their
+longest prompt plus 32,768 tokens: the server refuses any request that does not fit (at
+34,816, every prompt over 2,048 tokens), and only when the request reaches it.
+
+Tiny dev is two suites, run as separate jobs: `posttrain:tiny:dev` and
+`posttrain:tiny:dev:bfcl_multi_turn`. So is Small dev. MT-Bench and Multi-IF need the
+`multi_turn_chat` scaffold (`--harness multi_turn_chat`), which drops tool calls and has no
+sandbox, so they are `posttrain:small:dev:multi_turn`; the rest is `posttrain:small:dev`.
+
+The suites name no provider, but the engine is part of what a score measures: compare
+scores only between runs on the same provider, and record it with each run. When the rest
+of a suite runs on SGLang, BFCL needs its own job with `provider.kind=vllm_server`, the
+only provider with tool calls. LiveCodeBench (`livecodebench:lite` in dev,
+`livecodebench_hidden` in test) needs a sandbox harness, whose default image is CUDA 12.8
+and so cannot install SGLang ([SGLang](docs/sglang.md)); with `--image` set to the CUDA 13
+evaluator image (Beaker `01M632ZP67Y4WMV060J74FSC3R`) it runs on SGLang, and so does the
+WildGuard judge. In Small test, Arena-Hard v2 also needs vLLM: it fits its output budget to the context,
+which SGLang refuses.
+
+Every suite has WildGuard-judged safety tasks, so a launch needs the `wg_judge` overrides
+(`-o auxiliary_providers.wg_judge.kind=vllm_server -o
+auxiliary_providers.wg_judge.model=allenai/wildguard -o
+auxiliary_providers.wg_judge.kwargs.add_bos_token=true`), and the test suites also need the
+`sr_judge` overrides for StrongREJECT; `safety.py` has both. Without them the run generates
+every item and then fails at scoring. Each local judge gets its own GPUs on top of the
+model's: at least 2 GPUs for dev and 3 for test, at tensor parallel 1.
+
 ## Querying Results
 
 Evaluation results can be stored in PostgreSQL and queried via the CLI.
@@ -1072,6 +1202,140 @@ uv run olmo-eval run -m allenai/OLMo-2-1124-7B -t mmlu --force-download-model
 # Tool-augmented evaluation with harness
 uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 ```
+
+### Rescoring Saved Generations
+
+The `replay` provider answers each request with the generation an earlier run saved
+for the same prompt, so scorer and metric changes can be measured without a model or
+GPU. Point it at a predictions file or a results directory holding one model's
+predictions (each file is read with the requests file saved beside it; a prompt saved by
+two task configurations needs the file), and repeat the original run's model and task
+options so the prompts match:
+
+```bash
+uv run olmo-eval run -m mock -t gsm8k -o limit=100 \
+    -H default -o provider.kind=replay -o provider.predictions=/tmp/results/ \
+    -O /tmp/rescored/
+```
+
+A prompt with no saved generation, or saved with a different number of samples, fails
+like a generation error and counts against the task's failure budget. Only text
+generations are replayed: logprob tasks, image or tool requests and multi-turn
+rollouts are not.
+
+### Resuming Interrupted Runs
+
+With `--resume`, a run records each instance as it finishes. Restarted on the same
+output directory, it skips the instances an earlier attempt finished and writes the same
+predictions and metrics as an uninterrupted run.
+
+```bash
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --resume   # interrupted
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --resume   # continues
+uv run olmo-eval run -m llama3.1-8b -t gsm8k -O results/ --fresh    # discards progress
+```
+
+| Flag | Description |
+|------|-------------|
+| `--resume` | Record progress under `<output_dir>/progress/` and continue from any already there |
+| `--fresh` | Delete the recorded progress of this run's tasks and model before the run; cannot be combined with `--resume` |
+
+Without either flag, a run records nothing and ignores progress it finds, with a warning.
+Beaker task launches default to `--resume` and use `--resume-volume ai2/olmo-eval`
+by default. Replacement jobs mount the same WEKA directory directly. Use
+`--resume-volume <org>/<name>` to select a different native volume.
+
+Beaker results are the same with or without resume. The eval writes predictions,
+requests, metrics, the manifest and logs to `/results` as it runs, in the same layout
+and at the same moments. Only the progress records and the run's identity (its manifest
+and upload secret) go to the volume, and a completed run deletes them.
+
+To run without progress recovery, pass `--no-resume` (YAML: `resume: false`). This
+needs no resume-volume claim and records no recovery progress. Preempted or retried
+attempts start over. `--resume` explicitly enables
+recovery and overrides `resume: false` from YAML.
+
+Before the first resumable launch in a workspace, grant it read-write access to the volume:
+
+```bash
+beaker volume claim create --workspace <workspace> --volume ai2/olmo-eval --mode readwrite
+uv run olmo-eval beaker launch -m <model> -t <task> -c <cluster> -w <workspace> \
+    --min-runtime 30m --timeout 2h
+```
+
+This requires a volume-capable Beaker CLI (v1.5.346 is qualified). Claims are managed
+once per workspace; the launcher never changes access. If a claim is missing or
+read-only, submission stops with the workspace-specific grant command, permission
+requirements, and the `--no-resume` alternative. Every resumable submission gets its own
+UUID directory under `/eval-cache/tmp-7d/` by default. Set
+`--resume-retention-days 14` (YAML: `resume_retention_days: 14`) to use `tmp-14d`
+and retain inactive recovery files for fourteen days. Any positive whole number of
+days is accepted. Replacement jobs reuse their original UUID and retention path and take
+an exclusive run lock. The job log names the run's WEKA recovery directory.
+Grant read-write claims only to workspaces whose submitters are mutually trusted.
+Progress records can contain serialized Python objects; checksums detect corruption
+and do not authenticate writers.
+
+Active runs refresh every recovery file's modification time hourly. After the selected
+retention period of inactivity (seven days by default), files are eligible for WEKA
+prune deletion. Actual deletion depends on the volume's prune schedule. Results are
+unaffected: they are in Beaker results and upload to the dashboard normally. Expired,
+missing, or corrupt committed progress stops recovery with an error. Shared-storage
+progress flushes every five seconds and on graceful shutdown. A completion marker
+prevents a replacement from repeating a successfully finished run when its results
+came along; a rerun whose results lack them runs the eval again under the same run ID. External evals do
+not support `--resume-volume`. See the [implementation and validation plan](docs/weka-resume.md).
+
+- **What is recorded.** `progress/<model>/run.segments/` (on the volume under the Beaker
+  resume supervisor) holds one stream for the run: a
+  header per task, then one entry per finished instance with its outputs, scores and a
+  hash of its prepared request. Prompts are rebuilt from the task, not stored. A
+  generation's per-token logprobs are left out unless one of the task's metrics scores
+  from them (`Scorer.reads_logprobs`); its `sum_logits` and `num_tokens` are kept. Each
+  finished task also gets a `<task>_<hash>.final.json`. Entries reach the disk every two
+  minutes. The `progress/` directory is never uploaded. A run that completes deletes
+  the records of its own tasks only.
+- **What must match.** The record format, task spec and hash, model hash and revision,
+  the harness settings that affect outputs, the inference engine version (such as
+  `vllm==0.11.2`), the git commit, the uncommitted changes to tracked files (a hash of
+  `git diff HEAD`; untracked files are not covered) and, for SGLang, the resolved runtime.
+  Editing code after an interruption therefore stops a resume; revert the edits, pass
+  `--fresh`, or use another output directory. A run that starts from a dirty tree warns
+  that resuming will need the same changes. Without git (an installed package), the
+  commit and changes are not compared. New untracked files, such as a new scorer module,
+  are not covered either; `git add -N <file>` includes one. A difference
+  stops the run with an error naming the setting; pass `--fresh` or use another output
+  directory. Where the run executes (GPU count, cluster, tensor parallelism, concurrency)
+  may differ and only logs a warning. An instance whose prepared request, gold
+  answer or metadata changed is run again.
+- **Sharing an output directory.** Runs of different tasks may share one. Each run
+  keeps the others' records when it completes and logs which tasks it is keeping. Only one
+  run at a time may record for a model: `progress/<model>/.lock` names the holder (host,
+  PID, start time, Beaker job). A second run fails with an error naming it. A lock whose
+  process is gone from this host is taken over; on Beaker, a job takes over any lock in its
+  own `/results` (the predecessor's, copied there) and any lock left by an earlier attempt of
+  the same job. In a shared directory (`-O /weka/...`), another job's lock is treated as any
+  lock from another host. For a lock from another host outside Beaker,
+  delete the file once that run is gone.
+- **Failures.** An instance is recorded only when an uninterrupted run would keep its
+  outcome: a scored response, or a failure the request itself caused, such as a context
+  overflow. Connection and server errors, judge or sandbox outages, and results that
+  arrive after SIGTERM are not recorded, so the resumed run tries them again. A task that
+  fails or exceeds its failure budget is computed again from its recorded instances.
+- **Results return per request.** While recording, providers that send requests one at
+  a time (`vllm_server`, `litellm`) return each result when it finishes, not when its
+  batch does. In-process engines (`vllm`, `sglang`, `hf`, `olmo_core`, `olmo_core_vlm`) return a batch at once; to
+  record them more often, lower the batch size with
+  `--harness default -o batching.chunk_size=16`.
+- **Dashboard status.** A `--resume` run stopped by SIGTERM, as a preemption or a canceled
+  Beaker job stops it, shows as `interrupted` instead of `failed`. The resumed run keeps
+  the run ID and shows as running again, then finishes with its final status. A run that
+  nobody resumes shows as stale, like a stale running run, after the same delay; `olmo-eval results upload` on its directory uploads
+  it as finished, with the status its saved results support. Other crashes, Ctrl-C, and
+  runs without `--resume` are still reported as `failed`.
+- **Testing.** `OLMO_EVAL_DEBUG_EXIT_AT=0.5` makes a `--resume` run send itself SIGTERM
+  once half of its instances are recorded, which ends it as a preemption does (exit code
+  143).
 
 ## Debugging and Inspection
 
@@ -1327,6 +1591,14 @@ result = await manager.execute_code("print('hello')", capabilities=Capability.PY
 await manager.stop()
 ```
 
+Independent `execute_command` and `execute_code` calls preserve the sandbox server's
+initialized environment. Docker/Podman uses container execution when process
+supervision is available; other container and Modal paths use asynchronous HTTP
+commands so a long command does not block health checks or file requests.
+Command deadlines terminate the command process group. Commands that finish
+normally can leave background processes running. Persistent bash sessions retain
+shell state between calls and currently use SWE-ReX's session execution path.
+
 ### Sandbox Modes
 
 | Mode | Description |
@@ -1336,6 +1608,9 @@ await manager.stop()
 | `MODAL` | Run on Modal cloud platform |
 
 ## Launching on Beaker
+
+For BF16 Olmo MoE failures during B300 profiling, see the
+[B300 vLLM compatibility checks](docs/b300-vllm.md).
 
 olmo-eval includes built-in support for launching evaluation jobs on [Beaker](https://beaker.org).
 
@@ -1543,7 +1818,7 @@ budget: ai2/oe-other
 | `--gpus` | `-G` | auto | Number of GPUs (defaults to 1 for GPU providers, 0 otherwise) |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
 | `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
-| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`) |
+| `--preemptible` | | `true` | Allow preemption (deprecated by Beaker; prefer `--min-runtime`); `--no-preemptible` means `--min-runtime 8h` |
 | `--min-runtime` | | none | Minimum runtime before Beaker may preempt the job (e.g., `2h`) |
 | `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | `-r` | none | Number of retries on failure |
@@ -1557,6 +1832,9 @@ budget: ai2/oe-other
 | `--force-download-model` | | `false` | Refresh Hugging Face model/tokenizer cache before loading |
 | `--uv-cache-dir` | | default | UV cache directory for package downloads |
 | `--weka-bucket` | | none | Extra Weka bucket to mount at `/weka/<bucket>`, on top of `oe-training-default`, `oe-eval-default` and `oe-adapt-default` (can specify multiple) |
+| `--resume / --no-resume` | | enabled | Recover interrupted task progress; opt out to run without a resume-volume claim |
+| `--resume-volume` | | `ai2/olmo-eval` | Native Beaker volume for resumable task state; requires a read-write workspace claim |
+| `--resume-retention-days` | | 7 | Positive whole number of days to retain inactive recovery files |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--yes` | `-y` | `false` | Skip confirmation prompt |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
@@ -1567,8 +1845,10 @@ budget: ai2/oe-other
 
 ### Preemption
 
-By default, Beaker can preempt a job at any time and requeues it afterward. Use
-`--min-runtime` (or `min_runtime:` in a config file) to protect a job from preemption:
+By default, Beaker can preempt a job at any time and requeues it afterward. The requeued
+job continues from the instances the preempted one recorded (see
+[Resuming Interrupted Runs](#resuming-interrupted-runs)). Use `--min-runtime` (or
+`min_runtime:` in a config file) to protect a job from preemption:
 
 ```bash
 uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
@@ -1586,8 +1866,11 @@ uv run olmo-eval beaker launch -m llama3.1-8b -t mmlu -c h100 --min-runtime 4h
   both config file fields.
 - External evals (`-E`) take `--min-runtime` from the CLI only; they do not read the
   config file.
-- `--no-preemptible` still works. Beaker treats it as an 8h min runtime with auto-resume
-  turned off.
+- `--no-preemptible` (and `preemptible: false`) is the same as `--min-runtime 8h`. The
+  launcher sends the min runtime and leaves `preemptible` unset, so Beaker keeps
+  auto-resume on. Sending `preemptible=False` to Beaker would also turn auto-resume off,
+  and on clusters that make jobs interruptible after the min runtime, a preemption after
+  8h would end the experiment with no replacement job.
 
 ### Per-Task Overrides
 
@@ -1816,9 +2099,12 @@ retries: 2
 | `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
 | `min_runtime` | string | no | Minimum runtime before preemption (e.g., `2h`); see [Preemption](#preemption) |
-| `preemptible` | bool | no | Deprecated by Beaker; cannot be combined with `min_runtime` |
+| `preemptible` | bool | no | Deprecated by Beaker; `false` means `min_runtime: 8h`; cannot be combined with `min_runtime` |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
+| `resume` | bool | no | Recover interrupted task progress (default: `true`); `false` needs no resume-volume claim |
+| `resume_volume` | string | no | Native Beaker volume for resumable task state (default: `ai2/olmo-eval`) |
+| `resume_retention_days` | int | no | Days to retain inactive recovery files (default: 7; must be positive) |
 | `beaker_image` | string | no | Container image to use (config-only) |
 | `groups` | list | no | Beaker groups to add experiments to |
 

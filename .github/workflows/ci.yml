@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Runs the required checks on merge-queue groups (main + queued PRs).
+  merge_group:
   workflow_dispatch:
 
 concurrency:

@@ -1,13 +1,19 @@
 """Tests for the AA-Omniscience task."""
 
-import inspect
+import contextlib
 import logging
 from dataclasses import replace
 
 import pytest
 
 from olmo_eval.common.execution import ScoringContext
-from olmo_eval.common.scorers.llm_judge import build_openai_judge_fn
+from olmo_eval.common.scorers import llm_judge
+from olmo_eval.common.scorers.execution import ScoringIncompleteError
+from olmo_eval.common.scorers.llm_judge import (
+    JUDGE_ATTEMPTS,
+    JudgeParseError,
+    build_openai_judge_fn,
+)
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
 from olmo_eval.evals.tasks import omniscience
 from olmo_eval.evals.tasks.common import TaskConfig, get_task, task_exists
@@ -20,7 +26,7 @@ from olmo_eval.evals.tasks.omniscience import (
     OmniscienceScorer,
 )
 from olmo_eval.runners.asynq.preparation import prepare_task_items
-from olmo_eval.runners.io.builders import build_predictions, build_requests_from_responses
+from olmo_eval.runners.io.builders import build_predictions
 from olmo_eval.runners.processing.utils import compute_task_hash
 
 
@@ -63,13 +69,17 @@ def _response(task, text: str = "ASC 606-10-25-15", domain: str = "Finance") -> 
 
 def _graded(grade: str | None, domain: str = "Finance") -> Response:
     """A response whose judge grade has already been recorded."""
-    metadata: dict = {"domain": domain}
+    output = LMOutput(text="a")
     if grade is not None:
-        metadata["judge_result"] = {"grade": grade, "empty_response": False}
+        output.metadata["judge_result"] = {
+            "grade": grade,
+            "empty_response": False,
+            "raw_judge_response": None,
+        }
     return Response(
-        instance=Instance(question="q", gold_answer="g", metadata=metadata),
+        instance=Instance(question="q", gold_answer="g", metadata={"domain": domain}),
         request=LMRequest(request_type=RequestType.CHAT, messages=()),
-        outputs=[LMOutput(text="a")],
+        outputs=[output],
     )
 
 
@@ -85,6 +95,16 @@ def _replies_by_answer(replies: dict[str, str]):
         raise RuntimeError("judge unavailable")
 
     return judge, calls
+
+
+@pytest.fixture(autouse=True)
+def no_judge_backoff(monkeypatch):
+    """Skip the wait between judge attempts so asking again stays fast."""
+
+    async def instant(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(llm_judge.asyncio, "sleep", instant)
 
 
 @pytest.fixture
@@ -123,7 +143,6 @@ class TestRegistration:
             "any__any__omniscience_index",
             "any__any__hallucination_rate",
             "any__any__accuracy",
-            "judge_parsing_errors",
             *(f"domain__{domain}__accuracy" for domain in DOMAINS),
         }
         assert task.config.get_primary_metric().name == "any__any__omniscience_index"
@@ -153,7 +172,7 @@ class TestRegistration:
                 metrics=tuple(replace(metric, scorer=judge) for metric in task.config.metrics),
             )
 
-        default_model = inspect.signature(build_openai_judge_fn).parameters["model"].default
+        default_model = omniscience.OMNISCIENCE_JUDGE.model
         default_hash = compute_task_hash(task.config.to_dict())
 
         assert compute_task_hash(with_judge(default_model).to_dict()) == default_hash
@@ -175,7 +194,7 @@ class TestRegistration:
         assert {id(metric.scorer()) for metric in task.config.metrics} == {id(judge)}
         assert task.config.get_primary_metric().scorer() is judge
         assert judge.judge_fn.__dict__["judge_config"] == {
-            **build_openai_judge_fn().__dict__["judge_config"],
+            **omniscience.OMNISCIENCE_JUDGE.build_fn("OmniscienceScorer").judge_config,
             setting: value,
         }
 
@@ -369,13 +388,12 @@ class TestJudgeParsing:
         ],
     )
     def test_recognized_grades(self, raw, grade):
-        instance = Instance(question="q", gold_answer="g")
+        output = LMOutput(text="a")
 
-        score = OmniscienceScorer(judge_fn=named_judge).parse_judge_response(raw, instance)
+        score = OmniscienceScorer(judge_fn=named_judge).parse_judge_response(raw, output)
 
-        assert instance.metadata["judge_result"]["grade"] == grade
+        assert output.metadata["judge_result"]["grade"] == grade
         assert score == (1.0 if grade == "CORRECT" else 0.0)
-        assert instance.metadata["is_parsing_error"] is False
 
     @pytest.mark.parametrize(
         "raw",
@@ -391,22 +409,26 @@ class TestJudgeParsing:
             "partial answer, not attempted",
         ],
     )
-    def test_unparseable_replies_are_a_parsing_error(self, raw):
-        instance = Instance(question="q", gold_answer="g")
+    def test_unparseable_replies_raise_after_recording_a_parsing_error(self, raw):
+        output = LMOutput(text="a")
 
-        score = OmniscienceScorer(judge_fn=named_judge).parse_judge_response(raw, instance)
+        with pytest.raises(JudgeParseError):
+            OmniscienceScorer(judge_fn=named_judge).parse_judge_response(raw, output)
 
-        assert score == 0.0
-        assert instance.metadata["judge_result"]["grade"] == "PARSING_ERROR"
-        assert instance.metadata["is_parsing_error"] is True
+        assert output.metadata["judge_result"]["grade"] == "PARSING_ERROR"
+
+    def test_unparseable_replies_raise_without_an_output(self):
+        with pytest.raises(JudgeParseError):
+            OmniscienceScorer(judge_fn=named_judge).parse_judge_response("garbage")
 
     @pytest.mark.parametrize("raw", ["  b \n", "garbage"])
     def test_raw_judge_reply_is_kept_verbatim(self, raw):
-        instance = Instance(question="q", gold_answer="g")
+        output = LMOutput(text="a")
 
-        OmniscienceScorer(judge_fn=named_judge).parse_judge_response(raw, instance)
+        with contextlib.suppress(JudgeParseError):
+            OmniscienceScorer(judge_fn=named_judge).parse_judge_response(raw, output)
 
-        assert instance.metadata["judge_raw_response"] == raw
+        assert output.metadata["judge_result"]["raw_judge_response"] == raw
 
 
 class TestScorer:
@@ -421,33 +443,85 @@ class TestScorer:
 
         assert score == 1.0
         assert calls == [scorer.format_judge_prompt(instance, output)]
-        assert instance.metadata["judge_result"] == {"grade": "CORRECT", "empty_response": False}
-        assert instance.metadata["judge_raw_response"] == "A"
+        assert output.metadata["judge_result"] == {
+            "grade": "CORRECT",
+            "empty_response": False,
+            "raw_judge_response": "A",
+        }
 
     @pytest.mark.anyio
-    async def test_clears_a_stale_parsing_error_flag(self):
+    async def test_grades_live_on_the_output_not_the_instance(self):
         judge, _ = _replies_by_answer({"a": "B"})
-        instance = Instance(question="q", gold_answer="g", metadata={"is_parsing_error": True})
+        instance = Instance(question="q", gold_answer="g")
 
         await OmniscienceScorer(judge_fn=judge).ascore_with_context(
             instance, LMOutput(text="a"), ScoringContext()
         )
 
-        assert instance.metadata["is_parsing_error"] is False
+        assert instance.metadata == {}
 
     @pytest.mark.anyio
-    async def test_flags_and_reraises_a_judge_failure(self):
-        judge, _ = _replies_by_answer({})
-        instance = Instance(question="q", gold_answer="g", metadata={"judge_raw_response": "stale"})
+    async def test_an_unparseable_reply_is_asked_again(self):
+        replies = iter(["not a grade", "garbage", "A"])
+        calls: list[str] = []
 
-        with pytest.raises(RuntimeError, match="judge unavailable"):
+        async def judge(prompt: str) -> str:
+            calls.append(prompt)
+            return next(replies)
+
+        output = LMOutput(text="a")
+        score = await OmniscienceScorer(judge_fn=judge).ascore_with_context(
+            Instance(question="q", gold_answer="g"), output, ScoringContext()
+        )
+
+        assert score == 1.0
+        assert len(calls) == 3
+        assert output.metadata["judge_result"]["grade"] == "CORRECT"
+        assert output.metadata["judge_result"]["raw_judge_response"] == "A"
+
+    @pytest.mark.anyio
+    async def test_waits_between_judge_attempts(self, monkeypatch):
+        delays: list[float] = []
+
+        async def record(delay: float) -> None:
+            delays.append(delay)
+
+        monkeypatch.setattr(llm_judge.asyncio, "sleep", record)
+        judge, _ = _replies_by_answer({"a": "garbage"})
+
+        with pytest.raises(JudgeParseError):
             await OmniscienceScorer(judge_fn=judge).ascore_with_context(
-                instance, LMOutput(text="a"), ScoringContext()
+                Instance(question="q", gold_answer="g"), LMOutput(text="a"), ScoringContext()
             )
 
-        assert instance.metadata["is_parsing_error"] is True
-        assert instance.metadata["judge_result"]["grade"] == "PARSING_ERROR"
-        assert instance.metadata["judge_raw_response"] is None
+        assert delays == [1, 2]
+
+    @pytest.mark.anyio
+    async def test_no_parseable_reply_raises_and_leaves_the_output_unscored(self):
+        judge, calls = _replies_by_answer({"a": "not a grade"})
+        output = LMOutput(text="a")
+
+        with pytest.raises(JudgeParseError) as raised:
+            await OmniscienceScorer(judge_fn=judge).ascore_with_context(
+                Instance(question="q", gold_answer="g"), output, ScoringContext()
+            )
+
+        assert len(calls) == JUDGE_ATTEMPTS
+        assert raised.value.raw == "not a grade"
+        assert output.metadata["judge_result"]["grade"] == "PARSING_ERROR"
+        assert output.metadata["judge_result"]["raw_judge_response"] == "not a grade"
+
+    @pytest.mark.anyio
+    async def test_a_judge_failure_raises_without_recording_a_grade(self):
+        judge, _ = _replies_by_answer({})
+        output = LMOutput(text="a")
+
+        with pytest.raises(ScoringIncompleteError, match="judge unavailable"):
+            await OmniscienceScorer(judge_fn=judge).ascore_with_context(
+                Instance(question="q", gold_answer="g"), output, ScoringContext()
+            )
+
+        assert "judge_result" not in output.metadata
 
     @pytest.mark.anyio
     @pytest.mark.parametrize(
@@ -457,22 +531,21 @@ class TestScorer:
     )
     async def test_no_final_answer_is_not_attempted_without_a_judge_call(self, text):
         judge, calls = _replies_by_answer({})
-        instance = Instance(
-            question="q", gold_answer="42", metadata={"judge_raw_response": "stale"}
-        )
+        instance = Instance(question="q", gold_answer="42")
+        output = LMOutput(text=text, extracted_answer="")
 
         score = await OmniscienceScorer(judge_fn=judge).ascore_with_context(
-            instance, LMOutput(text=text, extracted_answer=""), ScoringContext()
+            instance, output, ScoringContext()
         )
 
         assert score == 0.0
         assert calls == []
-        assert instance.metadata["judge_result"] == {
+        assert output.metadata["judge_result"] == {
             "grade": "NOT_ATTEMPTED",
             "empty_response": True,
+            "raw_judge_response": None,
         }
-        assert instance.metadata["judge_raw_response"] is None
-        assert instance.metadata["is_parsing_error"] is False
+        assert instance.metadata == {}
 
 
 class TestMetrics:
@@ -508,7 +581,9 @@ class TestMetrics:
 
     def test_parsing_errors_do_not_change_any_metric(self, responses):
         graded_only = [
-            r for r in responses if r.instance.metadata["judge_result"]["grade"] != "PARSING_ERROR"
+            r
+            for r in responses
+            if r.outputs[0].metadata["judge_result"]["grade"] != "PARSING_ERROR"
         ]
         for metric in (
             OmniscienceIndexMetric(),
@@ -700,15 +775,21 @@ class TestEndToEnd:
 
         await task.score_responses(responses, ScoringContext())
 
-        assert len(calls) == 4
+        # The unparseable reply is asked for again before the output is given up on.
+        assert len(calls) == 3 + JUDGE_ATTEMPTS
         assert not any("hmm" in prompt for prompt in calls)
-        assert [r.instance.metadata["judge_result"]["grade"] for r in responses] == [
+        assert [r.outputs[0].metadata["judge_result"]["grade"] for r in responses] == [
             "CORRECT",
             "INCORRECT",
             "NOT_ATTEMPTED",
             "PARSING_ERROR",
         ]
-        assert [r.scores["omniscience_judge"] for r in responses] == [1.0, 0.0, 0.0, 0.0]
+        assert [r.scores.get("omniscience_judge") for r in responses] == [1.0, 0.0, 0.0, None]
+        unscored = responses[3].outputs[0]
+        assert unscored.metadata["scoring_errors"]["omniscience_judge"]["type"] == (
+            "JudgeParseError"
+        )
+        assert "score:omniscience_judge" not in unscored.metadata
 
         metrics = task.compute_metrics(responses)
         judge_name = "omniscience_judge"
@@ -717,7 +798,25 @@ class TestEndToEnd:
         assert metrics["any__any__accuracy"][judge_name] == pytest.approx(1 / 3)
         assert metrics["domain__Finance__accuracy"][judge_name] == pytest.approx(0.5)
         assert metrics["domain__Law__accuracy"][judge_name] == pytest.approx(0.0)
-        assert metrics["judge_parsing_errors"][judge_name] == 1.0
+        assert "judge_parsing_errors" not in metrics
+
+    @pytest.mark.anyio
+    async def test_a_reply_that_parses_on_a_later_attempt_is_scored(self, task, patch_judge):
+        responses = [_response(task, text="answered")]
+        replies = iter(["not a grade", "A"])
+        calls: list[str] = []
+
+        async def judge(prompt: str) -> str:
+            calls.append(prompt)
+            return next(replies)
+
+        patch_judge(judge)
+
+        await task.score_responses(responses, ScoringContext())
+
+        assert len(calls) == 2
+        assert responses[0].scores["omniscience_judge"] == 1.0
+        assert "scoring_errors" not in responses[0].outputs[0].metadata
 
     @pytest.mark.anyio
     async def test_no_final_answer_counts_as_not_attempted(self, task, patch_judge):
@@ -733,23 +832,20 @@ class TestEndToEnd:
         await task.score_responses(responses, ScoringContext())
 
         assert len(calls) == 1
-        assert [r.instance.metadata["judge_result"] for r in responses] == [
-            {"grade": "CORRECT", "empty_response": False},
-            {"grade": "NOT_ATTEMPTED", "empty_response": True},
-            {"grade": "NOT_ATTEMPTED", "empty_response": True},
-            {"grade": "NOT_ATTEMPTED", "empty_response": True},
+        assert [r.outputs[0].metadata["judge_result"] for r in responses] == [
+            {"grade": "CORRECT", "empty_response": False, "raw_judge_response": "A"},
+            {"grade": "NOT_ATTEMPTED", "empty_response": True, "raw_judge_response": None},
+            {"grade": "NOT_ATTEMPTED", "empty_response": True, "raw_judge_response": None},
+            {"grade": "NOT_ATTEMPTED", "empty_response": True, "raw_judge_response": None},
         ]
 
         metrics = task.compute_metrics(responses)
         assert metrics["any__any__accuracy"]["omniscience_judge"] == pytest.approx(1 / 4)
         assert metrics["any__any__omniscience_index"]["omniscience_judge"] == pytest.approx(25.0)
         assert metrics["any__any__hallucination_rate"]["omniscience_judge"] == 0.0
-        assert metrics["judge_parsing_errors"]["omniscience_judge"] == 0.0
 
     @pytest.mark.anyio
-    async def test_a_failed_judge_call_is_logged_once_counted_and_excluded(
-        self, task, patch_judge, caplog
-    ):
+    async def test_a_failed_judge_call_is_logged_once_and_excluded(self, task, patch_judge, caplog):
         responses = [_response(task, text="answered"), _response(task, text="judge fails")]
         judge, _ = _replies_by_answer({"answered": "A"})
         patch_judge(judge)
@@ -758,7 +854,12 @@ class TestEndToEnd:
             scored = await task.score_responses(responses, ScoringContext())
 
         assert len(scored) == 2
-        warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+        # The retry helper also logs the failed call; this counts the scoring warnings.
+        warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if r.levelno >= logging.WARNING and r.name != "olmo_eval.inference.retry"
+        ]
         assert len(warnings) == 1
         assert "omniscience_judge" in warnings[0]
         assert "judge unavailable" in warnings[0]
@@ -766,20 +867,16 @@ class TestEndToEnd:
         failed = responses[1]
         assert failed.outputs[0].metadata["scoring_errors"]["omniscience_judge"]
         assert "omniscience_judge" not in failed.scores
-        assert failed.instance.metadata["is_parsing_error"] is True
-        assert failed.instance.metadata["judge_result"]["grade"] == "PARSING_ERROR"
+        assert "judge_result" not in failed.outputs[0].metadata
 
         metrics = task.compute_metrics(responses)
         assert metrics["any__any__accuracy"]["omniscience_judge"] == 1.0
         assert metrics["any__any__omniscience_index"]["omniscience_judge"] == 100.0
-        # The failed call is left out of every metric, its own error count included;
-        # the runner reports it among the task's scoring failures.
-        assert metrics["judge_parsing_errors"]["omniscience_judge"] == 0.0
 
     @pytest.mark.anyio
     async def test_no_warning_when_every_judge_call_succeeds(self, task, patch_judge, caplog):
-        responses = [_response(task, text="answered"), _response(task, text="garbage reply")]
-        judge, _ = _replies_by_answer({"answered": "A", "garbage reply": "not a grade"})
+        responses = [_response(task, text="answered"), _response(task, text="other")]
+        judge, _ = _replies_by_answer({"answered": "A", "other": "B"})
         patch_judge(judge)
 
         with caplog.at_level(logging.WARNING):
@@ -788,20 +885,23 @@ class TestEndToEnd:
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
     @pytest.mark.anyio
-    async def test_judge_output_is_saved_to_the_requests_file(self, task, patch_judge):
+    async def test_judge_output_is_saved_to_the_predictions_file(self, task, patch_judge):
         responses = [_response(task, text="graded"), _response(task, text="unparseable")]
         judge, _ = _replies_by_answer({"graded": "A", "unparseable": "not a grade"})
         patch_judge(judge)
 
         await task.score_responses(responses, ScoringContext())
-        rows = build_requests_from_responses(responses, "omniscience:judge")
+        predictions = build_predictions(responses, metrics=task.config.metrics)
 
-        assert rows[0]["doc"]["judge_raw_response"] == "A"
-        assert rows[0]["doc"]["judge_result"]["grade"] == "CORRECT"
-        assert rows[0]["doc"]["is_parsing_error"] is False
-        assert rows[1]["doc"]["judge_raw_response"] == "not a grade"
-        assert rows[1]["doc"]["judge_result"]["grade"] == "PARSING_ERROR"
-        assert rows[1]["doc"]["is_parsing_error"] is True
+        graded, unparseable = (p["model_output"][0] for p in predictions)
+        assert graded["judge_result"] == {
+            "grade": "CORRECT",
+            "empty_response": False,
+            "raw_judge_response": "A",
+        }
+        assert unparseable["judge_result"]["grade"] == "PARSING_ERROR"
+        assert unparseable["judge_result"]["raw_judge_response"] == "not a grade"
+        assert unparseable["scoring_errors"]["omniscience_judge"]["type"] == "JudgeParseError"
 
     @pytest.mark.anyio
     async def test_empty_response_is_saved_to_the_predictions_file(self, task, patch_judge):
@@ -812,9 +912,9 @@ class TestEndToEnd:
         await task.score_responses(responses, ScoringContext())
         predictions = build_predictions(responses, metrics=task.config.metrics)
 
-        assert [p["judge_result"] for p in predictions] == [
-            {"grade": "NOT_ATTEMPTED", "empty_response": False},
-            {"grade": "NOT_ATTEMPTED", "empty_response": True},
+        assert [p["model_output"][0]["judge_result"] for p in predictions] == [
+            {"grade": "NOT_ATTEMPTED", "empty_response": False, "raw_judge_response": "D"},
+            {"grade": "NOT_ATTEMPTED", "empty_response": True, "raw_judge_response": None},
         ]
 
 

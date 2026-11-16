@@ -33,8 +33,8 @@ The default judge is ``gpt-6-luna``; the official HLE scorer uses
 model behind it can change without the task hash changing; pass a dated model with
 ``-o judge_model`` when results must stay comparable across time. Change the judge
 for one task with ``-o judge_model=<model>`` (and ``-o judge_reasoning_effort=<effort>``
-for reasoning judges), or for every judge task in a run with
-``OLMO_EVAL_JUDGE=<model>[:<effort>]``; a task override wins. The judge
+for reasoning judges), or for every judged task in a run with
+``OLMO_EVAL_JUDGE=<model>[:<effort>[:<max_tokens>]]``; a task override wins. The judge
 settings are part of the task configuration and hash, so runs with different judges
 are stored and compared as separate results.
 
@@ -92,7 +92,7 @@ from typing import Any
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.scorers.llm_judge import JudgeFn
+from olmo_eval.common.scorers.llm_judge import Judge
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -379,7 +379,7 @@ class _HLE(JudgedTask):
             ),
         )
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn: JudgeFn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge: Judge) -> float:
         """Judge one output; an unfinished response scores wrong without the judge."""
         answer = self._judged_answer(output)
         truncated = is_truncated(output)
@@ -396,7 +396,7 @@ class _HLE(JudgedTask):
                 correct_answer=response.instance.gold_answer or "",
             )
             verdict = await self._judge_output(
-                output, judge_fn, prompt, parse_judge_reply, judge_result
+                output, judge, prompt, parse_judge_reply, judge_result
             )
 
         judge_result.update(

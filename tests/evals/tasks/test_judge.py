@@ -1,12 +1,13 @@
 """Tests for the shared judged-task base."""
 
 import asyncio
-import types
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
 
+from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.multi_turn import scripted_chat_request
 from olmo_eval.common.scorers import llm_judge
 from olmo_eval.common.scorers.llm_judge import parse_judge_spec
@@ -19,7 +20,8 @@ from olmo_eval.common.types import (
     RequestType,
     Response,
 )
-from olmo_eval.evals.tasks.common import OutputScoreAggregation, TaskConfig
+from olmo_eval.evals.tasks import mt_bench
+from olmo_eval.evals.tasks.common import OutputScoreAggregation, TaskConfig, get_task, registry
 from olmo_eval.evals.tasks.common import judge as judge_module
 from olmo_eval.evals.tasks.common.judge import (
     JUDGE_ATTEMPTS,
@@ -30,8 +32,10 @@ from olmo_eval.evals.tasks.common.judge import (
     is_truncated,
     visible_response,
 )
+from olmo_eval.evals.tasks.common.registry import parse_overrides
 from olmo_eval.evals.tasks.hle import HLEAccuracyMetric, HLETruncationRateMetric
 from olmo_eval.inference.retry import retry_with_backoff
+from olmo_eval.runners.asynq.preparation import configure_task
 from tests.evals.tasks.judge_stubs import use_judge
 
 pytestmark = pytest.mark.usefixtures("judge_test_env")
@@ -51,11 +55,11 @@ class _PassFailTask(JudgedTask):
     def format_request(self, instance: Instance) -> LMRequest:
         return LMRequest(request_type=RequestType.CHAT, messages=())
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge) -> float:
         judge_result: dict[str, Any] = {"scorer": self.judge_scorer_name}
         verdict = await self._judge_output(
             output,
-            judge_fn,
+            judge,
             self._judged_answer(output),
             lambda raw: raw if raw in {"PASS", "FAIL"} else None,
             judge_result,
@@ -76,13 +80,13 @@ class _RatingTask(_PassFailTask):
     judge_extra_score_keys = ("forward", "reversed")
     unanswered_score = 1.0
 
-    async def _score_output(self, response: Response, output: LMOutput, judge_fn) -> float:
+    async def _score_output(self, response: Response, output: LMOutput, judge) -> float:
         judge_result: dict[str, Any] = {}
         ratings = await self._judge_together(
             *(
                 self._judge_output(
                     output,
-                    judge_fn,
+                    judge,
                     f"{self._judged_answer(output)} ({order})",
                     lambda raw: float(raw) if raw.isdigit() else None,
                     judge_result,
@@ -143,14 +147,21 @@ def _scripted_judge(replies: dict[str, list[str]]):
 
 
 class TestHelpers:
-    def test_parse_judge_spec_splits_model_and_effort(self):
-        assert parse_judge_spec("gpt-5:high") == ("gpt-5", "high")
-        assert parse_judge_spec("gpt-4o") == ("gpt-4o", None)
-        assert parse_judge_spec("gpt-4o:") == ("gpt-4o", None)
+    def test_parse_judge_spec_splits_model_effort_and_budget(self):
+        assert parse_judge_spec("gpt-5:high") == ("gpt-5", "high", None)
+        assert parse_judge_spec("gpt-4o") == ("gpt-4o", None, None)
+        assert parse_judge_spec("gpt-4o:") == ("gpt-4o", None, None)
+        assert parse_judge_spec("gpt-5:high:16384") == ("gpt-5", "high", 16384)
+        assert parse_judge_spec("gpt-4o::512") == ("gpt-4o", None, 512)
 
     def test_parse_judge_spec_requires_a_model(self):
         with pytest.raises(ValueError, match="must name a judge model"):
             parse_judge_spec(":high")
+
+    @pytest.mark.parametrize("budget", ["lots", "0", "-5"])
+    def test_parse_judge_spec_requires_a_positive_budget(self, budget):
+        with pytest.raises(ValueError, match="max_tokens must be a positive integer"):
+            parse_judge_spec(f"gpt-5:high:{budget}")
 
     def test_visible_response_drops_a_closed_reasoning_block(self):
         assert visible_response("<think>work</think>\nAnswer: 42") == "Answer: 42"
@@ -168,49 +179,55 @@ class TestHelpers:
 
 
 class TestJudgeConfiguration:
-    def test_environment_override_replaces_the_default_judge(self, monkeypatch):
+    def test_environment_override_replaces_the_default_model_and_effort(self, monkeypatch):
         monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high")
 
-        config = _PassFailTask(_config()).config
-
-        assert config.judge_model == "gpt-5"
-        assert config.judge_reasoning_effort == "high"
-
-    def test_task_override_wins_over_the_environment(self, monkeypatch):
-        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high")
-
-        config = _PassFailTask(_config(judge_model="judge-a")).config
-
-        assert config.judge_model == "judge-a"
-        assert config.judge_reasoning_effort is None
-
-    def test_environment_effort_replaces_a_task_default_effort(self, monkeypatch):
-        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high")
-
-        config = _RatingTask(_config(judge_reasoning_effort="medium")).config
+        config = get_task("mt_bench").config
 
         assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-5", "high")
+        assert config.judge_max_tokens == mt_bench.MT_BENCH_JUDGE_MAX_TOKENS
 
-    def test_environment_model_without_an_effort_drops_a_task_default_effort(self, monkeypatch):
+    def test_environment_model_without_an_effort_drops_the_default_effort(self, monkeypatch):
         monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-4o")
 
-        config = _RatingTask(_config(judge_reasoning_effort="medium")).config
+        config = get_task("mt_bench").config
 
         assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-4o", None)
 
-    def test_an_effort_override_equal_to_the_default_counts_as_unset(self, monkeypatch):
+    def test_environment_sets_the_judge_token_budget(self, monkeypatch):
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high:16384")
+
+        config = get_task("multichallenge").config
+
+        assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-5", "high")
+        assert config.judge_max_tokens == 16384
+
+    def test_a_task_judge_model_override_wins_even_when_it_is_the_default(self, monkeypatch):
+        monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
+        unchanged = get_task("mt_bench").config
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high:16384")
+        overrides = {"judge_model": unchanged.judge_model}
+
+        config = get_task("mt_bench", config_overrides=overrides).config
+
+        assert config == unchanged
+
+    def test_task_effort_and_budget_overrides_apply_over_the_environment(self, monkeypatch):
         monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-4o")
+        default_effort = mt_bench.MT_BENCH_DEFAULT_JUDGE_REASONING_EFFORT
 
-        config = _RatingTask(_config(judge_reasoning_effort="medium")).config
+        config = get_task(
+            "mt_bench",
+            config_overrides={"judge_reasoning_effort": default_effort, "judge_max_tokens": 99},
+        ).config
 
-        assert config.judge_reasoning_effort is None
+        assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-4o", default_effort)
+        assert config.judge_max_tokens == 99
 
-    def test_task_effort_override_wins_over_the_environment(self, monkeypatch):
+    def test_environment_leaves_tasks_without_a_judge_alone(self, monkeypatch):
         monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high")
 
-        config = _RatingTask(_config(judge_reasoning_effort="low")).config
-
-        assert (config.judge_model, config.judge_reasoning_effort) == ("gpt-5", "low")
+        assert get_task("gsm8k").config.judge_model is None
 
     def test_judge_is_built_once_from_the_config(self, monkeypatch):
         built: list[dict[str, Any]] = []
@@ -219,31 +236,64 @@ class TestJudgeConfiguration:
             built.append(kwargs)
             return object()
 
-        monkeypatch.setattr(judge_module, "build_openai_judge_fn", builder)
+        monkeypatch.setattr(llm_judge, "build_openai_judge_fn", builder)
         task = _PassFailTask(_config(judge_reasoning_effort="low"))
 
-        assert task._get_judge_fn() is task._get_judge_fn()
+        assert task._get_judge() is task._get_judge()
         assert len(built) == 1
         assert built[0]["model"] == DEFAULT_JUDGE
         assert built[0]["max_tokens"] == 64
         assert built[0]["reasoning_effort"] == "low"
         assert built[0]["temperature"] == 0.0
 
+    def test_judge_temperature_reaches_the_judge(self, monkeypatch):
+        built: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            llm_judge, "build_openai_judge_fn", lambda **kwargs: built.append(kwargs)
+        )
+
+        _PassFailTask(_config(judge_temperature=0.3))._get_judge()
+
+        assert built[0]["temperature"] == 0.3
+        assert parse_overrides("judge_temperature=0.3") == {"judge_temperature": 0.3}
+
+    @pytest.fixture
+    def warm_mt_bench(self, monkeypatch):
+        """mt_bench with a default judge temperature, as a task tuned for its judge has."""
+        monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
+        config = registry._configs["mt_bench"]
+        monkeypatch.setitem(registry._configs, "mt_bench", replace(config, judge_temperature=0.1))
+
+    def test_the_default_judge_keeps_the_default_temperature(self, warm_mt_bench, monkeypatch):
+        default = get_task("mt_bench").config
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", default.judge_model)
+
+        assert get_task("mt_bench").config.judge_temperature == 0.1
+        overrides = {"judge_model": default.judge_model}
+        assert get_task("mt_bench", config_overrides=overrides).config.judge_temperature == 0.1
+
+    def test_another_judge_drops_the_default_temperature(self, warm_mt_bench, monkeypatch):
+        overridden = get_task("mt_bench", config_overrides={"judge_model": "o3-2025-04-16"})
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5.4-2026-03-05:medium")
+        from_env = get_task("mt_bench")
+
+        for task in (overridden, from_env):
+            assert task.config.judge_temperature is None
+            assert "judge_temperature" not in task.config.to_dict()
+
+    def test_another_judge_keeps_a_temperature_the_overrides_set(self, warm_mt_bench, monkeypatch):
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-4o")
+        overrides = {"judge_model": "gpt-4.1-2025-04-14", "judge_temperature": 0.3}
+
+        assert get_task("mt_bench", config_overrides=overrides).config.judge_temperature == 0.3
+        overrides = {"judge_temperature": 0.3}
+        assert get_task("mt_bench", config_overrides=overrides).config.judge_temperature == 0.3
+
     def test_incomplete_judge_configuration_is_rejected(self):
         task = _PassFailTask(_config(judge_max_tokens=None))
 
         with pytest.raises(ValueError, match="complete judge configuration"):
-            task._get_judge_fn()
-
-    def test_judge_limiter_is_shared_through_the_scoring_context(self):
-        context = types.SimpleNamespace(scoring_concurrency=2)
-        first = _PassFailTask(_config())
-        second = _PassFailTask(_config(name="other"))
-
-        semaphore = first._get_judge_semaphore(context)
-
-        assert second._get_judge_semaphore(context) is semaphore
-        assert first._get_judge_semaphore(None) is not semaphore
+            task._get_judge()
 
 
 class TestScoreResponses:
@@ -415,7 +465,7 @@ class TestJudgeCalls:
         responses = [_response("a", "b"), _response("c", "d", group="b")]
 
         await _RatingTask(_config()).score_responses(
-            responses, context=types.SimpleNamespace(scoring_concurrency=3)
+            responses, context=ScoringContext(scoring_concurrency=3)
         )
 
         assert peak == 3
@@ -540,3 +590,26 @@ class TestMetrics:
         assert metric.compute(responses) == 0.5
         assert metric.compute_instance(responses[0]) is None
         assert metric.compute([]) == 0.0
+
+
+class TestRunnerConfiguration:
+    """The runner builds the stored task config with configure_task, not get_task."""
+
+    def test_a_judge_model_override_wins_over_the_environment(self, monkeypatch):
+        monkeypatch.delenv("OLMO_EVAL_JUDGE", raising=False)
+        overrides = {"judge_model": "gpt-4.1-2025-04-14"}
+        expected = configure_task("mt_bench", overrides).config
+        monkeypatch.setenv("OLMO_EVAL_JUDGE", "gpt-5:high:16384")
+
+        config = configure_task("mt_bench", overrides).config
+
+        assert config == expected
+        assert config.judge_reasoning_effort == mt_bench.MT_BENCH_DEFAULT_JUDGE_REASONING_EFFORT
+        assert config.judge_max_tokens == mt_bench.MT_BENCH_JUDGE_MAX_TOKENS
+
+    def test_the_task_is_constructed_with_its_judge_overrides(self):
+        task = configure_task("omniscience:judge", {"judge_model": "judge-b"})
+
+        scorer = task.config.metrics[0].scorer
+        assert task.config.judge_model == "judge-b"
+        assert scorer.judge_fn.judge_config["model"] == "judge-b"

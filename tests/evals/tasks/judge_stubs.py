@@ -9,10 +9,10 @@ them also apply the ``judge_test_env`` fixture from this package's conftest.
 
 from __future__ import annotations
 
+from olmo_eval.common.scorers import llm_judge
 from olmo_eval.common.scorers.execution import format_scoring_error
 from olmo_eval.common.scorers.llm_judge import JudgeFn
 from olmo_eval.common.types import Response
-from olmo_eval.evals.tasks.common import judge as judge_module
 from olmo_eval.runners.asynq.results import _record_scoring_failure
 
 
@@ -30,7 +30,7 @@ def scripted_judge(*replies: str) -> tuple[JudgeFn, list[str]]:
 
 def use_judge(monkeypatch, judge: JudgeFn) -> None:
     """Make judged tasks call ``judge`` instead of building an API client."""
-    monkeypatch.setattr(judge_module, "build_openai_judge_fn", lambda **_: judge)
+    monkeypatch.setattr(llm_judge, "build_openai_judge_fn", lambda **_: judge)
 
 
 async def score_like_the_runner(task, response: Response) -> Response:

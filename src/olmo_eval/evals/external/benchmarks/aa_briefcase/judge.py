@@ -21,10 +21,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from olmo_eval.common.scorers.execution import ScoringIncompleteError
 from olmo_eval.common.scorers.llm_judge import (
+    JUDGE_ATTEMPTS,
     ConfiguredJudgeFn,
+    Judge,
+    JudgeParseError,
     build_openai_judge_fn,
-    judge_with_retries,
 )
 
 from .loader import BriefcaseScenario, RubricCheck
@@ -37,7 +40,6 @@ DEFAULT_JUDGE_MODEL = "gpt-5.5-2026-04-23"
 DEFAULT_JUDGE_REASONING_EFFORT = "high"
 DEFAULT_JUDGE_MAX_TOKENS = 32768
 #: Judge calls per check before an unparseable reply is given up on.
-JUDGE_ATTEMPTS = 3
 #: Retries of a failing judge call, with waits doubling from ``JUDGE_RETRY_DELAY``
 #: seconds, so a stretch of rate limiting is waited out rather than left ungraded.
 JUDGE_RETRIES = 6
@@ -189,35 +191,33 @@ async def grade_check(
             reasoning=f"Not submitted: {', '.join(check.files)}",
         )
     content = build_judge_content(scenario, brief, check, submission)
+    judge = Judge(
+        call=judge_fn,
+        label=f"aa_briefcase_lite {check.check_id}",
+        max_retries=JUDGE_RETRIES,
+        retry_delay=JUDGE_RETRY_DELAY,
+    )
     try:
-        verdict, raw = await judge_with_retries(
-            judge_fn,
-            content,
-            parse_verdict,
-            limiter=limiter,
-            system_prompt=scenario.judge_system_prompt,
-            attempts=JUDGE_ATTEMPTS,
-            max_retries=JUDGE_RETRIES,
-            retry_delay=JUDGE_RETRY_DELAY,
-            context=f"aa_briefcase_lite {check.check_id}",
+        (passed, reasoning), raw = await judge.ask(
+            content, parse_verdict, limiter=limiter, system_prompt=scenario.judge_system_prompt
         )
-    except Exception as e:
-        logger.warning(f"Judge call for {check.check_id} failed: {e}")
+    except JudgeParseError as e:
         return CheckVerdict(
             check_id=check.check_id,
             check_type=check.check_type,
             passed=None,
-            error=f"judge_error: {e}",
-        )
-    if verdict is None:
-        return CheckVerdict(
-            check_id=check.check_id,
-            check_type=check.check_type,
-            passed=None,
-            raw_reply=raw,
+            raw_reply=e.raw,
             error=f"judge_parse_error: no verdict after {JUDGE_ATTEMPTS} attempts",
         )
-    passed, reasoning = verdict
+    except ScoringIncompleteError as e:
+        cause = e.__cause__ or e
+        logger.warning(f"Judge call for {check.check_id} failed: {cause}")
+        return CheckVerdict(
+            check_id=check.check_id,
+            check_type=check.check_type,
+            passed=None,
+            error=f"judge_error: {cause}",
+        )
     return CheckVerdict(
         check_id=check.check_id,
         check_type=check.check_type,

@@ -94,6 +94,9 @@ results and hashed to identify it.
 - A new optional field must leave existing hashes unchanged when unused, so serialize it
   only when set. Test both that changing the field changes the hash and that an unrelated
   existing task keeps its hash.
+- `tests/evals/tasks/test_task_hashes.py` pins every spec's stored hash. When it fails,
+  regenerate `task_hashes.json` with `--update-task-hashes` and follow the "Pinned
+  hashes" rule in AGENTS.md for when a moved or removed hash needs a compatibility entry.
 - Pin a new dataset's `revision=` when the task is introduced, and pin judge models to
   dated snapshots. Adding a pin later changes the task's identity after results exist.
 - Variant names describe the measurement or regime (`mc`, `rc`, `bpb`, `gen`, `cot`,
@@ -144,6 +147,34 @@ results and hashed to identify it.
   answers inside `<think>` traces. Treat `num_fewshot=0` as a real value (`is None` means
   unset), keep explicit token budgets within the model's context, and don't let a
   class-level `split` overwrite a requested one.
+
+### Judged tasks
+
+- Build on the shared judge code in `common/scorers/llm_judge.py`, not a new client,
+  retry loop, or limiter. Use `JudgedTask` for a task that grades each output with an
+  OpenAI-compatible judge, an `LLMJudgeScorer` subclass for a single-verdict scorer, and
+  `JudgeSettings` with `Judge` or `call_judge` for other multi-call scoring.
+- Keep judge settings in `TaskConfig` (`judge_model`, `judge_reasoning_effort`,
+  `judge_max_tokens`, `judge_temperature`): set them as class defaults, or leave them
+  unset to mean a `JudgeSettings` default named in the task module. A default effort or
+  temperature belongs to the default model and is dropped when another judge is named.
+  Set `judged = True` so `get_task`
+  applies `OLMO_EVAL_JUDGE`, and don't read the variable while scoring; leave it unset
+  only when the task's judge settings cannot take an arbitrary judge, as for
+  Omniscience's 10-token letter grade. A judge served by
+  an auxiliary provider records the model that provider must serve in `judge_model`, and
+  the runner checks it before generating.
+- Call the judge through `Judge.ask` or `call_judge`. They retry transient API failures,
+  hold the run's `judge_limiter` for each call, and raise `ScoringIncompleteError` when
+  the judge stays unavailable. `Judge.ask` asks an API judge again for a reply with no
+  verdict and then raises `JudgeParseError`, which leaves the output unscored; a judge
+  served from the inference pool at temperature 0 raises on the first such reply.
+  Scoring an unparseable reply as wrong needs a parity reason, an explicit
+  `except JudgeParseError`, and a logged count. A score that does not depend on the
+  verdict, such as 0.0 for an empty response, can stand without one.
+- Record `judge_result`, with the raw reply and any flags the score depends on, and the
+  scores on each judged output, so every sample keeps its own. Of the output metadata,
+  saved predictions keep `judge_result` and scores, not arbitrary keys.
 
 ### Shared interfaces and environment
 

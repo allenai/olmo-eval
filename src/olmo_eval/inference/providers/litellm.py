@@ -348,7 +348,9 @@ class LiteLLMProvider(InferenceProvider):
         from olmo_eval.common.progress import ProgressLogger
         from olmo_eval.inference.utils import dispatch_requests
 
-        logger.info(
+        # A single request is a per-request dispatch from the runner; keep it out of the log.
+        log_sending = logger.info if len(requests) > 1 else logger.debug
+        log_sending(
             f"Sending {len(requests)} requests for {self.model_name}"
             f" with max_concurrency {self.max_concurrency}"
         )
@@ -359,13 +361,18 @@ class LiteLLMProvider(InferenceProvider):
                 "truncate_prompt_tokens or truncation_side has been set in the params, "
                 "but is not supported for the LiteLLMProvider and will not be used."
             )
-        progress = ProgressLogger(total=len(requests), desc="Generating", logger=logger)
+        progress = (
+            ProgressLogger(total=len(requests), desc="Generating", logger=logger)
+            if len(requests) > 1
+            else None
+        )
 
         async def process(req: LMRequest) -> list[LMOutput]:
             return await self._generate_single_async(req, params)
 
         def on_progress(done: int, total: int) -> None:
-            progress.update(1)
+            if progress is not None:
+                progress.update(1)
 
         results = await dispatch_requests(
             requests,
@@ -374,7 +381,8 @@ class LiteLLMProvider(InferenceProvider):
             max_retries=self.max_retries,
             on_progress=on_progress,
         )
-        progress.close()
+        if progress is not None:
+            progress.close()
         return results
 
     def generate(
@@ -492,7 +500,8 @@ class LiteLLMProvider(InferenceProvider):
                 "loglikelihood requests."
             )
 
-        logger.info(
+        log_sending = logger.info if len(requests) > 1 else logger.debug
+        log_sending(
             f"Sending {len(requests)} logprob requests for {self.model_name}"
             f" with max_concurrency {self.max_concurrency}"
         )
@@ -503,10 +512,15 @@ class LiteLLMProvider(InferenceProvider):
                 "truncate_prompt_tokens or truncation_side has been set in the params, "
                 "but is not supported for the LiteLLMProvider and will not be used."
             )
-        progress = ProgressLogger(total=len(requests), desc="Logprobs", logger=logger)
+        progress = (
+            ProgressLogger(total=len(requests), desc="Logprobs", logger=logger)
+            if len(requests) > 1
+            else None
+        )
 
         def on_progress(done: int, total: int) -> None:
-            progress.update(1)
+            if progress is not None:
+                progress.update(1)
 
         results = await dispatch_requests(
             requests,
@@ -515,7 +529,8 @@ class LiteLLMProvider(InferenceProvider):
             max_retries=self.max_retries,
             on_progress=on_progress,
         )
-        progress.close()
+        if progress is not None:
+            progress.close()
         return results
 
     def logprobs(

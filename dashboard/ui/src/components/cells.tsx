@@ -33,7 +33,7 @@ export function ScoreValue({
   return diagnostics ? (
     <span className={c.scoreWithCounts}>
       {value}
-      <span className={c.generationCounts} title="Cap hits / generations; empty final answers; unclosed explicit thinking tags; unknown finish reasons.">
+      <span className={c.generationCounts} title="Length-stopped outputs / all generated outputs, including every sample; a lower bound when finish reasons are unknown. Empty scoring text excludes tool calls; unclosed thinking counts emitted tags.">
         {diagnostics}
       </span>
     </span>

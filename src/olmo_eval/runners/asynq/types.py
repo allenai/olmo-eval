@@ -151,6 +151,9 @@ class ResultItem:
     # rollout's share, split across a batch's requests by token share. None only for
     # fatal error signals.
     attributed_seconds: float | None = None
+    # The request itself caused the error (such as a context overflow), so a resumed run
+    # keeps the failure. Other errors may be transient and are tried again.
+    request_caused: bool = False
 
 
 __all__ = [

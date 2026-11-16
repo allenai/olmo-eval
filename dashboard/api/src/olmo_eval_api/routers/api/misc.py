@@ -276,7 +276,7 @@ async def _search_ids(session: Any, query: str, limit: int) -> list[a.SearchResu
 # Home
 # ---------------------------------------------------------------------------
 
-STATUS_RANK = {"failed": 3, "partial": 2, "running": 1, "complete": 0}
+STATUS_RANK = {"failed": 4, "partial": 3, "interrupted": 2, "running": 1, "complete": 0}
 
 
 @router.get("/activity", response_model=a.ActivityResponse)

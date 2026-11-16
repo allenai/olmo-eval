@@ -20,8 +20,11 @@ and the configuration, code, data, and environment behind a result must be recov
    job is not a verified result.
 
 Committing and pushing to a feature branch is fine. Never push to `main`, force-push, or
-rewrite history on a branch someone else is using. Beaker runs use a pushed commit, so
-finish the local code, tests, and launch command before pushing for a remote trial.
+rewrite history on a branch someone else is using, and merge a PR only when your human
+asks. Before merging, retarget PRs stacked on its branch (`gh pr edit <n> --base main`):
+the branch is deleted on merge, which can close them for good. Beaker runs use a pushed
+commit, so finish the local code, tests, and launch command before pushing for a remote
+trial.
 
 ## Commands
 
@@ -88,6 +91,17 @@ for an open PR. Those results can be uploaded after merge with
 - **Task hash.** Every setting that changes requests or scores must reach
   `TaskConfig.to_dict()`. A new optional field must be serialized only when set, so
   existing hashes don't move. Test both directions.
+- **Pinned hashes.** `tests/evals/tasks/test_task_hashes.py` pins the stored task hash
+  of every task, single variant, and suite spec in `task_hashes.json`, and fails when
+  one is added, removed, or changed. A new task or variant only adds specs: regenerate
+  the file with `uv run pytest tests/evals/tasks/test_task_hashes.py
+  --update-task-hashes`, and nothing more is needed. A changed hash means a change moved
+  a spec's identity: prefer a new variant, as "Spec meaning is fixed" says, and move a
+  hash in place only when unavoidable. Then regenerate the file, check that only the
+  intended specs changed, and add an entry to
+  [docs/result-compatibility.md](docs/result-compatibility.md) naming them. A removed
+  spec is a retirement and needs an entry too. The test cannot see a change to what a
+  spec measures that leaves its hash alone; that still needs an entry.
 - **Pins.** Pin a new dataset's `revision=` and judge models to dated snapshots when the
   task is introduced.
 - **Failures aren't scores.** No broad `except` around provider, judge, or scoring calls

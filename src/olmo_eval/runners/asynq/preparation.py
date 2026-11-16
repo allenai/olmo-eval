@@ -23,6 +23,39 @@ from olmo_eval.runners.processing.utils import get_metric_metadata
 logger = get_logger(__name__)
 
 
+def configure_task(
+    spec: str,
+    overrides: dict[str, Any] | None = None,
+    sampling_overrides: dict[str, Any] | None = None,
+) -> Task:
+    """Build a task with its config overrides and final sampling params applied.
+
+    The config is the one a run stores, so its hash is the run's task hash.
+    Overrides go through ``get_task`` so the task is constructed with them, and
+    an explicit ``judge_model`` override takes precedence over ``$OLMO_EVAL_JUDGE``.
+    """
+    overrides = dict(overrides or {})
+    nested_sampling = overrides.get("sampling_params")
+    if isinstance(nested_sampling, dict):
+        overrides.pop("sampling_params")
+    else:
+        nested_sampling = {}
+    task = get_task(spec, overrides or None)
+
+    # Build sampling params from overrides
+    existing_params = task.config.sampling_params or SamplingParams()
+
+    # Apply sampling_overrides
+    if nested_sampling or sampling_overrides:
+        for key, value in (nested_sampling | (sampling_overrides or {})).items():
+            if hasattr(existing_params, key):
+                existing_params = replace(existing_params, **{key: value})
+
+    # Always update task config with final sampling params (so finalize_task captures them)
+    task.config = replace(task.config, sampling_params=existing_params)
+    return task
+
+
 def prepare_task_items(
     spec: str,
     model_name: str,
@@ -41,22 +74,8 @@ def prepare_task_items(
         Tuple of (Task instance for scoring, list of QueueItems)
 
     """
-    task = get_task(spec)
-
-    if overrides:
-        task.config = replace(task.config, **overrides)
-
-    # Build sampling params from overrides
+    task = configure_task(spec, overrides, sampling_overrides)
     existing_params = task.config.sampling_params or SamplingParams()
-
-    # Apply sampling_overrides
-    if sampling_overrides:
-        for key, value in sampling_overrides.items():
-            if hasattr(existing_params, key):
-                existing_params = replace(existing_params, **{key: value})
-
-    # Always update task config with final sampling params (so finalize_task captures them)
-    task.config = replace(task.config, sampling_params=existing_params)
 
     instances = list(task.instances)
     if task.config.limit and len(instances) > task.config.limit:
@@ -370,6 +389,7 @@ def _first_instance_error(failed_instances: dict[int, str]) -> str | None:
 
 
 __all__ = [
+    "configure_task",
     "prepare_task_items",
     "build_requests_from_items",
     "finalize_task",

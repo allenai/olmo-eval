@@ -26,12 +26,22 @@ class BatchingStrategy(ABC):
     Each inference worker builds its own strategy, so ``clock`` is the worker's: every
     batch and rollout the worker runs shares it, and overlapping work splits the
     worker's time.
+
+    ``per_request`` asks for each request's result as soon as it finishes, which a
+    run that records progress needs so that a preemption loses little work. Only
+    strategies that wait for whole batches act on it.
     """
 
-    def __init__(self, config: BatchConfig, max_batch_sequences: int | None = None):
+    def __init__(
+        self,
+        config: BatchConfig,
+        max_batch_sequences: int | None = None,
+        per_request: bool = False,
+    ):
         self.config = config
         self.clock = ShareClock()
         self.max_batch_sequences = max_batch_sequences
+        self.per_request = per_request
         self._pending_item = None
 
     @abstractmethod

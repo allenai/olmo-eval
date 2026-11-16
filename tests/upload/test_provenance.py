@@ -281,3 +281,120 @@ def test_interpreter_package_versions_queries_a_real_interpreter() -> None:
     versions = interpreter_package_versions(sys.executable, ("olmo-eval", "no-such-dist-xyz"))
     assert "olmo-eval" in versions
     assert "no-such-dist-xyz" not in versions
+
+
+def _git(repo: Path, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+@pytest.fixture
+def checkout(tmp_path, monkeypatch) -> Path:
+    """A git checkout whose package directory ``olmo_eval`` appears to live in."""
+    import olmo_eval
+
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "notes.txt").write_bytes(b"one\ntwo\n")
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "init")
+    monkeypatch.setattr(olmo_eval, "__file__", str(repo / "pkg" / "__init__.py"))
+    provenance.uncommitted_diff_hash.cache_clear()
+    yield repo
+    provenance.uncommitted_diff_hash.cache_clear()
+
+
+def _diff_hash() -> str | None:
+    provenance.uncommitted_diff_hash.cache_clear()
+    return provenance.uncommitted_diff_hash()
+
+
+def test_uncommitted_diff_hash_follows_the_tracked_edits(checkout) -> None:
+    clean = _diff_hash()
+    notes = checkout / "pkg" / "notes.txt"
+    notes.write_bytes(b"one\nthree\n")
+    edited = _diff_hash()
+    notes.write_bytes(b"one\nfour\n")
+
+    assert clean is not None and edited is not None
+    assert len(edited) == 12 and edited != clean
+    assert _diff_hash() not in (clean, edited)
+    notes.write_bytes(b"one\nthree\n")
+    assert _diff_hash() == edited
+
+
+def test_uncommitted_diff_hash_covers_a_file_that_is_not_utf8(checkout) -> None:
+    (checkout / "pkg" / "notes.txt").write_bytes(b"one\ncaf\xe9\n")
+    first = _diff_hash()
+    (checkout / "pkg" / "notes.txt").write_bytes(b"one\nna\xefve\n")
+
+    assert first is not None
+    assert _diff_hash() not in (None, first)
+
+
+def test_uncommitted_diff_hash_tells_two_binary_edits_apart(checkout) -> None:
+    blob = checkout / "pkg" / "data.bin"
+    blob.write_bytes(b"\x00\x01\x02")
+    _git(checkout, "add", "data.bin" if False else "pkg/data.bin")
+    _git(checkout, "commit", "-q", "-m", "binary")
+    blob.write_bytes(b"\x00\x01\x03")
+    first = _diff_hash()
+    blob.write_bytes(b"\x00\x01\x04")
+
+    assert first is not None
+    assert _diff_hash() not in (None, first)
+
+
+def test_uncommitted_diff_hash_of_a_binary_edit_ignores_the_users_abbrev_setting(
+    checkout,
+) -> None:
+    # Without --binary the diff names a binary file's blobs only by abbreviated hash.
+    blob = checkout / "pkg" / "data.bin"
+    blob.write_bytes(b"\x00\x01\x02")
+    _git(checkout, "add", "pkg/data.bin")
+    _git(checkout, "commit", "-q", "-m", "binary")
+    blob.write_bytes(b"\x00\x01\x03")
+    default = _diff_hash()
+    _git(checkout, "config", "core.abbrev", "4")
+
+    assert default is not None
+    assert _diff_hash() == default
+
+
+def test_uncommitted_diff_hash_ignores_the_users_textconv_and_ext_diff(checkout) -> None:
+    (checkout / "pkg" / "notes.txt").write_bytes(b"one\nthree\n")
+    (checkout / ".gitattributes").write_text("*.txt diff=shout\n")
+    _git(checkout, "add", "-N", ".gitattributes")
+    without_config = _diff_hash()
+
+    _git(checkout, "config", "diff.shout.textconv", "tr a-z A-Z <")
+    _git(checkout, "config", "diff.external", "echo external")
+
+    assert without_config is not None
+    assert _diff_hash() == without_config
+
+
+@pytest.mark.parametrize("failure", ["timeout", "missing"])
+def test_uncommitted_diff_hash_is_none_and_warns_when_git_fails(
+    monkeypatch, caplog, failure
+) -> None:
+    import subprocess
+
+    def run(*args, **kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("git", 30)
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(provenance.subprocess, "run", run)
+    with caplog.at_level("WARNING"):
+        assert _diff_hash() is None
+    provenance.uncommitted_diff_hash.cache_clear()
+
+    assert "code-change detection is off" in caplog.text

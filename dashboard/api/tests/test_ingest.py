@@ -388,6 +388,70 @@ async def test_status_never_downgraded(client: httpx.AsyncClient) -> None:
     assert body["upload_state"] == "complete"
 
 
+async def _upsert_status(client: httpx.AsyncClient, body: dict, status: str) -> dict:
+    body["run"]["status"] = status
+    response = await client.put(f"/v1/runs/{body['run']['run_id']}", json=body)
+    assert response.status_code == 200, response.text
+    assert_valid("RunUpsertResponse", response.json())
+    return response.json()
+
+
+async def _complete(client: httpx.AsyncClient, run_id: str, status: str) -> None:
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": status,
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [],
+            "expected_task_results": 0,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
+async def test_an_interrupted_run_resumes_and_then_finishes(client: httpx.AsyncClient) -> None:
+    body = run_payload(run_id="intr00000001", model_name="m", status="running")
+    assert (await _upsert_status(client, body, "running"))["status"] == "running"
+
+    stopped = await _upsert_status(client, body, "interrupted")
+    assert stopped["status"] == "interrupted" and stopped["upload_state"] == "uploading"
+
+    # The replacement job registers its start under the same run ID.
+    assert (await _upsert_status(client, body, "running"))["status"] == "running"
+    assert (await _upsert_status(client, body, "interrupted"))["status"] == "interrupted"
+
+    await _complete(client, "intr00000001", "partial")
+    final = await _upsert_status(client, body, "partial")
+    assert final["status"] == "partial" and final["upload_state"] == "complete"
+
+
+@pytest.mark.parametrize("final", ["complete", "partial", "failed"])
+@pytest.mark.parametrize("unfinished", ["running", "interrupted"])
+async def test_a_final_status_is_never_downgraded(
+    client: httpx.AsyncClient, final: str, unfinished: str
+) -> None:
+    run_id = "fini00000001"
+    body = run_payload(run_id=run_id, model_name="m", status="running")
+    await _upsert_status(client, body, "interrupted")
+    await _complete(client, run_id, final)
+
+    after = await _upsert_status(client, body, unfinished)
+
+    assert after["status"] == final and after["upload_state"] == "complete"
+
+
+async def test_an_interrupted_run_can_be_reported_failed(client: httpx.AsyncClient) -> None:
+    run_id = "intr00000002"
+    body = run_payload(run_id=run_id, model_name="m", status="running")
+    await _upsert_status(client, body, "interrupted")
+
+    assert (await _upsert_status(client, body, "failed"))["status"] == "failed"
+    await _complete(client, run_id, "failed")
+    assert (await _upsert_status(client, body, "interrupted"))["status"] == "failed"
+
+
 async def test_reupload_keeps_a_complete_run_visible(client: httpx.AsyncClient) -> None:
     await seed_contract_example_run(client)
     final = load_example("ingest/run-upsert-final.request.json")
@@ -767,19 +831,25 @@ async def test_complete_derivations(client: httpx.AsyncClient, session: Any) -> 
     assert run["num_tasks"] == 3 and run["num_instances"] == 120
 
 
-async def test_suite_with_missing_task_and_mean_headline(
-    client: httpx.AsyncClient, session: Any
+@pytest.mark.parametrize("unscored_suite", [False, True])
+async def test_headline_respects_unscored_suite_scopes(
+    client: httpx.AsyncClient, session: Any, unscored_suite: bool
 ) -> None:
     await seed_run(
         client,
         run_id="run000000002",
         tasks={"t1": [1.0, 0.0] * 10, "t2": [1.0] * 20},
-        suites=[suite("s", ["t1", "t3"], score=None, aggregation="display_only")],
+        suites=[suite("s", ["t1", "t3"], score=None, aggregation="display_only")]
+        if unscored_suite
+        else [],
     )
-    sr = (await session.execute(text("SELECT * FROM suite_results"))).mappings().one()
-    assert sr["tasks_missing"] == ["t3"]
     run = (await session.execute(text("SELECT headline FROM runs"))).scalar_one()
-    assert run["kind"] == "mean" and math.isclose(run["score"], 0.75)
+    if unscored_suite:
+        sr = (await session.execute(text("SELECT * FROM suite_results"))).mappings().one()
+        assert sr["tasks_missing"] == ["t3"]
+        assert run is None
+    else:
+        assert run["kind"] == "mean" and math.isclose(run["score"], 0.75)
 
 
 async def test_nested_average_suite_weighs_every_task_equally(
@@ -934,3 +1004,192 @@ async def test_ingest_mode_rejects_dashboard_routes(engine: Any, settings: Any) 
             assert (await c.get("/api/me")).status_code == 404
             assert (await c.get("/health")).json()["mode"] == "ingest"
             assert (await c.get("/v1/whoami")).status_code == 401
+
+
+@pytest.mark.parametrize("reported_score", [0.4, 0.6, -0.2, None])
+async def test_gap_ingest_metadata_follows_companion(
+    client: httpx.AsyncClient, session: Any, reported_score: float | None
+) -> None:
+    run_id = "metastore01"
+    response = await client.put(
+        f"/v1/runs/{run_id}", json=run_payload(run_id=run_id, model_name="test-org/metadata-model")
+    )
+    assert response.status_code == 200, response.text
+    for name, score, fmt, direction in (("in", 0.6, "raw", None), ("out", 0.4, "percent", False)):
+        response = await client.post(
+            f"/v1/runs/{run_id}/task-results",
+            json=task_payload(
+                name,
+                task_hash=f"hash-{name}",
+                primary_metric="acc:default",
+                corpus_score=score,
+                n=1,
+                display_format=fmt,
+                higher_is_better=direction,
+            ),
+        )
+        assert response.status_code == 200, response.text
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": "complete",
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [suite("metapair", ["in", "out"], score=reported_score, aggregation="gap")],
+            "expected_task_results": 2,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 200, response.text
+    row = (
+        await session.execute(
+            text(
+                "SELECT display_format, higher_is_better, score, primary_metric, metrics "
+                "FROM suite_results WHERE run_id = :run"
+            ),
+            {"run": run_id},
+        )
+    ).one()
+    assert row.display_format == "percent"
+    assert row.higher_is_better is False
+    assert row.score == 0.4 and row.primary_metric == "primary_score:companion"
+    assert row.metrics == pytest.approx(
+        {"primary_score:reference": 0.6, "primary_score:companion": 0.4, "primary_score:gap": -0.2}
+    )
+
+
+@pytest.mark.parametrize("invalid_pair", ["different_metrics", "unscored", "missing_task"])
+async def test_ingest_withholds_invalid_gap_scores(
+    client: httpx.AsyncClient, session: Any, invalid_pair: str
+) -> None:
+    run_id = "invalidgap01"
+    response = await client.put(
+        f"/v1/runs/{run_id}", json=run_payload(run_id=run_id, model_name="test-org/gap-validation")
+    )
+    assert response.status_code == 200, response.text
+    tasks = [
+        ("in", "strict:default", 0.6),
+        (
+            "out",
+            "flex:default" if invalid_pair == "different_metrics" else "strict:default",
+            None if invalid_pair == "unscored" else 0.4,
+        ),
+    ]
+    if invalid_pair == "missing_task":
+        tasks.pop()
+    for name, metric, score in tasks:
+        response = await client.post(
+            f"/v1/runs/{run_id}/task-results",
+            json=task_payload(
+                name, task_hash=f"hash-{name}", primary_metric=metric, corpus_score=score, n=1
+            ),
+        )
+        assert response.status_code == 200, response.text
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": "complete",
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [suite("pair", ["in", "out"], score=0.9, aggregation="gap")],
+            "expected_task_results": len(tasks),
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 200, response.text
+    row = (
+        await session.execute(
+            text(
+                "SELECT score, stderr, primary_metric, metrics FROM suite_results "
+                "WHERE run_id = :run"
+            ),
+            {"run": run_id},
+        )
+    ).one()
+    assert row.score is None and row.stderr is None
+    assert row.primary_metric is None and row.metrics == {}
+    assert (
+        await session.execute(
+            text("SELECT headline FROM runs WHERE run_id = :run"), {"run": run_id}
+        )
+    ).scalar_one() is None
+
+
+async def test_ingest_rejects_nested_gap_definitions(client):
+    run_id = "nestedgap01"
+    response = await client.put(
+        f"/v1/runs/{run_id}", json=run_payload(run_id=run_id, model_name="nested-gap")
+    )
+    assert response.status_code == 200, response.text
+    pair = suite("pair", ["in", "out"], aggregation="gap")
+    parent = suite("parent", [], aggregation="average")
+    parent["children"] = [{"type": "suite", "name": "pair"}]
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": "complete",
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [pair, parent],
+            "expected_task_results": 0,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 400
+    assert "GAP suites cannot be nested" in response.text
+
+
+async def test_incomplete_gap_run_does_not_override_column_metadata(client, session):
+    from olmo_eval_api.routers.api.runs import column_meta
+
+    pair = suite("columnpair", ["in", "out"], aggregation="gap")
+    await seed_run(
+        client, run_id="metavalid01", tasks={"in": [0.0, 1.0], "out": [1.0, 1.0]}, suites=[pair]
+    )
+    await seed_run(client, run_id="metapartial01", tasks={"in": [0.0, 1.0]}, suites=[pair])
+    columns = await column_meta(session, [("suite:columnpair", "suite", "columnpair")])
+    assert columns[0].display_format == "percent"
+    assert columns[0].higher_is_better is True
+
+
+@pytest.mark.parametrize("aggregation", ["none", "display_only"])
+async def test_ingest_clears_legacy_no_score_suite_values(client, session, aggregation):
+    legacy = suite("legacy", ["a"], score=0.9, aggregation=aggregation)
+    legacy.update(
+        primary_metric="primary_score:average", metrics={"primary_score": {"average": 0.9}}
+    )
+    await seed_run(client, run_id="legacynone01", tasks={"a": [1.0]}, suites=[legacy])
+    row = (
+        await session.execute(
+            text(
+                "SELECT score,primary_metric,stderr FROM suite_results WHERE run_id='legacynone01'"
+            )
+        )
+    ).one()
+    assert row.score is None and row.primary_metric is None and row.stderr is None
+
+
+@pytest.mark.parametrize("aggregation", ["none", "average"])
+async def test_ingest_gap_requires_none_at_every_ancestor(client, aggregation):
+    run_id = "gapancestor01"
+    response = await client.put(
+        f"/v1/runs/{run_id}", json=run_payload(run_id=run_id, model_name="gap-ancestors")
+    )
+    assert response.status_code == 200, response.text
+    pair = suite("pair", ["in", "out"], aggregation="gap")
+    wrapper = suite("wrapper", [], aggregation="none")
+    wrapper["children"] = [{"type": "suite", "name": "pair"}]
+    parent = suite("parent", [], aggregation=aggregation)
+    parent["children"] = [{"type": "suite", "name": "wrapper"}]
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": "complete",
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [pair, wrapper, parent],
+            "expected_task_results": 0,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == (200 if aggregation == "none" else 400), response.text

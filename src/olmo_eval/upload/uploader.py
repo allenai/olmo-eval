@@ -208,6 +208,11 @@ def _parse_time(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+# Top-level directories of the output directory that hold a run's working state, not
+# its results: the records a resumable run keeps (``runners.asynq.progress.PROGRESS_DIR``).
+_UNUPLOADED_DIRS = frozenset({"progress"})
+
+
 def collect_artifacts(
     output_dir: Path,
     task_files: Mapping[str, str],
@@ -220,7 +225,7 @@ def collect_artifacts(
     An output directory can be reused across runs (the default is /tmp/results/). When
     ``since`` is given, files last modified before it are left out, except metrics.json,
     manifest.json and the files the run's tasks reference. Paths in ``skip`` are never
-    included.
+    included, and neither is the ``progress/`` directory of resume records.
     """
     artifacts: list[dict[str, Any]] = []
     files: dict[str, Path] = {}
@@ -229,6 +234,8 @@ def collect_artifacts(
     stale = 0
     for root, dirs, names in os.walk(output_dir):
         dirs.sort()
+        if Path(root) == Path(output_dir):
+            dirs[:] = [d for d in dirs if d not in _UNUPLOADED_DIRS]
         for name in sorted(names):
             path = Path(root) / name
             if (
@@ -424,9 +431,16 @@ def build_plan(output_dir: str | Path, tags: Sequence[str] = ()) -> UploadPlan:
 
     status = run.get("status")
     if status not in FINAL_STATUSES:
+        # A run that stopped before finalizing (running, or interrupted and not resumed) is
+        # uploaded as finished, with the status its saved results support.
         errors = {task.spec: task.payload["error"] for task in tasks}
-        status = run_status(errors, []) if tasks else "failed"
-        run["status"] = status
+        derived = run_status(errors, []) if tasks else "failed"
+        if status == "interrupted":
+            warnings.append(
+                f"Run {run_id} was interrupted; uploading it as {derived}. "
+                "To finish it instead, rerun it with --resume in this directory."
+            )
+        status = run["status"] = derived
     if not run.get("finished_at") and metrics is not None:
         run["finished_at"] = utc_now()
 
@@ -637,6 +651,69 @@ def register_run_start(
             client.close()
 
 
+def _stopped_run_manifest(out: Path, since: datetime | None) -> dict[str, Any] | str:
+    """The manifest of a run that stopped before it could finalize, or why there is none.
+
+    Only a manifest with status "running" qualifies and, when ``since`` is given, only one
+    whose run started after it, so a manifest left by an earlier run in a reused directory
+    is not reported.
+    """
+    manifest = read_manifest(out)
+    if manifest is None or manifest.get("run", {}).get("status") != "running":
+        return "no running manifest"
+    started = _parse_time(manifest["run"].get("started_at"))
+    if since is not None and (started is None or started < since - STALE_FILE_SLACK):
+        return "manifest is from an earlier run"
+    return manifest
+
+
+def _as_failed(run: Mapping[str, Any]) -> dict[str, Any]:
+    """A copy of ``run`` with status "failed", finished now."""
+    failed = dict(run)
+    finished = datetime.now(UTC)
+    failed["status"] = "failed"
+    failed["finished_at"] = finished.isoformat()
+    started = failed.get("started_at")
+    if started:
+        with contextlib.suppress(ValueError):
+            failed["duration_seconds"] = (
+                finished - datetime.fromisoformat(started)
+            ).total_seconds()
+    return failed
+
+
+def _run_request(run: Mapping[str, Any], model: Any, config: UploadConfig) -> dict[str, Any]:
+    run_upload = dict(run)
+    run_upload["tags"] = list(validate_tags([*(run.get("tags") or []), *config.tags]))
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "client": _client_info(),
+        "run": run_upload,
+        "model": model,
+    }
+
+
+def _report_failed(
+    client: IngestClient, run: Mapping[str, Any], model: Any, config: UploadConfig
+) -> UploadResult:
+    """Record ``run`` (status "failed") as a finished run with no task results."""
+    client.upsert_run(run["run_id"], _run_request(run, model, config))
+    completed = client.complete(
+        run["run_id"],
+        {
+            "status": "failed",
+            "finished_at": run["finished_at"],
+            "duration_seconds": run.get("duration_seconds"),
+            "suites": [],
+            "expected_task_results": 0,
+            "expected_artifacts": 0,
+        },
+    )
+    url = completed.get("dashboard_url")
+    logger.info(f"Recorded failed run {run['run_id']}: {url or ''}")
+    return UploadResult(ok=True, run_id=run["run_id"], dashboard_url=url)
+
+
 def mark_run_failed(
     output_dir: str | Path,
     config: UploadConfig,
@@ -654,57 +731,76 @@ def mark_run_failed(
     out = Path(output_dir)
     owned = client is None
     try:
-        manifest = read_manifest(out)
-        if manifest is None or manifest.get("run", {}).get("status") != "running":
-            return UploadResult(ok=False, error="no running manifest")
-        run = manifest["run"]
-        started = _parse_time(run.get("started_at"))
-        if since is not None and (started is None or started < since - STALE_FILE_SLACK):
-            return UploadResult(ok=False, error="manifest is from an earlier run")
-        finished = datetime.now(UTC)
-        run["status"] = "failed"
-        run["finished_at"] = finished.isoformat()
-        started = run.get("started_at")
-        if started:
-            with contextlib.suppress(ValueError):
-                run["duration_seconds"] = (
-                    finished - datetime.fromisoformat(started)
-                ).total_seconds()
+        manifest = _stopped_run_manifest(out, since)
+        if isinstance(manifest, str):
+            return UploadResult(ok=False, error=manifest)
+        run = _as_failed(manifest["run"])
         run["errors"] = [*(run.get("errors") or []), {"task": None, "error": error[:4000]}]
+        manifest["run"] = run
         write_manifest(out, manifest)
         if not config.enabled:
             return UploadResult(ok=False, run_id=run["run_id"], error="upload disabled")
-
-        run_upload = dict(run)
-        run_upload["tags"] = list(validate_tags([*(run.get("tags") or []), *config.tags]))
         if client is None:
             client = make_client(config, deadline_s=FAILURE_BUDGET_S)
         client.run_secret = run_secret(out)
-        client.upsert_run(
-            run["run_id"],
-            {
-                "protocol_version": PROTOCOL_VERSION,
-                "client": _client_info(),
-                "run": run_upload,
-                "model": manifest["model"],
-            },
-        )
-        completed = client.complete(
-            run["run_id"],
-            {
-                "status": "failed",
-                "finished_at": run["finished_at"],
-                "duration_seconds": run.get("duration_seconds"),
-                "suites": [],
-                "expected_task_results": 0,
-                "expected_artifacts": 0,
-            },
-        )
-        url = completed.get("dashboard_url")
-        logger.info(f"Recorded failed run {run['run_id']}: {url or ''}")
-        return UploadResult(ok=True, run_id=run["run_id"], dashboard_url=url)
+        return _report_failed(client, run, manifest["model"], config)
     except Exception as e:
         logger.warning(f"Could not record the failed run with {config.api_url}: {e}")
+        return UploadResult(ok=False, error=str(e))
+    finally:
+        if owned and client is not None:
+            client.close()
+
+
+def mark_run_interrupted(
+    output_dir: str | Path,
+    config: UploadConfig,
+    reason: str,
+    *,
+    since: datetime | None = None,
+    client: IngestClient | None = None,
+) -> UploadResult:
+    """Record a resumable run that was stopped, such as by preemption. Never raises.
+
+    Rewrites the manifest with status "interrupted" and reports that status, which is not
+    final: the job that resumes the run registers it as running again under the same run
+    ID, and its final upload replaces it. Acts on the same manifests as mark_run_failed.
+
+    An ingest service from before the "interrupted" status rejects it (HTTP 422); the run
+    is then reported as failed, as it was before. The local manifest stays interrupted.
+    30 s budget.
+    """
+    out = Path(output_dir)
+    owned = client is None
+    try:
+        manifest = _stopped_run_manifest(out, since)
+        if isinstance(manifest, str):
+            return UploadResult(ok=False, error=manifest)
+        run = manifest["run"]
+        run["status"] = "interrupted"
+        run["errors"] = [*(run.get("errors") or []), {"task": None, "error": reason[:4000]}]
+        write_manifest(out, manifest)
+        if not config.enabled:
+            return UploadResult(ok=False, run_id=run["run_id"], error="upload disabled")
+        if client is None:
+            client = make_client(config, deadline_s=FAILURE_BUDGET_S)
+        client.run_secret = run_secret(out)
+        try:
+            request = _run_request(run, manifest["model"], config)
+            response = client.upsert_run(run["run_id"], request)
+        except IngestError as e:
+            if e.status != 422:
+                raise
+            logger.info(
+                f"The ingest service does not accept interrupted runs ({e}); "
+                "recording the run as failed"
+            )
+            return _report_failed(client, _as_failed(run), manifest["model"], config)
+        url = response.get("dashboard_url")
+        logger.info(f"Recorded interrupted run {run['run_id']}: {url or ''}")
+        return UploadResult(ok=True, run_id=run["run_id"], dashboard_url=url)
+    except Exception as e:
+        logger.warning(f"Could not record the interrupted run with {config.api_url}: {e}")
         return UploadResult(ok=False, error=str(e))
     finally:
         if owned and client is not None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import multiprocessing as mp
+import os
 import random
 import time
 from collections.abc import Mapping, Sequence
@@ -25,6 +26,18 @@ from olmo_eval.runners.asynq.monitoring import (
     wait_for_workers_ready,
 )
 from olmo_eval.runners.asynq.preparation import prepare_task_items
+from olmo_eval.runners.asynq.progress import (
+    ProgressLock,
+    Restored,
+    discard_progress,
+    has_progress,
+    is_shared_run,
+    model_lock,
+    open_run_progress,
+    remove_empty_progress_dirs,
+    restore_shared_identity,
+    save_shared_identity,
+)
 from olmo_eval.runners.asynq.results import (
     aggregate_results,
     check_failure_budget,
@@ -42,6 +55,7 @@ if TYPE_CHECKING:
     from olmo_eval.common.execution import ProcessScoringPoolConfig
     from olmo_eval.evals.tasks.common import SandboxEnv, Task
     from olmo_eval.harness.sandbox import SandboxConfig
+    from olmo_eval.runners.asynq.progress import RunProgress
     from olmo_eval.upload import UploadConfig
 
 logger = get_logger(__name__)
@@ -530,8 +544,13 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     save_predictions: bool = True
     save_requests: bool = True
 
-    # Shuffle seed for deterministic instance ordering (enables future checkpointing)
+    # Shuffle seed for deterministic instance ordering
     shuffle_seed: int = 42
+
+    # resume records progress under output_dir and continues from it when it is there.
+    # Without it a run writes no progress and ignores any it finds; fresh discards it.
+    resume: bool = False
+    fresh: bool = False
 
     # Instance inspection options
     inspect_instance: bool = False
@@ -547,6 +566,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     # Run record state for the manifest written at start and finalize
     _started_at: str | None = field(default=None, init=False, repr=False)
     _prepared_tasks: dict[str, Task] = field(default_factory=dict, init=False, repr=False)
+    # Restarts of this run in the same output directory, kept in the manifest
+    _resume_record: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def provider_config(self) -> ProviderConfig:
@@ -606,21 +627,71 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # startup (imports and config resolution), which it does not cover.
         experiment_start = time.time()
 
-        # Generate experiment ID early so metrics can include it
-        experiment_id = generate_experiment_id()
+        # A run that records or discards progress takes the model's lock before it
+        # touches the output directory: another live run's manifest, run ID and records
+        # must not change because this one started.
+        lock = model_lock(self.output_dir, self.model_name) if self.resume or self.fresh else None
+        if lock is not None:
+            lock.acquire()
+        try:
+            return await self._run_locked(experiment_start, lock)
+        finally:
+            if lock is not None and lock.held:
+                lock.release()
+                remove_empty_progress_dirs(self.output_dir, self.model_name)
+
+    async def _run_locked(
+        self, experiment_start: float, lock: ProgressLock | None
+    ) -> dict[str, Any]:
+        if self.fresh:
+            discard_progress(
+                self.output_dir, self.model_name, expand_tasks(self.task_specs), lock=lock
+            )
+        elif not self.resume and has_progress(self.output_dir):
+            runner_logger.warning(
+                f"{self.output_dir} holds progress recorded by another run, which this run "
+                "ignores. Pass --resume to continue it, or --fresh to discard the records "
+                "of this run's tasks (other tasks' records stay)."
+            )
+
+        # Generate experiment ID early so metrics can include it. A resumed run keeps
+        # the ID of the run it continues.
+        if self.resume:
+            restore_shared_identity(self.output_dir)
+        previous_run_id, self._resume_record = self._previous_run()
+        experiment_id = previous_run_id or generate_experiment_id()
         self._start_run_record(experiment_id)
+        if self.resume:
+            # A replacement job keeps this run ID even if this one stops before it
+            # records any progress.
+            save_shared_identity(self.output_dir)
 
         # Prepare tasks
         expanded_tasks, trackers, items = self._prepare_tasks()
         self._prepared_tasks = {
             spec: tracker.task for spec, tracker in trackers.items() if tracker.task is not None
         }
-        total_instances = len(items)
-        runner_logger.info(f"Total instances: {total_instances}")
+        runner_logger.info(f"Total instances: {len(items)}")
 
         # Update harness metrics config with experiment metadata before starting workers
         self._update_metrics_config(experiment_id)
         self._enable_tool_parsing_for_tool_requests(items)
+
+        # With --resume, record progress and skip the instances an earlier attempt on
+        # this output directory already finished. Without it, nothing is recorded.
+        progress: RunProgress | None = None
+        restored = Restored(remaining=items)
+        if self.resume:
+            progress = open_run_progress(
+                self.output_dir, self.model_name, self.harness_config, lock=lock
+            )
+            try:
+                restored = progress.restore(trackers, items, self.harness_config)
+            except BaseException:
+                progress.close()
+                raise
+        items = restored.remaining
+        total_instances = len(items)
 
         # Setup multiprocessing
         ctx = mp.get_context("spawn")
@@ -674,6 +745,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 item_queue=item_queue,
                 result_queue=result_queue,
                 output_dir=self.output_dir,
+                per_request=progress is not None,
             )
 
             # Add poison pills (one per worker)
@@ -873,6 +945,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 )
 
             self.harness_config = apply_worker_configs(self.harness_config, worker_configs)
+            if progress is not None:
+                progress.check_runtime(self.harness_config.provider.resolved_runtime)
             self._update_metrics_config(experiment_id)
 
             runner_logger.info(
@@ -896,6 +970,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 response_scoring_concurrency,
                 len(expanded_tasks),
                 total_instances,
+                restored=restored.responses,
+                finalized=restored.finalized,
+                progress=progress,
             )
             processing_seconds = _processing_seconds(results, processing_start, time.time())
 
@@ -935,8 +1012,11 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 experiment_id=experiment_id,
                 experiment_duration_seconds=experiment_duration_seconds,
                 provider_init_seconds=provider_init_seconds,
+                progress=progress,
             )
         finally:
+            if progress is not None:
+                progress.close()
             terminate_workers(workers)
             if sandbox_manager is not None:
                 runner_logger.info("Stopping sandbox manager...")
@@ -968,6 +1048,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 configured = get_task(spec, overrides or None)
                 self._check_scaffold(spec, configured)
                 self._check_sandbox(spec, configured)
+                self._check_judge_provider(spec, configured)
                 task, task_items = prepare_task_items(
                     spec,
                     self.model_name,
@@ -1085,6 +1166,34 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             "has none."
         )
 
+    def _check_judge_provider(self, spec: str, task: Task) -> None:
+        """Fail before generation if an auxiliary judge provider serves another model.
+
+        A task scored by a model in this run's harness, such as an LLM judge or
+        ALCE's NLI model, records that model in ``judge_model``, and so in its task
+        hash; the provider must serve that model.
+        """
+        from olmo_eval.common.scorers.execution import ContextScorer
+
+        judge_model = task.config.judge_model
+        for scorer in task._get_scorers().values():
+            name = getattr(scorer, "provider_name", None)
+            if not isinstance(scorer, ContextScorer) or name is None or judge_model is None:
+                continue
+            provider = self.harness_config.auxiliary_providers.get(name)
+            if provider is None:
+                raise ValueError(
+                    f"{spec} is judged by the auxiliary provider {name!r}, which harness "
+                    f"{self.harness_config.name!r} does not define. Add a provider {name!r} "
+                    f"that serves {judge_model!r}; the task module shows a launch command."
+                )
+            if provider.served_model != judge_model:
+                raise ValueError(
+                    f"{spec} is judged by {judge_model!r}, but auxiliary provider {name!r} "
+                    f"serves {provider.served_model!r}. Serve {judge_model!r}, or pass "
+                    f"`-o judge_model={provider.served_model}` to record the judge you use."
+                )
+
     def _build_task_overrides(self, spec: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """Build task and sampling overrides for a given task spec.
 
@@ -1185,6 +1294,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         scoring_concurrency: int,
         total_tasks: int,
         total_instances: int,
+        restored: dict[str, dict[int, Any]] | None = None,
+        finalized: dict[str, TaskResult] | None = None,
+        progress: RunProgress | None = None,
     ) -> dict[str, Any]:
         """Process results from workers with inline async scoring."""
         return await process_results(
@@ -1201,6 +1313,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             save_requests=self.save_requests,
             write_requests_fn=self._write_requests,
             max_hard_failure_rate=self.max_hard_failure_rate,
+            restored=restored,
+            finalized=finalized,
+            progress=progress,
         )
 
     def _aggregate_results(
@@ -1225,19 +1340,34 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         experiment_id: str,
         experiment_duration_seconds: float | None = None,
         provider_init_seconds: dict[str, float] | None = None,
+        progress: RunProgress | None = None,
     ) -> dict[str, Any]:
         """Write the results, then fail the run if a task blew its budget.
 
         The order is the point: a run that trips the gate must still leave its
         metrics.json and predictions on disk to be diagnosed from, so the gate is
-        checked only after _finalize_and_save has returned.
+        checked only after _finalize_and_save has returned. A run that trips it also
+        keeps its progress records, so a retry continues from them; a run that passes
+        deletes its own once its outputs are written and uploaded, so a preemption during
+        the upload still resumes instead of rerunning the eval.
         """
+        keep_progress = progress is None or any(
+            result.failure_budget_exceeded for result in results.values()
+        )
         final_results = self._finalize_and_save(
             results_dict,
             experiment_id=experiment_id,
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
+        if progress is not None and not keep_progress and not is_shared_run():
+            progress.discard()
+        elif progress is None and has_progress(self.output_dir):
+            runner_logger.warning(
+                f"{self.output_dir} still holds progress recorded by another run, which this "
+                "run did not use. Pass --resume to continue it, or --fresh to discard the "
+                "records of this run's tasks (other tasks' records stay)."
+            )
         check_failure_budget(results)
         return final_results
 
@@ -1282,6 +1412,48 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         return results_dict
 
+    def _previous_run(self) -> tuple[str | None, dict[str, Any]]:
+        """The run ID to continue and this run's restart record for the manifest.
+
+        The ID is that of a manifest in the output directory that is running, interrupted or
+        failed, for the same task specs and model, when resuming; its upload secret, if it
+        has one, is reused with the directory. Otherwise it is None.
+        """
+        from olmo_eval.upload.manifest import RESUMABLE_STATUSES, RUN_ID_RE, read_manifest
+
+        job_id = os.environ.get("BEAKER_JOB_ID")
+        job_ids = [job_id] if job_id else []
+        fresh = {"resumed_count": 0, "beaker_job_ids": job_ids}
+        # Progress that was discarded (a completed run, or --fresh) has nothing to continue.
+        if not self.resume or (not is_shared_run() and not has_progress(self.output_dir)):
+            return None, fresh
+        manifest = read_manifest(self.output_dir)
+        if manifest is None:
+            return None, fresh
+        run = manifest.get("run") or {}
+        run_id = run.get("run_id")
+        if (
+            run.get("status")
+            not in (
+                *RESUMABLE_STATUSES,
+                # Under the supervisor, a finished run can be continued too: a failed
+                # upload's retry, or a rerun of a completed job that lacks its results.
+                *(("complete", "partial") if is_shared_run() else ()),
+            )
+            or list(run.get("task_specs") or []) != list(self.task_specs)
+            or (manifest.get("model") or {}).get("path") != self.model_name
+            or not isinstance(run_id, str)
+            or not RUN_ID_RE.match(run_id)
+        ):
+            return None, fresh
+        previous = manifest.get("resume") or {}
+        record = {
+            "resumed_count": int(previous.get("resumed_count") or 0) + 1,
+            "beaker_job_ids": [*previous.get("beaker_job_ids", []), *job_ids],
+        }
+        runner_logger.info(f"Continuing run {run_id} (restart {record['resumed_count']})")
+        return run_id, record
+
     def _start_run_record(self, experiment_id: str) -> None:
         """Write manifest.json with status "running" and register the run (best effort)."""
         from olmo_eval.upload import register_run_start
@@ -1311,7 +1483,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 # Runtime identity is unknown until workers initialize. Do not
                 # register a provisional auto-profile hash as an actual model.
                 model["model_hash"] = None
-            write_manifest(self.output_dir, build_manifest(run, model))
+            write_manifest(self.output_dir, build_manifest(run, model, resume=self._resume_record))
         except Exception as e:
             logger.warning(f"Could not write the run manifest: {e}")
             return
@@ -1376,7 +1548,14 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 provider_kind=results_dict.get("provider") or str(self.provider_config.kind),
                 provider_config=results_dict.get("model_config", {}),
             )
-            suites = suite_results(results_dict.get("suites") or {}, results_dict.get("tasks"))
-            write_manifest(self.output_dir, build_manifest(run, model, tasks, suites))
+            suites = suite_results(
+                results_dict.get("suites") or {},
+                results_dict.get("tasks"),
+                task_specs=self.task_specs,
+            )
+            write_manifest(
+                self.output_dir,
+                build_manifest(run, model, tasks, suites, resume=self._resume_record),
+            )
         except Exception as e:
             logger.warning(f"Could not write the run manifest: {e}")
