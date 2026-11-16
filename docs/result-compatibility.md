@@ -16,6 +16,18 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-16: RULER VT `:v3` re-draws its worked example per instance
+
+- **Affected**: `ruler_vt__{4096,...,131072}:v3`, which so far exists only on branch
+  `yashasbls/ruler-vt-example` (first at 661c98da).
+- **Change**: the worked example `:v3` puts before the input now gets new variable
+  names and a new value for each instance, as upstream RULER does; at 661c98da every
+  instance carried the data row's one fixed example.
+- **Identity**: task hashes change, so results with the fixed example (661c98da) and the
+  re-drawn one are told apart by hash.
+- **Comparability**: the two are not interchangeable; fixed-example results serve only
+  as an ablation of this change.
+
 ## 2026-11-03: Auditable IFEval per-question exports
 
 - **Affected**: predictions produced with the four IFEval metrics, including `ifeval`,
