@@ -380,9 +380,6 @@ def launch(
     from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
     from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
     from olmo_eval.cli.beaker.task_validator import TaskValidator
-    from olmo_eval.common.constants.infrastructure import (
-        BEAKER_SANDBOX_IMAGE,
-    )
 
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
     raw_task_overrides, harness_overrides = process_ordered_args(ordered_args)
@@ -606,10 +603,9 @@ def launch(
         effective_image = image
     elif eval_config and eval_config.beaker_image:
         effective_image = eval_config.beaker_image
-    elif harness_needs_sandbox:
-        effective_image = BEAKER_SANDBOX_IMAGE
     else:
-        effective_image = None  # JobConfigAssembler selects per resolved provider.
+        # JobConfigAssembler selects per resolved provider and sandbox need.
+        effective_image = None
 
     # Handle group creation
     _handle_group_creation(launcher, effective_groups, dry_run, yes)

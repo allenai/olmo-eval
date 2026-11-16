@@ -359,8 +359,8 @@ class LaunchConfigLoader:
         """Detect GPU requirement based on provider and harness configuration.
 
         Calculates total GPUs needed for:
-        - Main model (tensor_parallel_size × num_instances)
-        - Auxiliary providers (each with their own tensor_parallel_size × num_instances)
+        - Main model (tensor_parallel_size × pipeline_parallel_size × num_instances)
+        - Auxiliary providers (each with their own TP × PP × num_instances)
 
         Args:
             model_spec: Model specification (name or preset).
@@ -371,6 +371,7 @@ class LaunchConfigLoader:
             Total number of GPUs required.
         """
         from olmo_eval.common.configs import get_provider_config
+        from olmo_eval.inference.gpu_planner import gpus_per_instance
 
         # Build effective harness config with overrides applied
         harness_config = self._get_effective_harness_config(harness_name, harness_overrides)
@@ -394,7 +395,7 @@ class LaunchConfigLoader:
         main_tp = 1
         main_provider = harness_config.provider if harness_config else provider_config
         if main_provider:
-            main_tp = main_provider.kwargs.get("tensor_parallel_size", 1)
+            main_tp = gpus_per_instance(main_provider.kwargs)
             main_instances = main_provider.num_instances
         main_gpus = (
             main_instances * main_tp
@@ -410,8 +411,7 @@ class LaunchConfigLoader:
                     # API-backed or external server - no GPUs needed
                     continue
                 num_instances = config.num_instances
-                tensor_parallel = config.kwargs.get("tensor_parallel_size", 1)
-                aux_gpus += num_instances * tensor_parallel
+                aux_gpus += num_instances * gpus_per_instance(config.kwargs)
 
         return main_gpus + aux_gpus
 

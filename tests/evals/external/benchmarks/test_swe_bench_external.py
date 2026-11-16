@@ -143,9 +143,9 @@ class TestImageSource(unittest.TestCase):
 class TestSelectInstances(unittest.TestCase):
     def setUp(self) -> None:
         self.instances = [
-            _instance(instance_id="a__a-1", repo="a/a"),
-            _instance(instance_id="b__b-1", repo="b/b"),
-            _instance(instance_id="b__b-2", repo="b/b"),
+            _instance(instance_id="a__a-1", repo="a/a", difficulty="<15 min fix"),
+            _instance(instance_id="b__b-1", repo="b/b", difficulty="15 min - 1 hour"),
+            _instance(instance_id="b__b-2", repo="b/b", difficulty="<15 min fix"),
         ]
 
     def test_filters_by_id_in_dataset_order(self) -> None:
@@ -160,13 +160,31 @@ class TestSelectInstances(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing__id"):
             select_instances(self.instances, instance_ids=["missing__id"])
 
+    def test_filters_by_difficulty(self) -> None:
+        selected = select_instances(self.instances, difficulties=["<15 min fix"])
+        self.assertEqual([i.instance_id for i in selected], ["a__a-1", "b__b-2"])
+        selected = select_instances(self.instances, repos=["b/b"], difficulties=["<15 min fix"])
+        self.assertEqual([i.instance_id for i in selected], ["b__b-2"])
+
+    def test_unknown_difficulty_raises(self) -> None:
+        # A typo must not read as an empty bucket.
+        with self.assertRaisesRegex(ValueError, "<15 min"):
+            select_instances(self.instances, difficulties=["<15 min"])
+
 
 class TestArgsAndPrompt(unittest.TestCase):
     def test_from_dict_parses_strings(self) -> None:
         args = swe_eval.SWEBenchArgs.from_dict(
-            {"instance_ids": "a, b", "limit": "3", "oracle": "true", "max_concurrency": "8"}
+            {
+                "instance_ids": "a, b",
+                "difficulties": "<15 min fix",
+                "limit": "3",
+                "oracle": "true",
+                "max_concurrency": "8",
+            }
         )
         self.assertEqual(args.instance_ids, ["a", "b"])
+        self.assertEqual(args.difficulties, ["<15 min fix"])
         self.assertEqual(args.limit, 3)
         self.assertTrue(args.oracle)
         self.assertEqual(args.max_concurrency, 8)
@@ -181,6 +199,7 @@ class TestArgsAndPrompt(unittest.TestCase):
     def test_from_dict_defaults(self) -> None:
         args = swe_eval.SWEBenchArgs.from_dict({})
         self.assertIsNone(args.instance_ids)
+        self.assertIsNone(args.difficulties)
         self.assertIsNone(args.limit)
         self.assertEqual(args.revision, swe_eval.DATASET_REVISION)
 

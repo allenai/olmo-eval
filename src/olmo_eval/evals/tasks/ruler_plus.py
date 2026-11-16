@@ -26,7 +26,7 @@ from olmo_eval.data.ruler_plus_loader import (
     load_ruler_plus_shard,
 )
 from olmo_eval.data.ruler_plus_tasks import RULER_PLUS_TASKS
-from olmo_eval.evals.tasks.common.registry import register
+from olmo_eval.evals.tasks.common.registry import register, register_variant
 from olmo_eval.evals.tasks.ruler import RulerTask, make_ruler_task_class
 
 
@@ -93,6 +93,8 @@ class RulerPlusTask(RulerTask):
 
 # Number of samples to draw per task/context-size condition.
 _RULER_PLUS_LIMIT = 512
+# The hillclimb variant's smaller seeded sample, for fast dev reads at long contexts.
+_RULER_PLUS_HILLCLIMB_LIMIT = 128
 
 # Dynamically register all ruler-plus tasks
 for _task_name, _task_config in RULER_PLUS_TASKS.items():
@@ -106,3 +108,4 @@ for _task_name, _task_config in RULER_PLUS_TASKS.items():
     # Inject into module globals so pickle can find the class by name
     globals()[_cls.__name__] = _cls
     register(f"ruler_plus_{_task_name}")(_cls)
+    register_variant(f"ruler_plus_{_task_name}", "hillclimb", limit=_RULER_PLUS_HILLCLIMB_LIMIT)

@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.common.constants.infrastructure import (
     BEAKER_DEFAULT_IMAGE,
     BEAKER_RESULT_DIR,
+    BEAKER_SANDBOX_IMAGE,
     BEAKER_SGLANG_IMAGE,
+    BEAKER_SGLANG_SANDBOX_IMAGE,
     cluster_has_weka,
 )
 from olmo_eval.launch.beaker.constants import BEAKER_INFRA_ENV_VARS
@@ -25,6 +27,16 @@ if TYPE_CHECKING:
 
 OLMO_CORE_PACKAGE_WITH_EXTRAS = "ai2-olmo-core[torchao,transformers]"
 _VERSION_SELECTOR_RE = re.compile(r"^(?:\d|==|!=|~=|>=|<=|>|<)")
+
+
+def default_beaker_image(provider_kind: str | None, sandbox: bool) -> str:
+    """Base image for a job that names none.
+
+    SGLang needs its CUDA 13 / PyTorch 2.13 base; sandboxed harnesses need Podman.
+    """
+    if provider_kind == "sglang":
+        return BEAKER_SGLANG_SANDBOX_IMAGE if sandbox else BEAKER_SGLANG_IMAGE
+    return BEAKER_SANDBOX_IMAGE if sandbox else BEAKER_DEFAULT_IMAGE
 
 
 def get_provider_kind(model_spec: str, default_kind: str | None = None) -> str | None:
@@ -541,8 +553,8 @@ class JobConfigAssembler:
         provider_kind = resolve_provider_kind(exp.model_spec, preset, self.config.harness_overrides)
         # None means the caller left image selection to the resolved provider.
         # Resolve per experiment so mixed-provider launches can use different bases.
-        effective_image = self.effective_image or (
-            BEAKER_SGLANG_IMAGE if provider_kind == "sglang" else BEAKER_DEFAULT_IMAGE
+        effective_image = self.effective_image or default_beaker_image(
+            provider_kind, sandbox_enabled
         )
         vllm_isolated_venv = provider_kind == "vllm_server"
         model_provider_extras = get_provider_extras(exp.model_spec, default_kind=provider_kind)

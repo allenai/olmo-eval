@@ -107,7 +107,7 @@ _FAKE_DOCS: dict[str, list[dict[str, Any]]] = {
         }
         for i in range(16)
     ],
-    "gsm8k": [
+    "openai/gsm8k": [
         {
             "question": f"What is {i} plus {i}? <<say:The answer is {2 * i}.>>",
             "answer": f"{i} + {i} = {2 * i}\n#### {2 * i}",

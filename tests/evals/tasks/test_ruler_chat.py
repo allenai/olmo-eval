@@ -8,7 +8,8 @@ from olmo_eval.evals.tasks.common.registry import get_task, list_variants
 
 def test_every_ruler_task_has_a_chat_variant():
     variants = list_variants()
-    ruler = [t for t in variants if t.startswith("ruler_")]
+    # RULER+ tasks have their own variants (hillclimb), not chat ones.
+    ruler = [t for t in variants if t.startswith("ruler_") and not t.startswith("ruler_plus_")]
     assert ruler
     assert all("chat" in variants[t] for t in ruler)
 

@@ -973,6 +973,10 @@ class BeakerLauncher:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_artifact_registry"
             steps.append(f"source {script}")
 
+        # Optional shell snippet run after every package install (e.g. to re-pin a dependency
+        # that a later per-package install changed).  Not exported: it is a command, not a variable.
+        env_exports = dict(env_exports or {})
+        post_install_cmd = env_exports.pop("OLMO_EVAL_RUNTIME_POST_INSTALL_CMD", None)
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
             for key, value in env_exports.items():
@@ -993,7 +997,9 @@ class BeakerLauncher:
 
             _, flags = parse_install_spec(package)
             extra_flags: list[str] = []
-            if "--index-url" not in flags and "--extra-index-url" not in flags:
+            if "--index-url" not in flags:
+                extra_flags.extend(["--index-url", "https://pypi.org/simple"])
+            if "--extra-index-url" not in flags:
                 extra_flags.extend(["--extra-index-url", runtime_torch_index_url])
             if "--index-strategy" not in flags:
                 extra_flags.extend(["--index-strategy", "unsafe-best-match"])
@@ -1006,6 +1012,18 @@ class BeakerLauncher:
         # overridden packages are symlinked into /opt/vllm-venv below.
         if runtime_torch_version:
             steps.append(build_install_command(runtime_torch_spec(), force_reinstall=True))
+            # Companion packages that must change build together with torch (torchvision/torchaudio
+            # carry the CUDA variant too); otherwise the image's builds end up in the constraints
+            # and conflict with the provider's pins.  Space-separated specs, same index as torch.
+            for extra_spec in (
+                (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_EXTRA_PACKAGES") or ""
+            ).split():
+                spec = (
+                    f"{extra_spec} --index-url {runtime_torch_index_url}"
+                    if runtime_torch_index_url
+                    else extra_spec
+                )
+                steps.append(build_install_command(spec, force_reinstall=True))
 
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them.
         # CUTLASS DSL is the exception: vLLM pins this package independently of
@@ -1090,6 +1108,9 @@ class BeakerLauncher:
             for pkg in task_packages:
                 steps.append(build_install_command(pkg, constraints))
 
+        if post_install_cmd:
+            steps.append(post_install_cmd)
+
         # Set up Modal secret for GCP Artifact Registry (Modal sandboxes)
         if setup_modal_gcp_secret:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_modal_gcp_secret"
@@ -1117,6 +1138,8 @@ class BeakerLauncher:
             "UV_CACHE_DIR",
             "OLMO_EVAL_RUNTIME_TORCH_VERSION",
             "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
+            "OLMO_EVAL_RUNTIME_TORCH_EXTRA_PACKAGES",
+            "OLMO_EVAL_RUNTIME_POST_INSTALL_CMD",
         )
         for key in install_env_keys:
             if key in config.env_vars:

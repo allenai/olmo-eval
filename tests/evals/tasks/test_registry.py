@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import (
     Task,
@@ -16,6 +16,7 @@ from olmo_eval.evals.tasks.common import (
     list_variants,
     parse_overrides,
     register,
+    register_sampling_variant,
     register_variant,
 )
 from olmo_eval.evals.tasks.common.registry import _configs, _tasks, _variants
@@ -126,6 +127,46 @@ class TestRegisterVariant:
 
         variants = list_variants("multi_variant")
         assert set(variants["multi_variant"]) == {"fast", "full", "fewshot"}
+
+
+class TestRegisterSamplingVariant:
+    """Tests for register_sampling_variant."""
+
+    @pytest.fixture
+    def sampled_task(self):
+        @register("sampled")
+        class SampledTask(DummyTask):
+            data_source = DataSource(path="test/dataset")
+            sampling_params = SamplingParams(max_tokens=100, temperature=0.6, top_p=0.95)
+
+        register_variant(
+            "sampled",
+            "many",
+            limit=10,
+            sampling_params=SamplingParams(max_tokens=200, temperature=0.6, num_samples=8),
+        )
+
+    def test_keeps_the_variants_and_changes_only_the_named_fields(self, sampled_task):
+        spec = register_sampling_variant("sampled:many", "hot", temperature=1.0)
+        config = get_task(spec).config
+
+        assert spec == "sampled:many_hot"
+        assert config.limit == 10
+        assert config.sampling_params == SamplingParams(
+            max_tokens=200, temperature=1.0, num_samples=8
+        )
+
+    def test_a_bare_task_gets_a_variant_of_its_own(self, sampled_task):
+        spec = register_sampling_variant("sampled", "hot", temperature=1.0)
+
+        assert spec == "sampled:hot"
+        assert get_task(spec).config.sampling_params == SamplingParams(
+            max_tokens=100, temperature=1.0, top_p=0.95
+        )
+
+    def test_unknown_variant_raises(self, sampled_task):
+        with pytest.raises(ValueError, match="Unknown variant"):
+            register_sampling_variant("sampled:missing", "hot", temperature=1.0)
 
 
 class TestGetTask:
