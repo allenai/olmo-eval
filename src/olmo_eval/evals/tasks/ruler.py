@@ -194,13 +194,15 @@ class RulerTask(Task):
         elif self.prepends_example and (example := str(doc.get("example") or "").strip()):
             # The preformatted input leaves out the worked example the data row carries
             # (VT's one-shot demonstration); the template path above already includes it.
-            # As upstream RULER does, each instance gets its own variable names and value.
-            example = randomize_vt_example(
-                example,
-                seed=doc.get("index", index),
-                avoid_names=[str(a) for a in (doc.get("outputs") or doc.get("answer") or [])],
-                avoid_value=str(doc.get("query", "")),
-            )
+            # As upstream RULER does, each instance gets its own variable names and value
+            # (`:v3`); `:v3_fixed` keeps the data's one example, as an ablation.
+            if self.config.task_settings.get("prepend_example") == "random":
+                example = randomize_vt_example(
+                    example,
+                    seed=doc.get("index", index),
+                    avoid_names=[str(a) for a in (doc.get("outputs") or doc.get("answer") or [])],
+                    avoid_value=str(doc.get("query", "")),
+                )
             question = example + "\n\n" + question
 
         # Get answer (handle both "answer" and "outputs" fields)
@@ -448,7 +450,8 @@ RULER_V2_MAX_GEN_TOKS = {"vt": 100}
 #: Task types whose `:v2` outputs are scored only up to their first `Question:`.
 RULER_V2_ANSWER_CUT = ("vt",)
 
-#: Task types with a `:v3`: `:v2` plus the data row's worked example before the input.
+#: Task types with a `:v3`: `:v2` plus the data row's worked example before the input,
+#: re-drawn per instance (`:v3_fixed`: the data's one example, kept for an ablation).
 RULER_V3_PREPEND_EXAMPLE = ("vt",)
 
 # Dynamically register all RULER tasks
@@ -483,5 +486,11 @@ for _task_name, _task_config in RULER_TASKS.items():
             f"ruler_{_task_name}",
             "v3",
             task_settings={**_v2_settings, "prepend_example": "random"},
+            **_v2_sampling,
+        )
+        register_variant(
+            f"ruler_{_task_name}",
+            "v3_fixed",
+            task_settings={**_v2_settings, "prepend_example": "fixed"},
             **_v2_sampling,
         )
