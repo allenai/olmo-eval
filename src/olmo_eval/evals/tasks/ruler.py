@@ -205,6 +205,14 @@ class RulerTask(Task):
                 )
             question = example + "\n\n" + question
 
+        if self.closed_book:
+            # The question alone, without the documents: the input's closing instruction and
+            # question, with "based on the given documents" removed (a contamination probe).
+            tail = question.rfind(CLOSED_BOOK_INSTRUCTION)
+            if tail < 0:
+                raise ValueError(f"{self.task_name}: no closing instruction to keep in the input")
+            question = "Answer the question." + question[tail + len(CLOSED_BOOK_INSTRUCTION) :]
+
         # Get answer (handle both "answer" and "outputs" fields)
         answer = doc.get("answer") or doc.get("outputs")
 
@@ -239,6 +247,14 @@ class RulerTask(Task):
         without failing its batch, and an output whose haystack was cut is emptied.
         """
         return (self.config.task_settings or {}).get("overflow") == "score_zero"
+
+    @property
+    def closed_book(self) -> bool:
+        """Whether the documents are left out and only the question is asked (QA's ``:closedbook``).
+
+        A model that still answers knew the answer without the context, e.g. from training data.
+        """
+        return bool((self.config.task_settings or {}).get("closed_book"))
 
     @property
     def prepends_example(self) -> bool:
@@ -450,6 +466,12 @@ RULER_V2_MAX_GEN_TOKS = {"vt": 100}
 #: Task types whose `:v2` outputs are scored only up to their first `Question:`.
 RULER_V2_ANSWER_CUT = ("vt",)
 
+#: QA's closing instruction; `:closedbook` keeps the prompt from here on, minus the documents.
+CLOSED_BOOK_INSTRUCTION = "Answer the question based on the given documents."
+
+#: Task types with a `:closedbook`: `:v2` with the documents left out.
+RULER_CLOSED_BOOK = ("qa_1", "qa_2")
+
 #: Task types with a `:v3`: `:v2` plus the data row's worked example before the input,
 #: re-drawn per instance (`:v3_fixed`: the data's one example, kept for an ablation).
 RULER_V3_PREPEND_EXAMPLE = ("vt",)
@@ -492,5 +514,13 @@ for _task_name, _task_config in RULER_TASKS.items():
             f"ruler_{_task_name}",
             "v3_fixed",
             task_settings={**_v2_settings, "prepend_example": "fixed"},
+            **_v2_sampling,
+        )
+    # `:closedbook` (QA only): `:v2` with the documents left out, see RULER_CLOSED_BOOK.
+    if _v2_type in RULER_CLOSED_BOOK:
+        register_variant(
+            f"ruler_{_task_name}",
+            "closedbook",
+            task_settings={**_v2_settings, "closed_book": True},
             **_v2_sampling,
         )

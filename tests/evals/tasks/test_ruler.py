@@ -219,3 +219,29 @@ def test_v3_fixed_keeps_the_datas_example_for_every_instance():
         **get_task("ruler_vt__4096:v2").config.task_settings,
         "prepend_example": "fixed",
     }
+
+
+def test_qa_closedbook_asks_the_question_without_the_documents():
+    doc = {
+        "input": (
+            "Answer the question based on the given documents. Only give me the answer and do not "
+            "output any other words.\n\nThe following are given documents.\n\nDocument 1:\nNormandy "
+            "is in France.\n\nAnswer the question based on the given documents. Only give me the "
+            "answer and do not output any other words.\n\nQuestion: In what country is Normandy "
+            "located? Answer:"
+        ),
+        "context": "Document 1:\nNormandy is in France.",
+        "outputs": ["France"],
+        "index": 0,
+    }
+
+    instance = get_task("ruler_qa_1__4096:closedbook").process_doc(doc)
+
+    assert instance.question == (
+        "Answer the question. Only give me the answer and do not output any other words.\n\n"
+        "Question: In what country is Normandy located? Answer:"
+    )
+    assert "Normandy is in France" not in instance.question
+    assert get_task("ruler_qa_1__4096:v2").process_doc(doc).question == doc["input"]
+    with pytest.raises(Exception):
+        get_task("ruler_niah_s_1__4096:closedbook")
