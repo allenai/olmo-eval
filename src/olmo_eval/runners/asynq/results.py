@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import queue
 import time
-from collections.abc import Collection
+from collections.abc import Collection, Hashable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from olmo_eval.common.beaker_status import BeakerStatusReporter
 from olmo_eval.common.logging import get_logger
@@ -79,12 +79,26 @@ def apply_task_cost(result: TaskResult, tracker: TaskTracker, completed_at: floa
     result.attributed_inference_seconds = tracker.attributed_inference_seconds
 
 
+class _PendingBatchItem(NamedTuple):
+    instance_idx: int
+    response: Response
+    result_item: ResultItem
+
+
+async def _score_responses(
+    task: Task, responses: list[Response], context: ScoringContext | None
+) -> list[Response]:
+    """Score a batch of responses with their task's scorers."""
+    task.strip_thinking_traces(responses)
+    scored = await task.score_responses(responses, context=context)
+    return list(scored) if scored else list(responses)
+
+
 async def _score_response(
     task: Task, response: Response, context: ScoringContext | None
 ) -> Response:
     """Score one response with its task's scorers."""
-    task.strip_thinking_traces([response])
-    scored = await task.score_responses([response], context=context)
+    scored = await _score_responses(task, [response], context=context)
     return scored[0] if scored else response
 
 
@@ -229,11 +243,25 @@ async def process_results(
     # Determine which tasks need the scoring worker (async scorers like sandboxed
     # code execution). All other tasks are scored inline to avoid mp.Queue overhead.
     tasks_needing_async_scoring: set[str] = set()
+    batch_scorers_by_spec: dict[str, tuple[Any, ...]] = {}
     for spec, tracker in trackers.items():
         if tracker.task is not None and tracker.task._has_async_scorers():
             tasks_needing_async_scoring.add(spec)
+        get_batch_scorers = getattr(tracker.task, "_get_response_batch_scorers", None)
+        if get_batch_scorers is not None:
+            batch_scorers = get_batch_scorers()
+            if batch_scorers:
+                batch_scorers_by_spec[spec] = batch_scorers
     if tasks_needing_async_scoring:
         logger.info(f"Tasks using async scoring worker: {tasks_needing_async_scoring}")
+
+    ready_for_batch: dict[str, dict[int, _PendingBatchItem]] = {
+        spec: {} for spec in batch_scorers_by_spec
+    }
+    next_to_batch: dict[str, int] = dict.fromkeys(batch_scorers_by_spec, 0)
+    batch_buffers: dict[str, dict[Hashable, list[_PendingBatchItem]]] = {
+        spec: {} for spec in batch_scorers_by_spec
+    }
 
     def check_task_completion(spec: str) -> None:
         """Check if task is complete and finalize if so."""
@@ -305,6 +333,101 @@ async def process_results(
             progress.record(spec, instance_idx, scored, result_item)
         scoring_progress.update(1)
         check_task_completion(spec)
+
+    async def score_batch_and_store(
+        spec: str,
+        batch_items: list[_PendingBatchItem],
+        task: Task,
+    ) -> None:
+        """Score a batch of responses, store results, and record progress."""
+        batch_responses = [item.response for item in batch_items]
+        async with scoring_semaphore:
+            try:
+                scored_batch = await measure_instance_scoring(
+                    _score_responses(task, batch_responses, scoring_context),
+                    trackers[spec].scoring_times,
+                )
+                if len(scored_batch) != len(batch_items):
+                    raise ValueError(
+                        f"score_responses returned {len(scored_batch)} response(s) "
+                        f"for batch of {len(batch_items)}"
+                    )
+            except Exception as e:
+                error = format_scoring_error(e, phase="response")
+                for item in batch_items:
+                    logger.warning(
+                        "Failed to score %s[%s]: %s",
+                        spec,
+                        item.instance_idx,
+                        error.get("message", error["type"]),
+                    )
+                scored_batch = [
+                    _record_scoring_failure(item.response, error=error) for item in batch_items
+                ]
+
+        for item, scored in zip(batch_items, scored_batch, strict=True):
+            scored_responses[spec][item.instance_idx] = scored
+            instances_scored[spec] += 1
+            if progress is not None:
+                progress.record(spec, item.instance_idx, scored, item.result_item)
+            scoring_progress.update(1)
+        check_task_completion(spec)
+
+    def _advance_batch_scoring(spec: str, *, flush_all: bool = False) -> None:
+        """Advance the instance-order watermark for ``spec`` and dispatch ready batches."""
+        if spec not in batch_scorers_by_spec:
+            return
+        tracker = trackers[spec]
+        assert tracker.task is not None
+        batch_scorers = batch_scorers_by_spec[spec]
+        primary_scorer = batch_scorers[0] if len(batch_scorers) == 1 else None
+        batch_size = primary_scorer.batch_size if primary_scorer is not None else None
+        if batch_size is not None and batch_size <= 0:
+            batch_size = None
+
+        restored_for_spec = restored.get(spec, {})
+        ready = ready_for_batch[spec]
+        buffers = batch_buffers[spec]
+        cursor = next_to_batch[spec]
+
+        while cursor < tracker.total_instances:
+            if cursor in restored_for_spec or cursor in tracker.failed_instances:
+                cursor += 1
+                continue
+            if cursor not in ready:
+                break
+            item = ready.pop(cursor)
+            key = primary_scorer.batch_key(item.response) if primary_scorer is not None else None
+            bucket = buffers.setdefault(key, [])
+            bucket.append(item)
+            if batch_size is not None and len(bucket) >= batch_size:
+                chunk = bucket[:batch_size]
+                del bucket[:batch_size]
+                scoring_task = asyncio.create_task(
+                    score_batch_and_store(spec=spec, batch_items=chunk, task=tracker.task)
+                )
+                in_flight_scoring.add(scoring_task)
+            cursor += 1
+
+        next_to_batch[spec] = cursor
+
+        if flush_all or cursor >= tracker.total_instances:
+            for key in list(buffers.keys()):
+                bucket = buffers.pop(key)
+                if not bucket:
+                    continue
+                if batch_size is None:
+                    scoring_task = asyncio.create_task(
+                        score_batch_and_store(spec=spec, batch_items=bucket, task=tracker.task)
+                    )
+                    in_flight_scoring.add(scoring_task)
+                else:
+                    for start in range(0, len(bucket), batch_size):
+                        chunk = bucket[start : start + batch_size]
+                        scoring_task = asyncio.create_task(
+                            score_batch_and_store(spec=spec, batch_items=chunk, task=tracker.task)
+                        )
+                        in_flight_scoring.add(scoring_task)
 
     def _reap_done_tasks() -> None:
         """Remove completed scoring tasks from in_flight set."""
@@ -408,6 +531,7 @@ async def process_results(
                         result_item.task_id, result_item.instance_idx, result_item
                     )
                 scoring_progress.update(1)
+                _advance_batch_scoring(result_item.task_id)
                 check_task_completion(result_item.task_id)
                 continue
 
@@ -436,18 +560,29 @@ async def process_results(
                 request_trace=result_item.request_trace,
             )
 
-            # Score inline as an async task
+            # Score inline as an async task (or buffer for ResponseBatchScorer tasks)
             assert tracker.task is not None
-            scoring_task = asyncio.create_task(
-                score_and_store(
-                    spec=result_item.task_id,
+            if result_item.task_id in batch_scorers_by_spec:
+                ready_for_batch[result_item.task_id][result_item.instance_idx] = _PendingBatchItem(
                     instance_idx=result_item.instance_idx,
                     response=response,
-                    task=tracker.task,
                     result_item=result_item,
                 )
-            )
-            in_flight_scoring.add(scoring_task)
+                _advance_batch_scoring(result_item.task_id)
+            else:
+                scoring_task = asyncio.create_task(
+                    score_and_store(
+                        spec=result_item.task_id,
+                        instance_idx=result_item.instance_idx,
+                        response=response,
+                        task=tracker.task,
+                        result_item=result_item,
+                    )
+                )
+                in_flight_scoring.add(scoring_task)
+
+        for spec in batch_scorers_by_spec:
+            _advance_batch_scoring(spec, flush_all=True)
 
         # Wait for all in-flight scoring to complete
         if in_flight_scoring:

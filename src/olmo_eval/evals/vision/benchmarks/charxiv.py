@@ -19,11 +19,9 @@ Metrics are 0-1 (the leaderboard reports x100); the official protocol counts fai
 
 from __future__ import annotations
 
-import asyncio
 import threading
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
@@ -32,24 +30,15 @@ from olmo_eval.evals.tasks.common import register
 from olmo_eval.evals.vision.data.images import lazy_hf_image
 from olmo_eval.evals.vision.scoring.charxiv import (
     IDX2ANSTYPE,
-    build_descriptive_grading_batches,
-    build_reasoning_grading_prompt,
     build_reasoning_question,
     descriptive_query_helper,
     qnum_to_qtype,
 )
-from olmo_eval.evals.vision.scoring.judges import (
-    CharxivJudgeScorer,
-    default_charxiv_cache_dir,
-    grade_descriptive_batch,
-    grade_reasoning,
-)
+from olmo_eval.evals.vision.scoring.judges import CharxivJudgeScorer
 from olmo_eval.evals.vision.tasks.image_qa import ImageQATask
 
-if TYPE_CHECKING:
-    from olmo_eval.common.execution import ScoringContext
-
-_SCORER = CharxivJudgeScorer()
+_SCORER = CharxivJudgeScorer(batch_size=5)
+_REAS_SCORER = CharxivJudgeScorer(batch_size=1)
 
 
 # The runner prepares both charxiv tasks concurrently, and datasets' arrow reader goes through
@@ -73,28 +62,6 @@ def _figure_id(figure_path: str) -> int:
 def _subplot_loc(ex: dict) -> list[int] | str:
     loc = ex["subplot_loc"]
     return loc if loc is not None else [ex["subplot_row"], ex["subplot_col"]]
-
-
-def _response_text(response: Response) -> str:
-    if response.outputs:
-        return response.outputs[0].text or ""
-    return ""
-
-
-def _store_result(response: Response, extracted, raw_score, **extra) -> None:
-    # official get_stats: scores outside {0, 1} are invalid and count as 0
-    score = float(raw_score) if raw_score in (0, 1) else 0.0
-    response.scores["charxiv"] = score
-    if response.outputs:
-        output = response.outputs[0]
-        if output.metadata is None:
-            output.metadata = {}
-        output.metadata["charxiv_result"] = {
-            "extracted_answer": extracted,
-            "score": raw_score,
-            **extra,
-        }
-        output.metadata["score:charxiv"] = score
 
 
 def _results(responses: Sequence[Response]) -> Iterator[dict]:
@@ -189,28 +156,17 @@ _DESC_METRICS: tuple[Metric, ...] = (
 )
 
 _REAS_METRICS: tuple[Metric, ...] = (
-    CharxivScoreMetric(name="reasoning_overall", scorer=_SCORER),
+    CharxivScoreMetric(name="reasoning_overall", scorer=_REAS_SCORER),
     *(
         CharxivScoreMetric(
             name=f"reasoning_{IDX2ANSTYPE[i].lower().replace('-', '_')}",
-            scorer=_SCORER,
+            scorer=_REAS_SCORER,
             inst_category=i,
         )
         for i in (1, 2, 3, 4)
     ),
-    CharxivInvalidCountMetric(name="n_invalid", scorer=_SCORER),
+    CharxivInvalidCountMetric(name="n_invalid", scorer=_REAS_SCORER),
 )
-
-
-async def _gather_bounded(coros, context: ScoringContext | None):
-    limit = context.scoring_concurrency if context is not None else 8
-    semaphore = asyncio.Semaphore(limit)
-
-    async def _run(coro):
-        async with semaphore:
-            return await coro
-
-    return await asyncio.gather(*(_run(c) for c in coros))
 
 
 @register("charxiv_descriptive")
@@ -248,43 +204,6 @@ class CharxivDescriptiveTask(ImageQATask):
                     },
                 )
 
-    async def score_responses(
-        self,
-        responses: Sequence[Response],
-        context: ScoringContext | None = None,
-    ) -> Sequence[Response]:
-        self._extract_answers(responses)
-        # Official protocol: group all responses by template id, grade 5 triplets per GPT call.
-        items = [
-            (
-                r.instance.metadata["resp_key"],
-                _response_text(r),
-                r.instance.metadata["answer"],
-                r.instance.metadata["qid"],
-            )
-            for r in responses
-        ]
-        batches = build_descriptive_grading_batches(items)
-        cache_dir = default_charxiv_cache_dir()
-        results = await _gather_bounded(
-            (
-                grade_descriptive_batch(
-                    batch["grading_query"], len(batch["resp_keys"]), cache_dir=cache_dir
-                )
-                for batch in batches
-            ),
-            context,
-        )
-        graded = {}
-        for batch, result in zip(batches, results, strict=True):
-            for i, resp_key in enumerate(batch["resp_keys"]):
-                graded[resp_key] = (result[f"extract_answer_T{i + 1}"], result[f"score_T{i + 1}"])
-        for response in responses:
-            meta = response.instance.metadata
-            extracted, raw_score = graded[meta["resp_key"]]
-            _store_result(response, extracted, raw_score, qid=meta["qid"])
-        return responses
-
 
 @register("charxiv_reasoning")
 class CharxivReasoningTask(ImageQATask):
@@ -318,34 +237,3 @@ class CharxivReasoningTask(ImageQATask):
                     "image": lazy_hf_image(ds, idx, "image"),
                 },
             )
-
-    async def score_responses(
-        self,
-        responses: Sequence[Response],
-        context: ScoringContext | None = None,
-    ) -> Sequence[Response]:
-        self._extract_answers(responses)
-        cache_dir = default_charxiv_cache_dir()
-        results = await _gather_bounded(
-            (
-                grade_reasoning(
-                    build_reasoning_grading_prompt(
-                        r.instance.metadata["raw_question"],
-                        r.instance.metadata["inst_category"],
-                        r.instance.metadata["answer"],
-                        _response_text(r),
-                    ),
-                    cache_dir=cache_dir,
-                )
-                for r in responses
-            ),
-            context,
-        )
-        for response, (extracted, raw_score) in zip(responses, results, strict=True):
-            _store_result(
-                response,
-                extracted,
-                raw_score,
-                inst_category=response.instance.metadata["inst_category"],
-            )
-        return responses

@@ -16,7 +16,7 @@ import os
 import random
 import re
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,12 +26,13 @@ from olmo_eval.common.openai_credentials import (
     create_async_openai_client,
     require_openai_credentials,
 )
-from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.scorers.execution import ContextScorer
+from olmo_eval.common.scorers.execution import ContextScorer, ResponseBatchScorer
 from olmo_eval.common.scoring_time import measure_scoring
-from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.common.types import Instance, LMOutput, Response
 from olmo_eval.evals.vision.scoring.charxiv import (
+    build_descriptive_grading_batches,
     build_dummy_output,
+    build_reasoning_grading_prompt,
     verify_grading_output,
 )
 
@@ -558,16 +559,43 @@ async def grade_reasoning(
     return content["extracted_answer"], content["score"]
 
 
-@dataclass(frozen=True)
-class CharxivJudgeScorer(Scorer):
-    """Score channel for the CharXiv GPT judge.
+def _response_text(response: Response) -> str:
+    if response.outputs:
+        return response.outputs[0].text or ""
+    return ""
 
-    Actual grading happens task-level (the official protocol batches descriptive triplets
-    across instances), which stores per-output ``score:charxiv``; this scorer exposes that
-    stored value so the metric/scorer plumbing stays uniform.
+
+def _store_charxiv_result(
+    response: Response, extracted: Any, raw_score: int, **extra: Any
+) -> float:
+    # official get_stats: scores outside {0, 1} are invalid and count as 0
+    score = float(raw_score) if raw_score in (0, 1) else 0.0
+    response.scores["charxiv"] = score
+    if response.outputs:
+        output = response.outputs[0]
+        if output.metadata is None:
+            output.metadata = {}
+        output.metadata["charxiv_result"] = {
+            "extracted_answer": extracted,
+            "score": raw_score,
+            **extra,
+        }
+        output.metadata["score:charxiv"] = score
+    return score
+
+
+@dataclass(frozen=True)
+class CharxivJudgeScorer(ResponseBatchScorer):
+    """GPT-4o judge scorer for CharXiv descriptive and reasoning benchmarks.
+
+    Grades descriptive responses in batches of ``batch_size`` (default 5) grouped by
+    question template id (``qid``), matching the official CharXiv evaluation protocol
+    (~800 GPT calls across the 4,000-instance descriptive split instead of 4,000), and
+    grades reasoning responses one figure per call.
     """
 
     name: str = "charxiv"
+    batch_size: int | None = 5
     cache_dir: str = field(default_factory=default_charxiv_cache_dir)
     cache_only: bool = False
     recompute: bool = False
@@ -581,6 +609,86 @@ class CharxivJudgeScorer(Scorer):
             "model": CHARXIV_JUDGE_MODEL,
         }
 
+    def batch_key(self, response: Response) -> Hashable:
+        meta = response.instance.metadata or {}
+        if "qid" in meta:
+            return ("descriptive", meta["qid"])
+        return ("reasoning", meta.get("example_id", id(response)))
+
     def score(self, instance: Instance, output: LMOutput) -> float:
-        value = (output.metadata or {}).get("score:charxiv", 0.0)
-        return float(value) if isinstance(value, (int, float)) else 0.0
+        if output.metadata and "score:charxiv" in output.metadata:
+            value = output.metadata["score:charxiv"]
+            return float(value) if isinstance(value, (int, float)) else 0.0
+        return super().score(instance, output)
+
+    async def ascore_batch(
+        self,
+        responses: Sequence[Response],
+        context: ScoringContext,
+    ) -> list[float]:
+        if not responses:
+            return []
+        cache_dir = (
+            os.environ.get("CHARXIV_GPT_CACHE_DIR")
+            if _PROCESS_CACHE_DIR and self.cache_dir == _PROCESS_CACHE_DIR[0]
+            else None
+        ) or self.cache_dir
+
+        first_meta = responses[0].instance.metadata or {}
+        if "qid" in first_meta:
+            items = [
+                (
+                    r.instance.metadata["resp_key"],
+                    _response_text(r),
+                    r.instance.metadata["answer"],
+                    r.instance.metadata["qid"],
+                )
+                for r in responses
+            ]
+            batches = build_descriptive_grading_batches(items, nq_per_query=self.batch_size or 5)
+            graded: dict[str, tuple[Any, int]] = {}
+            for batch in batches:
+                result = await grade_descriptive_batch(
+                    batch["grading_query"],
+                    len(batch["resp_keys"]),
+                    cache_dir=cache_dir,
+                    cache_only=self.cache_only,
+                    recompute=self.recompute,
+                )
+                for i, resp_key in enumerate(batch["resp_keys"]):
+                    graded[resp_key] = (
+                        result[f"extract_answer_T{i + 1}"],
+                        result[f"score_T{i + 1}"],
+                    )
+            scores: list[float] = []
+            for response in responses:
+                meta = response.instance.metadata
+                extracted, raw_score = graded[meta["resp_key"]]
+                scores.append(
+                    _store_charxiv_result(response, extracted, raw_score, qid=meta["qid"])
+                )
+            return scores
+
+        scores = []
+        for response in responses:
+            meta = response.instance.metadata
+            extracted, raw_score = await grade_reasoning(
+                build_reasoning_grading_prompt(
+                    meta["raw_question"],
+                    meta["inst_category"],
+                    meta["answer"],
+                    _response_text(response),
+                ),
+                cache_dir=cache_dir,
+                cache_only=self.cache_only,
+                recompute=self.recompute,
+            )
+            scores.append(
+                _store_charxiv_result(
+                    response,
+                    extracted,
+                    raw_score,
+                    inst_category=meta["inst_category"],
+                )
+            )
+        return scores

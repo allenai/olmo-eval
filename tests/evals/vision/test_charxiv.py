@@ -345,3 +345,219 @@ class TestIsAuthError:
         exc = RuntimeError("judge failed")
         exc.status_code = status  # type: ignore[ty:unresolved-attribute]
         assert not charxiv_judge._is_auth_error(exc)
+
+
+class TestCharxivResponseBatchScorer:
+    def _descriptive_response(self, idx: int, qid: int, text: str, answer: str) -> Response:
+        resp_key = f"{idx}_0"
+        instance = Instance(
+            question=f"q-{idx}",
+            gold_answer=answer,
+            metadata={
+                "figure_id": idx,
+                "subq_idx": 0,
+                "qid": qid,
+                "answer": answer,
+                "resp_key": resp_key,
+                "example_id": resp_key,
+            },
+        )
+        return Response(
+            instance=instance,
+            request=None,
+            outputs=[LMOutput(text=text)],
+        )
+
+    def test_descriptive_task_batches_five_per_qid_in_score_responses(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        from olmo_eval.evals.tasks.common import get_task
+
+        monkeypatch.setenv("CHARXIV_GPT_CACHE_DIR", str(tmp_path))
+        replies = [
+            json.dumps(
+                {f"extract_answer_T{i}": f"ans{i}", f"score_T{i}": 1 if i % 2 else 0}
+                for i in range(1, 6)
+            )
+            if False
+            else json.dumps(
+                {
+                    k: v
+                    for i in range(1, 6)
+                    for k, v in ((f"extract_answer_T{i}", f"a{i}"), (f"score_T{i}", 1))
+                }
+            ),
+            json.dumps(
+                {
+                    "extract_answer_T1": "a6",
+                    "score_T1": 0,
+                    "extract_answer_T2": "a7",
+                    "score_T2": 1,
+                }
+            ),
+            json.dumps({"extract_answer_T1": "x0", "score_T1": 1}),
+        ]
+        client = _FakeClient(replies)
+        _patch_client(monkeypatch, client)
+
+        task = get_task("charxiv_descriptive")
+        responses = [self._descriptive_response(i, 7, f"r{i}", f"a{i}") for i in range(7)]
+        responses.append(self._descriptive_response(7, 13, "rx", "ax"))
+
+        scored = asyncio.run(task.score_responses(responses))
+
+        # 7 items of qid=7 (5 + 2) and 1 item of qid=13 -> 3 GPT calls instead of 8.
+        assert len(client.calls) == 3
+        assert [r.scores["charxiv"] for r in scored] == [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0]
+        assert scored[5].outputs[0].metadata["charxiv_result"] == {
+            "extracted_answer": "a6",
+            "score": 0,
+            "qid": 7,
+        }
+
+    def test_runner_process_results_batches_five_per_qid_in_instance_order(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        import queue
+
+        from olmo_eval.common.execution import ScoringContext
+        from olmo_eval.common.types import LMRequest, RequestType
+        from olmo_eval.evals.tasks.common import get_task
+        from olmo_eval.runners.asynq.results import process_results
+        from olmo_eval.runners.asynq.types import ResultItem, TaskTracker
+
+        monkeypatch.setenv("CHARXIV_GPT_CACHE_DIR", str(tmp_path))
+        replies = [
+            json.dumps(
+                {
+                    k: v
+                    for i in range(1, 6)
+                    for k, v in ((f"extract_answer_T{i}", f"b1_{i}"), (f"score_T{i}", 1))
+                }
+            ),
+            json.dumps(
+                {
+                    k: v
+                    for i in range(1, 6)
+                    for k, v in ((f"extract_answer_T{i}", f"b2_{i}"), (f"score_T{i}", 0))
+                }
+            ),
+            json.dumps({"extract_answer_T1": "rem1", "score_T1": 1}),
+            json.dumps({"extract_answer_T1": "rem2", "score_T1": 1}),
+        ]
+        client = _FakeClient(replies)
+        _patch_client(monkeypatch, client)
+
+        task = get_task("charxiv_descriptive")
+        total = 12
+        # Interleave qid=1 (even indices: 6 items) and qid=2 (odd indices: 6 items),
+        # and enqueue out of order to verify deterministic instance-order batching.
+        items_by_idx: dict[int, ResultItem] = {}
+        for idx in range(total):
+            qid = 1 if idx % 2 == 0 else 2
+            resp = self._descriptive_response(idx, qid, f"resp_{idx}", f"gt_{idx}")
+            items_by_idx[idx] = ResultItem(
+                model_name="m",
+                task_id="charxiv_descriptive",
+                instance_idx=idx,
+                instance=resp.instance,
+                request=LMRequest(request_type=RequestType.CHAT, prompt=resp.instance.question),
+                outputs=resp.outputs,
+            )
+
+        result_queue: queue.Queue[ResultItem] = queue.Queue()
+        for idx in [3, 0, 2, 1, 5, 4, 7, 6, 9, 8, 11, 10]:
+            result_queue.put(items_by_idx[idx])
+
+        results = asyncio.run(
+            process_results(
+                trackers={
+                    "charxiv_descriptive": TaskTracker(
+                        model_name="m",
+                        spec="charxiv_descriptive",
+                        task=task,
+                        total_instances=total,
+                    )
+                },
+                result_queue=result_queue,  # type: ignore[arg-type]
+                workers=[],
+                scoring_context=ScoringContext(scoring_concurrency=4),
+                scoring_concurrency=4,
+                total_tasks=1,
+                total_instances=total,
+                model_name="m",
+                save_predictions=False,
+                write_predictions_fn=None,
+                save_requests=False,
+                write_requests_fn=None,
+            )
+        )
+
+        # 6 items for qid=1 -> (5 + 1) calls; 6 items for qid=2 -> (5 + 1) calls = 4 calls total.
+        assert len(client.calls) == 4
+        first_prompt = client.calls[0]["messages"][0]["content"]
+        # First batch for qid=1 must contain instances 0, 2, 4, 6, 8 in exact order T1..T5.
+        for t_idx, inst_idx in enumerate([0, 2, 4, 6, 8], start=1):
+            assert (
+                f"T{t_idx}:\nResponse {t_idx}: resp_{inst_idx}\nGround Truth {t_idx}: gt_{inst_idx}"
+                in first_prompt
+            )
+        task_result = results["charxiv_descriptive"]
+        assert task_result.error is None
+        assert task_result.metrics["descriptive_overall"]["charxiv"] == pytest.approx(7 / 12)
+
+    def test_reasoning_task_scores_one_per_call(self, monkeypatch, tmp_path) -> None:
+        from olmo_eval.evals.tasks.common import get_task
+
+        monkeypatch.setenv("CHARXIV_GPT_CACHE_DIR", str(tmp_path))
+        replies = [
+            json.dumps({"extracted_answer": "Joint-CNN", "score": 1}),
+            json.dumps({"extracted_answer": "wrong", "score": 0}),
+        ]
+        client = _FakeClient(replies)
+        _patch_client(monkeypatch, client)
+
+        task = get_task("charxiv_reasoning")
+        responses = [
+            Response(
+                instance=Instance(
+                    question="q1",
+                    gold_answer="Joint-CNN",
+                    metadata={
+                        "figure_id": 1,
+                        "raw_question": "Which model?",
+                        "answer": "Joint-CNN",
+                        "inst_category": 1,
+                        "qa_source": 1,
+                        "example_id": "1",
+                    },
+                ),
+                request=None,
+                outputs=[LMOutput(text="The model is Joint-CNN.")],
+            ),
+            Response(
+                instance=Instance(
+                    question="q2",
+                    gold_answer="3.25",
+                    metadata={
+                        "figure_id": 2,
+                        "raw_question": "What value?",
+                        "answer": "3.25",
+                        "inst_category": 4,
+                        "qa_source": 1,
+                        "example_id": "2",
+                    },
+                ),
+                request=None,
+                outputs=[LMOutput(text="0.00")],
+            ),
+        ]
+
+        scored = asyncio.run(task.score_responses(responses))
+        assert len(client.calls) == 2
+        assert [r.scores["charxiv"] for r in scored] == [1.0, 0.0]
+        assert scored[0].outputs[0].metadata["charxiv_result"] == {
+            "extracted_answer": "Joint-CNN",
+            "score": 1,
+            "inst_category": 1,
+        }
