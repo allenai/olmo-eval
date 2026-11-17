@@ -17,7 +17,7 @@ from olmo_eval.common.types import (
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import REQUEST_ERROR_KEY
 from olmo_eval.runners.common.types import PREDICTIONS_SUFFIX, REQUESTS_SUFFIX
-from olmo_eval.runners.io.writers import _lazy_loader_placeholder
+from olmo_eval.runners.io.writers import _request_json_default
 
 #: Saved per-output fields the replayed output's metadata carries over: the raw Harmony
 #: decode and its alignment error, so response parsing reproduces, and the context-cut
@@ -34,7 +34,7 @@ _METADATA_FIELDS = (
 
 def _prompt_key(context: Any, system_prompt: str | None) -> str:
     """The key a saved request and a live request share when the model saw the same prompt."""
-    return json.dumps([context, system_prompt], sort_keys=True, default=_lazy_loader_placeholder)
+    return json.dumps([context, system_prompt], sort_keys=True, default=_request_json_default)
 
 
 def _request_key(request: LMRequest) -> str:

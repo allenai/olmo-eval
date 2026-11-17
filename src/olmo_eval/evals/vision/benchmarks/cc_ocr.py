@@ -32,8 +32,11 @@ import io
 import os
 import sys
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from olmo_eval.common.images import ImageReference
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register
@@ -89,11 +92,25 @@ def _load_tsv(path: str) -> list[dict[str, str]]:
 
 
 def _decode_tsv_image(path: str, row: int):
-    """Decode one base64 image cell (module-level so the owning instance stays picklable)."""
+    """Decode one base64 image cell from a CC-OCR TSV file."""
     from PIL import Image
 
     data = base64.b64decode(_load_tsv(path)[row]["image"])
     return Image.open(io.BytesIO(data)).convert("RGB")
+
+
+@dataclass(frozen=True, slots=True)
+class TsvImageReference(ImageReference):
+    """Reference to one base64-encoded image row in a CC-OCR TSV file."""
+
+    path: str
+    row: int
+
+    def resolve(self) -> Any:
+        return _decode_tsv_image(self.path, self.row)
+
+    def to_json(self) -> dict[str, Any]:
+        return {"type": "tsv_image", "path": self.path, "row": self.row}
 
 
 def _data_dir() -> Path:
@@ -164,7 +181,7 @@ class CcOcrMultiSceneTask(OcrTask):
                     "dataset": row["split"],
                     "image_name": row["image_name"],
                     "answer": row["answer"],
-                    "image": functools.partial(_decode_tsv_image, tsv_path, row_index),
+                    "image": TsvImageReference(path=tsv_path, row=row_index),
                 },
             )
 

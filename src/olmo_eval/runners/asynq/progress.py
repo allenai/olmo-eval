@@ -67,6 +67,7 @@ from olmo_eval.common.constants.infrastructure import (
     SHARED_RUN_IDENTITY_FILES,
     SHARED_RUN_PROGRESS_DIR,
 )
+from olmo_eval.common.images import ImageReference
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.scoring_failures import output_scoring_errors
 from olmo_eval.common.shutdown import shutdown_requested
@@ -1036,8 +1037,10 @@ def check_header(path: Path, recorded: Mapping[str, Any], expected: Mapping[str,
 
 
 def _hash_default(obj: object) -> Any:
-    # Dataclasses (tool schemas) hash by content. Lazy image loaders and other objects
-    # hash by type, not by their repr's address.
+    # ImageReference instances serialize via to_json() without copying underlying datasets.
+    # Dataclasses (tool schemas) hash by content. Legacy callables and other objects hash by type.
+    if isinstance(obj, ImageReference):
+        return obj.to_json()
     if is_dataclass(obj) and not isinstance(obj, type):
         return asdict(obj)
     return f"<{type(obj).__name__}>"
@@ -1102,10 +1105,10 @@ def is_final(response: Response) -> bool:
 
 
 def _metadata_changes(original: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, Any]:
-    """Instance metadata that scoring set or changed. Callables (lazy loaders) are skipped."""
+    """Instance metadata that scoring set or changed. Lazy image loaders are skipped."""
     changes: dict[str, Any] = {}
     for key, value in current.items():
-        if callable(value):
+        if callable(value) or isinstance(value, ImageReference):
             continue
         if key in original:
             try:

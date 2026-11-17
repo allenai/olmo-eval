@@ -13,6 +13,13 @@ import json
 import click
 
 from olmo_eval.cli.utils import console
+from olmo_eval.common.images import ImageReference
+
+
+def _cli_json_default(obj: object) -> object:
+    if isinstance(obj, ImageReference):
+        return obj.to_json()
+    return str(obj)
 
 
 @click.group()
@@ -153,6 +160,14 @@ def inspect(
                         "prompt": req.prompt if req.prompt else None,
                         "continuations": (list(req.continuations) if req.continuations else None),
                         "system_prompt": req.system_prompt if req.system_prompt else None,
+                        "images": (
+                            [
+                                item.to_json() if isinstance(item, ImageReference) else item
+                                for item in req.images
+                            ]
+                            if req.images
+                            else None
+                        ),
                         "tools": (
                             [
                                 {
@@ -181,7 +196,7 @@ def inspect(
                         instance_dict["_tokenization_error"] = str(e)
             output.append(instance_dict)
 
-        print(json.dumps(output, indent=2, default=str))
+        print(json.dumps(output, indent=2, default=_cli_json_default))
     else:
         # Rich display mode
         console.print(f"\n[bold]Task:[/bold] {task_spec}")

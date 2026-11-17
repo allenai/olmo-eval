@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 from olmo_eval.common.repr import hide_unset
 
 if TYPE_CHECKING:
+    from olmo_eval.common.images import ImageReference
+
     from .tools import ToolCall, ToolSchema
     from .trajectory import AgentTrajectory
 
@@ -267,7 +269,9 @@ class LMRequest:
     tools: tuple[ToolSchema, ...] | None = None
     system_prompt: str | None = None
     max_length: int | None = None
-    images: tuple[Any, ...] | None = None
+    #: Lazy image references (:class:`olmo_eval.common.images.ImageReference`) or
+    #: inline image entries resolved in the worker via ``resolve_images``.
+    images: tuple[ImageReference | Any, ...] | None = None
     #: Per-instance payload for a scaffold that needs more than the messages,
     #: such as the state a multi-turn rollout acts on. Not sent to the model.
     metadata: dict[str, Any] | None = None
