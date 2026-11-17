@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import ClassVar
@@ -67,10 +68,11 @@ class FailingSyncScorer(Scorer):
 
     name: str = "failing_sync"
     fail_text: str = "boom"
+    error_message: str = "intentional sync scorer failure"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.text == self.fail_text:
-            raise ValueError("intentional sync scorer failure")
+            raise ValueError(self.error_message)
         return 1.0
 
 
@@ -1326,13 +1328,75 @@ class TestSyncScoringFailures:
 
         assert scored[0].scores["failing_sync"] == 0.0
 
-    async def test_async_scorer_without_context_still_raises(self):
-        metric = PassAtKMetric(k=1, scorer=MockExecutionScorer)
+    @pytest.mark.parametrize(
+        ("scorer_cls", "expected_exc"),
+        [
+            (MockExecutionScorer, SandboxRequiredError),
+            (TrackedContextScorer, RuntimeError),
+            (FailingProcessScorer, RuntimeError),
+        ],
+    )
+    async def test_async_scorer_without_context_still_raises(self, scorer_cls, expected_exc):
+        metric = PassAtKMetric(k=1, scorer=scorer_cls)
         task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
         response = _make_responses(n_responses=1, n_outputs=1)[0]
 
-        with pytest.raises(SandboxRequiredError):
+        with pytest.raises(expected_exc):
             await task.score_responses([response])
+
+    async def test_first_aggregation_skips_failed_leading_output(self):
+        metric = AccuracyMetric(scorer=FailingSyncScorer)
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(metric,),
+            output_score_aggregation=OutputScoreAggregation.FIRST,
+        )
+        task = ConcreteTask(config)
+
+        response = _make_responses(n_responses=1, n_outputs=2)[0]
+        response.outputs[0].text = "boom"
+        response.outputs[1].text = "ok"
+
+        scored = await task.score_responses([response])
+
+        assert scored[0].scores["failing_sync"] == 1.0
+        assert "score:failing_sync" not in scored[0].outputs[0].metadata
+        assert scored[0].outputs[0].metadata["scoring_errors"]["failing_sync"]["phase"] == "sync"
+        assert scored[0].outputs[1].metadata["score:failing_sync"] == 1.0
+        assert task.compute_metrics(scored) == {"accuracy": {"failing_sync": 1.0}}
+
+    async def test_sync_scorer_failure_logs_instance_id_and_empty_message_error(self, caplog):
+        metric = AccuracyMetric(scorer=FailingSyncScorer(error_message=""))
+        task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
+
+        responses = [
+            Response(
+                instance=Instance(question="Q0", gold_answer="A", metadata={"id": "doc-42"}),
+                request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q0"),
+                outputs=[LMOutput(text="boom")],
+            ),
+            Response(
+                instance=Instance(question="Q1", gold_answer="A"),
+                request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q1"),
+                outputs=[LMOutput(text="boom")],
+            ),
+        ]
+
+        with caplog.at_level(logging.WARNING, logger="olmo_eval.evals.tasks.common.base"):
+            scored = await task.score_responses(responses)
+
+        messages = [
+            r.getMessage() for r in caplog.records if r.name == "olmo_eval.evals.tasks.common.base"
+        ]
+        assert messages == [
+            "Sync scoring failed for instance doc-42 output 0 with scorer failing_sync: ValueError",
+            "Sync scoring failed for instance 1 output 0 with scorer failing_sync: ValueError",
+        ]
+        assert scored[0].outputs[0].metadata["scoring_errors"] == {
+            "failing_sync": {"phase": "sync", "type": "ValueError"}
+        }
+        assert "message" not in scored[0].outputs[0].metadata["scoring_errors"]["failing_sync"]
 
     async def test_sync_scorer_failure_does_not_affect_sibling_sync_scorer(self):
         config = TaskConfig(
