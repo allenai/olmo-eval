@@ -1486,6 +1486,34 @@ class TestSyncScoringFailures:
             }
         }
 
+    async def test_rescoring_clears_stale_scores_and_errors(self):
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(AccuracyMetric(scorer=FailingSyncScorer),),
+        )
+        task = ConcreteTask(config)
+
+        response = _make_responses(n_responses=1, n_outputs=1)[0]
+        response.outputs[0].text = "ok"
+        await task.score_responses([response])
+        assert response.scores["failing_sync"] == 1.0
+        assert response.outputs[0].metadata["score:failing_sync"] == 1.0
+
+        # Rescore after output becomes failing: stale score must be cleared
+        response.outputs[0].text = "boom"
+        await task.score_responses([response])
+        assert "failing_sync" not in response.scores
+        assert "score:failing_sync" not in response.outputs[0].metadata
+        assert "failing_sync" in response.outputs[0].metadata["scoring_errors"]
+
+        # Rescore after output becomes valid again: stale scoring_errors must be cleared
+        response.outputs[0].text = "ok"
+        await task.score_responses([response])
+        assert response.scores["failing_sync"] == 1.0
+        assert response.outputs[0].metadata["score:failing_sync"] == 1.0
+        assert "scoring_errors" not in response.outputs[0].metadata
+
 
 @pytest.mark.anyio
 class TestMixedWorkloadScoring:

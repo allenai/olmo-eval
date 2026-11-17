@@ -53,12 +53,20 @@ def _store_output_score(
         output.metadata = {}
     if score is not None:
         output.metadata[f"score:{scorer_name}"] = score
+    else:
+        output.metadata.pop(f"score:{scorer_name}", None)
     if scoring_error is not None:
         existing = output.metadata.get("scoring_errors")
         if not isinstance(existing, dict):
             existing = {}
             output.metadata["scoring_errors"] = existing
         existing[scorer_name] = scoring_error
+    else:
+        existing = output.metadata.get("scoring_errors")
+        if isinstance(existing, dict):
+            existing.pop(scorer_name, None)
+            if not existing:
+                output.metadata.pop("scoring_errors", None)
 
 
 class OutputScore(NamedTuple):
@@ -791,6 +799,8 @@ class Task(ABC):
         # succeeded, omit response.scores[scorer.name] rather than crediting a zero.
         if scored or not response.outputs:
             response.scores[scorer.name] = self._aggregate_output_scores(scored)
+        else:
+            response.scores.pop(scorer.name, None)
 
     def _apply_scorers(self, responses: Sequence[Response]) -> None:
         """Run all scorers synchronously and populate response.scores."""
@@ -1052,6 +1062,8 @@ class Task(ABC):
                     scored = {i: s for i, s in output_scores.items() if s is not None}
                     if scored:
                         response.scores[scorer_name] = self._aggregate_output_scores(scored)
+                    else:
+                        response.scores.pop(scorer_name, None)
 
     def _aggregate_output_scores(self, scores: dict[int, float]) -> float:
         """Collapse per-output scorer values into one response-level score."""
