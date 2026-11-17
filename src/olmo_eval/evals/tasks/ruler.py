@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from olmo_eval.common.formatters import ChatFormatter, PPLFormatter
+from olmo_eval.evals.tasks.ruler_ablations import VT_VARIANTS, fwe_ablate, fwe_variants, vt_prompt
 from olmo_eval.common.metrics import Metric, RecallMetric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import (
@@ -173,6 +174,9 @@ class RulerTask(Task):
         Returns:
             Instance object or None if document should be skipped
         """
+        settings = self.config.task_settings or {}
+        if fwe_variant := settings.get("fwe_ablation"):
+            doc = fwe_ablate(doc, fwe_variant, index)
         # Build the context by formatting the user template
         context_fields = dict(doc)
         if "context" not in context_fields:
@@ -204,6 +208,21 @@ class RulerTask(Task):
                     avoid_value=str(doc.get("query", "")),
                 )
             question = example + "\n\n" + question
+
+        if (vt_variant := settings.get("vt_ablation")) and isinstance(question, str):
+            seed = doc.get("index", index)
+            avoid = [str(a) for a in (doc.get("outputs") or doc.get("answer") or [])]
+
+            def redraw(example: str, shot: int, name_len: int | None) -> str:
+                return randomize_vt_example(
+                    example,
+                    seed=seed if shot == 0 else f"{seed}-{shot}",
+                    avoid_names=avoid,
+                    avoid_value=str(doc.get("query", "")),
+                    name_len=name_len,
+                )
+
+            question = vt_prompt(question, str(doc.get("example") or "").strip(), vt_variant, redraw)
 
         if self.closed_book:
             # The question alone, without the documents: the input's closing instruction and
@@ -363,7 +382,11 @@ class RulerTask(Task):
 
 
 def randomize_vt_example(
-    example: str, seed: Any, avoid_names: Sequence[str] = (), avoid_value: str = ""
+    example: str,
+    seed: Any,
+    avoid_names: Sequence[str] = (),
+    avoid_value: str = "",
+    name_len: int | None = None,
 ) -> str:
     """Give a VT worked example new variable names and a new value, as upstream RULER does.
 
@@ -373,7 +396,7 @@ def randomize_vt_example(
     stores one example for every row; this re-draws it deterministically from ``seed``
     (the instance index), keeping its chain and wording. New names and value never equal
     the instance's own answers or value. An example in an unexpected shape is returned
-    unchanged.
+    unchanged. ``name_len`` gives the new names that many letters instead of the old length.
     """
     head, sep, tail = example.rpartition("they are:")
     names = tail.split()
@@ -384,7 +407,8 @@ def randomize_vt_example(
     taken = {*names, *avoid_names}
     new_names = {}
     for name in names:
-        while (new := "".join(rng.choices(string.ascii_uppercase, k=len(name)))) in taken:
+        k = name_len or len(name)
+        while (new := "".join(rng.choices(string.ascii_uppercase, k=k))) in taken:
             pass
         taken.add(new)
         new_names[name] = new
@@ -516,6 +540,24 @@ for _task_name, _task_config in RULER_TASKS.items():
             task_settings={**_v2_settings, "prepend_example": "fixed"},
             **_v2_sampling,
         )
+    # FWE and VT prompt ablations (scaling-ladders #106, #107), on top of `:v2`; see
+    # ruler_ablations. Ablations only, not paper numbers.
+    if _v2_type == "fwe":
+        for _variant in fwe_variants(int(_task_name.rsplit("__", 1)[1])):
+            register_variant(
+                f"ruler_{_task_name}",
+                _variant,
+                task_settings={**_v2_settings, "fwe_ablation": _variant},
+                **_v2_sampling,
+            )
+    if _v2_type == "vt":
+        for _variant in VT_VARIANTS:
+            register_variant(
+                f"ruler_{_task_name}",
+                _variant,
+                task_settings={**_v2_settings, "vt_ablation": _variant},
+                **_v2_sampling,
+            )
     # `:closedbook` (QA only): `:v2` with the documents left out, see RULER_CLOSED_BOOK.
     if _v2_type in RULER_CLOSED_BOOK:
         register_variant(
