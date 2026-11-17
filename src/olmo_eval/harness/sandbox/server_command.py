@@ -7,12 +7,12 @@ from pathlib import Path
 
 def server_command(executable: str, token: str, port: int, *, install_pipx: bool = False) -> str:
     """Preserve the server interpreter and shell environment while installing its adapter."""
-    source = Path(__file__).with_name("_http_command.py").read_bytes()
-    payload = base64.b64encode(source + b"\ninstall()\n").decode()
-    patch = (
-        f"import base64; exec(compile(base64.b64decode({payload!r}), "
-        "'<olmo-http-command>', 'exec'))\n"
-    )
+    patches = []
+    for module in ("_http_command.py", "_http_session.py"):
+        source = Path(__file__).with_name(module).read_bytes()
+        payload = base64.b64encode(source + b"\ninstall()\n").decode()
+        patches.append(f"exec(compile(base64.b64decode({payload!r}), {module!r}, 'exec'))")
+    patch = "import base64; " + "; ".join(patches) + "\n"
     encoded = base64.b64encode(patch.encode()).decode()
     # A temporary console script retains the installed entrypoint's shebang.
     # This works for an isolated SWE-ReX venv as well as an activated task venv.

@@ -1,5 +1,6 @@
+import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
@@ -184,6 +185,41 @@ for subset in MATH_SUBSETS:
 @register("math500")
 class Math500(Math500Task):
     data_source = DataSource(path="HuggingFaceH4/MATH-500")
+
+
+@register("math500:latex_delimiters")
+class Math500LatexDelimiters(Math500):
+    """MATH-500 with delimiter sizing removed before legacy unit normalization.
+
+    The reference normalizer removes ``ft`` inside ``\\left`` before its later
+    delimiter cleanup can recognize the command. Keep that reference behavior
+    under ``math500`` and correct both gold and generated answers in this spec.
+    """
+
+    data_source = DataSource(
+        path="HuggingFaceH4/MATH-500", revision="6e4ed1a2a79af7d8630a6b768ec859cb5af4d3be"
+    )
+
+    @staticmethod
+    def _answers(text: str) -> list[str]:
+        # Match whole commands, not prefixes of commands such as \leftarrow.
+        text = re.sub(r"\\(?:left|right)(?![A-Za-z])", "", text)
+        return MathExtractor.extract_answer(text)
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        instance = super().process_doc(doc, index)
+        assert instance is not None
+        answers = self._answers(doc["solution"])
+        return replace(
+            instance,
+            gold_answer=answers[0] if answers else None,
+            metadata={**instance.metadata, "all_gold_answers": answers},
+        )
+
+    def extract_answer(self, output: LMOutput) -> str | None:
+        answers = self._answers(output.text)
+        output.metadata["all_extracted_answers"] = answers
+        return answers[0] if answers else None
 
 
 for _subset in MATH_SUBSETS:

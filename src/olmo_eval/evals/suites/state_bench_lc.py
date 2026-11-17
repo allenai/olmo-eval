@@ -2,23 +2,20 @@ import logging
 
 from olmo_eval.evals.suites.registry import AggregationStrategy, make_suite
 from olmo_eval.evals.tasks.state_bench_lc import (
-    STATE_BENCH_10PCT_TASKS,
-    STATE_BENCH_CONFIGS,
-    STATE_BENCH_STRATA_BY_CONFIG,
-    STATE_BENCH_TASKS,
-    STATE_BENCH_TOKEN_STRATA,
-    state_bench_10pct_task_name,
-    state_bench_configs_for_stratum,
-    state_bench_task_name,
+    STATE_BENCH_V1,
+    STATE_BENCH_V2,
+    StateBenchRelease,
 )
 
 logger = logging.getLogger(__name__)
 
-_ALL_STRATA_NOTE = (
-    " Spans every token stratum up to 1m tokens; strata longer than the model's context"
-    " are left-truncated by the provider, so select stratum suites"
-    " (e.g. state_bench:tokens_64k) within the model's context instead."
-)
+
+def _all_strata_note(release: StateBenchRelease, span: str) -> str:
+    return (
+        f" Spans every token stratum {span}; strata longer than the model's context"
+        " are left-truncated by the provider, so select stratum suites"
+        f" (e.g. {release.task_prefix}:tokens_64k) within the model's context instead."
+    )
 
 
 def _coverage_note(tasks: tuple[str, ...], total: int) -> str:
@@ -51,129 +48,85 @@ def _make_suite_if_nonempty(
     )
 
 
-make_suite(
-    name="state_bench",
-    tasks=STATE_BENCH_TASKS,
-    aggregation=AggregationStrategy.AVERAGE,
-    description="Long-context StateBench tasks across all formats and complexity classes."
-    + _ALL_STRATA_NOTE,
-)
+def _register_release_suites(release: StateBenchRelease, title: str, span: str) -> None:
+    """Register the full, complexity, formatter and token-tier suites for one release."""
+    prefix = release.task_prefix
+    sample_prefix = f"{prefix}_10pct"
+    note = _all_strata_note(release, span)
 
-make_suite(
-    name="state_bench_10pct",
-    tasks=STATE_BENCH_10PCT_TASKS,
-    aggregation=AggregationStrategy.AVERAGE,
-    description="Deterministic 10% sample of the long-context StateBench tasks." + _ALL_STRATA_NOTE,
-)
+    def full_and_sample(
+        suffix: str,
+        configs: tuple[str, ...],
+        description: str,
+        sample_description: str,
+    ) -> None:
+        pairs = tuple(
+            (config_name, token_stratum)
+            for config_name in configs
+            for token_stratum in release.strata_for_config(config_name)
+        )
+        make_suite(
+            name=prefix + suffix,
+            tasks=tuple(release.task_name(*pair) for pair in pairs),
+            aggregation=AggregationStrategy.AVERAGE,
+            description=description + note,
+        )
+        make_suite(
+            name=sample_prefix + suffix,
+            tasks=tuple(release.task_name_10pct(*pair) for pair in pairs),
+            aggregation=AggregationStrategy.AVERAGE,
+            description=sample_description + note,
+        )
 
-for _complexity in ("aperiodic", "periodic", "r-trivial"):
-    make_suite(
-        name=f"state_bench:{_complexity.replace('-', '_')}",
-        tasks=tuple(
-            state_bench_task_name(config_name, token_stratum)
-            for config_name in STATE_BENCH_CONFIGS
-            if config_name.endswith(f"--{_complexity}")
-            for token_stratum in STATE_BENCH_STRATA_BY_CONFIG[config_name]
-        ),
-        aggregation=AggregationStrategy.AVERAGE,
-        description=f"Long-context StateBench tasks in the {_complexity} complexity class."
-        + _ALL_STRATA_NOTE,
-    )
-    make_suite(
-        name=f"state_bench_10pct:{_complexity.replace('-', '_')}",
-        tasks=tuple(
-            state_bench_10pct_task_name(config_name, token_stratum)
-            for config_name in STATE_BENCH_CONFIGS
-            if config_name.endswith(f"--{_complexity}")
-            for token_stratum in STATE_BENCH_STRATA_BY_CONFIG[config_name]
-        ),
-        aggregation=AggregationStrategy.AVERAGE,
-        description=f"Deterministic 10% StateBench sample in the {_complexity} complexity class."
-        + _ALL_STRATA_NOTE,
-    )
-
-for _formatter in (
-    "cube-painting",
-    "integer-code",
-    "people-in-rooms",
-    "ruler",
-    "spreadsheet-cells",
-    "status-lights",
-):
-    make_suite(
-        name=f"state_bench:{_formatter.replace('-', '_')}",
-        tasks=tuple(
-            state_bench_task_name(config_name, token_stratum)
-            for config_name in STATE_BENCH_CONFIGS
-            if config_name.startswith(f"{_formatter}--")
-            for token_stratum in STATE_BENCH_STRATA_BY_CONFIG[config_name]
-        ),
-        aggregation=AggregationStrategy.AVERAGE,
-        description=f"Long-context StateBench tasks using the {_formatter} format."
-        + _ALL_STRATA_NOTE,
-    )
-    make_suite(
-        name=f"state_bench_10pct:{_formatter.replace('-', '_')}",
-        tasks=tuple(
-            state_bench_10pct_task_name(config_name, token_stratum)
-            for config_name in STATE_BENCH_CONFIGS
-            if config_name.startswith(f"{_formatter}--")
-            for token_stratum in STATE_BENCH_STRATA_BY_CONFIG[config_name]
-        ),
-        aggregation=AggregationStrategy.AVERAGE,
-        description=f"Deterministic 10% StateBench sample using the {_formatter} format."
-        + _ALL_STRATA_NOTE,
-    )
-    _formatter_configs = tuple(
-        config_name
-        for config_name in STATE_BENCH_CONFIGS
-        if config_name.startswith(f"{_formatter}--")
-    )
-    for _token_stratum in STATE_BENCH_TOKEN_STRATA:
-        _staged = state_bench_configs_for_stratum(_token_stratum)
-        _staged_configs = tuple(
-            config_name for config_name in _formatter_configs if config_name in _staged
+    def tier(suffix: str, configs: tuple[str, ...], token_stratum: str, what: str) -> None:
+        staged = release.configs_for_stratum(token_stratum)
+        tier_configs = tuple(config_name for config_name in configs if config_name in staged)
+        _make_suite_if_nonempty(
+            name=f"{prefix}{suffix}:{token_stratum}",
+            tasks=tuple(release.task_name(c, token_stratum) for c in tier_configs),
+            total=len(configs),
+            description=f"Long-context {title} {what}tasks in the {token_stratum} context tier.",
         )
         _make_suite_if_nonempty(
-            name=(f"state_bench:{_formatter.replace('-', '_')}:{_token_stratum}"),
-            tasks=tuple(
-                state_bench_task_name(config_name, _token_stratum)
-                for config_name in _staged_configs
-            ),
-            total=len(_formatter_configs),
+            name=f"{sample_prefix}{suffix}:{token_stratum}",
+            tasks=tuple(release.task_name_10pct(c, token_stratum) for c in tier_configs),
+            total=len(configs),
             description=(
-                f"Long-context StateBench {_formatter} tasks in the {_token_stratum} context tier."
-            ),
-        )
-        _make_suite_if_nonempty(
-            name=(f"state_bench_10pct:{_formatter.replace('-', '_')}:{_token_stratum}"),
-            tasks=tuple(
-                state_bench_10pct_task_name(config_name, _token_stratum)
-                for config_name in _staged_configs
-            ),
-            total=len(_formatter_configs),
-            description=(
-                f"Deterministic 10% StateBench {_formatter} sample in the "
-                f"{_token_stratum} context tier."
+                f"Deterministic 10% {title} {what}sample in the {token_stratum} context tier."
             ),
         )
 
-for _token_stratum in STATE_BENCH_TOKEN_STRATA:
-    _staged_configs = state_bench_configs_for_stratum(_token_stratum)
-    _make_suite_if_nonempty(
-        name=f"state_bench:{_token_stratum}",
-        tasks=tuple(
-            state_bench_task_name(config_name, _token_stratum) for config_name in _staged_configs
-        ),
-        total=len(STATE_BENCH_CONFIGS),
-        description=f"Long-context StateBench tasks in the {_token_stratum} context tier.",
+    full_and_sample(
+        "",
+        release.configs,
+        f"Long-context {title} tasks across all formats and complexity classes.",
+        f"Deterministic 10% sample of the long-context {title} tasks.",
     )
-    _make_suite_if_nonempty(
-        name=f"state_bench_10pct:{_token_stratum}",
-        tasks=tuple(
-            state_bench_10pct_task_name(config_name, _token_stratum)
-            for config_name in _staged_configs
-        ),
-        total=len(STATE_BENCH_CONFIGS),
-        description=f"Deterministic 10% StateBench sample in the {_token_stratum} context tier.",
-    )
+
+    for complexity in release.complexities:
+        full_and_sample(
+            f":{complexity.replace('-', '_')}",
+            tuple(c for c in release.configs if c.endswith(f"--{complexity}")),
+            f"Long-context {title} tasks in the {complexity} complexity class.",
+            f"Deterministic 10% {title} sample in the {complexity} complexity class.",
+        )
+
+    for formatter in release.formatters:
+        formatter_configs = tuple(c for c in release.configs if c.startswith(f"{formatter}--"))
+        full_and_sample(
+            f":{formatter.replace('-', '_')}",
+            formatter_configs,
+            f"Long-context {title} tasks using the {formatter} format.",
+            f"Deterministic 10% {title} sample using the {formatter} format.",
+        )
+        for token_stratum in release.token_strata:
+            tier(
+                f":{formatter.replace('-', '_')}", formatter_configs, token_stratum, f"{formatter} "
+            )
+
+    for token_stratum in release.token_strata:
+        tier("", release.configs, token_stratum, "")
+
+
+_register_release_suites(STATE_BENCH_V1, title="StateBench", span="up to 1m tokens")
+_register_release_suites(STATE_BENCH_V2, title="StateBench v2", span="up to and beyond 2m tokens")

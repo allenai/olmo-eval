@@ -60,3 +60,14 @@ for size in RULER_PLUS_CONTEXT_SIZES:
                 ),
             )
         )
+        register(
+            Suite(
+                name=f"ruler_plus_all__{size}:hillclimb:chat_mt512",
+                tasks=tuple(f"{task}:hillclimb:chat_mt512" for task in all_tasks),
+                aggregation=AggregationStrategy.AVERAGE,
+                description=(
+                    f"ruler_plus_all__{size}:hillclimb served through the chat template, "
+                    "with 512 output tokens"
+                ),
+            )
+        )
