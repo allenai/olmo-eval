@@ -251,3 +251,18 @@ class TestImageReferenceContract:
         inspect_request(item0.request, console=console, task_name="ai2d", native_id="0")
         rendered = console.file.getvalue()
         assert "hf_dataset_image" in rendered
+
+        from olmo_eval.common.types import LMOutput, Response
+        from olmo_eval.runners.io.builders import build_requests, build_requests_from_responses
+
+        req_rows = build_requests([item0.instance], [item0.request], "ai2d")
+        assert req_rows[0]["request"]["images"] == [ref0]
+        exec_rows = build_requests_from_responses(
+            [
+                Response(
+                    instance=item0.instance, request=item0.request, outputs=[LMOutput(text="A")]
+                )
+            ],
+            "ai2d",
+        )
+        assert exec_rows[0]["request"]["images"] == [ref0]

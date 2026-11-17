@@ -109,8 +109,6 @@ def format_value(
         return f"<{type(value).__name__}>"
 
     # Fallback: use repr with truncation
-    if isinstance(value, ImageReference):
-        return json.dumps(value.to_json(), ensure_ascii=False)
     repr_str = repr(value)
     if max_string_length > 0 and len(repr_str) > max_string_length:
         return repr_str[:max_string_length] + "..."

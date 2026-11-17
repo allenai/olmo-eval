@@ -41,6 +41,16 @@ def _hf_dataset_metadata(dataset: Any) -> dict[str, str]:
     return extra
 
 
+def _open_path_image(path: str | Path) -> Any:
+    """Open an image path, load its pixel data, and close the underlying file handle."""
+    from PIL import Image
+
+    with Image.open(path) as img:
+        copied = img.copy()
+        copied.format = img.format
+        return copied
+
+
 def _decode_hf_record(rec: Any) -> Any:
     """Decode one cell from a ``datasets.Image(decode=False)`` column."""
     if isinstance(rec, dict):
@@ -51,7 +61,7 @@ def _decode_hf_record(rec: Any) -> Any:
         if rec.get("bytes"):
             return Image.open(io.BytesIO(rec["bytes"]))
         if rec.get("path"):
-            return Image.open(rec["path"])
+            return _open_path_image(rec["path"])
     return rec
 
 
@@ -93,9 +103,7 @@ class PathImage(ImageReference):
             object.__setattr__(self, "path", str(self.path))
 
     def resolve(self) -> Any:
-        from PIL import Image
-
-        return Image.open(self.path)
+        return _open_path_image(self.path)
 
     def to_json(self) -> dict[str, Any]:
         return {"type": "path", "path": str(self.path)}
@@ -184,6 +192,8 @@ class CappedImageList(ImageReference):
             object.__setattr__(self, "images", tuple(self.images))
 
     def resolve(self) -> list[Any]:
+        if self.max_images == 0:
+            return []
         if isinstance(self.images, HfDatasetImageList):
             return self.images.resolve(max_items=self.max_images)
         if isinstance(self.images, ImageList):

@@ -13,7 +13,7 @@ import json
 import click
 
 from olmo_eval.cli.utils import console
-from olmo_eval.common.images import ImageReference
+from olmo_eval.common.images import ImageReference, encode_image_entry
 
 
 def _cli_json_default(obj: object) -> object:
@@ -161,10 +161,7 @@ def inspect(
                         "continuations": (list(req.continuations) if req.continuations else None),
                         "system_prompt": req.system_prompt if req.system_prompt else None,
                         "images": (
-                            [
-                                item.to_json() if isinstance(item, ImageReference) else item
-                                for item in req.images
-                            ]
+                            [encode_image_entry(item) for item in req.images]
                             if req.images
                             else None
                         ),
