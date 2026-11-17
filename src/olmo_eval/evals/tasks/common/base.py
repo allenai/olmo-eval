@@ -819,6 +819,7 @@ class Task(ABC):
             ResponseBatchScorer,
             SandboxInfrastructureError,
             SandboxRequiredError,
+            ScoringIncompleteError,
         )
 
         execution_env = context.execution_env if context.has_execution_env else None
@@ -993,6 +994,14 @@ class Task(ABC):
                             f"{scorer.__class__.__name__}.ascore_batch returned "
                             f"{len(batch_scores)} score(s) for {len(resp_indices)} response(s)"
                         )
+                    for resp_idx, raw_score in zip(resp_indices, batch_scores, strict=True):
+                        n_outputs = len(responses[resp_idx].outputs)
+                        if isinstance(raw_score, (list, tuple)) and len(raw_score) != n_outputs:
+                            raise ValueError(
+                                f"{scorer.__class__.__name__}.ascore_batch returned "
+                                f"{len(raw_score)} output score(s) for response with "
+                                f"{n_outputs} output(s)"
+                            )
                 except Exception as exc:
                     error = format_scoring_error(exc, phase="context")
                     for resp_idx in resp_indices:
@@ -1015,21 +1024,37 @@ class Task(ABC):
                         for resp_idx in resp_indices
                     ]
 
+                incomplete_error = format_scoring_error(
+                    ScoringIncompleteError(f"{scorer.__class__.__name__} returned no score"),
+                    phase="context",
+                )
                 batch_results: list[ResponseScore] = []
                 for resp_idx, raw_score in zip(resp_indices, batch_scores, strict=True):
                     n_outputs = len(responses[resp_idx].outputs)
+                    output_scores: dict[int, float | None] = {}
+                    output_errors: dict[int, dict[str, str]] = {}
                     if isinstance(raw_score, (list, tuple)):
-                        output_scores = {
-                            out_idx: (float(s) if s is not None else None)
-                            for out_idx, s in enumerate(raw_score)
-                            if out_idx < n_outputs
-                        }
+                        for out_idx, s in enumerate(raw_score):
+                            if s is None:
+                                output_scores[out_idx] = None
+                                output_errors[out_idx] = dict(incomplete_error)
+                            else:
+                                output_scores[out_idx] = float(s)
+                    elif raw_score is None:
+                        for out_idx in range(n_outputs):
+                            output_scores[out_idx] = None
+                            output_errors[out_idx] = dict(incomplete_error)
+                        if n_outputs == 0:
+                            responses[resp_idx].scoring_error = dict(incomplete_error)
                     else:
-                        val = float(raw_score) if raw_score is not None else None
-                        output_scores = dict.fromkeys(range(n_outputs), val)
-                        if n_outputs == 0 and val is not None:
+                        val = float(raw_score)
+                        for out_idx in range(n_outputs):
+                            output_scores[out_idx] = val
+                        if n_outputs == 0:
                             responses[resp_idx].scores[scorer.name] = val
-                    batch_results.append(ResponseScore(resp_idx, scorer.name, output_scores, {}))
+                    batch_results.append(
+                        ResponseScore(resp_idx, scorer.name, output_scores, output_errors)
+                    )
                 return batch_results
 
             tasks = []

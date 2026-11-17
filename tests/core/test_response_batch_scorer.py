@@ -57,6 +57,9 @@ class _RecordingBatchScorer(ResponseBatchScorer):
         for response in responses:
             if any(o.text == "boom" for o in response.outputs):
                 raise RuntimeError("batch judge failed")
+            if any(o.text == "skip" for o in response.outputs):
+                results.append(None)
+                continue
             if len(response.outputs) > 1:
                 results.append(
                     [
@@ -238,3 +241,24 @@ class TestResponseBatchScorer:
 
         assert scorer.recorded_batches == [["q0", "q1", "q2", "q3", "q4"]]
         assert results["t"].metrics["accuracy"]["recording_batch"] == pytest.approx(1.0)
+
+    def test_none_score_in_batch_records_incomplete_error_for_that_item_only(self) -> None:
+        scorer = _RecordingBatchScorer(batch_size=3)
+        metric = AccuracyMetric(scorer=scorer)
+        task = _DummyTask(TaskConfig(name="t", data_source="test/d", metrics=(metric,)))
+
+        r1 = _make_response("q1", "A", "A")
+        r2 = _make_response("q2", "A", "skip")
+        r3 = _make_response("q3", "A", "A")
+
+        scored = asyncio.run(task.score_responses([r1, r2, r3]))
+
+        assert scored[0].scores["recording_batch"] == 1.0
+        assert "recording_batch" not in scored[1].scores
+        assert scored[1].outputs[0].metadata["scoring_errors"]["recording_batch"] == {
+            "phase": "context",
+            "type": "ScoringIncompleteError",
+            "message": "_RecordingBatchScorer returned no score",
+            "infrastructure": "true",
+        }
+        assert scored[2].scores["recording_batch"] == 1.0
