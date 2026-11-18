@@ -1095,6 +1095,8 @@ class VLLMServerProvider(InferenceProvider):
             kwargs["stop"] = list(params.stop_sequences)
         if tools:
             kwargs["tools"] = tools
+            if request.tool_choice is not None:
+                kwargs["tool_choice"] = request.tool_choice
         # Always request logprobs for metrics computation
         # Both logprobs=True and top_logprobs are required for chat completions API
         kwargs["logprobs"] = True

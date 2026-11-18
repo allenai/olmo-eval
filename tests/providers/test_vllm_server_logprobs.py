@@ -298,6 +298,34 @@ class TestVLLMServerProviderLogprobs:
         assert "extra_body" not in call_kwargs
 
     @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("tools", "tool_choice", "sent"),
+        [
+            (True, "required", "required"),
+            (True, None, None),
+            (False, "required", None),
+        ],
+    )
+    async def test_generate_chat_sends_tool_choice_only_with_tools(
+        self, provider, tools, tool_choice, sent
+    ):
+        """tool_choice reaches the server when set, and only alongside tools."""
+        from olmo_eval.common.types import ToolSchema
+
+        provider.chat_template_kwargs = None
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=[{"role": "user", "content": "Hi"}],
+            tools=(ToolSchema("lookup", "Look something up"),) if tools else None,
+            tool_choice=tool_choice,
+        )
+        await provider._generate_chat(client, request, SamplingParams(max_tokens=8))
+
+        assert client.chat.completions.create.call_args.kwargs.get("tool_choice") == sent
+
+    @pytest.mark.anyio
     async def test_chat_logprobs_preserve_termination_and_usage(self, provider):
         provider.chat_template_kwargs = None
         response = self._make_chat_response()
