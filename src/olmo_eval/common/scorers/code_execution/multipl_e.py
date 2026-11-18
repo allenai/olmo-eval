@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from olmo_eval.common.types import Instance, LMOutput
 
-from ..execution import ExecutionScorer
+from ..execution import ExecutionScorer, SandboxInfrastructureError
 from .languages import get_evaluator
 from .languages.base import EvalResult, ExecutionStatus
 
@@ -125,6 +125,9 @@ class MultiplEScorer(ExecutionScorer):
                 stderr="",  # Our shell command combines stderr into stdout
                 timed_out=timed_out,
             )
+        except SandboxInfrastructureError:
+            # A failed sandbox is not a wrong answer: let the instance go unscored.
+            raise
         except Exception as e:
             return EvalResult(
                 status=ExecutionStatus.ERROR,
