@@ -8,7 +8,7 @@ from olmo_eval.common.scorers import MinervaMathScorer
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import register, register_variant
-from olmo_eval.evals.tasks.minerva_math import MinervaMathTask
+from olmo_eval.evals.tasks.minerva_math import FINAL_ANSWER_OVERRIDES, MinervaMathTask
 
 _PASS_AT_32_METRICS = {
     "acc": AccuracyMetric(scorer=MinervaMathScorer),
@@ -262,6 +262,8 @@ for _task_name in ("hmmt_feb_2025", "hmmt_nov_2025", "hmmt_feb_2026"):
         primary_metric=_PASS_AT_32_METRICS["k1"],
         sampling_params=_RLZERO_SAMPLING,
     )
+
+    register_variant(_task_name, "final_answer", **FINAL_ANSWER_OVERRIDES)
 
 for _task_name in ("hmmt_nov_2025", "hmmt_feb_2026"):
     register_variant(
