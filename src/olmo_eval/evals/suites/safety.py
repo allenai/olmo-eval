@@ -133,3 +133,16 @@ make_suite(
     aggregation=AggregationStrategy.AVERAGE,
     description="Safety evals for pretrained models",
 )
+
+# safety_base with the "\n\n" stop removed from every judged member. The MCQ
+# tasks keep their base variant: they generate a single token, so no stop applies.
+make_suite(
+    "safety_base:v2",
+    (
+        *(f"{task}:base_multiparagraph" for task in SAFETY_TASKS),
+        *(f"{task}:base" for task in MCQ_TASKS),
+        "strongreject:base_multiparagraph",
+    ),
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Safety evals for pretrained models, without the blank-line stop",
+)
