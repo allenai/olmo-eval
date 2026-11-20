@@ -28,8 +28,10 @@ vision-alignment runs, whose language model mixes Kimi Delta Attention with a
 few attention layers) are prompted as ``[EOS] + image tokens + prompt`` with no
 chat template and causal image attention (``prompt_format="document"``, picked
 automatically; see ``preprocessing.uses_document_layout``). Their recurrent
-mixers have no KV cache, so they decode without one, batched by right-padding:
-every forward is causal, so pad slots after a row's last token never reach it.
+mixers decode from kept state alongside the attention layers' KV caches (see
+``cache``). A model the cache does not cover decodes without one, batched by
+right-padding: every forward is causal, so pad slots after a row's last token
+never reach it.
 """
 
 from __future__ import annotations
@@ -263,9 +265,9 @@ class OlmoCoreVLMProvider(InferenceProvider):
         self.use_cache = use_cache and cache.enable_kv_cache(model)
         if use_cache and not self.use_cache and not bidirectional_image_attention:
             logger.warning(
-                "KV-cached decoding is unavailable for this model (e.g. recurrent Kimi Delta "
-                "Attention blocks); decoding re-runs the LM over each batch's whole "
-                "right-padded sequence for every generated token."
+                "Cached decoding is unavailable for this model (a block the cache does not "
+                "cover, or one that failed its check at load); decoding re-runs the LM over "
+                "each batch's whole right-padded sequence for every generated token."
             )
         elif use_cache and not self.use_cache:
             logger.error(
@@ -785,10 +787,11 @@ class OlmoCoreVLMProvider(InferenceProvider):
     def _decode_batch_cached(
         self, batch: _PreparedBatch, params: SamplingParams
     ) -> list[list[int]]:
-        """KV-cached batched decode: one prefill, then one batched forward per token.
+        """Cached batched decode: one prefill, then one batched forward per token.
 
-        Uses the cache-capable dense-SDPA backend installed by
-        ``cache.enable_kv_cache``. RoPE runs on explicit per-row positions
+        Uses the cache-capable blocks installed by ``cache.enable_kv_cache``
+        (dense-SDPA attention with a KV cache, Kimi Delta Attention with its
+        recurrent state). RoPE runs on explicit per-row positions
         (cache slot minus the row's left-pad), so every row sees exactly the
         positions it would in a single-request forward. Rows that hit a stop
         token or their budget stay in the batch (their trailing tokens are
