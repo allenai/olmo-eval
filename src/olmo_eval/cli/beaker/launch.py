@@ -815,11 +815,18 @@ def _require_upload_credentials(upload: bool, dry_run: bool, workspace: str) -> 
     they never leave this machine. Without them, it reuses the workspace's existing
     uploader secret when there is one.
     """
+    from google.auth.exceptions import GoogleAuthError
+
     from olmo_eval.launch.beaker.uploader import UPLOADER_SECRET_NAME, uploader_secret_exists
     from olmo_eval.upload.auth import NO_CREDENTIALS_MESSAGE, has_local_google_credentials
 
-    if not upload or has_local_google_credentials():
+    if not upload:
         return
+    try:
+        if has_local_google_credentials():
+            return
+    except GoogleAuthError:  # e.g. RefreshError while resolving the project of expired ADC
+        pass
     if dry_run:
         console.print(f"[yellow]Warning:[/yellow] {NO_CREDENTIALS_MESSAGE}")
         return

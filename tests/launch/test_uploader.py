@@ -47,6 +47,15 @@ def test_fetch_decodes_the_latest_version() -> None:
     )
 
 
+def test_fetch_unreachable_raises_uploader_key_error() -> None:
+    from requests.exceptions import ConnectTimeout
+
+    session = MagicMock()
+    session.get.side_effect = ConnectTimeout("timed out")
+    with pytest.raises(UploaderKeyError, match="Could not reach Secret Manager"):
+        _fetch(session)
+
+
 def test_fetch_denied_names_the_secret() -> None:
     with pytest.raises(UploaderKeyError, match="olmo-eval-uploader-key.*HTTP 403"):
         _fetch(_session_returning(403, text="denied"))

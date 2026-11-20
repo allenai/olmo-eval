@@ -43,6 +43,7 @@ def fetch_uploader_key() -> str:
     import google.auth
     from google.auth.exceptions import GoogleAuthError
     from google.auth.transport.requests import AuthorizedSession
+    from requests.exceptions import RequestException
 
     try:
         credentials, _ = google.auth.default(
@@ -53,6 +54,11 @@ def fetch_uploader_key() -> str:
         raise UploaderKeyError(
             f"Could not read the uploader key ({e}). Run "
             "`gcloud auth application-default login`, or pass --no-upload."
+        ) from e
+    except RequestException as e:
+        raise UploaderKeyError(
+            f"Could not reach Secret Manager for the uploader key ({e}). Retry, or pass "
+            "--no-upload."
         ) from e
     if response.status_code != 200:
         raise UploaderKeyError(

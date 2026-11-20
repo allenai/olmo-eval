@@ -52,10 +52,12 @@ An eval is established when the run uses task specs and scoring code from `main`
 unchanged, and in progress when it depends on a task, spec, or scoring change not yet on
 `main`.
 Uploads use the user's Google Application Default Credentials, for local runs and for
-`olmo-eval beaker launch` alike. Without them, a local run keeps results only on disk and a
-Beaker launch stops with an error.
+`olmo-eval beaker launch` alike. Without them, a local run keeps results only on disk. A
+Beaker launch reuses the workspace's `olmo_eval_uploader_key` secret when it exists, and
+otherwise stops with an error.
 
-Before `olmo-eval run` or `olmo-eval beaker launch` with a real model, check credentials:
+Before a local `olmo-eval run` with a real model, or an `olmo-eval beaker launch` into a
+workspace without that secret (`beaker secret list --workspace <ws>`), check credentials:
 
 ```bash
 gcloud auth application-default print-access-token > /dev/null
