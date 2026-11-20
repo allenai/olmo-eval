@@ -572,7 +572,7 @@ def launch(
         gcs_credentials,
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
-    _require_upload_credentials(launch_config.upload, dry_run)
+    _require_upload_credentials(launch_config.upload, dry_run, launch_config.workspace)
 
     if dry_run:
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
@@ -808,18 +808,33 @@ def _get_task_configs(
     return task_configs
 
 
-def _require_upload_credentials(upload: bool, dry_run: bool) -> None:
-    """Stop before launching when uploads are on but no local Google credentials exist.
+def _require_upload_credentials(upload: bool, dry_run: bool, workspace: str) -> None:
+    """Stop before launching when uploads are on but no key source exists.
 
     The launch reads the uploader key from Secret Manager with the local credentials, so
-    they never leave this machine.
+    they never leave this machine. Without them, it reuses the workspace's existing
+    uploader secret when there is one.
     """
+    from google.auth.exceptions import GoogleAuthError
+
+    from olmo_eval.launch.beaker.uploader import UPLOADER_SECRET_NAME, uploader_secret_exists
     from olmo_eval.upload.auth import NO_CREDENTIALS_MESSAGE, has_local_google_credentials
 
-    if not upload or has_local_google_credentials():
+    if not upload:
         return
+    try:
+        if has_local_google_credentials():
+            return
+    except GoogleAuthError:  # e.g. RefreshError while resolving the project of expired ADC
+        pass
     if dry_run:
         console.print(f"[yellow]Warning:[/yellow] {NO_CREDENTIALS_MESSAGE}")
+        return
+    if uploader_secret_exists(workspace):
+        console.print(
+            "[yellow]Note:[/yellow] No local Google credentials; jobs upload with the "
+            f"existing {UPLOADER_SECRET_NAME} secret in {workspace}."
+        )
         return
     console.print(f"[red]Error:[/red] {NO_CREDENTIALS_MESSAGE}")
     raise SystemExit(1)
@@ -1189,7 +1204,7 @@ def _launch_external_evals(
         gcs_credentials=gcs_credentials,
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
-    _require_upload_credentials(upload, dry_run)
+    _require_upload_credentials(upload, dry_run, effective_workspace)
 
     # Auto-generate group if needed (using shared helper)
     effective_groups = _auto_generate_group("external-eval", list(group))

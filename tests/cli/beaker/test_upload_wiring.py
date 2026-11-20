@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from google.auth.exceptions import RefreshError
 
 from olmo_eval.cli.beaker.config_loader import LaunchConfig
 from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
@@ -151,11 +152,34 @@ def test_no_upload_skips_the_uploader_key() -> None:
 def test_launch_stops_without_google_credentials(capsys) -> None:
     from olmo_eval.cli.beaker.launch import _require_upload_credentials
 
-    with patch("olmo_eval.upload.auth.has_local_google_credentials", return_value=False):
+    with (
+        patch("olmo_eval.upload.auth.has_local_google_credentials", return_value=False),
+        patch(
+            "olmo_eval.launch.beaker.uploader.uploader_secret_exists", return_value=False
+        ) as exists,
+    ):
         with pytest.raises(SystemExit):
-            _require_upload_credentials(upload=True, dry_run=False)
-        _require_upload_credentials(upload=True, dry_run=True)  # warns only
-        _require_upload_credentials(upload=False, dry_run=False)
+            _require_upload_credentials(upload=True, dry_run=False, workspace="ai2/ws")
+        exists.assert_called_once_with("ai2/ws")
+        _require_upload_credentials(upload=True, dry_run=True, workspace="ai2/ws")  # warns only
+        _require_upload_credentials(upload=False, dry_run=False, workspace="ai2/ws")
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [{"return_value": False}, {"side_effect": RefreshError("Reauthentication failed.")}],
+    ids=["missing", "expired"],
+)
+def test_launch_without_usable_credentials_uses_existing_secret(credentials, capsys) -> None:
+    from olmo_eval.cli.beaker.launch import _require_upload_credentials
+
+    with (
+        patch("olmo_eval.upload.auth.has_local_google_credentials", **credentials),
+        patch("olmo_eval.launch.beaker.uploader.uploader_secret_exists", return_value=True),
+    ):
+        _require_upload_credentials(upload=True, dry_run=False, workspace="ai2/ws")
+    out = " ".join(capsys.readouterr().out.split())  # Rich wraps at the terminal width
+    assert "existing olmo_eval_uploader_key secret in ai2/ws" in out
 
 
 def test_launch_cli_resolves_upload_from_env(monkeypatch) -> None:
