@@ -7,7 +7,9 @@ infra/terraform/uploader.tf), and any @allenai.org account can read it.
 
 At launch, the key is read with the launching user's local credentials and written
 to a shared Beaker secret in the job's workspace, so personal credentials never
-reach Beaker. The secret is rewritten when the key rotates. Inside the job, the CLI
+reach Beaker. The secret is rewritten when the key rotates. A launch whose local
+credentials cannot read the key reuses the workspace's existing secret, so launches
+from machines without a current Google login still upload. Inside the job, the CLI
 moves the key out of the environment before any subprocess starts.
 """
 
@@ -62,8 +64,25 @@ def fetch_uploader_key() -> str:
     return base64.b64decode(response.json()["payload"]["data"]).decode()
 
 
+def uploader_secret_exists(workspace: str) -> bool:
+    """Whether the workspace already holds the uploader secret."""
+    from beaker import Beaker
+    from beaker.exceptions import BeakerSecretNotFound
+
+    try:
+        Beaker.from_env(default_workspace=workspace).secret.get(UPLOADER_SECRET_NAME)
+    except BeakerSecretNotFound:
+        return False
+    return True
+
+
 def ensure_uploader_secret(workspace: str, key: str | None = None) -> str:
     """Make sure the workspace's uploader secret holds the current key.
+
+    When the key cannot be read from Secret Manager (no local Google credentials, or
+    they need reauthentication) but the workspace already holds the secret, the
+    existing secret is used as is. A secret older than a key rotation then fails at
+    upload time inside the job, which logs the error and keeps the results.
 
     Args:
         workspace: Beaker workspace the job runs in.
@@ -71,11 +90,23 @@ def ensure_uploader_secret(workspace: str, key: str | None = None) -> str:
 
     Returns:
         The Beaker secret name holding the key.
+
+    Raises:
+        UploaderKeyError: If the key cannot be read and the workspace has no secret.
     """
     from beaker import Beaker
 
     if key is None:
-        key = fetch_uploader_key()
+        try:
+            key = fetch_uploader_key()
+        except UploaderKeyError as e:
+            if not uploader_secret_exists(workspace):
+                raise
+            log.warning(
+                f"{e} Using the existing Beaker secret {UPLOADER_SECRET_NAME} in "
+                f"{workspace} instead."
+            )
+            return UPLOADER_SECRET_NAME
     client = Beaker.from_env(default_workspace=workspace)
     try:
         current = client.secret.read(client.secret.get(UPLOADER_SECRET_NAME))
