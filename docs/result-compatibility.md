@@ -16,6 +16,19 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-19: SciCode grades each substep using the code available at that step (#570)
+
+- **Affected**: all configurations of the `scicode` external evaluation.
+- **Change**: each substep used to run against the entire generated program, with all
+  supplied snippets placed first. A later error could invalidate an earlier correct
+  answer, or a later definition could make an earlier incomplete answer pass. Each test
+  now uses code through its own substep, with supplied snippets in their original positions.
+- **Identity**: the configuration hash stays the same. Use the evaluator revision or
+  the recorded rescoring revision to establish which verifier produced a score.
+- **Comparability**: both `sub_step_accuracy` and `main_problem_accuracy` can change.
+  For comparisons across the correction, rescore saved per-step programs with the
+  corrected verifier. This requires no new model inference.
+
 ## 2026-11-12: Namespaced Hugging Face dataset ids for six tasks (#558)
 
 - **Affected**: every spec of `gsm8k` (except `gsm8k:platinum`, which has its own
