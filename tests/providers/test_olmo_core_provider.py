@@ -1486,3 +1486,148 @@ class TestConv1dAutotuneBuckets:
             y = y[0] if isinstance(y, tuple) else y
             got = got[0] if isinstance(got, tuple) else got
             assert torch.equal(got, y), (b, t)
+
+
+class TestCachedDecodeState:
+    """Pieces of the cached decode for recurrent (Kimi Delta Attention) blocks."""
+
+    @pytest.fixture(autouse=True)
+    def _torch(self):
+        self.torch = pytest.importorskip("torch")
+
+    def test_causal_conv_tail_matches_the_full_causal_convolution(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import cache
+
+        torch = self.torch
+        torch.manual_seed(0)
+        channels, kernel, length = 6, 4, 11
+        conv = torch.nn.Conv1d(
+            channels, channels, kernel, groups=channels, bias=False, padding=kernel - 1
+        )
+        conv.hidden_size, conv.activation = channels, "silu"
+        x = torch.randn(3, length, channels)
+        full = torch.nn.functional.silu(conv(x.transpose(1, 2))[..., :length].transpose(1, 2))
+        # Decode one position at a time from the previous kernel - 1 inputs (zeros at the start).
+        history = torch.zeros(3, kernel - 1, channels)
+        for position in range(length):
+            window = torch.cat([history, x[:, position : position + 1]], dim=1)
+            step = cache.causal_conv_tail(conv, window, 1)
+            assert torch.allclose(step[:, 0], full[:, position], atol=1e-6)
+            history = window[:, -(kernel - 1) :]
+        # Several positions at once.
+        window = torch.cat([x[:, 2:5], x[:, 5:9]], dim=1)
+        assert torch.allclose(cache.causal_conv_tail(conv, window, 4), full[:, 5:9], atol=1e-6)
+
+    def test_cached_scalable_softmax_counts_visible_tokens_from_the_cache(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import cache
+
+        torch = self.torch
+
+        class Base:
+            scalable_softmax = True
+            kv_cache_manager = None
+
+            def _apply_scalable_softmax(self, q, cu_doc_lens):
+                visible = torch.arange(1, q.shape[1] + 1)[None, :].expand(q.shape[0], -1)
+                scale = visible.log().to(q.dtype).unsqueeze(-1) * self.ssmax_scale.view(1, 1, -1)
+                return q * scale.unsqueeze(-1)
+
+        module = cache._cached_attention_class(Base)()
+        module.ssmax_scale = torch.tensor([0.5, 2.0])
+        torch.manual_seed(0)
+        q = torch.randn(2, 7, 2, 3)  # (rows, positions, heads, dim): one full forward
+        full = module._apply_scalable_softmax(q, None)
+        # The same queries through a cache: rows right-aligned, row 1 two tokens shorter.
+        leftpad = torch.tensor([0, 2])
+        module.kv_cache_manager = SimpleNamespace(
+            _position_mirror=0, _has_leftpad=True, cache_leftpad=leftpad
+        )
+        prefill = module._apply_scalable_softmax(q[:, :5], None)
+        assert torch.allclose(prefill[0], full[0, :5])
+        assert torch.allclose(prefill[1, 2:], q[1, 2:5] / q[1, :3] * full[1, :3])
+        module.kv_cache_manager._position_mirror = 5
+        step = module._apply_scalable_softmax(q[:, 5:6], None)
+        assert torch.allclose(step[0], full[0, 5:6])  # sixth visible token
+        assert torch.allclose(step[1], q[1, 5:6] / q[1, 3:4] * full[1, 3:4])  # fourth
+
+    def _running_sum_modules(self):
+        """A toy recurrent mixer (a running sum of a projection) and two cached versions of it:
+        one that keeps its state between forwards and one that forgets it."""
+        torch = self.torch
+
+        class RunningSum(torch.nn.Module):
+            d_model = 4
+            _decode = None
+
+            def __init__(self):
+                super().__init__()
+                self.w_q = torch.nn.Linear(4, 4, bias=False)
+
+            def forward(self, x, **kwargs):
+                return self.w_q(x).cumsum(dim=1)
+
+        class KeepsState(RunningSum):
+            keeps = True
+
+            def forward(self, x, **kwargs):
+                decode = self._decode
+                if decode is None:
+                    return super().forward(x, **kwargs)
+                y = self.w_q(x)
+                if decode.state is None:
+                    pad = torch.arange(x.shape[1])[None, :] < decode.leftpad[:, None]
+                    y = y.masked_fill(pad[:, :, None], 0.0)
+                    decode.state = torch.zeros_like(y[:, :1])
+                out = y.cumsum(dim=1) + (decode.state if self.keeps else 0.0)
+                decode.state = out[:, -1:]
+                return out
+
+        class ForgetsState(KeepsState):
+            keeps = False
+
+        return RunningSum, KeepsState, ForgetsState
+
+    def test_state_decoding_error_separates_a_kept_state_from_a_lost_one(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import cache
+
+        self.torch.manual_seed(0)
+        _, keeps_state, forgets_state = self._running_sum_modules()
+        module = keeps_state()
+        assert cache.kda_state_decoding_error(module) < 1e-5
+        assert module._decode is None
+        assert cache.kda_state_decoding_error(forgets_state()) > cache._KDA_DECODE_TOLERANCE
+
+    def test_a_cached_class_is_trusted_only_when_it_reproduces_the_module(self) -> None:
+        from olmo_eval.inference.providers.olmo_core_vlm import cache
+
+        self.torch.manual_seed(0)
+        running_sum, keeps_state, forgets_state = self._running_sum_modules()
+        module = running_sum()
+        assert cache._kda_decodes_from_state(module, keeps_state)
+        assert not cache._kda_decodes_from_state(module, forgets_state)
+        assert type(module) is running_sum
+
+        class Raises(running_sum):
+            def forward(self, x, **kwargs):
+                raise TypeError("the module's forward changed")
+
+        assert not cache._kda_decodes_from_state(module, Raises)
+        assert type(module) is running_sum
+
+    def test_kimi_delta_attention_decodes_from_state_like_its_full_forward(self) -> None:
+        torch = self.torch
+        kda_module = pytest.importorskip("olmo_core.nn.attention.kda")
+        if not torch.cuda.is_available():
+            pytest.skip("the Kimi Delta Attention kernels need a GPU")
+        from olmo_eval.inference.providers.olmo_core_vlm import cache
+
+        torch.manual_seed(0)
+        try:
+            kda = kda_module.KimiDeltaAttention(d_model=64, n_heads=4, init_device="cuda")
+        except RuntimeError as error:  # flash-linear-attention is not installed
+            pytest.skip(str(error))
+        kda.eval()
+        kda.__class__ = cache._cached_kda_class()
+        assert cache.kda_state_decoding_error(kda) < 1e-3
+        # A prefill shorter than the convolution's history, and steps across a kernel chunk.
+        assert cache.kda_state_decoding_error(kda, length=70, pad=67, steps=2) < 1e-3
