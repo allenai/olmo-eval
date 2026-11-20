@@ -64,6 +64,42 @@ def test_selected_pools(gpu, total, cache, expected, selector):
     assert effective["cuda_graph_backend_prefill"] == "disabled"
 
 
+@pytest.mark.parametrize("selector", ["auto", "olmo3.5-small"])
+def test_small_b300_uses_its_own_memory_and_attention_geometry(selector):
+    small = MODEL_SHAPES["olmo3.5-small"] | {"dtype": "bfloat16"}
+    devices = [("NVIDIA B300 SXM6 AC", 275000, 274000)]
+    report = resolve_profile(selector, small, {"context_length": 34816}, devices)
+    assert report["selected"] == "olmo3.5-small-sglang-b300-v1"
+    assert report["defaults"] == {
+        "attention_backend": "trtllm_mha",
+        "sampling_backend": "flashinfer",
+        "disable_radix_cache": True,
+        "max_running_requests": 96,
+        "max_total_tokens": 3342336,
+        "max_mamba_cache_size": 128,
+        "cuda_graph_backend_decode": "full",
+        "cuda_graph_max_bs_decode": 96,
+        "cuda_graph_backend_prefill": "disabled",
+        "chunked_prefill_size": 8192,
+        "mem_fraction_static": 0.88,
+    }
+    with pytest.raises(ValueError, match="Settings conflict.*max_running_requests"):
+        resolve_profile(
+            selector, small, {"context_length": 34816, "max_running_requests": 512}, devices
+        )
+
+
+def test_small_does_not_claim_other_gpu_families():
+    small = MODEL_SHAPES["olmo3.5-small"] | {"dtype": "bfloat16"}
+    options = {"context_length": 34816}
+    devices = [("NVIDIA H100", 81559, 81559)]
+    assert resolve_profile("auto", small, options, devices)["selected"] == "generic"
+    with pytest.raises(ValueError, match="Small requires a B300"):
+        resolve_profile("olmo3.5-small", small, options, devices)
+    with pytest.raises(ValueError, match="No qualified profile for this model"):
+        resolve_profile("olmo3.5-small", model(), options, devices)
+
+
 @pytest.mark.parametrize(
     "change",
     [

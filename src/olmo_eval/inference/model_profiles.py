@@ -31,9 +31,41 @@ OLMO35_12_5B_SHAPE: dict[str, Any] = {
 }
 
 
+# H203 Small (A4B) HF export, as used by the Small B300 R96 measurements.
+OLMO35_SMALL_SHAPE: dict[str, Any] = {
+    "model_type": "olmo3moe",
+    "architectures": ["Olmo3MoeForCausalLM"],
+    "hidden_size": 1536,
+    "num_hidden_layers": 40,
+    "num_attention_heads": 8,
+    "num_key_value_heads": 4,
+    "head_dim": 256,
+    "attention_hidden_size": 2048,
+    "vocab_size": 100278,
+    "tie_word_embeddings": False,
+    "n_routed_experts": 256,
+    "num_experts_per_tok": 8,
+    "moe_intermediate_size": 3072,
+    "latent_moe_dim": 768,
+    "dense_layers_indices": [0],
+    "dense_mlp_intermediate_size": 12288,
+    "dense_layers_use_shared_expert": True,
+    "shared_expert_intermediate_size": 3072,
+    "linear_num_key_heads": 8,
+    "linear_num_value_heads": 8,
+    "linear_key_head_dim": 256,
+    "linear_value_head_dim": 512,
+    "linear_conv_kernel_dim": 4,
+    "number_of_conv_states": None,
+    "use_rope": False,
+    "layer_types": ["full_attention" if i % 8 == 7 else "linear_attention" for i in range(40)],
+}
+
+
 # A model name alone never qualifies an engine profile. Providers register their
 # own measured defaults for these shapes and validate their runtime constraints.
 MODEL_SHAPES: dict[str, dict[str, Any]] = {
+    "olmo3.5-small": OLMO35_SMALL_SHAPE,
     "olmo3.5-12.5b": {
         **OLMO35_12_5B_SHAPE,
         "architectures": ["Olmo3MoeForCausalLM"],

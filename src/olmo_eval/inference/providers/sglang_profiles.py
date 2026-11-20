@@ -70,35 +70,30 @@ def _check_profile_conflicts(
         )
 
 
-def _olmo35_defaults(
+def _olmo35_profile_gpu(
     model: dict[str, Any],
     options: dict[str, Any],
     devices: list[tuple[str, float, float]],
-) -> dict[str, Any]:
-    """Measured SGLang settings for the 12.5B shape; geometry is checked by the resolver."""
-    report: dict[str, Any] = {"selected": "generic", "defaults": {}}
-
-    def fallback(reason: str) -> dict[str, Any]:
-        report["reason"] = reason
-        return report
+) -> tuple[str | None, str]:
+    """Validate runtime constraints shared by the BF16 Olmo profiles."""
 
     if model.get("dtype", model.get("torch_dtype")) != "bfloat16" or options.get(
         "dtype", "auto"
     ) not in ("auto", "bfloat16"):
-        return fallback("Profiles require BF16 weights and inference")
+        return None, ("Profiles require BF16 weights and inference")
     if model.get("quantization_config") or options.get("quantization"):
-        return fallback("Quantized inference is not qualified")
+        return None, ("Quantized inference is not qualified")
     if any(options.get(k, 1) != 1 for k in ("tp_size", "dp_size", "ep_size", "pp_size", "nnodes")):
-        return fallback("Profiles require single-GPU TP1 inference")
+        return None, ("Profiles require single-GPU TP1 inference")
     if options.get("enable_multimodal") or model.get("vision_config"):
-        return fallback("Vision profiles are not qualified")
+        return None, ("Vision profiles are not qualified")
     context = options.get("context_length", model.get("max_position_embeddings", 0))
     if not isinstance(context, int) or not 0 < context <= 34816:
-        return fallback(
+        return None, (
             "Profiles cover context limits up to 34,816 tokens; set max_model_len explicitly"
         )
     if len(devices) != 1:
-        return fallback("Could not identify the engine GPU")
+        return None, ("Could not identify the engine GPU")
     name, total, free = devices[0]
     gpu = next(
         (
@@ -109,9 +104,21 @@ def _olmo35_defaults(
         None,
     )
     if gpu is None or "mig" in name.lower():
-        return fallback("No qualified profile for this GPU/memory capacity")
+        return None, ("No qualified profile for this GPU/memory capacity")
     if free < total * 0.95:
-        return fallback("Profiles require a dedicated GPU with at least 95% memory free at startup")
+        return None, ("Profiles require a dedicated GPU with at least 95% memory free at startup")
+    return gpu, "Matched BF16 geometry, dedicated GPU and context range"
+
+
+def _olmo35_defaults(
+    model: dict[str, Any],
+    options: dict[str, Any],
+    devices: list[tuple[str, float, float]],
+) -> dict[str, Any]:
+    """Measured SGLang settings for the 12.5B shape."""
+    gpu, reason = _olmo35_profile_gpu(model, options, devices)
+    if gpu is None:
+        return {"selected": "generic", "defaults": {}, "reason": reason}
     cache_off = gpu != "b300"
     running = 512
     kv_contexts = running if gpu == "b300" else 192
@@ -132,12 +139,46 @@ def _olmo35_defaults(
         defaults["mamba_radix_cache_strategy"] = "extra_buffer"
     selected = f"olmo3.5-12.5b-sglang-{gpu}-v1"
     _check_profile_conflicts(selected, defaults, options)
-    report.update(
-        selected=selected,
-        reason="Matched BF16 geometry, dedicated GPU and context range",
-        defaults={k: v for k, v in defaults.items() if k not in options},
-    )
-    return report
+    return {
+        "selected": selected,
+        "reason": reason,
+        "defaults": {key: value for key, value in defaults.items() if key not in options},
+    }
+
+
+def _olmo35_small_defaults(
+    model: dict[str, Any],
+    options: dict[str, Any],
+    devices: list[tuple[str, float, float]],
+) -> dict[str, Any]:
+    gpu, reason = _olmo35_profile_gpu(model, options, devices)
+    if gpu != "b300":
+        return {
+            "selected": "generic",
+            "defaults": {},
+            "reason": reason if gpu is None else "Small requires a B300",
+        }
+    running = 96
+    defaults = {
+        "disable_radix_cache": True,
+        "max_running_requests": running,
+        "cuda_graph_backend_decode": "full",
+        "cuda_graph_max_bs_decode": running,
+        "cuda_graph_backend_prefill": "disabled",
+        "max_total_tokens": running * 34816,
+        "max_mamba_cache_size": 128,
+        "mem_fraction_static": 0.88,
+        "chunked_prefill_size": 8192,
+        "attention_backend": "trtllm_mha",
+        "sampling_backend": "flashinfer",
+    }
+    selected = "olmo3.5-small-sglang-b300-v1"
+    _check_profile_conflicts(selected, defaults, options)
+    return {
+        "selected": selected,
+        "reason": reason,
+        "defaults": {key: value for key, value in defaults.items() if key not in options},
+    }
 
 
 @dataclass(frozen=True)
@@ -151,6 +192,7 @@ class EngineProfile:
 # Engine-specific qualification: adding a shared geometry does not automatically
 # opt it into SGLang defaults (or qualify these settings for another engine).
 ENGINE_PROFILES = {
+    "olmo3.5-small": EngineProfile("olmo_sglang:register", _olmo35_small_defaults),
     "olmo3.5-12.5b": EngineProfile("olmo_sglang:register", _olmo35_defaults),
 }
 
