@@ -57,6 +57,7 @@ class SciCodeConfig:
     with_background: bool = True
     enable_thinking: bool = False
     max_tokens: int = 16384
+    fit_max_tokens_to_context: bool = False
     temperature: float = 0.6
     max_concurrency: int = 4
     command_timeout: float = 600.0
@@ -125,7 +126,9 @@ class SciCodeExternalEval(ExternalEval):
         )
 
         sampling_params = SamplingParams(
-            max_tokens=sc_args.max_tokens, temperature=sc_args.temperature
+            max_tokens=sc_args.max_tokens,
+            temperature=sc_args.temperature,
+            fit_max_tokens_to_context=sc_args.fit_max_tokens_to_context,
         )
 
         semaphore = asyncio.Semaphore(sc_args.max_concurrency)
@@ -191,6 +194,7 @@ class SciCodeExternalEval(ExternalEval):
                 "split": sc_args.split,
                 "with_background": sc_args.with_background,
                 "max_tokens": sc_args.max_tokens,
+                "fit_max_tokens_to_context": sc_args.fit_max_tokens_to_context,
                 "temperature": sc_args.temperature,
             },
             duration_seconds=time.time() - start_time,
