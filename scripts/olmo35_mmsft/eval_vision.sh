@@ -20,7 +20,12 @@ case $MODE in olmo35 | document | chat) ;; *) echo "mode must be olmo35, documen
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd)
 TASKS=${TASKS:-"chart_qa vqa2 doc_qa text_vqa ai2d countbench_qa real_world_qa"}
 GPUS=${GPUS:-8}; WORKSPACE=${WORKSPACE:-ai2/olmo-instruct}; CLUSTER=${CLUSTER:-ai2/holmes}
-PRIORITY=${PRIORITY:-urgent}; TIMEOUT=${TIMEOUT:-24h}; GROUP=${GROUP:-olmo35-mmsft-eval$([[ $WORKSPACE == ai2/oe-olmo3p5-mt ]] && echo -mt)}
+PRIORITY=${PRIORITY:-urgent}; TIMEOUT=${TIMEOUT:-24h}
+# Default group per workspace (group names are per user). An `if`, not `[[ ]] && echo`: under set -e a
+# command substitution whose last command fails aborts the assignment, so the old form exited silently
+# in every workspace but ai2/oe-olmo3p5-mt.
+if [[ $WORKSPACE == ai2/oe-olmo3p5-mt ]]; then DEFAULT_GROUP=olmo35-mmsft-eval-mt; else DEFAULT_GROUP=olmo35-mmsft-eval; fi
+GROUP=${GROUP:-$DEFAULT_GROUP}
 OLMO_CORE_SHA=${OLMO_CORE_SHA:-9923dd071e7dd55cef4fef892fd8d77a77f804bc}
 OLMO_EVAL_PY=${OLMO_EVAL_PY:-python}
 # The olmo35 tokenizer at its pinned revision, on Weka (jobs may not reach the gated Hub repo);
