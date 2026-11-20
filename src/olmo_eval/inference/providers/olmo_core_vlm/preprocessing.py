@@ -91,6 +91,19 @@ def dataset_tokenizer(info: MultimodalCheckpointInfo) -> tuple[str, str | None] 
     return identifier, revision if isinstance(revision, str) and revision else None
 
 
+def dataset_tokenizer_json_split(info: MultimodalCheckpointInfo) -> bool:
+    """Whether an OLMo-core run loaded its tokenizer exactly as ``tokenizer.json`` defines it.
+
+    OLMo-core's ``MultimodalMixtureConfig.tokenizer_json_split`` (on by default) loads
+    ``tokenizer.json`` losslessly. Earlier runs used ``AutoTokenizer``, which builds
+    ``GPT2Tokenizer`` for Dolma2 and splits with GPT-2's regex: the same IDs, but different tokens.
+    Each checkpoint is evaluated with the split it trained on, and a config saved before the setting
+    existed means the earlier split.
+    """
+    dataset = info.config.get("dataset")
+    return isinstance(dataset, dict) and dataset.get("tokenizer_json_split") is True
+
+
 def _contains_item(config: Any, key: str, value: object) -> bool:
     """Whether ``key: value`` appears anywhere in a nested config tree."""
     if isinstance(config, dict):
