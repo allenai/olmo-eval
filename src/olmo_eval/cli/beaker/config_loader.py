@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import beaker
 from rich.console import Console
+
+from olmo_eval.common.constants.infrastructure import (
+    BEAKER_DEFAULT_RESUME_RETENTION_DAYS,
+    BEAKER_DEFAULT_RESUME_VOLUME,
+)
 
 if TYPE_CHECKING:
     from olmo_eval.launch import EvalConfig
@@ -38,12 +44,13 @@ class LaunchConfig:
 
     gpus: int = 0
 
-    s3_bucket: str = "ai2-llm"
-    s3_prefix: str = "olmo-eval"
-    s3_endpoint_url: str | None = None
-    s3_region: str = "us-east-1"
+    # Dashboard upload: resolved at launch so a local OLMO_EVAL_UPLOAD=0 carries over
+    upload: bool = True
+    api_url: str | None = None
+    tags: list[str] = field(default_factory=list)
+    # Shared by every job of one launch; the dashboard groups runs by it
+    launch_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
 
-    store: bool = False
     debug_requests: bool = False
     debug_provider: bool = False
     force_download_model: bool = False
@@ -60,12 +67,18 @@ class LaunchConfig:
 
     uv_cache_dir: str | None = None
 
+    # Weka buckets mounted in addition to the defaults
+    weka_buckets: list[str] = field(default_factory=list)
+    resume: bool = True
+    resume_volume: str | None = BEAKER_DEFAULT_RESUME_VOLUME
+    resume_retention_days: int = BEAKER_DEFAULT_RESUME_RETENTION_DAYS
+
     # Secret env overrides: maps beaker_secret_name -> env_var_name
     # Allows overriding default {username}_{ENV_VAR} pattern
     secret_env_overrides: dict[str, str] = field(default_factory=dict)
 
     # User-supplied plain env vars forwarded/set on the job via --env/-e.
-    # These win over infra and store defaults.
+    # These win over infra defaults.
     env_vars: dict[str, str] = field(default_factory=dict)
 
 
@@ -75,15 +88,20 @@ def resolve_preemption(
     """Resolve the preemption settings from one source into (preemptible, min_runtime).
 
     A min runtime replaces preemptible, so the returned preemptible is None when a min
-    runtime is set. Without either setting, jobs are preemptible.
+    runtime is set. Without either setting, jobs are preemptible. ``preemptible=False``
+    becomes the maximum min runtime (8h) with preemptible unset, because Beaker turns
+    ``preemptible=False`` into the same min runtime but also disables auto-resume, so a
+    preemption after 8h would end the experiment.
 
     Raises:
         ValueError: If both are set, or the min runtime is not a valid duration.
     """
-    from olmo_eval.launch.beaker import validate_min_runtime
+    from olmo_eval.launch.beaker import PROTECTED_MIN_RUNTIME, validate_min_runtime
 
     if min_runtime is None:
-        return (True if preemptible is None else preemptible), None
+        if preemptible is False:
+            return None, PROTECTED_MIN_RUNTIME
+        return True, None
     if preemptible is not None:
         raise ValueError("preemptible and min_runtime cannot both be set; set min_runtime alone")
     return None, validate_min_runtime(min_runtime)
@@ -204,10 +222,32 @@ class LaunchConfigLoader:
         assert cluster is not None
         assert workspace is not None
 
-        from olmo_eval.launch.beaker.constants import DEFAULT_S3_BUCKET, DEFAULT_S3_PREFIX
+        resume = self.cli_args.get("resume")
+        if resume is None:
+            resume = cfg.resume if cfg else True
+        resume_volume = (
+            self.cli_args.get("resume_volume")
+            or (cfg.resume_volume if cfg else None)
+            or BEAKER_DEFAULT_RESUME_VOLUME
+        )
+        resume_retention_days = self.cli_args.get("resume_retention_days")
+        if resume_retention_days is None:
+            resume_retention_days = (
+                cfg.resume_retention_days if cfg else BEAKER_DEFAULT_RESUME_RETENTION_DAYS
+            )
+        if type(resume_retention_days) is not int or resume_retention_days < 1:
+            console.print("[red]Error:[/red] resume_retention_days must be a positive integer")
+            raise SystemExit(1)
+        if not resume:
+            resume_volume = None
+        if resume_volume is not None:
+            from olmo_eval.launch.beaker.volume import validate_volume
 
-        s3_bucket = self.cli_args.get("s3_bucket") or DEFAULT_S3_BUCKET
-        s3_prefix = self.cli_args.get("s3_prefix") or DEFAULT_S3_PREFIX
+            try:
+                validate_volume(resume_volume)
+            except ValueError as e:
+                console.print(f"[red]Error:[/red] {e}")
+                raise SystemExit(1) from None
 
         effective_groups = list(cli_groups)
         if cfg is not None and cfg.groups:
@@ -232,11 +272,9 @@ class LaunchConfigLoader:
             image=image,
             groups=effective_groups,
             gpus=gpus,
-            s3_bucket=s3_bucket,
-            s3_prefix=s3_prefix,
-            s3_endpoint_url=self.cli_args.get("s3_endpoint_url"),
-            s3_region=self.cli_args.get("s3_region", "us-east-1"),
-            store=self.cli_args.get("store", False),
+            upload=self.cli_args.get("upload", True),
+            api_url=self.cli_args.get("api_url"),
+            tags=list(self.cli_args.get("tags", [])),
             debug_requests=self.cli_args.get("debug_requests", False),
             debug_provider=self.cli_args.get("debug_provider", False),
             force_download_model=self.cli_args.get("force_download_model", False),
@@ -250,6 +288,10 @@ class LaunchConfigLoader:
             harness=self.cli_args.get("harness"),
             harness_overrides=self.cli_args.get("harness_overrides", []),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
+            weka_buckets=list(self.cli_args.get("weka_buckets", [])),
+            resume=resume,
+            resume_volume=resume_volume,
+            resume_retention_days=resume_retention_days,
             secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),
             env_vars=self.cli_args.get("env_vars", {}),
         )
@@ -317,8 +359,8 @@ class LaunchConfigLoader:
         """Detect GPU requirement based on provider and harness configuration.
 
         Calculates total GPUs needed for:
-        - Main model (tensor_parallel_size × num_instances)
-        - Auxiliary providers (each with their own tensor_parallel_size × num_instances)
+        - Main model (tensor_parallel_size × pipeline_parallel_size × num_instances)
+        - Auxiliary providers (each with their own TP × PP × num_instances)
 
         Args:
             model_spec: Model specification (name or preset).
@@ -329,6 +371,7 @@ class LaunchConfigLoader:
             Total number of GPUs required.
         """
         from olmo_eval.common.configs import get_provider_config
+        from olmo_eval.inference.gpu_planner import gpus_per_instance
 
         # Build effective harness config with overrides applied
         harness_config = self._get_effective_harness_config(harness_name, harness_overrides)
@@ -352,7 +395,7 @@ class LaunchConfigLoader:
         main_tp = 1
         main_provider = harness_config.provider if harness_config else provider_config
         if main_provider:
-            main_tp = main_provider.kwargs.get("tensor_parallel_size", 1)
+            main_tp = gpus_per_instance(main_provider.kwargs)
             main_instances = main_provider.num_instances
         main_gpus = (
             main_instances * main_tp
@@ -368,8 +411,7 @@ class LaunchConfigLoader:
                     # API-backed or external server - no GPUs needed
                     continue
                 num_instances = config.num_instances
-                tensor_parallel = config.kwargs.get("tensor_parallel_size", 1)
-                aux_gpus += num_instances * tensor_parallel
+                aux_gpus += num_instances * gpus_per_instance(config.kwargs)
 
         return main_gpus + aux_gpus
 

@@ -5,6 +5,7 @@ import pytest
 from olmo_eval.cli.beaker.config_loader import LaunchConfigLoader
 from olmo_eval.common.constants.infrastructure import cluster_has_weka
 from olmo_eval.launch.beaker import (
+    DEFAULT_WEKA_BUCKETS,
     BeakerEnvSecret,
     BeakerJobConfig,
     BeakerWekaBucket,
@@ -17,6 +18,7 @@ from olmo_eval.launch.beaker import (
     resolve_clusters,
     validate_min_runtime,
     validate_priority_configuration,
+    weka_buckets_with,
 )
 
 
@@ -142,6 +144,29 @@ class TestBeakerWekaBucket:
         assert bucket.mount == "/custom/path"
 
 
+class TestWekaBucketsWith:
+    """Tests for the default Weka bucket list and extra buckets."""
+
+    def test_job_config_mounts_defaults(self):
+        """A job config without extra buckets mounts exactly the defaults."""
+        config = BeakerJobConfig(
+            name="test-job",
+            command=["echo", "hello"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-other",
+        )
+        assert [b.bucket for b in config.weka_buckets] == list(DEFAULT_WEKA_BUCKETS)
+
+    def test_extra_buckets_appended_once(self):
+        """Extra buckets follow the defaults, and a repeated bucket is mounted once."""
+        buckets = weka_buckets_with(
+            ["olmo-3p5-post-checkpoints", "oe-eval-default", "olmo-3p5-post-checkpoints"]
+        )
+        assert [b.bucket for b in buckets] == [*DEFAULT_WEKA_BUCKETS, "olmo-3p5-post-checkpoints"]
+        assert buckets[-1].mount == "/weka/olmo-3p5-post-checkpoints"
+
+
 class TestBeakerJobConfig:
     """Tests for BeakerJobConfig."""
 
@@ -188,7 +213,8 @@ class TestBeakerJobConfig:
         assert config.num_gpus == 4
         assert config.cluster == ["ai2/jupiter", "ai2/saturn"]
         assert config.priority == "high"
-        assert config.preemptible is False
+        assert config.preemptible is None
+        assert config.min_runtime == "8h"
         assert config.retries == 2
         assert config.nfs is True
         assert len(config.weka_buckets) == 1
@@ -257,6 +283,11 @@ class TestBeakerJobConfigMinRuntime:
         assert config.min_runtime == "2h"
         assert config.preemptible is None
 
+    def test_preemptible_false_becomes_8h_min_runtime(self):
+        config = self._config(preemptible=False)
+        assert config.min_runtime == "8h"
+        assert config.preemptible is None
+
     def test_preemptible_false_with_min_runtime_rejected(self):
         with pytest.raises(ValueError, match="cannot be combined with min_runtime"):
             self._config(preemptible=False, min_runtime="2h")
@@ -272,7 +303,7 @@ class TestBeakerJobConfigMinRuntime:
         ("kwargs", "expected_preemptible", "expected_min_runtime"),
         [
             ({}, True, None),
-            ({"preemptible": False}, False, None),
+            ({"preemptible": False}, None, "8h"),
             ({"min_runtime": "2h"}, None, "2h"),
         ],
     )
@@ -298,7 +329,7 @@ class TestBeakerJobConfigMinRuntime:
         ("kwargs", "expected_context"),
         [
             ({}, {"preemptible": True}),
-            ({"preemptible": False}, {"preemptible": False}),
+            ({"preemptible": False}, {"minRuntime": 8 * 3600 * 1_000_000_000}),
             ({"min_runtime": "1h30m"}, {"minRuntime": 90 * 60 * 1_000_000_000}),
         ],
     )
@@ -322,7 +353,7 @@ class TestBeakerJobConfigMinRuntime:
         ("kwargs", "expected_line"),
         [
             ({}, "Preemptible: yes"),
-            ({"preemptible": False}, "Preemptible: no"),
+            ({"preemptible": False}, "Min runtime: 8h"),
             ({"min_runtime": "1h30m"}, "Min runtime: 1h30m"),
         ],
     )
@@ -346,6 +377,87 @@ class TestBeakerJobConfigMinRuntime:
         print_experiment_config({"tasks": [{"context": context}]}, name="test")
 
         assert expected_line in capsys.readouterr().out
+
+
+class TestGoogleCredentialInjection:
+    """Google credentials reach gantry as google_credentials_secret."""
+
+    def _launch(self, dry_run: bool):
+        from unittest.mock import MagicMock, patch
+
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher(workspace="ai2/oe-data")
+        launcher._beaker = MagicMock(user_name="test-user")
+        config = BeakerJobConfig(
+            name="test",
+            command=["echo"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-other",
+            weka_buckets=[],
+            inject_gcs_credentials=True,
+        )
+        with (
+            patch("gantry.api.launch_experiment") as mock_launch,
+            patch(
+                "olmo_eval.launch.beaker.gcs.ensure_gcs_secrets",
+                return_value="test-user_GOOGLE_CREDENTIALS",
+            ) as mock_ensure,
+        ):
+            launcher.launch(config, dry_run=dry_run)
+        return mock_launch.call_args.kwargs, mock_ensure
+
+    def test_launch_writes_and_injects_the_secret(self):
+        kwargs, mock_ensure = self._launch(dry_run=False)
+        mock_ensure.assert_called_once_with("ai2/oe-data")
+        assert kwargs["google_credentials_secret"] == "test-user_GOOGLE_CREDENTIALS"
+
+    def test_dry_run_injects_without_writing_the_secret(self):
+        kwargs, mock_ensure = self._launch(dry_run=True)
+        mock_ensure.assert_not_called()
+        assert kwargs["google_credentials_secret"] == "test-user_GOOGLE_CREDENTIALS"
+
+
+class TestUploaderKeyInjection:
+    """The uploader key reaches the job as OLMO_EVAL_UPLOAD_CREDENTIALS."""
+
+    def _launch(self, dry_run: bool):
+        from unittest.mock import MagicMock, patch
+
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher(workspace="ai2/oe-data")
+        launcher._beaker = MagicMock(user_name="test-user")
+        config = BeakerJobConfig(
+            name="test",
+            command=["echo"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-other",
+            weka_buckets=[],
+            inject_upload_credentials=True,
+        )
+        with (
+            patch("gantry.api.launch_experiment") as mock_launch,
+            patch(
+                "olmo_eval.launch.beaker.uploader.ensure_uploader_secret",
+                return_value="olmo_eval_uploader_key",
+            ) as mock_ensure,
+        ):
+            launcher.launch(config, dry_run=dry_run)
+        return mock_launch.call_args.kwargs, mock_ensure
+
+    def test_launch_writes_and_injects_the_key(self):
+        kwargs, mock_ensure = self._launch(dry_run=False)
+        mock_ensure.assert_called_once_with("ai2/oe-data")
+        assert ("OLMO_EVAL_UPLOAD_CREDENTIALS", "olmo_eval_uploader_key") in kwargs["env_secrets"]
+        assert kwargs["google_credentials_secret"] is None
+
+    def test_dry_run_injects_without_reading_the_key(self):
+        kwargs, mock_ensure = self._launch(dry_run=True)
+        mock_ensure.assert_not_called()
+        assert ("OLMO_EVAL_UPLOAD_CREDENTIALS", "olmo_eval_uploader_key") in kwargs["env_secrets"]
 
 
 class TestBeakerLauncherImport:
@@ -710,6 +822,26 @@ class TestBuildCommandWithTaskPackages:
             "| grep -vE '^nvidia-cutlass-dsl' > /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "grep -E '^(torch|nvidia-)' > /tmp/cuda-constraints.txt" not in install_cmd
+
+    def test_runtime_torch_index_is_extra_to_pypi_for_provider_builds(self):
+        """Provider build dependencies should resolve from PyPI, not the Torch index."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=[],
+            env_exports={
+                "OLMO_EVAL_RUNTIME_TORCH_VERSION": "2.11.0",
+                "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL": "https://download.pytorch.org/whl/cu130",
+            },
+            provider_packages=["git+https://github.com/user/plugin@main"],
+        )
+
+        assert (
+            "--index-url https://pypi.org/simple "
+            "--extra-index-url https://download.pytorch.org/whl/cu130 "
+            "--index-strategy unsafe-best-match"
+        ) in install_cmd
 
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""
@@ -1389,10 +1521,15 @@ class TestLaunchConfigLoaderPreemption:
                 yaml_body=f"preemptible: {preemptible}\nmin_runtime: 4h\n", tmp_path=tmp_path
             )
 
+    def test_cli_no_preemptible_is_8h_min_runtime(self):
+        config = self._load({"preemptible": False})
+        assert config.preemptible is None
+        assert config.min_runtime == "8h"
+
     def test_config_file_preemptible_false(self, tmp_path):
         config = self._load(yaml_body="preemptible: false\n", tmp_path=tmp_path)
-        assert config.preemptible is False
-        assert config.min_runtime is None
+        assert config.preemptible is None
+        assert config.min_runtime == "8h"
 
     def test_cli_min_runtime_replaces_config_file_preemptible(self, tmp_path):
         config = self._load(
@@ -1405,5 +1542,5 @@ class TestLaunchConfigLoaderPreemption:
         config = self._load(
             {"preemptible": False}, yaml_body="min_runtime: 4h\n", tmp_path=tmp_path
         )
-        assert config.preemptible is False
-        assert config.min_runtime is None
+        assert config.preemptible is None
+        assert config.min_runtime == "8h"

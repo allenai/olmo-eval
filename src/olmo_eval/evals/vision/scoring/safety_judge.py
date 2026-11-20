@@ -11,7 +11,8 @@ A call that never returns usable text yields ``None``; each benchmark records
 that as a judge error and leaves the example out of its rates, rather than
 counting it as safe or unsafe. Unusable credentials raise instead, since no
 retry can succeed. The cache dir comes from ``SAFETY_JUDGE_CACHE_DIR`` or a
-fresh per-process temp dir; ``OPENAI_API_KEY`` is needed on cache misses.
+fresh per-process temp dir; ``OPENAI_API_KEY`` or ``OPENROUTER_API_KEY`` is
+needed on cache misses.
 """
 
 from __future__ import annotations
@@ -27,13 +28,18 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from olmo_eval.common.openai_credentials import (
+    create_async_openai_client,
+    require_openai_credentials,
+)
+
 logger = logging.getLogger(__name__)
 
 _RETRY_BASE_DELAY = 1.0
 _RETRY_MAX_DELAY = 30.0
 
 _PROCESS_CACHE_DIR: list[str] = []
-_ASYNC_CLIENTS: dict[str, Any] = {}
+_ASYNC_CLIENTS: dict[str, tuple[Any, str]] = {}
 
 _MIME_TYPES = {
     ".jpg": "image/jpeg",
@@ -54,22 +60,25 @@ def default_cache_dir() -> str:
     return _PROCESS_CACHE_DIR[0]
 
 
-def _get_client() -> Any:
-    if "default" not in _ASYNC_CLIENTS:
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY is required for the safety judge on a cache miss.")
-        try:
-            from openai import AsyncOpenAI
-        except ImportError:
-            raise ImportError("openai package required: pip install openai") from None
-        _ASYNC_CLIENTS["default"] = AsyncOpenAI(api_key=api_key)
-    return _ASYNC_CLIENTS["default"]
+def _get_client(model: str) -> tuple[Any, str]:
+    """A cached client and the model name to request from it (an OpenRouter slug
+    when only an OpenRouter key is set). Cache keys keep the OpenAI model name."""
+    if model not in _ASYNC_CLIENTS:
+        credentials = require_openai_credentials("the safety judge")
+        _ASYNC_CLIENTS[model] = (
+            create_async_openai_client(credentials),
+            credentials.model_name(model),
+        )
+    return _ASYNC_CLIENTS[model]
 
 
 def _is_auth_error(exc: Exception) -> bool:
+    """Whether the call failed because the credentials are unusable.
+
+    Includes 402, which OpenRouter returns when the key is out of credits.
+    """
     status = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
-    if status in (401, 403):
+    if status in (401, 402, 403):
         return True
     return type(exc).__name__ in ("AuthenticationError", "PermissionDeniedError")
 
@@ -159,12 +168,12 @@ async def judge(
         if name in params:
             kwargs[name] = params[name]
 
-    client = _get_client()
+    client, request_model = _get_client(model)
     last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
             completion = await client.chat.completions.create(
-                model=model, messages=messages, **kwargs
+                model=request_model, messages=messages, **kwargs
             )
             text = completion.choices[0].message.content
             if text and text.strip():

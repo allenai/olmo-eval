@@ -14,18 +14,27 @@ Original implementation: https://github.com/hsiehjackson/RULER
 import os
 import re
 import string
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, replace
 from typing import Any, cast
 
-from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import RecallMetric
+from olmo_eval.common.formatters import ChatFormatter, PPLFormatter
+from olmo_eval.common.metrics import Metric, RecallMetric
 from olmo_eval.common.scorers.base import Scorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    ContextFit,
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+    SamplingParams,
+)
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
-from olmo_eval.evals.tasks.common.registry import register
+from olmo_eval.evals.tasks.common.registry import register, register_variant
 
 
 def _normalize_answer(s: str) -> str:
@@ -74,13 +83,23 @@ class RulerTask(Task):
 
     Each RULER task variant (e.g., niah_s_1__4096) is registered as a separate task
     with specific configuration from RULER_TASKS.
+
+    Subclasses point at a different task registry and name prefix by overriding
+    ``_tasks_registry`` and ``_name_prefix``, and can customize data loading by
+    overriding ``_load_data`` (e.g. RulerPlusTask, where each task needs only
+    one shard of a much larger dataset repo).
     """
+
+    _tasks_registry: dict[str, dict[str, Any]] = RULER_TASKS
+    _name_prefix: str = "ruler_"
+    #: Joins the rendered question and the answer prefix in a completion prompt.
+    answer_prefix_separator: str = "\n"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        task_name = config.name.removeprefix("ruler_")
+        task_name = config.name.removeprefix(self._name_prefix)
         self.task_name = task_name
-        self.ruler_config = RULER_TASKS[task_name]
+        self.ruler_config = self._tasks_registry[task_name]
 
         # Extract context size from task name
         task_type, context_size_str = task_name.rsplit("__", 1)
@@ -186,6 +205,11 @@ class RulerTask(Task):
         }
         if isinstance(answer, list):
             metadata["all_gold_answers"] = answer
+        haystack = doc.get("context")
+        if self.scores_overflow_zero and isinstance(haystack, str) and haystack:
+            start = question.find(haystack)
+            if start >= 0 and question.count(haystack) == 1:
+                metadata["haystack_span"] = (start, start + len(haystack))
 
         return Instance(
             question=question,
@@ -194,9 +218,47 @@ class RulerTask(Task):
         )
 
     @property
+    def scores_overflow_zero(self) -> bool:
+        """Whether a prompt too long for the model's window scores 0 (the ``:v2`` variant).
+
+        The haystack is marked so a provider cuts its end to fit, so the prompt can be sent
+        without failing its batch, and an output whose haystack was cut is emptied.
+        """
+        return (self.config.task_settings or {}).get("overflow") == "score_zero"
+
+    @property
+    def cuts_answer(self) -> bool:
+        """Whether outputs are scored only up to their first ``Question:`` (VT's ``:v2``).
+
+        Having answered, base models go on writing questions of their own in the prompt's
+        ``Question: ... Answer:`` format, naming variables that substring recall credits.
+        """
+        return (self.config.task_settings or {}).get("answer_cut") == "before_question"
+
+    def strip_thinking_traces(self, responses: Sequence[Response]) -> None:
+        """Strip thinking traces, then apply the ``:v2`` scoring rules (idempotent).
+
+        As the base class does, a changed output keeps its text in
+        ``metadata["original_text"]``.
+        """
+        super().strip_thinking_traces(responses)
+        for response in responses:
+            for output in response.outputs:
+                text = output.text or ""
+                if self.scores_overflow_zero and output.metadata.get(CONTEXT_CUT_TOKENS_KEY):
+                    kept = ""
+                elif self.cuts_answer:
+                    kept = text.partition("Question:")[0]
+                else:
+                    continue
+                if kept != text:
+                    output.metadata.setdefault("original_text", text)
+                    output.text = kept
+
+    @property
     def request_type(self) -> RequestType:
         """Return the request type for this task."""
-        return RequestType.COMPLETION
+        return super().request_type
 
     def format_request(self, instance: Instance) -> LMRequest:
         """Format an instance as an LMRequest.
@@ -209,6 +271,10 @@ class RulerTask(Task):
         """
         # Use config formatter if provided
         if self.config.formatter is not None:
+            if isinstance(self.config.formatter, ChatFormatter):
+                prefix = (instance.metadata or {}).get("prepend_text", "")
+                if prefix:
+                    instance = replace(instance, question=instance.question + "\n" + prefix)
             # For PPL formatters (BPB variant), convert list answers to strings
             if isinstance(self.config.formatter, PPLFormatter) and isinstance(
                 instance.gold_answer, list
@@ -219,19 +285,27 @@ class RulerTask(Task):
                     gold_answer=", ".join(str(a) for a in instance.gold_answer),
                     metadata=instance.metadata,
                 )
-            return self.config.formatter.format(instance, self.get_fewshot())
+            request = self.config.formatter.format(instance, self.get_fewshot())
+            return self._with_haystack_fit(request, instance)
 
         # Build prompt: append system template as completion prefix for non-chat format.
         # For base models, the prefix anchors the expected output format.
         prompt = instance.question
         prepend_text = (instance.metadata or {}).get("prepend_text", "")
         if prepend_text:
-            prompt = prompt + "\n" + prepend_text
+            prompt = prompt + self.answer_prefix_separator + prepend_text
 
-        return LMRequest(
-            request_type=self.request_type,
-            prompt=prompt,
+        return self._with_haystack_fit(
+            LMRequest(request_type=self.request_type, prompt=prompt), instance
         )
+
+    def _with_haystack_fit(self, request: LMRequest, instance: Instance) -> LMRequest:
+        """Mark the haystack, if any, as a ContextFit with no budget beyond the window."""
+        span = (instance.metadata or {}).get("haystack_span")
+        if not span:
+            return request
+        start, end = span
+        return replace(request, context_fit=ContextFit(text=instance.question[start:end]))
 
     def extract_answer(self, output: LMOutput) -> Any:
         """Extract answer from model output.
@@ -248,41 +322,104 @@ class RulerTask(Task):
         return output.text
 
 
-def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
+#: RULER's newline stops: the newline character and the byte-level spellings some
+#: tokenizers decode it to.
+RULER_STOP_SEQUENCES = ("\n", "Ċ", "ĊĊ", "<0x0A>")
+
+
+def make_ruler_task_class(
+    task_name: str,
+    task_cfg: dict,
+    *,
+    base_cls: type[RulerTask] = RulerTask,
+    class_prefix: str = "Ruler",
+    limit: int | None = 100,
+    metrics: tuple[Metric, ...] | None = None,
+    primary_metric: Metric | str = "recall",
+    stop_sequences: tuple[str, ...] = RULER_STOP_SEQUENCES,
+    extra_bases: tuple[type, ...] = (),
+    attrs: dict[str, Any] | None = None,
+) -> type[RulerTask]:
     """Create a task subclass for a RULER task variant.
 
     Subclasses carry only class-level attributes (metrics, sampling_params, limit);
     all runtime state is derived from config.name inside RulerTask.__init__.
+
+    Args:
+        task_name: Task variant key (e.g., "niah_s_1__4096"), matching a key in
+            base_cls's ``_tasks_registry``.
+        task_cfg: Task configuration dict (see RULER_TASKS/RULER_PLUS_TASKS).
+        base_cls: RulerTask subclass to build on (allows other data sources/prefixes).
+        class_prefix: Prefix for the generated class name.
+        limit: Number of samples to draw per task/context-size condition.
+        metrics: The task's metrics; RULER's recall metric by default.
+        primary_metric: The primary metric, or its name.
+        stop_sequences: Stops used when the task config sets ``stop_new_line``.
+        extra_bases: Classes mixed in ahead of ``base_cls``.
+        attrs: Further class attributes.
     """
-    # QA tasks use RulerQAScorer which applies HELMET-style normalization
-    # (removes articles/punctuation, normalizes whitespace) matching the old framework.
-    # All other tasks use the standard SubstringRecallScorer via RecallMetric.
-    stop_sequences: tuple[str, ...] | None = (
-        ("\n", "Ċ", "ĊĊ", "<0x0A>") if task_cfg.get("stop_new_line", False) else None
-    )
+    if metrics is None:
+        # QA tasks use RulerQAScorer which applies HELMET-style normalization
+        # (removes articles/punctuation, normalizes whitespace) matching the old
+        # framework. All other tasks use the standard SubstringRecallScorer via
+        # RecallMetric.
+        metrics = (
+            (RecallMetric(scorer=RulerQAScorer),) if task_cfg["tag"] == "qa" else (RecallMetric(),)
+        )
     return type(
-        f"Ruler_{task_name}",
-        (RulerTask,),
+        f"{class_prefix}_{task_name}",
+        (*extra_bases, base_cls),
         {
-            "__module__": __name__,
-            "metrics": (RecallMetric(scorer=RulerQAScorer),)
-            if task_cfg["tag"] == "qa"
-            else (RecallMetric(),),
-            "primary_metric": "recall",
+            "__module__": base_cls.__module__,
+            "metrics": metrics,
+            "primary_metric": primary_metric,
             "sampling_params": SamplingParams(
                 temperature=0.0,
                 top_p=1.0,
                 max_tokens=task_cfg.get("max_gen_toks", 50),
-                stop_sequences=stop_sequences,
+                stop_sequences=stop_sequences if task_cfg.get("stop_new_line", False) else None,
             ),
-            "limit": 100,
+            "limit": limit,
+            **(attrs or {}),
         },
     )
 
 
+#: `:v2`: a prompt too long for the model's window scores 0 instead of failing its batch.
+RULER_V2_TASK_SETTINGS = {"overflow": "score_zero"}
+
+#: `:v2` generation budgets by task type: VT answers that restate the chain need ~60 tokens.
+RULER_V2_MAX_GEN_TOKS = {"vt": 100}
+
+#: Task types whose `:v2` outputs are scored only up to their first `Question:`.
+RULER_V2_ANSWER_CUT = ("vt",)
+
 # Dynamically register all RULER tasks
 for _task_name, _task_config in RULER_TASKS.items():
-    _cls = _make_ruler_task_class(_task_name, _task_config)
+    _cls = make_ruler_task_class(_task_name, _task_config)
     # Inject into module globals so pickle can find the class by name
     globals()[_cls.__name__] = _cls
     register(f"ruler_{_task_name}")(_cls)
+    # `:chat` serves the same preformatted RULER input (it already ends with the answer prefix)
+    # as one user turn through the model's chat template, for chat models judged in their
+    # serving format. Sampling, scoring and items are unchanged, so a `:chat` cell pairs
+    # item-for-item with the completion cell on the same checkpoint.
+    register_variant(
+        f"ruler_{_task_name}", "chat", formatter=ChatFormatter(user_template="{question}")
+    )
+    # `:v2`: see RULER_V2_TASK_SETTINGS, RULER_V2_MAX_GEN_TOKS and RULER_V2_ANSWER_CUT.
+    _v2_type = _task_name.rsplit("__", 1)[0]
+    _v2_budget = RULER_V2_MAX_GEN_TOKS.get(_v2_type)
+    register_variant(
+        f"ruler_{_task_name}",
+        "v2",
+        task_settings={
+            **RULER_V2_TASK_SETTINGS,
+            **({"answer_cut": "before_question"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
+        },
+        **(
+            {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
+            if _v2_budget is not None
+            else {}
+        ),
+    )
