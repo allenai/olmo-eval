@@ -13,7 +13,14 @@ from jinja2 import TemplateError
 
 from olmo_eval.common.images import resolve_images
 from olmo_eval.common.logging import get_logger
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+    ToolCall,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import (
     CONTEXT_OVERFLOW_KEY,
@@ -71,7 +78,7 @@ class SGLangProvider(InferenceProvider):
     """Run generation with a locally installed SGLang engine.
 
     Install the `sglang` extra in a compatible GPU runtime. Continuation likelihood
-    scoring and tool requests are not supported by this provider.
+    scoring is unsupported. Tool requests require an explicit native tool parser.
     """
 
     def __init__(
@@ -91,9 +98,12 @@ class SGLangProvider(InferenceProvider):
         enable_multimodal: bool = False,
         prompt_format: Literal["chat", "document"] = "chat",
         profile: str = "auto",
+        tool_call_parser: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(model_name)
+        self.tool_call_parser = tool_call_parser
+        self.supports_tools = tool_call_parser is not None
         if prompt_format not in ("chat", "document"):
             raise ValueError("prompt_format must be 'chat' or 'document'")
         if prompt_format == "document" and (not enable_multimodal or add_bos_token is not None):
@@ -226,7 +236,9 @@ class SGLangProvider(InferenceProvider):
         return self.engine.tokenizer_manager.tokenizer
 
     def _validate_request(self, request: LMRequest) -> None:
-        if request.tools or request.request_type == RequestType.LOGLIKELIHOOD:
+        if (
+            request.tools and not self.supports_tools
+        ) or request.request_type == RequestType.LOGLIKELIHOOD:
             raise NotImplementedError("SGLangProvider supports text and chat generation only")
         if request.images and not self.supports_images:
             raise NotImplementedError("Image requests require enable_multimodal=True")
@@ -237,7 +249,12 @@ class SGLangProvider(InferenceProvider):
         self._validate_request(request)
         if request.request_type == RequestType.CHAT:
             return self.get_tokenizer().apply_chat_template(
-                list(request.messages), tokenize=False, add_generation_prompt=True
+                list(request.messages),
+                tokenize=False,
+                add_generation_prompt=True,
+                **(
+                    {"tools": [tool.to_openai() for tool in request.tools]} if request.tools else {}
+                ),
             )
         return request.prompt
 
@@ -512,6 +529,8 @@ class SGLangProvider(InferenceProvider):
             )
             for output in samples:
                 output.metadata.update(prepared[offset][1])
+                if requests[position].tools and REQUEST_ERROR_KEY not in output.metadata:
+                    self._parse_tool_output(output, requests[position])
                 if failures:
                     # The scorer expects the complete requested sample budget.
                     # Mark the whole request, including any successful samples,
@@ -524,6 +543,34 @@ class SGLangProvider(InferenceProvider):
             [o for o in converted if REQUEST_ERROR_KEY not in o.metadata], params
         )
         return grouped
+
+    def _parse_tool_output(self, output: LMOutput, request: LMRequest) -> None:
+        """Decode native calls using the same parser as SGLang's serving endpoint.
+
+        Keep the sampled text intact for audit and ordinary reasoning extraction.
+        Parsing never constrains generation or changes the semantic tool scorer.
+        """
+        parser_module = import_module("sglang.srt.function_call.function_call_parser")
+        protocol = import_module("sglang.srt.entrypoints.openai.protocol")
+        tools = [protocol.Tool.model_validate(tool.to_openai()) for tool in request.tools]
+        parser = parser_module.FunctionCallParser(
+            tools=tools, tool_call_parser=self.tool_call_parser
+        )
+        text = output.text or ""
+        prompt = self._format_prompt(request)
+        if "</think>" in text:
+            text = text.rsplit("</think>", 1)[1]
+        elif prompt.rstrip().endswith("<think>") or "<think>" in text:
+            output.tool_calls = []
+            output.metadata["native_tool_parse_error"] = "Unclosed reasoning block"
+            return
+        _, calls = parser.parse_non_stream(text)
+        output.tool_calls = [
+            ToolCall.create(f"call_{index}", call.name, call.parameters)
+            for index, call in enumerate(calls)
+        ]
+        output.metadata["native_tool_parser"] = self.tool_call_parser
+        output.metadata["native_tool_call_count"] = len(output.tool_calls)
 
     def _convert_output(self, output: dict[str, Any]) -> LMOutput:
         metadata = dict(output["meta_info"])

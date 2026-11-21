@@ -1293,3 +1293,84 @@ def test_context_fitting_invalid_count_fails_closed(context_engine, monkeypatch,
             SamplingParams(max_tokens=32768, fit_max_tokens_to_context=True),
         )
     engine.generate.assert_not_called()
+
+
+def test_native_tools_render_schemas_and_decode_with_serving_parser(setup_engine, monkeypatch):
+    engine, _, tokenizer = setup_engine
+    provider = SGLangProvider("model", tool_call_parser="qwen3_coder")
+    request = LMRequest(
+        RequestType.CHAT,
+        messages=({"role": "user", "content": "factorial 5"},),
+        tools=(
+            ToolSchema(
+                name="factorial",
+                description="factorial",
+                parameters={"type": "object", "properties": {"number": {"type": "integer"}}},
+            ),
+        ),
+    )
+    raw = (
+        "Reasoning</think>\n<tool_call>\n<function=factorial>\n"
+        "<parameter=number>5</parameter>\n</function>\n</tool_call>"
+    )
+    original = engine.generate.side_effect
+
+    def generate(**kwargs):
+        result = original(**kwargs)
+        for item in result:
+            item["text"] = raw
+        return result
+
+    engine.generate.side_effect = generate
+    parser = Mock()
+    parser.parse_non_stream.return_value = (
+        "",
+        [SimpleNamespace(name="factorial", parameters='{"number":5}')],
+    )
+    constructor = Mock(return_value=parser)
+    monkeypatch.setitem(
+        sys.modules,
+        "sglang.srt.function_call.function_call_parser",
+        SimpleNamespace(FunctionCallParser=constructor),
+    )
+    validator = Mock(side_effect=lambda value: value)
+    monkeypatch.setitem(
+        sys.modules,
+        "sglang.srt.entrypoints.openai.protocol",
+        SimpleNamespace(Tool=SimpleNamespace(model_validate=validator)),
+    )
+    output = provider.generate([request])[0][0]
+    assert provider.supports_tools
+    assert tokenizer.apply_chat_template.call_args.kwargs["tools"] == [request.tools[0].to_openai()]
+    assert output.text == raw
+    assert output.tool_calls[0].function.name == "factorial"
+    assert json.loads(output.tool_calls[0].function.arguments) == {"number": 5}
+    parser.parse_non_stream.assert_called_once_with(raw.split("</think>")[1])
+    constructor.assert_called_once_with(
+        tools=[request.tools[0].to_openai()], tool_call_parser="qwen3_coder"
+    )
+
+
+def test_native_tools_do_not_extract_calls_from_unclosed_reasoning(setup_engine, monkeypatch):
+    engine, _, _ = setup_engine
+    provider = SGLangProvider("model", tool_call_parser="qwen3_coder")
+    request = LMRequest(
+        RequestType.CHAT,
+        messages=({"role": "user", "content": "question"},),
+        tools=(ToolSchema(name="f", description="test"),),
+    )
+    parser = Mock()
+    monkeypatch.setitem(
+        sys.modules,
+        "sglang.srt.function_call.function_call_parser",
+        SimpleNamespace(FunctionCallParser=Mock(return_value=parser)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "sglang.srt.entrypoints.openai.protocol",
+        SimpleNamespace(Tool=SimpleNamespace(model_validate=lambda value: value)),
+    )
+    output = provider.generate([request])[0][0]
+    assert output.tool_calls == []
+    assert output.metadata["native_tool_parse_error"] == "Unclosed reasoning block"
+    parser.parse_non_stream.assert_not_called()

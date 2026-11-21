@@ -2289,3 +2289,22 @@ uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and PR expectations.
+
+### Native XML tool calls with inline SGLang
+
+Instruction-tuned checkpoints with an XML tool-call chat template should use
+BFCL's native tasks, supplying structured schemas through that template. The
+inline SGLang provider enables this explicitly with
+`-o provider.kwargs.tool_call_parser=qwen3_coder`; it uses SGLang's own native
+XML parser and returns canonical calls to BFCL's unchanged semantic checker.
+The same setting can serve other native parser names supported by the installed
+SGLang version. No grammar-constrained decoding is added.
+
+For example, use `-t bfcl_simple` with that provider setting, not
+`-t bfcl_simple:prompt`: the latter asks for Python-style calls and measures a
+different protocol. Preserve the checkpoint's chat template, including its
+reasoning prefix. Unclosed reasoning does not produce an actionable tool call.
+Before a panel, inspect a saved request and verify tool definitions, XML format
+instructions, generated calls and parsed arguments on representative call,
+parallel-call and no-call examples. A successful run with near-zero call scores
+and perfect irrelevance can be a format mismatch, not proof of tool weakness.
