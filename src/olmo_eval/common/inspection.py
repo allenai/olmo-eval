@@ -18,6 +18,7 @@ from rich.table import Table
 from rich.text import Text
 
 from olmo_eval.common.console import console as shared_console
+from olmo_eval.common.images import ImageReference, encode_image_entry
 
 if TYPE_CHECKING:
     from olmo_eval.common.types import Instance, LMRequest, Response
@@ -99,9 +100,10 @@ def format_value(
             return "{}"
 
         # Pretty print as JSON
-        import json
+        return json.dumps(value, indent=2, ensure_ascii=False, default=encode_image_entry)
 
-        return json.dumps(value, indent=2, ensure_ascii=False)
+    if isinstance(value, ImageReference):
+        return json.dumps(value.to_json(), ensure_ascii=False)
 
     if is_dataclass(value) and not isinstance(value, type):
         return f"<{type(value).__name__}>"
@@ -137,6 +139,8 @@ def _format_simple_value(value: Any, max_length: int = 0) -> str:
         if not value:
             return "[]" if isinstance(value, list) else "()"
         return "[...]" if isinstance(value, list) else "(...)"
+    if isinstance(value, ImageReference):
+        return json.dumps(value.to_json(), ensure_ascii=False)
     repr_str = repr(value)
     if max_length > 0 and len(repr_str) > max_length:
         half = max_length // 2
@@ -367,6 +371,9 @@ def inspect_request(
         for tool in request.tools:
             tool_strs.append(f"• {tool.name}: {tool.description}")
         add_field("tools", "\n".join(tool_strs))
+
+    if request.images:
+        add_field("images", format_value(list(request.images), max_string_length=limit))
 
     # Build panel title
     if task_name and native_id is not None:

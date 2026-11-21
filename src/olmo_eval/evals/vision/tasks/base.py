@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
+from olmo_eval.common.images import ImageReference, PathImage
 from olmo_eval.common.types import Instance, LMRequest, RequestType
 from olmo_eval.evals.tasks.common.base import Task
 
@@ -45,18 +47,21 @@ class VisionTask(Task):
         """Yield all instances for ``self.config.split``."""
         ...
 
-    def _attach_images(self, instance: Instance) -> tuple[Any, ...] | None:
+    def _attach_images(self, instance: Instance) -> tuple[ImageReference | Any, ...] | None:
         """The images to send with ``instance``; ``None`` sends a text-only request.
 
-        Entries are lazy references — a path or a picklable zero-arg callable — so
-        preparing requests never decodes pixels in the parent process; providers
-        resolve them (``olmo_eval.common.images.resolve_images``) at inference time.
+        Entries are typed :class:`~olmo_eval.common.images.ImageReference` objects
+        (or inline images in tests) so preparing requests never decodes pixels in the
+        parent process; providers resolve them
+        (``olmo_eval.common.images.resolve_images``) at inference time.
         """
         image = instance.metadata.get("image")
         if image is not None:
+            if isinstance(image, Path):
+                return (PathImage(image),)
             return (image,)
         path = instance.metadata.get("image_path")
-        return (str(path),) if path is not None else None
+        return (PathImage(path),) if path is not None else None
 
     def format_request(self, instance: Instance) -> LMRequest:
         return LMRequest(

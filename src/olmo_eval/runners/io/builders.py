@@ -259,6 +259,9 @@ def build_requests(
             # Chat format - context is the messages
             request_dict["context"] = list(request.messages)
 
+        if request.images:
+            request_dict["images"] = list(request.images)
+
         # Add generation kwargs
         if sampling_params:
             request_dict["stop_sequences"] = (
@@ -361,6 +364,8 @@ def build_requests_from_responses(
             request_dict["max_length"] = request.max_length
         if request.tools:
             request_dict["tools"] = [tool.to_openai() for tool in request.tools]
+        if request.images:
+            request_dict["images"] = list(request.images)
 
         request_trace = response.request_trace or {}
         if request_trace:
