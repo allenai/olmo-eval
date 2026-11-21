@@ -53,12 +53,20 @@ def _store_output_score(
         output.metadata = {}
     if score is not None:
         output.metadata[f"score:{scorer_name}"] = score
+    else:
+        output.metadata.pop(f"score:{scorer_name}", None)
     if scoring_error is not None:
         existing = output.metadata.get("scoring_errors")
         if not isinstance(existing, dict):
             existing = {}
             output.metadata["scoring_errors"] = existing
         existing[scorer_name] = scoring_error
+    else:
+        existing = output.metadata.get("scoring_errors")
+        if isinstance(existing, dict):
+            existing.pop(scorer_name, None)
+            if not existing:
+                output.metadata.pop("scoring_errors", None)
 
 
 class OutputScore(NamedTuple):
@@ -757,20 +765,50 @@ class Task(ABC):
             for output in response.outputs:
                 output.extracted_answer = self.extract_answer(output)
 
+    def _score_response_sync(self, resp_idx: int, response: Response, scorer: Scorer) -> None:
+        """Run one synchronous scorer on a response, recording errors per output."""
+        scored: dict[int, float] = {}
+        for out_idx, output in enumerate(response.outputs):
+            try:
+                score = scorer.score(response.instance, output)
+            except Exception as exc:
+                # Misconfigured async-only scorers invoked without ScoringContext should still
+                # raise rather than masking missing runtime configuration as output errors.
+                if getattr(scorer, "requires_async", False):
+                    raise
+                error = format_scoring_error(exc, phase="sync")
+                instance_id = (response.instance.metadata or {}).get("id", str(resp_idx))
+                logger.warning(
+                    "Sync scoring failed for instance %s output %s with scorer %s: %s",
+                    instance_id,
+                    out_idx,
+                    scorer.name,
+                    error.get("message", error["type"]),
+                )
+                _store_output_score(
+                    output,
+                    scorer_name=scorer.name,
+                    score=None,
+                    scoring_error=error,
+                )
+            else:
+                _store_output_score(output, scorer_name=scorer.name, score=score)
+                scored[out_idx] = score
+
+        # Aggregate over the outputs that were scored. If outputs existed and none
+        # succeeded, omit response.scores[scorer.name] rather than crediting a zero.
+        if scored or not response.outputs:
+            response.scores[scorer.name] = self._aggregate_output_scores(scored)
+        else:
+            response.scores.pop(scorer.name, None)
+
     def _apply_scorers(self, responses: Sequence[Response]) -> None:
         """Run all scorers synchronously and populate response.scores."""
         scorers_by_name = self._get_scorers()
 
-        for response in responses:
+        for resp_idx, response in enumerate(responses):
             for scorer in scorers_by_name.values():
-                scores = [scorer.score(response.instance, o) for o in response.outputs]
-                for i, output in enumerate(response.outputs):
-                    if output.metadata is None:
-                        output.metadata = {}
-                    output.metadata[f"score:{scorer.name}"] = scores[i] if i < len(scores) else 0.0
-                response.scores[scorer.name] = self._aggregate_output_scores(
-                    dict(enumerate(scores))
-                )
+                self._score_response_sync(resp_idx, response, scorer)
 
     async def _apply_scorers_async(
         self,
@@ -857,19 +895,9 @@ class Task(ABC):
                 sync_scorers[name] = scorer
 
         # Apply sync scorers first (fast, no concurrency needed)
-        for response in responses:
+        for resp_idx, response in enumerate(responses):
             for scorer in sync_scorers.values():
-                scores = [scorer.score(response.instance, o) for o in response.outputs]
-                # Store individual scores in output metadata for pass@k expansion
-                for i, output in enumerate(response.outputs):
-                    _store_output_score(
-                        output,
-                        scorer_name=scorer.name,
-                        score=scores[i] if i < len(scores) else 0.0,
-                    )
-                response.scores[scorer.name] = self._aggregate_output_scores(
-                    dict(enumerate(scores))
-                )
+                self._score_response_sync(resp_idx, response, scorer)
 
         # Apply async scorers (execution, process, and context) concurrently
         async_scorers_exist = (
@@ -1034,6 +1062,8 @@ class Task(ABC):
                     scored = {i: s for i, s in output_scores.items() if s is not None}
                     if scored:
                         response.scores[scorer_name] = self._aggregate_output_scores(scored)
+                    else:
+                        response.scores.pop(scorer_name, None)
 
     def _aggregate_output_scores(self, scores: dict[int, float]) -> float:
         """Collapse per-output scorer values into one response-level score."""

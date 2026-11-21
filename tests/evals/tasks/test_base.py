@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import ClassVar
@@ -17,8 +18,12 @@ from olmo_eval.common.execution import (
 )
 from olmo_eval.common.execution.environment import ExecutionResult, ScoringContext
 from olmo_eval.common.metrics import AccuracyMetric, PassAtKMetric
-from olmo_eval.common.scorers import ExactMatchScorer, ProcessScorer
-from olmo_eval.common.scorers.execution import ContextScorer, ExecutionScorer
+from olmo_eval.common.scorers import ExactMatchScorer, ProcessScorer, Scorer
+from olmo_eval.common.scorers.execution import (
+    ContextScorer,
+    ExecutionScorer,
+    SandboxRequiredError,
+)
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
 from olmo_eval.common.types.base import compute_task_hash
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, Task, TaskConfig
@@ -55,6 +60,20 @@ class EchoProcessScorer(ProcessScorer):
         if output.extracted_answer is None or instance.gold_answer is None:
             return 0.0
         return 1.0 if str(output.extracted_answer) == str(instance.gold_answer) else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class FailingSyncScorer(Scorer):
+    """Sync scorer that fails for selected outputs."""
+
+    name: str = "failing_sync"
+    fail_text: str = "boom"
+    error_message: str = "intentional sync scorer failure"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.text == self.fail_text:
+            raise ValueError(self.error_message)
+        return 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1212,6 +1231,288 @@ class TestAsyncScoringFailures:
         )
         # pass@1 over the one scored sample, not over a failed sample counted as wrong.
         assert task.compute_metrics(scored) == {"pass_at_1": {"failing_exec": 1.0}}
+
+
+@pytest.mark.anyio
+class TestSyncScoringFailures:
+    """Tests that synchronous scoring exceptions record output errors instead of aborting."""
+
+    async def test_sync_scorer_failure_records_the_error_and_no_score(self):
+        metric = PassAtKMetric(k=1, scorer=FailingSyncScorer)
+        config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
+        task = ConcreteTask(config)
+
+        responses = _make_responses(n_responses=2, n_outputs=1)
+        responses[0].outputs[0].text = "ok"
+        responses[1].outputs[0].text = "boom"
+
+        scored = await task.score_responses(responses)
+
+        assert scored[0].scores["failing_sync"] == 1.0
+        assert scored[0].outputs[0].metadata["score:failing_sync"] == 1.0
+        assert "scoring_errors" not in scored[0].outputs[0].metadata
+
+        failing_output = scored[1].outputs[0]
+        assert "failing_sync" not in scored[1].scores
+        assert "score:failing_sync" not in failing_output.metadata
+        assert failing_output.metadata["scoring_errors"] == {
+            "failing_sync": {
+                "phase": "sync",
+                "type": "ValueError",
+                "message": "intentional sync scorer failure",
+            }
+        }
+        assert task.compute_metrics(scored) == {"pass_at_1": {"failing_sync": 1.0}}
+
+    async def test_a_partly_failed_sync_response_is_scored_from_its_scored_outputs(self):
+        metric = PassAtKMetric(k=1, scorer=FailingSyncScorer)
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(metric,),
+            output_score_aggregation=OutputScoreAggregation.MEAN,
+        )
+        task = ConcreteTask(config)
+
+        response = _make_responses(n_responses=1, n_outputs=2)[0]
+        response.outputs[0].text = "ok"
+        response.outputs[1].text = "boom"
+
+        scored = await task.score_responses([response])
+
+        assert scored[0].scores["failing_sync"] == 1.0
+        assert scored[0].outputs[0].metadata["score:failing_sync"] == 1.0
+        assert "score:failing_sync" not in scored[0].outputs[1].metadata
+        assert scored[0].outputs[1].metadata["scoring_errors"]["failing_sync"]["type"] == (
+            "ValueError"
+        )
+        assert task.compute_metrics(scored) == {"pass_at_1": {"failing_sync": 1.0}}
+
+    async def test_mixed_workload_isolates_sync_scorer_failure(self):
+        env = MockExecutionEnv(semaphore=asyncio.Semaphore(4))
+        sync_metric = AccuracyMetric(scorer=FailingSyncScorer)
+        exec_metric = PassAtKMetric(k=1, scorer=MockExecutionScorer)
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(sync_metric, exec_metric),
+        )
+        task = ConcreteTask(config)
+
+        responses = _make_responses(n_responses=2, n_outputs=1)
+        responses[0].outputs[0].text = "ok"
+        responses[1].outputs[0].text = "boom"
+        context = ScoringContext(execution_env=env, scoring_concurrency=4)
+
+        scored = await task.score_responses(responses, context=context)
+
+        assert scored[0].scores == {"failing_sync": 1.0, "mock_exec": 1.0}
+        assert "failing_sync" not in scored[1].scores
+        assert scored[1].scores["mock_exec"] == 1.0
+        assert scored[1].outputs[0].metadata["scoring_errors"]["failing_sync"]["phase"] == "sync"
+        assert task.compute_metrics(scored) == {
+            "accuracy": {"failing_sync": 1.0},
+            "pass_at_1": {"mock_exec": 1.0},
+        }
+
+    async def test_empty_outputs_still_score_zero(self):
+        metric = AccuracyMetric(scorer=FailingSyncScorer)
+        task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
+        response = Response(
+            instance=Instance(question="What is 2+2?", gold_answer="4"),
+            request=LMRequest(request_type=RequestType.COMPLETION, prompt="What is 2+2?"),
+            outputs=[],
+        )
+
+        scored = await task.score_responses([response])
+
+        assert scored[0].scores["failing_sync"] == 0.0
+
+    @pytest.mark.parametrize(
+        ("scorer_cls", "expected_exc"),
+        [
+            (MockExecutionScorer, SandboxRequiredError),
+            (TrackedContextScorer, RuntimeError),
+            (FailingProcessScorer, RuntimeError),
+        ],
+    )
+    async def test_async_scorer_without_context_still_raises(self, scorer_cls, expected_exc):
+        metric = PassAtKMetric(k=1, scorer=scorer_cls)
+        task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
+        response = _make_responses(n_responses=1, n_outputs=1)[0]
+
+        with pytest.raises(expected_exc):
+            await task.score_responses([response])
+
+    async def test_first_aggregation_skips_failed_leading_output(self):
+        metric = AccuracyMetric(scorer=FailingSyncScorer)
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(metric,),
+            output_score_aggregation=OutputScoreAggregation.FIRST,
+        )
+        task = ConcreteTask(config)
+
+        response = _make_responses(n_responses=1, n_outputs=2)[0]
+        response.outputs[0].text = "boom"
+        response.outputs[1].text = "ok"
+
+        scored = await task.score_responses([response])
+
+        assert scored[0].scores["failing_sync"] == 1.0
+        assert "score:failing_sync" not in scored[0].outputs[0].metadata
+        assert scored[0].outputs[0].metadata["scoring_errors"]["failing_sync"]["phase"] == "sync"
+        assert scored[0].outputs[1].metadata["score:failing_sync"] == 1.0
+        assert task.compute_metrics(scored) == {"accuracy": {"failing_sync": 1.0}}
+
+    async def test_sync_scorer_failure_logs_instance_id_and_empty_message_error(self, caplog):
+        metric = AccuracyMetric(scorer=FailingSyncScorer(error_message=""))
+        task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
+
+        responses = [
+            Response(
+                instance=Instance(question="Q0", gold_answer="A", metadata={"id": "doc-42"}),
+                request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q0"),
+                outputs=[LMOutput(text="boom")],
+            ),
+            Response(
+                instance=Instance(question="Q1", gold_answer="A"),
+                request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q1"),
+                outputs=[LMOutput(text="boom")],
+            ),
+        ]
+
+        with caplog.at_level(logging.WARNING, logger="olmo_eval.evals.tasks.common.base"):
+            scored = await task.score_responses(responses)
+
+        messages = [
+            r.getMessage() for r in caplog.records if r.name == "olmo_eval.evals.tasks.common.base"
+        ]
+        assert messages == [
+            "Sync scoring failed for instance doc-42 output 0 with scorer failing_sync: ValueError",
+            "Sync scoring failed for instance 1 output 0 with scorer failing_sync: ValueError",
+        ]
+        assert scored[0].outputs[0].metadata["scoring_errors"] == {
+            "failing_sync": {"phase": "sync", "type": "ValueError"}
+        }
+        assert "message" not in scored[0].outputs[0].metadata["scoring_errors"]["failing_sync"]
+
+    async def test_sync_scorer_failure_does_not_affect_sibling_sync_scorer(self):
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(
+                AccuracyMetric(scorer=ExactMatchScorer),
+                AccuracyMetric(scorer=FailingSyncScorer),
+            ),
+        )
+        task = ConcreteTask(config)
+
+        responses = _make_responses(n_responses=2, n_outputs=1)
+        responses[0].outputs[0].text = "ok"
+        responses[1] = Response(
+            instance=Instance(question="What is 3+3?", gold_answer="boom"),
+            request=LMRequest(request_type=RequestType.COMPLETION, prompt="What is 3+3?"),
+            outputs=[LMOutput(text="boom")],
+        )
+
+        scored = await task.score_responses(responses)
+
+        assert scored[0].scores == {"exact_match": 0.0, "failing_sync": 1.0}
+        assert scored[1].scores == {"exact_match": 1.0}
+        assert scored[1].outputs[0].metadata["score:exact_match"] == 1.0
+        assert "score:failing_sync" not in scored[1].outputs[0].metadata
+        assert scored[1].outputs[0].metadata["scoring_errors"]["failing_sync"]["phase"] == "sync"
+        assert task.compute_metrics(scored) == {
+            "accuracy": {"exact_match": 0.5, "failing_sync": 1.0}
+        }
+
+    async def test_sync_scorer_failure_flows_through_compute_task_metrics(self):
+        from olmo_eval.runners.asynq.preparation import compute_task_metrics
+
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(AccuracyMetric(scorer=FailingSyncScorer),),
+        )
+        task = ConcreteTask(config)
+
+        def make_responses() -> list[Response]:
+            responses = _make_responses(n_responses=2, n_outputs=1)
+            responses[0].outputs[0].text = "ok"
+            responses[1].outputs[0].text = "boom"
+            return responses
+
+        over_budget = compute_task_metrics(
+            "test",
+            task,
+            list(await task.score_responses(make_responses())),
+            {},
+            2,
+            0.0,
+            max_hard_failure_rate=0.05,
+        )
+        assert over_budget.failure_budget_exceeded is True
+        assert over_budget.error is not None
+
+        within_budget = compute_task_metrics(
+            "test",
+            task,
+            list(await task.score_responses(make_responses())),
+            {},
+            2,
+            0.0,
+            max_hard_failure_rate=0.5,
+        )
+        assert within_budget.failure_budget_exceeded is False
+        assert within_budget.error is None
+        assert within_budget.metrics == {"accuracy": {"failing_sync": 1.0}}
+        assert within_budget.scoring_failures == {
+            "instances_unscored": 1,
+            "instances_partially_scored": 0,
+            "outputs_unscored": 1,
+            "infrastructure": 0,
+            "by_type": {"ValueError": 1},
+            "first_error": "ValueError: intentional sync scorer failure",
+        }
+        assert within_budget.predictions is not None
+        assert "sample_metrics" not in within_budget.predictions[1]["model_output"][0]
+        assert within_budget.predictions[1]["model_output"][0]["scoring_errors"] == {
+            "failing_sync": {
+                "phase": "sync",
+                "type": "ValueError",
+                "message": "intentional sync scorer failure",
+            }
+        }
+
+    async def test_rescoring_clears_stale_scores_and_errors(self):
+        config = TaskConfig(
+            name="test",
+            data_source="test/dataset",
+            metrics=(AccuracyMetric(scorer=FailingSyncScorer),),
+        )
+        task = ConcreteTask(config)
+
+        response = _make_responses(n_responses=1, n_outputs=1)[0]
+        response.outputs[0].text = "ok"
+        await task.score_responses([response])
+        assert response.scores["failing_sync"] == 1.0
+        assert response.outputs[0].metadata["score:failing_sync"] == 1.0
+
+        # Rescore after output becomes failing: stale score must be cleared
+        response.outputs[0].text = "boom"
+        await task.score_responses([response])
+        assert "failing_sync" not in response.scores
+        assert "score:failing_sync" not in response.outputs[0].metadata
+        assert "failing_sync" in response.outputs[0].metadata["scoring_errors"]
+
+        # Rescore after output becomes valid again: stale scoring_errors must be cleared
+        response.outputs[0].text = "ok"
+        await task.score_responses([response])
+        assert response.scores["failing_sync"] == 1.0
+        assert response.outputs[0].metadata["score:failing_sync"] == 1.0
+        assert "scoring_errors" not in response.outputs[0].metadata
 
 
 @pytest.mark.anyio
