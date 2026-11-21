@@ -72,7 +72,7 @@ class SciCodeExternalEval(ExternalEval):
     For each main problem, generates code for each sub-step sequentially via the
     provided ``InferenceProvider`` (hardcoded snippets for problems 13.6, 62.1,
     and 76.3 are injected verbatim without generation). All generated code is
-    then concatenated and tested one sub-step at a time in a Python sandbox
+    tested with the generated prefix through each sub-step in a Python sandbox
     that has ``numpy``, ``scipy``, ``sympy``, ``h5py``, and the SciCode numeric
     reference ``test_data.h5`` available.
     """
@@ -212,7 +212,7 @@ class SciCodeExternalEval(ExternalEval):
         hardcoded = scicode_prompts.HARDCODED_SNIPPETS.get(problem.problem_id, {})
         sub_steps = problem.sub_steps
         # Hardcoded snippets feed generation via previous_llm_code but stay out
-        # of step_codes; the verifier receives them separately as hardcoded_prelude.
+        # of step_codes; the verifier includes them at their original positions.
         previous_llm_code: list[str | None] = [None] * len(sub_steps)
         for idx, snippet in hardcoded.items():
             if idx < len(sub_steps):
@@ -244,16 +244,10 @@ class SciCodeExternalEval(ExternalEval):
 
         scorable_indices = [i for i in range(len(sub_steps)) if i not in hardcoded]
         total_scorable = len(scorable_indices)
-        hardcoded_prelude = "\n\n".join(
-            hardcoded[i] for i in sorted(hardcoded) if i < len(sub_steps)
-        )
-        full_code = "\n\n".join(step_codes[i] for i in sorted(step_codes) if step_codes[i])
-
         step_results = await self._verify(
             problem=problem,
             scorable_indices=scorable_indices,
-            full_code=full_code,
-            hardcoded_prelude=hardcoded_prelude,
+            code_by_step=step_codes | hardcoded,
             sc_args=sc_args,
             container_runtime=container_runtime,
         )
@@ -274,8 +268,7 @@ class SciCodeExternalEval(ExternalEval):
         self,
         problem: scicode_loader.SciCodeProblem,
         scorable_indices: list[int],
-        full_code: str,
-        hardcoded_prelude: str,
+        code_by_step: dict[int, str],
         sc_args: SciCodeConfig,
         container_runtime: str,
     ) -> list[bool]:
@@ -318,11 +311,12 @@ class SciCodeExternalEval(ExternalEval):
                 raise RuntimeError(f"SciCode sandbox dep install failed: {sync_result.output}")
             for idx in scorable_indices:
                 step = problem.sub_steps[idx]
+                prefix = "\n\n".join(code_by_step[i] for i in range(idx + 1) if code_by_step.get(i))
                 script = scicode_verifier.build_step_script(
                     step=step,
                     required_dependencies=problem.required_dependencies,
-                    full_code=full_code,
-                    hardcoded_prelude=hardcoded_prelude,
+                    full_code=prefix,
+                    hardcoded_prelude="",
                     h5py_file=sc_args.h5py_container_path,
                 )
                 exec_result = await sandbox_manager.execute_code(
