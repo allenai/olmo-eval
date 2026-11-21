@@ -26,6 +26,7 @@ from .code_execution import CodeExecutionScorer, MultiplEScorer
 from .execution import (
     ContextScorer,
     ExecutionScorer,
+    ResponseBatchScorer,
     SandboxRequiredError,
     ScoringIncompleteError,
 )
@@ -84,6 +85,7 @@ __all__ = [
     "NGramCopyingBPBScorer",
     "PerplexityScorer",
     "ProcessScorer",
+    "ResponseBatchScorer",
     "RougeLF1Scorer",
     "RougeLRecallScorer",
     "SafetyScorer",
