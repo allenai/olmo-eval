@@ -158,15 +158,15 @@ def _olmo35_small_defaults(
             "defaults": {},
             "reason": reason if gpu is None else "Small requires a B300",
         }
-    running = 96
+    running = 160
     defaults = {
         "disable_radix_cache": True,
         "max_running_requests": running,
         "cuda_graph_backend_decode": "full",
         "cuda_graph_max_bs_decode": running,
         "cuda_graph_backend_prefill": "disabled",
-        "max_total_tokens": running * 34816,
-        "max_mamba_cache_size": 128,
+        "max_total_tokens": 3342336,
+        "max_mamba_cache_size": 192,
         "mem_fraction_static": 0.88,
         "chunked_prefill_size": 8192,
         "attention_backend": "trtllm_mha",

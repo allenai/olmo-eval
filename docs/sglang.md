@@ -345,13 +345,14 @@ Set the evaluation context to at most 34,816 tokens. This profile matches the
 40-layer A4B Small geometry and requires a dedicated TP1 B300. The named selector
 rejects Tiny checkpoints and devices without sufficient free memory.
 
-The starting settings mirror the measured Small B300 R96 engine: 96 live
-sequences, 3,342,336 KV tokens, 128 recurrent slots, TRT-LLM MHA, 8K prefill
-chunks, full decode graphs and prefix caching disabled. `batching.chunk_size=auto`
-uses the engine's reported admission when available, counting expanded samples
-rather than prompts. Keep generation settings fixed when comparing throughput.
-The R96 engine has been exercised in training and evaluation; the named profile
-must pass an evaluator GPU check before it is used for model comparisons.
+The Small B300 profile uses 160 active sequences and decode graph slots,
+3,342,336 KV tokens, 192 recurrent slots, TRT-LLM MHA, 8K prefill chunks,
+and prefix caching disabled. `batching.chunk_size=auto` uses the engine's
+reported admission when available and counts expanded samples. In a
+[paired AIME 2022 comparison](https://beaker.org/ex/01M7XY4R77CY0C4X66TB8NJEEF)
+on one B300, the profile finished the same ten questions at 32 draws and a
+32,768-token output cap in 36m 26s, compared with 39m 23s for the generic R96
+configuration. Both finished all 320 responses.
 
 To qualify another shape, add its exact configuration contract to
 `inference/model_profiles.py` and register its measured resolver and required
