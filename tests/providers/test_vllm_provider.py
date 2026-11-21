@@ -436,3 +436,91 @@ def test_text_that_is_not_in_the_prompt_is_refused() -> None:
 
     with pytest.raises(ValueError, match="exactly once"):
         provider.generate([request], SamplingParams(max_tokens=1))
+
+
+class ScoringTokenizer(FakeTokenizer):
+    """Character tokenizer without a BOS token, as the OLMo tokenizers are."""
+
+    bos_token_id = None
+    eos_token_id = 2
+
+    def decode(self, token_ids: list[int]) -> str:
+        return "".join(chr(token_id) for token_id in token_ids)
+
+
+class ScoringLLM(FakeLLM):
+    """Returns a -1.0 prompt logprob for every token after the first, as vLLM does."""
+
+    def generate(
+        self,
+        prompts: list[str] | list[dict[str, list[int]]],
+        sampling_params: object,
+        use_tqdm: bool = False,
+    ) -> list[object]:
+        self.generate_calls.append({"prompts": prompts, "sampling_params": sampling_params})
+        outputs = []
+        for prompt in prompts:
+            assert isinstance(prompt, dict)
+            token_ids = prompt["prompt_token_ids"]
+            prompt_logprobs = [None] + [
+                {token_id: SimpleNamespace(logprob=-1.0, decoded_token=chr(token_id))}
+                for token_id in token_ids[1:]
+            ]
+            outputs.append(SimpleNamespace(prompt_logprobs=prompt_logprobs, outputs=[]))
+        return outputs
+
+
+def _scoring_provider(monkeypatch, add_bos_token: bool | None) -> tuple[VLLMProvider, ScoringLLM]:
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.SamplingParams = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+    llm = ScoringLLM(ScoringTokenizer())
+    provider = VLLMProvider.__new__(VLLMProvider)
+    provider.model_name = "test-model"
+    provider.llm = llm
+    provider._add_bos_token = add_bos_token
+    provider._max_length = 64
+    return provider, llm
+
+
+def _empty_context_request() -> LMRequest:
+    return LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt="", continuations=("hi",))
+
+
+def test_logprobs_puts_eos_ahead_of_an_empty_context_by_default(monkeypatch) -> None:
+    provider, llm = _scoring_provider(monkeypatch, add_bos_token=None)
+
+    [[output]] = provider.logprobs([_empty_context_request()])
+
+    assert llm.generate_calls[0]["prompts"] == [{"prompt_token_ids": [2, ord("h"), ord("i")]}]
+    assert [entry["token_id"] for entry in output.logprobs] == [ord("h"), ord("i")]
+    assert output.metadata["num_tokens"] == 2
+
+
+def test_logprobs_scores_an_empty_context_from_a_cold_start_when_bos_is_disabled(
+    monkeypatch,
+) -> None:
+    # A model that never saw EOS at the start of a sequence is not asked to: the
+    # continuation is sent as written and its first token is the (unscored) context.
+    provider, llm = _scoring_provider(monkeypatch, add_bos_token=False)
+
+    [[output]] = provider.logprobs([_empty_context_request()])
+
+    assert llm.generate_calls[0]["prompts"] == [{"prompt_token_ids": [ord("h"), ord("i")]}]
+    assert [entry["token_id"] for entry in output.logprobs] == [ord("i")]
+    assert output.metadata["num_tokens"] == 1
+    assert output.metadata["num_tokens_all"] == 2
+
+
+def test_logprobs_drops_the_tokenizer_bos_from_a_context_when_bos_is_disabled(
+    monkeypatch,
+) -> None:
+    provider, llm = _scoring_provider(monkeypatch, add_bos_token=False)
+    tokenizer = llm.get_tokenizer()
+    tokenizer.bos_token_id = 1
+    tokenizer.add_bos_token = True
+    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt="a", continuations=("b",))
+
+    provider.logprobs([request])
+
+    assert llm.generate_calls[0]["prompts"] == [{"prompt_token_ids": [ord("a"), ord("b")]}]

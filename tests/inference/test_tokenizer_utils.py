@@ -6,6 +6,7 @@ These tests use mock tokenizers and don't require GPU.
 from __future__ import annotations
 
 from olmo_eval.inference.tokenizer_utils import (
+    TokenizerBosOverride,
     encode_context_and_continuation,
     get_bos_token_ids,
     get_context_token_ids,
@@ -106,11 +107,24 @@ class TestEncodeContextAndContinuation:
         assert ctx == [2]
         assert cont == [ord("h"), ord("i")]
 
-    def test_empty_context_no_bos_when_disabled(self):
+    def test_empty_context_scores_from_a_cold_start_when_bos_disabled(self):
+        """Without a prefix token the first continuation token is the context, unscored."""
         tokenizer = MockTokenizer(bos_token_id=1)
         ctx, cont = encode_context_and_continuation(tokenizer, "", "hi", use_bos_for_empty=False)
-        assert ctx == []
-        assert cont == [ord("h"), ord("i")]
+        assert ctx == [ord("h")]
+        assert cont == [ord("i")]
+
+    def test_cold_start_ignores_the_tokenizer_add_bos_token_setting(self):
+        tokenizer = TokenizerBosOverride(MockTokenizer(bos_token_id=1), add_bos_token=True)
+        ctx, cont = encode_context_and_continuation(tokenizer, "", "hi", use_bos_for_empty=False)
+        assert ctx == [ord("h")]
+        assert cont == [ord("i")]
+
+    def test_cold_start_with_a_single_token_continuation_scores_nothing(self):
+        tokenizer = MockTokenizer(bos_token_id=None, eos_token_id=None)
+        ctx, cont = encode_context_and_continuation(tokenizer, "", "h")
+        assert ctx == [ord("h")]
+        assert cont == []
 
     def test_non_empty_context_basic(self):
         tokenizer = MockTokenizer()
@@ -161,11 +175,17 @@ class TestEdgeCases:
         assert cont == []
 
     def test_no_special_tokens_available(self):
-        """Tokenizer has no BOS or EOS."""
+        """Tokenizer has no BOS or EOS: the continuation is scored from a cold start."""
         tokenizer = MockTokenizer(bos_token_id=None, eos_token_id=None)
         ctx, cont = encode_context_and_continuation(tokenizer, "", "hi")
+        assert ctx == [ord("h")]
+        assert cont == [ord("i")]
+
+    def test_both_empty_without_prefix_token(self):
+        tokenizer = MockTokenizer(bos_token_id=None, eos_token_id=None)
+        ctx, cont = encode_context_and_continuation(tokenizer, "", "")
         assert ctx == []
-        assert cont == [ord("h"), ord("i")]
+        assert cont == []
 
     def test_unicode_handling(self):
         """Unicode characters in context and continuation."""

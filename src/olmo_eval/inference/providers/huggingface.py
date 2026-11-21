@@ -18,7 +18,10 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.request_utils import chat_messages_for_request
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.tokenizer_utils import (
+    TokenizerBosOverride,
+    encode_context_and_continuation,
+)
 
 logger = get_logger(__name__)
 
@@ -268,6 +271,9 @@ class HuggingFaceProvider(InferenceProvider):
     max_multi_image_crops: int
     autocast_dtype: str | None
 
+    #: The provider's ``add_bos_token`` kwarg; False scores loglikelihood requests as written.
+    _add_bos_token: bool | None = None
+
     # kwargs that may be passed by the runner but are not valid for HF from_pretrained
     _IGNORED_KWARGS = frozenset(
         {
@@ -325,7 +331,9 @@ class HuggingFaceProvider(InferenceProvider):
                 set aside for it.
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
-        # Strip kwargs meant for other providers (e.g., vLLM)
+        # add_bos_token=False makes loglikelihood scoring skip BOS (and its EOS stand-in
+        # for an empty context), as the vLLM providers do; the rest are for other providers.
+        self._add_bos_token = model_kwargs.get("add_bos_token")
         for key in self._IGNORED_KWARGS:
             model_kwargs.pop(key, None)
 
@@ -685,6 +693,9 @@ class HuggingFaceProvider(InferenceProvider):
                 "truncate_prompt_tokens or truncation_side has been set in the params, "
                 "but is not supported for the HuggingFaceProvider and will not be used."
             )
+        encode_tokenizer: Any = self.tokenizer
+        if self._add_bos_token is False:
+            encode_tokenizer = TokenizerBosOverride(self.tokenizer, False)
         results = []
         for request in requests:
             request_outputs = []
@@ -693,7 +704,10 @@ class HuggingFaceProvider(InferenceProvider):
                 prompt = cont_prompts[i] if cont_prompts else request.prompt
                 # Use shared utility for BOS handling and trailing space logic
                 context_enc, continuation_enc = encode_context_and_continuation(
-                    self.tokenizer, prompt, continuation
+                    encode_tokenizer,
+                    prompt,
+                    continuation,
+                    use_bos_for_empty=self._add_bos_token is not False,
                 )
 
                 # Build full sequence as tensor

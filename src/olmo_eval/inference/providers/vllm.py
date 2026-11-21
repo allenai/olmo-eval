@@ -20,7 +20,10 @@ from olmo_eval.common.types import (
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.providers.vllm_server import _replace_context_text
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.tokenizer_utils import (
+    TokenizerBosOverride,
+    encode_context_and_continuation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -491,6 +494,13 @@ class VLLMProvider(InferenceProvider):
         tokenizer = self.llm.get_tokenizer()
         default_max_len = self.max_length
 
+        # add_bos_token=False scores the request as written, as generate() sends it: no
+        # BOS ahead of a context and no BOS (or EOS stand-in) ahead of an empty one.
+        encode_tokenizer: Any = tokenizer
+        if self._add_bos_token is False:
+            encode_tokenizer = TokenizerBosOverride(tokenizer, False)
+        use_bos_for_empty = self._add_bos_token is not False
+
         # Build token sequences for all continuations
         token_inputs: list[list[int]] = []
         request_meta: list[tuple[int, int, int]] = []  # (ctxlen, num_tokens_all, overflow)
@@ -503,7 +513,7 @@ class VLLMProvider(InferenceProvider):
             for i, continuation in enumerate(continuations):
                 prompt = cont_prompts[i] if cont_prompts else request.prompt
                 context_enc, continuation_enc = encode_context_and_continuation(
-                    tokenizer, prompt, continuation
+                    encode_tokenizer, prompt, continuation, use_bos_for_empty=use_bos_for_empty
                 )
 
                 # Calculate overflow and left-truncate to max_length - 1

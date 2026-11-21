@@ -5,6 +5,17 @@ from __future__ import annotations
 from typing import Any
 
 
+class TokenizerBosOverride:
+    """Tokenizer proxy that overrides add_bos_token without mutating the underlying tokenizer."""
+
+    def __init__(self, tokenizer: Any, add_bos_token: bool) -> None:
+        self._tokenizer = tokenizer
+        self.add_bos_token = add_bos_token
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._tokenizer, name)
+
+
 def get_bos_token_ids(tokenizer: Any, *, fallback_to_eos: bool = True) -> list[int]:
     """Get BOS token ID, optionally falling back to EOS.
 
@@ -70,6 +81,9 @@ def encode_context_and_continuation(
     before tokenization to ensure consistent token boundaries.
 
     For empty contexts, BOS token is used as the context (optionally falling back to EOS).
+    When no such token is inserted (``use_bos_for_empty=False``, or the tokenizer has
+    none), the continuation is scored from a cold start: its first token becomes the
+    context and goes unscored, so the model is never fed a token it was not asked for.
 
     Args:
         tokenizer: A tokenizer object with encode method.
@@ -81,11 +95,14 @@ def encode_context_and_continuation(
     Returns:
         Tuple of (context_token_ids, continuation_token_ids).
     """
-    # Handle empty context: use BOS token
-    if context == "" and use_bos_for_empty:
-        context_enc = get_bos_token_ids(tokenizer, fallback_to_eos=fallback_to_eos)
+    # Handle empty context: use BOS token, or score from a cold start
+    if context == "":
         continuation_enc = tokenizer.encode(continuation, add_special_tokens=False)
-        return context_enc, continuation_enc
+        if use_bos_for_empty:
+            context_enc = get_bos_token_ids(tokenizer, fallback_to_eos=fallback_to_eos)
+            if context_enc:
+                return context_enc, continuation_enc
+        return continuation_enc[:1], continuation_enc[1:]
 
     # Match lm_eval behavior: move trailing spaces from context to continuation
     n_spaces = len(context) - len(context.rstrip())
