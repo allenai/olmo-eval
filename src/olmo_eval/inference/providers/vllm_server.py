@@ -27,7 +27,11 @@ from olmo_eval.inference.errors import (
     is_context_overflow,
 )
 from olmo_eval.inference.hf_cache import refresh_hf_cache
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.tokenizer_utils import (
+    TokenizerBosOverride,
+    encode_context_and_continuation,
+    get_bos_token_ids,
+)
 from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
@@ -122,17 +126,6 @@ class RemoteTokenizer:
         if self._client is not None:
             self._client.close()
             self._client = None
-
-
-class TokenizerBosOverride:
-    """Tokenizer proxy that overrides add_bos_token without mutating the underlying tokenizer."""
-
-    def __init__(self, tokenizer: Any, add_bos_token: bool) -> None:
-        self._tokenizer = tokenizer
-        self.add_bos_token = add_bos_token
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._tokenizer, name)
 
 
 def _cut_at_stop_sequence(text: str, stop_sequences: list[str] | None) -> str:
@@ -1277,16 +1270,16 @@ class VLLMServerProvider(InferenceProvider):
         for i, continuation in enumerate(request.continuations or ()):
             # Use per-continuation prompt when available (e.g. Trinh & Le partial eval)
             ctx = cont_prompts[i] if cont_prompts else context
-            # Use shared utility for proper tokenization (handles BOS, trailing spaces)
-            context_enc, continuation_enc = encode_context_and_continuation(
-                tokenizer, ctx, continuation
-            )
-
-            # RemoteTokenizer doesn't have BOS/EOS token IDs, so for empty contexts
-            # encode_context_and_continuation returns empty context_enc.
-            # In this case, encode with add_special_tokens=True to get BOS from server.
-            if not context_enc and context == "":
+            if ctx == "" and not get_bos_token_ids(tokenizer):
+                # RemoteTokenizer doesn't have BOS/EOS token IDs: encode with
+                # add_special_tokens=True to get BOS from the server instead.
                 context_enc = tokenizer.encode("", add_special_tokens=True)
+                continuation_enc = tokenizer.encode(continuation, add_special_tokens=False)
+            else:
+                # Use shared utility for proper tokenization (handles BOS, trailing spaces)
+                context_enc, continuation_enc = encode_context_and_continuation(
+                    tokenizer, ctx, continuation
+                )
 
             full_tokens = context_enc + continuation_enc
             # Loglikelihood scoring intentionally left-truncates only when the task,

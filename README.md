@@ -284,6 +284,20 @@ uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness-config ./my_harness.yaml
 ```
 
+#### Loglikelihood scoring and BOS
+
+For a `LOGLIKELIHOOD` request the providers tokenize the context and continuation
+without special tokens, then put the tokenizer's BOS token (or its EOS token when it has
+no BOS, as the OLMo tokenizers do) ahead of an empty context so that every continuation
+token is scored. Pass `-o provider.kwargs.add_bos_token=false` to score a request as
+written instead: no BOS ahead of a context, and an empty context is scored from a cold
+start, where the first continuation token is the context and goes unscored. Use it for a
+checkpoint that was never trained on a sequence that starts with EOS, such as a
+long-context stage trained on packed documents. Corpus perplexity tasks (`c4`, `c4_1k`,
+`c4_10k`) are the ones with an empty context; multiple-choice and bits-per-byte tasks
+have a prompt and are unaffected. The inline vLLM and HuggingFace providers honour the
+setting.
+
 #### HarnessConfig
 
 Configuration for a harness:
