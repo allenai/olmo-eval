@@ -9,7 +9,6 @@ from typing import Any
 from olmo_eval.common.metrics.base import (
     BPBMetricByteAvg,
     BPBMetricInstanceAvg,
-    CorpusLossMetric,
     CorpusPerplexityMetric,
     GreedyAccuracyMetric,
     LogprobMCAccuracyMetric,
@@ -213,15 +212,6 @@ def _compute_metric_value_from_prediction(
         if sum_logits is None or num_tokens is None:
             return None
         return float(math.exp(-(sum_logits / num_tokens)))
-
-    if isinstance(metric, CorpusLossMetric):
-        if not outputs:
-            return None
-        sum_logits = _sum_logits(outputs[0])
-        num_tokens = _num_tokens(outputs[0])
-        if sum_logits is None or not num_tokens:
-            return None
-        return float(-(sum_logits / num_tokens))
 
     if isinstance(metric, LogprobMCAccuracyMetric):
         gold_idx = _gold_idx(prediction, outputs)

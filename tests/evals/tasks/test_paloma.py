@@ -1,8 +1,8 @@
-"""Tests for the Paloma perplexity tasks and the paloma macro-loss suite."""
+"""Tests for the Paloma perplexity tasks and the paloma macro bits-per-byte suite."""
 
 import pytest
 
-from olmo_eval.common.metrics import BPBMetricByteAvg, CorpusLossMetric
+from olmo_eval.common.metrics import CorpusBPBMetric
 from olmo_eval.common.types import RequestType, Split
 from olmo_eval.evals.suites import AggregationStrategy, get_suite
 from olmo_eval.evals.tasks import paloma
@@ -53,11 +53,11 @@ class TestRegistration:
         assert source.data_files == "c4_en/val/*"
         assert source.split == "train"
 
-    def test_primary_metric_is_token_weighted_loss(self):
+    def test_only_metric_is_byte_weighted_bpb(self):
         config = get_task("paloma_gab").config
         assert config.split == Split.VALIDATION
-        assert isinstance(config.get_primary_metric(), CorpusLossMetric)
-        assert any(isinstance(metric, BPBMetricByteAvg) for metric in config.metrics)
+        assert isinstance(config.get_primary_metric(), CorpusBPBMetric)
+        assert [type(metric) for metric in config.metrics] == [CorpusBPBMetric]
 
 
 class TestInstances:

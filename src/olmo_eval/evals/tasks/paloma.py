@@ -2,10 +2,9 @@
 
 Paloma (Magnusson et al., 2023, https://huggingface.co/datasets/allenai/paloma)
 is 16 held-out corpora. Each task here scores one source's text and reports its
-token-weighted loss (nats per token) and byte-weighted bits per byte. The
-``paloma`` suite averages those over the 16 sources with equal weight, the
-"Paloma macro loss" that Levanter logs as ``eval/paloma/macro_loss`` and Marin
-uses as its scaling-law target.
+byte-weighted bits per byte, which unlike loss per token does not depend on the
+tokenizer. The ``paloma`` suite averages that over the 16 sources with equal
+weight, the macro bits per byte that Levanter logs as ``eval/paloma/macro_bpb``.
 
 Long documents are split into chunks of at most ``MAX_CHUNK_CHARS`` characters,
 broken at whitespace, and each chunk is scored from a BOS token. This plays the
@@ -18,7 +17,7 @@ import sys
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import BPBMetricByteAvg, CorpusLossMetric
+from olmo_eval.common.metrics import CorpusBPBMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, Split
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register
@@ -83,8 +82,8 @@ class PalomaBase(Task):
     """One Paloma source, scored as raw text in whitespace-bounded chunks."""
 
     split = Split.VALIDATION
-    metrics = (CorpusLossMetric(), BPBMetricByteAvg())
-    primary_metric = CorpusLossMetric()
+    metrics = (CorpusBPBMetric(),)
+    primary_metric = CorpusBPBMetric()
 
     @property
     def request_type(self) -> RequestType:

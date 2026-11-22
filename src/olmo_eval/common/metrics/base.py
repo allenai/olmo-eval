@@ -18,7 +18,7 @@ from olmo_eval.common.scorers import (
     SubstringRecallScorer,
     ToolCallScorer,
 )
-from olmo_eval.common.types import LMOutput, Response
+from olmo_eval.common.types import Response
 from olmo_eval.common.utils import compute_pass_at_k, compute_pass_pow_k
 
 
@@ -834,64 +834,55 @@ class CorpusPerplexityMetric(Metric):
 
 
 @dataclass(frozen=True, slots=True)
-class CorpusLossMetric(Metric):
-    """Corpus-level (token-weighted) cross-entropy in nats per token.
+class CorpusBPBMetric(BPBMetricByteAvg):
+    """Byte-weighted bits per byte over a corpus scored as raw text.
 
-    ``-sum(logprobs) / sum(tokens)`` over every scored token in the corpus, the
-    log of :class:`CorpusPerplexityMetric`. This is the per-dataset loss that
-    Levanter averages into its ``macro_loss``.
-
-    A loss is only defined over the tokens actually scored, so an output that
-    has no logprobs or whose prompt was truncated to fit the context raises
-    instead of being skipped or counted as zero.
+    ``-sum(logprobs) / (sum(bytes) * ln 2)`` over every chunk, as in
+    :class:`BPBMetricByteAvg`, but strict: a chunk with no output, no logprobs,
+    no bytes, or a prompt truncated to fit the context raises instead of being
+    skipped, and an empty corpus raises instead of scoring 0.0. Either way the
+    tokens scored would not be the whole text.
     """
-
-    name: str = "corpus_loss"
-    scorer: type[Scorer] = LogprobScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         total_logprob = 0.0
-        total_tokens = 0
+        total_bytes = 0
         for response in responses:
-            output = _corpus_output(response)
-            total_logprob += self.scorer().score(response.instance, output)
-            total_tokens += len(output.logprobs or ())
+            logprob, num_bytes = _corpus_logprob_and_bytes(response)
+            total_logprob += logprob
+            total_bytes += num_bytes
 
-        if total_tokens == 0:
-            raise ValueError("corpus_loss: no scored tokens")
-        return -total_logprob / total_tokens
+        if total_bytes == 0:
+            raise ValueError("corpus bits_per_byte: no scored text")
+        return -total_logprob / (total_bytes * math.log(2))
 
     def compute_instance(self, response: Response) -> float | None:
-        output = _corpus_output(response)
-        total_logprob = self.scorer().score(response.instance, output)
-        return float(-total_logprob / len(output.logprobs or ()))
-
-    def supports_scorer_fallback(self) -> bool:
-        return False
-
-    def higher_is_better(self) -> bool:
-        return False
+        logprob, num_bytes = _corpus_logprob_and_bytes(response)
+        return -logprob / (num_bytes * math.log(2))
 
 
-def _corpus_output(response: Response) -> LMOutput:
-    """The single scored output of a corpus-loss instance.
+def _corpus_logprob_and_bytes(response: Response) -> tuple[float, int]:
+    """Summed logprob and UTF-8 byte count of a corpus chunk's single output.
 
-    Raises when the output has no logprobs or was left-truncated: either way the
-    tokens scored are not the whole text, so its loss is not the text's loss.
+    Raises when the chunk was not scored in full: no output, no logprobs, no
+    text, or a prompt left-truncated to fit the context.
     """
     instance_id = response.instance.metadata.get("id")
     if not response.outputs:
-        raise ValueError(f"corpus_loss: instance {instance_id} has no output")
+        raise ValueError(f"corpus bits_per_byte: instance {instance_id} has no output")
     output = response.outputs[0]
     if not output.logprobs:
-        raise ValueError(f"corpus_loss: instance {instance_id} has no logprobs")
+        raise ValueError(f"corpus bits_per_byte: instance {instance_id} has no logprobs")
     truncated = (output.metadata or {}).get("prompt_truncated_tokens") or 0
     if truncated > 0:
         raise ValueError(
-            f"corpus_loss: instance {instance_id} was truncated by {truncated} tokens to fit "
-            f"the context; shorten the task's chunks"
+            f"corpus bits_per_byte: instance {instance_id} was truncated by {truncated} tokens "
+            f"to fit the context; shorten the task's chunks"
         )
-    return output
+    num_bytes = len(output.text.encode("utf-8")) if output.text else 0
+    if num_bytes == 0:
+        raise ValueError(f"corpus bits_per_byte: instance {instance_id} has no text")
+    return sum(tok["logprob"] for tok in output.logprobs), num_bytes
 
 
 @dataclass(frozen=True, slots=True)
