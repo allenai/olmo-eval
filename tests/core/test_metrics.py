@@ -8,6 +8,7 @@ from olmo_eval.common.metrics import (
     AccuracyMetric,
     BPBMetricByteAvg,
     BPBMetricInstanceAvg,
+    CorpusLossMetric,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
     MacroSubsetAccuracyMetric,
@@ -322,6 +323,53 @@ class TestBPBMetricByteAvg:
         output = LMOutput(text="test", logprobs=None)
         responses = [self._make_response([output])]
         assert metric.compute(responses) == 0.0
+
+
+class TestCorpusLossMetric:
+    """Tests for CorpusLossMetric (token-weighted nats per token)."""
+
+    def _response(self, logprobs: list[float] | None, **metadata) -> Response:
+        entries = None if logprobs is None else [{"token": "t", "logprob": lp} for lp in logprobs]
+        return Response(
+            instance=Instance(question="", gold_answer="text", metadata={"id": 0}),
+            request=LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt=""),
+            outputs=[LMOutput(text="text", logprobs=entries, metadata=metadata or None)],
+        )
+
+    def test_weights_each_token_equally(self):
+        # 1 token at -1.0 and 3 tokens at -3.0: (1 + 9) / 4, not the mean of 1.0 and 3.0.
+        responses = [self._response([-1.0]), self._response([-3.0, -3.0, -3.0])]
+        assert CorpusLossMetric().compute(responses) == pytest.approx(2.5)
+
+    def test_is_the_log_of_corpus_perplexity(self):
+        from olmo_eval.common.metrics import CorpusPerplexityMetric
+
+        responses = [self._response([-0.5, -2.0]), self._response([-1.25])]
+        loss = CorpusLossMetric().compute(responses)
+        assert math.exp(loss) == pytest.approx(CorpusPerplexityMetric().compute(responses))
+
+    def test_instance_value_is_that_instance_mean(self):
+        assert CorpusLossMetric().compute_instance(self._response([-1.0, -2.0])) == 1.5
+
+    def test_missing_logprobs_raise(self):
+        with pytest.raises(ValueError, match="no logprobs"):
+            CorpusLossMetric().compute([self._response(None)])
+
+    def test_truncated_output_raises(self):
+        response = self._response([-1.0], prompt_truncated_tokens=3)
+        with pytest.raises(ValueError, match="truncated by 3 tokens"):
+            CorpusLossMetric().compute([response])
+
+    def test_no_responses_raise(self):
+        with pytest.raises(ValueError, match="no scored tokens"):
+            CorpusLossMetric().compute([])
+
+    def test_saved_prediction_gets_the_instance_loss(self):
+        from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
+
+        prediction = {"model_output": [{"sum_logits": -6.0, "num_tokens": 4}]}
+        augment_prediction_instance_metrics(prediction, [CorpusLossMetric()])
+        assert prediction["instance_metrics"]["corpus_loss"]["logprob"] == pytest.approx(1.5)
 
 
 class TestLogprobMCAccuracyMetric:
