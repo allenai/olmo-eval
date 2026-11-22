@@ -9,7 +9,7 @@ weight, so no one source dominates.
 
 Following Paloma's inference format, documents are scored individually rather
 than packed together, and long documents are split into disjoint inputs: chunks
-of at most ``MAX_CHUNK_CHARS`` characters, broken at whitespace, each scored
+of at most ``MAX_CHUNK_BYTES`` UTF-8 bytes, broken at whitespace, each scored
 from a BOS token. Every token is scored and none is dropped to fit the context.
 The chunks join back to the original text exactly, so bytes are counted once.
 """
@@ -46,36 +46,46 @@ PALOMA_SUBSETS: tuple[str, ...] = (
     "wikitext_103",
 )
 
-#: Longest chunk scored as one request. At most one token per character for
-#: almost all text, so a chunk fits an 8k-token context with room to spare.
-MAX_CHUNK_CHARS = 8000
+#: Longest chunk scored as one request, in UTF-8 bytes. A byte-level tokenizer
+#: spends at least one byte per token, so a chunk is at most 8000 tokens and
+#: fits an 8192-token context with its BOS. A character limit would not: emoji
+#: and CJK text run to several tokens per character.
+MAX_CHUNK_BYTES = 8000
 
 #: Paloma names its splits ``val`` and ``test``.
 _PALOMA_SPLITS = {Split.VALIDATION: "val", Split.TEST: "test"}
 
 
-def split_text(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
-    """Split ``text`` into chunks of at most ``max_chars`` characters.
+def split_text(text: str, max_bytes: int = MAX_CHUNK_BYTES) -> list[str]:
+    """Split ``text`` into chunks of at most ``max_bytes`` UTF-8 bytes.
 
     Each cut falls just after the last newline in the window, else the last
     space or tab, provided that leaves the chunk at least half full; otherwise
-    the window is cut at ``max_chars``. The whitespace stays at the end of the
-    earlier chunk, and ``"".join(split_text(text)) == text``.
+    the window is cut at the last character boundary within ``max_bytes``. The
+    whitespace stays at the end of the earlier chunk, and
+    ``"".join(split_text(text)) == text``.
     """
-    if max_chars < 2:
-        raise ValueError(f"max_chars must be at least 2, got {max_chars}")
+    if max_bytes < 4:
+        raise ValueError(f"max_bytes must be at least 4 to fit any character, got {max_bytes}")
+    data = text.encode("utf-8")
     chunks: list[str] = []
     start = 0
-    while len(text) - start > max_chars:
-        window = text[start : start + max_chars]
-        cut = window.rfind("\n")
-        if cut < max_chars // 2:
-            cut = max(window.rfind(" "), window.rfind("\t"))
-        end = start + cut + 1 if cut >= max_chars // 2 else start + max_chars
-        chunks.append(text[start:end])
+    while len(data) - start > max_bytes:
+        window = data[start : start + max_bytes]
+        cut = window.rfind(b"\n")
+        if cut < max_bytes // 2:
+            cut = max(window.rfind(b" "), window.rfind(b"\t"))
+        if cut >= max_bytes // 2:
+            end = start + cut + 1
+        else:
+            end = start + max_bytes
+            # Back off continuation bytes (0b10xxxxxx) so no character is split.
+            while data[end] & 0xC0 == 0x80:
+                end -= 1
+        chunks.append(data[start:end].decode("utf-8"))
         start = end
-    if start < len(text):
-        chunks.append(text[start:])
+    if start < len(data):
+        chunks.append(data[start:].decode("utf-8"))
     return chunks
 
 
@@ -124,7 +134,7 @@ class PalomaBase(Task):
                 "doc_id": doc_id,
                 "chunk_index": chunk_index,
                 "num_chunks": num_chunks,
-                "num_chars": len(text),
+                "num_bytes": len(text.encode("utf-8")),
             },
         )
 
