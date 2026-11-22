@@ -549,7 +549,7 @@ class TestExecuteOracle(unittest.TestCase):
 
 
 class TestRunInstanceAgent(unittest.TestCase):
-    def _run(self, agent_error: Exception) -> swe_eval.InstanceResult:
+    def _run(self, agent_error: Any) -> swe_eval.InstanceResult:
         manager = mock.MagicMock()
         manager.start = mock.AsyncMock()
         manager.stop = mock.AsyncMock()
@@ -583,6 +583,35 @@ class TestRunInstanceAgent(unittest.TestCase):
         self.assertEqual(result.completion_reason, "agent_timeout")
         self.assertIsNone(result.error)
         self.assertEqual(result.patch, GOLD_PATCH)
+
+    def test_a_cut_off_agent_still_logs_the_replies_it_got(self) -> None:
+        async def cut_off(*_: Any, progress: Any) -> None:
+            progress.steps = 1
+            progress.timing.append({"step": 1, "completion_tokens": 9, "finish_reason": "length"})
+            progress.in_flight = True
+            raise TimeoutError
+
+        result = self._run(cut_off)
+        self.assertEqual(result.completion_reason, "agent_timeout")
+        self.assertEqual(result.patch, GOLD_PATCH)
+        meta = result.trajectory.metadata
+        self.assertTrue(meta["partial"])
+        self.assertTrue(meta["in_flight_request"])
+        self.assertEqual(meta["steps"], 1)
+        self.assertEqual(meta["timing"][0]["completion_tokens"], 9)
+
+    def test_a_failed_agent_run_still_logs_the_replies_it_got(self) -> None:
+        async def failing(*_: Any, progress: Any) -> None:
+            progress.steps = 2
+            progress.timing.extend({"step": i, "completion_tokens": 4} for i in (1, 2))
+            raise RuntimeError("boom")
+
+        result = self._run(failing)
+        self.assertEqual(result.error, "agent_error: boom")
+        meta = result.trajectory.metadata
+        self.assertTrue(meta["partial"])
+        self.assertFalse(meta["in_flight_request"])
+        self.assertEqual(meta["steps"], 2)
 
     def test_context_overflow_still_grades_partial_patch(self) -> None:
         result = self._run(RuntimeError("maximum context length is 40960 tokens"))
@@ -708,6 +737,9 @@ class TestImageTimeout(unittest.TestCase):
         self.assertFalse(result.resolved)
         run_agent.assert_not_awaited()
         self.assertEqual(get_image.call_args.kwargs["timeout"], 900.0)
+        # The agent never started: the log says so, with no replies.
+        self.assertEqual(result.trajectory.metadata["steps"], 0)
+        self.assertTrue(result.trajectory.metadata["partial"])
         remove.assert_called_once()
 
 
@@ -846,7 +878,7 @@ class TestVanilluxAgent(unittest.TestCase):
     def test_vanillux_gets_a_grace_period_past_the_agent_timeout(
         self, scaffold: str, expected: str
     ) -> None:
-        async def slow_agent(*_args: Any) -> None:
+        async def slow_agent(*_args: Any, **_: Any) -> None:
             await asyncio.sleep(0.3)
             _args[-1].completion_reason = "submitted"
 
