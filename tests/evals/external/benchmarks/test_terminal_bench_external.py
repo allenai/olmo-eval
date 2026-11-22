@@ -553,6 +553,8 @@ class TestTaskImage:
         assert result.completion_reason == "error"
         assert result.attempt == 1
         manager.assert_not_called()
+        assert result.trajectory.metadata["partial"] is True
+        assert result.trajectory.metadata["steps"] == 0
 
 
 class TestDatasets:
@@ -660,7 +662,7 @@ class TestExecuteTask:
         args = tb_eval.TerminalBenchArgs.from_dict({})
         task = make_task(difficulty="hard", category="c")
 
-        async def fake_agent(manager, task, provider, tb_args):
+        async def fake_agent(manager, task, provider, tb_args, progress=None):
             return trajectory_with_steps(3), "submitted", 3, None
 
         with mock.patch.object(eval_obj, "_run_agent", side_effect=fake_agent):
@@ -683,7 +685,7 @@ class TestExecuteTask:
         args = tb_eval.TerminalBenchArgs.from_dict({})
         task = make_task(agent_timeout=0.01)
 
-        async def slow_agent(manager, task, provider, tb_args):
+        async def slow_agent(manager, task, provider, tb_args, progress=None):
             await asyncio.sleep(5)
             return trajectory_with_steps(1), "submitted", 1, None
 
@@ -698,11 +700,56 @@ class TestExecuteTask:
         assert result.error is None
         assert FakeSandboxManager.instances[0].stopped
 
+    def test_a_cut_off_agent_still_logs_the_replies_it_got(self) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        args = tb_eval.TerminalBenchArgs.from_dict({})
+        task = make_task(agent_timeout=0.01)
+
+        async def slow_agent(manager, task, provider, tb_args, progress=None):
+            progress.steps = 1
+            progress.timing.append({"step": 1, "completion_tokens": 9, "finish_reason": "length"})
+            progress.in_flight = True
+            await asyncio.sleep(5)
+
+        with (
+            mock.patch.object(eval_obj, "_run_agent", side_effect=slow_agent),
+            mock.patch.object(tb_eval, "AGENT_TIMEOUT_GRACE", 0.0),
+        ):
+            result = self._run(eval_obj, task, args)
+
+        assert result.completion_reason == "timeout"
+        assert result.reward == 1.0
+        assert result.agent_steps == 0
+        meta = result.trajectory.metadata
+        assert meta["partial"] is True
+        assert meta["in_flight_request"] is True
+        assert meta["timing"] == [{"step": 1, "completion_tokens": 9, "finish_reason": "length"}]
+
+    def test_a_failed_agent_run_still_logs_the_replies_it_got(self) -> None:
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        args = tb_eval.TerminalBenchArgs.from_dict({})
+
+        async def failing_agent(manager, task, provider, tb_args, progress=None):
+            progress.steps = 2
+            progress.timing.extend({"step": i, "completion_tokens": 4} for i in (1, 2))
+            raise RuntimeError("sandbox died")
+
+        with mock.patch.object(eval_obj, "_run_agent", side_effect=failing_agent):
+            result = self._run(eval_obj, make_task(), args)
+
+        assert result.error == "sandbox died"
+        assert result.completion_reason == "error"
+        assert result.reward == 0.0
+        meta = result.trajectory.metadata
+        assert meta["partial"] is True
+        assert meta["in_flight_request"] is False
+        assert meta["steps"] == 2
+
     def test_a_model_serving_failure_is_an_error(self) -> None:
         eval_obj = tb_eval.TerminalBenchExternalEval()
         args = tb_eval.TerminalBenchArgs.from_dict({})
 
-        async def failed_agent(manager, task, provider, tb_args):
+        async def failed_agent(manager, task, provider, tb_args, progress=None):
             return AgentTrajectory(turns=()), "error", 0, "Connection error."
 
         with mock.patch.object(eval_obj, "_run_agent", side_effect=failed_agent):
@@ -803,6 +850,31 @@ class TestRunAgent:
         assert steps == 2
         assert error is None
         assert trajectory.num_turns == 2
+
+    def test_vanillux_gets_the_trial_progress_record(self) -> None:
+        from olmo_eval.harness.scaffolds.vanillux import RunProgress
+
+        eval_obj = tb_eval.TerminalBenchExternalEval()
+        args = tb_eval.TerminalBenchArgs.from_dict({})
+        scaffold = mock.Mock()
+        scaffold.run = mock.AsyncMock(
+            return_value=mock.Mock(
+                trajectory=trajectory_with_steps(1),
+                metadata={"completion_reason": "submitted", "steps": 1},
+                max_turns_reached=False,
+                error=None,
+            )
+        )
+        progress = RunProgress()
+
+        with mock.patch("olmo_eval.harness.scaffolds.get_scaffold", return_value=scaffold):
+            asyncio.run(
+                eval_obj._run_agent(
+                    mock.Mock(), make_task(), FakeProvider(), args, progress=progress
+                )
+            )
+
+        assert scaffold.run.await_args.kwargs["progress"] is progress
 
     def test_the_openai_agents_scaffold_keeps_its_own_tools_and_prompt(self) -> None:
         eval_obj = tb_eval.TerminalBenchExternalEval()
