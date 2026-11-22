@@ -17,7 +17,7 @@ import sys
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import CorpusBPBMetric
+from olmo_eval.common.metrics import BPBMetricByteAvg
 from olmo_eval.common.types import Instance, LMRequest, RequestType, Split
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register
@@ -82,8 +82,8 @@ class PalomaBase(Task):
     """One Paloma source, scored as raw text in whitespace-bounded chunks."""
 
     split = Split.VALIDATION
-    metrics = (CorpusBPBMetric(),)
-    primary_metric = CorpusBPBMetric()
+    metrics = (BPBMetricByteAvg(),)
+    primary_metric = BPBMetricByteAvg()
 
     @property
     def request_type(self) -> RequestType:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from olmo_eval.common.metrics import CorpusBPBMetric
+from olmo_eval.common.metrics import BPBMetricByteAvg
 from olmo_eval.common.types import RequestType, Split
 from olmo_eval.evals.suites import AggregationStrategy, get_suite
 from olmo_eval.evals.tasks import paloma
@@ -56,8 +56,8 @@ class TestRegistration:
     def test_only_metric_is_byte_weighted_bpb(self):
         config = get_task("paloma_gab").config
         assert config.split == Split.VALIDATION
-        assert isinstance(config.get_primary_metric(), CorpusBPBMetric)
-        assert [type(metric) for metric in config.metrics] == [CorpusBPBMetric]
+        assert isinstance(config.get_primary_metric(), BPBMetricByteAvg)
+        assert [type(metric) for metric in config.metrics] == [BPBMetricByteAvg]
 
 
 class TestInstances:
