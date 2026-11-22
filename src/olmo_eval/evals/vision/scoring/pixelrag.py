@@ -2,54 +2,44 @@
 
 Vendored from ``eval/lib/grader.py`` and ``eval/repro_assets/`` of
 https://github.com/StarTrail-org/PixelRAG (commit c4a0f530). The two judge prompts are the
-official files byte for byte, and the judge call, the verdict parsing and the score follow the
-grader:
+official files byte for byte, and the verdict parsing and the exact match follow the grader:
 
 * ``simpleqa`` is graded with OpenAI's SimpleQA template, whose reply is a letter (A/B/C);
 * every other subset is graded with WorldVQA's judge prompt, whose reply ends in
   ``Label: Correct|Incorrect|Unattempted``. Its ground truth reads ``Any of: a | b`` when a
   question has several references;
 * NQ and NQ-Tables are also scored by the grader's normalized exact match, its default mode
-  for them (the paper's numbers use the judge).
+  for them (the paper's numbers use the judge). Exact match needs no judge, so it is its own
+  scorer and does not depend on the judge call succeeding.
 
-The judge is ``gpt-4.1-2025-04-14`` at temperature 0 with seed 42 and a 1000-token reply, under
-the system message ``You are a helpful assistant.``. A response's ``<think>`` block is removed
-before it is judged. The score is the fraction graded correct among the responses the judge
-graded. Unlike the official grader, a failed call is retried with backoff before it counts as
-an error.
+A response's ``<think>`` block is removed before it is judged or matched. The judge call
+itself is the shared judge's (:mod:`olmo_eval.evals.vision.benchmarks.pixelrag`).
 """
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
-import json
-import logging
-import os
-import random
 import re
 import string
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
-from olmo_eval.common.scorers.base import Scorer, get_scorer_result
+from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput
 
-logger = logging.getLogger(__name__)
-
 SCORER_NAME = "pixelrag"
+#: Score channel of the exact match.
+EXACT_MATCH_SCORER_NAME = "pixelrag_exact_match"
 
 Grader = Literal["simpleqa", "worldvqa"]
 #: A judge verdict; ``unattempted`` is SimpleQA's NOT_ATTEMPTED and WorldVQA's Unattempted.
 Verdict = Literal["correct", "incorrect", "unattempted"]
 
+#: The official judge: model, reply budget and system message (temperature 0, the shared
+#: judge's default).
 JUDGE_MODEL = "gpt-4.1-2025-04-14"
-JUDGE_SYSTEM_MESSAGE = "You are a helpful assistant."
 JUDGE_MAX_TOKENS = 1000
-JUDGE_SEED = 42
+JUDGE_SYSTEM_MESSAGE = "You are a helpful assistant."
 
 #: ``eval/repro_assets/judge_worldvqa_prompt.txt`` (MoonshotAI/WorldVQA's
 #: ``JUDGE_WORLDQA_PROMPT_EN``), verbatim. The ``\u`` escapes are literal text in the file.
@@ -308,144 +298,27 @@ def is_exact_match(prediction: str | None, golds: Sequence[Any]) -> bool:
     return any(_normalize_text(str(g)) == pred_norm for g in golds)
 
 
-# ---------------------------------------------------------------------------
-# Judge call
-# ---------------------------------------------------------------------------
-
-_ASYNC_CLIENT: list[Any] = []
-_PROCESS_CACHE_DIR: list[str] = []
-_MAX_ATTEMPTS = 8
-_RETRY_BASE_DELAY = 1.0
-_RETRY_MAX_DELAY = 30.0
-
-
-class JudgeError(RuntimeError):
-    """The judge could not grade a response."""
-
-
-def default_judge_cache_dir() -> str:
-    """Judge-reply cache: ``$PIXELRAG_JUDGE_CACHE_DIR``, else a process-local temp dir."""
-    env_dir = os.environ.get("PIXELRAG_JUDGE_CACHE_DIR")
-    if env_dir:
-        return env_dir
-    if not _PROCESS_CACHE_DIR:
-        _PROCESS_CACHE_DIR.append(tempfile.mkdtemp(prefix="pixelrag-judge-cache-"))
-    return _PROCESS_CACHE_DIR[0]
-
-
-def _client() -> Any:
-    if not _ASYNC_CLIENT:
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise JudgeError("OPENAI_API_KEY is required to grade PixelRAG responses.")
-        from openai import AsyncOpenAI
-
-        _ASYNC_CLIENT.append(AsyncOpenAI(api_key=api_key))
-    return _ASYNC_CLIENT[0]
-
-
-def _is_auth_error(exc: Exception) -> bool:
-    status = getattr(exc, "status_code", None)
-    return status in (401, 403) or type(exc).__name__ in (
-        "AuthenticationError",
-        "PermissionDeniedError",
-    )
-
-
-def _cache_key(model: str, prompt: str) -> str:
-    payload = {
-        "model": model,
-        "system": JUDGE_SYSTEM_MESSAGE,
-        "prompt": prompt,
-        "temperature": 0,
-        "max_tokens": JUDGE_MAX_TOKENS,
-        "seed": JUDGE_SEED,
-    }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-
-
-async def judge_reply(prompt: str, *, model: str = JUDGE_MODEL, cache_dir: str) -> str:
-    """The judge's reply to ``prompt``, cached on disk by model and prompt.
-
-    Raises :class:`JudgeError` when every attempt fails, and at once on unusable credentials.
-    """
-    cache_file = Path(cache_dir) / f"{_cache_key(model, prompt)}.json"
-    if cache_file.exists():
-        with open(cache_file, encoding="utf-8") as f:
-            return json.load(f)["reply"]
-
-    client = _client()
-    last_error: Exception | None = None
-    for attempt in range(1, _MAX_ATTEMPTS + 1):
-        try:
-            response = await client.chat.completions.create(
-                model=model,
-                temperature=0,
-                max_tokens=JUDGE_MAX_TOKENS,
-                seed=JUDGE_SEED,
-                messages=[
-                    {"role": "system", "content": JUDGE_SYSTEM_MESSAGE},
-                    {"role": "user", "content": prompt},
-                ],
-            )
-            reply = response.choices[0].message.content
-            if reply is None:
-                raise JudgeError("the judge returned no content")
-            break
-        except Exception as exc:
-            if _is_auth_error(exc):
-                raise JudgeError(f"the judge rejected the credentials: {exc}") from exc
-            last_error = exc
-            logger.warning("PixelRAG judge call failed (attempt %d): %s", attempt, exc)
-            delay = min(_RETRY_MAX_DELAY, _RETRY_BASE_DELAY * 2 ** (attempt - 1))
-            await asyncio.sleep(delay * (0.5 + random.random()))
-    else:
-        raise JudgeError(f"the judge failed {_MAX_ATTEMPTS} times: {last_error}")
-
-    os.makedirs(cache_dir, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(".tmp", dir=cache_dir)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump({"model": model, "prompt": prompt, "reply": reply}, f)
-    os.replace(tmp, cache_file)
-    return reply
-
-
-async def judge_verdict(
-    grader: Grader,
-    *,
-    question: str,
-    ground_truth: str,
-    response: str | None,
-    cache_dir: str,
-    model: str = JUDGE_MODEL,
-) -> tuple[Verdict, str]:
-    """Grade one response as the official grader does: ``(verdict, judge reply)``."""
+def judge_prompt(grader: Grader, *, question: str, ground_truth: str, response: str | None) -> str:
+    """The official judge prompt for one response, its ``<think>`` block removed."""
     answer = strip_think(response)
     if grader == "simpleqa":
-        reply = await judge_reply(
-            simpleqa_prompt(question, ground_truth, answer), model=model, cache_dir=cache_dir
-        )
-        return parse_simpleqa_grade(reply), reply
-    reply = await judge_reply(
-        worldvqa_prompt(question, answer, ground_truth), model=model, cache_dir=cache_dir
-    )
-    return parse_worldvqa_label(reply), reply
+        return simpleqa_prompt(question, ground_truth, answer)
+    return worldvqa_prompt(question, answer, ground_truth)
+
+
+def parse_verdict(grader: Grader, judge_text: str) -> Verdict:
+    """The verdict of a judge reply, as the official grader reads it (never unparsed)."""
+    if grader == "simpleqa":
+        return parse_simpleqa_grade(judge_text)
+    return parse_worldvqa_label(judge_text)
 
 
 @dataclass(frozen=True)
-class PixelRagJudgeScorer(Scorer):
-    """Score channel for the PixelRAG judge: 1.0 when graded correct.
+class PixelRagExactMatchScorer(Scorer):
+    """The official normalized exact match against any of ``metadata["gold_answers"]``."""
 
-    Grading runs task-level, asynchronously, and stores each verdict as the scorer result;
-    this scorer reads it back so the metric plumbing stays uniform.
-    """
-
-    name: str = SCORER_NAME
-
-    def to_dict(self) -> dict[str, Any]:
-        """The output-affecting settings only; the cache location is machine-local."""
-        return {"type": self.__class__.__name__, "name": self.name, "model": JUDGE_MODEL}
+    name: str = EXACT_MATCH_SCORER_NAME
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        result = get_scorer_result(output, self.name) or {}
-        return 1.0 if result.get("verdict") == "correct" else 0.0
+        golds = instance.metadata.get("gold_answers") or []
+        return float(is_exact_match(strip_think(output.text), golds))
