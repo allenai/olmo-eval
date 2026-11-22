@@ -9,6 +9,6 @@ make_suite(
     aggregation=AggregationStrategy.AVERAGE,
     description=(
         "Paloma macro bits per byte: the unweighted mean over Paloma's 16 sources of each "
-        "source's byte-weighted bits per byte. Matches Levanter's eval/paloma/macro_bpb."
+        "source's byte-weighted bits per byte."
     ),
 )

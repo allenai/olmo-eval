@@ -1,16 +1,17 @@
 """Paloma perplexity tasks, one per Paloma source.
 
-Paloma (Magnusson et al., 2023, https://huggingface.co/datasets/allenai/paloma)
-is 16 held-out corpora. Each task here scores one source's text and reports its
+Paloma (Magnusson et al., 2023, https://arxiv.org/abs/2312.10523,
+https://huggingface.co/datasets/allenai/paloma) is AI2's benchmark of 16
+held-out corpora. Each task here scores one source's val text and reports its
 byte-weighted bits per byte, which unlike loss per token does not depend on the
 tokenizer. The ``paloma`` suite averages that over the 16 sources with equal
-weight, the macro bits per byte that Levanter logs as ``eval/paloma/macro_bpb``.
+weight, so no one source dominates.
 
-Long documents are split into chunks of at most ``MAX_CHUNK_CHARS`` characters,
-broken at whitespace, and each chunk is scored from a BOS token. This plays the
-role of Levanter packing eval text into fixed-length windows: every token is
-scored and none is dropped to fit the context. The chunks join back to the
-original text exactly, so bytes are counted once.
+Following Paloma's inference format, documents are scored individually rather
+than packed together, and long documents are split into disjoint inputs: chunks
+of at most ``MAX_CHUNK_CHARS`` characters, broken at whitespace, each scored
+from a BOS token. Every token is scored and none is dropped to fit the context.
+The chunks join back to the original text exactly, so bytes are counted once.
 """
 
 import sys
