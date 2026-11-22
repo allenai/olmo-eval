@@ -229,8 +229,9 @@ def require_rolling_support(provider: InferenceProvider) -> None:
     """
     if getattr(provider, "supports_rolling_logprobs", False):
         return
+    name = type(getattr(provider, "base_provider", provider)).__name__
     raise ValueError(
-        f"{type(provider).__name__} does not score rolling requests, which this task "
+        f"{name} does not score rolling requests, which this task "
         "uses to score texts longer than the context in full. Run it with "
         "provider.kind=vllm."
     )

@@ -113,10 +113,13 @@ def rolling_token_windows(
     every token of ``tokens`` exactly once.
 
     The first input is ``prefix`` followed by as many tokens as fit. Each later
-    input starts with the last token the previous one scored, as context only,
-    followed by the next ``max_len - 1`` tokens. Inputs share no scored tokens,
-    so their summed logprobs are the logprob of the whole text, the way
-    lm-eval-harness's ``loglikelihood_rolling`` scores with a context length of 1.
+    input scores the next ``max_len - 1`` tokens, conditioned on the one before
+    them. The last input is extended back to ``max_len`` tokens of context where
+    the text allows, and scores only the tokens no earlier input scored. Inputs
+    overlap only in context, never in scored tokens, so their summed logprobs are
+    the logprob of the whole text. This is lm-eval-harness's rolling windows
+    (``get_rolling_token_windows`` with a context length of 1, then
+    ``make_disjoint_window``).
 
     Args:
         prefix: Context tokens before the text, usually just BOS. Not scored.
@@ -132,12 +135,18 @@ def rolling_token_windows(
         )
     if max_len <= len(prefix):
         raise ValueError(f"max_len {max_len} leaves no room after a {len(prefix)}-token prefix")
-    if max_len < 2:
-        raise ValueError(f"max_len must be at least 2, got {max_len}")
+    sequence = prefix + tokens
     first = max_len - len(prefix)
-    windows = [(prefix + tokens[:first], len(prefix))]
-    start = first
+    windows = [(sequence[:max_len], len(prefix))]
+    start = first  # index into ``tokens`` of the first token not yet scored
     while start < len(tokens):
-        windows.append((tokens[start - 1 : start + max_len - 1], 1))
-        start += max_len - 1
+        end = min(start + max_len - 1, len(tokens))
+        # Positions in ``sequence`` are offset by the prefix; take up to max_len
+        # tokens ending at the last one scored, so a short last window keeps a
+        # full context instead of one token.
+        seq_end = len(prefix) + end
+        seq_start = max(0, seq_end - max_len)
+        window = sequence[seq_start:seq_end]
+        windows.append((window, len(window) - (end - start)))
+        start = end
     return windows

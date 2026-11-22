@@ -71,3 +71,52 @@ def test_a_rolling_request_must_score_one_text_from_an_empty_prompt(kwargs, mess
     fields = {"request_type": RequestType.LOGLIKELIHOOD, "continuations": ("text",)}
     with pytest.raises(ValueError, match=message):
         LMRequest(**{**fields, **kwargs}, rolling=True)
+
+
+def test_the_refusal_names_the_provider_behind_the_metrics_wrapper() -> None:
+    from olmo_eval.inference.metrics.core.collector import InstrumentedProvider
+
+    harness = harness_with(InstrumentedProvider(NonRollingProvider("stub")))
+    with pytest.raises(ValueError, match="^NonRollingProvider does not score rolling"):
+        harness.logprobs([rolling_request()])
+
+
+def test_the_metrics_wrapper_passes_rolling_support_through() -> None:
+    from olmo_eval.inference.metrics.core.collector import InstrumentedProvider
+
+    [[output]] = harness_with(InstrumentedProvider(MockProvider("mock"))).logprobs(
+        [rolling_request("text")]
+    )
+    assert output.text == "text"
+
+
+def test_saved_request_rows_record_rolling_only_when_set() -> None:
+    from olmo_eval.common.types import Instance, Response
+    from olmo_eval.runners.io.builders import build_requests_from_responses
+
+    def row(request: LMRequest) -> dict:
+        response = Response(
+            instance=Instance(question="", metadata={"id": 0}),
+            request=request,
+            outputs=[LMOutput(text="t")],
+        )
+        return build_requests_from_responses([response], "task")[0]["request"]
+
+    plain = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=("t",))
+    assert row(rolling_request("t"))["rolling"] is True
+    assert "rolling" not in row(plain)
+
+
+def test_the_resume_hash_tells_rolling_from_ordinary_requests() -> None:
+    from olmo_eval.common.types import Instance
+    from olmo_eval.runners.asynq.progress import request_hash
+    from olmo_eval.runners.asynq.types import QueueItem
+
+    def item(request: LMRequest) -> QueueItem:
+        instance = Instance(question="", gold_answer="t", metadata={"id": 0})
+        return QueueItem(
+            model_name="m", task_id="t", instance_idx=0, instance=instance, request=request
+        )
+
+    plain = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=("t",))
+    assert request_hash(item(rolling_request("t"))) != request_hash(item(plain))

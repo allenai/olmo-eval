@@ -274,9 +274,9 @@ class LMRequest:
     #: Text the provider may shorten to fit the prompt; see ``ContextFit``.
     context_fit: ContextFit | None = None
     #: Score the single continuation as a whole text from an empty prompt, in
-    #: disjoint inputs of at most the model's context, so a text longer than the
-    #: context is scored in full instead of being truncated. Needs a provider
-    #: with ``supports_rolling_logprobs``.
+    #: inputs of at most the model's context that each score different tokens,
+    #: so a text longer than the context is scored in full instead of being
+    #: truncated. Needs a provider with ``supports_rolling_logprobs``.
     rolling: bool = False
 
     def __post_init__(self) -> None:
