@@ -436,3 +436,97 @@ def test_text_that_is_not_in_the_prompt_is_refused() -> None:
 
     with pytest.raises(ValueError, match="exactly once"):
         provider.generate([request], SamplingParams(max_tokens=1))
+
+
+class ScoringTokenizer(FakeTokenizer):
+    """One token per character (its code point), with BOS 1."""
+
+    bos_token_id = 1
+    eos_token_id = 2
+
+
+class ScoringLLM(FakeLLM):
+    """Gives every input token after the first a logprob of -token_id / 1000."""
+
+    def generate(self, prompts, sampling_params, use_tqdm=False):  # noqa: ANN001, ANN201
+        self.generate_calls.append({"prompts": prompts})
+        outputs = []
+        for prompt in prompts:
+            ids = prompt["prompt_token_ids"]
+            prompt_logprobs = [None] + [
+                {tid: SimpleNamespace(logprob=-tid / 1000, decoded_token=chr(tid))}
+                for tid in ids[1:]
+            ]
+            outputs.append(SimpleNamespace(prompt_logprobs=prompt_logprobs))
+        return outputs
+
+
+def _scoring_provider(monkeypatch, max_length: int) -> tuple[VLLMProvider, ScoringLLM]:  # noqa: ANN001
+    fake_vllm = FakeVllmModule("vllm")
+    fake_vllm.SamplingParams = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+    llm = ScoringLLM(ScoringTokenizer())
+    provider = VLLMProvider.__new__(VLLMProvider)
+    provider.model_name = "test-model"
+    provider.llm = llm
+    provider._add_bos_token = None
+    provider._max_length = max_length
+    return provider, llm
+
+
+TEXT = "the quick brown fox jumps over the lazy dog"
+
+
+def test_a_rolling_request_scores_a_text_longer_than_the_context_in_full(monkeypatch) -> None:  # noqa: ANN001
+    provider, llm = _scoring_provider(monkeypatch, max_length=9)
+    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True)
+
+    [[output]] = provider.logprobs([request])
+
+    inputs = llm.generate_calls[0]["prompts"]
+    assert len(inputs) > 1
+    assert all(len(p["prompt_token_ids"]) <= 8 for p in inputs)  # max_length - 1
+    assert [entry["token_id"] for entry in output.logprobs] == [ord(c) for c in TEXT]
+    assert output.metadata["sum_logits"] == pytest.approx(-sum(ord(c) for c in TEXT) / 1000)
+    assert output.metadata["num_tokens"] == len(TEXT)
+    assert output.metadata["num_windows"] == len(inputs)
+    assert output.metadata["prompt_truncated_tokens"] == 0
+    assert output.text == TEXT
+
+
+def test_a_rolling_request_that_fits_is_scored_like_an_ordinary_one(monkeypatch) -> None:  # noqa: ANN001
+    provider, _ = _scoring_provider(monkeypatch, max_length=100)
+    rolling = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True)
+    plain = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,))
+
+    [[rolled]], [[scored]] = provider.logprobs([rolling]), provider.logprobs([plain])
+
+    assert rolled.logprobs == scored.logprobs
+    assert rolled.metadata["num_windows"] == 1
+    assert "num_windows" not in scored.metadata
+
+
+def test_an_ordinary_request_is_still_left_truncated(monkeypatch) -> None:  # noqa: ANN001
+    provider, _ = _scoring_provider(monkeypatch, max_length=9)
+    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,))
+
+    [[output]] = provider.logprobs([request])
+
+    assert output.metadata["prompt_truncated_tokens"] == len(TEXT) + 1 - 8
+    assert [entry["token_id"] for entry in output.logprobs] == [ord(c) for c in TEXT[-7:]]
+
+
+def test_rolling_and_ordinary_requests_share_a_batch(monkeypatch) -> None:  # noqa: ANN001
+    provider, _ = _scoring_provider(monkeypatch, max_length=9)
+    requests = [
+        LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True),
+        LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=("ab", "abc")),
+        LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT[:5],), rolling=True),
+    ]
+
+    outputs = provider.logprobs(requests)
+
+    assert [len(o) for o in outputs] == [1, 2, 1]
+    assert outputs[0][0].metadata["num_tokens"] == len(TEXT)
+    assert [o.metadata["num_tokens"] for o in outputs[1]] == [2, 3]
+    assert outputs[2][0].metadata["num_tokens"] == 5
