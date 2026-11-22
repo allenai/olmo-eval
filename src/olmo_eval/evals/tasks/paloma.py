@@ -8,10 +8,11 @@ tokenizer. The ``paloma`` suite averages that over the 16 sources with equal
 weight, so no one source dominates.
 
 Following Paloma's inference format, documents are scored individually rather
-than packed together, and long documents are split into disjoint inputs: chunks
-of at most ``MAX_CHUNK_BYTES`` UTF-8 bytes, broken at whitespace, each scored
-from a BOS token. Every token is scored and none is dropped to fit the context.
-The chunks join back to the original text exactly, so bytes are counted once.
+than packed together, and a document longer than the model's context is split
+into disjoint inputs of the context's length. Each document is one rolling
+request: the provider scores it from a BOS token in windows of its context, so
+every token is scored once and none is dropped, and the window follows each
+model's context length.
 """
 
 import sys
@@ -46,12 +47,6 @@ PALOMA_SUBSETS: tuple[str, ...] = (
     "wikitext_103",
 )
 
-#: Longest chunk scored as one request, in UTF-8 bytes. A byte-level tokenizer
-#: spends at least one byte per token, so a chunk is at most 8000 tokens and
-#: fits an 8192-token context with its BOS. A character limit would not: emoji
-#: and CJK text run to several tokens per character.
-MAX_CHUNK_BYTES = 8000
-
 #: Paloma names its splits ``val`` and ``test``.
 _PALOMA_SPLITS = {Split.VALIDATION: "val", Split.TEST: "test"}
 
@@ -66,41 +61,8 @@ _SPLIT_FILES: dict[tuple[str, str], tuple[str, ...]] = {
 }
 
 
-def split_text(text: str, max_bytes: int = MAX_CHUNK_BYTES) -> list[str]:
-    """Split ``text`` into chunks of at most ``max_bytes`` UTF-8 bytes.
-
-    Each cut falls just after the last newline in the window, else the last
-    space or tab, provided that leaves the chunk at least half full; otherwise
-    the window is cut at the last character boundary within ``max_bytes``. The
-    whitespace stays at the end of the earlier chunk, and
-    ``"".join(split_text(text)) == text``.
-    """
-    if max_bytes < 4:
-        raise ValueError(f"max_bytes must be at least 4 to fit any character, got {max_bytes}")
-    data = text.encode("utf-8")
-    chunks: list[str] = []
-    start = 0
-    while len(data) - start > max_bytes:
-        window = data[start : start + max_bytes]
-        cut = window.rfind(b"\n")
-        if cut < max_bytes // 2:
-            cut = max(window.rfind(b" "), window.rfind(b"\t"))
-        if cut >= max_bytes // 2:
-            end = start + cut + 1
-        else:
-            end = start + max_bytes
-            # Back off continuation bytes (0b10xxxxxx) so no character is split.
-            while data[end] & 0xC0 == 0x80:
-                end -= 1
-        chunks.append(data[start:end].decode("utf-8"))
-        start = end
-    if start < len(data):
-        chunks.append(data[start:].decode("utf-8"))
-    return chunks
-
-
 class PalomaBase(Task):
-    """One Paloma source, scored as raw text in whitespace-bounded chunks."""
+    """One Paloma source, each document scored as raw text in full."""
 
     split = Split.VALIDATION
     metrics = (BPBMetricByteAvg(),)
@@ -114,49 +76,38 @@ class PalomaBase(Task):
 
     @property
     def instances(self) -> Iterator[Instance]:
-        """Yield one instance per chunk of every document in the split."""
+        """Yield one instance per document in the split."""
         if self._instances_cache is None:
             source = _split_source(self.config.data_source, self.config.split)
-            self._instances_cache = []
-            for doc_index, doc in enumerate(DataLoader().load(source)):
-                chunks = split_text(doc["text"])
-                for chunk_index, chunk in enumerate(chunks):
-                    self._instances_cache.append(
-                        self.process_chunk(
-                            chunk,
-                            index=len(self._instances_cache),
-                            doc_id=doc.get("id", doc_index),
-                            chunk_index=chunk_index,
-                            num_chunks=len(chunks),
-                        )
-                    )
+            self._instances_cache = [
+                self.process_doc(doc, index) for index, doc in enumerate(DataLoader().load(source))
+            ]
         yield from self._instances_cache
 
-    def process_chunk(
-        self, text: str, *, index: int, doc_id: Any, chunk_index: int, num_chunks: int
-    ) -> Instance:
-        """Convert one chunk of a document to an Instance scored as a continuation."""
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        """Convert one document to an Instance scored as a whole text."""
+        text = doc["text"]
         return Instance(
             question="",
             gold_answer=text,
             metadata={
                 "id": index,
-                "doc_id": doc_id,
-                "chunk_index": chunk_index,
-                "num_chunks": num_chunks,
+                "doc_id": doc.get("id", index),
                 "num_bytes": len(text.encode("utf-8")),
             },
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
-        """Score the chunk as the continuation of an empty (BOS-only) prompt."""
+        """Score the document from BOS in windows of the model's context."""
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, self.get_fewshot())
         gold = instance.gold_answer
+        if gold is None:
+            raise ValueError(f"Paloma instance {instance.metadata.get('id')} has no text")
         return LMRequest(
             request_type=self.request_type,
-            prompt=instance.question,
-            continuations=(gold,) if gold is not None else None,
+            continuations=(gold,),
+            rolling=True,
         )
 
 
