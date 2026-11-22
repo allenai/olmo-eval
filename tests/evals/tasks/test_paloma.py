@@ -115,6 +115,12 @@ class TestInstances:
         assert loaded[0].data_files == "ptb/test/*"
         assert loaded[0].revision == paloma.PALOMA_REVISION
 
+    def test_dolma_test_split_skips_its_empty_file(self, loaded):
+        list(get_task("paloma_dolma-v1_5", {"split": Split.TEST}).instances)
+        files = loaded[0].data_files
+        assert isinstance(files, tuple) and len(files) == 5
+        assert "dolma-v1_5/test/test_books.jsonl.gz" not in files
+
     def test_split_paloma_lacks_is_rejected(self, loaded):
         with pytest.raises(ValueError, match="no train split"):
             list(get_task("paloma_ptb", {"split": Split.TRAIN}).instances)

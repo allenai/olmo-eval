@@ -55,6 +55,16 @@ MAX_CHUNK_BYTES = 8000
 #: Paloma names its splits ``val`` and ``test``.
 _PALOMA_SPLITS = {Split.VALIDATION: "val", Split.TEST: "test"}
 
+#: Files the datasets library cannot load because they hold no documents. At the
+#: pinned revision dolma-v1_5's test split has an empty books file (42 bytes of
+#: gzip), so that split names its other five files instead of a glob.
+_SPLIT_FILES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("dolma-v1_5", "test"): tuple(
+        f"dolma-v1_5/test/test_{name}.jsonl.gz"
+        for name in ("common-crawl", "pes2o", "reddit_uniform", "stack_uniform", "wiki")
+    ),
+}
+
 
 def split_text(text: str, max_bytes: int = MAX_CHUNK_BYTES) -> list[str]:
     """Split ``text`` into chunks of at most ``max_bytes`` UTF-8 bytes.
@@ -153,19 +163,23 @@ class PalomaBase(Task):
 def _split_source(data_source: Any, split: Split) -> DataSource:
     """The files of one Paloma split, loaded on their own.
 
-    ``load_dataset`` on a Paloma config builds every split, and the dolma-v1_5
-    test split fails to build. Naming the split's files loads just those; the
+    ``load_dataset`` on a Paloma config builds every split, so one unloadable
+    file breaks them all. Naming the split's files loads just those; the
     datasets library files them under ``train``.
     """
     if split not in _PALOMA_SPLITS:
         raise ValueError(f"Paloma has no {split} split; use validation or test")
     if not isinstance(data_source, DataSource) or data_source.subset is None:
         raise ValueError(f"Paloma tasks need a DataSource naming the subset, got {data_source!r}")
+    paloma_split = _PALOMA_SPLITS[split]
+    data_files = _SPLIT_FILES.get(
+        (data_source.subset, paloma_split), f"{data_source.subset}/{paloma_split}/*"
+    )
     return DataSource(
         path=data_source.path,
         subset=data_source.subset,
         split="train",
-        data_files=f"{data_source.subset}/{_PALOMA_SPLITS[split]}/*",
+        data_files=data_files,
         revision=data_source.revision,
     )
 
