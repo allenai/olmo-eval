@@ -1,18 +1,21 @@
 """Paloma perplexity tasks, one per Paloma source.
 
 Paloma (Magnusson et al., 2023, https://arxiv.org/abs/2312.10523,
-https://huggingface.co/datasets/allenai/paloma) is AI2's benchmark of 16
-held-out corpora. Each task here scores one source's val text and reports its
+https://huggingface.co/datasets/allenai/paloma) is AI2's benchmark of held-out
+corpora. Each task here scores one Paloma source's val text and reports its
 byte-weighted bits per byte, which unlike loss per token does not depend on the
-tokenizer. The ``paloma`` suite averages that over the 16 sources with equal
+tokenizer. The ``paloma`` suite averages that over the sources with equal
 weight, so no one source dominates.
 
 Following Paloma's inference format, documents are scored individually rather
-than packed together, and a document longer than the model's context is split
-into disjoint inputs of the context's length. Each document is one rolling
-request: the provider scores it from a BOS token in windows of its context, so
-every token is scored once and none is dropped, and the window follows each
-model's context length.
+than packed together, and a document longer than the context is split into
+inputs of the context's length. Each document is one rolling request: the
+provider scores it from a BOS token in windows of its context (or of the task's
+``max_length``), so every token is scored once and none is dropped.
+
+Each source is byte-weighted over all of its documents. The paper's per-source
+view instead averages over a source's domains; documents keep their
+``subdomain`` so that view can be computed from the predictions.
 """
 
 import sys
@@ -27,7 +30,7 @@ from olmo_eval.evals.tasks.common import Task, register
 PALOMA_PATH = "allenai/paloma"
 PALOMA_REVISION = "65cd6fc59dba021b21db414fa5e8d7765ffbe5e6"
 
-#: Paloma's 16 sources, as named by the dataset's configs.
+#: Paloma's sources, as named by the dataset's configs.
 PALOMA_SUBSETS: tuple[str, ...] = (
     "4chan_meta_sep",
     "c4_100_domains",
@@ -70,8 +73,6 @@ class PalomaBase(Task):
 
     @property
     def request_type(self) -> RequestType:
-        if self.config.formatter is not None:
-            return self.config.formatter.request_type
         return RequestType.LOGLIKELIHOOD
 
     @property
@@ -93,20 +94,26 @@ class PalomaBase(Task):
             metadata={
                 "id": index,
                 "doc_id": doc.get("id", index),
+                "subdomain": doc.get("subdomain"),
                 "num_bytes": len(text.encode("utf-8")),
             },
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
-        """Score the document from BOS in windows of the model's context."""
+        """Score the document from BOS in windows of the context or ``max_length``."""
         if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
+            # A formatter builds its own request, which would not roll: a long document
+            # would be truncated while all its bytes still count.
+            raise ValueError("Paloma tasks score raw text and do not take a formatter")
+        if self.config.num_fewshot:
+            raise ValueError("Paloma tasks score raw text and do not take few-shot examples")
         gold = instance.gold_answer
         if gold is None:
             raise ValueError(f"Paloma instance {instance.metadata.get('id')} has no text")
         return LMRequest(
             request_type=self.request_type,
             continuations=(gold,),
+            max_length=self.config.max_length,
             rolling=True,
         )
 
@@ -143,9 +150,10 @@ def _register_paloma_tasks() -> None:
             class_name,
             (PalomaBase,),
             {
-                "data_source": _split_source(
-                    DataSource(path=PALOMA_PATH, subset=subset, revision=PALOMA_REVISION),
-                    Split.VALIDATION,
+                # The split's files are chosen at load time, so the stored config
+                # does not claim the val files for a test-split run.
+                "data_source": DataSource(
+                    path=PALOMA_PATH, subset=subset, revision=PALOMA_REVISION
                 ),
                 "__module__": __name__,
                 "__qualname__": class_name,

@@ -15,13 +15,13 @@ class TestRegistration:
         assert registered == {f"paloma_{subset}" for subset in paloma.PALOMA_SUBSETS}
         assert len(paloma.PALOMA_SUBSETS) == 16
 
-    def test_tasks_read_the_pinned_validation_files(self):
+    def test_tasks_pin_the_dataset_and_choose_files_by_split(self):
         source = get_task("paloma_c4_en").config.data_source
         assert source.path == "allenai/paloma"
         assert source.subset == "c4_en"
         assert source.revision == paloma.PALOMA_REVISION
-        assert source.data_files == "c4_en/val/*"
-        assert source.split == "train"
+        # The split's files are chosen at load time, not stored in the config.
+        assert source.data_files is None
 
     def test_only_metric_is_byte_weighted_bpb(self):
         config = get_task("paloma_gab").config
@@ -35,7 +35,7 @@ class TestInstances:
     def loaded(self, monkeypatch):
         sources = []
         docs = [
-            {"id": "doc-a", "text": "short document"},
+            {"id": "doc-a", "text": "short document", "subdomain": "nyt"},
             {"id": "doc-b", "text": "y" * 100_000},
         ]
 
@@ -52,6 +52,12 @@ class TestInstances:
         assert [i.metadata["id"] for i in instances] == [0, 1]
         assert [i.metadata["doc_id"] for i in instances] == ["doc-a", "doc-b"]
         assert instances[1].metadata["num_bytes"] == 100_000
+        assert [i.metadata["subdomain"] for i in instances] == ["nyt", None]
+
+    def test_val_split_reads_the_val_files(self, loaded):
+        list(get_task("paloma_ptb").instances)
+        assert loaded[0].data_files == "ptb/val/*"
+        assert loaded[0].split == "train"
 
     def test_requests_roll_over_the_whole_document_from_an_empty_prompt(self, loaded):
         task = get_task("paloma_ptb")
@@ -59,6 +65,17 @@ class TestInstances:
         assert all(r.request_type == RequestType.LOGLIKELIHOOD for r in requests)
         assert all(r.rolling and r.prompt == "" for r in requests)
         assert requests[1].continuations == ("y" * 100_000,)
+        assert all(r.max_length is None for r in requests)
+
+    def test_max_length_sets_the_window(self, loaded):
+        task = get_task("paloma_ptb", {"max_length": 2048})
+        assert task.format_request(next(iter(task.instances))).max_length == 2048
+
+    @pytest.mark.parametrize("override", [{"num_fewshot": 2}])
+    def test_settings_that_do_not_apply_are_refused(self, loaded, override):
+        task = get_task("paloma_ptb", override)
+        with pytest.raises(ValueError, match="raw text"):
+            task.format_request(next(iter(task.instances)))
 
     def test_test_split_reads_the_test_files(self, loaded):
         list(get_task("paloma_ptb", {"split": Split.TEST}).instances)
@@ -76,7 +93,28 @@ class TestInstances:
             list(get_task("paloma_ptb", {"split": Split.TRAIN}).instances)
 
 
-def test_suite_averages_the_sixteen_sources_equally():
+def test_bits_per_byte_divides_the_rolled_logprob_by_every_byte(monkeypatch):
+    import math
+
+    from olmo_eval.common.types import LMOutput, Response
+
+    docs = [{"id": "a", "text": "héllo"}, {"id": "b", "text": "y" * 40}]
+    monkeypatch.setattr(paloma.DataLoader, "load", lambda _loader, _source: iter(docs))
+    task = get_task("paloma_ptb")
+    responses = []
+    for instance, logprob in zip(task.instances, (-3.0, -11.0), strict=True):
+        request = task.format_request(instance)
+        output = LMOutput(
+            text=request.continuations[0],
+            logprobs=[{"token": "t", "logprob": logprob}],
+        )
+        responses.append(Response(instance=instance, request=request, outputs=[output]))
+
+    bpb = task.config.get_primary_metric().compute(responses)
+    assert bpb == pytest.approx(14.0 / ((6 + 40) * math.log(2)))
+
+
+def test_suite_averages_the_sources_equally():
     suite = get_suite("paloma")
     assert suite.aggregation == AggregationStrategy.AVERAGE
     assert suite.expand() == tuple(f"paloma_{subset}" for subset in paloma.PALOMA_SUBSETS)
