@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -66,20 +67,32 @@ def chat_with_images(
     return chat
 
 
-def template_has_system_role(chat_template: str | None) -> bool:
-    """Whether a chat template renders system turns (it at least mentions the role)."""
-    return chat_template is None or "system" in chat_template
-
-
 def drop_system_turns(chat: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The conversation without its system turns, for chat templates with no system role.
-
-    Such templates reject a system turn, and the model was never trained on system text,
-    so moving it into the user turn puts unfamiliar text in front of the question. The rest
-    of the conversation is sent unchanged; a warning is logged once.
-    """
+    """The conversation without its system turns; a warning is logged once."""
     kept = [m for m in chat if m["role"] != "system"]
     if len(kept) != len(chat) and not _DROPPED_SYSTEM_WARNED:
         _DROPPED_SYSTEM_WARNED.append(True)
-        logger.warning("The chat template has no system role; dropping the system turn.")
+        logger.warning(
+            "The chat template rejected the system turn; sending the request without it."
+        )
     return kept
+
+
+def render_chat[T](
+    apply_template: Callable[[list[dict[str, Any]]], T], chat: list[dict[str, Any]]
+) -> T:
+    """Render ``chat`` with ``apply_template``, keeping its system turn when the template can.
+
+    A chat template that rejects a system turn (Molmo2's raises: its roles must alternate
+    from a user turn) gets the conversation without it. Moving the system text into the
+    user turn instead would put text the model never trained on in front of the question.
+    Templates that accept a system turn render it as before.
+    """
+    from jinja2.exceptions import TemplateError
+
+    try:
+        return apply_template(chat)
+    except TemplateError:
+        if not any(m["role"] == "system" for m in chat):
+            raise
+        return apply_template(drop_system_turns(chat))
