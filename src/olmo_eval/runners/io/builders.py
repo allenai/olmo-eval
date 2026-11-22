@@ -359,6 +359,8 @@ def build_requests_from_responses(
             request_dict["system_prompt"] = request.system_prompt
         if request.max_length is not None:
             request_dict["max_length"] = request.max_length
+        if request.rolling:
+            request_dict["rolling"] = True
         if request.tools:
             request_dict["tools"] = [tool.to_openai() for tool in request.tools]
 

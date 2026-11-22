@@ -5,11 +5,14 @@ These tests use mock tokenizers and don't require GPU.
 
 from __future__ import annotations
 
+import pytest
+
 from olmo_eval.inference.tokenizer_utils import (
     encode_context_and_continuation,
     get_bos_token_ids,
     get_context_token_ids,
     has_bos_token,
+    rolling_token_windows,
 )
 
 
@@ -174,3 +177,37 @@ class TestEdgeCases:
         # Our mock uses ord() which handles unicode
         assert ctx == [ord("c"), ord("a"), ord("f"), ord("é")]
         assert cont == [ord("r"), ord("é"), ord("s"), ord("u"), ord("m"), ord("é")]
+
+
+class TestRollingTokenWindows:
+    def _scored(self, windows: list[tuple[list[int], int]]) -> list[int]:
+        return [token for input_ids, ctxlen in windows for token in input_ids[ctxlen:]]
+
+    def test_short_text_is_one_input_after_the_prefix(self):
+        assert rolling_token_windows([0], [1, 2, 3], max_len=8) == [([0, 1, 2, 3], 1)]
+
+    def test_every_token_is_scored_exactly_once(self):
+        tokens = list(range(1, 24))
+        windows = rolling_token_windows([0], tokens, max_len=5)
+        assert self._scored(windows) == tokens
+        assert all(len(input_ids) <= 5 for input_ids, _ in windows)
+
+    def test_later_inputs_start_with_the_last_scored_token(self):
+        windows = rolling_token_windows([0], list(range(1, 11)), max_len=4)
+        assert windows == [
+            ([0, 1, 2, 3], 1),
+            ([3, 4, 5, 6], 1),
+            ([6, 7, 8, 9], 1),
+            ([9, 10], 1),
+        ]
+
+    def test_text_that_exactly_fills_the_first_input_needs_no_second(self):
+        assert len(rolling_token_windows([0], [1, 2, 3], max_len=4)) == 1
+
+    def test_needs_a_prefix_to_score_the_first_token(self):
+        with pytest.raises(ValueError, match="needs a prefix"):
+            rolling_token_windows([], [1, 2], max_len=4)
+
+    def test_needs_room_after_the_prefix(self):
+        with pytest.raises(ValueError, match="leaves no room"):
+            rolling_token_windows([0, 1], [2], max_len=2)

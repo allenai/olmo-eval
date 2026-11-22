@@ -7,6 +7,9 @@ from olmo_eval.inference.base import InferenceProvider
 class MockProvider(InferenceProvider):
     """Mock provider that returns fixed responses for testing."""
 
+    #: Mock scoring has no context limit, so a rolling request needs no windows.
+    supports_rolling_logprobs = True
+
     #: The mock accepts anything, so vision suites stay dry-runnable.
     supports_images = True
     #: Likewise for tool-calling tasks, though the fixed reply never calls one.

@@ -61,6 +61,7 @@ class TestApplyHarnessConfig:
             "images",
             "metadata",
             "context_fit",
+            "rolling",
         }
         request = LMRequest(
             request_type=RequestType.CHAT,

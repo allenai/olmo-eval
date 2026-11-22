@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
-from olmo_eval.inference.base import require_tool_support
+from olmo_eval.inference.base import require_rolling_support, require_tool_support
 
 from .config import HarnessConfig
 from .result import HarnessResult
@@ -357,6 +357,8 @@ class Harness:
         # directly depends on the provider honouring its tool schemas.
         if request.tools and not self.config.scaffold:
             require_tool_support(self.provider)
+        if request.rolling:
+            require_rolling_support(self.provider)
         return apply_harness_config(self.config, request)
 
 
@@ -389,6 +391,7 @@ def apply_harness_config(config: HarnessConfig, request: LMRequest) -> LMRequest
         images=request.images,
         metadata=request.metadata,
         context_fit=request.context_fit,
+        rolling=request.rolling,
     )
 
 

@@ -104,3 +104,40 @@ def encode_context_and_continuation(
     continuation_enc = whole_enc[len(context_enc) :]
 
     return bos_ids + context_enc, continuation_enc
+
+
+def rolling_token_windows(
+    prefix: list[int], tokens: list[int], max_len: int
+) -> list[tuple[list[int], int]]:
+    """Cut ``prefix + tokens`` into inputs of at most ``max_len`` tokens that score
+    every token of ``tokens`` exactly once.
+
+    The first input is ``prefix`` followed by as many tokens as fit. Each later
+    input starts with the last token the previous one scored, as context only,
+    followed by the next ``max_len - 1`` tokens. Inputs share no scored tokens,
+    so their summed logprobs are the logprob of the whole text, the way
+    lm-eval-harness's ``loglikelihood_rolling`` scores with a context length of 1.
+
+    Args:
+        prefix: Context tokens before the text, usually just BOS. Not scored.
+        tokens: Tokens of the text to score.
+        max_len: Most tokens one input may hold.
+
+    Returns:
+        ``(input_ids, ctxlen)`` pairs; ``input_ids[ctxlen:]`` are the tokens scored.
+    """
+    if not prefix:
+        raise ValueError(
+            "rolling_token_windows needs a prefix token (BOS) to score the first token"
+        )
+    if max_len <= len(prefix):
+        raise ValueError(f"max_len {max_len} leaves no room after a {len(prefix)}-token prefix")
+    if max_len < 2:
+        raise ValueError(f"max_len must be at least 2, got {max_len}")
+    first = max_len - len(prefix)
+    windows = [(prefix + tokens[:first], len(prefix))]
+    start = first
+    while start < len(tokens):
+        windows.append((tokens[start - 1 : start + max_len - 1], 1))
+        start += max_len - 1
+    return windows

@@ -273,6 +273,21 @@ class LMRequest:
     metadata: dict[str, Any] | None = None
     #: Text the provider may shorten to fit the prompt; see ``ContextFit``.
     context_fit: ContextFit | None = None
+    #: Score the single continuation as a whole text from an empty prompt, in
+    #: disjoint inputs of at most the model's context, so a text longer than the
+    #: context is scored in full instead of being truncated. Needs a provider
+    #: with ``supports_rolling_logprobs``.
+    rolling: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.rolling:
+            return
+        if self.request_type != RequestType.LOGLIKELIHOOD:
+            raise ValueError(f"rolling applies to loglikelihood requests, not {self.request_type}")
+        if self.prompt or self.continuation_prompts:
+            raise ValueError("a rolling request scores its continuation from an empty prompt")
+        if self.continuations is None or len(self.continuations) != 1:
+            raise ValueError("a rolling request scores exactly one continuation")
 
 
 @hide_unset()
