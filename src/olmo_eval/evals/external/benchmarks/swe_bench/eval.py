@@ -42,6 +42,7 @@ from .task import IMAGE_SOURCES, SWEBenchInstance
 
 if TYPE_CHECKING:
     from olmo_eval.harness.sandbox import SandboxManager
+    from olmo_eval.harness.scaffolds.vanillux import RunProgress
     from olmo_eval.inference.base import InferenceProvider
 
 logger = logging.getLogger(__name__)
@@ -601,6 +602,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
     ) -> InstanceResult:
         """Produce a patch for one instance, then grade it in a fresh container."""
         from olmo_eval.harness.sandbox.image import remove_swerex_image
+        from olmo_eval.harness.scaffolds.vanillux import RunProgress
 
         result = InstanceResult(
             instance_id=instance.instance_id,
@@ -615,11 +617,18 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         runtime = cast(ContainerRuntime, container_runtime)
 
         base_image = instance.image_for(swe_args.image_source)
+        # vanillux fills this as it runs, so an instance whose agent run fails or
+        # is cut off still logs every reply the agent got. Logging only.
+        progress = (
+            RunProgress() if not swe_args.oracle and swe_args.scaffold == "vanillux" else None
+        )
         try:
             await self._solve_and_grade(
-                instance, base_image, provider, swe_args, mode, runtime, result
+                instance, base_image, provider, swe_args, mode, runtime, result, progress=progress
             )
         finally:
+            if progress is not None and progress.final is None:
+                result.trajectory = progress.trajectory()
             if swe_args.cleanup_images and mode == SandboxMode.DOCKER:
                 await asyncio.to_thread(remove_swerex_image, base_image, runtime)
         return result
@@ -633,6 +642,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         mode: SandboxMode,
         runtime: ContainerRuntime,
         result: InstanceResult,
+        progress: RunProgress | None = None,
     ) -> None:
         """Run the agent (or take the gold patch) and grade the patch, filling in ``result``."""
         from olmo_eval.harness.sandbox import SandboxManager
@@ -681,7 +691,9 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                     agent_deadline += AGENT_TIMEOUT_GRACE
                 try:
                     await asyncio.wait_for(
-                        self._run_agent(manager, instance, provider, swe_args, result),
+                        self._run_agent(
+                            manager, instance, provider, swe_args, result, progress=progress
+                        ),
                         timeout=agent_deadline,
                     )
                 except TimeoutError:
@@ -744,6 +756,7 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
         provider: InferenceProvider,
         swe_args: SWEBenchArgs,
         result: InstanceResult,
+        progress: RunProgress | None = None,
     ) -> None:
         """Run the agent in the instance container, recording its trajectory on ``result``."""
         from olmo_eval.harness.config import HarnessConfig
@@ -778,6 +791,8 @@ class SWEBenchVerifiedExternalEval(ExternalEval):
                 "max_tool_output_chars": swe_args.max_tool_output_chars,
                 "stop_at_tools": ("submit",) if swe_args.stop_on_submit else None,
             }
+        if progress is not None:
+            run_kwargs["progress"] = progress
 
         harness_config = HarnessConfig(
             name=f"swe_bench_{instance.instance_id}",

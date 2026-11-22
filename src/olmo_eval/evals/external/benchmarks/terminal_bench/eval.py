@@ -32,6 +32,7 @@ from .verifier import SOLUTION_DIR, TerminalBenchVerifier
 
 if TYPE_CHECKING:
     from olmo_eval.harness.sandbox import SandboxManager
+    from olmo_eval.harness.scaffolds.vanillux import RunProgress
     from olmo_eval.inference.base import InferenceProvider
 
 logger = logging.getLogger(__name__)
@@ -439,12 +440,17 @@ class TerminalBenchExternalEval(ExternalEval):
 
     @staticmethod
     def _failed_result(
-        task: TerminalBenchTask, attempt: int, error: str, agent_duration: float
+        task: TerminalBenchTask,
+        attempt: int,
+        error: str,
+        agent_duration: float,
+        progress: RunProgress | None = None,
     ) -> TaskResult:
         return TaskResult(
             task_id=task.task_id,
             reward=0.0,
-            trajectory=AgentTrajectory(turns=()),
+            # What the agent did before the trial failed, where the scaffold kept it.
+            trajectory=progress.trajectory() if progress is not None else AgentTrajectory(turns=()),
             completion_reason="error",
             agent_duration=agent_duration,
             verification_output="",
@@ -531,15 +537,19 @@ class TerminalBenchExternalEval(ExternalEval):
     ) -> TaskResult:
         """Run one trial: start a container, run the agent, verify, and tear down."""
         from olmo_eval.harness.sandbox import SandboxManager
+        from olmo_eval.harness.scaffolds.vanillux import RunProgress
 
         logger.info(f"Executing task: {task.task_id} (attempt {attempt})")
         task_start = time.time()
+        # vanillux fills this as it runs, so a trial that fails or is cut off
+        # still logs every reply the agent got. Logging only.
+        progress = RunProgress() if not tb_args.oracle and tb_args.scaffold == "vanillux" else None
 
         try:
             image = await self._task_image(task, container_runtime, image_lock)
         except Exception as e:
             logger.exception(f"Task {task.task_id} attempt {attempt} image failed")
-            return self._failed_result(task, attempt, str(e), time.time() - task_start)
+            return self._failed_result(task, attempt, str(e), time.time() - task_start, progress)
 
         sandbox_config = self._sandbox_config(task, container_runtime, tb_args, image)
         sandbox_manager = SandboxManager([sandbox_config], owner=f"tb-{task.task_id}-{attempt}")
@@ -561,7 +571,9 @@ class TerminalBenchExternalEval(ExternalEval):
                         agent_steps,
                         agent_error,
                     ) = await asyncio.wait_for(
-                        self._run_agent(sandbox_manager, task, provider, tb_args),
+                        self._run_agent(
+                            sandbox_manager, task, provider, tb_args, progress=progress
+                        ),
                         timeout=task.agent_timeout + AGENT_TIMEOUT_GRACE,
                     )
                 except TimeoutError:
@@ -571,6 +583,8 @@ class TerminalBenchExternalEval(ExternalEval):
                         f"Task {task.task_id} agent cut off after "
                         f"{task.agent_timeout + AGENT_TIMEOUT_GRACE:.0f}s"
                     )
+                    if progress is not None:
+                        trajectory = progress.trajectory()
 
             agent_duration = time.time() - task_start
 
@@ -602,7 +616,7 @@ class TerminalBenchExternalEval(ExternalEval):
 
         except Exception as e:
             logger.exception(f"Task {task.task_id} attempt {attempt} failed")
-            return self._failed_result(task, attempt, str(e), time.time() - task_start)
+            return self._failed_result(task, attempt, str(e), time.time() - task_start, progress)
         finally:
             await sandbox_manager.stop()
 
@@ -645,6 +659,7 @@ class TerminalBenchExternalEval(ExternalEval):
         task: TerminalBenchTask,
         provider: InferenceProvider,
         tb_args: TerminalBenchArgs,
+        progress: RunProgress | None = None,
     ) -> tuple[AgentTrajectory, str, int, str | None]:
         """Run the LLM agent.
 
@@ -684,6 +699,8 @@ class TerminalBenchExternalEval(ExternalEval):
         run_kwargs: dict[str, Any] = {}
         if scaffold_name == "openai_agents":
             run_kwargs["enable_compaction"] = tb_args.enable_compaction
+        if progress is not None:
+            run_kwargs["progress"] = progress
 
         logger.info(
             f"Starting agent: scaffold={scaffold_name} task_id={task.task_id} "
