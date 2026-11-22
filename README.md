@@ -820,8 +820,9 @@ The OCR datasets are downloaded from the Hugging Face Hub at pinned revisions ra
 than read from `$MOLMO_DATA_DIR`.
 
 Safety tasks grade free-form answers with each benchmark's own GPT judge prompts
-and report rates over the examples the judge graded (judge errors are counted
-separately rather than scored). `mm_safety_bench` runs MM-SafetyBench's 1,680
+and report rates over the instances the judge graded; a judge call that fails or
+never parses leaves its instance unscored, which counts against the run's failure
+budget. The raw verdicts are saved with the predictions in `judge_result`. `mm_safety_bench` runs MM-SafetyBench's 1,680
 questions text-only and with SD, typography and SD+typography images, and
 reports attack success rate (`asr/<setting>`, lower is safer, averaged over the
 13 scenarios; `asr/sd_typo` is the headline; `asr_pooled/<setting>` pools over
@@ -874,8 +875,9 @@ Several tasks call the OpenAI API and need `OPENAI_API_KEY` or `OPENROUTER_API_K
 - The safety tasks (all but `siuo_mcqa`) run GPT judges: `gpt-4-0613` for
   MM-SafetyBench, `gpt-4o-mini-2024-07-18` for SIUO (its official
   `gpt-4-vision-preview` is retired) and `gpt-4o-2024-08-06` for USB, the last
-  two shown the image. Override with `-o judge_model=...`; replies are cached
-  under `SAFETY_JUDGE_CACHE_DIR`.
+  two shown the image. They are judged tasks: `-o judge_model=...`,
+  `-o judge_max_tokens=...`, `-o judge_temperature=...` or `OLMO_EVAL_JUDGE`
+  change the judge.
 
 The launcher resolves the key as the user-scoped beaker secret
 `{beaker-username}_OPENAI_API_KEY`, or `{beaker-username}_OPENROUTER_API_KEY` when

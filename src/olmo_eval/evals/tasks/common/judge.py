@@ -41,6 +41,7 @@ from olmo_eval.common.scorers.execution import format_scoring_error
 from olmo_eval.common.scorers.llm_judge import (
     JUDGE_ATTEMPTS,
     Judge,
+    JudgeContent,
     JudgeParseError,
     JudgeSettings,
     LLMJudgeScorer,
@@ -315,7 +316,7 @@ class JudgedTask(Task):
         self,
         output: LMOutput,
         judge: Judge,
-        prompt: str,
+        prompt: JudgeContent,
         parse: Callable[[str], V | None],
         judge_result: dict[str, Any],
         *,
