@@ -368,6 +368,32 @@ async def test_token_usage_is_summed_over_steps() -> None:
 
 
 @pytest.mark.anyio
+async def test_each_reply_logs_its_token_count_and_finish_reason() -> None:
+    cut = LMOutput(
+        text="THOUGHT: cut", metadata={"completion_tokens": 7, "finish_reason": "length"}
+    )
+    submit = LMOutput(
+        text="THOUGHT: done",
+        tool_calls=[ToolCall.create("call-2", "bash", {"command": f"echo {SUBMIT_MARKER}"})],
+        metadata={"completion_tokens": 3, "finish_reason": "tool_calls"},
+    )
+    provider = ScriptedProvider([cut, bash_reply("ls"), submit])
+
+    result, _ = await run(provider)
+
+    timing = result.metadata["timing"]
+    assert [(t["completion_tokens"], t["finish_reason"]) for t in timing] == [
+        (7, "length"),
+        (5, None),
+        (3, "tool_calls"),
+    ]
+    assert timing[0]["format_error"] is True
+    assert (
+        sum(t["completion_tokens"] for t in timing) == result.metadata["usage"]["completion_tokens"]
+    )
+
+
+@pytest.mark.anyio
 async def test_the_config_must_carry_a_session_bash_tool() -> None:
     provider = ScriptedProvider([])
     config = make_config(tools=get_tools(("execute_bash_session",)))
