@@ -309,13 +309,19 @@ class VanilluxScaffold(Scaffold):
                 steps += 1
                 last_text = output.text or ""
                 self._accumulate_usage(output, usage)
+                reply = self._reply_record(output)
                 action = parse_action(output)
 
                 if action.kind == "no_tool_call":
                     format_errors += 1
                     self._record_format_error(messages, turns, output, action)
                     timing.append(
-                        {"step": steps, "llm_s": round(llm_seconds, 1), "format_error": True}
+                        {
+                            "step": steps,
+                            "llm_s": round(llm_seconds, 1),
+                            **reply,
+                            "format_error": True,
+                        }
                     )
                     if format_errors >= max_format_errors:
                         completion_reason = "format_errors"
@@ -354,6 +360,7 @@ class VanilluxScaffold(Scaffold):
                     {
                         "step": steps,
                         "llm_s": round(llm_seconds, 1),
+                        **reply,
                         "bash_s": round(exec_seconds, 1),
                         "exit_code": result.exit_code,
                         "cmd": action.command[:200],
@@ -391,6 +398,19 @@ class VanilluxScaffold(Scaffold):
             value = metadata.get(key)
             if isinstance(value, int | float):
                 usage[key] += int(value)
+
+    @staticmethod
+    def _reply_record(output: LMOutput) -> dict[str, Any]:
+        """The reply's token count and finish reason as the provider gave them (None if absent).
+
+        Logged so that the share of replies cut at ``max_tokens`` can be counted per reply,
+        not inferred from the trial's total.
+        """
+        metadata = output.metadata or {}
+        return {
+            "completion_tokens": metadata.get("completion_tokens"),
+            "finish_reason": metadata.get("finish_reason"),
+        }
 
     @staticmethod
     def _record_format_error(
