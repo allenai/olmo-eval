@@ -445,8 +445,13 @@ class ScoringTokenizer(FakeTokenizer):
     eos_token_id = 2
 
 
+def _logprob(prev: int, tid: int) -> float:
+    """A bigram logprob: depends on the token and the one before it."""
+    return -(tid + 3 * prev) / 10_000
+
+
 class ScoringLLM(FakeLLM):
-    """Gives every input token after the first a logprob of -token_id / 1000."""
+    """Scores every input token after the first with a bigram logprob."""
 
     def generate(self, prompts, sampling_params, use_tqdm=False):  # noqa: ANN001, ANN201
         self.generate_calls.append({"prompts": prompts})
@@ -454,11 +459,16 @@ class ScoringLLM(FakeLLM):
         for prompt in prompts:
             ids = prompt["prompt_token_ids"]
             prompt_logprobs = [None] + [
-                {tid: SimpleNamespace(logprob=-tid / 1000, decoded_token=chr(tid))}
-                for tid in ids[1:]
+                {tid: SimpleNamespace(logprob=_logprob(prev, tid), decoded_token=chr(tid))}
+                for prev, tid in zip(ids, ids[1:], strict=False)
             ]
             outputs.append(SimpleNamespace(prompt_logprobs=prompt_logprobs))
         return outputs
+
+
+def _full_context_logprob(text: str, bos: int = 1) -> float:
+    ids = [bos] + [ord(c) for c in text]
+    return sum(_logprob(prev, tid) for prev, tid in zip(ids, ids[1:], strict=False))
 
 
 def _scoring_provider(monkeypatch, max_length: int) -> tuple[VLLMProvider, ScoringLLM]:  # noqa: ANN001
@@ -487,9 +497,13 @@ def test_a_rolling_request_scores_a_text_longer_than_the_context_in_full(monkeyp
     assert len(inputs) > 1
     assert all(len(p["prompt_token_ids"]) <= 8 for p in inputs)  # max_length - 1
     assert [entry["token_id"] for entry in output.logprobs] == [ord(c) for c in TEXT]
-    assert output.metadata["sum_logits"] == pytest.approx(-sum(ord(c) for c in TEXT) / 1000)
+    # Each window conditions its first scored token on the token before it, so with a
+    # bigram model rolling scores match scoring the whole text in one context.
+    assert output.metadata["sum_logits"] == pytest.approx(_full_context_logprob(TEXT))
     assert output.metadata["num_tokens"] == len(TEXT)
     assert output.metadata["num_windows"] == len(inputs)
+    assert output.metadata["window_tokens"] == 8
+    assert output.metadata["num_tokens_all"] == sum(len(p["prompt_token_ids"]) for p in inputs)
     assert output.metadata["prompt_truncated_tokens"] == 0
     assert output.text == TEXT
 
@@ -514,6 +528,9 @@ def test_an_ordinary_request_is_still_left_truncated(monkeypatch) -> None:  # no
 
     assert output.metadata["prompt_truncated_tokens"] == len(TEXT) + 1 - 8
     assert [entry["token_id"] for entry in output.logprobs] == [ord(c) for c in TEXT[-7:]]
+    # The tokens actually sent, as before rolling requests existed.
+    assert output.metadata["num_tokens_all"] == 8
+    assert "num_windows" not in output.metadata and "window_tokens" not in output.metadata
 
 
 def test_rolling_and_ordinary_requests_share_a_batch(monkeypatch) -> None:  # noqa: ANN001
@@ -530,3 +547,52 @@ def test_rolling_and_ordinary_requests_share_a_batch(monkeypatch) -> None:  # no
     assert outputs[0][0].metadata["num_tokens"] == len(TEXT)
     assert [o.metadata["num_tokens"] for o in outputs[1]] == [2, 3]
     assert outputs[2][0].metadata["num_tokens"] == 5
+
+
+def test_a_rolling_request_uses_its_own_shorter_max_length(monkeypatch) -> None:  # noqa: ANN001
+    provider, llm = _scoring_provider(monkeypatch, max_length=100)
+    request = LMRequest(
+        request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True, max_length=9
+    )
+
+    [[output]] = provider.logprobs([request])
+
+    assert all(len(p["prompt_token_ids"]) <= 8 for p in llm.generate_calls[0]["prompts"])
+    assert output.metadata["window_tokens"] == 8
+    assert output.metadata["sum_logits"] == pytest.approx(_full_context_logprob(TEXT))
+
+
+def test_a_rolling_window_larger_than_the_engine_is_refused(monkeypatch) -> None:  # noqa: ANN001
+    provider, _ = _scoring_provider(monkeypatch, max_length=9)
+    request = LMRequest(
+        request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True, max_length=64
+    )
+
+    with pytest.raises(ValueError, match="exceeds the engine's max_model_len"):
+        provider.logprobs([request])
+
+
+def test_an_empty_rolling_text_scores_no_tokens(monkeypatch) -> None:  # noqa: ANN001
+    provider, _ = _scoring_provider(monkeypatch, max_length=9)
+    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=("",), rolling=True)
+
+    [[output]] = provider.logprobs([request])
+
+    assert output.logprobs == []
+    assert output.metadata["num_tokens"] == 0
+
+
+def test_a_rolling_output_missing_a_token_logprob_raises(monkeypatch) -> None:  # noqa: ANN001
+    provider, llm = _scoring_provider(monkeypatch, max_length=9)
+    generate = llm.generate
+
+    def drop_one(prompts, sampling_params, use_tqdm=False):  # noqa: ANN001, ANN202
+        outputs = generate(prompts, sampling_params, use_tqdm)
+        outputs[0].prompt_logprobs[2] = {}
+        return outputs
+
+    llm.generate = drop_one
+    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True)
+
+    with pytest.raises(RuntimeError, match="scored .* of .* tokens"):
+        provider.logprobs([request])

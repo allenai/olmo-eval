@@ -192,14 +192,22 @@ class TestRollingTokenWindows:
         assert self._scored(windows) == tokens
         assert all(len(input_ids) <= 5 for input_ids, _ in windows)
 
-    def test_later_inputs_start_with_the_last_scored_token(self):
+    def test_later_inputs_condition_on_the_token_before_them(self):
         windows = rolling_token_windows([0], list(range(1, 11)), max_len=4)
-        assert windows == [
-            ([0, 1, 2, 3], 1),
-            ([3, 4, 5, 6], 1),
-            ([6, 7, 8, 9], 1),
-            ([9, 10], 1),
-        ]
+        assert windows[:3] == [([0, 1, 2, 3], 1), ([3, 4, 5, 6], 1), ([6, 7, 8, 9], 1)]
+
+    def test_the_last_input_keeps_a_full_context(self):
+        # Only token 10 is left; it is scored with three tokens of context, not one.
+        assert rolling_token_windows([0], list(range(1, 11)), max_len=4)[-1] == ([7, 8, 9, 10], 3)
+
+    def test_inputs_are_contiguous_and_condition_correctly(self):
+        prefix, tokens = [0], list(range(1, 30))
+        sequence = prefix + tokens
+        for max_len in range(2, 12):
+            for input_ids, ctxlen in rolling_token_windows(prefix, tokens, max_len):
+                start = sequence.index(input_ids[0])
+                assert sequence[start : start + len(input_ids)] == input_ids
+                assert 1 <= ctxlen < len(input_ids) <= max_len
 
     def test_text_that_exactly_fills_the_first_input_needs_no_second(self):
         assert len(rolling_token_windows([0], [1, 2, 3], max_len=4)) == 1

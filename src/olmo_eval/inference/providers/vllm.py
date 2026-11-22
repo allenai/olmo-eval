@@ -503,7 +503,8 @@ class VLLMProvider(InferenceProvider):
         # rolling request needs to score its whole text.
         token_inputs: list[list[int]] = []
         windows_per_continuation: list[list[tuple[list[int], int]]] = []
-        continuation_meta: list[tuple[int, int, bool]] = []  # (num_tokens_all, overflow, rolling)
+        # (num_tokens_all, overflow, window tokens if rolling else None)
+        continuation_meta: list[tuple[int, int, int | None]] = []
 
         for request in requests:
             # Use per-request max_length if set (e.g., from task config), else provider default.
@@ -515,14 +516,20 @@ class VLLMProvider(InferenceProvider):
                 context_enc, continuation_enc = encode_context_and_continuation(
                     tokenizer, prompt, continuation
                 )
-                full_len = len(context_enc) + len(continuation_enc)
-
+                window_tokens: int | None = None
                 if request.rolling:
+                    if max_len > default_max_len:
+                        raise ValueError(
+                            f"rolling request max_length {max_len} exceeds the engine's "
+                            f"max_model_len {default_max_len}"
+                        )
                     # Inputs of max_length - 1 leave room for the one generated token.
-                    windows = rolling_token_windows(context_enc, continuation_enc, max_len - 1)
+                    window_tokens = max_len - 1
+                    windows = rolling_token_windows(context_enc, continuation_enc, window_tokens)
                     overflow = 0
                 else:
                     # Calculate overflow and left-truncate to max_length - 1
+                    full_len = len(context_enc) + len(continuation_enc)
                     overflow = full_len - (max_len - 1)
                     inp = (context_enc + continuation_enc)[-(max_len - 1) :]
                     # Adjust ctxlen based on overflow
@@ -531,7 +538,9 @@ class VLLMProvider(InferenceProvider):
 
                 token_inputs.extend(window for window, _ in windows)
                 windows_per_continuation.append(windows)
-                continuation_meta.append((full_len, overflow, request.rolling))
+                # num_tokens_all counts the tokens sent to the model, overlap included.
+                sent = sum(len(window) for window, _ in windows)
+                continuation_meta.append((sent, overflow, window_tokens))
 
         # Call vLLM with token IDs instead of strings
         # Pass as list of dicts with prompt_token_ids key
@@ -556,7 +565,7 @@ class VLLMProvider(InferenceProvider):
 
             for continuation in continuations:
                 windows = next(windows_iter)
-                num_tokens_all, overflow, rolling = next(meta_iter)
+                num_tokens_all, overflow, window_tokens = next(meta_iter)
 
                 logprob_entries: list[LogProbEntry] = []
                 total = 0.0
@@ -577,8 +586,16 @@ class VLLMProvider(InferenceProvider):
                     "is_greedy": is_greedy,
                     "prompt_truncated_tokens": max(0, overflow),
                 }
-                if rolling:
+                if window_tokens is not None:
+                    expected = sum(len(window) - ctxlen for window, ctxlen in windows)
+                    if len(logprob_entries) != expected:
+                        # A token without a logprob would drop out of the sum while its
+                        # bytes still count, reading as a better model.
+                        raise RuntimeError(
+                            f"rolling request scored {len(logprob_entries)} of {expected} tokens"
+                        )
                     metadata["num_windows"] = len(windows)
+                    metadata["window_tokens"] = window_tokens
                 request_outputs.append(
                     LMOutput(text=continuation, logprobs=logprob_entries, metadata=metadata)
                 )
