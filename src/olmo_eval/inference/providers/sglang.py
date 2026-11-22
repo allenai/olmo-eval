@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import os
 import sys
@@ -314,6 +315,8 @@ class SGLangProvider(InferenceProvider):
             "top_k": params.top_k if params.do_sample and params.top_k is not None else -1,
             "stop": list(params.stop_sequences or ()),
             "n": 1,
+            # Diagnostic only: extra SGLang sampling fields (e.g. logit_bias) as JSON.
+            **json.loads(os.environ.get("OLMO_EVAL_SGLANG_EXTRA_SAMPLING", "{}")),
         }
 
     def _consider_larger_batches(self, outputs: list[LMOutput], params: SamplingParams) -> None:
