@@ -191,6 +191,17 @@ class TestDriverRecords:
         assert record["task_contract_sha256"] == "abc"
         assert len(record["messages"]) == 5
 
+    def test_progress_line_reports_how_tasks_ended(self):
+        from collections import Counter
+
+        line = driver.progress_line(
+            4, 600, 61.2, 10, Counter({"no_tools_called": 3, "max_turns_reached": 1})
+        )
+        assert line == (
+            "[automationbench] 4/600 tasks done (61s elapsed; mean turns 2.5; "
+            "max_turns_reached=1, no_tools_called=3)"
+        )
+
     def test_task_record_without_a_score_is_an_infra_failure(self):
         record = driver.task_record(
             {"info": {"task_name": "hr.x"}, "error": "boom", "completion": []}

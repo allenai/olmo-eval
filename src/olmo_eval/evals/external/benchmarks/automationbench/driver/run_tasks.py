@@ -33,6 +33,7 @@ import json
 import sys
 import time
 import traceback
+from collections import Counter
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -240,6 +241,16 @@ def task_record(output: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def progress_line(done: int, total: int, elapsed: float, turns: int, stops: Counter[str]) -> str:
+    """A progress log line with how the finished tasks ended, to spot a broken run early."""
+    ends = ", ".join(f"{k}={v}" for k, v in sorted(stops.items()))
+    mean_turns = turns / done if done else 0.0
+    return (
+        f"[automationbench] {done}/{total} tasks done ({elapsed:.0f}s elapsed; "
+        f"mean turns {mean_turns:.1f}; {ends})"
+    )
+
+
 async def run(config: dict[str, Any], output_path: str) -> int:
     import verifiers as vf
     from automationbench.clients import RetryingOpenAIChatCompletionsClient
@@ -281,20 +292,21 @@ async def run(config: dict[str, Any], output_path: str) -> int:
     )
 
     done = 0
+    turns = 0
+    stops: Counter[str] = Counter()
     started = time.time()
     with open(output_path, "w") as out:
 
         def on_progress(all_outputs: Any, new_outputs: Any, new_metadata: Any) -> None:
-            nonlocal done
+            nonlocal done, turns
             for output in new_outputs or []:
-                out.write(json.dumps(task_record(output)) + "\n")
+                record = task_record(output)
+                out.write(json.dumps(record) + "\n")
                 done += 1
+                turns += record["turns"]
+                stops[str(record["stop_condition"])] += 1
             out.flush()
-            print(
-                f"[automationbench] {done}/{total} tasks done "
-                f"({time.time() - started:.0f}s elapsed)",
-                flush=True,
-            )
+            print(progress_line(done, total, time.time() - started, turns, stops), flush=True)
 
         await env.evaluate(
             client=client,
