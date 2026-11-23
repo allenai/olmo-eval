@@ -104,6 +104,20 @@ def classify_assertions(
     }
 
 
+def initial_check(
+    initial_state: dict[str, Any] | None, registry: Any, world_cls: Any
+) -> Callable[[dict[str, Any]], bool]:
+    """How to check an assertion against the task's initial world.
+
+    Like ``partial_credit``, a task without an initial state has nothing that
+    passes at the start, so every scored assertion is an objective.
+    """
+    if not initial_state:
+        return lambda assertion: False
+    initial_world = world_cls(**initial_state)
+    return lambda assertion: registry.check(initial_world, assertion)
+
+
 def error_kind(error: BaseException | None) -> str | None:
     """Whether a rollout error is the model's (scored) or the harness's (unscored)."""
     if error is None:
@@ -155,15 +169,13 @@ def olmo_eval_record(state: Any, **kwargs: Any) -> float:
         if isinstance(info, str):
             info = json.loads(info)
         world = state.get("world")
-        initial = state.get("initial_state")
-        if world is None or initial is None:
+        if world is None:
             raise RuntimeError("the rollout has no world state to score")
         if "partial_credit" not in state:
             raise RuntimeError("AutomationBench's partial_credit did not run to completion")
-        initial_world = WorldState(**initial)
         aa = classify_assertions(
             info.get("assertions", []),
-            lambda a: AssertionRegistry.check(initial_world, a),
+            initial_check(state.get("initial_state"), AssertionRegistry, WorldState),
             lambda a: AssertionRegistry.check(world, a),
         )
         expected = float(state["partial_credit"])

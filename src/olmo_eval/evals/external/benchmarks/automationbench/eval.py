@@ -47,6 +47,9 @@ INFRA_ERROR = "infra"
 _UV_PASSTHROUGH = ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "UV_LINK_MODE")
 _STRIPPED_ENV = ("VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "CONDA_PREFIX")
 
+#: Longest driver output line the log reader accepts.
+_STREAM_LINE_LIMIT = 16 * 1024 * 1024
+
 #: The variable the driver's client reads its API key from.
 API_KEY_VAR = "AUTOMATIONBENCH_API_KEY"
 
@@ -65,6 +68,7 @@ class AutomationBenchArgs:
     max_tokens: int | None = None
     max_failure_rate: float = 0.05
     setup_timeout: float = 1800.0
+    run_timeout: float = 20 * 3600.0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AutomationBenchArgs:
@@ -87,11 +91,14 @@ class AutomationBenchArgs:
             max_tokens=as_optional_int(data.get("max_tokens")),
             max_failure_rate=float(data.get("max_failure_rate", defaults.max_failure_rate)),
             setup_timeout=float(data.get("setup_timeout", defaults.setup_timeout)),
+            run_timeout=float(data.get("run_timeout", defaults.run_timeout)),
         )
         if args.max_turns < 1 or args.max_concurrency < 1:
             raise ValueError("max_turns and max_concurrency must be at least 1")
         if args.limit is not None and args.limit < 1:
             raise ValueError("limit must be at least 1")
+        if args.run_timeout <= 0 or args.setup_timeout <= 0:
+            raise ValueError("setup_timeout and run_timeout must be positive")
         if not 0.0 <= args.max_failure_rate <= 1.0:
             raise ValueError("max_failure_rate must be between 0 and 1")
         return args
@@ -191,7 +198,8 @@ def compute_metrics(tasks: list[TaskResult]) -> dict[str, float]:
         return sum(values) / len(values) if values else 0.0
 
     objectives = sum(t.objectives for t in scored)
-    met = sum(t.objectives_met for t in scored)
+    # An errored task scores 0, so none of its objectives count as met.
+    met = sum(t.objectives_met for t in scored if t.error_kind != MODEL_ERROR)
     violations = sum(t.guardrail_violations for t in scored)
     metrics: dict[str, float] = {
         "aa_score": mean([t.score for t in scored]),
@@ -249,8 +257,10 @@ def prepare_environment(cache_root: Path, timeout: float) -> Path:
     if ready.exists() and python.exists():
         return python
 
-    shutil.rmtree(repo, ignore_errors=True)
-    repo.parent.mkdir(parents=True, exist_ok=True)
+    # Build in a private directory and move it into place, so a concurrent or
+    # interrupted install never leaves a half-built checkout under the final name.
+    cache_root.mkdir(parents=True, exist_ok=True)
+    build = Path(tempfile.mkdtemp(prefix=f".{REPO_COMMIT[:12]}-", dir=cache_root))
     env = _subprocess_env()
 
     def run(cmd: list[str], cwd: Path | None = None) -> str:
@@ -263,22 +273,38 @@ def prepare_environment(cache_root: Path, timeout: float) -> Path:
             raise RuntimeError(f"{' '.join(cmd)} failed ({done.returncode}): {output}")
         return done.stdout
 
-    run([git, "init", "--quiet", str(repo)])
-    run([git, "-C", str(repo), "fetch", "--quiet", "--depth", "1", REPO_URL, REPO_COMMIT])
-    run([git, "-C", str(repo), "checkout", "--quiet", "FETCH_HEAD"])
-    head = run([git, "-C", str(repo), "rev-parse", "HEAD"]).strip()
-    if head != REPO_COMMIT:
-        raise RuntimeError(f"AutomationBench checkout is at {head}, expected {REPO_COMMIT}")
-    run([uv, "sync", "--frozen", "--no-dev", "--python", PYTHON_VERSION], cwd=repo)
-    ready.write_text(REPO_COMMIT + "\n")
+    try:
+        run([git, "init", "--quiet", str(build)])
+        run([git, "-C", str(build), "fetch", "--quiet", "--depth", "1", REPO_URL, REPO_COMMIT])
+        run([git, "-C", str(build), "checkout", "--quiet", "FETCH_HEAD"])
+        head = run([git, "-C", str(build), "rev-parse", "HEAD"]).strip()
+        if head != REPO_COMMIT:
+            raise RuntimeError(f"AutomationBench checkout is at {head}, expected {REPO_COMMIT}")
+        # The venv records absolute paths, so it is created at its final location:
+        # the checkout moves first, then syncs.
+        shutil.rmtree(repo, ignore_errors=True)
+        build.rename(repo)
+        run([uv, "sync", "--frozen", "--no-dev", "--python", PYTHON_VERSION], cwd=repo)
+        ready.write_text(REPO_COMMIT + "\n")
+    finally:
+        shutil.rmtree(build, ignore_errors=True)
     return python
 
 
 def read_records(path: Path) -> list[dict[str, Any]]:
+    """Read the driver's task lines, skipping a last line cut off mid-write."""
     if not path.exists():
         return []
-    with open(path) as f:
-        return [json.loads(line) for line in f if line.strip()]
+    lines = [line for line in path.read_text().splitlines() if line.strip()]
+    records = []
+    for i, line in enumerate(lines):
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            if i != len(lines) - 1:
+                raise
+            logger.warning(f"[automationbench_aa] skipping a truncated last line in {path}")
+    return records
 
 
 class AutomationBenchAAExternalEval(ExternalEval):
@@ -297,7 +323,7 @@ class AutomationBenchAAExternalEval(ExternalEval):
 
     @property
     def timeout_seconds(self) -> float:
-        return 24 * 3600.0
+        return AutomationBenchArgs().run_timeout
 
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
@@ -318,6 +344,10 @@ class AutomationBenchAAExternalEval(ExternalEval):
             "setup_timeout": (
                 "Timeout in seconds for each benchmark install step",
                 defaults.setup_timeout,
+            ),
+            "run_timeout": (
+                "Wall-clock budget in seconds for all tasks; the run is stopped after it",
+                defaults.run_timeout,
             ),
         }
 
@@ -373,7 +403,7 @@ class AutomationBenchAAExternalEval(ExternalEval):
             config_path.write_text(json.dumps(config, indent=2))
 
             exit_code, output_tail = await self._run_driver(
-                python, config_path, records_path, run_dir, api_key
+                python, config_path, records_path, run_dir, api_key, ab_args.run_timeout
             )
             records = read_records(records_path)
 
@@ -418,9 +448,19 @@ class AutomationBenchAAExternalEval(ExternalEval):
         return result
 
     async def _run_driver(
-        self, python: Path, config_path: Path, records_path: Path, run_dir: Path, api_key: str
+        self,
+        python: Path,
+        config_path: Path,
+        records_path: Path,
+        run_dir: Path,
+        api_key: str,
+        timeout: float,
     ) -> tuple[int, str]:
-        """Run the driver in the benchmark's environment, streaming its output to the log."""
+        """Run the driver in the benchmark's environment, streaming its output to the log.
+
+        The driver is killed when it outlasts ``timeout`` or when this coroutine is
+        cancelled; the tasks it finished by then are still in ``records_path``.
+        """
         proc = await asyncio.create_subprocess_exec(
             str(python),
             "-I",
@@ -431,15 +471,30 @@ class AutomationBenchAAExternalEval(ExternalEval):
             env=_subprocess_env({API_KEY_VAR: api_key}),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            # An error chain can echo a whole request; the default 64 KiB line limit
+            # would stop the reader and leave the driver blocked on a full pipe.
+            limit=_STREAM_LINE_LIMIT,
         )
         tail: list[str] = []
-        assert proc.stdout is not None
-        async for raw in proc.stdout:
-            line = raw.decode(errors="replace").rstrip()
-            logger.info(f"[{self.name}] {line}")
-            tail = (tail + [line])[-20:]
-        exit_code = await proc.wait()
-        return exit_code, "\n".join(tail)
+
+        async def pump() -> int:
+            assert proc.stdout is not None
+            async for raw in proc.stdout:
+                line = raw.decode(errors="replace").rstrip()
+                logger.info(f"[{self.name}] {line}")
+                tail.append(line[:2000])
+                del tail[:-20]
+            return await proc.wait()
+
+        try:
+            return await asyncio.wait_for(pump(), timeout=timeout), "\n".join(tail)
+        except TimeoutError:
+            tail.append(f"the run outlasted run_timeout ({timeout:.0f}s) and was stopped")
+            return -1, "\n".join(tail)
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
 
     def _prediction(self, task: TaskResult) -> dict[str, Any]:
         instance_metrics: dict[str, Any] = {}
@@ -454,4 +509,8 @@ class AutomationBenchAAExternalEval(ExternalEval):
             "instance_metrics": instance_metrics,
             "failure": task.failure,
             **{k: v for k, v in task.raw.items() if k != "task_name"},
+            # The task's score, 0 after a model error; the driver's value is the
+            # state the agent reached.
+            "aa_score": task.score,
+            "state_aa_score": task.aa_score,
         }

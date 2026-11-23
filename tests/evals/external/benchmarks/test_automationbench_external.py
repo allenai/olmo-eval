@@ -201,6 +201,96 @@ class TestDriverRecords:
         assert TaskResult.from_record(record).failure is not None
 
 
+class StubWorld:
+    """Stands in for AutomationBench's WorldState: holds the ids that pass in it."""
+
+    def __init__(self, passing: list[str] | None = None, **_: Any):
+        self.passing = set(passing or [])
+
+
+class StubRegistry:
+    @staticmethod
+    def check(world: StubWorld, assertion: dict) -> bool:
+        return assertion["id"] in world.passing
+
+
+class StubInvalidResponse(Exception):
+    pass
+
+
+@pytest.fixture
+def stub_benchmark(monkeypatch):
+    """Stub the verifiers and AutomationBench modules olmo_eval_record imports."""
+    modules = {
+        "verifiers": SimpleNamespace(InvalidModelResponseError=StubInvalidResponse),
+        "automationbench": SimpleNamespace(),
+        "automationbench.rubric": SimpleNamespace(),
+        "automationbench.rubric.registry": SimpleNamespace(AssertionRegistry=StubRegistry),
+        "automationbench.schema": SimpleNamespace(),
+        "automationbench.schema.world": SimpleNamespace(WorldState=StubWorld),
+    }
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+
+def rollout_state(**overrides: Any) -> dict[str, Any]:
+    state = {
+        "info": json.dumps(
+            {"assertions": [{"type": "t", "id": "obj"}, {"type": "t", "id": "guard"}]}
+        ),
+        "initial_state": {"passing": ["guard"]},
+        "world": StubWorld(["obj", "guard"]),
+        "partial_credit": 1.0,
+        "error": None,
+    }
+    return {**state, **overrides}
+
+
+@pytest.mark.usefixtures("stub_benchmark")
+class TestOlmoEvalRecord:
+    def test_records_the_classification(self):
+        state = rollout_state()
+        assert driver.olmo_eval_record(state) == 1.0
+        record = state["_olmo_eval"]
+        assert record["scoring_error"] is None
+        assert (record["objectives"], record["guardrails"]) == (1, 1)
+        assert record["error_kind"] is None
+
+    def test_mismatch_with_partial_credit_is_a_scoring_error(self):
+        state = rollout_state(partial_credit=0.25)
+        assert driver.olmo_eval_record(state) == 0.0
+        assert "imply partial_credit" in state["_olmo_eval"]["scoring_error"]
+        assert TaskResult.from_record(state["_olmo_eval"] | {"task_name": "a.b"}).failure
+
+    def test_missing_partial_credit_is_a_scoring_error(self):
+        state = rollout_state()
+        del state["partial_credit"]
+        driver.olmo_eval_record(state)
+        assert "did not run" in state["_olmo_eval"]["scoring_error"]
+
+    def test_missing_world_is_a_scoring_error(self):
+        state = rollout_state(world=None)
+        driver.olmo_eval_record(state)
+        assert "no world state" in state["_olmo_eval"]["scoring_error"]
+
+    def test_empty_initial_state_makes_every_assertion_an_objective(self):
+        # partial_credit evaluates every assertion normally without an initial world.
+        state = rollout_state(initial_state={}, partial_credit=1.0)
+        driver.olmo_eval_record(state)
+        record = state["_olmo_eval"]
+        assert record["scoring_error"] is None
+        assert (record["objectives"], record["guardrails"]) == (2, 0)
+
+    def test_error_kinds(self):
+        state = rollout_state(error=StubInvalidResponse("empty reply"))
+        driver.olmo_eval_record(state)
+        assert state["_olmo_eval"]["error_kind"] == driver.MODEL_ERROR
+        state = rollout_state(error=ConnectionError("server down"))
+        driver.olmo_eval_record(state)
+        assert state["_olmo_eval"]["error_kind"] == driver.INFRA_ERROR
+        assert "server down" in state["_olmo_eval"]["error"]
+
+
 def task(name: str, **kwargs: Any) -> TaskResult:
     return TaskResult(task_name=name, domain=name.split(".")[0], **kwargs)
 
@@ -255,6 +345,8 @@ class TestComputeMetrics:
         assert metrics["aa_score"] == 0.0
         assert metrics["model_error_rate"] == 1.0
         assert metrics["num_scored_tasks"] == 1
+        # Its objectives do not count as met in the pooled metric either.
+        assert metrics["objectives_completed"] == 0.0
 
     def test_stop_conditions(self):
         tasks = [
@@ -311,6 +403,7 @@ class TestArgs:
         [
             {"domains": "simple"},
             {"max_turns": "0"},
+            {"run_timeout": "0"},
             {"limit": "0"},
             {"max_failure_rate": "1.5"},
         ],
@@ -356,7 +449,7 @@ class TestEnvironment:
         def fake_run(cmd, **kwargs):
             commands.append(cmd)
             if cmd[1] == "init":
-                Path(cmd[-1]).mkdir(parents=True)
+                Path(cmd[-1]).mkdir(parents=True, exist_ok=True)
             stdout = ab_eval.REPO_COMMIT + "\n" if "rev-parse" in cmd else ""
             return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
@@ -386,13 +479,15 @@ class TestEnvironment:
 #: A stand-in for the driver: echoes its config and writes the records it is given.
 FAKE_DRIVER = textwrap.dedent(
     """
-    import json, os, sys
+    import json, os, sys, time
     config = json.load(open(sys.argv[1]))
     records = json.load(open(os.path.join(os.path.dirname(sys.argv[1]), "fake_records.json")))
     with open(sys.argv[2], "w") as out:
         for record in records:
             out.write(json.dumps(record) + "\\n")
     print("model=" + config["model"] + " key=" + os.environ["AUTOMATIONBENCH_API_KEY"])
+    sys.stdout.flush()
+    time.sleep(float(os.environ.get("FAKE_DRIVER_SLEEP", "0")))
     sys.exit(int(os.environ.get("FAKE_DRIVER_EXIT", "0")))
     """
 )
@@ -488,6 +583,29 @@ class TestExecute:
         assert not result.success
         assert "exited with 1" in (result.error or "")
         assert "key=EMPTY" in (result.error or "")
+
+    def test_truncated_last_line_is_skipped(self, tmp_path):
+        path = tmp_path / "tasks.jsonl"
+        path.write_text(json.dumps(record("sales.a")) + "\n" + '{"task_name": "sal')
+        assert [r["task_name"] for r in ab_eval.read_records(path)] == ["sales.a"]
+        path.write_text('{"broken\n' + json.dumps(record("sales.a")) + "\n")
+        with pytest.raises(json.JSONDecodeError):
+            ab_eval.read_records(path)
+
+    def test_run_timeout_stops_the_driver(self, run_eval, monkeypatch):
+        monkeypatch.setenv("FAKE_DRIVER_SLEEP", "60")
+        result = run_eval([record("sales.a")], {"run_timeout": "1"})
+        assert not result.success
+        assert "outlasted run_timeout" in (result.error or "")
+        # The tasks written before the timeout are still scored.
+        assert result.metrics["num_tasks"] == 1
+
+    def test_prediction_score_is_zero_after_a_model_error(self, run_eval):
+        result = run_eval([record("sales.a", error_kind="model")])
+        prediction = (result.predictions or [])[0]
+        assert prediction["aa_score"] == 0.0
+        assert prediction["state_aa_score"] == 1.0
+        assert prediction["instance_metrics"]["aa_score"] == {"external": 0.0}
 
     def test_no_tasks_fails_the_run(self, run_eval):
         result = run_eval([])
