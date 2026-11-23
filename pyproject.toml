@@ -376,6 +376,9 @@ allowed-unresolved-imports = [
     # Imported by the AA-Briefcase-Lite submission parser inside its sandbox image.
     "pptx.**",
     "openpyxl.**",
+    # Imported by the AutomationBench-AA driver inside the benchmark's own environment.
+    "automationbench.**",
+    "verifiers.**",
 ]
 
 [tool.gantry]
