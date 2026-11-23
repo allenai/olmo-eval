@@ -15,6 +15,7 @@ from olmo_eval.inference.tokenizer_utils import (
     get_context_token_ids,
     has_bos_token,
     reject_add_bos_token,
+    rolling_token_windows,
 )
 
 
@@ -306,3 +307,42 @@ class TestEdgeCases:
         # Our mock uses ord() which handles unicode
         assert ctx == [ord("c"), ord("a"), ord("f"), ord("é")]
         assert cont == [ord("r"), ord("é"), ord("s"), ord("u"), ord("m"), ord("é")]
+
+
+class TestRollingTokenWindows:
+    def _scored(self, windows: list[tuple[list[int], int]]) -> list[int]:
+        return [token for input_ids, ctxlen in windows for token in input_ids[ctxlen:]]
+
+    def test_short_text_is_one_input_after_the_prefix(self):
+        assert rolling_token_windows([0], [1, 2, 3], max_len=8) == [([0, 1, 2, 3], 1)]
+
+    def test_windows_condition_on_the_token_before_and_the_last_keeps_full_context(self):
+        # Only token 10 is left for the last window; it gets three tokens of context, not one.
+        assert rolling_token_windows([0], list(range(1, 11)), max_len=4) == [
+            ([0, 1, 2, 3], 1),
+            ([3, 4, 5, 6], 1),
+            ([6, 7, 8, 9], 1),
+            ([7, 8, 9, 10], 3),
+        ]
+
+    def test_every_token_is_scored_once_from_contiguous_inputs(self):
+        prefix, tokens = [0], list(range(1, 30))
+        sequence = prefix + tokens
+        for max_len in range(2, 12):
+            windows = rolling_token_windows(prefix, tokens, max_len)
+            assert self._scored(windows) == tokens
+            for input_ids, ctxlen in windows:
+                start = sequence.index(input_ids[0])
+                assert sequence[start : start + len(input_ids)] == input_ids
+                assert 1 <= ctxlen < len(input_ids) <= max_len
+
+    def test_text_that_exactly_fills_the_first_input_needs_no_second(self):
+        assert len(rolling_token_windows([0], [1, 2, 3], max_len=4)) == 1
+
+    def test_needs_a_prefix_to_score_the_first_token(self):
+        with pytest.raises(ValueError, match="needs a prefix"):
+            rolling_token_windows([], [1, 2], max_len=4)
+
+    def test_needs_room_after_the_prefix(self):
+        with pytest.raises(ValueError, match="leaves no room"):
+            rolling_token_windows([0, 1], [2], max_len=2)

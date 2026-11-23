@@ -173,3 +173,43 @@ def encode_context_and_continuation(
     if prefix_ids and context_enc[: len(prefix_ids)] != prefix_ids:
         context_enc = [*prefix_ids, *context_enc]
     return context_enc, continuation_enc
+
+
+def rolling_token_windows(
+    prefix: list[int], tokens: list[int], max_len: int
+) -> list[tuple[list[int], int]]:
+    """Cut ``prefix + tokens`` into inputs of at most ``max_len`` tokens that score
+    every token of ``tokens`` exactly once.
+
+    Each input after the first conditions on the token before it, and the last
+    is right-aligned to keep a full context. This matches lm-eval-harness
+    (``get_rolling_token_windows`` with context length 1, then
+    ``make_disjoint_window``).
+
+    Args:
+        prefix: Context tokens before the text, usually just BOS. Not scored.
+        tokens: Tokens of the text to score.
+        max_len: Most tokens one input may hold.
+
+    Returns:
+        ``(input_ids, ctxlen)`` pairs; ``input_ids[ctxlen:]`` are the tokens scored.
+    """
+    if not prefix:
+        raise ValueError(
+            "rolling_token_windows needs a prefix token (BOS) to score the first token"
+        )
+    if max_len <= len(prefix):
+        raise ValueError(f"max_len {max_len} leaves no room after a {len(prefix)}-token prefix")
+    sequence = prefix + tokens
+    first = max_len - len(prefix)
+    windows = [(sequence[:max_len], len(prefix))]
+    start = first  # index into ``tokens`` of the first token not yet scored
+    while start < len(tokens):
+        end = min(start + max_len - 1, len(tokens))
+        # Up to max_len tokens ending at the last one scored (positions are offset by the prefix).
+        seq_end = len(prefix) + end
+        seq_start = max(0, seq_end - max_len)
+        window = sequence[seq_start:seq_end]
+        windows.append((window, len(window) - (end - start)))
+        start = end
+    return windows
