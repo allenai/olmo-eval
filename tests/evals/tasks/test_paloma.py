@@ -51,13 +51,16 @@ class TestInstances:
         assert [i.gold_answer for i in instances] == ["short document", "y" * 100_000]
         assert [i.metadata["id"] for i in instances] == [0, 1]
         assert [i.metadata["doc_id"] for i in instances] == ["doc-a", "doc-b"]
-        assert instances[1].metadata["num_bytes"] == 100_000
         assert [i.metadata["subdomain"] for i in instances] == ["nyt", None]
 
-    def test_val_split_reads_the_val_files(self, loaded):
-        list(get_task("paloma_ptb").instances)
-        assert loaded[0].data_files == "ptb/val/*"
+    @pytest.mark.parametrize(
+        ("overrides", "files"), [({}, "ptb/val/*"), ({"split": Split.TEST}, "ptb/test/*")]
+    )
+    def test_each_split_reads_its_own_files(self, loaded, overrides, files):
+        list(get_task("paloma_ptb", overrides).instances)
+        assert loaded[0].data_files == files
         assert loaded[0].split == "train"
+        assert loaded[0].revision == paloma.PALOMA_REVISION
 
     def test_requests_roll_over_the_whole_document_from_an_empty_prompt(self, loaded):
         task = get_task("paloma_ptb")
@@ -76,11 +79,6 @@ class TestInstances:
         task = get_task("paloma_ptb", override)
         with pytest.raises(ValueError, match="raw text"):
             task.format_request(next(iter(task.instances)))
-
-    def test_test_split_reads_the_test_files(self, loaded):
-        list(get_task("paloma_ptb", {"split": Split.TEST}).instances)
-        assert loaded[0].data_files == "ptb/test/*"
-        assert loaded[0].revision == paloma.PALOMA_REVISION
 
     def test_dolma_test_split_skips_its_empty_file(self, loaded):
         list(get_task("paloma_dolma-v1_5", {"split": Split.TEST}).instances)

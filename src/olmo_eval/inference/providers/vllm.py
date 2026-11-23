@@ -454,8 +454,6 @@ class VLLMProvider(InferenceProvider):
             }
             trace["stop_sequences"] = []
             trace["input_mode"] = "prompt_token_ids"
-            if request.rolling:
-                trace["rolling"] = True
             return trace
 
         vllm_params = self._build_sampling_params(params)
@@ -589,8 +587,7 @@ class VLLMProvider(InferenceProvider):
                 if window_tokens is not None:
                     expected = sum(len(window) - ctxlen for window, ctxlen in windows)
                     if len(logprob_entries) != expected:
-                        # A token without a logprob would drop out of the sum while its
-                        # bytes still count, reading as a better model.
+                        # A missing token would drop out of the sum but not the bytes.
                         raise RuntimeError(
                             f"rolling request scored {len(logprob_entries)} of {expected} tokens"
                         )

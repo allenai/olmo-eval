@@ -186,25 +186,22 @@ class TestRollingTokenWindows:
     def test_short_text_is_one_input_after_the_prefix(self):
         assert rolling_token_windows([0], [1, 2, 3], max_len=8) == [([0, 1, 2, 3], 1)]
 
-    def test_every_token_is_scored_exactly_once(self):
-        tokens = list(range(1, 24))
-        windows = rolling_token_windows([0], tokens, max_len=5)
-        assert self._scored(windows) == tokens
-        assert all(len(input_ids) <= 5 for input_ids, _ in windows)
+    def test_windows_condition_on_the_token_before_and_the_last_keeps_full_context(self):
+        # Only token 10 is left for the last window; it gets three tokens of context, not one.
+        assert rolling_token_windows([0], list(range(1, 11)), max_len=4) == [
+            ([0, 1, 2, 3], 1),
+            ([3, 4, 5, 6], 1),
+            ([6, 7, 8, 9], 1),
+            ([7, 8, 9, 10], 3),
+        ]
 
-    def test_later_inputs_condition_on_the_token_before_them(self):
-        windows = rolling_token_windows([0], list(range(1, 11)), max_len=4)
-        assert windows[:3] == [([0, 1, 2, 3], 1), ([3, 4, 5, 6], 1), ([6, 7, 8, 9], 1)]
-
-    def test_the_last_input_keeps_a_full_context(self):
-        # Only token 10 is left; it is scored with three tokens of context, not one.
-        assert rolling_token_windows([0], list(range(1, 11)), max_len=4)[-1] == ([7, 8, 9, 10], 3)
-
-    def test_inputs_are_contiguous_and_condition_correctly(self):
+    def test_every_token_is_scored_once_from_contiguous_inputs(self):
         prefix, tokens = [0], list(range(1, 30))
         sequence = prefix + tokens
         for max_len in range(2, 12):
-            for input_ids, ctxlen in rolling_token_windows(prefix, tokens, max_len):
+            windows = rolling_token_windows(prefix, tokens, max_len)
+            assert self._scored(windows) == tokens
+            for input_ids, ctxlen in windows:
                 start = sequence.index(input_ids[0])
                 assert sequence[start : start + len(input_ids)] == input_ids
                 assert 1 <= ctxlen < len(input_ids) <= max_len

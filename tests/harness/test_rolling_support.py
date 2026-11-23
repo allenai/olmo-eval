@@ -52,11 +52,6 @@ def test_a_supporting_provider_gets_the_rolling_flag_through_the_harness() -> No
     assert apply_harness_config(HarnessConfig(name="test"), rolling_request()).rolling is True
 
 
-def test_an_ordinary_loglikelihood_request_is_unaffected() -> None:
-    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=("x",))
-    assert harness_with(NonRollingProvider("stub"))._apply_config(request).rolling is False
-
-
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [

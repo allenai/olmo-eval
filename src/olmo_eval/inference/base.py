@@ -33,9 +33,8 @@ class InferenceProvider(ABC):
     #: the harness refuses such a request instead.
     supports_tools: bool = False
 
-    #: Whether this provider scores ``LMRequest.rolling`` requests in windows of
-    #: its context. One that does not would score only the part of a long text
-    #: that fits, so the harness refuses rolling requests for it.
+    #: Whether this provider scores ``LMRequest.rolling`` requests; see
+    #: ``require_rolling_support``.
     supports_rolling_logprobs: bool = False
 
     def __init__(self, model_name: str) -> None:

@@ -112,13 +112,9 @@ def rolling_token_windows(
     """Cut ``prefix + tokens`` into inputs of at most ``max_len`` tokens that score
     every token of ``tokens`` exactly once.
 
-    The first input is ``prefix`` followed by as many tokens as fit. Each later
-    input scores the next ``max_len - 1`` tokens, conditioned on the one before
-    them. The last input is extended back to ``max_len`` tokens of context where
-    the text allows, and scores only the tokens no earlier input scored. Inputs
-    overlap only in context, never in scored tokens, so their summed logprobs are
-    the logprob of the whole text. This is lm-eval-harness's rolling windows
-    (``get_rolling_token_windows`` with a context length of 1, then
+    Each input after the first conditions on the token before it, and the last
+    is right-aligned to keep a full context. This matches lm-eval-harness
+    (``get_rolling_token_windows`` with context length 1, then
     ``make_disjoint_window``).
 
     Args:
@@ -141,9 +137,7 @@ def rolling_token_windows(
     start = first  # index into ``tokens`` of the first token not yet scored
     while start < len(tokens):
         end = min(start + max_len - 1, len(tokens))
-        # Positions in ``sequence`` are offset by the prefix; take up to max_len
-        # tokens ending at the last one scored, so a short last window keeps a
-        # full context instead of one token.
+        # Up to max_len tokens ending at the last one scored (positions are offset by the prefix).
         seq_end = len(prefix) + end
         seq_start = max(0, seq_end - max_len)
         window = sequence[seq_start:seq_end]

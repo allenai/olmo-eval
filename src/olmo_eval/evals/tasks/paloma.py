@@ -1,21 +1,9 @@
-"""Paloma perplexity tasks, one per Paloma source.
+"""Paloma (https://arxiv.org/abs/2312.10523) bits per byte, one task per source.
 
-Paloma (Magnusson et al., 2023, https://arxiv.org/abs/2312.10523,
-https://huggingface.co/datasets/allenai/paloma) is AI2's benchmark of held-out
-corpora. Each task here scores one Paloma source's val text and reports its
-byte-weighted bits per byte, which unlike loss per token does not depend on the
-tokenizer. The ``paloma`` suite averages that over the sources with equal
-weight, so no one source dominates.
-
-Following Paloma's inference format, documents are scored individually rather
-than packed together, and a document longer than the context is split into
-inputs of the context's length. Each document is one rolling request: the
-provider scores it from a BOS token in windows of its context (or of the task's
-``max_length``), so every token is scored once and none is dropped.
-
-Each source is byte-weighted over all of its documents. The paper's per-source
-view instead averages over a source's domains; documents keep their
-``subdomain`` so that view can be computed from the predictions.
+Each document is scored on its own as one rolling request, so a document longer
+than the context is scored in full in windows of the context. A source is
+byte-weighted over all its documents; the paper instead averages over a source's
+domains, which the saved ``subdomain`` lets you recompute.
 """
 
 import sys
@@ -87,23 +75,20 @@ class PalomaBase(Task):
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert one document to an Instance scored as a whole text."""
-        text = doc["text"]
         return Instance(
             question="",
-            gold_answer=text,
+            gold_answer=doc["text"],
             metadata={
                 "id": index,
                 "doc_id": doc.get("id", index),
                 "subdomain": doc.get("subdomain"),
-                "num_bytes": len(text.encode("utf-8")),
             },
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
         """Score the document from BOS in windows of the context or ``max_length``."""
         if self.config.formatter is not None:
-            # A formatter builds its own request, which would not roll: a long document
-            # would be truncated while all its bytes still count.
+            # A formatter's request would not roll, so long documents would be truncated.
             raise ValueError("Paloma tasks score raw text and do not take a formatter")
         if self.config.num_fewshot:
             raise ValueError("Paloma tasks score raw text and do not take few-shot examples")
@@ -118,7 +103,7 @@ class PalomaBase(Task):
         )
 
 
-def _split_source(data_source: Any, split: Split) -> DataSource:
+def _split_source(data_source: DataSource, split: Split) -> DataSource:
     """The files of one Paloma split, loaded on their own.
 
     ``load_dataset`` on a Paloma config builds every split, so one unloadable
@@ -127,8 +112,6 @@ def _split_source(data_source: Any, split: Split) -> DataSource:
     """
     if split not in _PALOMA_SPLITS:
         raise ValueError(f"Paloma has no {split} split; use validation or test")
-    if not isinstance(data_source, DataSource) or data_source.subset is None:
-        raise ValueError(f"Paloma tasks need a DataSource naming the subset, got {data_source!r}")
     paloma_split = _PALOMA_SPLITS[split]
     data_files = _SPLIT_FILES.get(
         (data_source.subset, paloma_split), f"{data_source.subset}/{paloma_split}/*"
