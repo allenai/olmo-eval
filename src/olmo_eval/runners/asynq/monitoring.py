@@ -21,8 +21,12 @@ DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
 def provider_init_timeout(provider: ProviderConfig) -> float:
     """Return how long to wait for inference workers to initialize a provider.
 
-    A provider ``startup_timeout`` longer than the default wait extends it, with a 60s
-    buffer for worker setup before the server starts.
+    A provider ``startup_timeout`` bounds only the server's own startup. Workers also
+    spend time outside it, such as re-downloading the model with ``force_download``
+    before the server starts or starting a scaffold's sandboxes once it is ready, so the
+    default wait is added to ``startup_timeout`` rather than replaced by it. A server
+    that fails to start raises at ``startup_timeout`` regardless, so this wait only
+    bounds a worker that hangs.
 
     Args:
         provider: Provider configuration the inference workers load.
@@ -33,7 +37,7 @@ def provider_init_timeout(provider: ProviderConfig) -> float:
     startup_timeout = provider.kwargs.get("startup_timeout")
     if startup_timeout is None:
         return DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS
-    return max(DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS, float(startup_timeout) + 60.0)
+    return DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS + float(startup_timeout)
 
 
 def terminate_workers(
