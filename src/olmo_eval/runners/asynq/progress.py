@@ -1082,6 +1082,9 @@ def request_hash(item: QueueItem) -> str:
         instance.expected_final_state,
         {k: v for k, v in instance.metadata.items() if not callable(v)},
     ]
+    # Appended only when set, so the hashes of existing non-rolling requests stay put.
+    if request.rolling:
+        content.append({"rolling": True})
     blob = json.dumps(_canonical(content), sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:12]
 
