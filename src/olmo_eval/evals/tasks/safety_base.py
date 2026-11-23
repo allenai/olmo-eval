@@ -198,8 +198,7 @@ def register_safety_variants(
         judge_model=judge_model,
     )
 
-    # The base variant without the "\n\n" stop, so the judge sees a response that
-    # runs past its first paragraph. Every other setting matches "base".
+    # The base variant without the "\n\n" stop
     register_variant(
         eval_name,
         "base_multiparagraph",
