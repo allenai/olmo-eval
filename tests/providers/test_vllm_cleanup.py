@@ -15,7 +15,8 @@ from olmo_eval.runners.asynq.workers import inference_worker
 @pytest.fixture
 def engine(monkeypatch):
     core = SimpleNamespace(shutdown=Mock())
-    llm = SimpleNamespace(llm_engine=SimpleNamespace(engine_core=core))
+    tokenizer = SimpleNamespace(encode=lambda text, add_special_tokens=False: [1])
+    llm = SimpleNamespace(llm_engine=SimpleNamespace(engine_core=core), get_tokenizer=lambda: tokenizer)
     constructor = Mock(return_value=llm)
     monkeypatch.setitem(sys.modules, "vllm", SimpleNamespace(LLM=constructor))
     return core, constructor

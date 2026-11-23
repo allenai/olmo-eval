@@ -558,8 +558,10 @@ def test_text_that_is_not_in_the_prompt_is_refused() -> None:
 class ScoringTokenizer(FakeTokenizer):
     """One token per character (its code point), with BOS 1."""
 
-    bos_token_id = 1
     eos_token_id = 2
+
+    def __init__(self) -> None:
+        super().__init__(bos_token_id=1)
 
 
 def _logprob(prev: int, tid: int) -> float:
@@ -598,6 +600,7 @@ def _scoring_provider(monkeypatch, max_length: int) -> tuple[VLLMProvider, Scori
     provider.llm = llm
     provider._add_bos_token = None
     provider._max_length = max_length
+    provider._prefix_ids = default_prefix_ids(llm.tokenizer)
     return provider, llm
 
 
