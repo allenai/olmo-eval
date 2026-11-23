@@ -246,20 +246,29 @@ def prepare_environment(cache_root: Path, timeout: float) -> Path:
     """Check out the pinned AutomationBench and sync its locked environment.
 
     Returns the environment's Python. A checkout that finished syncing before is
-    reused; a partial one is replaced.
+    reused; a partial one is replaced. A file lock serializes installs, so two runs
+    on one host never replace each other's environment.
     """
+    import fcntl
+
     git, uv = shutil.which("git"), shutil.which("uv")
     if git is None or uv is None:
         raise RuntimeError("AutomationBench-AA needs git and uv on PATH to install the benchmark")
+    cache_root.mkdir(parents=True, exist_ok=True)
+    with open(cache_root / ".install.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _install(cache_root, git, uv, timeout)
+
+
+def _install(cache_root: Path, git: str, uv: str, timeout: float) -> Path:
     repo = cache_root / REPO_COMMIT
     python = repo / ".venv" / "bin" / "python"
     ready = repo / ".olmo-eval-ready"
     if ready.exists() and python.exists():
         return python
 
-    # Build in a private directory and move it into place, so a concurrent or
-    # interrupted install never leaves a half-built checkout under the final name.
-    cache_root.mkdir(parents=True, exist_ok=True)
+    # Fetch into a private directory and move it into place; an interrupted install
+    # leaves no ready marker, so the next run starts over.
     build = Path(tempfile.mkdtemp(prefix=f".{REPO_COMMIT[:12]}-", dir=cache_root))
     env = _subprocess_env()
 
@@ -490,6 +499,10 @@ class AutomationBenchAAExternalEval(ExternalEval):
             return await asyncio.wait_for(pump(), timeout=timeout), "\n".join(tail)
         except TimeoutError:
             tail.append(f"the run outlasted run_timeout ({timeout:.0f}s) and was stopped")
+            return -1, "\n".join(tail)
+        except ValueError as e:
+            # A line longer than the reader's limit; the driver is stopped below.
+            tail.append(f"could not read the driver's output: {e}")
             return -1, "\n".join(tail)
         finally:
             if proc.returncode is None:

@@ -99,6 +99,8 @@ A reply that the server returns but that cannot be used, such as an empty one, i
 model's failure. The client asks again up to 40 times first. A task that ends this way
 scores 0, as Artificial Analysis scores errored tasks, and none of its objectives count
 as met.
+Its prediction still records the objectives met in the state the agent reached
+(`objectives_met`, `state_aa_score`) beside its score (`aa_score`).
 
 The run fails if more than `max_failure_rate` (default 5%) of its tasks are unscored, if
 the benchmark process exits with an error, or if it outlasts `run_timeout` (default 20
