@@ -1,7 +1,8 @@
 """Paloma (https://arxiv.org/abs/2312.10523) bits per byte, one task per source.
 
 Each document is scored on its own as one rolling request, so a document longer
-than the context is scored in full in windows of the context. A source is
+than ``max_length`` is scored in full in windows of ``max_length``. The tasks
+require ``max_length`` so the window is part of the task hash. A source is
 byte-weighted over all its documents; the paper instead averages over a source's
 domains, which the saved ``subdomain`` lets you recompute.
 """
@@ -66,6 +67,13 @@ class PalomaBase(Task):
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield one instance per document in the split."""
+        if self.config.max_length is None:
+            # Left to the provider, the window would be its context, which is in the
+            # model hash, not the task hash: runs with different windows would share it.
+            raise ValueError(
+                "Paloma tasks need max_length, the window documents are scored in; set it "
+                "to the model's context, e.g. -o max_length=8192"
+            )
         if self._instances_cache is None:
             source = _split_source(self.config.data_source, self.config.split)
             self._instances_cache = [
@@ -86,7 +94,7 @@ class PalomaBase(Task):
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
-        """Score the document from BOS in windows of the context or ``max_length``."""
+        """Score the document from BOS in windows of ``max_length``."""
         if self.config.formatter is not None:
             # A formatter's request would not roll, so long documents would be truncated.
             raise ValueError("Paloma tasks score raw text and do not take a formatter")
