@@ -23,8 +23,14 @@ BEAKER_DEFAULT_RESUME_VOLUME = "ai2/olmo-eval"
 BEAKER_DEFAULT_RESUME_RETENTION_DAYS = 7
 
 SHARED_RUN_ENV = "OLMO_EVAL_SHARED_RUN_DIR"
-RESUME_COPY_RESULTS_ENV = "OLMO_EVAL_RESUME_COPY_RESULTS"
-"""Set to 1 to also copy a resumable run's output (without progress/) into Beaker results."""
+"""Set by the WEKA resume supervisor to the run's recovery directory on the volume."""
+SHARED_RUN_PROGRESS_DIR = "progress"
+"""Subdirectory of the recovery directory that holds progress records."""
+SHARED_RUN_IDENTITY_DIR = "identity"
+"""Subdirectory of the recovery directory that holds the run's manifest and upload secret."""
+SHARED_RUN_IDENTITY_FILES = ("manifest.json", ".upload-secret")
+"""The output files that carry a run's identity (upload.manifest's MANIFEST_NAME and
+RUN_SECRET_NAME), saved so a replacement job keeps the run ID."""
 
 BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64"
 """Default Docker image for Beaker evaluation jobs."""
@@ -34,6 +40,10 @@ BEAKER_SGLANG_IMAGE = "01M5VBMKPG8BX4BVJBGVBMF64V"
 
 BEAKER_SANDBOX_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc2100-amd64-sandbox"
 """Docker image for Beaker evaluation jobs with sandbox support (includes Podman)."""
+
+BEAKER_SGLANG_SANDBOX_IMAGE = "01M765Y8PKZG005F44450HCH8R"
+"""olmo-eval-cu1302-trc2130-amd64-devel-sandbox: the SGLang base plus Podman, for
+sandboxed harnesses; recipe: docs/sglang.md."""
 
 BEAKER_RESULT_DIR = "/results"
 """Default directory for evaluation results in Beaker jobs."""
@@ -216,6 +226,7 @@ BACKEND_OPTIONAL_GROUPS: dict[str, str | None] = {
     "olmo_core_vlm": "olmo_core_vlm",
     "litellm": "litellm",
     "mock": None,
+    "replay": None,
 }
 """Mapping of backend types to their pyproject.toml optional dependency group names.
 

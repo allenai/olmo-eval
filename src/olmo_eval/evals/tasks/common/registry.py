@@ -105,6 +105,45 @@ def register_variant(task_name: str, variant: str, **overrides: Any) -> None:
     _variants.setdefault(task_name, {})[variant] = overrides
 
 
+def register_sampling_variant(spec: str, variant: str, **sampling: Any) -> str:
+    """Register ``spec`` with only some of its sampling settings changed, and return the new spec.
+
+    A variant's ``sampling_params`` replaces the whole block, so stacking one on ``spec``
+    would drop what ``spec``'s own variants set there (a pass@k sample count, say). This
+    instead folds ``spec``'s variants and the changed fields into one variant of its base
+    task: ``register_sampling_variant("hmmt_feb_2025:pass_at_8", "t10", temperature=1.0)``
+    registers and returns ``hmmt_feb_2025:pass_at_8_t10``.
+
+    Args:
+        spec: A registered task spec (``task_name[:variant...]``).
+        variant: Suffix naming the change; joined to ``spec``'s variants with ``_``.
+        **sampling: ``SamplingParams`` fields to change.
+    """
+    parts = spec.split(":")
+    for i in range(len(parts), 0, -1):
+        task_name = ":".join(parts[:i])
+        if task_name in _tasks:
+            variants = parts[i:]
+            break
+    else:
+        raise ValueError(f"Unknown task in spec {spec!r}")
+
+    config = _configs[task_name]
+    overrides: dict[str, Any] = {}
+    for name in variants:
+        if name not in _variants.get(task_name, {}):
+            raise ValueError(f"Unknown variant {name!r} in spec {spec!r}")
+        overrides.update(_variants[task_name][name])
+        config = replace(config, **_variants[task_name][name])
+    if config.sampling_params is None:
+        raise ValueError(f"{spec!r} has no sampling settings to change")
+    overrides["sampling_params"] = replace(config.sampling_params, **sampling)
+
+    name = "_".join([*variants, variant])
+    register_variant(task_name, name, **overrides)
+    return f"{task_name}:{name}"
+
+
 def _parse_bool(value_str: str, key: str) -> bool:
     """Coerce an override value to a bool (true/false/1/0, case-insensitive)."""
     normalized = value_str.strip().lower()

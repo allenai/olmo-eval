@@ -1,7 +1,9 @@
 """Progress records that let a restarted run skip the work it already finished.
 
 A run started with ``--resume`` records progress under ``<output_dir>/progress/<model>/``
-and continues from it when it is there. The records are one run-level stream of
+and continues from it when it is there. Under the WEKA resume supervisor the records go
+to ``<recovery dir>/progress/<model>/`` on the volume instead, and outputs stay in the
+output directory (see :func:`progress_root`). The records are one run-level stream of
 tagged entries (``run.segments``) plus one ``<spec>_<hash6>.final.json``
 per finalized task. For each task the stream has a header naming what the task
 measures (task, model, harness, engine and code) and where it ran, then one entry per
@@ -58,7 +60,13 @@ from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, SHARED_RUN_ENV
+from olmo_eval.common.constants.infrastructure import (
+    BEAKER_RESULT_DIR,
+    SHARED_RUN_ENV,
+    SHARED_RUN_IDENTITY_DIR,
+    SHARED_RUN_IDENTITY_FILES,
+    SHARED_RUN_PROGRESS_DIR,
+)
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.scoring_failures import output_scoring_errors
 from olmo_eval.common.shutdown import shutdown_requested
@@ -82,12 +90,63 @@ FINAL_SUFFIX = ".final.json"
 LOCK_NAME = ".lock"
 
 
-def is_shared_output(output_dir: str | Path) -> bool:
-    """Whether a shared-run supervisor retains this output directory's checkpoints."""
+def shared_run_dir() -> Path | None:
+    """The WEKA recovery directory of a run under the resume supervisor, if any.
+
+    The supervisor sets SHARED_RUN_ENV for its child and writes ``session.json`` before
+    starting it. Requiring both keeps a stray inherited variable from moving records.
+    """
     directory = os.environ.get(SHARED_RUN_ENV)
-    return (
-        directory is not None and Path(output_dir).resolve() == Path(directory).resolve() / "output"
-    )
+    if not directory or not (Path(directory) / "session.json").is_file():
+        return None
+    return Path(directory)
+
+
+def is_shared_run() -> bool:
+    """Whether the resume supervisor keeps this run's progress and identity on WEKA."""
+    return shared_run_dir() is not None
+
+
+def progress_root(output_dir: str | Path) -> Path:
+    """Directory holding progress records: on WEKA under the supervisor, else beside outputs.
+
+    Under the supervisor, outputs go to Beaker results as they do without resume, and only
+    the records needed to continue the run go to the volume.
+    """
+    shared = shared_run_dir()
+    return shared / SHARED_RUN_PROGRESS_DIR if shared else Path(output_dir) / PROGRESS_DIR
+
+
+def restore_shared_identity(output_dir: str | Path) -> None:
+    """Put the run's saved manifest and upload secret in ``output_dir``.
+
+    A replacement job's Beaker results may start empty, or with a copy Beaker carried
+    over from an earlier snapshot. The saved identity is the newest (the supervisor also
+    saves it when each attempt exits), so it replaces either, and the replacement keeps
+    the run ID, upload secret and restart history of the run it continues.
+    """
+    shared = shared_run_dir()
+    if shared is None:
+        return
+    copy_identity(shared / SHARED_RUN_IDENTITY_DIR, Path(output_dir))
+
+
+def save_shared_identity(output_dir: str | Path) -> None:
+    """Save the run's manifest and upload secret to WEKA for a replacement job."""
+    shared = shared_run_dir()
+    if shared is None:
+        return
+    copy_identity(Path(output_dir), shared / SHARED_RUN_IDENTITY_DIR)
+
+
+def copy_identity(source: Path, target: Path) -> None:
+    """Copy the identity files present in ``source`` to ``target``, each atomically."""
+    for name in SHARED_RUN_IDENTITY_FILES:
+        if (source / name).is_file():
+            target.mkdir(mode=0o700, parents=True, exist_ok=True)
+            tmp = target / f".{name}.tmp"
+            shutil.copy2(source / name, tmp)
+            os.replace(tmp, target / name)
 
 
 # Dataset carry-over follows Beaker's snapshot cadence. Shared storage can publish
@@ -489,7 +548,7 @@ class ProgressStore:
 
 
 def _model_dir(output_dir: str | Path, model_name: str) -> Path:
-    return Path(output_dir) / PROGRESS_DIR / sanitize_spec_for_filename(model_name)
+    return progress_root(output_dir) / sanitize_spec_for_filename(model_name)
 
 
 def task_key(spec: str, task_hash: str) -> str:
@@ -503,7 +562,7 @@ def final_path(output_dir: str | Path, model_name: str, spec: str, task_hash: st
 
 
 def model_lock(output_dir: str | Path, model_name: str) -> ProgressLock:
-    """The lock on one model's progress in the output directory."""
+    """The lock on one model's progress under the run's progress root."""
     return ProgressLock(_model_dir(output_dir, model_name))
 
 
@@ -513,14 +572,14 @@ def stream_dir(output_dir: str | Path, model_name: str) -> Path:
 
 
 def has_progress(output_dir: str | Path) -> bool:
-    """Whether the output directory holds any progress record (a lock file is not one)."""
-    path = Path(output_dir) / PROGRESS_DIR
+    """Whether the run's progress root holds any progress record (a lock file is not one)."""
+    path = progress_root(output_dir)
     return path.is_dir() and any(p.is_file() and p.name != LOCK_NAME for p in path.rglob("*"))
 
 
 def remove_empty_progress_dirs(output_dir: str | Path, model_name: str) -> None:
-    """Remove the model's progress directory and ``progress/`` when nothing is left in them."""
-    _remove_empty_dirs(_model_dir(output_dir, model_name), Path(output_dir) / PROGRESS_DIR)
+    """Remove the model's progress directory and the progress root when they are empty."""
+    _remove_empty_dirs(_model_dir(output_dir, model_name), progress_root(output_dir))
 
 
 def _remove_empty_dirs(*directories: Path) -> None:
@@ -546,9 +605,7 @@ def discard_progress(
     """
     model_dir = _model_dir(output_dir, model_name)
     with contextlib.nullcontext() if lock is not None and lock.held else ProgressLock(model_dir):
-        store = ProgressStore(
-            stream_dir(output_dir, model_name), verify_integrity=is_shared_output(output_dir)
-        )
+        store = ProgressStore(stream_dir(output_dir, model_name), verify_integrity=is_shared_run())
         try:
             store.drop(specs=specs)
         except ProgressMismatchError as e:
@@ -557,7 +614,7 @@ def discard_progress(
         for path in model_dir.glob(f"*{FINAL_SUFFIX}"):
             if _final_spec(path, specs) is not None:
                 path.unlink()
-    _remove_empty_dirs(model_dir, Path(output_dir) / PROGRESS_DIR)
+    _remove_empty_dirs(model_dir, progress_root(output_dir))
 
 
 def _final_spec(path: Path, specs: Collection[str] | None = None) -> str | None:
@@ -1337,7 +1394,10 @@ class RunProgress:
             return None
         for name, digest in data.get("checksums", {}).items():
             if ProgressStore._digest(Path(self.output_dir) / name) != digest:
-                raise ProgressMismatchError(f"Finalized WEKA output changed: {name}")
+                # Outputs live in Beaker results, which a replacement job may start with
+                # an earlier copy of. The records rebuild them.
+                logger.info(f"{spec} was finalized, but {name} differs; recomputing it")
+                return None
         return TaskResult(**decode_value(data["result"]))
 
     def restore(
@@ -1375,7 +1435,7 @@ class RunProgress:
 
         self._store = store = ProgressStore(
             stream_dir(self.output_dir, self.model_name),
-            verify_integrity=is_shared_output(self.output_dir),
+            verify_integrity=is_shared_run(),
         )
         restored = Restored()
         expected: dict[str, dict[str, Any]] = {}
@@ -1621,7 +1681,7 @@ class RunProgress:
                                 for path in paths.values()
                             }
                         }
-                        if is_shared_output(self.output_dir)
+                        if is_shared_run()
                         else {}
                     ),
                     "result": encode_value(stored),
@@ -1650,7 +1710,7 @@ class RunProgress:
                 return
         self.close()
         _remove_empty_dirs(
-            _model_dir(self.output_dir, self.model_name), Path(self.output_dir) / PROGRESS_DIR
+            _model_dir(self.output_dir, self.model_name), progress_root(self.output_dir)
         )
 
     def _flush(self) -> None:

@@ -459,6 +459,40 @@ class TestUploaderKeyInjection:
         mock_ensure.assert_not_called()
         assert ("OLMO_EVAL_UPLOAD_CREDENTIALS", "olmo_eval_uploader_key") in kwargs["env_secrets"]
 
+    def test_unreadable_key_injects_the_workspace_secret(self):
+        """A launcher without a usable Google login still uploads through the existing secret."""
+        from unittest.mock import MagicMock, patch
+
+        from olmo_eval.launch import BeakerLauncher
+        from olmo_eval.launch.beaker.uploader import UploaderKeyError
+
+        launcher = BeakerLauncher(workspace="ai2/oe-data")
+        launcher._beaker = MagicMock(user_name="test-user")
+        config = BeakerJobConfig(
+            name="test",
+            command=["echo"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-other",
+            weka_buckets=[],
+            inject_upload_credentials=True,
+        )
+        workspace_client = MagicMock()
+        with (
+            patch("gantry.api.launch_experiment") as mock_launch,
+            patch(
+                "olmo_eval.launch.beaker.uploader.fetch_uploader_key",
+                side_effect=UploaderKeyError("Reauthentication failed."),
+            ),
+            patch("beaker.Beaker.from_env", return_value=workspace_client) as from_env,
+        ):
+            launcher.launch(config, dry_run=False)
+        from_env.assert_called_with(default_workspace="ai2/oe-data")
+        workspace_client.secret.get.assert_called_with("olmo_eval_uploader_key")
+        workspace_client.secret.write.assert_not_called()
+        env_secrets = mock_launch.call_args.kwargs["env_secrets"]
+        assert ("OLMO_EVAL_UPLOAD_CREDENTIALS", "olmo_eval_uploader_key") in env_secrets
+
 
 class TestBeakerLauncherImport:
     """Tests for BeakerLauncher import behavior."""
@@ -822,6 +856,26 @@ class TestBuildCommandWithTaskPackages:
             "| grep -vE '^nvidia-cutlass-dsl' > /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "grep -E '^(torch|nvidia-)' > /tmp/cuda-constraints.txt" not in install_cmd
+
+    def test_runtime_torch_index_is_extra_to_pypi_for_provider_builds(self):
+        """Provider build dependencies should resolve from PyPI, not the Torch index."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=[],
+            env_exports={
+                "OLMO_EVAL_RUNTIME_TORCH_VERSION": "2.11.0",
+                "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL": "https://download.pytorch.org/whl/cu130",
+            },
+            provider_packages=["git+https://github.com/user/plugin@main"],
+        )
+
+        assert (
+            "--index-url https://pypi.org/simple "
+            "--extra-index-url https://download.pytorch.org/whl/cu130 "
+            "--index-strategy unsafe-best-match"
+        ) in install_cmd
 
     def test_no_task_packages_if_none(self):
         """Test that no extra install steps if task_packages is None."""

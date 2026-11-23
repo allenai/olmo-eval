@@ -11,6 +11,7 @@ from .agent import (
 from .base import (
     CONTEXT_CUT_TOKENS_KEY,
     FOLLOW_UP_TURNS_KEY,
+    SCORING_TEXT_EMPTY_KEY,
     TURNS_KEY,
     ContextFit,
     Instance,
@@ -65,6 +66,7 @@ __all__ = [
     "CONTEXT_CUT_TOKENS_KEY",
     "FOLLOW_UP_TURNS_KEY",
     "TURNS_KEY",
+    "SCORING_TEXT_EMPTY_KEY",
     "AgentMetrics",
     "AgentTrajectory",
     "AgentTurn",

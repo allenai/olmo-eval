@@ -34,6 +34,7 @@ from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import AccuracyMetric, Metric
 from olmo_eval.common.scorers import ExactMatchScorer, Scorer
 from olmo_eval.common.types import (
+    SCORING_TEXT_EMPTY_KEY,
     Instance,
     LMOutput,
     LMRequest,
@@ -601,6 +602,12 @@ _SHORT_ANSWER_SAMPLING = SamplingParams(temperature=0.0, max_tokens=128)
 
 class GeneTuringTask(Task):
     """Base class for GeneTuring subtasks."""
+
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        for response in responses:
+            for output in response.outputs:
+                output.metadata[SCORING_TEXT_EMPTY_KEY] = not _strip_thinking(output.text).strip()
+        super()._extract_answers(responses)
 
     def __init_subclass__(
         cls,

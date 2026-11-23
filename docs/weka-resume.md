@@ -25,10 +25,10 @@ have a claim. Never create claims implicitly during launch.
    secret mappings. This bridge supports the locked SDK (2.6.0) and Gantry (3.7.0);
    SDK 2.8.0+ supports native mounts and permits a future SDK-only submission path.
 3. Wrap the task command in a shared-run lifecycle. Allocate a unique directory per
-   submission, stable across replacement jobs, and put the complete output directory
-   there. Take an advisory lock before touching manifests or progress. Reclaim the
-   predecessor's progress locks only while holding this outer lock. Leave only a
-   small receipt in Beaker `/results`, with no symlink to the volume.
+   submission, stable across replacement jobs. (The first version put the complete
+   output directory there; see "Outputs stay in Beaker results" below.) Take an advisory lock before touching manifests or progress. Reclaim the
+   predecessor's progress locks only while holding this outer lock. (The first version
+   left only a small receipt in Beaker `/results`; see "Outputs stay in Beaker results".)
 4. Refresh recovery files during active runs. Use one `tmp-<days>d` ancestor (default `tmp-7d`), never nested
    `tmp-*` directories. Refresh every file's mtime, not just a heartbeat: prune uses
    per-file mtime and reading files does not extend their lifetime. Preserve completed
@@ -52,7 +52,7 @@ have a claim. Never create claims implicitly during launch.
   where allocated, bounded timeout. First qualify storage. Then run the actual
   wrapper with a local-fixture deterministic eval and real preemption/retry. Verify
   run ID, completed-instance reuse, failure counts, exactly one final row per instance,
-  intact finalized tasks, and small Beaker receipts.
+  intact finalized tasks, and complete Beaker results.
 - Scale: compare 1 GB and 10 GB WEKA state across replacements, checksum it, and
   separate scheduler/finalization delay, Gantry setup, and restore time. Cap all
   scratch data well below the volume's 500 GB capacity.
@@ -293,3 +293,34 @@ passed**. The focused launcher/lifecycle run passed 192 tests.
 
 No volume failures occurred in this validation. Live dashboard-upload validation and
 production-workspace claims remain deployment checks.
+
+
+## Outputs stay in Beaker results
+
+The first version of this change moved the whole output directory to WEKA and left only
+a `weka-resume.json` receipt in Beaker `/results`. That was a breaking change. Beaker
+results no longer held predictions, requests, metrics or logs, and the WEKA copies are
+pruned after the retention window. Runs launched with `--no-upload`, and anyone who
+downloaded predictions from Beaker, lost them.
+
+Beaker results now behave as they did before resumability (`747508d8`):
+
+- The eval runs with `-O /results`, so it writes the same files at the same moments as
+  a run without resume: the manifest at start, vLLM logs and inference metrics as they
+  grow, each task's predictions and requests when the task finishes, and `metrics.json`
+  at the end.
+- Only recovery state goes to `tmp-<days>d/<uuid>/` on the volume. `progress/` holds the
+  progress records (`progress_root()` in `runners/asynq/progress.py`). `identity/` holds
+  the run's `manifest.json` and `.upload-secret`, saved when the run starts.
+- A replacement job may start with empty results. It restores the saved identity where
+  missing, so it keeps the run ID. A finalized task whose predictions are missing from
+  `/results`, or differ from the recorded checksums, is rebuilt from its records instead
+  of raising.
+- The supervisor saves the identity again when each attempt exits, so an upload secret
+  created late (by the final upload, or when marking the run interrupted) is kept.
+- A completed run deletes `progress/` and writes `complete.json`; the small `identity/`
+  stays until retention prunes it. If Beaker reruns a completed job and its results hold
+  the completed manifest and `metrics.json`, the job exits. Otherwise it runs the eval
+  again under the same run ID, as a job without resume would.
+- The receipt and the copy of outputs to WEKA are gone. The job log names the WEKA
+  recovery directory.

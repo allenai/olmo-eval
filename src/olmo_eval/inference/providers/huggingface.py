@@ -17,7 +17,11 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.inference.base import InferenceProvider
-from olmo_eval.inference.request_utils import chat_messages_for_request
+from olmo_eval.inference.request_utils import (
+    chat_messages_for_request,
+    chat_with_images,
+    render_chat,
+)
 from olmo_eval.inference.tokenizer_utils import (
     default_prefix_ids,
     encode_context_and_continuation,
@@ -498,27 +502,13 @@ class HuggingFaceProvider(InferenceProvider):
         """Build processor chat messages, injecting images into the user turn.
 
         Mirrors the released Molmo2 HF eval: a single user turn whose content is
-        the image(s) followed by the question text. A system message (if present)
-        is preserved as a text-only turn; images attach to the first user turn.
+        the image(s) followed by the question text, unless the request places its
+        images with ``{"type": "image"}`` parts. A system message (if present) is
+        preserved as a text-only turn; :func:`render_chat` drops it only for a chat
+        template that rejects it.
         """
         image_parts = [{"type": "image", "image": img} for img in (images or ())]
-        messages = chat_messages_for_request(request)
-
-        chat: list[dict[str, Any]] = []
-        attached = False
-        for msg in messages:
-            role = msg.get("role", "user")
-            text = msg.get("content", "") or ""
-            if role == "user" and not attached and image_parts:
-                chat.append(
-                    {"role": role, "content": [*image_parts, {"type": "text", "text": text}]}
-                )
-                attached = True
-            else:
-                chat.append({"role": role, "content": [{"type": "text", "text": text}]})
-        if not attached and image_parts:
-            chat.insert(0, {"role": "user", "content": image_parts})
-        return chat
+        return chat_with_images(chat_messages_for_request(request), image_parts)
 
     def _generate_multimodal(
         self, requests: list[LMRequest], params: SamplingParams
@@ -553,8 +543,11 @@ class HuggingFaceProvider(InferenceProvider):
                     img = img.convert("RGB")
                 pil_images.append(img)
 
-            text = self.processor.apply_chat_template(
-                chat, tokenize=False, add_generation_prompt=True
+            text = render_chat(
+                lambda c: self.processor.apply_chat_template(
+                    c, tokenize=False, add_generation_prompt=True
+                ),
+                chat,
             )
             if pil_images:
                 max_crops = self.max_crops if len(pil_images) == 1 else self.max_multi_image_crops

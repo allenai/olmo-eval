@@ -389,3 +389,30 @@ def test_sage_empty_counts_match_its_scored_text(spec, text, expected_empty, has
     assert counts is not None
     assert counts["empty"] == int(expected_empty and not has_tool_call)
     assert response.outputs[0].text == text
+
+
+@pytest.mark.parametrize(
+    "spec", ["expertqa", "expertqa:cite", "researchqa", "geneturing_gene_name_conversion"]
+)
+@pytest.mark.parametrize(
+    "answer,empty", [("", True), ("  ", True), ("malformed but nonempty", False)]
+)
+def test_internal_thinking_stripping_counts_scoring_text(spec, answer, empty):
+    task = get_task(spec)
+    response = _response((f"<think>plan</think>{answer}", "stop"))
+    from unittest.mock import AsyncMock
+
+    if spec.startswith("expertqa"):
+        task.__dict__["_judge"] = None
+        task._score_output = AsyncMock(return_value={})
+    elif spec == "researchqa":
+        task.__dict__["_judge"] = None
+        task._score_single = AsyncMock(return_value=({}, [], [], 0))
+    asyncio.run(task.score_responses([response]))
+    from olmo_eval.runners.io.builders import build_predictions
+
+    counts = count_generations([response])
+    assert counts["empty"] == int(empty)
+    prediction = build_predictions([response])[0]
+    assert prediction["model_output"][0]["scoring_text_empty"] is empty
+    assert response.outputs[0].text == f"<think>plan</think>{answer}"

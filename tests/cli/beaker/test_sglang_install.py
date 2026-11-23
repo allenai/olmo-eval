@@ -7,7 +7,12 @@ import pytest
 from olmo_eval.cli.beaker.config_loader import LaunchConfig
 from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
 from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
-from olmo_eval.common.constants.infrastructure import BEAKER_DEFAULT_IMAGE, BEAKER_SGLANG_IMAGE
+from olmo_eval.common.constants.infrastructure import (
+    BEAKER_DEFAULT_IMAGE,
+    BEAKER_SANDBOX_IMAGE,
+    BEAKER_SGLANG_IMAGE,
+    BEAKER_SGLANG_SANDBOX_IMAGE,
+)
 from olmo_eval.launch.beaker.launcher import BeakerLauncher
 
 
@@ -86,3 +91,49 @@ def test_job_installs_selected_provider(provider_kind, custom_package, image, li
     else:
         assert "sglang" not in command
     assert "-c /tmp/cuda-constraints.txt" in command
+
+
+@pytest.mark.parametrize("provider_kind", ["sglang", "vllm"])
+@pytest.mark.parametrize("image", [None, "explicit-image"])
+def test_sandbox_harness_image_follows_provider(provider_kind, image):
+    """A sandboxed harness needs Podman, and SGLang needs its CUDA 13 base, so the
+    CUDA 12.8 sandbox image serves only non-SGLang providers."""
+    config = LaunchConfig(
+        name="sandbox-image-test",
+        model_specs=["llama3.1-8b"],
+        task_specs=["gsm8k"],
+        cluster="h100",
+        workspace="ai2/test",
+        harness="codex_python",
+        harness_overrides=[f"provider.kind={provider_kind}"],
+    )
+    plan = ExperimentPlan(
+        name=config.name,
+        model_spec=config.model_specs[0],
+        priority="normal",
+        tasks=config.task_specs,
+        original_task_specs=config.task_specs,
+        total_expanded_tasks=1,
+        num_gpus=1,
+    )
+    assembler = JobConfigAssembler(
+        config=config,
+        effective_image=image,
+        effective_groups=[],
+        beaker_username="test-user",
+        common_secrets=[],
+        task_secrets=[],
+        inject_aws_credentials=False,
+        inject_gcs_credentials=False,
+        enable_sandbox=True,
+    )
+    with (
+        patch("olmo_eval.cli.beaker.job_assembler.cluster_has_weka", return_value=False),
+        patch(
+            "olmo_eval.launch.beaker.mirror.get_registry_mirror_url",
+            return_value="mirror.test",
+        ),
+    ):
+        job = assembler.assemble(plan)
+    default = BEAKER_SGLANG_SANDBOX_IMAGE if provider_kind == "sglang" else BEAKER_SANDBOX_IMAGE
+    assert job.beaker_image == (image or default)

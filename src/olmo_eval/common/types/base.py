@@ -222,6 +222,11 @@ class Instance:
 #: conversation sends after each of the model's replies.
 FOLLOW_UP_TURNS_KEY = "follow_up_turns"
 
+
+#: Whether the text used for scoring is empty, before answer parsing. Tasks that
+#: transform text internally set this without replacing ``LMOutput.text``.
+SCORING_TEXT_EMPTY_KEY = "scoring_text_empty"
+
 #: ``LMOutput.metadata`` key holding one record per user turn the model answered, in
 #: order: the reply as ``text``, plus the ``finish_reason``, ``prompt_tokens`` and
 #: ``completion_tokens`` the provider reported for that turn.

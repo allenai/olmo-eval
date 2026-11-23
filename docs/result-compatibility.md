@@ -28,6 +28,80 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: the two are not interchangeable; fixed-example results serve only
   as an ablation of this change.
 
+## 2026-11-12: Namespaced Hugging Face dataset ids for six tasks (#558)
+
+- **Affected**: every spec of `gsm8k` (except `gsm8k:platinum`, which has its own
+  dataset), `csqa`, `piqa`, `socialiqa`, `winogrande`, `humaneval` and
+  `codex_humaneval`, 60 specs in all, including their `olmo3base`, `olmes`, `bpb`,
+  `mc`/`rc`, `full`, `xlarge`, `chat` and pass@k variants.
+- **Change**: the data is now read from `openai/gsm8k`, `tau/commonsense_qa`,
+  `ybisk/piqa`, `allenai/social_i_qa`, `allenai/winogrande` and
+  `openai/openai_humaneval` instead of the legacy un-namespaced ids, which current
+  `huggingface_hub` no longer resolves from an empty cache. These are the repositories the
+  legacy ids pointed to, with the same splits and row counts. Prompts, few-shot examples,
+  sampling and metrics are unchanged.
+- **Identity**: the data source is part of a task's identity, so all 60 task hashes
+  change.
+- **Comparability**: results from before and after measure the same thing and remain
+  comparable; they differ only in task hash.
+
+## 2026-11-12: Sandbox HTTP commands stop waiting for background processes (#527)
+
+- **Affected**: independent `execute_command` and `execute_code` calls that go through the
+  SWE-ReX HTTP server: Modal sandboxes, and Docker/Podman sandboxes that set `exec_shell` or
+  whose image fails the process-supervision probe. Persistent bash sessions are not affected.
+- **Change**: a command that starts a background process still writing to the command's
+  output (`python server.py &` with no redirect) used to block until `command_timeout` and
+  end in a timeout error. It now returns when its shell exits, with the output written so
+  far, and the background process keeps running; its later output goes to an unlinked file
+  in the sandbox's `/tmp` until it exits. Commands that start no such process are unchanged.
+- **Identity**: no task hash moves, so results from before and after can only be told apart
+  by commit or date.
+- **Comparability**: agentic results on those sandbox paths can differ wherever the agent
+  ran such a command, because the agent now sees its output instead of a timeout. Other
+  results are unchanged.
+
+## 2026-11-03: Terminal-Bench and TBLite leave harness failures out of their scores (#539)
+
+- **Affected**: the `terminal_bench_2` and `openthoughts_tblite` external evals, for
+  runs in which some trial hit a harness or infrastructure failure (image build,
+  container, verifier timeout or unreadable reward, model server). Runs without one
+  are unchanged.
+- **Change**: such a trial used to count as 0 in `pass_rate`, `pass@k`,
+  `pass_rate_std`/`pass_rate_sem` and the per-difficulty and per-category rates, and
+  the run always reported success. It now has no score: those metrics leave it out,
+  and `num_errors` counts it. `pass@k` averages only over tasks with at least `k`
+  measured trials, and `pass@k_num_tasks` counts them. `pass_rate_adjusted`, which already left such trials out
+  and now equals `pass_rate`, is removed. The run fails when more than
+  `max_error_rate` (0.05 by default) of its trials failed this way. A reply that broke
+  the tool-call protocol (`model_error`) is no longer counted as an error; it stays a
+  scored trial.
+- **Identity**: the task hash, computed from `eval_name` and the `eval_args` passed, does
+  not move, so results from before and after can only be told apart by commit or date.
+  Passing `max_error_rate` explicitly changes the hash.
+- **Comparability**: an earlier result whose `error_rate` is 0 is unchanged. For one
+  with errors, its `pass_rate_adjusted` is the new `pass_rate`.
+
+## 2026-11-03: SWE-bench Verified leaves harness failures out of its scores (#538)
+
+- **Affected**: the `swe_bench_verified` external eval, for runs in which some instance
+  hit a harness or infrastructure failure (`image_error`, `image_timeout`,
+  `sandbox_error`, `agent_error`, `grading_error`). Runs without one are unchanged.
+- **Change**: such an instance used to count as unresolved in `resolve_rate` and the
+  other rates, and the run reported success unless every instance failed. It now has
+  no score: the rates and per-repo and per-difficulty breakdowns leave it out, and
+  `num_errors` counts it. The run fails when more than `max_error_rate` (0.05 by
+  default) of its instances failed this way. `error_rate` no longer counts a reply that
+  broke the tool-call protocol (`model_error`), which stays a scored instance.
+  `resume_from` reruns harness failures instead of keeping them.
+- **Identity**: the task hash, computed from `eval_name` and the `eval_args` passed, does
+  not move, so results from before and after can only be told apart by commit or date.
+  Passing `max_error_rate` explicitly changes the hash.
+- **Comparability**: an earlier result whose `error_rate` is 0 is unchanged. One with
+  errors understated `resolve_rate` by roughly that rate times the true resolve rate;
+  dividing `num_resolved` by the number of instances without an error gives the new
+  value, except where an errored instance's partial patch resolved and was counted.
+
 ## 2026-11-03: Auditable IFEval per-question exports
 
 - **Affected**: predictions produced with the four IFEval metrics, including `ifeval`,
@@ -133,6 +207,33 @@ separate and provisional. Do not choose seeds or parameters to fit aggregate tot
 - **Comparability**: results for unaffected tokenizers are unchanged. Earlier
   log-likelihood results for affected models, and in-process `vllm` chat results for
   models whose chat template writes BOS, are not comparable and should be re-run.
+
+## 2026-10-31: Empty scoring-text diagnostics
+
+- **Affected**: `expertqa`, `researchqa`, their variants, and `geneturing_*` tasks.
+- **Change**: `generation_counts.empty` uses the text remaining after each task's
+  internal thinking removal. The `scoring_text_empty` flag is saved with predictions.
+  Earlier empty counts may undercount reasoning-only outputs.
+- **Identity**: task hashes and scores do not change; only diagnostics change.
+- **Comparability**: quality scores remain comparable. Historical diagnostic counts
+  are not automatically recomputed.
+
+## 2026-10-31: Opt-in Harmony response parsing (#398)
+
+- **Affected:** only runs explicitly setting `response_parser=harmony`; existing
+  specs, suites and default parsing are unchanged.
+- **Change:** structured Harmony transcripts score only the final-channel body;
+  a recognized analysis trace without a final channel scores an empty answer.
+  Inline vLLM retains reserved token delimiters for the opt-in parser; its default
+  output is unchanged. Saved predictions keep the original decoded text as
+  `original_text` and the delimited text as `text_with_special_tokens`.
+  Already saved token-stripped `analysis...assistantfinal...` transcripts are not
+  recoverable unambiguously.
+- **Identity:** the parser setting is serialized and changes the task hash; absent
+  settings preserve every existing hash.
+- **Comparability:** parsed results are a different measurement from older runs
+  that scored reasoning and answer together. Compare only runs with the same
+  parser and decoding settings. This adds no numerical parity claim.
 
 ## 2026-10-26: Judge identity in the hash; no verdict leaves an output unscored (#512)
 

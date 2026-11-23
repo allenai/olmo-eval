@@ -33,10 +33,18 @@ turns, thinking off and the server's sampling defaults. Its run ends when the
 model calls `submit()`; set `stop_on_submit=false` to let it keep going until
 `max_turns`.
 
+An instance that the harness or infrastructure failed (an image that would not
+pull, a container or grader that died, a model server that stopped answering) is
+not scored: `resolve_rate` and the other rates leave it out, and `num_errors` and
+`error_rate` count it. The run fails when more than `max_error_rate` of its
+instances (default 0.05) failed this way, or when all of them did. Running out
+of turns, time or context, and a reply that breaks the tool-call protocol
+(`model_error`), are the agent's failures and stay scored.
+
 Each finished instance is appended to `swe_bench_verified_progress.jsonl` in the
 output directory, so a job that is killed or preempted keeps its finished work.
 Pass that file as `resume_from` to a new run to skip the instances it already
-covers.
+covers; instances the harness failed are run again.
 
 Other arguments include `limit`, `repos`, `max_turns`, `command_timeout`,
 `agent_timeout`, `image_timeout`, `eval_timeout`, `include_hints`, and the
