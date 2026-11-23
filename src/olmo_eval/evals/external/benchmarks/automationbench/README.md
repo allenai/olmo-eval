@@ -96,7 +96,9 @@ failure to check the task's assertions. Such a task is left unscored: it is left
 every metric and listed under `failed_tasks` in the metadata.
 
 A reply that the server returns but that cannot be used, such as an empty one, is the
-model's failure. The client asks again up to 40 times first. A task that ends this way
+model's failure. So is a request the server rejects because the history holds a tool
+call the model wrote with arguments that are not JSON: vLLM parses earlier tool calls
+when it renders the prompt. The client asks again up to 40 times first. A task that ends this way
 scores 0, as Artificial Analysis scores errored tasks, and none of its objectives count
 as met.
 Its prediction still records the objectives met in the state the agent reached

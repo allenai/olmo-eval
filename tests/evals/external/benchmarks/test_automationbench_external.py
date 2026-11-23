@@ -301,6 +301,42 @@ class TestOlmoEvalRecord:
         assert state["_olmo_eval"]["error_kind"] == driver.INFRA_ERROR
         assert "server down" in state["_olmo_eval"]["error"]
 
+    def test_rejected_history_with_a_malformed_tool_call_is_the_models_error(self):
+        class BadRequestError(Exception):
+            pass
+
+        def rejected() -> Exception:
+            try:
+                try:
+                    raise BadRequestError("Error code: 400 - Unterminated string")
+                except BadRequestError as e:
+                    raise RuntimeError("model call failed") from e
+            except RuntimeError as e:
+                return e
+
+        bad_call = {"role": "assistant", "tool_calls": [{"id": "1", "arguments": '{"q": "x'}]}
+        good_call = {"role": "assistant", "tool_calls": [{"id": "1", "arguments": '{"q": "x"}'}]}
+        state = rollout_state(error=rejected(), completion=[bad_call])
+        driver.olmo_eval_record(state)
+        assert state["_olmo_eval"]["error_kind"] == driver.MODEL_ERROR
+        # A 400 with only well-formed calls is not explained by the model.
+        state = rollout_state(error=rejected(), completion=[good_call])
+        driver.olmo_eval_record(state)
+        assert state["_olmo_eval"]["error_kind"] == driver.INFRA_ERROR
+        # A connection error is the server's, whatever the history holds.
+        state = rollout_state(error=ConnectionError("down"), completion=[bad_call])
+        driver.olmo_eval_record(state)
+        assert state["_olmo_eval"]["error_kind"] == driver.INFRA_ERROR
+
+    def test_malformed_tool_call_detection_reads_objects_and_dicts(self):
+        call = SimpleNamespace(id="1", name="api_fetch", arguments="{not json")
+        message = SimpleNamespace(role="assistant", tool_calls=[call])
+        assert driver.has_malformed_tool_call([message])
+        serialized = {"role": "assistant", "tool_calls": [json.dumps({"arguments": '{"a": '})]}
+        assert driver.has_malformed_tool_call([serialized])
+        nested = {"role": "assistant", "tool_calls": [{"function": {"arguments": "{}"}}]}
+        assert not driver.has_malformed_tool_call([nested, {"role": "user", "content": "x"}])
+
 
 def task(name: str, **kwargs: Any) -> TaskResult:
     return TaskResult(task_name=name, domain=name.split(".")[0], **kwargs)

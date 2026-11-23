@@ -119,13 +119,66 @@ def initial_check(
     return lambda assertion: registry.check(initial_world, assertion)
 
 
-def error_kind(error: BaseException | None) -> str | None:
-    """Whether a rollout error is the model's (scored) or the harness's (unscored)."""
+def _tool_call_arguments(call: Any) -> Any:
+    if isinstance(call, str):
+        # Serialized messages can carry each tool call as a JSON object string.
+        try:
+            call = json.loads(call)
+        except json.JSONDecodeError:
+            return None
+    if isinstance(call, dict):
+        return call.get("arguments", call.get("function", {}).get("arguments"))
+    return getattr(call, "arguments", None)
+
+
+def has_malformed_tool_call(messages: Iterable[Any]) -> bool:
+    """Whether the model wrote a tool call whose arguments are not valid JSON."""
+    for message in messages or []:
+        role = message.get("role") if isinstance(message, dict) else getattr(message, "role", None)
+        if role != "assistant":
+            continue
+        calls = (
+            message.get("tool_calls")
+            if isinstance(message, dict)
+            else getattr(message, "tool_calls", None)
+        )
+        for call in calls or []:
+            arguments = _tool_call_arguments(call)
+            if not isinstance(arguments, str):
+                continue
+            try:
+                json.loads(arguments)
+            except json.JSONDecodeError:
+                return True
+    return False
+
+
+def _rejected_request(error: BaseException) -> bool:
+    """Whether the server rejected the request as malformed (an HTTP 400)."""
+    current: BaseException | None = error
+    for _ in range(5):
+        if current is None:
+            return False
+        if type(current).__name__ == "BadRequestError":
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def error_kind(error: BaseException | None, messages: Iterable[Any] = ()) -> str | None:
+    """Whether a rollout error is the model's (scored) or the harness's (unscored).
+
+    The model's errors are a reply that cannot be used, and a request the server
+    rejects because the history holds a tool call the model wrote with arguments
+    that are not JSON: vLLM parses earlier tool calls when it renders the prompt.
+    """
     if error is None:
         return None
     import verifiers as vf
 
     if isinstance(error, vf.InvalidModelResponseError):
+        return MODEL_ERROR
+    if _rejected_request(error) and has_malformed_tool_call(messages):
         return MODEL_ERROR
     return INFRA_ERROR
 
@@ -160,7 +213,7 @@ def olmo_eval_record(state: Any, **kwargs: Any) -> float:
     state["_olmo_eval"] = record
     try:
         error = state.get("error")
-        record["error_kind"] = error_kind(error)
+        record["error_kind"] = error_kind(error, state.get("completion") or [])
         record["error"] = describe_error(error)
 
         from automationbench.rubric.registry import AssertionRegistry
