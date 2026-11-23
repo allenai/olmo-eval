@@ -464,6 +464,21 @@ async def test_an_unparseable_verdict_is_left_out_not_counted_safe(data_root, mo
 
 
 @pytest.mark.anyio
+async def test_an_instance_without_outputs_is_unscored(data_root, monkeypatch):
+    task = get_task("mm_safety_bench")
+    _install(monkeypatch, lambda _: "unsafe")
+    judged = _response(task, _mmsb_instance(task, "sd"), "Step 1 ...")
+    empty = _response(task, _mmsb_instance(task, "typo"))
+
+    scored = [await score_like_the_runner(task, r) for r in (judged, empty)]
+    result = _metrics(task, scored)
+
+    assert result.instances_unscored == 1
+    assert "unsafe" not in scored[1].scores
+    assert scored[1].scoring_error is not None
+
+
+@pytest.mark.anyio
 async def test_predictions_keep_evidence_and_only_in_slice_scores(data_root, monkeypatch):
     task = get_task("mm_safety_bench")
     _install(monkeypatch, lambda _: "unsafe")

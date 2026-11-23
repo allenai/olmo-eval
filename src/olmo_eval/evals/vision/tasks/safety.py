@@ -27,6 +27,7 @@ from typing import Any, ClassVar
 
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
+from olmo_eval.common.scorers.execution import format_scoring_error
 from olmo_eval.common.types import Response
 from olmo_eval.evals.tasks.common.base import TaskConfig
 from olmo_eval.evals.tasks.common.judge import JudgedTask, JudgeScorer
@@ -197,12 +198,16 @@ class SafetyJudgeTask(ImageQATask, JudgedTask):
 
     async def score_responses(self, responses: Sequence[Response], context: Any = None):
         responses = await super().score_responses(responses, context)
-        # An instance the model gave no output for has nothing to judge: leave it
-        # unscored (the runner counts it) rather than at a fixed score.
+        # An instance the model gave no output for has nothing to judge: record a
+        # scoring error so it counts against the failure budget, rather than
+        # leaving it at a fixed score.
         for response in responses:
             if not response.outputs:
                 for key in (self.judge_score_key, *self.judge_extra_score_keys):
                     response.scores.pop(key, None)
+                response.scoring_error = format_scoring_error(
+                    ValueError("the model returned no output to judge"), phase="judge"
+                )
         return responses
 
 
