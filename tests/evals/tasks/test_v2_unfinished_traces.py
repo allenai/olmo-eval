@@ -15,7 +15,7 @@ from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.suites import get_suite
 from olmo_eval.evals.tasks import arena_hard
-from olmo_eval.evals.tasks.common import get_task, register_sampling_variant
+from olmo_eval.evals.tasks.common import get_task, register_sampling_variant, registry
 from olmo_eval.evals.tasks.hle import states_confidence
 from olmo_eval.evals.tasks.mmlu_pro import names_several_choices
 from tests.evals.tasks.judge_stubs import scripted_judge, use_judge
@@ -73,11 +73,17 @@ class TestRegistration:
     @pytest.mark.parametrize("spec", V2_SPECS)
     def test_a_sampling_variant_can_be_formed_from_v2(self, spec):
         sampled = register_sampling_variant(spec, "test_t07", temperature=0.7, max_tokens=64)
-
-        config = get_task(sampled).config
-        assert (config.sampling_params.temperature, config.sampling_params.max_tokens) == (0.7, 64)
-        assert config.thinking_prefilled == "auto"
-        assert config.metrics == get_task(spec).config.metrics
+        try:
+            config = get_task(sampled).config
+            params = config.sampling_params
+            assert (params.temperature, params.max_tokens) == (0.7, 64)
+            assert config.thinking_prefilled == "auto"
+            assert config.metrics == get_task(spec).config.metrics
+        finally:
+            # Leave the registry as it was: other tests enumerate every registered spec.
+            for variants in registry._variants.values():
+                for name in [name for name in variants if name.endswith("test_t07")]:
+                    del variants[name]
 
     def test_v2_alone_is_the_same_measurement_as_the_stacked_spec(self):
         # A variant is also a spec of its base task; it must not be a meaningless one.
