@@ -73,9 +73,8 @@ class CodeExecutionScorer(ExecutionScorer):
             *limit_cmds,
             f"exec {shlex.quote(python_executable)} {shlex.quote(filename)}",
         ]
-        run_cmd = (
-            f"timeout {math.ceil(timeout)} bash -c {shlex.quote(' && '.join(inner_cmd_parts))}"
-        )
+        inner_command = shlex.quote(" && ".join(inner_cmd_parts))
+        run_cmd = f"timeout --kill-after=1s {math.ceil(timeout)} bash -c {inner_command}"
 
         command = "\n".join(
             [
@@ -92,7 +91,7 @@ class CodeExecutionScorer(ExecutionScorer):
             ]
         )
 
-        return await execution_env.execute_command(command, timeout=timeout + 1.0)
+        return await execution_env.execute_command(command, timeout=math.ceil(timeout) + 5.0)
 
     async def ascore(
         self,
@@ -121,11 +120,14 @@ class CodeExecutionScorer(ExecutionScorer):
 
         full_code = f"{output.extracted_answer}{self.separator}{test_code}"
 
-        result = await execution_env.execute_code(
-            full_code,
-            language=self.language,
-            timeout=self.timeout,
-        )
+        if self.language == "python":
+            result = await self.execute_python_script(
+                execution_env, full_code, timeout=self.timeout
+            )
+        else:
+            result = await execution_env.execute_code(
+                full_code, language=self.language, timeout=self.timeout
+            )
         output.metadata["execution_result"] = {
             "success": result.success,
             "exit_code": result.exit_code,
