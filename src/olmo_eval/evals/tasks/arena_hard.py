@@ -46,6 +46,14 @@ no output for, such as one longer than its context, counts as a decisive loss in
 games. Responses with no visible answer get neutral style, so that style control
 does not excuse their losses as the losses of a short answer.
 
+The ``v2`` variant of each category (``arena_hard_v2:hard_prompt:v2``) scores a response
+with no visible answer as a decisive loss in both games without asking the judge, the
+same as a prompt the model gave no output for, and reads a reasoning trace the chat
+template opened as a trace: one that never closed leaves no visible answer. In the
+original specs such a trace has no ``<think>`` tag to show for itself, so the judge
+receives it as the answer, sometimes loses the verdict format in it, and the style
+model takes its length for a long answer.
+
 Metrics:
 
 - ``win_rate``: the share of weighted battles the model wins.
@@ -94,7 +102,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.common import OutputScoreAggregation, register
+from olmo_eval.evals.tasks.common import OutputScoreAggregation, register, register_variant
 from olmo_eval.evals.tasks.common.judge import (
     JudgedScoreMetric,
     JudgedTask,
@@ -517,6 +525,19 @@ class _ArenaHardV2(JudgedTask):
             "scorer": ARENA_HARD_SCORER_NAME,
             "baseline_model": instance.metadata["baseline_model"],
         }
+        if not answer and self.config.strip_unclosed_thinking:
+            # The ``v2`` variant: nothing to compare, so both games are decisive losses,
+            # as for a prompt the model gave no output for. No judge is asked.
+            outcomes = UNANSWERED_BATTLE_OUTCOMES
+            judge_result.update(
+                no_visible_answer=True,
+                battle_outcomes=list(outcomes),
+                style_features=list(features),
+                parse_error=False,
+            )
+            return self._record_judgement(
+                output, judge_result, {"win_rate": sum(outcomes) / len(outcomes)}
+            )
 
         async def judge_game(game: str, baseline_is_a: bool) -> str:
             answer_a, answer_b = (baseline, answer) if baseline_is_a else (answer, baseline)
@@ -589,3 +610,12 @@ class ArenaHardV2CreativeWriting(_ArenaHardV2):
         TruncationRateMetric(scorer=ArenaHardScorer),
     )
     primary_metric = CREATIVE_WRITING_WIN_RATE
+
+
+for _arena_task in ("arena_hard_v2:hard_prompt", "arena_hard_v2:creative_writing"):
+    register_variant(
+        _arena_task,
+        "v2",
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )

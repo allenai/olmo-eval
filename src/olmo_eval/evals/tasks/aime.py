@@ -163,3 +163,14 @@ for _year in (2022, 2023, 2024, 2025, 2026):
         sampling_params=_PASS_AT_32_16K_SAMPLING,
     )
     register_variant(f"aime_{_year}", "final_answer", **FINAL_ANSWER_OVERRIDES)
+    # Stack on a sampling variant (``aime_2025:pass_at_32:v2``). A reasoning trace that
+    # never closed is no answer, including a trace the chat template opened: without
+    # this, a ``\boxed{}`` candidate inside a trace cut off at the token limit is
+    # extracted and scored. A finished response is extracted from as before, trace
+    # included; ``final_answer`` is the variant that reads only the text after it.
+    register_variant(
+        f"aime_{_year}",
+        "v2",
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )

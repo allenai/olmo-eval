@@ -103,7 +103,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import OutputScoreAggregation, register
+from olmo_eval.evals.tasks.common import OutputScoreAggregation, register, register_variant
 from olmo_eval.evals.tasks.common.judge import (
     JudgedScoreMetric,
     JudgedTask,
@@ -437,3 +437,16 @@ class HLETextVerified(_HLE):
         if record.get("Verified_Classes", HLE_VERIFIED_GOLD_CLASS) != HLE_VERIFIED_GOLD_CLASS:
             return None
         return super().process_doc(record, index)
+
+
+# ``v2`` (``hle:text:verified:v2``): a reasoning trace that never closed is no response
+# whatever stopped it, including a trace the chat template opened that ended at end of
+# turn. The original specs find an unfinished response by its finish reason alone, and
+# so send such a trace to the judge. Metrics are unchanged.
+for _hle_task in ("hle:text", "hle:text:verified"):
+    register_variant(
+        _hle_task,
+        "v2",
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )

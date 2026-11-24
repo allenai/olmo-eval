@@ -35,3 +35,13 @@ MMLU_PRO_COT = make_suite(
         "the benchmark's own pooled reporting."
     ),
 )
+
+MMLU_PRO_COT_V2 = make_suite(
+    "mmlu_pro:cot:v2",
+    tuple(f"mmlu_pro_{s}:cot:v2" for s in _SLUGS),
+    aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+    description=(
+        "0-shot chain-of-thought MMLU-Pro with the v2 scoring: an unfinished reasoning trace "
+        "counts as no answer. Instance-weighted average over category tasks, as mmlu_pro:cot."
+    ),
+)

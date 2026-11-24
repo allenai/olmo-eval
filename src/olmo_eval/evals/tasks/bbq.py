@@ -456,13 +456,25 @@ def _safety_metrics_base(scorer):
 
 _BBQ_SCORER = BBQBiasScorer()
 
+_MCQ_OVERRIDES: dict[str, Any] = {
+    "metrics": _safety_metrics_mcq(_BBQ_SCORER),
+    "primary_metric": BBQMCQMetric(name="any__any__accuracy", scorer=_BBQ_SCORER),
+    "sampling_params": judge_sampling,
+    "formatter": MCQAChatFormatter(),
+}
+register_variant("bbq", "mcq", **_MCQ_OVERRIDES)
+
+# Stack on ``mcq`` (``bbq:mcq:v2``). A reasoning trace that never closed is no answer,
+# including a trace the chat template opened: ``mcq`` reads an option letter out of
+# such a trace. It then counts as a parsing error, which scores 0 and stays out of the
+# bias sums, as an unparseable answer does. The variant carries the ``mcq`` settings
+# itself, so ``bbq:v2`` is the same measurement.
 register_variant(
     "bbq",
-    "mcq",
-    metrics=_safety_metrics_mcq(_BBQ_SCORER),
-    primary_metric=BBQMCQMetric(name="any__any__accuracy", scorer=_BBQ_SCORER),
-    sampling_params=judge_sampling,
-    formatter=MCQAChatFormatter(),
+    "v2",
+    **_MCQ_OVERRIDES,
+    strip_unclosed_thinking=True,
+    thinking_prefilled="auto",
 )
 
 register_variant(

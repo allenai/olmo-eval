@@ -1134,5 +1134,13 @@ class Task(ABC):
             # Use expanded responses for pass metrics, original for others
             if isinstance(metric, (PassAtKMetric, PassPowKMetric)):
                 measured = self._expand_multi_output_responses(measured)
-            result[metric.name][scorer_name] = metric.compute(measured)
+            value = metric.compute(measured)
+            # A metric that opts in reports NaN when it has nothing to measure (a subset
+            # with no answered question, say) and is then left out instead of reporting
+            # a number that would read as a score.
+            if getattr(metric, "omit_when_undefined", False) and math.isnan(value):
+                if not result[metric.name]:
+                    del result[metric.name]
+                continue
+            result[metric.name][scorer_name] = value
         return result

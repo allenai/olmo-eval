@@ -543,21 +543,27 @@ SUBSET_METRICS = tuple(f"domain__{domain}__accuracy" for domain in DOMAINS)
 
 _JUDGE_SCORER = OmniscienceScorer()
 
-register_variant(
-    "omniscience",
-    "judge",
-    metrics=(
+_JUDGE_OVERRIDES: dict[str, Any] = {
+    "metrics": (
         OmniscienceIndexMetric(scorer=_JUDGE_SCORER),
         HallucinationRateMetric(scorer=_JUDGE_SCORER),
         OmniscienceAccuracyMetric(scorer=_JUDGE_SCORER),
-        *(
-            OmniscienceAccuracyMetric(
-                name=name,
-                scorer=_JUDGE_SCORER,
-            )
-            for name in SUBSET_METRICS
-        ),
+        *(OmniscienceAccuracyMetric(name=name, scorer=_JUDGE_SCORER) for name in SUBSET_METRICS),
     ),
-    primary_metric=OmniscienceIndexMetric(scorer=_JUDGE_SCORER),
-    required_secrets=("OPENAI_API_KEY",),
+    "primary_metric": OmniscienceIndexMetric(scorer=_JUDGE_SCORER),
+    "required_secrets": ("OPENAI_API_KEY",),
+}
+register_variant("omniscience", "judge", **_JUDGE_OVERRIDES)
+
+# Stack on ``judge`` (``omniscience:judge:v2``). A reasoning trace that never closed is
+# no answer, including a trace the chat template opened, which carries no ``<think>``
+# for ``extract_final_answer`` to see. It is graded NOT_ATTEMPTED without a judge call,
+# where ``judge`` sends the trace to the judge as the answer. The variant carries the
+# judge metrics itself, so it is never a spec without metrics.
+register_variant(
+    "omniscience",
+    "v2",
+    **_JUDGE_OVERRIDES,
+    strip_unclosed_thinking=True,
+    thinking_prefilled="auto",
 )

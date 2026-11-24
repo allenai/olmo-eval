@@ -289,7 +289,8 @@ class MMLUProCoTTask(MMLUProTask):
         )
 
     def extract_answer(self, output: LMOutput) -> str | None:
-        return _extract_cot_letter(output.text or "") or None
+        extractor = self.config.answer_extractor or _extract_cot_letter
+        return extractor(output.text or "") or None
 
     def format_request(self, instance: Instance) -> LMRequest:
         formatter = self.config.formatter
@@ -356,3 +357,12 @@ for _category in MMLU_PRO_CATEGORIES:
         },
     )
     register(f"{_name}:cot")(_cot_cls)
+    # ``mmlu_pro_<category>:cot:v2``. A reasoning trace that never closed is no answer:
+    # ``cot`` runs its extraction cascade over such a trace and credits whichever option
+    # letter (or the word "a") it mentions last.
+    register_variant(
+        f"{_name}:cot",
+        "v2",
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )
