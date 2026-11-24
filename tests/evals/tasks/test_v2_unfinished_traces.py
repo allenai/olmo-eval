@@ -1,8 +1,10 @@
 """Tests for the ``v2`` variants, which treat an unfinished reasoning trace as no answer.
 
 A chat template that opens ``<think>`` in the prompt leaves no opening tag in the
-generation, so a trace that ran to the token limit looks like an answer. Providers record
-such a prompt on each output; ``PREFILLED`` is that record.
+generation, so a trace that never closed looks like an answer. Providers record such a
+prompt on each output and, where they have evidence, whether the trace closed. ``OPEN``
+and ``CLOSED`` are those records; ``NO_EVIDENCE`` is a prompt-opened trace the provider
+could not vouch for either way.
 """
 
 from __future__ import annotations
@@ -16,13 +18,17 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, R
 from olmo_eval.evals.suites import get_suite
 from olmo_eval.evals.tasks import arena_hard
 from olmo_eval.evals.tasks.common import get_task, register_sampling_variant, registry
-from olmo_eval.evals.tasks.hle import states_confidence
-from olmo_eval.evals.tasks.mmlu_pro import names_several_choices
+from olmo_eval.runners.io.builders import build_predictions
 from tests.evals.tasks.judge_stubs import scripted_judge, use_judge
 
 pytestmark = pytest.mark.usefixtures("judge_test_env")
 
-PREFILLED = {"prompt_opens_think": True}
+OPEN = {"prompt_opens_think": True, "think_closed": False}
+CLOSED = {"prompt_opens_think": True, "think_closed": True}
+NO_EVIDENCE = {"prompt_opens_think": True}
+# Most cases below are a trace the provider knows stayed open, or text whose own
+# ``</think>`` shows that it closed.
+PREFILLED = OPEN
 V2_SPECS = (
     "wmdp:mcq:v2",
     "mmlu_pro_law:cot:v2",
@@ -35,6 +41,11 @@ V2_SPECS = (
     "omniscience:judge:v2",
     "hle:text:v2",
     "hle:text:verified:v2",
+    "aime_2025:pass_at_32:v2",
+    "aime_2026:pass_at_32:v2",
+    "livecodebench_hidden:v2",
+    "livecodebench:lite:v2",
+    "bbq:mcq:v2",
 )
 
 
@@ -85,11 +96,69 @@ class TestRegistration:
                 for name in [name for name in variants if name.endswith("test_t07")]:
                     del variants[name]
 
+    @pytest.mark.parametrize("spec", V2_SPECS)
+    @pytest.mark.parametrize("record", [NO_EVIDENCE, {"prompt_opens_think": None}])
+    @pytest.mark.parametrize("finish_reason", ["stop", "length"])
+    def test_an_output_without_evidence_is_not_scored(self, spec, record, finish_reason):
+        """Unknown is neither an answer nor an unfinished trace, for every v2 scorer.
+
+        Stripping runs before every scorer and judge, so the output never reaches one:
+        the runner records the instance as unscored and counts it against the task's
+        failure budget.
+        """
+        from olmo_eval.common.scorers.execution import ScoringIncompleteError
+
+        task = get_task(spec)
+        response = _response(
+            Instance(question="q", gold_answer="A"),
+            ("The answer is (A).", {**record, "finish_reason": finish_reason}),
+        )
+
+        with pytest.raises(ScoringIncompleteError, match="no evidence"):
+            task.strip_thinking_traces([response])
+
+        assert response.outputs[0].text == "The answer is (A)."
+        assert "unclosed_thinking" not in response.outputs[0].metadata
+
+    @pytest.mark.parametrize("spec", V2_SPECS)
+    @pytest.mark.parametrize("finish_reason", ["stop", "length"])
+    def test_evidence_decides_whatever_stopped_the_generation(self, spec, finish_reason):
+        task = get_task(spec)
+        response = _response(
+            Instance(question="q", gold_answer="A"),
+            ("a trace that ended", {**OPEN, "finish_reason": finish_reason}),
+            ("an answer, perhaps cut sho", {**CLOSED, "finish_reason": finish_reason}),
+        )
+
+        task.strip_thinking_traces([response])
+
+        assert [o.text for o in response.outputs] == ["", "an answer, perhaps cut sho"]
+
+    @pytest.mark.anyio
+    async def test_the_runner_leaves_an_output_without_evidence_unscored(self):
+        from olmo_eval.runners.asynq.results import _score_response
+        from tests.evals.tasks.judge_stubs import score_like_the_runner
+
+        task = get_task("wmdp:mcq:v2")
+        instance = Instance(question="q", choices=("w", "x", "y", "z"), gold_answer="A")
+        response = _response(instance, ("ANSWER: B", NO_EVIDENCE))
+
+        class _Stripping:
+            async def score_responses(self, responses):
+                return [await _score_response(task, responses[0], ScoringContext())]
+
+        scored = await score_like_the_runner(_Stripping(), response)
+
+        assert scored.scores == {}
+        error = scored.outputs[0].metadata["scoring_errors"]["__response__"]
+        assert error["type"] == "ScoringIncompleteError"
+
     def test_v2_alone_is_the_same_measurement_as_the_stacked_spec(self):
         # A variant is also a spec of its base task; it must not be a meaningless one.
         for stacked, alone in (
             ("zebralogic:chat:v2", "zebralogic:v2"),
             ("omniscience:judge:v2", "omniscience:v2"),
+            ("bbq:mcq:v2", "bbq:v2"),
         ):
             assert get_task(alone).config == get_task(stacked).config
 
@@ -133,22 +202,86 @@ class TestWMDP:
         # One answered question gives the gold answer, one does not.
         assert metrics["accuracy"] == 0.5
         assert metrics["no_answer_rate"] == 0.5
-        assert metrics["parsing_error"] == 2
         assert metrics["subcategory__wmdp-bio"] == 0.5
         # A subset with no answered question has no accuracy; 0.0 would read as unsafe.
         assert "subcategory__wmdp-cyber" not in metrics
         accuracy = task.config.primary_metric
         assert [accuracy.compute_instance(r) for r in scored] == [None, 0.0, 1.0, None]
         assert scored[0].outputs[0].metadata["unclosed_thinking"] is True
+        saved = build_predictions(scored)[0]["model_output"][0]
+        assert saved["scorer_results"]["wmdp_multiple_choice"] == {"no_answer": True}
 
     @pytest.mark.anyio
-    async def test_accuracy_is_left_out_when_no_question_was_answered(self):
+    @pytest.mark.parametrize("unfinished_first", [True, False])
+    async def test_several_samples_are_counted_one_by_one_in_any_order(self, unfinished_first):
+        """Each sample carries its own record, so the order of samples changes nothing."""
+        task = get_task("wmdp:mcq:v2")
+        samples = [
+            ("maybe (A), or (B)", OPEN),  # no answer
+            ("weighing</think>ANSWER: B", OPEN),  # answered, not the gold letter
+            ("weighing</think>ANSWER: A", OPEN),  # answered with the gold letter
+        ]
+        if not unfinished_first:
+            samples.reverse()
+        instance = Instance(
+            question="q",
+            choices=("w", "x", "y", "z"),
+            gold_answer="A",
+            metadata={"subcategory": "wmdp-bio"},
+        )
+
+        scored = await _score(task, [_response(instance, *samples)])
+
+        metrics = _metrics(task, scored)
+        assert metrics["accuracy"] == 0.5
+        assert metrics["no_answer_rate"] == pytest.approx(1 / 3)
+        assert task.config.primary_metric.compute_instance(scored[0]) == 0.5
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("unfinished_first", [True, False])
+    async def test_one_unfinished_and_one_safe_sample_score_the_same_in_both_orders(
+        self, unfinished_first
+    ):
+        task = get_task("wmdp:mcq:v2")
+        samples = [("maybe (A), or (B)", OPEN), ("weighing</think>ANSWER: B", OPEN)]
+        if not unfinished_first:
+            samples.reverse()
+        instance = Instance(question="q", choices=("w", "x", "y", "z"), gold_answer="A")
+
+        scored = await _score(task, [_response(instance, *samples)])
+
+        metrics = _metrics(task, scored)
+        assert (metrics["accuracy"], metrics["no_answer_rate"]) == (1.0, 0.5)
+
+    @pytest.mark.anyio
+    async def test_no_answered_question_is_an_error_not_a_promoted_metric(self):
+        """With accuracy undefined, no other metric may stand in as the task's score."""
+        from olmo_eval.runners.asynq.preparation import compute_task_metrics
+        from olmo_eval.runners.processing.utils import get_primary_metric
+
         task = get_task("wmdp:mcq:v2")
         scored = await _score(task, self._responses()[:1])
 
         metrics = _metrics(task, scored)
         assert "accuracy" not in metrics
         assert metrics["no_answer_rate"] == 1.0
+
+        result = compute_task_metrics(
+            spec="wmdp:mcq:v2",
+            task=task,
+            scored_responses=scored,
+            failed_instances={},
+            total_instances=1,
+            duration_seconds=1.0,
+        )
+
+        assert result.metrics == {}
+        assert "Primary metric 'accuracy' is undefined" in result.error
+        assert "no_answer_rate=1" in result.error
+        assert result.failure_budget_exceeded is False
+        assert get_primary_metric(result.metrics, result.primary_metric) is None
+        # The outputs are still saved for inspection.
+        assert result.predictions
 
     @pytest.mark.anyio
     async def test_the_original_counts_the_same_questions_as_safe(self):
@@ -161,61 +294,28 @@ class TestWMDP:
 
 
 class TestMMLUPro:
-    @pytest.mark.parametrize(
-        ("text", "several"),
-        [
-            ("Therefore, the answer is (C, E).", True),
-            ("Therefore, the answer is (I) and (J)", True),
-            ("**Therefore, the answer is (A), (C), and (J).**", True),
-            ("The answer is (A or B)", True),
-            ("The answer is C and E", True),
-            ("The answer is C, E", True),
-            ("ANSWER: C, E", True),
-            ("Answer: (C) and (E)", True),
-            ("The answer is: C or E.", True),
-            ("The answer is **C** and **E**.", True),
-            ("So \\boxed{C, E}", True),
-            ("So \\boxed{\\text{C, E}}", True),
-            ("The answer is (I) and (J), which are both right.", True),
-            ("Therefore, the answer is (A).", False),
-            ("The answer is A and I am sure of it.", False),
-            ("The answer is C, I believe.", False),
-            ("The answer is C, a good choice.", False),
-            ("The answer is C and Earth is round.", False),
-            ("Answer: A. Both B and C fail.", False),
-            ("\\boxed{C}", False),
-            ("The answer is B or, failing that, nothing.", False),
-            ("Therefore, the answer is (A) and I am sure.", False),
-            ("Therefore, the answer is (B), not (C).", False),
-            ("Therefore, the answer is (B), because (A, C) are wrong.", False),
-            ("Therefore, the answer is (A), (A).", False),
-            ("Options (A, B) are wrong.\nTherefore, the answer is (D).", False),
-            ("Therefore, the answer is (C, E).\nOn reflection, the answer is (C).", False),
-            ("No statement, just (A, B).", False),
-        ],
-    )
-    def test_names_several_choices(self, text, several):
-        assert names_several_choices(text) is several
-
     @pytest.mark.anyio
-    async def test_unfinished_traces_and_several_letters_are_not_answers(self):
+    async def test_an_unfinished_trace_is_not_an_answer(self):
         def instance() -> Instance:
             return Instance(question="q", gold_answer="C")
 
         texts = [
-            ("is it B? no, (C) fits the facts", PREFILLED),
-            ("hm</think>Therefore, the answer is (C, E).", PREFILLED),
-            ("hm</think>Therefore, the answer is (C).", PREFILLED),
+            ("is it B? no, (C) fits the facts", OPEN),
+            ("hm</think>Therefore, the answer is (C).", OPEN),
+            # Only the unfinished trace differs from ``cot``: a list of letters is
+            # still read as its first letter here.
+            ("hm</think>Therefore, the answer is (C, E).", OPEN),
         ]
         v2, original = get_task("mmlu_pro_law:cot:v2"), get_task("mmlu_pro_law:cot")
 
         new = await _score(v2, [_response(instance(), text) for text in texts])
         old = await _score(original, [_response(instance(), text) for text in texts])
 
-        assert [r.scores["exact_match"] for r in new] == [0.0, 0.0, 1.0]
-        assert [o.extracted_answer for r in new for o in r.outputs] == [None, None, "C"]
-        # The original reads "C" out of the unfinished trace and out of the list.
+        assert [r.scores["exact_match"] for r in new] == [0.0, 1.0, 1.0]
+        assert [o.extracted_answer for r in new for o in r.outputs] == [None, "C", "C"]
+        # The original reads "C" out of the unfinished trace.
         assert [r.scores["exact_match"] for r in old] == [1.0, 1.0, 1.0]
+        assert v2.config.metrics == original.config.metrics
 
 
 class TestZebraLogic:
@@ -321,9 +421,9 @@ class TestArenaHard:
     @pytest.mark.parametrize(
         "metadata",
         [
-            PREFILLED,
-            # A server with a reasoning parser: the trace hit the limit before closing.
-            {**PREFILLED, "think_close_hidden": True, "finish_reason": "length"},
+            {**OPEN, "finish_reason": "length"},
+            # The trace ended at end of turn without closing.
+            {**OPEN, "finish_reason": "stop"},
         ],
     )
     async def test_no_visible_answer_loses_both_games_without_the_judge(
@@ -348,16 +448,12 @@ class TestArenaHard:
         }
 
     @pytest.mark.anyio
-    async def test_an_answer_the_server_separated_from_its_trace_is_judged(self, monkeypatch):
+    async def test_an_answer_cut_off_after_a_closed_trace_is_judged(self, monkeypatch):
         task = get_task("arena_hard_v2:hard_prompt:v2")
         judge, calls = scripted_judge("[[A=B]]", "[[A=B]]")
         use_judge(monkeypatch, judge)
-        metadata = {
-            **PREFILLED,
-            "think_close_hidden": True,
-            "reasoning_separated": True,
-            "finish_reason": "length",
-        }
+        # A server's reasoning parser removed the closed trace; the answer hit the limit.
+        metadata = {**CLOSED, "finish_reason": "length"}
 
         scored = await _score(task, [_response(self._instance(), ("A partial answ", metadata))])
 
@@ -396,68 +492,102 @@ class TestOmniscience:
 
 
 class TestHLE:
-    @pytest.mark.parametrize(
-        ("answer", "stated"),
-        [
-            ("Explanation: x\nAnswer: 42\nConfidence: 85%", True),
-            ("Answer: 42\n**Confidence:** 0.9", True),
-            ("I have 70 percent confidence.\nconfidence level - 70", True),
-            ("The final answer is \\boxed{2}", False),
-            ("Answer: 42\nConfidence: high", False),
-        ],
-    )
-    def test_states_confidence(self, answer, stated):
-        assert states_confidence(answer) is stated
-
     @pytest.mark.anyio
-    async def test_calibration_is_read_from_stated_confidences(self, monkeypatch):
-        task = get_task("hle:text:verified:v2")
+    async def test_a_trace_that_ended_at_end_of_turn_is_not_judged(self, monkeypatch):
+        """The original finds an unfinished response by its finish reason alone."""
 
-        def reply(correct: str, confidence: str) -> str:
-            return f"extracted_final_answer: 42\ncorrect: {correct}\nconfidence: {confidence}"
+        def responses() -> list[Response]:
+            instance = Instance(question="q", gold_answer="42", metadata={"category": "Math"})
+            return [
+                _response(instance, ("so it is 42? Answer: 42", {**OPEN, "finish_reason": "stop"}))
+            ]
 
-        # The judge reads a missing confidence as 100, as its prompt directs.
-        judge, calls = scripted_judge(reply("yes", "60"), reply("no", "100"))
+        reply = "extracted_final_answer: 42\ncorrect: yes\nconfidence: 90"
+        judge, calls = scripted_judge(reply)
         use_judge(monkeypatch, judge)
 
-        def instance() -> Instance:
-            return Instance(question="q", gold_answer="42", metadata={"category": "Math"})
+        v2 = get_task("hle:text:verified:v2")
+        new = await _score(v2, responses())
+        assert calls == []
+        assert new[0].scores["accuracy"] == 0.0
+        assert new[0].outputs[0].metadata["judge_result"]["no_final_response"] is True
 
-        responses = [
-            _response(instance(), ("x</think>Answer: 42\nConfidence: 60%", PREFILLED)),
-            _response(instance(), ("x</think>Answer: 41", PREFILLED)),
-            # Cut off inside the trace: no judge call, wrong at an imputed 100%.
-            _response(instance(), ("still working, confidence: 90", PREFILLED)),
-        ]
+        original = get_task("hle:text:verified")
+        old = await _score(original, responses())
+        assert len(calls) == 1
+        assert old[0].scores["accuracy"] == 1.0
+        assert v2.config.metrics == original.config.metrics
 
-        scored = await _score(task, responses)
 
-        assert len(calls) == 2
-        stated = [r.outputs[0].metadata["judge_result"]["confidence_stated"] for r in scored]
-        assert stated == [True, False, False]
-        metrics = _metrics(task, scored)
-        assert metrics["accuracy"] == pytest.approx(1 / 3)
-        # One stated confidence: 60% on a correct answer.
-        assert metrics["calibration_error_stated"] == pytest.approx(0.4)
-        assert metrics["confidence_stated_rate"] == pytest.approx(1 / 3)
-        assert "calibration_error_all_bins" not in metrics
+class TestAIME:
+    @pytest.mark.parametrize("year", [2025, 2026])
+    def test_a_boxed_candidate_in_an_unfinished_trace_is_not_extracted(self, year):
+        trace = "Try 7. So maybe \\boxed{42}? Let me re-check the case n=3"
 
+        def extracted(spec: str, text: str, record: dict) -> str | None:
+            task = get_task(spec)
+            response = _response(Instance(question="q", gold_answer="42"), (text, record))
+            task.strip_thinking_traces([response])
+            task._extract_answers([response])
+            return response.outputs[0].extracted_answer
+
+        assert extracted(f"aime_{year}:pass_at_32", trace, OPEN) == "42"
+        assert not extracted(f"aime_{year}:pass_at_32:v2", trace, OPEN)
+        # A finished response is extracted from exactly as before.
+        finished = "Try 7.</think>The answer is \\boxed{42}."
+        assert extracted(f"aime_{year}:pass_at_32:v2", finished, CLOSED) == "42"
+        assert extracted(f"aime_{year}:pass_at_32:v2", finished, CLOSED) == extracted(
+            f"aime_{year}:pass_at_32", finished, CLOSED
+        )
+
+    def test_v2_keeps_the_sampling_and_metrics_it_is_stacked_on(self):
+        stacked, base = get_task("aime_2025:pass_at_32:v2"), get_task("aime_2025:pass_at_32")
+        assert stacked.config.sampling_params == base.config.sampling_params
+        assert stacked.config.metrics == base.config.metrics
+
+
+class TestLiveCodeBench:
+    @pytest.mark.parametrize("task_name", ["livecodebench_hidden", "livecodebench"])
+    def test_a_draft_in_an_unfinished_trace_is_not_the_solution(self, task_name):
+        draft = "First attempt:\n```python\nprint(1)\n```\nThat fails when n is"
+        finished = "plan\n```python\nprint(1)\n```\n</think>\n```python\nprint(2)\n```"
+
+        def extracted(spec: str, text: str, record: dict) -> str | None:
+            task = get_task(spec)
+            response = _response(Instance(question="q"), (text, record))
+            task.strip_thinking_traces([response])
+            return task.extract_answer(response.outputs[0])
+
+        assert extracted(task_name, draft, OPEN) == "print(1)"
+        assert extracted(f"{task_name}:v2", draft, OPEN) is None
+        assert extracted(f"{task_name}:v2", finished, CLOSED) == "print(2)"
+        assert extracted(task_name, finished, CLOSED) == "print(2)"
+
+
+class TestBBQ:
     @pytest.mark.anyio
-    async def test_calibration_is_left_out_when_no_output_states_a_confidence(self, monkeypatch):
-        task = get_task("hle:text:verified:v2")
-        judge, _ = scripted_judge("extracted_final_answer: 41\ncorrect: no\nconfidence: 100")
-        use_judge(monkeypatch, judge)
-        instance = Instance(question="q", gold_answer="42", metadata={"category": "Math"})
+    async def test_a_letter_in_an_unfinished_trace_is_a_parsing_error(self):
+        def response(text: str) -> Response:
+            instance = Instance(
+                question="q",
+                choices=("x", "y", "z"),
+                gold_answer="A",
+                metadata={
+                    "bias_label": "B",
+                    "unknown_label": "A",
+                    "question_polarity": "neg",
+                    "context_condition": "ambig",
+                    "category": "Age",
+                },
+            )
+            return _response(instance, (text, OPEN))
 
-        scored = await _score(task, [_response(instance, ("x</think>Answer: 41", PREFILLED))])
+        trace, answer = "it could be (A), though", "hm</think>ANSWER: A"
+        v2, original = get_task("bbq:mcq:v2"), get_task("bbq:mcq")
 
-        metrics = _metrics(task, scored)
-        # 0.0 would read as perfect calibration.
-        assert "calibration_error_stated" not in metrics
-        assert metrics["confidence_stated_rate"] == 0.0
-        assert metrics["accuracy"] == 0.0
+        new = await _score(v2, [response(trace), response(answer)])
+        old = await _score(original, [response(trace), response(answer)])
 
-    def test_the_original_keeps_its_metrics_and_judge_result(self):
-        names = [metric.name for metric in get_task("hle:text:verified").config.metrics]
-        assert "calibration_error_all_bins" in names
-        assert "calibration_error_stated" not in names
+        assert [r.scores["bbq_bias"] for r in new] == [0.0, 1.0]
+        assert [r.instance.metadata["is_parsing_error"] for r in new] == [True, False]
+        assert [r.scores["bbq_bias"] for r in old] == [1.0, 1.0]

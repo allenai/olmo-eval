@@ -254,6 +254,7 @@ def compute_task_metrics(
     # task's compute_metrics leaves out, per metric, those its own scorer could not.
     scorers = tuple(task._get_scorers())
     metrics = task.compute_metrics(measurable_responses(scored_responses, scorers=scorers))
+    undefined_primary = _undefined_primary_metric(task, metrics)
     # Counted after compute_metrics, which can itself record scoring errors (a task-level
     # evaluator that failed, for example).
     failures = count_scoring_failures(scored_responses, scorers)
@@ -287,6 +288,21 @@ def compute_task_metrics(
         max_failure_rate=max_hard_failure_rate,
     )
 
+    error = budget_error
+    if undefined_primary is not None and error is None:
+        # The task measured nothing it can report as its score. Publishing the other
+        # metrics would let a summary promote one of them into the primary's place.
+        others = ", ".join(
+            f"{name}={value:g}"
+            for name, by_scorer in metrics.items()
+            for value in by_scorer.values()
+        )
+        error = (
+            f"Primary metric {undefined_primary!r} is undefined: no output gave it anything "
+            f"to measure. Other metrics: {others or 'none'}."
+        )
+        metrics = {}
+
     return TaskResult(
         spec=spec,
         config=task.config.to_dict(),
@@ -296,7 +312,7 @@ def compute_task_metrics(
         predictions=predictions,
         requests=requests,
         primary_metric=primary_metric,
-        error=budget_error,
+        error=error,
         error_summary=error_summary,
         instances_processed=total_instances,
         instances_failed=instances_failed,
@@ -305,6 +321,19 @@ def compute_task_metrics(
         scoring_failures=failures.to_dict() if failures else None,
         generation_counts=count_generations(scored_responses),
     )
+
+
+def _undefined_primary_metric(task: Task, metrics: dict[str, dict[str, float]]) -> str | None:
+    """The task's primary metric name when it was left out of ``metrics`` as undefined.
+
+    A metric that sets ``omit_when_undefined`` is left out by ``Task.compute_metrics``
+    when it has nothing to measure (see there). None when the primary metric is present
+    or is not such a metric.
+    """
+    primary = task.config.get_primary_metric()
+    if primary is None or not getattr(primary, "omit_when_undefined", False):
+        return None
+    return None if primary.name in metrics else primary.name
 
 
 def _describe_scoring_failures(failures: ScoringFailures) -> str:
