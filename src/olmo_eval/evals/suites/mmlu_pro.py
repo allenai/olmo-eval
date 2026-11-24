@@ -42,7 +42,6 @@ MMLU_PRO_COT_V2 = make_suite(
     aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
     description=(
         "0-shot chain-of-thought MMLU-Pro with the v2 scoring: an unfinished reasoning trace "
-        "and an answer naming several letters both count as no answer. Instance-weighted "
-        "average over category tasks, as mmlu_pro:cot."
+        "counts as no answer. Instance-weighted average over category tasks, as mmlu_pro:cot."
     ),
 )
