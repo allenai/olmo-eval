@@ -16,7 +16,8 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
-## 2026-11-23: Post-training test suites read the v2 task variants
+<<<<<<< HEAD
+## 2026-11-23: Post-training test suites read the v2 task variants (#590)
 
 - **Affected**: suites `posttrain:tiny:test` and `posttrain:small:test`. The dev suites
   and their companion suites are unchanged.
@@ -49,6 +50,9 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   To reproduce an earlier result, run the replaced specs by name.
 
 ## 2026-11-23: `unclosed_think` counts traces the chat template opened
+=======
+## 2026-11-23: `unclosed_think` counts traces the chat template opened (#588)
+>>>>>>> chrisg/eval-v2-variants
 
 - **Affected**: the `generation_counts.unclosed_think` diagnostic of every generation
   task, for models whose chat template ends its generation prompt with `<think>` (the
