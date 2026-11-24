@@ -629,8 +629,10 @@ when the chat template itself opens the trace, a generation the provider has evi
 never produced `</think>`. The SGLang and vLLM providers record on each output whether
 the prompt opened a trace (`prompt_opens_think`) and whether it closed (`think_closed`,
 from the text or the generated token ids; absent when the provider has no evidence).
-Both are saved in the predictions file. Outputs without evidence, and runs saved before
-the providers recorded it, count only emitted tags. `empty` counts empty
+Both are saved in the predictions file. The vLLM server has to be asked for them, so
+it records them only for tasks that read them (`thinking_prefilled="auto"`); every
+other request is sent as before. Outputs without evidence, and runs saved before the
+providers recorded it, count only emitted tags. `empty` counts empty
 scoring text and excludes tool calls. Tasks that strip or transform text inside
 extraction, without changing `LMOutput.text`, set
 `output.metadata[SCORING_TEXT_EMPTY_KEY]` from that scoring text before parsing;

@@ -20,7 +20,9 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 
 - **Affected**: the `generation_counts.unclosed_think` diagnostic of every generation
   task, for models whose chat template ends its generation prompt with `<think>` (the
-  Olmo 3.5 templates do), run on the SGLang, inline vLLM or vLLM server provider.
+  Olmo 3.5 templates do), run on the SGLang or inline vLLM provider. On the vLLM
+  server provider only tasks that set `thinking_prefilled="auto"` are affected: the
+  record costs a server call there, so other requests are sent unchanged.
 - **Change**: those providers record on each output that the prompt opened the trace
   (`prompt_opens_think`) and, where they have evidence, whether it closed
   (`think_closed`: a `</think>` in the text or its token id among the generated ids).
