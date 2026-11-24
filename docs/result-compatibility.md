@@ -16,6 +16,60 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+
+## 2026-11-24: Bound Python solutions and stage large test programs (#592)
+
+- **Affected**: Python execution through `CodeExecutionScorer.ascore`, including
+  the execution-based HumanEval, HumanEval+, Codex HumanEval, MBPP, MBPP+,
+  HumanEval-FIM and DeepSeek LeetCode variants and their suites. The shared
+  `execute_python_script` helper used by BigCodeBench also gains file staging,
+  forced termination and outer-deadline headroom. Likelihood-only variants and
+  LiveCodeBench's separate grader are unchanged. Scorers overriding this execution
+  path are not affected merely by inheriting from `CodeExecutionScorer`.
+- **Change**: a Python solution that exceeds its configured time limit is stopped
+  inside the worker and receives a valid failing verdict. Previously the same
+  solution could raise a transport timeout. Staging-capable backends now receive
+  the code and tests as a file instead of a process argument, avoiding argument-size
+  failures. Non-staging backends retain the inline payload fallback and its size
+  limit. Prompts, datasets, tests, extraction, sampling and metric definitions do
+  not change. Genuine execution-infrastructure failures still raise.
+- **Identity**: task hashes are unchanged: this changes scorer implementation,
+  not serialized task settings. Distinguish results by evaluator revision and
+  execution environment; the task hash alone does not identify this boundary.
+- **Failure accounting**: current main and the study's pinned `56dc8921` image
+  leave raised scoring failures unscored, omit those samples from metric
+  aggregation, and count instances without a scored output against
+  `max_hard_failure_rate`. The study's stricter wrapper instead aborts the grader
+  job on any scoring error. Older runner revisions described in the October 22
+  failure-accounting entry could store a synthetic zero alongside `scoring_errors`;
+  that older behavior must not be attributed to the pinned study image.
+  Independently, `execute_code` could catch an argument-size error and return a
+  failed execution result instead of raising: that became a zero with
+  `execution_result.error` but no `scoring_errors` flag. Each of the five originally
+  completed Tiny mixing-study HumanEval+ panels contains 20 such zeros out of 164
+  examples, including five-pool600 (Beaker dataset
+  `01M86MHP21N6ASCKVGZGD0SW71`,
+  `evaluation/humaneval_plus_chat_pass_at_1-predictions.json`). Do not infer
+  denominator handling from an error label or successful job status alone. With
+  this fix, an ordinary solution time-limit failure is a scored zero and stays in
+  the denominator; genuine infrastructure failures retain the runner's existing
+  failure handling.
+- **Comparability and recovery**: inspect saved predictions, error counts and the
+  evaluator revision, including `execution_result.error` as well as
+  `scoring_errors`. A completed metric with omitted timed-out solutions can be
+  optimistic; including those solutions as valid failures can lower it without
+  any model change. Conversely, replacing synthetic argument-error zeros with
+  real test verdicts can raise a score. There is no uniform correction direction.
+  A synthetic error zero from an older runtime is not proof that the benchmark
+  actually ran. Completed runs with no affected failures are
+  expected to remain comparable under the same execution settings, but file-based
+  execution also uses a fresh working directory: environment-sensitive programs
+  are not guaranteed bitwise-identical behavior. For strict comparisons, regrade
+  the cohort's saved responses under the same corrected scorer, tests, dependencies
+  and timeout settings, retaining the originals and labeling the new measurement
+  by revision. Failed/incomplete panels are not completed baseline scores; a lone
+  aggregate cannot reconstruct missing verdicts. No stored-result backfill occurs.
+
 ## 2026-11-12: Namespaced Hugging Face dataset ids for six tasks (#558)
 
 - **Affected**: every spec of `gsm8k` (except `gsm8k:platinum`, which has its own

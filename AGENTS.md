@@ -157,3 +157,13 @@ for an open PR. Those results can be uploaded after merge with
   submitting. Pass credentials through secret mappings, not plaintext `--env`. Afterwards,
   inspect logs, completion status, failure counts, and saved predictions. If credentials
   or infrastructure block a check, state the gap and leave a runnable command.
+
+## Pull request introductions
+
+Write for a capable programmer who has not followed the development session.
+Begin with normal behavior, relevant background, and why the change matters.
+Explain specialized terms and system boundaries before relying on them. For a bug
+fix, describe the triggering input, failure, and user-visible impact before the
+implementation. Include a small concrete example when useful, then validation
+and material limitations. Distinguish measured results from expectations and
+keep incomplete validation explicit.

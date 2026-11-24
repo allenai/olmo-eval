@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from olmo_eval.common.execution.environment import StagingExecutionEnvironment
 from olmo_eval.common.types import Instance, LMOutput
 
 from ..execution import ExecutionScorer
@@ -73,17 +74,19 @@ class CodeExecutionScorer(ExecutionScorer):
             *limit_cmds,
             f"exec {shlex.quote(python_executable)} {shlex.quote(filename)}",
         ]
-        run_cmd = (
-            f"timeout {math.ceil(timeout)} bash -c {shlex.quote(' && '.join(inner_cmd_parts))}"
-        )
+        inner_command = shlex.quote(" && ".join(inner_cmd_parts))
+        run_cmd = f"timeout --kill-after=1s {math.ceil(timeout)} bash -c {inner_command}"
 
+        staged = isinstance(execution_env, StagingExecutionEnvironment)
+        setup = [f"mkdir -p {quoted_tmp_dir} || exit $?"]
+        if not staged:
+            setup.append(
+                f"printf '%s' {shlex.quote(code)} > {quoted_script_path}"
+                f" || {{ status=$?; {cleanup_cmd}; exit $status; }}"
+            )
         command = "\n".join(
             [
-                f"mkdir -p {quoted_tmp_dir} || exit $?",
-                (
-                    f"printf '%s' {shlex.quote(code)} > {quoted_script_path}"
-                    f" || {{ status=$?; {cleanup_cmd}; exit $status; }}"
-                ),
+                *setup,
                 f"cd {quoted_tmp_dir} || {{ status=$?; {cleanup_cmd}; exit $status; }}",
                 "status=0",
                 f"{run_cmd} || status=$?",
@@ -91,8 +94,12 @@ class CodeExecutionScorer(ExecutionScorer):
                 "exit $status",
             ]
         )
-
-        return await execution_env.execute_command(command, timeout=timeout + 1.0)
+        outer_timeout = math.ceil(timeout) + 5.0
+        if staged:
+            return await execution_env.execute_with_files(
+                command, {script_path: code}, timeout=outer_timeout
+            )
+        return await execution_env.execute_command(command, timeout=outer_timeout)
 
     async def ascore(
         self,
@@ -121,11 +128,14 @@ class CodeExecutionScorer(ExecutionScorer):
 
         full_code = f"{output.extracted_answer}{self.separator}{test_code}"
 
-        result = await execution_env.execute_code(
-            full_code,
-            language=self.language,
-            timeout=self.timeout,
-        )
+        if self.language == "python":
+            result = await self.execute_python_script(
+                execution_env, full_code, timeout=self.timeout
+            )
+        else:
+            result = await execution_env.execute_code(
+                full_code, language=self.language, timeout=self.timeout
+            )
         output.metadata["execution_result"] = {
             "success": result.success,
             "exit_code": result.exit_code,

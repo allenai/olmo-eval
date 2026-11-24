@@ -76,13 +76,13 @@ class TestCodeExecutionScorerPythonScriptHelper:
         command, timeout = env.command_calls[0]
         tmp_dir = _extract_tmp_dir(command)
 
-        assert timeout == pytest.approx(3.2)
+        assert timeout == pytest.approx(8.0)
         assert "printf '%s'" in command
         assert f"mkdir -p {tmp_dir}" in command
         assert f"cd {tmp_dir}" in command
         assert f"rm -rf {tmp_dir}" in command
         assert f"{tmp_dir}/runner.py" in command
-        assert "timeout 3 bash -c" in command
+        assert "timeout --kill-after=1s 3 bash -c" in command
         assert "/custom/python3" in command
         assert "runner.py" in command
         assert "ulimit -v" not in command
@@ -145,7 +145,7 @@ class TestBigCodeBenchScorer:
         command, timeout = env.command_calls[0]
         tmp_dir = _extract_tmp_dir(command)
 
-        assert timeout == pytest.approx(4.0)
+        assert timeout == pytest.approx(8.0)
         assert f"mkdir -p {tmp_dir}" in command
         assert f"cd {tmp_dir}" in command
         assert "ulimit -v 31457280" in command
