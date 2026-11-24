@@ -95,7 +95,7 @@ import math
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers.base import Scorer
@@ -348,14 +348,20 @@ class HLEStatedCalibrationErrorMetric(Metric):
     are not confidences the model expressed, and where they are common the metric
     reports little more than one minus the accuracy. This one leaves them out;
     :class:`HLEConfidenceStatedRateMetric` says how many outputs remain. The value for
-    each remaining output is the confidence the judge extracted. With none it is 0.0.
+    each remaining output is the confidence the judge extracted. When no output stated
+    one there is no calibration to report: 0.0 would read as perfect calibration, so the
+    metric is left out of the results (``compute`` returns NaN and
+    ``omit_when_undefined`` is set); ``confidence_stated_rate`` is then 0.
     """
 
     name: str = "calibration_error_stated"
     scorer: type[Scorer] | Scorer = HLEScorer
+    omit_when_undefined: ClassVar[bool] = True
 
     def compute(self, responses: Sequence[Response]) -> float:
         confidences, correct, _ = _stated_confidences(responses)
+        if not confidences:
+            return math.nan
         return calibration_error(confidences, correct)
 
     def supports_scorer_fallback(self) -> bool:

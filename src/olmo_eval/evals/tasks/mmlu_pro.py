@@ -244,22 +244,32 @@ def _extract_cot_letter(text: str) -> str:
     return _extract_cot_answer(text).answer
 
 
-# The lead-in of a final answer statement, up to where the answer starts.
-_ANSWER_LEAD_IN = re.compile(r"(?i)\banswer\s+is\b:?[^\S\n]*[*_]*[^\S\n]*")
-# Several choices given as one answer: a list in one pair of parentheses ("(C, E)",
-# "(A or B)") or parenthesized letters joined together ("(I) and (J)", "(A), (C)").
+# The lead-in of a final answer statement, up to where the answer starts: "the answer
+# is", "Answer:", or a LaTeX box.
+_ANSWER_LEAD_IN = re.compile(
+    r"(?:(?i:\banswer\s+is\b:?|\banswer\s*:)[^\S\n]*|\\boxed\{\s*(?:\\text\{\s*)?)"
+)
 _JOIN = r"(?:,\s*(?:and|or)\b|,|/|&|\band\b|\bor\b)"
+# A choice letter standing alone, with any emphasis or parentheses around it.
+_CHOICE = r"[*_(]*(?<![A-Za-z])[A-J](?![A-Za-z0-9])[*_)]*"
+_PARENTHESIZED_CHOICE = r"[*_]*\([A-J]\)[*_]*"
+# Several choices given as one answer. Parenthesized letters joined together are a list
+# wherever the sentence goes next ("(I) and (J) are both right"). Bare letters are a list
+# only when the statement ends with them, so that "C, I believe" and "A and I am sure"
+# stay single answers.
 _SEVERAL_CHOICES = re.compile(
-    rf"\(\s*[A-J]\s*(?:{_JOIN}\s*[A-J]\s*)+\)|\([A-J]\)(?:\s*{_JOIN}\s*\([A-J]\))+"
+    rf"{_PARENTHESIZED_CHOICE}(?:\s*{_JOIN}\s*{_PARENTHESIZED_CHOICE})+"
+    rf"|{_CHOICE}(?:\s*{_JOIN}\s*{_CHOICE})+(?=[^\S\n]*(?:[.!}}\]]|\\\)|\n|$))"
 )
 
 
 def names_several_choices(text: str) -> bool:
-    """Whether the last "answer is ..." statement in ``text`` gives more than one letter.
+    """Whether the last answer statement in ``text`` gives more than one letter.
 
-    Each question has one correct choice, so "the answer is (C, E)" is not an answer to
-    it. Only an explicit list that starts the answer counts: letters mentioned later in
-    the sentence ("the answer is (B), not (C)") do not.
+    Each question has one correct choice, so "the answer is (C, E)", "Answer: C or E"
+    and ``\\boxed{C, E}`` are not answers to it. Only a list that starts the answer
+    counts: letters mentioned later in the sentence ("the answer is (B), not (C)") do
+    not, and neither does the same letter repeated.
     """
     lead_ins = list(_ANSWER_LEAD_IN.finditer(text))
     if not lead_ins:
