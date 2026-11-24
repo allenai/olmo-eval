@@ -12,6 +12,7 @@ from olmo_eval.evals.suites.posttrain import (
     MODEL_SAMPLING,
     OWN_SAMPLING,
     SAMPLED_FROM,
+    SUPERSEDED_SAMPLED,
 )
 from olmo_eval.evals.tasks.common import get_task
 
@@ -36,15 +37,15 @@ DEV_SHARED = (
 
 
 TEST_SHARED = (
-    "mmlu_pro:cot:t10_32k",
-    "omniscience:judge_t10_32k",
-    "zebralogic:chat_t10_32k",
+    "mmlu_pro:cot:v2:t10_32k",
+    "omniscience:judge_v2_t10_32k",
+    "zebralogic:chat_v2_t10_32k",
     "aime_2025:pass_at_32_t10_32k",
     "aime_2026:pass_at_32_t10_32k",
     "livecodebench_hidden:t10_32k",
     "do_anything_now:wg_judge_thinking_t10_32k",
     "wildjailbreak:wg_judge_thinking_t10_32k",
-    "wmdp:mcq_t10_32k",
+    "wmdp:mcq_v2_t10_32k",
     "bbq:mcq_t10_32k",
     "strongreject:sr_judge_thinking_t10_32k",
 )
@@ -59,9 +60,9 @@ MEMBERS = {
     "posttrain:small:dev:chat_ruler": CHAT_RULER,
     "posttrain:small:test": (
         *TEST_SHARED,
-        "hle:text:verified:t10_32k",
-        "arena_hard_v2:t10_32k",
-        "frontierscience:t10_32k",
+        "hle:text:verified:v2_t10_32k",
+        "arena_hard_v2:v2:t10_32k",
+        "frontierscience:v2:t10_32k",
     ),
 }
 # RULER+ runs greedy with direct-answer budgets (512 tokens in chat), and BFCL
@@ -249,3 +250,44 @@ def test_chat_ruler_pairs_with_the_completion_cell():
             chat, formatter=completion.formatter, sampling_params=completion.sampling_params
         )
         assert unchanged == completion, task
+
+
+V2_TASKS = (
+    "mmlu_pro_",
+    "omniscience:",
+    "zebralogic:",
+    "wmdp:",
+    "hle:",
+    "arena_hard_v2:",
+    "frontierscience_",
+)
+
+
+@pytest.mark.parametrize("name", ["posttrain:tiny:test", "posttrain:small:test"])
+def test_test_suites_read_the_v2_variant_of_each_task_that_has_one(name):
+    # An unfinished reasoning trace is no answer in v2; the originals scored it as one.
+    for task in get_suite(name).expand():
+        config = get_task(task).config
+        if task.startswith(V2_TASKS):
+            assert "v2" in task, task
+            assert config.strip_unclosed_thinking is True, task
+            assert config.thinking_prefilled == "auto", task
+            assert "v2" in SAMPLED_FROM[task].split(":"), task
+
+
+def test_superseded_specs_still_resolve_and_are_in_no_suite():
+    superseded = {
+        task
+        for entry in SUPERSEDED_SAMPLED
+        for task in (entry.expand() if isinstance(entry, Suite) else (entry,))
+    }
+    held = {task for name in MEMBERS for task in get_suite(name).expand()}
+
+    assert "wmdp:mcq_t10_32k" in superseded
+    assert "mmlu_pro_law:cot:t10_32k" in superseded
+    assert "arena_hard_v2:hard_prompt:t10_32k" in superseded
+    assert not superseded & held
+    for task in superseded:
+        config = get_task(task).config
+        assert config.thinking_prefilled is False, task
+        assert config.sampling_params.max_tokens == MODEL_SAMPLING["max_tokens"], task

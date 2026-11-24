@@ -1118,6 +1118,14 @@ chat than in completion on the same items. Run it as its own job with thinking o
 serving a think-off chat template (`-o provider.tokenizer=<dir>`). With thinking on, 512
 tokens cut the reasoning off, and even at 8,192 tokens 70% of answers hit the cap.
 
+The test suites read the `v2` variant of each task that has one (MMLU-Pro, Omniscience,
+ZebraLogic and WMDP, and in Small also HLE, Arena-Hard and FrontierScience), for example
+`wmdp:mcq_v2_t10_32k`. The Olmo 3.5 chat template opens `<think>` in the prompt, so a
+generation cut off inside its reasoning carries no tag, and the original variants scored
+it as an answer. The `v2` variants treat it as no answer. Results from before this change
+were scored with the originals (`wmdp:mcq_t10_32k` and so on), which stay registered; see
+the [result compatibility log](docs/result-compatibility.md).
+
 The suites name no provider, but the engine is part of what a score measures: compare
 scores only between runs on the same provider, and record it with each run. When the rest
 of a suite runs on SGLang, BFCL needs its own job with `provider.kind=vllm_server`, the
