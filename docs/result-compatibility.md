@@ -22,10 +22,12 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   task, for models whose chat template ends its generation prompt with `<think>` (the
   Olmo 3.5 templates do), run on the SGLang, inline vLLM or vLLM server provider.
 - **Change**: those providers record on each output that the prompt opened the trace
-  (`prompt_opens_think`, saved with predictions). A generation that then has no
-  `</think>` is counted as an unclosed trace. Before, only an emitted `<think>` with no
+  (`prompt_opens_think`) and, where they have evidence, whether it closed
+  (`think_closed`: a `</think>` in the text or its token id among the generated ids).
+  Both are saved with predictions. A generation with evidence that the trace stayed
+  open is counted as an unclosed trace. Before, only an emitted `<think>` with no
   closing tag was counted, so these runs reported 0 however many generations stopped
-  inside the trace.
+  inside the trace. An output without evidence is not counted.
 - **Identity**: task hashes and scores do not change; only the diagnostic changes.
 - **Comparability**: quality scores remain comparable. `unclosed_think` counts from
   before this change undercount for such models and are not recomputed; `cap_hit` is

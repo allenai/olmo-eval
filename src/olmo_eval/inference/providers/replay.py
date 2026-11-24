@@ -10,8 +10,7 @@ from typing import Any
 from olmo_eval.common.types import (
     CONTEXT_CUT_TOKENS_KEY,
     PROMPT_OPENS_THINK_KEY,
-    REASONING_SEPARATED_KEY,
-    THINK_CLOSE_HIDDEN_KEY,
+    THINK_CLOSED_KEY,
     LMOutput,
     LMRequest,
     RequestType,
@@ -33,8 +32,7 @@ _METADATA_FIELDS = (
     "response_parser_error",
     CONTEXT_CUT_TOKENS_KEY,
     PROMPT_OPENS_THINK_KEY,
-    REASONING_SEPARATED_KEY,
-    THINK_CLOSE_HIDDEN_KEY,
+    THINK_CLOSED_KEY,
 )
 
 
@@ -93,10 +91,12 @@ class ReplayProvider(InferenceProvider):
     identities nor native tool calls.
 
     ``prompt_opens_think`` is for runs saved before providers recorded whether the
-    rendered prompt opened a ``<think>`` trace. Set it when that model's chat template
-    did: every replayed output that saved no such record is then marked as starting
-    inside a trace, so tasks that read the record can tell an unfinished trace from an
-    answer. Outputs that saved their own record keep it.
+    rendered prompt opened a ``<think>`` trace and whether that trace closed. Set it only
+    when that model's chat template did open one and the run's provider left ``</think>``
+    in the text of a closed trace (inline SGLang with the Olmo tokenizers does; a server
+    with a reasoning parser does not). Every replayed output that saved no such record
+    is then marked as starting inside a trace, closed if and only if its text holds
+    ``</think>``. Outputs that saved their own record keep it.
     """
 
     def __init__(
@@ -165,7 +165,9 @@ class ReplayProvider(InferenceProvider):
             outputs = [_replayed_output(saved) for saved in queue.popleft()]
             if self._prompt_opens_think:
                 for output in outputs:
-                    output.metadata.setdefault(PROMPT_OPENS_THINK_KEY, True)
+                    if PROMPT_OPENS_THINK_KEY not in output.metadata:
+                        output.metadata[PROMPT_OPENS_THINK_KEY] = True
+                        output.metadata[THINK_CLOSED_KEY] = "</think>" in output.text
             return outputs
         return [LMOutput(text="", metadata={REQUEST_ERROR_KEY: f"replay: {error}"})]
 

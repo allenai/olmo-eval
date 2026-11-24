@@ -166,9 +166,12 @@ class TaskConfig:
     #: The generation prompt already opens a ``<think>`` trace. With
     #: ``strip_unclosed_thinking``, an output with no ``</think>`` is treated as
     #: an unterminated trace and emptied. Off by default. ``"auto"`` takes the answer
-    #: per output from what the provider recorded about the prompt it rendered (see
-    #: :func:`~olmo_eval.evals.extract.reasoning.trace_unfinished`), so one spec serves
-    #: models whose templates open the trace and models whose templates do not.
+    #: per output from what the provider recorded about the prompt it rendered and
+    #: whether the trace closed (see
+    #: :func:`~olmo_eval.evals.extract.reasoning.trace_state`), so one spec serves
+    #: models whose templates open the trace and models whose templates do not. An
+    #: output whose provider left no evidence either way is not scored: stripping
+    #: raises ``ScoringIncompleteError`` for it rather than guess.
     thinking_prefilled: bool | Literal["auto"] = False
 
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
@@ -709,8 +712,12 @@ class Task(ABC):
         With ``thinking_prefilled`` (the prompt itself ends in ``<think>``), outputs
         start inside the trace, so the unterminated case is "no ``</think>``" rather
         than "``<think>`` with no ``</think>``". With ``thinking_prefilled="auto"``
-        that holds for the outputs whose provider recorded such a prompt, and the
-        others are read by their tags.
+        that holds for the outputs whose provider recorded such a prompt and that
+        the trace stayed open, and the others are read by their tags. When the provider
+        recorded such a prompt, or could not tell, and left no evidence of whether the
+        trace closed, ``"auto"`` raises ``ScoringIncompleteError``: scoring the text
+        would treat a possible trace as an answer, and emptying it would discard a
+        possible answer. The runner records the instance as unscored.
 
         Only ``outputs[*].text`` is touched; trajectories and request traces
         keep the trace. The raw text is kept in ``metadata["original_text"]``.
@@ -720,7 +727,8 @@ class Task(ABC):
         if not (strip_closed or strip_unclosed or self.config.response_parser):
             return
         prefilled = self.config.thinking_prefilled
-        from olmo_eval.evals.extract import extract_think_answer, trace_unfinished
+        from olmo_eval.common.scorers.execution import ScoringIncompleteError
+        from olmo_eval.evals.extract import extract_think_answer, trace_state
 
         for response in responses:
             for output in response.outputs:
@@ -742,9 +750,19 @@ class Task(ABC):
                         text = parsed
                     output.metadata["response_parsed"] = True
                 closed = "</think>" in text
-                unclosed = trace_unfinished(
+                state = trace_state(
                     text, output.metadata, prefilled=None if prefilled == "auto" else prefilled
                 )
+                if state == "unknown" and strip_unclosed:
+                    raise ScoringIncompleteError(
+                        f"{self.config.name}: the prompt opened a reasoning trace, or may "
+                        "have, and the provider recorded no evidence of whether the trace "
+                        "closed (think_closed), so the text cannot be told apart from an "
+                        "unfinished trace. Use a provider that records it (inline SGLang or "
+                        "vLLM, or a vLLM server that returns token ids or logprobs), or a "
+                        "spec without thinking_prefilled=auto."
+                    )
+                unclosed = state == "unclosed"
                 if strip_unclosed and unclosed:
                     output.metadata.setdefault("original_text", text)
                     output.metadata["unclosed_thinking"] = True
