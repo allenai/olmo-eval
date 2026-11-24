@@ -625,10 +625,12 @@ Generation diagnostics count outputs, including each sample of an instance.
 `cap_hit` counts known `length` finish reasons and is a lower bound when
 `finish_reason_unknown` is nonzero. `unclosed_think` counts reasoning traces that
 never closed in the original generation: a `<think>` tag without a closing tag, or,
-when the chat template itself opens the trace, a generation with no `</think>`. The
-SGLang and vLLM providers record such a prompt on each output
-(`prompt_opens_think` in the predictions file); runs saved before they did report
-only emitted tags. `empty` counts empty
+when the chat template itself opens the trace, a generation the provider has evidence
+never produced `</think>`. The SGLang and vLLM providers record on each output whether
+the prompt opened a trace (`prompt_opens_think`) and whether it closed (`think_closed`,
+from the text or the generated token ids; absent when the provider has no evidence).
+Both are saved in the predictions file. Outputs without evidence, and runs saved before
+the providers recorded it, count only emitted tags. `empty` counts empty
 scoring text and excludes tool calls. Tasks that strip or transform text inside
 extraction, without changing `LMOutput.text`, set
 `output.metadata[SCORING_TEXT_EMPTY_KEY]` from that scoring text before parsing;

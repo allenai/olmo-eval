@@ -168,14 +168,19 @@ def test_generate_records_a_prompt_that_opens_a_trace(fake_provider) -> None:
 
     outputs = provider.generate([opened, plain], SamplingParams(max_tokens=1))
 
+    # The tag is ordinary text here, so "ok" without it is a trace that stayed open.
     assert outputs[0][0].metadata["prompt_opens_think"] is True
-    assert "think_close_hidden" not in outputs[0][0].metadata
+    assert outputs[0][0].metadata["think_closed"] is False
     assert "prompt_opens_think" not in outputs[1][0].metadata
+    assert "think_closed" not in outputs[1][0].metadata
 
-    # The default decode drops a special closing tag, so its absence proves nothing.
-    tokenizer.all_special_tokens = ["</think>"]
-    hidden = provider.generate([opened], SamplingParams(max_tokens=1))[0][0]
-    assert hidden.metadata["think_close_hidden"] is True
+    # The default decode drops a single-token tag: only the generated ids ([7]) show it.
+    tokenizer.get_added_vocab = lambda: {"</think>": 7}
+    assert provider.generate([opened], SamplingParams(max_tokens=1))[0][0].metadata["think_closed"]
+    tokenizer.get_added_vocab = lambda: {"</think>": 8}
+    assert not provider.generate([opened], SamplingParams(max_tokens=1))[0][0].metadata[
+        "think_closed"
+    ]
 
 
 def test_generate_preserves_termination_without_logprobs(fake_provider) -> None:

@@ -314,29 +314,35 @@ def test_prompt_that_opens_a_trace_is_recorded_on_each_output(setup_engine):
 
     opened = provider.generate([chat], SamplingParams(num_samples=2))[0]
     assert [output.metadata["prompt_opens_think"] for output in opened] == [True, True]
-    assert "think_close_hidden" not in opened[0].metadata
+    # The tag is ordinary text for this tokenizer, so its absence from "response0" shows
+    # that the trace stayed open.
+    assert [output.metadata["think_closed"] for output in opened] == [False, False]
     saved = build_predictions(
         [Response(instance=Instance(question="q"), request=chat, outputs=opened)]
     )[0]["model_output"]
-    assert saved[0]["prompt_opens_think"] is True
+    assert (saved[0]["prompt_opens_think"], saved[0]["think_closed"]) == (True, False)
 
     tokenizer.apply_chat_template.return_value = "<user>question<assistant>"
     plain = provider.generate([chat], SamplingParams())[0][0]
     completion = provider.generate([LMRequest(RequestType.COMPLETION, prompt="Q:")])[0][0]
-    assert "prompt_opens_think" not in plain.metadata
-    assert "prompt_opens_think" not in completion.metadata
+    for output in (plain, completion):
+        assert "prompt_opens_think" not in output.metadata
+        assert "think_closed" not in output.metadata
 
 
-def test_special_closing_tag_is_recorded_as_hidden(setup_engine):
+@pytest.mark.parametrize(("close_id", "closed"), [(18, True), (77, False)])
+def test_a_single_token_closing_tag_is_read_from_the_generated_ids(setup_engine, close_id, closed):
+    # A decoder that skips special tokens leaves no tag in the text; the engine returns
+    # ids 17 and 18 for every generation here.
     _, _, tokenizer = setup_engine
-    tokenizer.all_special_tokens = ["<|im_end|>", "</think>"]
+    tokenizer.get_added_vocab.return_value = {"</think>": close_id}
     provider = create_provider("sglang", "model")
     chat = LMRequest(RequestType.CHAT, messages=({"role": "user", "content": "question"},))
 
     output = provider.generate([chat], SamplingParams())[0][0]
 
-    assert output.metadata["prompt_opens_think"] is True
-    assert output.metadata["think_close_hidden"] is True
+    assert "</think>" not in output.text
+    assert output.metadata["think_closed"] is closed
 
 
 @pytest.mark.parametrize("reason", [{"type": "length", "length": 2}, "length", None])
