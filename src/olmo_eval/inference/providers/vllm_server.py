@@ -1017,7 +1017,8 @@ class VLLMServerProvider(InferenceProvider):
         stop_sequences = self._get_completion_stop_sequences(params)
         if stop_sequences:
             kwargs["stop"] = stop_sequences
-        opens_think = prompt_opens_think(request.prompt or "")
+        # Asked of the server only for a task that reads the record.
+        opens_think = request.record_thinking and prompt_opens_think(request.prompt or "")
         close_ids = await self._get_think_close_ids() if opens_think else None
         truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
         if truncate_prompt_tokens is not None:
@@ -1281,7 +1282,11 @@ class VLLMServerProvider(InferenceProvider):
             kwargs["extra_body"] = extra_body
 
         # Whether this prompt opens a reasoning trace, and what would show that it closed.
-        opens_think = await self._request_opens_think(messages, tools)
+        # Only for a task that reads the record: the lookup is an extra server call and
+        # can add a field to the request, and every other request is sent as it always was.
+        opens_think: bool | None = False
+        if request.record_thinking:
+            opens_think = await self._request_opens_think(messages, tools)
         close_ids = await self._get_think_close_ids() if opens_think else None
         if close_ids is not None and len(close_ids) == 1:
             # A single-token tag can decode to nothing, so ask for the generated ids.
