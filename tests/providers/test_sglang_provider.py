@@ -307,6 +307,38 @@ def test_chat_sampling_and_sampled_token_logprobs(setup_engine):
     assert trace["generation_kwargs"]["top_p"] == 0.95
 
 
+def test_prompt_that_opens_a_trace_is_recorded_on_each_output(setup_engine):
+    _, _, tokenizer = setup_engine
+    provider = create_provider("sglang", "model")
+    chat = LMRequest(RequestType.CHAT, messages=({"role": "user", "content": "question"},))
+
+    opened = provider.generate([chat], SamplingParams(num_samples=2))[0]
+    assert [output.metadata["prompt_opens_think"] for output in opened] == [True, True]
+    assert "think_close_hidden" not in opened[0].metadata
+    saved = build_predictions(
+        [Response(instance=Instance(question="q"), request=chat, outputs=opened)]
+    )[0]["model_output"]
+    assert saved[0]["prompt_opens_think"] is True
+
+    tokenizer.apply_chat_template.return_value = "<user>question<assistant>"
+    plain = provider.generate([chat], SamplingParams())[0][0]
+    completion = provider.generate([LMRequest(RequestType.COMPLETION, prompt="Q:")])[0][0]
+    assert "prompt_opens_think" not in plain.metadata
+    assert "prompt_opens_think" not in completion.metadata
+
+
+def test_special_closing_tag_is_recorded_as_hidden(setup_engine):
+    _, _, tokenizer = setup_engine
+    tokenizer.all_special_tokens = ["<|im_end|>", "</think>"]
+    provider = create_provider("sglang", "model")
+    chat = LMRequest(RequestType.CHAT, messages=({"role": "user", "content": "question"},))
+
+    output = provider.generate([chat], SamplingParams())[0][0]
+
+    assert output.metadata["prompt_opens_think"] is True
+    assert output.metadata["think_close_hidden"] is True
+
+
 @pytest.mark.parametrize("reason", [{"type": "length", "length": 2}, "length", None])
 def test_finish_reason_reaches_harness_counts_and_predictions(setup_engine, reason):
     engine, _, _ = setup_engine

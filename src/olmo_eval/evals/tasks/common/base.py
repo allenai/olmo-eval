@@ -165,8 +165,11 @@ class TaskConfig:
 
     #: The generation prompt already opens a ``<think>`` trace. With
     #: ``strip_unclosed_thinking``, an output with no ``</think>`` is treated as
-    #: an unterminated trace and emptied. Off by default.
-    thinking_prefilled: bool = False
+    #: an unterminated trace and emptied. Off by default. ``"auto"`` takes the answer
+    #: per output from what the provider recorded about the prompt it rendered (see
+    #: :func:`~olmo_eval.evals.extract.reasoning.trace_unfinished`), so one spec serves
+    #: models whose templates open the trace and models whose templates do not.
+    thinking_prefilled: bool | Literal["auto"] = False
 
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
     dependencies: list[str] | None = None
@@ -345,7 +348,7 @@ class TaskConfig:
         if self.strip_unclosed_thinking:
             serialized["strip_unclosed_thinking"] = True
         if self.thinking_prefilled:
-            serialized["thinking_prefilled"] = True
+            serialized["thinking_prefilled"] = self.thinking_prefilled
         if any(
             value is not None
             for value in (
@@ -705,7 +708,9 @@ class Task(ABC):
 
         With ``thinking_prefilled`` (the prompt itself ends in ``<think>``), outputs
         start inside the trace, so the unterminated case is "no ``</think>``" rather
-        than "``<think>`` with no ``</think>``".
+        than "``<think>`` with no ``</think>``". With ``thinking_prefilled="auto"``
+        that holds for the outputs whose provider recorded such a prompt, and the
+        others are read by their tags.
 
         Only ``outputs[*].text`` is touched; trajectories and request traces
         keep the trace. The raw text is kept in ``metadata["original_text"]``.
@@ -715,7 +720,7 @@ class Task(ABC):
         if not (strip_closed or strip_unclosed or self.config.response_parser):
             return
         prefilled = self.config.thinking_prefilled
-        from olmo_eval.evals.extract import extract_think_answer
+        from olmo_eval.evals.extract import extract_think_answer, trace_unfinished
 
         for response in responses:
             for output in response.outputs:
@@ -737,8 +742,9 @@ class Task(ABC):
                         text = parsed
                     output.metadata["response_parsed"] = True
                 closed = "</think>" in text
-                suffix = text.rpartition("</think>")[2] if closed else text
-                unclosed = "<think>" in suffix or (prefilled and not closed)
+                unclosed = trace_unfinished(
+                    text, output.metadata, prefilled=None if prefilled == "auto" else prefilled
+                )
                 if strip_unclosed and unclosed:
                     output.metadata.setdefault("original_text", text)
                     output.metadata["unclosed_thinking"] = True

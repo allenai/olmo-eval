@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.common.debug import is_debug_provider, is_debug_requests
 from olmo_eval.common.types import (
     CONTEXT_CUT_TOKENS_KEY,
+    PROMPT_OPENS_THINK_KEY,
+    THINK_CLOSE_HIDDEN_KEY,
     LMOutput,
     LMRequest,
     LogProbEntry,
@@ -20,6 +22,7 @@ from olmo_eval.common.types import (
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.providers.vllm_server import _replace_context_text
+from olmo_eval.inference.request_utils import prompt_opens_think, think_close_is_special
 from olmo_eval.inference.tokenizer_utils import (
     encode_context_and_continuation,
     rolling_token_windows,
@@ -382,8 +385,12 @@ class VLLMProvider(InferenceProvider):
             for token in getattr(tokenizer, "added_tokens_decoder", {}).values()
             if token.special
         )
+        # The default decode skips special tokens, so a special ``</think>`` never shows.
+        close_hidden = think_close_is_special(tokenizer)
         results: list[list[LMOutput]] = []
-        for output, (_, cut_tokens) in zip(outputs, fitted, strict=True):
+        for output, (_, cut_tokens), prompt in zip(outputs, fitted, prompt_strs, strict=True):
+            # The generation starts inside a trace the prompt opened, with no opening tag.
+            opens_think = prompt_opens_think(prompt)
             request_outputs: list[LMOutput] = []
             for completion in output.outputs:
                 logprobs = _convert_logprobs(completion.logprobs)
@@ -421,6 +428,10 @@ class VLLMProvider(InferenceProvider):
                     metadata["text_with_special_tokens"] = raw_text
                 if cut_tokens:
                     metadata[CONTEXT_CUT_TOKENS_KEY] = cut_tokens
+                if opens_think:
+                    metadata[PROMPT_OPENS_THINK_KEY] = True
+                    if close_hidden:
+                        metadata[THINK_CLOSE_HIDDEN_KEY] = True
 
                 request_outputs.append(
                     LMOutput(

@@ -682,6 +682,53 @@ class TestThinkingPrefilled:
         assert response.outputs[0].text == "reasoning</think>\n\n4"
         assert response.outputs[0].metadata == {}
 
+    def test_auto_reads_the_prompt_record_of_each_output(self):
+        """One spec serves outputs whose prompt opened the trace and outputs whose did not."""
+        task = self._task(
+            strip_thinking=True, strip_unclosed_thinking=True, thinking_prefilled="auto"
+        )
+        response = self._make_response(
+            ["cut off mid-trace", "plain answer", "reasoning</think>4", "<think>cut off"]
+        )
+        response.outputs[0].metadata["prompt_opens_think"] = True
+        response.outputs[2].metadata["prompt_opens_think"] = True
+
+        task.strip_thinking_traces([response])
+        first = [(o.text, dict(o.metadata)) for o in response.outputs]
+        task.strip_thinking_traces([response])
+
+        assert [o.text for o in response.outputs] == ["", "plain answer", "4", ""]
+        assert response.outputs[0].metadata["unclosed_thinking"] is True
+        assert response.outputs[0].metadata["original_text"] == "cut off mid-trace"
+        assert "unclosed_thinking" not in response.outputs[1].metadata
+        assert [(o.text, dict(o.metadata)) for o in response.outputs] == first
+
+    def test_auto_leaves_a_separated_or_hidden_trace_that_finished(self):
+        task = self._task(strip_unclosed_thinking=True, thinking_prefilled="auto")
+        response = self._make_response(["answer", "answer", "trace"])
+        separated, hidden_stop, hidden_length = response.outputs
+        separated.metadata.update(
+            prompt_opens_think=True, reasoning_separated=True, finish_reason="length"
+        )
+        hidden_stop.metadata.update(
+            prompt_opens_think=True, think_close_hidden=True, finish_reason="stop"
+        )
+        hidden_length.metadata.update(
+            prompt_opens_think=True, think_close_hidden=True, finish_reason="length"
+        )
+
+        task.strip_thinking_traces([response])
+
+        assert [o.text for o in response.outputs] == ["answer", "answer", ""]
+
+    def test_auto_is_serialized_and_parsed_as_an_override(self):
+        from olmo_eval.evals.tasks.common.registry import parse_overrides
+
+        config = TaskConfig(name="t", data_source="d", thinking_prefilled="auto")
+        assert config.to_dict()["thinking_prefilled"] == "auto"
+        assert parse_overrides("thinking_prefilled=auto") == {"thinking_prefilled": "auto"}
+        assert parse_overrides("thinking_prefilled=true") == {"thinking_prefilled": True}
+
     def test_to_dict(self):
         assert (
             TaskConfig(name="t", data_source="d", thinking_prefilled=True).to_dict()[

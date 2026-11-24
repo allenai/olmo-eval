@@ -13,6 +13,36 @@ logger = logging.getLogger(__name__)
 _DROPPED_SYSTEM_WARNED: list[bool] = []
 
 
+def prompt_opens_think(rendered_prompt: str) -> bool:
+    """Whether a rendered prompt ends by opening a ``<think>`` trace.
+
+    A chat template may end its generation prompt with ``<think>``. The generation then
+    starts inside the trace and has no opening tag, so providers record this on each
+    output under ``PROMPT_OPENS_THINK_KEY`` for scoring to tell an unfinished trace from
+    an answer.
+    """
+    return rendered_prompt.rstrip().endswith("<think>")
+
+
+def think_close_is_special(tokenizer: Any) -> bool:
+    """Whether ``tokenizer`` marks ``</think>`` as a special token.
+
+    A decoder that skips special tokens then drops the tag from the output text, so
+    providers record ``THINK_CLOSE_HIDDEN_KEY`` beside ``PROMPT_OPENS_THINK_KEY``.
+    """
+    close_tag = "</think>"
+    special = getattr(tokenizer, "all_special_tokens", None)
+    if isinstance(special, (list, tuple, set, frozenset)) and close_tag in special:
+        return True
+    added = getattr(tokenizer, "added_tokens_decoder", None)
+    if not isinstance(added, dict):
+        return False
+    return any(
+        str(token) == close_tag and getattr(token, "special", False) is True
+        for token in added.values()
+    )
+
+
 def chat_messages_for_request(request: LMRequest) -> tuple[dict, ...]:
     """The request's chat turns, preserving a completion prompt as a user turn.
 

@@ -156,6 +156,20 @@ def test_closed_trace_opened_by_the_template_is_not_unclosed() -> None:
     assert counts["empty"] == 0
 
 
+def test_trace_the_prompt_opened_counts_as_unclosed_when_the_provider_recorded_it() -> None:
+    """The generation has no opening tag, so only the provider's record can say."""
+    cut_off = _response(("step 1, step 2, step 3", "length"))
+    cut_off.outputs[0].metadata["prompt_opens_think"] = True
+    finished = _response(("reasoning</think>\nAnswer.", "stop"))
+    finished.outputs[0].metadata["prompt_opens_think"] = True
+    unrecorded = _response(("step 1, step 2, step 3", "length"))
+
+    counts = count_generations(_stripped([cut_off, finished, unrecorded]))
+
+    assert counts is not None
+    assert (counts["cap_hit"], counts["unclosed_think"]) == (2, 1)
+
+
 def test_missing_finish_reason_is_counted_as_unknown_not_as_complete() -> None:
     counts = count_generations([_response(("answer", None), ("", None))])
 

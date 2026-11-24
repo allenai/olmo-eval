@@ -223,6 +223,8 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
                 value = int(value_str)
             elif key in {"temperature", "top_p", "judge_temperature"}:
                 value = float(value_str)
+            elif key == "thinking_prefilled" and value_str.strip().lower() == "auto":
+                value = "auto"
             elif key in {"strip_thinking", "strip_unclosed_thinking", "thinking_prefilled"}:
                 value = _parse_bool(value_str, key)
             elif key == "dependencies":

@@ -7,6 +7,7 @@ from typing import Any
 
 from olmo_eval.common.multi_turn import turn_replies
 from olmo_eval.common.types import SCORING_TEXT_EMPTY_KEY, RequestType, Response
+from olmo_eval.evals.extract.reasoning import trace_unfinished
 
 GENERATION_COUNT_KEYS = (
     "generations",
@@ -16,23 +17,19 @@ GENERATION_COUNT_KEYS = (
     "finish_reason_unknown",
 )
 
-_THINK_OPEN = "<think>"
-_THINK_CLOSE = "</think>"
-
-
-def _unclosed_think(text: str) -> bool:
-    return text.rfind(_THINK_OPEN) > text.rfind(_THINK_CLOSE)
-
 
 def count_generations(responses: Sequence[Response]) -> dict[str, int] | None:
     """Count generation outcomes after scoring; None if there are no generations.
 
     A scripted conversation counts once, as unclosed if any of its turns is.
     ``cap_hit`` counts known length stops, a lower bound when finish reasons are
-    unknown. ``unclosed_think`` sees emitted tags, including original text kept
-    before stripping. ``empty`` excludes tool-call outputs; tasks that transform
-    scoring text without changing ``output.text`` set ``SCORING_TEXT_EMPTY_KEY``
-    from that text, rather than from whether answer extraction succeeded.
+    unknown. ``unclosed_think`` counts traces that never closed, read from the original
+    text kept before stripping: a ``<think>`` with no ``</think>`` after it, or, when the
+    provider recorded that the prompt itself opened the trace, a generation with no
+    ``</think>`` (see ``olmo_eval.evals.extract.reasoning.trace_unfinished``).
+    ``empty`` excludes tool-call outputs; tasks that transform scoring text without
+    changing ``output.text`` set ``SCORING_TEXT_EMPTY_KEY`` from that text, rather than
+    from whether answer extraction succeeded.
     """
     counts = dict.fromkeys(GENERATION_COUNT_KEYS, 0)
     for response in responses:
@@ -52,8 +49,13 @@ def count_generations(responses: Sequence[Response]) -> dict[str, int] | None:
             empty = metadata.get(SCORING_TEXT_EMPTY_KEY, not text.strip())
             if empty and not output.has_tool_calls:
                 counts["empty"] += 1
-            replies = turn_replies(output) or [raw]
-            if any(_unclosed_think(reply) for reply in replies):
+            replies = turn_replies(output)
+            if replies:
+                # The provider's record describes the last request, not each turn.
+                unclosed = any(trace_unfinished(reply) for reply in replies)
+            else:
+                unclosed = trace_unfinished(raw, metadata)
+            if unclosed:
                 counts["unclosed_think"] += 1
 
     if counts["generations"] == 0:

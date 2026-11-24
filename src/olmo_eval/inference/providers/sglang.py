@@ -17,12 +17,24 @@ from jinja2 import TemplateError
 
 from olmo_eval.common.images import resolve_images
 from olmo_eval.common.logging import get_logger
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    PROMPT_OPENS_THINK_KEY,
+    THINK_CLOSE_HIDDEN_KEY,
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.providers.sglang_profiles import prepare_profile
-from olmo_eval.inference.request_utils import chat_messages_for_request
+from olmo_eval.inference.request_utils import (
+    chat_messages_for_request,
+    prompt_opens_think,
+    think_close_is_special,
+)
 
 logger = get_logger(__name__)
 
@@ -245,6 +257,7 @@ class SGLangProvider(InferenceProvider):
                 if type(value) is int and value > 0:
                     self.profile_report[key] = value
         self._closed = False
+        self._think_close_special: bool | None = None
         self._capacity_checked = False
         self._previous_batch: tuple[int, int, int, int] | None = None
         self._loop_lock = threading.Lock()
@@ -290,6 +303,12 @@ class SGLangProvider(InferenceProvider):
             raise NotImplementedError("Image requests require enable_multimodal=True")
         if request.request_type == RequestType.CHAT and not request.messages:
             raise ValueError("CHAT requests require messages")
+
+    def _think_close_hidden(self) -> bool:
+        """Whether decoding drops ``</think>`` because the tokenizer marks it special."""
+        if self._think_close_special is None:
+            self._think_close_special = think_close_is_special(self.get_tokenizer())
+        return self._think_close_special
 
     def _format_prompt(self, request: LMRequest) -> str:
         self._validate_request(request)
@@ -356,9 +375,16 @@ class SGLangProvider(InferenceProvider):
                 "prompt_format": self.prompt_format,
             }
         prompt = self._format_prompt(request)
+        # The generation starts inside a trace the prompt opened, with no opening tag.
+        recorded: dict[str, Any] = {}
+        if prompt_opens_think(prompt):
+            recorded[PROMPT_OPENS_THINK_KEY] = True
+            if self._think_close_hidden():
+                recorded[THINK_CLOSE_HIDDEN_KEY] = True
         if self._add_bos_token is False:
-            return {"input_ids": self.get_tokenizer().encode(prompt, add_special_tokens=False)}, {}
-        return {"prompt": prompt}, {}
+            ids = self.get_tokenizer().encode(prompt, add_special_tokens=False)
+            return {"input_ids": ids}, recorded
+        return {"prompt": prompt}, recorded
 
     def _build_sampling_params(self, params: SamplingParams) -> dict[str, Any]:
         if params.truncate_prompt_tokens is not None or params.truncation_side is not None:

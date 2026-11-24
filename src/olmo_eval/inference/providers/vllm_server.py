@@ -13,6 +13,9 @@ from olmo_eval.common.beaker_status import BeakerStatusReporter
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import (
     CONTEXT_CUT_TOKENS_KEY,
+    PROMPT_OPENS_THINK_KEY,
+    REASONING_SEPARATED_KEY,
+    THINK_CLOSE_HIDDEN_KEY,
     LMOutput,
     LMRequest,
     LogProbEntry,
@@ -27,6 +30,7 @@ from olmo_eval.inference.errors import (
     is_context_overflow,
 )
 from olmo_eval.inference.hf_cache import refresh_hf_cache
+from olmo_eval.inference.request_utils import prompt_opens_think
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 from olmo_eval.inference.utils import run_async
 
@@ -133,6 +137,16 @@ class TokenizerBosOverride:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._tokenizer, name)
+
+
+def _message_reasoning(message: Any) -> str:
+    """The reasoning trace a server returned apart from a chat message's content, or ""."""
+    extra = getattr(message, "model_extra", None) or {}
+    for field in ("reasoning_content", "reasoning"):
+        value = getattr(message, field, None) or extra.get(field)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def _cut_at_stop_sequence(text: str, stop_sequences: list[str] | None) -> str:
@@ -355,6 +369,8 @@ class VLLMServerProvider(InferenceProvider):
         self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
+        # Whether the server's chat template opens a ``<think>`` trace; probed once.
+        self._chat_opens_think: bool | None = None
         self._server: VLLMServerProcess | None = None  # type: ignore[possibly-unresolved-reference]
         if max_model_len is not None and max_model_len <= 0:
             raise ValueError("max_model_len must be positive when set")
@@ -1020,6 +1036,51 @@ class VLLMServerProvider(InferenceProvider):
             payload["chat_template_kwargs"] = dict(self.chat_template_kwargs)
         return await self._count_tokens(payload)
 
+    async def _chat_prompt_opens_think(self) -> bool:
+        """Whether the server's chat template ends its generation prompt with ``<think>``.
+
+        The server renders the template, so this asks it to tokenize one user turn and
+        reads the end of the rendered prompt. It is asked once: a template's generation
+        prompt does not depend on the conversation. A server that cannot answer counts
+        as not opening a trace, which leaves scoring as it was.
+        """
+        if self._chat_opens_think is None:
+            self._chat_opens_think = await self._probe_chat_prompt_opens_think()
+        return self._chat_opens_think
+
+    async def _probe_chat_prompt_opens_think(self) -> bool:
+        base_url = self.base_url.rstrip("/").removesuffix("/v1")
+        payload: dict[str, Any] = {
+            "model": self._request_model_name,
+            "messages": [{"role": "user", "content": "Hi"}],
+            "add_generation_prompt": True,
+            "return_token_strs": True,
+        }
+        if self.chat_template_kwargs:
+            payload["chat_template_kwargs"] = dict(self.chat_template_kwargs)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                response = await http_client.post(f"{base_url}/tokenize", json=payload)
+                response.raise_for_status()
+                data = response.json()
+                token_strs = data.get("token_strs")
+                if isinstance(token_strs, list) and token_strs:
+                    tail = "".join(str(token) for token in token_strs[-8:])
+                else:
+                    tokens = data.get("tokens")
+                    if not isinstance(tokens, list) or not tokens:
+                        return False
+                    response = await http_client.post(
+                        f"{base_url}/detokenize",
+                        json={"model": self._request_model_name, "tokens": tokens[-8:]},
+                    )
+                    response.raise_for_status()
+                    tail = str(response.json().get("prompt") or "")
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Could not read the end of the rendered chat prompt: %s", exc)
+            return False
+        return prompt_opens_think(tail)
+
     async def _count_tokens(self, payload: dict[str, Any]) -> int | None:
         """Return the token count the server's /tokenize endpoint gives a payload."""
         base_url = self.base_url.rstrip("/").removesuffix("/v1")
@@ -1111,6 +1172,8 @@ class VLLMServerProvider(InferenceProvider):
         # Capture usage for accurate metrics
         usage = getattr(response, "usage", None)
 
+        opens_think = await self._chat_prompt_opens_think()
+
         outputs = []
         for choice in response.choices:
             text = choice.message.content or ""
@@ -1130,6 +1193,13 @@ class VLLMServerProvider(InferenceProvider):
             metadata: dict[str, Any] = {"finish_reason": getattr(choice, "finish_reason", None)}
 
             metadata.update(self._completion_usage_metadata(usage, len(response.choices)))
+            if opens_think:
+                # The generation starts inside the trace. A server-side reasoning parser
+                # or special-token stripping can remove ``</think>`` from the content.
+                metadata[PROMPT_OPENS_THINK_KEY] = True
+                metadata[THINK_CLOSE_HIDDEN_KEY] = True
+                if _message_reasoning(choice.message):
+                    metadata[REASONING_SEPARATED_KEY] = True
 
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:

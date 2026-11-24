@@ -161,6 +161,23 @@ def test_generate_keeps_completion_prompt_unchanged(
     assert llm.generate_calls[0]["prompts"] == ["Complete me"]
 
 
+def test_generate_records_a_prompt_that_opens_a_trace(fake_provider) -> None:
+    provider, _, tokenizer = fake_provider
+    opened = LMRequest(request_type=RequestType.COMPLETION, prompt="Q<think>\n")
+    plain = LMRequest(request_type=RequestType.COMPLETION, prompt="Q")
+
+    outputs = provider.generate([opened, plain], SamplingParams(max_tokens=1))
+
+    assert outputs[0][0].metadata["prompt_opens_think"] is True
+    assert "think_close_hidden" not in outputs[0][0].metadata
+    assert "prompt_opens_think" not in outputs[1][0].metadata
+
+    # The default decode drops a special closing tag, so its absence proves nothing.
+    tokenizer.all_special_tokens = ["</think>"]
+    hidden = provider.generate([opened], SamplingParams(max_tokens=1))[0][0]
+    assert hidden.metadata["think_close_hidden"] is True
+
+
 def test_generate_preserves_termination_without_logprobs(fake_provider) -> None:
     provider, _, _ = fake_provider
     request = LMRequest(request_type=RequestType.COMPLETION, prompt="Q")

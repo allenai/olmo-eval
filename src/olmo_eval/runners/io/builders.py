@@ -11,7 +11,10 @@ from olmo_eval.common.metrics.predictions import augment_prediction_instance_met
 from olmo_eval.common.scorers.base import SCORER_RESULTS_KEY
 from olmo_eval.common.types import (
     CONTEXT_CUT_TOKENS_KEY,
+    PROMPT_OPENS_THINK_KEY,
+    REASONING_SEPARATED_KEY,
     SCORING_TEXT_EMPTY_KEY,
+    THINK_CLOSE_HIDDEN_KEY,
     TURNS_KEY,
     Response,
     SamplingParams,
@@ -83,6 +86,11 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 "completion_tokens",
                 "prompt_tokens",
                 SCORING_TEXT_EMPTY_KEY,
+                # How the provider saw the reasoning trace, so a rescore tells an
+                # unfinished trace from an answer the same way.
+                PROMPT_OPENS_THINK_KEY,
+                REASONING_SEPARATED_KEY,
+                THINK_CLOSE_HIDDEN_KEY,
             ):
                 if key in meta:
                     out_data[key] = meta[key]

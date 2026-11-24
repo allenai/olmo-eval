@@ -262,3 +262,24 @@ def test_a_completion_request_is_keyed_by_its_prompt_even_with_messages(tmp_path
     replayed = ReplayProvider(predictions=str(tmp_path)).generate([request])[0][0]
 
     assert replayed.text == "A"
+
+
+def test_the_prompt_record_survives_replay(tmp_path: Path) -> None:
+    saved = {"text": "step 1", "finish_reason": "length", "prompt_opens_think": True}
+    _save(tmp_path, "task", [("Q", [saved]), ("R", [{"text": "A"}])])
+    provider = ReplayProvider(predictions=str(tmp_path))
+
+    marked, unmarked = provider.generate([_completion("Q"), _completion("R")])
+
+    assert marked[0].metadata["prompt_opens_think"] is True
+    assert "prompt_opens_think" not in unmarked[0].metadata
+
+
+@pytest.mark.parametrize("setting", [True, "true"])
+def test_prompt_opens_think_marks_runs_saved_without_the_record(tmp_path: Path, setting) -> None:
+    _save(tmp_path, "task", [("Q", [{"text": "step 1", "finish_reason": "length"}])])
+    provider = ReplayProvider(predictions=str(tmp_path), prompt_opens_think=setting)
+
+    replayed = provider.generate([_completion("Q")])[0][0]
+
+    assert replayed.metadata["prompt_opens_think"] is True

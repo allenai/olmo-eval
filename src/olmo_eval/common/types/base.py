@@ -250,6 +250,21 @@ class ContextFit:
     max_prompt_tokens: int | None = None
 
 
+#: ``LMOutput.metadata`` key a provider sets to True when the prompt it rendered ends by
+#: opening a ``<think>`` trace, so the generation starts inside the trace and carries no
+#: opening tag. Absent when the prompt does not, or when the provider cannot tell.
+PROMPT_OPENS_THINK_KEY = "prompt_opens_think"
+
+#: ``LMOutput.metadata`` key a server provider sets to True when the server returned the
+#: reasoning trace in its own field, so the text is the answer that followed a closed trace.
+REASONING_SEPARATED_KEY = "reasoning_separated"
+
+#: ``LMOutput.metadata`` key a provider sets to True when a closed trace may leave no
+#: ``</think>`` in the output text: a server may run a reasoning parser, and a decoder
+#: drops the tag when the tokenizer marks it special. A missing ``</think>`` then says
+#: nothing about whether the trace closed.
+THINK_CLOSE_HIDDEN_KEY = "think_close_hidden"
+
 #: ``LMOutput.metadata`` key holding how many tokens a provider cut from a request's
 #: ``ContextFit`` text before generating; absent when nothing was cut.
 CONTEXT_CUT_TOKENS_KEY = "context_cut_tokens"
