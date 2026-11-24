@@ -392,6 +392,7 @@ def apply_harness_config(config: HarnessConfig, request: LMRequest) -> LMRequest
         metadata=request.metadata,
         context_fit=request.context_fit,
         rolling=request.rolling,
+        record_thinking=request.record_thinking,
     )
 
 

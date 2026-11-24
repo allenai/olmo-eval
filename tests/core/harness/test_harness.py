@@ -62,6 +62,7 @@ class TestApplyHarnessConfig:
             "metadata",
             "context_fit",
             "rolling",
+            "record_thinking",
         }
         request = LMRequest(
             request_type=RequestType.CHAT,
@@ -73,6 +74,7 @@ class TestApplyHarnessConfig:
             images=("image",),
             metadata={"k": "v"},
             context_fit=ContextFit(text="document", max_prompt_tokens=4096),
+            record_thinking=True,
         )
         config = HarnessConfig(name="h", provider=ProviderConfig(kind=ProviderKind.MOCK))
         applied = apply_harness_config(config, request)
