@@ -319,23 +319,7 @@ class TestVLLMServerProviderLogprobs:
         assert outputs[0].metadata["prompt_tokens"] == 12
         assert outputs[0].metadata["sum_logits"] == -0.5
 
-    @pytest.mark.anyio
-    @pytest.mark.parametrize(
-        ("tokenized", "opens"),
-        [
-            ({"tokens": [1, 2], "token_strs": ["<|assistant|>", "\n", "<think>", "\n"]}, True),
-            ({"tokens": [1, 2], "token_strs": ["<|assistant|>", "\n"]}, False),
-            ({"tokens": [1, 2]}, True),  # no token strings: the tail is detokenized
-            ({}, False),
-        ],
-    )
-    async def test_chat_prompt_probe_reads_the_end_of_the_rendered_prompt(
-        self, provider, tokenized, opens
-    ):
-        provider.chat_template_kwargs = {"enable_thinking": True}
-        provider._chat_opens_think = None
-        posted = []
-
+    def _probe_server(self, tokenized, detokenized, posted):
         class FakeClient:
             async def __aenter__(self):
                 return self
@@ -345,32 +329,100 @@ class TestVLLMServerProviderLogprobs:
 
             async def post(self, url, json):
                 posted.append((url, json))
-                body = tokenized if url.endswith("/tokenize") else {"prompt": "\n<think>\n"}
+                body = tokenized if url.endswith("/tokenize") else detokenized
                 return MagicMock(json=MagicMock(return_value=body))
 
-        with patch(
+        return patch(
             "olmo_eval.inference.providers.vllm_server.httpx.AsyncClient",
             return_value=FakeClient(),
-        ):
+        )
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("detokenized", "opens"),
+        [
+            # A byte-level tokenizer reports the newline as "Ċ"; the detokenized text decides.
+            ({"prompt": "<|im_start|>assistant\n<think>\n"}, True),
+            ({"prompt": "<|im_start|>assistant\n<think>"}, True),
+            ({"prompt": "<|im_start|>assistant\n"}, False),
+        ],
+    )
+    async def test_chat_prompt_probe_reads_the_detokenized_end_of_the_prompt(
+        self, provider, detokenized, opens
+    ):
+        provider.chat_template_kwargs = {"enable_thinking": True}
+        provider._chat_opens_think = None
+        tokenized = {"tokens": list(range(20)), "token_strs": ["<", "think", ">", "Ċ"]}
+        posted = []
+
+        with self._probe_server(tokenized, detokenized, posted):
             assert await provider._chat_prompt_opens_think() is opens
             assert await provider._chat_prompt_opens_think() is opens
 
         # Asked once, with the template settings the requests use.
-        assert [url for url, _ in posted].count("http://localhost:8000/tokenize") == 1
+        assert [url for url, _ in posted] == [
+            "http://localhost:8000/tokenize",
+            "http://localhost:8000/detokenize",
+        ]
         assert posted[0][1]["chat_template_kwargs"] == {"enable_thinking": True}
         assert posted[0][1]["add_generation_prompt"] is True
+        assert posted[1][1]["tokens"] == list(range(4, 20))
 
     @pytest.mark.anyio
-    async def test_chat_prompt_probe_failure_leaves_outputs_unmarked(self, provider):
+    @pytest.mark.parametrize(
+        ("tokenized", "detokenized"),
+        [
+            ({}, {"prompt": "<think>"}),
+            ({"tokens": []}, {"prompt": "<think>"}),
+            (["not", "a", "dict"], {"prompt": "<think>"}),
+            ({"tokens": [1, 2]}, {}),
+            ({"tokens": [1, 2]}, ["not", "a", "dict"]),
+        ],
+    )
+    async def test_chat_prompt_probe_reports_an_unusable_reply(
+        self, provider, tokenized, detokenized, caplog
+    ):
+        provider.chat_template_kwargs = None
+        provider._chat_opens_think = None
+
+        with self._probe_server(tokenized, detokenized, []), caplog.at_level("ERROR"):
+            assert await provider._chat_prompt_opens_think() is False
+
+        assert "Could not read the end of the rendered chat prompt" in caplog.text
+
+    @pytest.mark.anyio
+    async def test_chat_prompt_probe_failure_leaves_outputs_unmarked(self, provider, caplog):
         import httpx
 
         provider.chat_template_kwargs = None
         provider._chat_opens_think = None
-        with patch(
-            "olmo_eval.inference.providers.vllm_server.httpx.AsyncClient",
-            side_effect=httpx.ConnectError("no server"),
+        with (
+            patch(
+                "olmo_eval.inference.providers.vllm_server.httpx.AsyncClient",
+                side_effect=httpx.ConnectError("no server"),
+            ),
+            caplog.at_level("ERROR"),
         ):
             assert await provider._chat_prompt_opens_think() is False
+
+        assert "thinking_prefilled=auto" in caplog.text
+
+    @pytest.mark.anyio
+    async def test_completion_outputs_record_a_prompt_that_opens_a_trace(self, provider):
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+        params = SamplingParams(max_tokens=8)
+
+        opened = await provider._generate_completion(
+            client, LMRequest(request_type=RequestType.COMPLETION, prompt="Q<think>\n"), params
+        )
+        plain = await provider._generate_completion(
+            client, LMRequest(request_type=RequestType.COMPLETION, prompt="Q"), params
+        )
+
+        assert opened[0].metadata["prompt_opens_think"] is True
+        assert opened[0].metadata["think_close_hidden"] is True
+        assert "prompt_opens_think" not in plain[0].metadata
 
     @pytest.mark.anyio
     async def test_chat_outputs_record_the_opened_trace_and_separated_reasoning(self, provider):
