@@ -556,12 +556,22 @@ def test_text_that_is_not_in_the_prompt_is_refused() -> None:
 
 
 class ScoringTokenizer(FakeTokenizer):
-    """One token per character (its code point), with BOS 1."""
+    """One token per character (its code point); adds BOS 1 in front of a text."""
 
     eos_token_id = 2
 
+    def __init__(self, bos_token_id: int | None = 1) -> None:
+        super().__init__(bos_token_id=bos_token_id)
+
+    def decode(self, ids: list[int]) -> str:
+        return "".join(chr(i) for i in ids)
+
+
+class NoBosScoringTokenizer(ScoringTokenizer):
+    """Like an OLMo or Qwen tokenizer: no BOS, an EOS, nothing added in front of a text."""
+
     def __init__(self) -> None:
-        super().__init__(bos_token_id=1)
+        super().__init__(bos_token_id=None)
 
 
 def _logprob(prev: int, tid: int) -> float:
@@ -590,11 +600,13 @@ def _full_context_logprob(text: str, bos: int = 1) -> float:
     return sum(_logprob(prev, tid) for prev, tid in zip(ids, ids[1:], strict=False))
 
 
-def _scoring_provider(monkeypatch, max_length: int) -> tuple[VLLMProvider, ScoringLLM]:  # noqa: ANN001
+def _scoring_provider(  # noqa: ANN001
+    monkeypatch, max_length: int, tokenizer: ScoringTokenizer | None = None
+) -> tuple[VLLMProvider, ScoringLLM]:
     fake_vllm = FakeVllmModule("vllm")
     fake_vllm.SamplingParams = lambda **kwargs: kwargs
     monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
-    llm = ScoringLLM(ScoringTokenizer())
+    llm = ScoringLLM(tokenizer or ScoringTokenizer())
     provider = VLLMProvider.__new__(VLLMProvider)
     provider.model_name = "test-model"
     provider.llm = llm
@@ -700,6 +712,49 @@ def test_an_empty_rolling_text_scores_no_tokens(monkeypatch) -> None:  # noqa: A
 
     assert output.logprobs == []
     assert output.metadata["num_tokens"] == 0
+
+
+def test_a_rolling_text_starts_with_bos_and_scores_every_byte(monkeypatch) -> None:  # noqa: ANN001
+    provider, llm = _scoring_provider(monkeypatch, max_length=9)
+    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True)
+
+    [[output]] = provider.logprobs([request])
+
+    assert llm.generate_calls[0]["prompts"][0]["prompt_token_ids"][0] == 1
+    assert output.metadata["prefix_tokens"] == 1
+    assert output.metadata["unscored_leading_tokens"] == 0
+    assert output.metadata["scored_bytes"] == len(TEXT.encode("utf-8"))
+
+
+def test_without_bos_a_rolling_text_starts_cold_not_after_eos(monkeypatch) -> None:  # noqa: ANN001
+    provider, llm = _scoring_provider(monkeypatch, max_length=9, tokenizer=NoBosScoringTokenizer())
+    text = "é" + TEXT  # a first token of two bytes
+    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(text,), rolling=True)
+
+    [[output]] = provider.logprobs([request])
+
+    inputs = [p["prompt_token_ids"] for p in llm.generate_calls[0]["prompts"]]
+    assert inputs[0][0] == ord("é")
+    assert all(2 not in ids for ids in inputs)  # no EOS anywhere
+    assert [entry["token_id"] for entry in output.logprobs] == [ord(c) for c in text[1:]]
+    # Each token after the first is scored once, conditioned on the one before it.
+    expected = sum(_logprob(ord(prev), ord(tid)) for prev, tid in zip(text, text[1:], strict=False))
+    assert output.metadata["sum_logits"] == pytest.approx(expected)
+    assert output.metadata["prefix_tokens"] == 0
+    assert output.metadata["unscored_leading_tokens"] == 1
+    assert output.metadata["scored_bytes"] == len(text.encode("utf-8")) - 2
+
+
+@pytest.mark.parametrize("text", ["", "x"])
+def test_without_bos_a_rolling_text_under_two_tokens_scores_nothing(monkeypatch, text) -> None:  # noqa: ANN001
+    provider, _ = _scoring_provider(monkeypatch, max_length=9, tokenizer=NoBosScoringTokenizer())
+    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(text,), rolling=True)
+
+    [[output]] = provider.logprobs([request])
+
+    assert output.logprobs == []
+    assert output.metadata["num_windows"] == 0
+    assert output.metadata["scored_bytes"] == 0
 
 
 def test_a_rolling_output_missing_a_token_logprob_raises(monkeypatch) -> None:  # noqa: ANN001

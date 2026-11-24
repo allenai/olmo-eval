@@ -125,6 +125,34 @@ def test_bits_per_byte_divides_the_rolled_logprob_by_every_byte(monkeypatch):
     assert bpb == pytest.approx(14.0 / ((6 + 40) * math.log(2)))
 
 
+def test_bits_per_byte_leaves_out_the_bytes_of_an_unscored_first_token(monkeypatch):
+    import math
+
+    from olmo_eval.common.types import LMOutput, Response
+
+    monkeypatch.setattr(
+        paloma.DataLoader, "load", lambda _loader, _source: iter([{"id": "a", "text": "hello"}])
+    )
+    task = get_task("paloma_ptb", WINDOW)
+    [instance] = task.instances
+    request = task.format_request(instance)
+    # A tokenizer without BOS: "h" was context, the other four bytes were scored.
+    output = LMOutput(
+        text="hello", logprobs=[{"token": "t", "logprob": -2.0}], metadata={"scored_bytes": 4}
+    )
+    response = Response(instance=instance, request=request, outputs=[output])
+
+    assert task.config.get_primary_metric().compute([response]) == pytest.approx(
+        2.0 / (4 * math.log(2))
+    )
+
+
+def test_the_rolling_prefix_rule_is_in_the_task_hash():
+    assert get_task("paloma_ptb", WINDOW).config.to_dict()["task_settings"] == {
+        "rolling_prefix": "tokenizer"
+    }
+
+
 def test_suite_averages_the_sources_equally():
     suite = get_suite("paloma")
     assert suite.aggregation == AggregationStrategy.AVERAGE

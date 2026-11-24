@@ -24,6 +24,7 @@ from olmo_eval.inference.tokenizer_utils import (
     default_prefix_ids,
     encode_context_and_continuation,
     encode_prompt,
+    leading_token_bytes,
     reject_add_bos_token,
     rolling_token_windows,
 )
@@ -478,8 +479,11 @@ class VLLMProvider(InferenceProvider):
         # rolling request needs to score its whole text.
         token_inputs: list[list[int]] = []
         windows_per_continuation: list[list[tuple[list[int], int]]] = []
-        # (num_tokens_all, overflow, window tokens if rolling else None)
-        continuation_meta: list[tuple[int, int, int | None]] = []
+        # (num_tokens_all, overflow, rolling metadata or None)
+        continuation_meta: list[tuple[int, int, dict[str, int] | None]] = []
+        # Rolling texts start with the tokenizer's own prefix, not BOS-or-EOS: a
+        # model whose tokenizer adds no BOS never saw a special token before a text.
+        rolling_prefix = default_prefix_ids(tokenizer) if any(r.rolling for r in requests) else []
 
         for request in requests:
             # Use per-request max_length if set (e.g., from task config), else provider default.
@@ -488,21 +492,33 @@ class VLLMProvider(InferenceProvider):
             cont_prompts = request.continuation_prompts
             for i, continuation in enumerate(continuations):
                 prompt = cont_prompts[i] if cont_prompts else request.prompt
-                context_enc, continuation_enc = encode_context_and_continuation(
-                    tokenizer, prompt, continuation, prefix_ids=self._prefix_ids
-                )
-                window_tokens: int | None = None
+                rolling: dict[str, int] | None = None
                 if request.rolling:
                     if max_len > default_max_len:
                         raise ValueError(
                             f"rolling request max_length {max_len} exceeds the engine's "
                             f"max_model_len {default_max_len}"
                         )
+                    tokens = tokenizer.encode(continuation, add_special_tokens=False)
                     # Inputs of max_length - 1 leave room for the one generated token.
-                    window_tokens = max_len - 1
-                    windows = rolling_token_windows(context_enc, continuation_enc, window_tokens)
+                    windows = rolling_token_windows(rolling_prefix, tokens, max_len - 1)
+                    # With no prefix the first token is context, so its bytes are not scored.
+                    unscored = 0 if rolling_prefix else min(1, len(tokens))
+                    unscored_bytes = (
+                        leading_token_bytes(tokenizer, continuation, tokens[0]) if unscored else 0
+                    )
+                    rolling = {
+                        "num_windows": len(windows),
+                        "window_tokens": max_len - 1,
+                        "prefix_tokens": len(rolling_prefix),
+                        "unscored_leading_tokens": unscored,
+                        "scored_bytes": max(0, len(continuation.encode("utf-8")) - unscored_bytes),
+                    }
                     overflow = 0
                 else:
+                    context_enc, continuation_enc = encode_context_and_continuation(
+                        tokenizer, prompt, continuation, prefix_ids=self._prefix_ids
+                    )
                     # Calculate overflow and left-truncate to max_length - 1
                     full_len = len(context_enc) + len(continuation_enc)
                     overflow = full_len - (max_len - 1)
@@ -515,7 +531,7 @@ class VLLMProvider(InferenceProvider):
                 windows_per_continuation.append(windows)
                 # num_tokens_all counts the tokens sent to the model, overlap included.
                 sent = sum(len(window) for window, _ in windows)
-                continuation_meta.append((sent, overflow, window_tokens))
+                continuation_meta.append((sent, overflow, rolling))
 
         # Call vLLM with token IDs instead of strings
         # Pass as list of dicts with prompt_token_ids key
@@ -540,7 +556,7 @@ class VLLMProvider(InferenceProvider):
 
             for continuation in continuations:
                 windows = next(windows_iter)
-                num_tokens_all, overflow, window_tokens = next(meta_iter)
+                num_tokens_all, overflow, rolling = next(meta_iter)
 
                 logprob_entries: list[LogProbEntry] = []
                 total = 0.0
@@ -561,15 +577,14 @@ class VLLMProvider(InferenceProvider):
                     "is_greedy": is_greedy,
                     "prompt_truncated_tokens": max(0, overflow),
                 }
-                if window_tokens is not None:
+                if rolling is not None:
                     expected = sum(len(window) - ctxlen for window, ctxlen in windows)
                     if len(logprob_entries) != expected:
                         # A missing token would drop out of the sum but not the bytes.
                         raise RuntimeError(
                             f"rolling request scored {len(logprob_entries)} of {expected} tokens"
                         )
-                    metadata["num_windows"] = len(windows)
-                    metadata["window_tokens"] = window_tokens
+                    metadata.update(rolling)
                 request_outputs.append(
                     LMOutput(text=continuation, logprobs=logprob_entries, metadata=metadata)
                 )

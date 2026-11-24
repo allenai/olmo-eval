@@ -8,7 +8,7 @@ from typing import Any
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
-from olmo_eval.common.scorers.base import SCORER_RESULTS_KEY
+from olmo_eval.common.scorers.base import SCORER_RESULTS_KEY, scored_bytes
 from olmo_eval.common.types import (
     CONTEXT_CUT_TOKENS_KEY,
     SCORING_TEXT_EMPTY_KEY,
@@ -39,7 +39,7 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
             # Logprobs describe the whole generation. If strip_thinking removed a
             # reasoning trace, normalize by the original text, not the stripped answer.
             full_text = meta.get("original_text") or out.text or ""
-            num_bytes = len(full_text.encode("utf-8"))
+            num_bytes = scored_bytes(out, full_text)
             num_chars_all = len(full_text)
 
             # Use metadata values if available (from vLLM provider), else compute
@@ -83,6 +83,12 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 "completion_tokens",
                 "prompt_tokens",
                 SCORING_TEXT_EMPTY_KEY,
+                # Rolling requests: how the text was windowed and what was scored.
+                "num_windows",
+                "window_tokens",
+                "prefix_tokens",
+                "unscored_leading_tokens",
+                "scored_bytes",
             ):
                 if key in meta:
                     out_data[key] = meta[key]
