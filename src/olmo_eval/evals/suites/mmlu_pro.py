@@ -45,3 +45,14 @@ MMLU_PRO_COT_V2 = make_suite(
         "counts as no answer. Instance-weighted average over category tasks, as mmlu_pro:cot."
     ),
 )
+
+MMLU_PRO_COT_V3 = make_suite(
+    "mmlu_pro:cot:v3",
+    tuple(f"mmlu_pro_{s}:cot:v3" for s in _SLUGS),
+    aggregation=AggregationStrategy.WEIGHTED_AVERAGE,
+    description=(
+        "0-shot chain-of-thought MMLU-Pro with the v3 scoring: as mmlu_pro:cot:v2, and an "
+        "answer naming several letters counts as no answer. Instance-weighted average over "
+        "category tasks."
+    ),
+)

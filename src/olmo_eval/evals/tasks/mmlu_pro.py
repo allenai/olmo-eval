@@ -244,6 +244,57 @@ def _extract_cot_letter(text: str) -> str:
     return _extract_cot_answer(text).answer
 
 
+# The lead-in of a final answer statement, up to where the answer starts: "the answer
+# is", "Answer:", or a LaTeX box.
+_ANSWER_LEAD_IN = re.compile(
+    r"(?:(?i:\banswer\s+is\b:?|\banswer\s*:)[^\S\n]*|\\boxed\{\s*(?:\\text\{\s*)?)"
+)
+# Joins are matched in any case ("C OR E"); the choice letters stay uppercase.
+_JOIN = r"(?:,\s*(?i:and|or)\b|,|/|&|\b(?i:and|or)\b)"
+# A choice letter standing alone, with any emphasis or parentheses around it.
+_CHOICE = r"[*_(]*(?<![A-Za-z])[A-J](?![A-Za-z0-9])[*_)]*"
+_CHOICE_LETTER = re.compile(r"(?<![A-Za-z])[A-J](?![A-Za-z0-9])")
+_PARENTHESIZED_CHOICE = r"[*_]*\([A-J]\)[*_]*"
+# Several choices given as one answer. Parenthesized letters joined together are a list
+# wherever the sentence goes next ("(I) and (J) are both right"). Bare letters are a list
+# only when the statement ends with them, so that "C, I believe" and "A and I am sure"
+# stay single answers.
+_SEVERAL_CHOICES = re.compile(
+    rf"{_PARENTHESIZED_CHOICE}(?:\s*{_JOIN}\s*{_PARENTHESIZED_CHOICE})+"
+    rf"|{_CHOICE}(?:\s*{_JOIN}\s*{_CHOICE})+(?=[^\S\n]*(?:[.!}}\]]|\\\)|\n|$))"
+)
+
+
+def names_several_choices(text: str) -> bool:
+    """Whether the last answer statement in ``text`` gives more than one letter.
+
+    Each question has one correct choice, so "the answer is (C, E)", "Answer: C or E"
+    and ``\\boxed{C, E}`` are not answers to it. Only a list that starts the answer
+    counts: letters mentioned later in the sentence ("the answer is (B), not (C)") do
+    not, and neither does the same letter repeated.
+    """
+    lead_ins = list(_ANSWER_LEAD_IN.finditer(text))
+    if not lead_ins:
+        return False
+    choices = _SEVERAL_CHOICES.match(text, lead_ins[-1].end())
+    if choices is None:
+        return False
+    # Only the choice letters count: the "A" and "D" of an uppercase "AND" are not choices.
+    return len(set(_CHOICE_LETTER.findall(choices.group(0)))) > 1
+
+
+def _extract_cot_answer_v3(text: str) -> ExtractedAnswer:
+    """:func:`_extract_cot_answer`, except that an answer naming several letters is none."""
+    visible = extract_think_answer(text or "") or ""
+    if names_several_choices(visible):
+        return ExtractedAnswer("", 0.0)
+    return _extract_cot_answer(text)
+
+
+def _extract_cot_letter_v3(text: str) -> str:
+    return _extract_cot_answer_v3(text).answer
+
+
 @dataclass(frozen=True, slots=True)
 class MMLUProCoTExactMatchScorer(Scorer):
     """Case-insensitive exact match on the extracted answer letter."""
@@ -260,6 +311,22 @@ class MMLUProCoTExactMatchScorer(Scorer):
 
 
 _COT_ACCURACY = AccuracyMetric(name="exact_match", scorer=MMLUProCoTExactMatchScorer)
+
+
+@dataclass(frozen=True, slots=True)
+class MMLUProCoTSingleAnswerScorer(Scorer):
+    """Exact match on the extracted letter; an answer naming several letters is wrong."""
+
+    name: str = "exact_match"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        answer, format_correct = _extract_cot_answer_v3(output.text or "")
+        output.metadata["answer_format_correct"] = format_correct
+        gold = str(instance.gold_answer or "")
+        return 1.0 if answer.upper() == gold.upper() else 0.0
+
+
+_COT_ACCURACY_V3 = AccuracyMetric(name="exact_match", scorer=MMLUProCoTSingleAnswerScorer)
 
 
 class MMLUProCoTTask(MMLUProTask):
@@ -363,6 +430,18 @@ for _category in MMLU_PRO_CATEGORIES:
     register_variant(
         f"{_name}:cot",
         "v2",
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )
+    # ``mmlu_pro_<category>:cot:v3``: ``v2``, and an answer naming several letters is no
+    # answer. Each question has one correct choice; ``cot`` and ``v2`` credit one of the
+    # letters such an answer lists.
+    register_variant(
+        f"{_name}:cot",
+        "v3",
+        metrics=(_COT_ACCURACY_V3,),
+        primary_metric=_COT_ACCURACY_V3,
+        answer_extractor=_extract_cot_letter_v3,
         strip_unclosed_thinking=True,
         thinking_prefilled="auto",
     )
