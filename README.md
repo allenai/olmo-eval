@@ -1122,6 +1122,18 @@ chat than in completion on the same items. Run it as its own job with thinking o
 serving a think-off chat template (`-o provider.tokenizer=<dir>`). With thinking on, 512
 tokens cut the reasoning off, and even at 8,192 tokens 70% of answers hit the cap.
 
+Each test suite has a `:v2` version, `posttrain:tiny:test:v2` and
+`posttrain:small:test:v2`, with the same rows read through variants that do not score an
+unfinished reasoning trace as an answer (for example `wmdp:mcq_v2_t10_32k`). The Olmo 3.5
+chat template opens `<think>` in the prompt, so a generation cut off inside its reasoning
+carries no tag, and the original variants score it as an answer. MMLU-Pro and HLE are
+read through their `v3` variants, which also reject an answer naming several letters and
+read calibration only from stated confidences. Prefer the `:v2` suites for new reads;
+`posttrain:{tiny,small}:test` keep their members, so earlier results stay comparable
+under those names. A `:v2` suite needs a provider that records whether each trace closed
+(SGLang, inline vLLM, or a vLLM server that returns token ids or logprobs): an output
+with no such evidence is left unscored.
+
 The suites name no provider, but the engine is part of what a score measures: compare
 scores only between runs on the same provider, and record it with each run. When the rest
 of a suite runs on SGLang, BFCL needs its own job with `provider.kind=vllm_server`, the

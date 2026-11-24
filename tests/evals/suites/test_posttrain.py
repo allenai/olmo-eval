@@ -48,6 +48,19 @@ TEST_SHARED = (
     "bbq:mcq_t10_32k",
     "strongreject:sr_judge_thinking_t10_32k",
 )
+TEST_SHARED_V2 = (
+    "mmlu_pro:cot:v3:t10_32k",
+    "omniscience:judge_v2_t10_32k",
+    "zebralogic:chat_v2_t10_32k",
+    "aime_2025:pass_at_32_v2_t10_32k",
+    "aime_2026:pass_at_32_v2_t10_32k",
+    "livecodebench_hidden:v2_t10_32k",
+    "do_anything_now:wg_judge_thinking_t10_32k",
+    "wildjailbreak:wg_judge_thinking_t10_32k",
+    "wmdp:mcq_v2_t10_32k",
+    "bbq:mcq_v2_t10_32k",
+    "strongreject:sr_judge_thinking_t10_32k",
+)
 CHAT_RULER = ("ruler_plus_all__65536:hillclimb:chat_mt512",)
 MEMBERS = {
     "posttrain:tiny:dev": DEV_SHARED,
@@ -62,6 +75,13 @@ MEMBERS = {
         "hle:text:verified:t10_32k",
         "arena_hard_v2:t10_32k",
         "frontierscience:t10_32k",
+    ),
+    "posttrain:tiny:test:v2": TEST_SHARED_V2,
+    "posttrain:small:test:v2": (
+        *TEST_SHARED_V2,
+        "hle:text:verified:v3_t10_32k",
+        "arena_hard_v2:v2:t10_32k",
+        "frontierscience:v2:t10_32k",
     ),
 }
 # RULER+ runs greedy with direct-answer budgets (512 tokens in chat), and BFCL
@@ -249,3 +269,45 @@ def test_chat_ruler_pairs_with_the_completion_cell():
             chat, formatter=completion.formatter, sampling_params=completion.sampling_params
         )
         assert unchanged == completion, task
+
+
+# Rows whose own extraction already gives the judge nothing for a trace with no </think>.
+TAG_GUARDED = ("do_anything_now:", "wildjailbreak:", "strongreject:")
+
+
+@pytest.mark.parametrize("size", ["tiny", "small"])
+def test_v2_test_suites_do_not_score_an_unfinished_trace_in_any_row(size):
+    from olmo_eval.evals.extract import extract_think_answer_only
+
+    for task in get_suite(f"posttrain:{size}:test:v2").expand():
+        config = get_task(task).config
+        if task.startswith(TAG_GUARDED):
+            assert config.answer_extractor is extract_think_answer_only, task
+            continue
+        assert config.strip_unclosed_thinking is True, task
+        assert config.thinking_prefilled == "auto", task
+
+
+@pytest.mark.parametrize("size", ["tiny", "small"])
+def test_v2_test_suites_hold_the_same_rows_as_the_suites_they_version(size):
+    def rows(name: str) -> list[str]:
+        # The task of each member, without its variants.
+        return [task.split(":")[0] for task in get_suite(name).expand()]
+
+    assert rows(f"posttrain:{size}:test:v2") == rows(f"posttrain:{size}:test")
+
+
+@pytest.mark.parametrize("size", ["tiny", "small"])
+def test_the_original_test_suites_keep_their_specs(size):
+    for task in get_suite(f"posttrain:{size}:test").expand():
+        config = get_task(task).config
+        assert config.thinking_prefilled is False, task
+        assert config.strip_unclosed_thinking is False, task
+        assert task in SAMPLED_FROM and not SAMPLED_FROM[task].endswith((":v2", ":v3")), task
+
+
+@pytest.mark.parametrize("size", ["tiny", "small"])
+def test_dev_and_the_v2_test_suite_share_no_task(size):
+    dev = {task for name in DEV_SUITES[size] for task in get_suite(name).expand()}
+
+    assert not dev & set(get_suite(f"posttrain:{size}:test:v2").expand())
