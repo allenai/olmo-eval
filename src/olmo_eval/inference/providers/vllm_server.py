@@ -900,10 +900,15 @@ class VLLMServerProvider(InferenceProvider):
         stop_sequences: list[str] | None,
         finish_reason: str | None = None,
         num_choices: int = 1,
+        opens_think: bool = False,
     ) -> LMOutput:
         """Create a standardized LMOutput from completion response payloads."""
         metadata = self._completion_usage_metadata(usage, num_choices)
         metadata["finish_reason"] = finish_reason
+        if opens_think:
+            # The server's decoder may drop a special ``</think>``; it cannot be asked.
+            metadata[PROMPT_OPENS_THINK_KEY] = True
+            metadata[THINK_CLOSE_HIDDEN_KEY] = True
         processed_text = self._postprocess_completion_text(text, stop_sequences)
 
         logprob_entries: list[LogProbEntry] | None = None
@@ -950,6 +955,7 @@ class VLLMServerProvider(InferenceProvider):
         stop_sequences = self._get_completion_stop_sequences(params)
         if stop_sequences:
             kwargs["stop"] = stop_sequences
+        opens_think = prompt_opens_think(request.prompt or "")
         truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
         if truncate_prompt_tokens is not None:
             extra_body["truncate_prompt_tokens"] = truncate_prompt_tokens
@@ -977,6 +983,7 @@ class VLLMServerProvider(InferenceProvider):
                     usage=usage,
                     stop_sequences=stop_sequences,
                     num_choices=len(choices),
+                    opens_think=opens_think,
                 )
                 for choice in choices
             ]
@@ -993,6 +1000,7 @@ class VLLMServerProvider(InferenceProvider):
                 usage=usage,
                 stop_sequences=stop_sequences,
                 num_choices=len(response.choices),
+                opens_think=opens_think,
             )
             for choice in response.choices
         ]
@@ -1039,14 +1047,16 @@ class VLLMServerProvider(InferenceProvider):
     async def _chat_prompt_opens_think(self) -> bool:
         """Whether the server's chat template ends its generation prompt with ``<think>``.
 
-        The server renders the template, so this asks it to tokenize one user turn and
-        reads the end of the rendered prompt. It is asked once: a template's generation
+        The server renders the template, so this asks it to tokenize one user turn and to
+        detokenize the end of the result. It is asked once: a template's generation
         prompt does not depend on the conversation. A server that cannot answer counts
-        as not opening a trace, which leaves scoring as it was.
+        as not opening a trace, which leaves scoring as it was; that is logged as an
+        error, because tasks that read the record then miss unfinished traces.
         """
-        if self._chat_opens_think is None:
-            self._chat_opens_think = await self._probe_chat_prompt_opens_think()
-        return self._chat_opens_think
+        cached = getattr(self, "_chat_opens_think", None)
+        if cached is None:
+            cached = self._chat_opens_think = await self._probe_chat_prompt_opens_think()
+        return cached
 
     async def _probe_chat_prompt_opens_think(self) -> bool:
         base_url = self.base_url.rstrip("/").removesuffix("/v1")
@@ -1054,7 +1064,6 @@ class VLLMServerProvider(InferenceProvider):
             "model": self._request_model_name,
             "messages": [{"role": "user", "content": "Hi"}],
             "add_generation_prompt": True,
-            "return_token_strs": True,
         }
         if self.chat_template_kwargs:
             payload["chat_template_kwargs"] = dict(self.chat_template_kwargs)
@@ -1062,22 +1071,26 @@ class VLLMServerProvider(InferenceProvider):
             async with httpx.AsyncClient(timeout=30.0) as http_client:
                 response = await http_client.post(f"{base_url}/tokenize", json=payload)
                 response.raise_for_status()
-                data = response.json()
-                token_strs = data.get("token_strs")
-                if isinstance(token_strs, list) and token_strs:
-                    tail = "".join(str(token) for token in token_strs[-8:])
-                else:
-                    tokens = data.get("tokens")
-                    if not isinstance(tokens, list) or not tokens:
-                        return False
-                    response = await http_client.post(
-                        f"{base_url}/detokenize",
-                        json={"model": self._request_model_name, "tokens": tokens[-8:]},
-                    )
-                    response.raise_for_status()
-                    tail = str(response.json().get("prompt") or "")
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Could not read the end of the rendered chat prompt: %s", exc)
+                tokens = response.json()["tokens"]
+                if not isinstance(tokens, list) or not tokens:
+                    raise ValueError("the server returned no prompt tokens")
+                # Token strings are byte-level for some tokenizers (a newline is "Ċ"), so
+                # the tail is detokenized to the text the other providers render.
+                response = await http_client.post(
+                    f"{base_url}/detokenize",
+                    json={"model": self._request_model_name, "tokens": tokens[-16:]},
+                )
+                response.raise_for_status()
+                tail = response.json()["prompt"]
+                if not isinstance(tail, str):
+                    raise ValueError("the server returned no detokenized text")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            logger.error(
+                "Could not read the end of the rendered chat prompt, so outputs are not "
+                "marked as starting inside a reasoning trace and tasks with "
+                "thinking_prefilled=auto will read an unfinished trace as an answer: %s",
+                exc,
+            )
             return False
         return prompt_opens_think(tail)
 

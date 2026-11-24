@@ -16,7 +16,7 @@ from olmo_eval.common.execution import (
     ProcessScoringPoolConfig,
 )
 from olmo_eval.common.execution.environment import ExecutionResult, ScoringContext
-from olmo_eval.common.metrics import AccuracyMetric, PassAtKMetric
+from olmo_eval.common.metrics import AccuracyMetric, Metric, PassAtKMetric
 from olmo_eval.common.scorers import ExactMatchScorer, ProcessScorer
 from olmo_eval.common.scorers.execution import ContextScorer, ExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
@@ -889,6 +889,41 @@ class TestTaskMetrics:
         assert "exact_match" in metrics["accuracy"]
         assert metrics["accuracy"]["exact_match"] == pytest.approx(2 / 3)
 
+    async def test_compute_metrics_omits_an_undefined_metric_only_when_it_opts_in(self):
+        """NaN from a metric that opted in is left out; any other NaN is still reported."""
+        import math
+        from dataclasses import dataclass
+        from typing import ClassVar
+
+        @dataclass(frozen=True)
+        class Undefined(Metric):
+            name: str = "undefined"
+            scorer: type = ExactMatchScorer
+
+            def compute(self, responses) -> float:
+                return math.nan
+
+        @dataclass(frozen=True)
+        class Omitted(Undefined):
+            name: str = "omitted"
+            omit_when_undefined: ClassVar[bool] = True
+
+        config = TaskConfig(
+            name="test", data_source="test/dataset", metrics=(Undefined(), Omitted())
+        )
+        task = ConcreteTask(config)
+        response = Response(
+            instance=Instance(question="Q1", gold_answer="A"),
+            request=self._make_request("Q1"),
+            outputs=[LMOutput(text="A")],
+        )
+
+        metrics = task.compute_metrics(await task.score_responses([response]))
+
+        assert "omitted" not in metrics
+        assert math.isnan(metrics["undefined"]["exact_match"])
+
+    @pytest.mark.anyio
     async def test_compute_metrics_first_sample_accuracy_with_pass_at_1(self):
         """Accuracy can use the first sample while pass@1 still uses all samples."""
         accuracy = AccuracyMetric(scorer=ExactMatchScorer)

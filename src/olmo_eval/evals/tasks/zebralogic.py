@@ -347,25 +347,22 @@ class ZebraLogicHard(ZebraLogic):
 # `zebralogic::olmo3:adapt` regime: sampled decoding, generation bounded only
 # by the model's context (``max_tokens=None``), and no stop sequences (the
 # chat template supplies end-of-turn).
+_CHAT_OVERRIDES: dict[str, Any] = {
+    "formatter": ChatFormatter(),
+    "sampling_params": SamplingParams(max_tokens=None, temperature=0.6, top_p=0.95),
+}
 for _task_name in ("zebralogic", "zebralogic_easy", "zebralogic_hard"):
-    register_variant(
-        _task_name,
-        "chat",
-        formatter=ChatFormatter(),
-        sampling_params=SamplingParams(
-            max_tokens=None,
-            temperature=0.6,
-            top_p=0.95,
-        ),
-    )
+    register_variant(_task_name, "chat", **_CHAT_OVERRIDES)
     # Stack on ``chat`` (``zebralogic:chat:v2``). The solution is parsed only from the
     # text after the reasoning trace, and a trace that never closed has no solution.
     # Without this the upstream parser scans the trace too: one unmatched ``{`` there
     # keeps it from ever completing the final JSON, and a JSON draft inside an
-    # unfinished trace counts as a parsed solution.
+    # unfinished trace counts as a parsed solution. The variant carries the chat
+    # settings itself, so it never applies to the completion task.
     register_variant(
         _task_name,
         "v2",
+        **_CHAT_OVERRIDES,
         strip_thinking=True,
         strip_unclosed_thinking=True,
         thinking_prefilled="auto",

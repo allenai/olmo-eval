@@ -40,9 +40,28 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   FrontierScience olympiad from 0.24 to 0.22, Arena-Hard hard prompts (style-controlled)
   from 0.094 to 0.107, and HLE calibration error from 0.884 to 0.791; Omniscience,
   FrontierScience research, HLE accuracy and Arena-Hard creative-writing win rate did
-  not move. A model whose template opens no trace, or that never hits the token limit,
-  scores the same under both except for MMLU-Pro's several-letter rule and the WMDP and
-  HLE metric definitions. To reproduce an earlier result, run the replaced specs by name.
+  not move. The two variants also differ where no trace was cut off at the limit: WMDP
+  and ZebraLogic `v2` read a finished answer only from the text after a closed trace
+  (`strip_thinking`), MMLU-Pro `v2` rejects several-letter answers, Arena-Hard and
+  FrontierScience `v2` do not send the judge an empty answer or a self-opened `<think>`
+  that never closed, and the WMDP and HLE metrics are defined differently. So no model
+  is guaranteed the same score under both.
+  To reproduce an earlier result, run the replaced specs by name.
+
+## 2026-11-23: `unclosed_think` counts traces the chat template opened
+
+- **Affected**: the `generation_counts.unclosed_think` diagnostic of every generation
+  task, for models whose chat template ends its generation prompt with `<think>` (the
+  Olmo 3.5 templates do), run on the SGLang, inline vLLM or vLLM server provider.
+- **Change**: those providers record on each output that the prompt opened the trace
+  (`prompt_opens_think`, saved with predictions). A generation that then has no
+  `</think>` is counted as an unclosed trace. Before, only an emitted `<think>` with no
+  closing tag was counted, so these runs reported 0 however many generations stopped
+  inside the trace.
+- **Identity**: task hashes and scores do not change; only the diagnostic changes.
+- **Comparability**: quality scores remain comparable. `unclosed_think` counts from
+  before this change undercount for such models and are not recomputed; `cap_hit` is
+  unaffected.
 
 ## 2026-11-12: Namespaced Hugging Face dataset ids for six tasks (#558)
 

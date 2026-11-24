@@ -79,6 +79,14 @@ class TestRegistration:
         assert config.thinking_prefilled == "auto"
         assert config.metrics == get_task(spec).config.metrics
 
+    def test_v2_alone_is_the_same_measurement_as_the_stacked_spec(self):
+        # A variant is also a spec of its base task; it must not be a meaningless one.
+        for stacked, alone in (
+            ("zebralogic:chat:v2", "zebralogic:v2"),
+            ("omniscience:judge:v2", "omniscience:v2"),
+        ):
+            assert get_task(alone).config == get_task(stacked).config
+
     def test_suites_hold_the_v2_specs(self):
         assert len(get_suite("mmlu_pro:cot:v2").expand()) == 14
         assert all(spec.endswith(":cot:v2") for spec in get_suite("mmlu_pro:cot:v2").expand())
@@ -121,11 +129,20 @@ class TestWMDP:
         assert metrics["no_answer_rate"] == 0.5
         assert metrics["parsing_error"] == 2
         assert metrics["subcategory__wmdp-bio"] == 0.5
-        # A subset with no answered question reports 0.0.
-        assert metrics["subcategory__wmdp-cyber"] == 0.0
+        # A subset with no answered question has no accuracy; 0.0 would read as unsafe.
+        assert "subcategory__wmdp-cyber" not in metrics
         accuracy = task.config.primary_metric
         assert [accuracy.compute_instance(r) for r in scored] == [None, 0.0, 1.0, None]
         assert scored[0].outputs[0].metadata["unclosed_thinking"] is True
+
+    @pytest.mark.anyio
+    async def test_accuracy_is_left_out_when_no_question_was_answered(self):
+        task = get_task("wmdp:mcq:v2")
+        scored = await _score(task, self._responses()[:1])
+
+        metrics = _metrics(task, scored)
+        assert "accuracy" not in metrics
+        assert metrics["no_answer_rate"] == 1.0
 
     @pytest.mark.anyio
     async def test_the_original_counts_the_same_questions_as_safe(self):
@@ -145,7 +162,23 @@ class TestMMLUPro:
             ("Therefore, the answer is (I) and (J)", True),
             ("**Therefore, the answer is (A), (C), and (J).**", True),
             ("The answer is (A or B)", True),
+            ("The answer is C and E", True),
+            ("The answer is C, E", True),
+            ("ANSWER: C, E", True),
+            ("Answer: (C) and (E)", True),
+            ("The answer is: C or E.", True),
+            ("The answer is **C** and **E**.", True),
+            ("So \\boxed{C, E}", True),
+            ("So \\boxed{\\text{C, E}}", True),
+            ("The answer is (I) and (J), which are both right.", True),
             ("Therefore, the answer is (A).", False),
+            ("The answer is A and I am sure of it.", False),
+            ("The answer is C, I believe.", False),
+            ("The answer is C, a good choice.", False),
+            ("The answer is C and Earth is round.", False),
+            ("Answer: A. Both B and C fail.", False),
+            ("\\boxed{C}", False),
+            ("The answer is B or, failing that, nothing.", False),
             ("Therefore, the answer is (A) and I am sure.", False),
             ("Therefore, the answer is (B), not (C).", False),
             ("Therefore, the answer is (B), because (A, C) are wrong.", False),
@@ -402,6 +435,21 @@ class TestHLE:
         assert metrics["calibration_error_stated"] == pytest.approx(0.4)
         assert metrics["confidence_stated_rate"] == pytest.approx(1 / 3)
         assert "calibration_error_all_bins" not in metrics
+
+    @pytest.mark.anyio
+    async def test_calibration_is_left_out_when_no_output_states_a_confidence(self, monkeypatch):
+        task = get_task("hle:text:verified:v2")
+        judge, _ = scripted_judge("extracted_final_answer: 41\ncorrect: no\nconfidence: 100")
+        use_judge(monkeypatch, judge)
+        instance = Instance(question="q", gold_answer="42", metadata={"category": "Math"})
+
+        scored = await _score(task, [_response(instance, ("x</think>Answer: 41", PREFILLED))])
+
+        metrics = _metrics(task, scored)
+        # 0.0 would read as perfect calibration.
+        assert "calibration_error_stated" not in metrics
+        assert metrics["confidence_stated_rate"] == 0.0
+        assert metrics["accuracy"] == 0.0
 
     def test_the_original_keeps_its_metrics_and_judge_result(self):
         names = [metric.name for metric in get_task("hle:text:verified").config.metrics]

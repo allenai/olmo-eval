@@ -2807,7 +2807,7 @@
   "omniscience:judge": "4c3b2821f7472384",
   "omniscience:judge_t10_32k": "e8a7802c6b8de0bf",
   "omniscience:judge_v2_t10_32k": "fc9cb249fb5e34da",
-  "omniscience:v2": "1e58f6db733eea47",
+  "omniscience:v2": "bde6d90871ae2ee5",
   "paloma_4chan_meta_sep": "e2e184a5060c8b95",
   "paloma_c4_100_domains": "ad621e6cb439c6d0",
   "paloma_c4_en": "5a401648d57f0cdb",
@@ -4394,13 +4394,13 @@
   "zebralogic:chat": "1ddbe43d58efa697",
   "zebralogic:chat_t10_32k": "6e29cb274daab8ef",
   "zebralogic:chat_v2_t10_32k": "5d5d74b373cffe8e",
-  "zebralogic:v2": "5f8b36a01c2d2535",
+  "zebralogic:v2": "17579bc009b412a7",
   "zebralogic_easy": "a7f588335820bb44",
   "zebralogic_easy:chat": "57cf86a12caecd7a",
-  "zebralogic_easy:v2": "bcd39b18656d6cc4",
+  "zebralogic_easy:v2": "fe16111d82389a99",
   "zebralogic_hard": "60387af2d899b31c",
   "zebralogic_hard:chat": "48b9f74a228bab4e",
-  "zebralogic_hard:v2": "43a5bd9b1c3f53a2"
+  "zebralogic_hard:v2": "1f2928370cb44949"
  },
  "with_judge_env": {
   "arena_hard_v2:creative_writing": "d6f121de15ae5528",
